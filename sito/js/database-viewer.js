@@ -1,6 +1,4 @@
 // Database Viewer - Dynamic Table Management
-const API_URL = 'https://projexa-4mix.onrender.com/api';
-
 let currentTable = null;
 let allTables = [];
 
