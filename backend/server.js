@@ -19,15 +19,15 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+// Redirect root to login page (MUST be before static files)
+app.get('/', (req, res) => {
+  res.redirect('/login.html');
+});
+
 // Serve static files from sito folder
 const sitoPath = path.join(__dirname, '../sito');
 app.use(express.static(sitoPath));
 console.log(`📁 Serving static files from: ${sitoPath}`);
-
-// Redirect root to login page
-app.get('/', (req, res) => {
-  res.redirect('/login.html');
-});
 
 // Logging
 app.use((req, res, next) => {
