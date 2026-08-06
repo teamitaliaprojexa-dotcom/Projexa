@@ -1,0 +1,1777 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #3B82F6;
+            --primary-dark: #1E40AF;
+            --secondary: #10B981;
+            --danger: #EF4444;
+            --warning: #F59E0B;
+            --dark: #1F2937;
+            --light: #F9FAFB;
+            --border: #E5E7EB;
+            --text-muted: #6B7280;
+            --radius: 8px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            color: var(--dark);
+            line-height: 1.6;
+            background: var(--light);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 1.5rem;
+        }
+
+        /* SIDEBAR */
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 250px;
+            height: 100vh;
+            background: white;
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+            z-index: 100;
+        }
+
+        .sidebar-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .sidebar-logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary);
+        }
+
+        .sidebar-toggle {
+            margin-left: auto;
+            background: transparent;
+            border: none;
+            color: var(--primary);
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 0.5rem;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .sidebar-toggle:hover {
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 6px;
+        }
+
+        /* SIDEBAR MINIMIZED STATE */
+        .sidebar.minimized {
+            width: 70px;
+        }
+
+        .sidebar.minimized .sidebar-logo {
+            display: none;
+        }
+
+        .sidebar.minimized .sidebar-header {
+            justify-content: center;
+            padding: 1rem 0.5rem;
+            gap: 0;
+        }
+
+        .sidebar.minimized .sidebar-header img {
+            display: none;
+        }
+
+        .sidebar.minimized .sidebar-toggle {
+            margin-left: 0;
+            padding: 0.5rem 0.25rem;
+        }
+
+        .sidebar.minimized .sidebar-menu {
+            padding: 0;
+        }
+
+        .sidebar.minimized .sidebar-menu li {
+            border-bottom: none;
+            display: flex;
+            justify-content: center;
+        }
+
+        .sidebar.minimized .sidebar-menu a {
+            justify-content: center;
+            padding: 1rem 0;
+            width: 70px;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .sidebar.minimized .sidebar-menu a span {
+            display: none;
+        }
+
+        .sidebar.minimized .sidebar-menu i {
+            width: auto;
+            font-size: 1.3rem;
+        }
+
+        .sidebar.minimized .sidebar-toggle i {
+            transform: scaleX(-1);
+        }
+
+        .main.minimized {
+            margin-left: 70px;
+        }
+
+        .sidebar-menu {
+            padding: 1rem 0;
+            list-style: none;
+        }
+
+        .sidebar-menu li {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .sidebar-menu a {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 1rem 1.5rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+
+        .sidebar-menu a:hover,
+        .sidebar-menu a.active {
+            color: var(--primary);
+            background: rgba(59, 130, 246, 0.05);
+            border-left: 3px solid var(--primary);
+            padding-left: calc(1.5rem - 3px);
+        }
+
+        .sidebar-menu i {
+            font-size: 1.1rem;
+            width: 20px;
+        }
+
+        .sidebar-footer {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            padding: 1.5rem;
+            border-top: 1px solid var(--border);
+            background: white;
+            display: none; /* Nascondi il footer vuoto */
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 1rem;
+            background: var(--light);
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .user-profile:hover {
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .user-info p {
+            margin: 0;
+            font-size: 0.9rem;
+        }
+
+        .user-info .name {
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        .user-info .email {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        /* MAIN CONTENT */
+        .main {
+            margin-left: 250px;
+            padding: 2rem 0;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: white;
+            padding: 2rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 2rem;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .header-title h1 {
+            font-size: 2rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .header-title p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            background: var(--light);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            flex: 1;
+            max-width: 300px;
+        }
+
+        .search-box input {
+            border: none;
+            background: transparent;
+            flex: 1;
+            outline: none;
+            color: var(--dark);
+        }
+
+        .search-box input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: var(--radius);
+            border: none;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--dark);
+        }
+
+        .btn-secondary:hover {
+            background: var(--light);
+            border-color: var(--primary);
+        }
+
+        .btn-icon {
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            background: var(--light);
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-icon:hover {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        /* STATS GRID */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 0.75rem;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .stat-icon {
+            font-size: 1.2rem;
+            margin-bottom: 0.35rem;
+        }
+
+        .stat-value {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: var(--dark);
+            margin-bottom: 0.1rem;
+        }
+
+        .stat-label {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+        }
+
+        /* TODO LIST */
+        .todo-item {
+            display: flex;
+            align-items: center;
+            padding: 0.65rem 1rem;
+            border-bottom: 1px solid var(--border);
+            transition: all 0.3s;
+            gap: 0.75rem;
+        }
+
+        .todo-item:hover {
+            background: var(--light);
+        }
+
+        .todo-item:last-child {
+            border-bottom: none;
+        }
+
+        .todo-checkbox {
+            width: 18px;
+            height: 18px;
+            min-width: 18px;
+            cursor: pointer;
+            accent-color: var(--primary);
+            flex-shrink: 0;
+        }
+
+        .todo-content {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            justify-content: space-between;
+        }
+
+        .todo-title {
+            font-weight: 500;
+            color: var(--dark);
+            font-size: 0.95rem;
+            flex: 1;
+        }
+
+        .todo-meta {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-shrink: 0;
+        }
+
+        .todo-duedate {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        .todo-priority {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 16px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .todo-priority.high {
+            background: rgba(239, 68, 68, 0.2);
+            color: #EF4444;
+        }
+
+        .todo-priority.medium {
+            background: rgba(245, 158, 11, 0.2);
+            color: #F59E0B;
+        }
+
+        .todo-priority.low {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10B981;
+        }
+
+        /* PROJECTS SECTION */
+        .section-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .projects-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 3rem;
+        }
+
+        .project-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .project-card:hover {
+            border-color: var(--primary);
+            box-shadow: 0 8px 24px rgba(59, 130, 246, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .project-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 1rem;
+        }
+
+        .project-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--dark);
+            margin-bottom: 0.25rem;
+        }
+
+        .project-meta {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .project-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.35rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .badge-success {
+            background: rgba(16, 185, 129, 0.1);
+            color: #059669;
+        }
+
+        .badge-warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: #d97706;
+        }
+
+        .badge-info {
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--primary);
+        }
+
+        .project-progress {
+            margin-bottom: 1rem;
+        }
+
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: var(--light);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+            border-radius: 4px;
+        }
+
+        .project-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .project-team {
+            display: flex;
+            gap: -10px;
+        }
+
+        .team-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--light);
+            border: 2px solid white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: bold;
+            color: var(--primary);
+        }
+
+        .more-members {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .project-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .project-actions button {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: var(--light);
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+        }
+
+        .project-actions button:hover {
+            background: var(--primary);
+            color: white;
+        }
+
+        /* RECENT ACTIVITY */
+        .activity-list {
+            background: white;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .activity-item {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 1rem;
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(59, 130, 246, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary);
+            flex-shrink: 0;
+        }
+
+        .activity-content {
+            flex: 1;
+        }
+
+        .activity-title {
+            font-weight: 600;
+            color: var(--dark);
+            margin-bottom: 0.25rem;
+        }
+
+        .activity-time {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 2rem;
+            background: white;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+
+        .empty-icon {
+            font-size: 3rem;
+            color: var(--light);
+            margin-bottom: 1rem;
+        }
+
+        .empty-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--dark);
+        }
+
+        .empty-text {
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
+        }
+
+        /* RESPONSIVE */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 70px;
+            }
+
+            .sidebar-logo,
+            .sidebar-menu a span,
+            .sidebar-footer {
+                display: none;
+            }
+
+            .sidebar-menu a {
+                justify-content: center;
+                padding: 1rem;
+            }
+
+            .main {
+                margin-left: 70px;
+            }
+
+            .projects-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <img src="../Logo_Projexa.png" alt="Projexa" style="height: 36px; width: auto;">
+            <div class="sidebar-logo">Projexa</div>
+            <button id="sidebarToggle" class="sidebar-toggle" title="Riduci/Espandi">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+        </div>
+
+        <ul class="sidebar-menu">
+            <li><a href="#" class="active"><i class="fas fa-home"></i> <span>Dashboard</span></a></li>
+            <li><a href="#"><i class="fas fa-folder"></i> <span>I miei progetti</span></a></li>
+            <li><a href="#"><i class="fas fa-star"></i> <span>Preferiti</span></a></li>
+            <li><a href="#"><i class="fas fa-clock"></i> <span>Recenti</span></a></li>
+            <li><a href="#"><i class="fas fa-trash"></i> <span>Archivio</span></a></li>
+            <li><a href="database-viewer.html"><i class="fas fa-database"></i> <span>Database</span></a></li>
+            <li style="border: none; margin-top: 2rem;"><a href="#"><i class="fas fa-cog"></i> <span>Impostazioni</span></a></li>
+        </ul>
+
+        <div class="sidebar-footer">
+            <div class="user-profile">
+                <div class="user-avatar">FR</div>
+                <div class="user-info">
+                    <p class="name">Federica</p>
+                    <p class="email">fed@project.ai</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main">
+        <div class="header">
+            <div class="header-top">
+                <div class="header-title">
+                    <h1 id="greeting">Benvenuta, Federica! 👋</h1>
+                    <p>Qui puoi gestire tutti i tuoi progetti con Projexa</p>
+                </div>
+                <div class="header-actions">
+                    <div class="search-box">
+                        <i class="fas fa-search" style="color: var(--text-muted);"></i>
+                        <input type="text" placeholder="Cerca un progetto...">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <i class="fas fa-building" style="color: var(--text-muted); font-size: 1rem;"></i>
+                        <select id="clientSelector" style="padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.95rem; cursor: pointer; background: white; color: var(--dark); font-weight: 500;">
+                            <option value="">Tutti i clienti</option>
+                            <option value="Acme Corp">Acme Corp</option>
+                            <option value="Tech Solutions">Tech Solutions</option>
+                            <option value="Global Industries">Global Industries</option>
+                            <option value="Digital Ventures">Digital Ventures</option>
+                            <option value="Smart Systems">Smart Systems</option>
+                            <option value="Future Works">Future Works</option>
+                            <option value="Network Plus">Network Plus</option>
+                        </select>
+                    </div>
+                    <button class="btn-icon">
+                        <i class="fas fa-bell"></i>
+                    </button>
+                    <button class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Nuovo Progetto
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="container">
+            <!-- STATS -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon" style="color: var(--primary);">
+                        <i class="fas fa-folder"></i>
+                    </div>
+                    <div class="stat-value">5</div>
+                    <div class="stat-label">Progetti attivi</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="color: var(--secondary);">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <div class="stat-value">12</div>
+                    <div class="stat-label">Progetti completati</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="color: var(--warning);">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                    <div class="stat-value">3</div>
+                    <div class="stat-label">Rischi aperti</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="color: var(--danger);">
+                        <i class="fas fa-hourglass-end"></i>
+                    </div>
+                    <div class="stat-value">2</div>
+                    <div class="stat-label">In ritardo</div>
+                </div>
+            </div>
+
+            <!-- TO DO LIST -->
+            <div style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                    <div class="section-title" style="margin: 0;">
+                        <i class="fas fa-list-check" style="color: var(--primary);"></i>
+                        To Do List
+                    </div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button id="expandTodoBtn" style="padding: 0.5rem 1rem; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem;">
+                            Espandi
+                        </button>
+                    </div>
+                </div>
+
+                <!-- FILTRI -->
+                <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; align-items: center; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Priorità:</label>
+                        <select id="priorityFilter" style="padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; cursor: pointer; background: white; color: var(--dark);">
+                            <option value="">Tutte</option>
+                            <option value="high">🔴 Alta</option>
+                            <option value="medium">🟡 Media</option>
+                            <option value="low">🟢 Bassa</option>
+                        </select>
+                    </div>
+
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Scadenza:</label>
+                        <select id="dateFilter" style="padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; cursor: pointer; background: white; color: var(--dark);">
+                            <option value="">Tutte le date</option>
+                            <option value="today">Oggi</option>
+                            <option value="week">Questa settimana</option>
+                            <option value="month">Questo mese</option>
+                            <option value="overdue">In ritardo</option>
+                        </select>
+                    </div>
+
+                    <button id="resetFiltersBtn" style="padding: 0.5rem 0.75rem; background: rgba(107, 114, 128, 0.1); color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; transition: all 0.3s;">
+                        ⟲ Reset
+                    </button>
+                </div>
+
+                <!-- Lista To Do -->
+                <div id="todoListContainer" style="max-height: 600px; overflow-y: auto;">
+                    <div id="todoList"></div>
+                </div>
+
+                <!-- Info contatore -->
+                <div style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;">
+                    Visualizzati: <span id="todoCount">10</span> di <span id="todoTotal">0</span> task
+                </div>
+            </div>
+
+            <!-- KPI FATTURATO -->
+            <div style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                    <div>
+                        <div class="section-title" style="margin: 0;">
+                            <i class="fas fa-chart-bar" style="color: var(--primary);"></i>
+                            KPI Fatturato
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <label style="font-weight: 500; color: var(--dark);">Anno:</label>
+                        <select id="yearSelector" style="padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; cursor: pointer;">
+                            <option value="2022">2022</option>
+                            <option value="2023">2023</option>
+                            <option value="2024" selected>2024</option>
+                            <option value="2025">2025</option>
+                            <option value="2026">2026</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Grafico -->
+                <div id="chartContainer" style="height: 400px; margin-bottom: 2rem; position: relative;">
+                    <canvas id="revenueChart"></canvas>
+                </div>
+
+                <!-- Totale Fatturato -->
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 1.5rem; background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(16, 185, 129, 0.1) 100%); border-radius: 8px; border: 1px solid var(--border);">
+                    <div>
+                        <div style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem;">Fatturato Totale</div>
+                        <div style="font-size: 1.2rem; color: var(--dark); font-weight: 600;">Anno: <span id="selectedYear">2024</span></div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 2.5rem; font-weight: bold; color: var(--primary);" id="totalRevenue">€0</div>
+                        <div style="font-size: 0.9rem; color: var(--text-muted); margin-top: 0.5rem;">Totale clienti: <span id="totalClients">0</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PROJECTS -->
+            <div style="margin-bottom: 3rem;">
+                <div class="section-title">
+                    <i class="fas fa-fire" style="color: var(--primary);"></i>
+                    Progetti in corso
+                </div>
+
+                <div class="projects-grid">
+                    <!-- Project 1 -->
+                    <div class="project-card" data-client="Acme Corp">
+                        <div class="project-header">
+                            <div>
+                                <div class="project-title">Refactor Backend API</div>
+                                <div class="project-meta">
+                                    <div class="project-meta-item">
+                                        <i class="fas fa-calendar"></i> 12 giorni
+                                    </div>
+                                    <div class="project-meta-item">
+                                        <i class="fas fa-layer-group"></i> 24 task
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="badge badge-success">On Track</span>
+                        </div>
+                        <div class="project-progress">
+                            <div class="progress-label">
+                                <span>Avanzamento</span>
+                                <span>68%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 68%;"></div>
+                            </div>
+                        </div>
+                        <div class="project-footer">
+                            <div>
+                                <div class="project-team">
+                                    <div class="team-avatar">Y</div>
+                                    <div class="team-avatar">F</div>
+                                </div>
+                            </div>
+                            <div class="project-actions">
+                                <button title="Apri">
+                                    <i class="fas fa-arrow-right"></i>
+                                </button>
+                                <button title="Menu">
+                                    <i class="fas fa-ellipsis-h"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Project 2 -->
+                    <div class="project-card" data-client="Tech Solutions">
+                        <div class="project-header">
+                            <div>
+                                <div class="project-title">Mobile App Redesign</div>
+                                <div class="project-meta">
+                                    <div class="project-meta-item">
+                                        <i class="fas fa-calendar"></i> 5 giorni
+                                    </div>
+                                    <div class="project-meta-item">
+                                        <i class="fas fa-layer-group"></i> 18 task
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="badge badge-warning">A rischio</span>
+                        </div>
+                        <div class="project-progress">
+                            <div class="progress-label">
+                                <span>Avanzamento</span>
+                                <span>45%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 45%; background: linear-gradient(90deg, var(--warning) 0%, #ff9800 100%);"></div>
+                            </div>
+                        </div>
+                        <div class="project-footer">
+                            <div>
+                                <div class="project-team">
+                                    <div class="team-avatar" style="background: rgba(239, 68, 68, 0.1); color: var(--danger);">F</div>
+                                    <div class="team-avatar">M</div>
+                                </div>
+                            </div>
+                            <div class="project-actions">
+                                <button title="Apri">
+                                    <i class="fas fa-arrow-right"></i>
+                                </button>
+                                <button title="Menu">
+                                    <i class="fas fa-ellipsis-h"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Project 3 -->
+                    <div class="project-card" data-client="Global Industries">
+                        <div class="project-header">
+                            <div>
+                                <div class="project-title">Q4 Marketing Campaign</div>
+                                <div class="project-meta">
+                                    <div class="project-meta-item">
+                                        <i class="fas fa-calendar"></i> 28 giorni
+                                    </div>
+                                    <div class="project-meta-item">
+                                        <i class="fas fa-layer-group"></i> 42 task
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="badge badge-info">Iniziato</span>
+                        </div>
+                        <div class="project-progress">
+                            <div class="progress-label">
+                                <span>Avanzamento</span>
+                                <span>23%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 23%;"></div>
+                            </div>
+                        </div>
+                        <div class="project-footer">
+                            <div>
+                                <div class="project-team">
+                                    <div class="team-avatar">Y</div>
+                                    <div class="team-avatar">S</div>
+                                    <div class="team-avatar" style="font-size: 0.7rem;">+2</div>
+                                </div>
+                            </div>
+                            <div class="project-actions">
+                                <button title="Apri">
+                                    <i class="fas fa-arrow-right"></i>
+                                </button>
+                                <button title="Menu">
+                                    <i class="fas fa-ellipsis-h"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RECENT ACTIVITY -->
+            <div>
+                <div class="section-title">
+                    <i class="fas fa-history" style="color: var(--primary);"></i>
+                    Attività recente
+                </div>
+
+                <div class="activity-list">
+                    <div class="activity-item">
+                        <div class="activity-icon">
+                            <i class="fas fa-file-alt"></i>
+                        </div>
+                        <div class="activity-content">
+                            <div class="activity-title">Piano generato per "Refactor Backend API"</div>
+                            <div class="activity-time">Oggi alle 14:32 • Fedrica</div>
+                        </div>
+                    </div>
+
+                    <div class="activity-item">
+                        <div class="activity-icon" style="background: rgba(16, 185, 129, 0.1); color: var(--secondary);">
+                            <i class="fas fa-check"></i>
+                        </div>
+                        <div class="activity-content">
+                            <div class="activity-title">6 task completati in "Mobile App Redesign"</div>
+                            <div class="activity-time">Ieri alle 16:45 • Team</div>
+                        </div>
+                    </div>
+
+                    <div class="activity-item">
+                        <div class="activity-icon" style="background: rgba(245, 158, 11, 0.1); color: var(--warning);">
+                            <i class="fas fa-exclamation"></i>
+                        </div>
+                        <div class="activity-content">
+                            <div class="activity-title">Nuovo rischio identificato: "Delay risorse"</div>
+                            <div class="activity-time">2 giorni fa • Yan ko</div>
+                        </div>
+                    </div>
+
+                    <div class="activity-item">
+                        <div class="activity-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="activity-content">
+                            <div class="activity-title">Marco aggiunto al progetto "Q4 Marketing Campaign"</div>
+                            <div class="activity-time">3 giorni fa • Admin</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // === GESTIONE UTENTE ===
+        function initializeUser() {
+            // Leggi da localStorage
+            const userFromStorage = localStorage.getItem('user');
+            let userData = {};
+
+            if (userFromStorage) {
+                userData = JSON.parse(userFromStorage);
+            }
+
+            // Leggi i parametri URL (per compatibilità con il redirect da login)
+            const params = new URLSearchParams(window.location.search);
+            const nameFromUrl = params.get('name');
+            const emailFromUrl = params.get('email');
+            const pictureFromUrl = params.get('picture');
+            const genderFromUrl = params.get('gender');
+            const provider = params.get('provider');
+
+            // Merge dei dati (URL ha priorità)
+            if (nameFromUrl) userData.name = decodeURIComponent(nameFromUrl);
+            if (emailFromUrl) userData.email = decodeURIComponent(emailFromUrl);
+            if (pictureFromUrl) userData.picture = decodeURIComponent(pictureFromUrl);
+            if (genderFromUrl) userData.gender = genderFromUrl;
+            if (provider) userData.provider = provider;
+
+            // Se non abbiamo dati, mostra un warning
+            if (!userData.email && !userData.name) {
+                console.warn('⚠️ Nessun utente autenticato - reindirizzamento a login');
+                setTimeout(() => {
+                    window.location.href = 'login-demo.html';
+                }, 2000);
+                return;
+            }
+
+            // Aggiorna il profilo nella sidebar
+            updateUserProfile(userData);
+
+            // Aggiorna il saluto dinamico con foto
+            updateGreeting(userData.name, userData.picture);
+
+            // Aggiungi pulsante logout in alto a destra
+            addLogoutButton();
+
+            // Aggiorna localStorage SEMPRE (non solo se non c'è)
+            localStorage.setItem('user', JSON.stringify(userData));
+
+            return userData;
+        }
+
+        // Aggiorna il saluto basato sul nome
+        function updateGreeting(name, picture) {
+            const greetingEl = document.getElementById('greeting');
+            if (greetingEl) {
+                const userName = name || 'Utente';
+                
+                // Se c'è una foto, la metto prima del testo
+                if (picture) {
+                    greetingEl.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 1.5rem;">
+                            <img src="${picture}" alt="${userName}" style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover;">
+                            <span>Welcome, ${userName}</span>
+                        </div>
+                    `;
+                } else {
+                    greetingEl.textContent = `Welcome, ${userName}`;
+                }
+            }
+        }
+
+        function updateUserProfile(userData) {
+            // Non visualizzare niente nel sidebar - logout sarà in alto a destra
+        }
+
+        function getAvatarPlaceholder(name) {
+            // Genera un avatar placeholder con il primo carattere
+            const firstChar = (name || 'U')[0].toUpperCase();
+            const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+            const randomColor = colors[Math.floor(Math.random() * colors.length)];
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = 96;
+            canvas.height = 96;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = randomColor;
+            ctx.fillRect(0, 0, 96, 96);
+            
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 40px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(firstChar, 48, 48);
+            
+            return canvas.toDataURL();
+        }
+
+        function logout() {
+            if (confirm('Sei sicuro di voler effettuare il logout?')) {
+                localStorage.removeItem('user');
+                showNotification('Logout effettuato', 'success');
+                setTimeout(() => {
+                    window.location.href = 'index.html';
+                }, 1000);
+            }
+        }
+
+        function showNotification(message, type) {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 1rem 1.5rem;
+                background: ${type === 'success' ? '#10B981' : '#3B82F6'};
+                color: white;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                font-weight: 500;
+                z-index: 2000;
+                animation: slideIn 0.3s ease;
+            `;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => notification.remove(), 300);
+            }, 3000);
+        }
+
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideIn {
+                from { transform: translateX(400px); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+            @keyframes slideOut {
+                from { transform: translateX(0); opacity: 1; }
+                to { transform: translateX(400px); opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // === KPI FATTURATO CHART ===
+        let revenueChart = null;
+
+        // Dati di esempio: clienti con fatturato e forecast per anno
+        const revenueData = {
+            'Acme Corp': { 
+                2022: { revenue: 45000, forecast: 8000 }, 
+                2023: { revenue: 52000, forecast: 10000 }, 
+                2024: { revenue: 68000, forecast: 15000 }, 
+                2025: { revenue: 75000, forecast: 18000 },
+                2026: { revenue: 82000, forecast: 20000 }
+            },
+            'Tech Solutions': { 
+                2022: { revenue: 38000, forecast: 6000 }, 
+                2023: { revenue: 41000, forecast: 8000 }, 
+                2024: { revenue: 55000, forecast: 12000 }, 
+                2025: { revenue: 62000, forecast: 15000 },
+                2026: { revenue: 70000, forecast: 17000 }
+            },
+            'Global Industries': { 
+                2022: { revenue: 52000, forecast: 10000 }, 
+                2023: { revenue: 58000, forecast: 12000 }, 
+                2024: { revenue: 71000, forecast: 18000 }, 
+                2025: { revenue: 85000, forecast: 22000 },
+                2026: { revenue: 95000, forecast: 26000 }
+            },
+            'Digital Ventures': { 
+                2022: { revenue: 31000, forecast: 5000 }, 
+                2023: { revenue: 36000, forecast: 7000 }, 
+                2024: { revenue: 48000, forecast: 11000 }, 
+                2025: { revenue: 58000, forecast: 14000 },
+                2026: { revenue: 68000, forecast: 16000 }
+            },
+            'Smart Systems': { 
+                2022: { revenue: 42000, forecast: 8000 }, 
+                2023: { revenue: 47000, forecast: 9000 }, 
+                2024: { revenue: 59000, forecast: 13000 }, 
+                2025: { revenue: 70000, forecast: 16000 },
+                2026: { revenue: 80000, forecast: 19000 }
+            },
+            'Future Works': { 
+                2022: { revenue: 28000, forecast: 4000 }, 
+                2023: { revenue: 33000, forecast: 6000 }, 
+                2024: { revenue: 45000, forecast: 10000 }, 
+                2025: { revenue: 54000, forecast: 12000 },
+                2026: { revenue: 62000, forecast: 14000 }
+            },
+            'Network Plus': { 
+                2022: { revenue: 35000, forecast: 6000 }, 
+                2023: { revenue: 39000, forecast: 7000 }, 
+                2024: { revenue: 51000, forecast: 11000 }, 
+                2025: { revenue: 61000, forecast: 14000 },
+                2026: { revenue: 71000, forecast: 17000 }
+            },
+        };
+
+        function initRevenueChart() {
+            const yearSelector = document.getElementById('yearSelector');
+            const ctx = document.getElementById('revenueChart');
+
+            if (!ctx || !yearSelector) return;
+
+            // Listener per cambio anno
+            yearSelector.addEventListener('change', (e) => {
+                updateRevenueChart(e.target.value);
+            });
+
+            // Carica il grafico per l'anno selezionato
+            updateRevenueChart(yearSelector.value);
+        }
+
+        function updateRevenueChart(year) {
+            const year_num = parseInt(year);
+            const clientSelector = document.getElementById('clientSelector');
+            const selectedClient = clientSelector ? clientSelector.value : '';
+
+            let clients, revenues, forecasts;
+
+            if (selectedClient === '') {
+                // Mostra tutti i clienti
+                clients = Object.keys(revenueData);
+                revenues = clients.map(client => revenueData[client][year_num].revenue || 0);
+                forecasts = clients.map(client => revenueData[client][year_num].forecast || 0);
+            } else {
+                // Mostra solo il cliente selezionato
+                clients = [selectedClient];
+                revenues = [revenueData[selectedClient][year_num].revenue || 0];
+                forecasts = [revenueData[selectedClient][year_num].forecast || 0];
+            }
+
+            // Calcola i totali
+            const totalRevenue = revenues.reduce((a, b) => a + b, 0);
+            const totalForecast = forecasts.reduce((a, b) => a + b, 0);
+            const totalClients = clients.length;
+
+            // Aggiorna il display totale
+            document.getElementById('selectedYear').textContent = year;
+            document.getElementById('totalRevenue').innerHTML = `
+                <div style="font-size: 2rem; font-weight: bold; color: var(--primary);">€${totalRevenue.toLocaleString('it-IT')}</div>
+                <div style="font-size: 1rem; color: #10B981; margin-top: 0.5rem; font-weight: 600;">+ €${totalForecast.toLocaleString('it-IT')} forecast</div>
+            `;
+            document.getElementById('totalClients').textContent = totalClients;
+
+            // Distruggi il grafico precedente se esiste
+            if (revenueChart) {
+                revenueChart.destroy();
+            }
+
+            // Calcola l'altezza dinamica: 60px per cliente, minimo 150px
+            const chartHeight = Math.max(150, clients.length * 60);
+            const chartContainer = document.getElementById('chartContainer');
+            if (chartContainer) {
+                chartContainer.style.height = chartHeight + 'px';
+            }
+
+            // Crea il nuovo grafico con fatturato e forecast
+            const ctx = document.getElementById('revenueChart');
+            revenueChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: clients,
+                    datasets: [
+                        {
+                            label: `Fatturato ${year}`,
+                            data: revenues,
+                            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                            borderColor: 'rgb(59, 130, 246)',
+                            borderWidth: 2,
+                            borderRadius: 6,
+                            hoverBackgroundColor: 'rgba(59, 130, 246, 0.9)',
+                        },
+                        {
+                            label: `Forecast ${year}`,
+                            data: forecasts,
+                            backgroundColor: 'rgba(16, 185, 129, 0.7)',
+                            borderColor: 'rgb(16, 185, 129)',
+                            borderWidth: 2,
+                            borderRadius: 6,
+                            hoverBackgroundColor: 'rgba(16, 185, 129, 0.9)',
+                        }
+                    ]
+                },
+                options: {
+                    indexAxis: 'y', // Grafico orizzontale
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                padding: 15,
+                                font: { size: 12, weight: 600 }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': €' + context.parsed.x.toLocaleString('it-IT');
+                                },
+                                afterLabel: function(context) {
+                                    // Se è il dataset fatturato, aggiungi il forecast nel tooltip
+                                    if (context.datasetIndex === 0) {
+                                        const forecastValue = context.chart.data.datasets[1].data[context.dataIndex];
+                                        return 'Forecast: €' + forecastValue.toLocaleString('it-IT');
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '€' + (value / 1000).toFixed(0) + 'k';
+                                }
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            }
+                        },
+                        y: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // === CLIENT FILTER ===
+        function initClientFilter() {
+            const clientSelector = document.getElementById('clientSelector');
+            
+            if (!clientSelector) return;
+
+            clientSelector.addEventListener('change', (e) => {
+                const selectedClient = e.target.value;
+                // Filtra i progetti
+                filterProjectsByClient(selectedClient);
+                // Filtra la to-do list
+                currentClientFilter = selectedClient;
+                currentTodoPage = 10; // Reset pagina
+                applyFiltersAndRender();
+                // Aggiorna il grafico KPI
+                const yearSelector = document.getElementById('yearSelector');
+                updateRevenueChart(yearSelector.value);
+            });
+        }
+
+        function filterProjectsByClient(client) {
+            const projectCards = document.querySelectorAll('.project-card');
+            
+            projectCards.forEach(card => {
+                const cardClient = card.getAttribute('data-client');
+                
+                if (client === '') {
+                    // Mostra tutti i progetti
+                    card.style.display = 'block';
+                } else if (cardClient === client) {
+                    // Mostra solo i progetti del cliente selezionato
+                    card.style.display = 'block';
+                } else {
+                    // Nascondi i progetti di altri clienti
+                    card.style.display = 'none';
+                }
+            });
+        }
+
+        // === TO DO LIST ===
+        let currentTodoPage = 10; // Mostra 10 per default
+        let currentPriorityFilter = '';
+        let currentDateFilter = '';
+        let currentClientFilter = '';
+
+        const todoData = [
+            { id: 1, title: 'Revisione proposta progetto', client: 'Acme Corp', priority: 'high', dueDate: '2026-08-07', completed: false, type: 'task' },
+            { id: 2, title: 'Approvazione budget Q3', client: 'Digital Ventures', priority: 'high', dueDate: '2026-08-08', completed: false, type: 'task' },
+            { id: 3, title: 'Riunione kickoff Project Phoenix', client: 'Acme Corp', priority: 'high', dueDate: '2026-08-09', completed: false, type: 'task' },
+            { id: 4, title: 'Aggiornare timeline', client: 'Global Industries', priority: 'medium', dueDate: '2026-08-10', completed: false, type: 'task' },
+            { id: 5, title: 'Review rischi', client: 'Tech Solutions', priority: 'medium', dueDate: '2026-08-10', completed: false, type: 'task' },
+            { id: 6, title: 'Validare deliverables Sprint 3', client: 'Tech Solutions', priority: 'medium', dueDate: '2026-08-12', completed: false, type: 'task' },
+            { id: 7, title: 'Sincronizzazione stakeholder', client: 'Smart Systems', priority: 'medium', dueDate: '2026-08-12', completed: false, type: 'task' },
+            { id: 8, title: 'Preparare report mensile fatturato', client: 'Global Industries', priority: 'high', dueDate: '2026-08-11', completed: false, type: 'task' },
+            { id: 9, title: 'Feedback al team', client: 'Future Works', priority: 'low', dueDate: '2026-08-15', completed: false, type: 'task' },
+            { id: 10, title: 'Pianificazione risorse Q4', client: 'Acme Corp', priority: 'medium', dueDate: '2026-08-13', completed: false, type: 'task' },
+            { id: 11, title: 'Verifica milestone', client: 'Network Plus', priority: 'low', dueDate: '2026-08-16', completed: false, type: 'task' },
+            { id: 12, title: 'Aggiornare documentazione progetti', client: 'Global Industries', priority: 'low', dueDate: '2026-08-17', completed: false, type: 'task' },
+            { id: 13, title: 'Onboarding nuovo PM team', client: 'Digital Ventures', priority: 'medium', dueDate: '2026-08-14', completed: false, type: 'task' },
+            { id: 14, title: 'Analisi competitiva mercato', client: 'Smart Systems', priority: 'low', dueDate: '2026-08-18', completed: false, type: 'task' },
+            { id: 15, title: 'Riesame performance progetto', client: 'Acme Corp', priority: 'medium', dueDate: '2026-08-13', completed: false, type: 'task' },
+            { id: 16, title: 'Implementazione feedback clienti', client: 'Future Works', priority: 'low', dueDate: '2026-08-20', completed: false, type: 'task' },
+            { id: 17, title: 'Planning sessione strategica annuale', client: 'Network Plus', priority: 'high', dueDate: '2026-08-21', completed: false, type: 'task' },
+            { id: 18, title: 'Audit compliance progetti', client: 'Tech Solutions', priority: 'medium', dueDate: '2026-08-22', completed: false, type: 'task' },
+            { id: 19, title: 'Aggiornare KPI dashboard', client: 'Digital Ventures', priority: 'low', dueDate: '2026-08-25', completed: false, type: 'task' },
+            { id: 20, title: 'Pianificazione training team', client: 'Smart Systems', priority: 'low', dueDate: '2026-08-26', completed: false, type: 'task' },
+            { id: 21, title: 'Meeting - Allineamento Team Leadership', client: 'Global Industries', priority: 'high', dueDate: '2026-08-05', completed: false, type: 'meeting', time: '16:00', meetingLink: 'https://meet.google.com/abc-defg-hij' },
+        ];
+
+        function initTodoList() {
+            // Aggiorna il totale
+            document.getElementById('todoTotal').textContent = todoData.length;
+
+            // Renderizza i task
+            applyFiltersAndRender();
+
+            // Listener sul pulsante Espandi
+            document.getElementById('expandTodoBtn').addEventListener('click', () => {
+                currentTodoPage += 10;
+                if (currentTodoPage > 100) currentTodoPage = 100;
+                const filtered = getFilteredTodos();
+                if (currentTodoPage > filtered.length) currentTodoPage = filtered.length;
+                document.getElementById('todoCount').textContent = currentTodoPage;
+                renderTodoList(filtered);
+            });
+
+            // Listener filtri
+            document.getElementById('priorityFilter').addEventListener('change', (e) => {
+                currentPriorityFilter = e.target.value;
+                currentTodoPage = 10; // Reset pagina
+                applyFiltersAndRender();
+            });
+
+            document.getElementById('dateFilter').addEventListener('change', (e) => {
+                currentDateFilter = e.target.value;
+                currentTodoPage = 10; // Reset pagina
+                applyFiltersAndRender();
+            });
+
+            // Listener Reset
+            document.getElementById('resetFiltersBtn').addEventListener('click', () => {
+                currentPriorityFilter = '';
+                currentDateFilter = '';
+                currentTodoPage = 10;
+                document.getElementById('priorityFilter').value = '';
+                document.getElementById('dateFilter').value = '';
+                applyFiltersAndRender();
+            });
+        }
+
+        function getFilteredTodos() {
+            let filtered = [...todoData];
+
+            // Filtra per cliente
+            if (currentClientFilter) {
+                filtered = filtered.filter(t => t.client === currentClientFilter);
+            }
+
+            // Filtra per priorità
+            if (currentPriorityFilter) {
+                filtered = filtered.filter(t => t.priority === currentPriorityFilter);
+            }
+
+            // Filtra per data
+            if (currentDateFilter) {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+
+                filtered = filtered.filter(todo => {
+                    const dueDate = new Date(todo.dueDate);
+                    dueDate.setHours(0, 0, 0, 0);
+
+                    if (currentDateFilter === 'today') {
+                        return dueDate.getTime() === today.getTime();
+                    } else if (currentDateFilter === 'week') {
+                        const weekEnd = new Date(today);
+                        weekEnd.setDate(weekEnd.getDate() + 7);
+                        return dueDate >= today && dueDate <= weekEnd;
+                    } else if (currentDateFilter === 'month') {
+                        const monthEnd = new Date(today);
+                        monthEnd.setMonth(monthEnd.getMonth() + 1);
+                        return dueDate >= today && dueDate <= monthEnd;
+                    } else if (currentDateFilter === 'overdue') {
+                        return dueDate < today;
+                    }
+                });
+            }
+
+            // Ordina per priorità (high > medium > low) e per data
+            filtered.sort((a, b) => {
+                const priorityOrder = { high: 0, medium: 1, low: 2 };
+                const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
+                if (priorityDiff !== 0) return priorityDiff;
+                return new Date(a.dueDate) - new Date(b.dueDate);
+            });
+
+            return filtered;
+        }
+
+        function applyFiltersAndRender() {
+            const filtered = getFilteredTodos();
+            document.getElementById('todoTotal').textContent = filtered.length;
+            renderTodoList(filtered);
+        }
+
+        function renderTodoList(todos) {
+            const todoList = document.getElementById('todoList');
+            const displayedTodos = todos.slice(0, currentTodoPage);
+
+            todoList.innerHTML = displayedTodos.map(todo => `
+                <div class="todo-item">
+                    <input type="checkbox" class="todo-checkbox" data-id="${todo.id}" ${todo.completed ? 'checked' : ''}>
+                    <div class="todo-content">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-right: auto;">
+                            <div class="todo-title" style="margin: 0;">${todo.title}</div>
+                            <div style="font-size: 0.85rem; color: var(--primary); font-weight: 500; white-space: nowrap;">${todo.client || 'N/A'}</div>
+                        </div>
+                        <div class="todo-meta">
+                            <div class="todo-duedate">${new Date(todo.dueDate).toLocaleDateString('it-IT')}</div>
+                            <div class="todo-priority ${todo.priority}">
+                                ${todo.priority === 'high' ? '🔴 Alta' : todo.priority === 'medium' ? '🟡 Media' : '🟢 Bassa'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // Listener sulle checkbox
+            document.querySelectorAll('.todo-checkbox').forEach(checkbox => {
+                checkbox.addEventListener('change', (e) => {
+                    const todoId = parseInt(e.target.dataset.id);
+                    const todo = todoData.find(t => t.id === todoId);
+                    if (todo) todo.completed = e.target.checked;
+                });
+            });
+
+            // Update pulsante Espandi
+            const expandBtn = document.getElementById('expandTodoBtn');
+            if (currentTodoPage >= todos.length) {
+                expandBtn.style.opacity = '0.5';
+                expandBtn.disabled = true;
+                expandBtn.textContent = 'Tutte le task caricate';
+            } else {
+                expandBtn.style.opacity = '1';
+                expandBtn.disabled = false;
+                expandBtn.textContent = `Espandi (${Math.min(currentTodoPage + 10, todos.length)} di ${todos.length})`;
+            }
+        }
+
+        // === SIDEBAR TOGGLE ===
+        function initSidebarToggle() {
+            const toggleBtn = document.getElementById('sidebarToggle');
+            const sidebar = document.querySelector('.sidebar');
+            const main = document.querySelector('.main');
+
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', () => {
+                    sidebar.classList.toggle('minimized');
+                    main.classList.toggle('minimized');
+                    
+                    // Salva lo stato nel localStorage
+                    const isMinimized = sidebar.classList.contains('minimized');
+                    localStorage.setItem('sidebarMinimized', isMinimized);
+                });
+
+                // Ripristina lo stato dal localStorage
+                const wasMinimized = localStorage.getItem('sidebarMinimized') === 'true';
+                if (wasMinimized) {
+                    sidebar.classList.add('minimized');
+                    main.classList.add('minimized');
+                }
+            }
+        }
+
+        // === PROJECT INTERACTIONS ===
+        document.querySelectorAll('.project-card').forEach(card => {
+            card.addEventListener('click', function() {
+                sendPrompt('Mostrami il dettaglio di un progetto: Gantt chart, rischi, action items, email recap');
+            });
+        });
+
+        document.querySelector('.btn-primary')?.addEventListener('click', function() {
+            sendPrompt('Mostrami il flow per creare un nuovo progetto: upload file, connessioni, generazione automatica');
+        });
+
+        // === AGGIUNGI PULSANTE LOGOUT IN ALTO A DESTRA ===
+        function addLogoutButton() {
+            const headerActions = document.querySelector('.header-actions');
+            if (headerActions) {
+                const logoutBtn = document.createElement('button');
+                logoutBtn.style.cssText = `
+                    padding: 0.5rem 1rem;
+                    background: rgba(239, 68, 68, 0.1);
+                    color: #EF4444;
+                    border: 1px solid rgba(239, 68, 68, 0.3);
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-weight: 500;
+                    font-size: 0.95rem;
+                    transition: all 0.3s;
+                `;
+                logoutBtn.innerHTML = '<i class="fas fa-sign-out-alt"></i> Logout';
+                logoutBtn.onmouseover = () => {
+                    logoutBtn.style.background = 'rgba(239, 68, 68, 0.2)';
+                    logoutBtn.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+                };
+                logoutBtn.onmouseout = () => {
+                    logoutBtn.style.background = 'rgba(239, 68, 68, 0.1)';
+                    logoutBtn.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+                };
+                logoutBtn.onclick = logout;
+                
+                headerActions.appendChild(logoutBtn);
+            }
+        }
+
+        // === API INTEGRATION ===
+        const API_URL = 'https://projexa-three.vercel.app/api';
+
+        async function loadDataFromAPI() {
+            try {
+                // Carica progetti
+                const projectsResponse = await fetch(`${API_URL}/projects`);
+                const projects = await projectsResponse.json();
+                console.log('✓ Projects loaded:', projects);
+
+                // Carica task
+                const tasksResponse = await fetch(`${API_URL}/tasks`);
+                const tasks = await tasksResponse.json();
+                console.log('✓ Tasks loaded:', tasks);
+
+                // Se non ci sono dati, usa i dati di esempio
+                if (projects.length > 0) {
+                    // Aggiorna i dati globali con dati reali
+                    window.projectsData = projects;
+                }
+
+                if (tasks.length > 0) {
+                    todoData.length = 0; // Svuota i dati di esempio
+                    tasks.forEach(task => {
+                        todoData.push({
+                            id: task.id,
+                            title: task.title,
+                            client: task.assigned_to || 'N/A',
+                            priority: task.priority || 'medium',
+                            dueDate: task.due_date,
+                            completed: task.status === 'completed',
+                            type: 'task'
+                        });
+                    });
+                    console.log('✓ Todo list updated with API data');
+                    applyFiltersAndRender();
+                }
+            } catch (error) {
+                console.warn('⚠️  API data not available - using local data:', error.message);
+                // Continua con i dati locali se l'API non è disponibile
+            }
+        }
+
+        // === INITIALIZATION ===
+        window.addEventListener('DOMContentLoaded', async () => {
+            initializeUser();
+            initSidebarToggle();
+
+            // Carica dati dalle API
+            await loadDataFromAPI();
+
+            initTodoList();
+            initRevenueChart();
+            initClientFilter();
+        });
+    </script>
+</body>
+</html>

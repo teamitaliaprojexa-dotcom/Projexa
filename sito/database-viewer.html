@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database Viewer - Projexa</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #3B82F6;
+            --primary-dark: #1E40AF;
+            --secondary: #10B981;
+            --danger: #EF4444;
+            --dark: #1F2937;
+            --light: #F9FAFB;
+            --border: #E5E7EB;
+            --text-muted: #6B7280;
+            --radius: 8px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--light);
+            color: var(--dark);
+            line-height: 1.6;
+        }
+
+        .header {
+            background: white;
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            flex: 1;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: var(--radius);
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #DC2626;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--dark);
+        }
+
+        .btn-secondary:hover {
+            background: var(--light);
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .tables-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .table-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+
+        .table-card:hover {
+            border-color: var(--primary);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .table-card i {
+            font-size: 2rem;
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .table-card-name {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .table-card-count {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .table-view {
+            display: none;
+            background: white;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .table-view.active {
+            display: block;
+        }
+
+        .table-view-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .table-view-header h2 {
+            font-size: 1.3rem;
+        }
+
+        .table-data {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            background: var(--light);
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid var(--border);
+        }
+
+        td {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        tr:hover {
+            background: var(--light);
+        }
+
+        .action-btns {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .action-btns .btn {
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: var(--radius);
+            padding: 2rem;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-family: inherit;
+            font-size: 1rem;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .modal-footer {
+            display: flex;
+            gap: 1rem;
+            margin-top: 2rem;
+            justify-content: flex-end;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state i {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.3;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-muted);
+        }
+
+        .insert-form {
+            background: var(--light);
+            padding: 1.5rem;
+            border-radius: var(--radius);
+            margin-bottom: 1.5rem;
+        }
+
+        .insert-form h3 {
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><i class="fas fa-database"></i> Database Viewer</h1>
+        <button class="btn btn-secondary" onclick="goBack()" style="display: none;" id="backBtn">
+            <i class="fas fa-arrow-left"></i> Indietro
+        </button>
+    </div>
+
+    <div class="container">
+        <!-- Tabelle Grid -->
+        <div id="tablesGrid" class="tables-grid"></div>
+
+        <!-- Table View -->
+        <div id="tableView" class="table-view">
+            <div class="table-view-header">
+                <div>
+                    <h2 id="tableName"></h2>
+                    <span id="rowCount" style="color: var(--text-muted);"></span>
+                </div>
+            </div>
+
+            <!-- Insert Form -->
+            <div class="insert-form" id="insertForm" style="display: none;">
+                <h3>Inserisci Nuova Riga</h3>
+                <div id="insertFields"></div>
+                <button class="btn btn-primary" onclick="insertRow()">
+                    <i class="fas fa-plus"></i> Aggiungi
+                </button>
+            </div>
+
+            <!-- Table -->
+            <div class="table-data">
+                <table id="dataTable">
+                    <thead id="tableHead"></thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">Modifica Riga</div>
+            <div id="editFields"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeEditModal()">Annulla</button>
+                <button class="btn btn-primary" onclick="saveEdit()">Salva</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://projexa-4mix.onrender.com/api';
+        const POSTGREST_TABLES = ['projects', 'tasks', 'risks', 'meetings', 'documents', 'stakeholders', 'activity_logs'];
+        let currentTable = null;
+        let currentTableData = null;
+        let editingRowId = null;
+
+        async function loadTables() {
+            try {
+                const grid = document.getElementById('tablesGrid');
+                grid.innerHTML = POSTGREST_TABLES.map(table => `
+                    <div class="table-card" onclick="viewTable('${table}')">
+                        <i class="fas fa-table"></i>
+                        <div class="table-card-name">${table}</div>
+                        <div class="table-card-count">Visualizza dati</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Errore caricamento tabelle:', error);
+                document.getElementById('tablesGrid').innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-exclamation-circle"></i>
+                        <p>Errore nel caricamento delle tabelle</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function viewTable(tableName) {
+            try {
+                const response = await fetch(`${API_URL}/${tableName}`);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const rows = await response.json();
+
+                // Ottieni le colonne dal primo record o usa uno schema fisso
+                const columns = rows.length > 0 ? Object.keys(rows[0]) : ['id'];
+                currentTableData = {
+                    columns,
+                    rows,
+                    totalRows: rows.length,
+                    displayedRows: rows.length
+                };
+                currentTable = tableName;
+
+                // Mostra la vista tabella
+                document.getElementById('tablesGrid').style.display = 'none';
+                document.getElementById('tableView').classList.add('active');
+                document.getElementById('backBtn').style.display = 'inline-flex';
+
+                // Popola i dati
+                document.getElementById('tableName').textContent = tableName;
+                document.getElementById('rowCount').textContent =
+                    `${currentTableData.displayedRows} di ${currentTableData.totalRows} righe`;
+
+                // Mostra form insert (escludi 'id' e colonne timestamp)
+                const skipColumns = ['id', 'created_at', 'updated_at'];
+                const insertableColumns = currentTableData.columns.filter(col => !skipColumns.includes(col));
+
+                console.log('Tabella:', tableName);
+                console.log('Colonne:', currentTableData.columns);
+                console.log('Colonne inseribili:', insertableColumns);
+
+                if (insertableColumns.length > 0) {
+                    document.getElementById('insertForm').style.display = 'block';
+                    document.getElementById('insertFields').innerHTML = insertableColumns.map(col => `
+                        <div class="form-group">
+                            <label>${col}</label>
+                            <input type="text" id="insert_${col}" placeholder="Inserisci ${col}">
+                        </div>
+                    `).join('');
+                }
+
+                // Crea header
+                const thead = document.getElementById('tableHead');
+                thead.innerHTML = `<tr>${currentTableData.columns.map(col =>
+                    `<th>${col}</th>`
+                ).join('')}<th>Azioni</th></tr>`;
+
+                // Crea body
+                const tbody = document.getElementById('tableBody');
+                tbody.innerHTML = currentTableData.rows.map(row => `
+                    <tr>${currentTableData.columns.map(col =>
+                        `<td>${row[col] !== null ? row[col] : 'NULL'}</td>`
+                    ).join('')}<td>
+                        <div class="action-btns">
+                            <button class="btn btn-primary" onclick="openEditModalSafe('${currentTable}', ${row.id})">Edit</button>
+                            <button class="btn btn-danger" onclick="deleteRow('${tableName}', ${row.id})">Elimina</button>
+                        </div>
+                    </td></tr>
+                `).join('');
+
+                if (currentTableData.rows.length === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="${currentTableData.columns.length + 1}" style="text-align: center; color: var(--text-muted);">
+                                Nessun dato
+                            </td>
+                        </tr>
+                    `;
+                }
+            } catch (error) {
+                console.error('Errore caricamento tabella:', error);
+                alert('Errore nel caricamento della tabella');
+            }
+        }
+
+        function goBack() {
+            document.getElementById('tablesGrid').style.display = 'grid';
+            document.getElementById('tableView').classList.remove('active');
+            document.getElementById('backBtn').style.display = 'none';
+            currentTable = null;
+            currentTableData = null;
+        }
+
+        async function insertRow() {
+            const skipColumns = ['id', 'created_at', 'updated_at'];
+            const insertableColumns = currentTableData.columns.filter(col => !skipColumns.includes(col));
+
+            const data = {};
+            for (const col of insertableColumns) {
+                const value = document.getElementById(`insert_${col}`).value;
+                data[col] = value || null;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/${currentTable}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Prefer': 'return=representation'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    alert('Riga aggiunta con successo!');
+                    viewTable(currentTable);
+                } else {
+                    const error = await response.json();
+                    console.error('Errore API:', error);
+                    alert(`Errore nell\'aggiunta della riga: ${error.message || 'Errore sconosciuto'}`);
+                }
+            } catch (error) {
+                console.error('Errore insert:', error);
+                alert('Errore nel tentativo di aggiungere la riga');
+            }
+        }
+
+        function openEditModal(table, id, row) {
+            editingRowId = id;
+            const skipColumns = ['id', 'created_at', 'updated_at'];
+            const editableColumns = currentTableData.columns.filter(col => !skipColumns.includes(col));
+
+            document.getElementById('editFields').innerHTML = editableColumns.map(col => `
+                <div class="form-group">
+                    <label>${col}</label>
+                    <input type="text" id="edit_${col}" value="${row[col] || ''}" placeholder="Modifica ${col}">
+                </div>
+            `).join('');
+
+            document.getElementById('editModal').classList.add('active');
+        }
+
+        function closeEditModal() {
+            document.getElementById('editModal').classList.remove('active');
+            editingRowId = null;
+        }
+
+        async function saveEdit() {
+            const skipColumns = ['id', 'created_at', 'updated_at'];
+            const editableColumns = currentTableData.columns.filter(col => !skipColumns.includes(col));
+
+            const data = {};
+            for (const col of editableColumns) {
+                const value = document.getElementById(`edit_${col}`).value;
+                data[col] = value || null;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/${currentTable}/${editingRowId}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    alert('Riga aggiornata!');
+                    closeEditModal();
+                    viewTable(currentTable);
+                } else {
+                    const error = await response.json();
+                    console.error('Errore API:', error);
+                    alert(`Errore nell\'aggiornamento della riga: ${error.message || 'Errore sconosciuto'}`);
+                }
+            } catch (error) {
+                console.error('Errore update:', error);
+                alert('Errore nel tentativo di aggiornare la riga');
+            }
+        }
+
+        async function deleteRow(table, id) {
+            if (!confirm('Sei sicuro di voler eliminare questa riga?')) return;
+
+            try {
+                const response = await fetch(`${API_URL}/${table}/${id}`, {
+                    method: 'DELETE'
+                });
+                if (response.ok) {
+                    alert('Riga eliminata!');
+                    viewTable(currentTable);
+                } else {
+                    const error = await response.json();
+                    console.error('Errore API:', error);
+                    alert(`Errore nell\'eliminazione della riga: ${error.message || 'Errore sconosciuto'}`);
+                }
+            } catch (error) {
+                console.error('Errore eliminazione:', error);
+                alert('Errore nel tentativo di eliminare la riga');
+            }
+        }
+
+        // Safe Edit Modal - passa solo ID e recupera row dalla currentTableData
+        function openEditModalSafe(table, id) {
+            const row = currentTableData.rows.find(r => r.id === id);
+            if (!row) {
+                alert('Riga non trovata');
+                return;
+            }
+            editingRowId = id;
+            const skipColumns = ['id', 'created_at', 'updated_at'];
+            const editableColumns = currentTableData.columns.filter(col => !skipColumns.includes(col));
+            document.getElementById('editFields').innerHTML = editableColumns.map(col => `
+                <div class="form-group">
+                    <label>${col}</label>
+                    <input type="text" id="edit_${col}" value="${row[col] || ''}" placeholder="Modifica ${col}">
+                </div>
+            `).join('');
+            document.getElementById('editModal').classList.add('active');
+        }
+
+        // Carica le tabelle all'avvio
+        loadTables();
+    </script>
+</body>
+</html>
