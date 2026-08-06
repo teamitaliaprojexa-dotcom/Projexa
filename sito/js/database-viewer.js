@@ -57,8 +57,8 @@ async function selectTable(tableId) {
   renderTablesList();
 
   // Update header
-  document.getElementById('tableName').textContent = table.display_name;
-  document.getElementById('tableDescription').textContent = table.description || 'No description';
+  document.getElementById('selectedTableName').textContent = table.display_name;
+  document.getElementById('selectedTableDesc').textContent = table.description || 'No description';
 
   // Load table data
   await loadTableData(table.table_name);
