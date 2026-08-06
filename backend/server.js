@@ -24,6 +24,11 @@ const sitoPath = path.join(__dirname, '../sito');
 app.use(express.static(sitoPath));
 console.log(`📁 Serving static files from: ${sitoPath}`);
 
+// Redirect root to login page
+app.get('/', (req, res) => {
+  res.redirect('/login.html');
+});
+
 // Logging
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} ${req.method} ${req.path}`);

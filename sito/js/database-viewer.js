@@ -183,54 +183,7 @@ async function deleteTable(tableId) {
   }
 }
 
-// Add new table
-document.getElementById('addTableBtn')?.addEventListener('click', () => {
-  document.getElementById('addTableModal').classList.add('show');
-});
-
-function closeAddTableModal() {
-  document.getElementById('addTableModal').classList.remove('show');
-}
-
-document.getElementById('addTableForm')?.addEventListener('submit', async (e) => {
-  e.preventDefault();
-
-  const tableName = document.getElementById('tableName').value.trim();
-  const displayName = document.getElementById('displayName').value.trim();
-  const description = document.getElementById('tableDesc').value.trim();
-
-  try {
-    const response = await fetch(`${API_URL}/table-structures`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${getToken()}`
-      },
-      body: JSON.stringify({
-        table_name: tableName,
-        display_name: displayName,
-        description: description || null
-      })
-    });
-
-    if (response.ok) {
-      closeAddTableModal();
-      document.getElementById('addTableForm').reset();
-      await loadTableStructures();
-    } else {
-      alert('Error adding table');
-    }
-  } catch (error) {
-    console.error('Error adding table:', error);
-  }
-});
-
-// Close modal on overlay click
-document.getElementById('addTableModal')?.addEventListener('click', (e) => {
-  if (e.target.id === 'addTableModal') {
-    closeAddTableModal();
-  }
-});
+// Add new table functionality (to be implemented)
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
