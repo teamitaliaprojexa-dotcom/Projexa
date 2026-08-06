@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import db from './config/database.js';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
@@ -8,8 +10,12 @@ import projectRoutes from './routes/projects.js';
 import taskRoutes from './routes/tasks.js';
 import riskRoutes from './routes/risks.js';
 import databaseRoutes from './routes/database.js';
+import tableStructuresRoutes from './routes/table-structures.js';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -17,7 +23,11 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static('../sito'));
+
+// Serve static files from sito folder
+const sitoPath = path.join(__dirname, '../sito');
+app.use(express.static(sitoPath));
+console.log(`📁 Serving static files from: ${sitoPath}`);
 
 // Logging
 app.use((req, res, next) => {
@@ -37,6 +47,7 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/risks', riskRoutes);
 app.use('/api/database', databaseRoutes);
+app.use('/api/table-structures', tableStructuresRoutes);
 
 // Generic table route
 app.get('/api/:table', async (req, res) => {
