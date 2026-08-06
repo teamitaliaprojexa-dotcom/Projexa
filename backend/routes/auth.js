@@ -93,8 +93,9 @@ router.post('/login', async (req, res) => {
       tenant: selectedTenant
     });
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('❌ LOGIN ERROR:', error.message);
+    console.error('Stack:', error.stack);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
