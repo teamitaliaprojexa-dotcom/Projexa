@@ -72,19 +72,19 @@ async function loadTableData(tableName) {
   tableContent.innerHTML = '<p class="loading">Loading...</p>';
 
   try {
-    const response = await fetch(`${API_URL}/database/table/${tableName}`, {
+    const response = await fetch(`${API_URL}/data/${tableName}`, {
       headers: { 'Authorization': `Bearer ${getToken()}` }
     });
 
     if (response.ok) {
       const data = await response.json();
 
-      if (!data.data || data.data.length === 0) {
+      if (!data || data.length === 0) {
         tableContent.innerHTML = '<div class="empty-state"><p>No data in this table</p></div>';
         return;
       }
 
-      const columns = Object.keys(data.data[0]);
+      const columns = Object.keys(data[0]);
       const html = `
         <div style="overflow-x: auto;">
           <table style="width: 100%; border-collapse: collapse;">
@@ -98,7 +98,7 @@ async function loadTableData(tableName) {
               </tr>
             </thead>
             <tbody>
-              ${data.data.map(row => `
+              ${data.map(row => `
                 <tr style="border-bottom: 1px solid var(--gray-200);">
                   ${columns.map(col => {
                     let value = row[col];
