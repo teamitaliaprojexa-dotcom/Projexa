@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Projexa - Login</title>
+    <title>Projexa - Project Management Intelligente</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         * {
@@ -12,103 +12,485 @@
             box-sizing: border-box;
         }
 
+        :root {
+            --primary: #3B82F6;
+            --primary-dark: #1E40AF;
+            --primary-light: #DBEAFE;
+            --secondary: #10B981;
+            --danger: #EF4444;
+            --warning: #F59E0B;
+            --dark: #1F2937;
+            --light: #F9FAFB;
+            --border: #E5E7EB;
+            --text-muted: #6B7280;
+            --radius: 8px;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-            background: linear-gradient(135deg, #3B82F6 0%, #10B981 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 1rem;
-        }
-
-        .login-container {
-            display: flex;
-            width: 100%;
-            max-width: 1200px;
+            color: var(--dark);
+            line-height: 1.6;
             background: white;
-            border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            overflow: hidden;
-            min-height: 600px;
         }
 
-        .login-brand {
-            flex: 1;
-            background: linear-gradient(135deg, #3B82F6 0%, #1E40AF 100%);
-            color: white;
-            padding: 4rem 2rem;
+        a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 1.5rem;
+        }
+
+        /* HEADER & NAVIGATION */
+        header {
+            position: sticky;
+            top: 0;
+            background: white;
+            border-bottom: 1px solid var(--border);
+            z-index: 100;
+        }
+
+        .navbar {
             display: flex;
-            flex-direction: column;
-            justify-content: center;
+            justify-content: space-between;
             align-items: center;
+            padding: 1rem 0;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary);
+        }
+
+        .nav-menu {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-menu a {
+            color: var(--dark);
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+
+        .nav-menu a:hover,
+        .nav-menu a.active {
+            color: var(--primary);
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 1rem;
+        }
+
+        /* BUTTONS */
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: var(--radius);
+            border: none;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--dark);
+            border: 2px solid var(--primary);
+        }
+
+        .btn-secondary:hover {
+            background: var(--primary-light);
+        }
+
+        .btn-lg {
+            padding: 1rem 2rem;
+            font-size: 1.1rem;
+        }
+
+        /* PAGES */
+        .page {
+            display: none;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        /* HOME PAGE */
+        .hero {
+            padding: 5rem 0;
             text-align: center;
-            min-height: 600px;
         }
 
-        .brand-icon {
+        .hero h1 {
             font-size: 3.5rem;
-            margin-bottom: 1.5rem;
+            margin-bottom: 1rem;
+            line-height: 1.2;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
-        .brand-title {
+        .hero p {
+            font-size: 1.25rem;
+            color: var(--text-muted);
+            max-width: 600px;
+            margin: 0 auto 2rem;
+        }
+
+        .hero-buttons {
+            display: flex;
+            gap: 1.5rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 3rem;
+        }
+
+        .hero-image {
+            margin-top: 3rem;
+            padding: 2rem;
+            background: var(--light);
+            border-radius: 12px;
+            border: 2px dashed var(--border);
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 4rem;
+        }
+
+        /* FEATURES SECTION */
+        .features {
+            padding: 4rem 0;
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        .section-header h2 {
             font-size: 2.5rem;
             margin-bottom: 1rem;
-            font-weight: 700;
         }
 
-        .brand-subtitle {
-            font-size: 1.2rem;
-            margin-bottom: 2rem;
-            opacity: 0.95;
-        }
-
-        .brand-features {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 2rem;
-            border-radius: 12px;
-        }
-
-        .brand-features p {
-            margin: 0;
-            font-size: 0.95rem;
-            line-height: 1.8;
-        }
-
-        .brand-features i {
-            color: #10B981;
-            margin-right: 0.5rem;
-        }
-
-        .login-form-section {
-            flex: 1;
-            padding: 4rem 3rem;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            overflow-y: auto;
-            max-height: 600px;
-        }
-
-        .form-container {
-            width: 100%;
-            max-width: 400px;
+        .section-header p {
+            font-size: 1.1rem;
+            color: var(--text-muted);
+            max-width: 600px;
             margin: 0 auto;
         }
 
-        .form-header {
-            margin-bottom: 2rem;
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
         }
 
-        .form-header h2 {
-            font-size: 2rem;
+        .feature-card {
+            padding: 2rem;
+            background: var(--light);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            transition: all 0.3s;
+        }
+
+        .feature-card:hover {
+            border-color: var(--primary);
+            box-shadow: 0 8px 24px rgba(59, 130, 246, 0.1);
+            transform: translateY(-4px);
+        }
+
+        .feature-icon {
+            font-size: 2.5rem;
+            color: var(--primary);
+            margin-bottom: 1rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.3rem;
             margin-bottom: 0.5rem;
-            color: #1F2937;
         }
 
-        .form-header p {
-            color: #6B7280;
-            margin: 0;
+        .feature-card p {
+            color: var(--text-muted);
+        }
+
+        /* HOW IT WORKS */
+        .how-it-works {
+            padding: 4rem 0;
+            background: var(--light);
+        }
+
+        .flow-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .flow-step {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            border: 2px solid var(--border);
+            text-align: center;
+            position: relative;
+        }
+
+        .step-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 50px;
+            height: 50px;
+            background: var(--primary);
+            color: white;
+            border-radius: 50%;
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+        }
+
+        .flow-step h3 {
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .flow-step p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        /* PRICING */
+        .pricing {
+            padding: 4rem 0;
+        }
+
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .pricing-card {
+            background: white;
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 2.5rem;
+            text-align: center;
+            transition: all 0.3s;
+        }
+
+        .pricing-card.featured {
+            border-color: var(--primary);
+            box-shadow: 0 12px 32px rgba(59, 130, 246, 0.2);
+            transform: scale(1.05);
+        }
+
+        .pricing-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .price {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: var(--primary);
+            margin: 1rem 0;
+        }
+
+        .price-period {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .features-list {
+            list-style: none;
+            margin: 2rem 0;
+            text-align: left;
+        }
+
+        .features-list li {
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+
+        .features-list li:last-child {
+            border-bottom: none;
+        }
+
+        .features-list li:before {
+            content: "✓ ";
+            color: var(--secondary);
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+
+        /* INTEGRATIONS */
+        .integrations {
+            padding: 4rem 0;
+            background: var(--light);
+        }
+
+        .integration-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .integration-card {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            transition: all 0.3s;
+        }
+
+        .integration-card:hover {
+            border-color: var(--primary);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .integration-icon {
+            font-size: 3rem;
+        }
+
+        .integration-card p {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        /* FAQ */
+        .faq {
+            padding: 4rem 0;
+        }
+
+        .faq-list {
+            max-width: 700px;
+            margin: 2rem auto;
+        }
+
+        .faq-item {
+            background: var(--light);
+            margin-bottom: 1rem;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .faq-header {
+            padding: 1.5rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 500;
+            user-select: none;
+            transition: background 0.3s;
+        }
+
+        .faq-header:hover {
+            background: white;
+        }
+
+        .faq-icon {
+            transition: transform 0.3s;
+        }
+
+        .faq-icon.open {
+            transform: rotate(180deg);
+        }
+
+        .faq-content {
+            display: none;
+            padding: 0 1.5rem 1.5rem;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border);
+        }
+
+        .faq-content.open {
+            display: block;
+        }
+
+        /* ABOUT */
+        .about {
+            padding: 4rem 0;
+        }
+
+        .team-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+
+        .team-card {
+            text-align: center;
+            padding: 2rem;
+            background: var(--light);
+            border-radius: 12px;
+        }
+
+        .team-avatar {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto 1rem;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            color: white;
+        }
+
+        .team-card h3 {
+            font-size: 1.2rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .team-card p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        /* CONTACT */
+        .contact {
+            padding: 4rem 0;
+        }
+
+        .contact-content {
+            max-width: 600px;
+            margin: 2rem auto;
+            background: var(--light);
+            padding: 2.5rem;
+            border-radius: 12px;
         }
 
         .form-group {
@@ -119,437 +501,664 @@
             display: block;
             margin-bottom: 0.5rem;
             font-weight: 500;
-            color: #1F2937;
         }
 
-        .form-group input {
+        .form-group input,
+        .form-group textarea {
             width: 100%;
             padding: 0.75rem;
-            border: 1px solid #E5E7EB;
-            border-radius: 8px;
-            font-size: 1rem;
-            transition: all 0.3s;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
             font-family: inherit;
+            font-size: 1rem;
         }
 
-        .form-group input:focus {
-            outline: none;
-            border-color: #3B82F6;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        .form-group textarea {
+            resize: vertical;
+            min-height: 120px;
         }
 
-        .forgot-password {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 0.5rem;
+        /* FOOTER */
+        footer {
+            background: var(--dark);
+            color: white;
+            padding: 3rem 0 1.5rem;
+            margin-top: 4rem;
         }
 
-        .forgot-password a {
-            color: #3B82F6;
-            text-decoration: none;
-            font-size: 0.9rem;
-        }
-
-        .checkbox-group {
-            display: flex;
-            align-items: center;
-            cursor: pointer;
+        .footer-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
             margin-bottom: 2rem;
         }
 
-        .checkbox-group input {
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-            margin-right: 0.75rem;
+        .footer-section h4 {
+            margin-bottom: 1rem;
         }
 
-        .btn {
-            width: 100%;
-            padding: 0.75rem;
-            border: none;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: all 0.3s;
-            margin-bottom: 1.5rem;
+        .footer-section a {
+            display: block;
+            color: #D1D5DB;
+            margin-bottom: 0.5rem;
+            transition: color 0.3s;
         }
 
-        .btn-primary {
-            background: linear-gradient(135deg, #3B82F6 0%, #1E40AF 100%);
+        .footer-section a:hover {
             color: white;
         }
 
-        .btn-primary:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 24px rgba(59, 130, 246, 0.3);
+        .footer-bottom {
+            border-top: 1px solid #374151;
+            padding-top: 2rem;
+            text-align: center;
+            color: #9CA3AF;
         }
 
-        .btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
+        /* CTA SECTION */
+        .cta-section {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            padding: 4rem 0;
+            text-align: center;
+            margin-bottom: 4rem;
         }
 
-        .error-message {
-            color: #EF4444;
-            font-size: 0.9rem;
+        .cta-section h2 {
+            font-size: 2rem;
             margin-bottom: 1rem;
-            display: none;
         }
 
-        .divider {
-            position: relative;
+        .cta-section p {
+            font-size: 1.1rem;
             margin-bottom: 2rem;
+            opacity: 0.95;
         }
 
-        .divider::before {
-            content: '';
-            position: absolute;
-            left: 0;
-            top: 50%;
-            right: 0;
-            height: 1px;
-            background: #E5E7EB;
-        }
-
-        .divider span {
-            position: relative;
-            background: white;
-            padding: 0 1rem;
-            color: #6B7280;
-            font-size: 0.9rem;
-            left: 50%;
-            transform: translateX(-50%);
-        }
-
-        .oauth-buttons {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
-            margin-bottom: 2rem;
-        }
-
-        .oauth-btn {
-            padding: 0.75rem;
-            border: 1px solid #E5E7EB;
-            background: white;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.3s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 0.5rem;
-        }
-
-        .oauth-btn:hover {
-            background: #F9FAFB;
-            border-color: #3B82F6;
-        }
-
-        .oauth-btn i {
-            color: #1F2937;
-        }
-
-        .oauth-btn span {
-            color: #1F2937;
-            font-weight: 500;
-            font-size: 0.9rem;
-        }
-
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
-            z-index: 1000;
-            justify-content: center;
-            align-items: center;
-        }
-
-        .modal.active {
-            display: flex;
-        }
-
-        .modal-content {
-            background: white;
-            border-radius: 12px;
-            padding: 2rem;
-            max-width: 400px;
-            width: 90%;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-        }
-
-        .modal-title {
-            font-size: 1.5rem;
-            color: #1F2937;
-            margin-bottom: 1rem;
-            font-weight: 600;
-        }
-
-        .modal-description {
-            color: #6B7280;
-            margin-bottom: 1.5rem;
-        }
-
-        .tenant-option {
-            padding: 1rem;
-            border: 1px solid #E5E7EB;
-            border-radius: 8px;
-            cursor: pointer;
-            margin-bottom: 0.75rem;
-            transition: all 0.3s;
-        }
-
-        .tenant-option:hover {
-            background: #F9FAFB;
-            border-color: #3B82F6;
-        }
-
-        .tenant-option.selected {
-            background: #EFF6FF;
-            border-color: #3B82F6;
-        }
-
+        /* RESPONSIVE */
         @media (max-width: 768px) {
-            .login-container {
-                flex-direction: column;
-                min-height: auto;
+            .hero h1 {
+                font-size: 2.5rem;
             }
 
-            .login-brand {
-                min-height: 300px;
-                padding: 2rem;
+            .nav-menu {
+                gap: 1rem;
+                font-size: 0.9rem;
             }
 
-            .login-form-section {
-                max-height: none;
-                min-height: auto;
-                padding: 2rem 1.5rem;
+            .pricing-card.featured {
+                transform: scale(1);
             }
 
-            .oauth-buttons {
-                grid-template-columns: 1fr;
+            .section-header h2 {
+                font-size: 2rem;
             }
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <div class="login-brand">
-            <div class="brand-icon">
-                <i class="fas fa-cube"></i>
-            </div>
-            <h1 class="brand-title">Projexa</h1>
-            <p class="brand-subtitle">Il tuo assistente per gestire progetti come un professionista</p>
-            <div class="brand-features">
-                <p><i class="fas fa-check"></i> Piani automatici<br></p>
-                <p><i class="fas fa-check"></i> Gantt in real-time<br></p>
-                <p><i class="fas fa-check"></i> Registri rischi<br></p>
-                <p><i class="fas fa-check"></i> Privacy EU</p>
-            </div>
+    <header>
+        <div class="container">
+            <nav class="navbar">
+                <div class="logo"><img src="../Logo_Projexa.png" alt="Projexa" style="height: 200px; width: auto;"></div>
+                <ul class="nav-menu">
+                    <li><a href="#" data-page="home" class="nav-link active">Home</a></li>
+                    <li><a href="#" data-page="features" class="nav-link">Features</a></li>
+                    <li><a href="#" data-page="pricing" class="nav-link">Pricing</a></li>
+                    <li><a href="#" data-page="integrations" class="nav-link">Integrazioni</a></li>
+                    <li><a href="#" data-page="faq" class="nav-link">FAQ</a></li>
+                    <li><a href="#" data-page="about" class="nav-link">Chi Siamo</a></li>
+                </ul>
+                <div class="nav-buttons">
+                    <a href="login.html" class="btn btn-secondary" style="display: inline-block; text-decoration: none;">Login</a>
+                    <a href="login.html" class="btn btn-primary" style="display: inline-block; text-decoration: none;">Prova Gratis</a>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <!-- HOME PAGE -->
+    <div id="home" class="page active">
+        <div class="container">
+            <section class="hero">
+                <h1>Trasforma il caos in ordine</h1>
+                <p>Projexa legge meeting, email e ticket per creare automaticamente piani di progetto, Gantt, e registri rischi.</p>
+                <div class="hero-buttons">
+                    <button class="btn btn-secondary btn-lg" onclick="navigateTo('features')">Scopri di più</button>
+                </div>
+                <div class="hero-image">
+                    <i class="fas fa-chart-gantt"></i>
+                </div>
+            </section>
         </div>
 
-        <div class="login-form-section">
-            <div class="form-container">
-                <div id="loginForm">
-                    <div class="form-header">
-                        <h2>Accedi</h2>
-                        <p>Bentornato! Accedi al tuo account Projexa</p>
+        <section class="features">
+            <div class="container">
+                <div class="section-header">
+                    <h2>Capacità principali</h2>
+                    <p>Tutto quello che serve per gestire progetti come un professionista</p>
+                </div>
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-microphone"></i></div>
+                        <h3>Trascrizioni Teams/Meet</h3>
+                        <p>Projexa partecipa ai tuoi meeting. In tempo reale genera trascrizione, appunti, action list. Dopo la call crea l'email di recap e documenti pronti da inviare.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-envelope"></i></div>
+                        <h3>Email e Calendario</h3>
+                        <p>Connessione a Outlook e Gmail. Sincronizza email, thread e calendar events. Tutto centralizzato, niente informazioni perse.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-ticket"></i></div>
+                        <h3>Integrazione Jira</h3>
+                        <p>Link diretto ai tuoi ticket. Timeline, dipendenze e stato aggiornati in tempo reale.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-file-pdf"></i></div>
+                        <h3>Upload Documenti</h3>
+                        <p>Carica PDF, Word o testo. Projexa estrae milestone, deliverable e timeline.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-robot"></i></div>
+                        <h3>Projexa Intelligente</h3>
+                        <p>Comprende contesto, estrae dipendenze, assegna criticità. Sempre più smart col tempo.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-shield"></i></div>
+                        <h3>Privacy Enterprise</h3>
+                        <p>Dati in EU. Nessun training su tuoi contenuti. SOC 2 e GDPR compliant.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="how-it-works">
+            <div class="container">
+                <div class="section-header">
+                    <h2>Come funziona</h2>
+                    <p>Da caos a struttura in tre semplici step</p>
+                </div>
+                <div class="flow-grid">
+                    <div class="flow-step">
+                        <div class="step-number">1</div>
+                        <h3>Carica le fonti</h3>
+                        <p>Meeting, email, ticket, documenti. Tutto quello che serve per il tuo progetto.</p>
+                    </div>
+                    <div class="flow-step">
+                        <div class="step-number">2</div>
+                        <h3>Projexa analizza</h3>
+                        <p>In pochi secondi estrae timeline, rischi, dipendenze e action item importanti.</p>
+                    </div>
+                    <div class="flow-step">
+                        <div class="step-number">3</div>
+                        <h3>Ricevi i deliverable</h3>
+                        <p>Piano, Gantt, registro rischi, action list. Tutto pronto per il tuo team.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="cta-section">
+            <div class="container">
+                <h2>Riduci il tempo di planning del 70%</h2>
+                <p>Smetti di compilare fogli Excel. Lascia che Projexa faccia il lavoro strutturale.</p>
+                <a href="login.html" class="btn btn-primary btn-lg" style="background: white; color: var(--primary); display: inline-block; text-decoration: none;">Inizia la prova gratuita</a>
+            </div>
+        </section>
+    </div>
+
+    <!-- FEATURES PAGE -->
+    <div id="features" class="page">
+        <div class="container">
+            <section class="features">
+                <div class="section-header">
+                    <h2>Tutte le Features</h2>
+                    <p>Scopri in dettaglio quello che puoi fare con Projexa</p>
+                </div>
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-microphone-lines"></i></div>
+                        <h3>Partecipazione ai Meeting in Real-time</h3>
+                        <p>Projexa entra nei tuoi meeting Teams e Meet. Durante la call genera trascrizione completa, identifica decisioni e action item. Al termine: appunti, email recap e documenti pronti per i partecipanti.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-bars"></i></div>
+                        <h3>Gantt Chart Interattivo</h3>
+                        <p>Visualizza la timeline del progetto in modo intuitivo. Modifica date, aggiungi risorse, identifica colli di bottiglia.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-exclamation-triangle"></i></div>
+                        <h3>Registro Rischi Prioritizzato</h3>
+                        <p>Identifica i rischi automaticamente. Per ogni rischio: descrizione, probabilità, impatto e piano di mitigation suggerito.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-list-check"></i></div>
+                        <h3>Action List Assegnata</h3>
+                        <p>Chi, cosa, quando, deadline. Ogni azione è assegnata, prioritizzata e tracciata. Integrabile con Outlook e Slack.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-envelope-open-text"></i></div>
+                        <h3>Email Recap Automatica</h3>
+                        <p>Projexa genera una bella email di recap con timeline, rischi e next step. Pronta da mandare ai tuoi stakeholder.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-dashboard"></i></div>
+                        <h3>Dashboard Stato Avanzamento</h3>
+                        <p>Monitoraggio real-time di progetto. KPI, milestone completate, rischi aperti, velocità del team.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-sync"></i></div>
+                        <h3>Aggiornamenti Real-time</h3>
+                        <p>Projexa rimane aggiornato con le tue email, Slack e Jira. Il piano evolve in base alla realtà del progetto.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-download"></i></div>
+                        <h3>Export Universali</h3>
+                        <p>Scarica in PDF, Excel, Markdown. Condividi con MS Project, Asana o qualsiasi altro tool.</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="feature-icon"><i class="fas fa-lock"></i></div>
+                        <h3>Gestione Accessi</h3>
+                        <p>Invita il tuo team. Definisci chi può vedere, modificare, commentare. Audit trail completo.</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- PRICING PAGE -->
+    <div id="pricing" class="page">
+        <div class="container">
+            <section class="pricing">
+                <div class="section-header">
+                    <h2>Scegli il Piano Giusto</h2>
+                    <p>Da freelance a enterprise, abbiamo il piano per te</p>
+                </div>
+                <div class="pricing-grid">
+                    <div class="pricing-card">
+                        <h3>Starter</h3>
+                        <p style="color: var(--text-muted); margin-bottom: 1rem;">Per freelance e small teams</p>
+                        <div class="price">€29<span class="price-period">/mese</span></div>
+                        <a href="login.html" class="btn btn-primary" style="width: 100%; margin-bottom: 1.5rem; display: block; text-align: center; text-decoration: none;">Inizia</a>
+                        <ul class="features-list">
+                            <li>3 progetti al mese</li>
+                            <li>10 upload al mese</li>
+                            <li>Integrazioni base (Teams, Email)</li>
+                            <li>Chat support</li>
+                            <li>Export PDF</li>
+                        </ul>
+                    </div>
+                    <div class="pricing-card featured">
+                        <div style="background: var(--primary); color: white; padding: 0.5rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.85rem;">PIÙ POPOLARE</div>
+                        <h3>Professional</h3>
+                        <p style="color: var(--text-muted); margin-bottom: 1rem;">Per agenzie e tech teams</p>
+                        <div class="price">€99<span class="price-period">/mese</span></div>
+                        <a href="login.html" class="btn btn-primary" style="width: 100%; margin-bottom: 1.5rem; display: block; text-align: center; text-decoration: none;">Inizia</a>
+                        <ul class="features-list">
+                            <li>Progetti illimitati</li>
+                            <li>100 upload al mese</li>
+                            <li>Tutte le integrazioni (Jira, Slack)</li>
+                            <li>Dashboard real-time</li>
+                            <li>Export multipli</li>
+                            <li>Priority support</li>
+                            <li>Fino a 10 team member</li>
+                        </ul>
+                    </div>
+                    <div class="pricing-card">
+                        <h3>Enterprise</h3>
+                        <p style="color: var(--text-muted); margin-bottom: 1rem;">Per PMO e grandi organizzazioni</p>
+                        <div class="price">Custom<span class="price-period">/anno</span></div>
+                        <button class="btn btn-secondary" style="width: 100%; margin-bottom: 1.5rem;" onclick="navigateTo('contact')">Contattaci</button>
+                        <ul class="features-list">
+                            <li>Tutto il Professional +</li>
+                            <li>SSO e SAML</li>
+                            <li>API personalizate</li>
+                            <li>Onboarding dedicato</li>
+                            <li>SLA garantiti</li>
+                            <li>Account manager</li>
+                            <li>Unlimited team members</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- INTEGRATIONS PAGE -->
+    <div id="integrations" class="page">
+        <div class="container">
+            <section class="integrations">
+                <div class="section-header">
+                    <h2>Integrazioni Supportate</h2>
+                    <p>Connessione seamless con i tuoi tool preferiti</p>
+                </div>
+                <div class="integration-grid">
+                    <div class="integration-card">
+                        <div class="integration-icon"><i class="fab fa-teams"></i></div>
+                        <p><strong>Microsoft Teams</strong></p>
+                        <p style="font-size: 0.85rem;">Upload trascrizioni e chat</p>
+                    </div>
+                    <div class="integration-card">
+                        <div class="integration-icon"><i class="fab fa-google"></i></div>
+                        <p><strong>Google Meet</strong></p>
+                        <p style="font-size: 0.85rem;">Registrazioni e trascrizioni</p>
+                    </div>
+                    <div class="integration-card">
+                        <div class="integration-icon"><i class="fas fa-envelope"></i></div>
+                        <p><strong>Outlook</strong></p>
+                        <p style="font-size: 0.85rem;">Sincronizzazione email</p>
+                    </div>
+                    <div class="integration-card">
+                        <div class="integration-icon"><i class="fab fa-google"></i></div>
+                        <p><strong>Gmail</strong></p>
+                        <p style="font-size: 0.85rem;">Email e thread di discussione</p>
+                    </div>
+                    <div class="integration-card">
+                        <div class="integration-icon"><i class="fab fa-jira"></i></div>
+                        <p><strong>Jira</strong></p>
+                        <p style="font-size: 0.85rem;">Ticket e sprint sync</p>
+                    </div>
+                    <div class="integration-card">
+                        <div class="integration-icon"><i class="fab fa-slack"></i></div>
+                        <p><strong>Slack</strong></p>
+                        <p style="font-size: 0.85rem;">Channel e DM sync</p>
+                    </div>
+                    <div class="integration-card">
+                        <div class="integration-icon"><i class="fas fa-file"></i></div>
+                        <p><strong>OneDrive</strong></p>
+                        <p style="font-size: 0.85rem;">Upload automatico file</p>
+                    </div>
+                    <div class="integration-card">
+                        <div class="integration-icon"><i class="fas fa-cloud"></i></div>
+                        <p><strong>Google Drive</strong></p>
+                        <p style="font-size: 0.85rem;">Sincronizzazione file</p>
+                    </div>
+                    <div class="integration-card">
+                        <div class="integration-icon"><i class="fas fa-calendar"></i></div>
+                        <p><strong>Outlook Calendar</strong></p>
+                        <p style="font-size: 0.85rem;">Timeline e milestone</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="features" style="padding: 4rem 0;">
+                <div class="section-header">
+                    <h2>Presto su ProjectAI</h2>
+                    <p>Stiamo lavorando su queste integrazioni</p>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem;">
+                    <div style="text-align: center; padding: 1.5rem; background: var(--light); border-radius: 12px;">
+                        <div style="font-size: 2rem; margin-bottom: 0.5rem;">📊</div>
+                        <p><strong>Asana</strong></p>
+                    </div>
+                    <div style="text-align: center; padding: 1.5rem; background: var(--light); border-radius: 12px;">
+                        <div style="font-size: 2rem; margin-bottom: 0.5rem;">📋</div>
+                        <p><strong>Monday.com</strong></p>
+                    </div>
+                    <div style="text-align: center; padding: 1.5rem; background: var(--light); border-radius: 12px;">
+                        <div style="font-size: 2rem; margin-bottom: 0.5rem;">✅</div>
+                        <p><strong>Notion</strong></p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- FAQ PAGE -->
+    <div id="faq" class="page">
+        <div class="container">
+            <section class="faq">
+                <div class="section-header">
+                    <h2>Domande Frequenti</h2>
+                    <p>Tutto quello che devi sapere</p>
+                </div>
+                <div class="faq-list">
+                    <div class="faq-item">
+                        <div class="faq-header" onclick="toggleFaq(this)">
+                            <span>Come funziona l'AI di ProjectAI?</span>
+                            <i class="fas fa-chevron-down faq-icon"></i>
+                        </div>
+                        <div class="faq-content">
+                            <p>Usiamo modelli di linguaggio avanzati che analizzano il contesto dei tuoi documenti, email e trascrizioni per identificare automaticamente le strutture di progetto, i rischi e le dipendenze. L'AI impara dai tuoi progetti passati per diventare sempre più precisa.</p>
+                        </div>
                     </div>
 
-                    <div class="error-message" id="errorMessage"></div>
+                    <div class="faq-item">
+                        <div class="faq-header" onclick="toggleFaq(this)">
+                            <span>I miei dati sono al sicuro?</span>
+                            <i class="fas fa-chevron-down faq-icon"></i>
+                        </div>
+                        <div class="faq-content">
+                            <p>Sì, i dati sono storage in datacenter EU (GDPR compliant). Non usciamo i tuoi dati per addestrare i nostri modelli. Abbiamo certificazione SOC 2 Type II e Iso 27001 in corso.</p>
+                        </div>
+                    </div>
 
-                    <form id="emailForm" onsubmit="handleEmailLogin(event)">
+                    <div class="faq-item">
+                        <div class="faq-header" onclick="toggleFaq(this)">
+                            <span>Quanto tempo ci vuole per fare un piano di progetto?</span>
+                            <i class="fas fa-chevron-down faq-icon"></i>
+                        </div>
+                        <div class="faq-content">
+                            <p>Dipende dalla complessità, ma in media 30-60 secondi dall'upload dei documenti. Per progetti grandi (100+ task) potrebbe volerci 2-3 minuti. Il risultato è sempre immediatamente modificabile.</p>
+                        </div>
+                    </div>
+
+                    <div class="faq-item">
+                        <div class="faq-header" onclick="toggleFaq(this)">
+                            <span>Posso modificare il piano generato dall'AI?</span>
+                            <i class="fas fa-chevron-down faq-icon"></i>
+                        </div>
+                        <div class="faq-content">
+                            <p>Certo. Il piano è 100% editabile. Puoi aggiungere, rimuovere o modificare task, date, risorse, rischi. L'AI rimane disponibile per aiutarti a rifare analisi se lo desideri.</p>
+                        </div>
+                    </div>
+
+                    <div class="faq-item">
+                        <div class="faq-header" onclick="toggleFaq(this)">
+                            <span>Quali integrazioni supportate nel piano Free?</span>
+                            <i class="fas fa-chevron-down faq-icon"></i>
+                        </div>
+                        <div class="faq-content">
+                            <p>Nel piano Starter supportiamo Teams, Google Meet, Outlook e Gmail. Jira e Slack arrivano nel piano Professional. Enterprise ha accesso a tutte le integrazioni.</p>
+                        </div>
+                    </div>
+
+                    <div class="faq-item">
+                        <div class="faq-header" onclick="toggleFaq(this)">
+                            <span>Posso invitare il mio team?</span>
+                            <i class="fas fa-chevron-down faq-icon"></i>
+                        </div>
+                        <div class="faq-content">
+                            <p>Sì. Nel piano Starter puoi aggiungere fino a 3 team member, nel Professional fino a 10, nell'Enterprise illimitati. Puoi gestire i permessi (view, edit, comment) per ogni persona.</p>
+                        </div>
+                    </div>
+
+                    <div class="faq-item">
+                        <div class="faq-header" onclick="toggleFaq(this)">
+                            <span>Posso cancellare la mia subscription in qualsiasi momento?</span>
+                            <i class="fas fa-chevron-down faq-icon"></i>
+                        </div>
+                        <div class="faq-content">
+                            <p>Sì, puoi cancellare in qualsiasi momento senza penali. Non c'è contratto a lungo termine per Starter e Professional. Enterprise ha termini specifici da concordare.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- ABOUT PAGE -->
+    <div id="about" class="page">
+        <div class="container">
+            <section class="about">
+                <div class="section-header">
+                    <h2>Chi Siamo</h2>
+                    <p>Fondatori di ProjectAI, ex PM e tech lead</p>
+                </div>
+                <div style="background: var(--light); padding: 2rem; border-radius: 12px; margin: 2rem 0;">
+                    <p style="font-size: 1.1rem; margin-bottom: 1rem;">ProjectAI nasce da un problema reale.</p>
+                    <p style="color: var(--text-muted); margin-bottom: 1rem;">Federica, Project Manager senior, passava 40 ore al mese a raccogliere informazioni da email, meeting notes e ticket per creare piani di progetto strutturati. Allo stesso tempo, Marco, CTO, stava sperimentando con modelli di linguaggio avanzati.</p>
+                    <p style="color: var(--text-muted); margin-bottom: 1rem;">Nel 2024 hanno deciso di unire le forze e creare ProjectAI: uno strumento che fa per i PM quello che l'AI sta facendo per gli sviluppatori.</p>
+                    <p style="color: var(--text-muted);">Oggi ProjectAI è usato da oltre 500 team in tutta Europa per ridurre il tempo di planning e aumentare la qualità dei piani di progetto.</p>
+                </div>
+
+                <div class="section-header" style="margin-top: 3rem;">
+                    <h2>Il Nostro Team</h2>
+                </div>
+                <div class="team-grid">
+                    <div class="team-card">
+                        <div class="team-avatar">F</div>
+                        <h3>Federica Rossi</h3>
+                        <p>Co-founder & CEO</p>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">Ex PM Senior @ Accenture, 12 anni di esperienza</p>
+                    </div>
+                    <div class="team-card">
+                        <div class="team-avatar">M</div>
+                        <h3>Marco Bianchi</h3>
+                        <p>Co-founder & CTO</p>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">Ex Fullstack Lead @ Innovatech, AI/ML specialist</p>
+                    </div>
+                    <div class="team-card">
+                        <div class="team-avatar">L</div>
+                        <h3>Laura Verdi</h3>
+                        <p>Product Manager</p>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">Ex Head of Product @ TechStartup, user research expert</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- CONTACT PAGE -->
+    <div id="contact" class="page">
+        <div class="container">
+            <section class="contact">
+                <div class="section-header">
+                    <h2>Contattaci</h2>
+                    <p>Abbiamo domande? Siamo qui per aiutare</p>
+                </div>
+                <div class="contact-content">
+                    <form onsubmit="handleSubmit(event)">
+                        <div class="form-group">
+                            <label>Nome</label>
+                            <input type="text" required placeholder="Il tuo nome">
+                        </div>
                         <div class="form-group">
                             <label>Email</label>
-                            <input type="email" id="emailInput" placeholder="name@company.com" required>
+                            <input type="email" required placeholder="la@tua.email">
                         </div>
-
                         <div class="form-group">
-                            <div class="forgot-password">
-                                <label>Password</label>
-                                <a href="#">Dimenticata?</a>
-                            </div>
-                            <input type="password" id="passwordInput" placeholder="••••••••" required>
+                            <label>Azienda</label>
+                            <input type="text" placeholder="Nome azienda">
                         </div>
-
-                        <div class="checkbox-group">
-                            <input type="checkbox" id="remember">
-                            <label for="remember">Ricordami su questo dispositivo</label>
+                        <div class="form-group">
+                            <label>Messaggio</label>
+                            <textarea required placeholder="Come possiamo aiutarti?"></textarea>
                         </div>
-
-                        <button type="submit" class="btn btn-primary" id="loginBtn">Accedi</button>
+                        <button type="submit" class="btn btn-primary" style="width: 100%;">Invia</button>
                     </form>
-
-                    <div class="divider">
-                        <span>Oppure continua con</span>
+                    <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border); text-align: center; color: var(--text-muted);">
+                        <p><strong>Email:</strong> hello@projectai.it</p>
+                        <p style="margin-top: 0.5rem;"><strong>Telefono:</strong> +39 02 1234 5678</p>
                     </div>
+                </div>
+            </section>
+        </div>
+    </div>
 
-                    <div id="google-signin-button" style="margin-bottom: 2rem;"></div>
-
-                    <div class="oauth-buttons">
-                        <button type="button" class="oauth-btn" onclick="handleMicrosoftSignIn()">
-                            <i class="fab fa-microsoft"></i>
-                            <span>Microsoft</span>
-                        </button>
-                    </div>
+    <!-- FOOTER -->
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>Prodotto</h4>
+                    <a href="#" data-page="features">Features</a>
+                    <a href="#" data-page="pricing">Pricing</a>
+                    <a href="#" data-page="integrations">Integrazioni</a>
+                    <a href="#" onclick="navigateTo('contact')">Contatti</a>
+                </div>
+                <div class="footer-section">
+                    <h4>Company</h4>
+                    <a href="#" data-page="about">Chi Siamo</a>
+                    <a href="#">Blog</a>
+                    <a href="#">Careers</a>
+                    <a href="#">Press Kit</a>
+                </div>
+                <div class="footer-section">
+                    <h4>Risorse</h4>
+                    <a href="#">Documentazione</a>
+                    <a href="#">API Reference</a>
+                    <a href="#">Community</a>
+                    <a href="#">Status Page</a>
+                </div>
+                <div class="footer-section">
+                    <h4>Legal</h4>
+                    <a href="#">Privacy Policy</a>
+                    <a href="#">Terms of Service</a>
+                    <a href="#">Cookie Policy</a>
+                    <a href="#">GDPR</a>
                 </div>
             </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 Projexa. Tutti i diritti riservati. Fatto con ❤️ a Milano</p>
+            </div>
         </div>
-    </div>
-
-    <div id="tenantModal" class="modal">
-        <div class="modal-content">
-            <h2 class="modal-title">Scegli il tuo tenant</h2>
-            <p class="modal-description">Hai accesso a più organizzazioni. Seleziona quella che vuoi usare:</p>
-            <div id="tenantList"></div>
-            <button type="button" class="btn btn-primary" onclick="selectTenant()" style="margin-top: 1rem;">Continua</button>
-        </div>
-    </div>
-
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    </footer>
 
     <script>
-        const API_URL = 'https://projexa-4mix.onrender.com/api';
-        let selectedTenant = null;
-        let loginData = null;
+        // Page Navigation
+        const navLinks = document.querySelectorAll('[data-page]');
+        const pages = document.querySelectorAll('.page');
 
-        async function handleEmailLogin(event) {
-            event.preventDefault();
-
-            const email = document.getElementById('emailInput').value;
-            const password = document.getElementById('passwordInput').value;
-            const errorDiv = document.getElementById('errorMessage');
-            const loginBtn = document.getElementById('loginBtn');
-
-            errorDiv.style.display = 'none';
-            loginBtn.disabled = true;
-
-            try {
-                const response = await fetch(`${API_URL}/auth/login`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password })
-                });
-
-                const data = await response.json();
-
-                if (response.status === 200) {
-                    localStorage.setItem('authToken', data.token);
-                    localStorage.setItem('user', JSON.stringify(data.user));
-                    window.location.href = './dashboard.html';
-                } else if (response.status === 300) {
-                    loginData = { email, password };
-                    showTenantModal(data.tenants);
-                } else {
-                    errorDiv.textContent = data.error || 'Errore durante l\'accesso';
-                    errorDiv.style.display = 'block';
-                }
-            } catch (error) {
-                errorDiv.textContent = 'Errore di connessione al server';
-                errorDiv.style.display = 'block';
-            } finally {
-                loginBtn.disabled = false;
-            }
-        }
-
-        function showTenantModal(tenants) {
-            const tenantList = document.getElementById('tenantList');
-            const modal = document.getElementById('tenantModal');
-
-            tenantList.innerHTML = tenants.map(t => `
-                <div class="tenant-option" onclick="setSelectedTenant('${t.code}', this)">
-                    <div style="font-weight: 600; color: #1F2937;">${t.name}</div>
-                </div>
-            `).join('');
-
-            selectedTenant = null;
-            modal.classList.add('active');
-        }
-
-        function setSelectedTenant(code, element) {
-            selectedTenant = code;
-            document.querySelectorAll('.tenant-option').forEach(el => el.classList.remove('selected'));
-            element.classList.add('selected');
-        }
-
-        async function selectTenant() {
-            if (!selectedTenant || !loginData) return;
-
-            const { email, password } = loginData;
-            document.getElementById('tenantModal').classList.remove('active');
-
-            try {
-                const response = await fetch(`${API_URL}/auth/login`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        email, 
-                        password, 
-                        tenant_code: selectedTenant
-                    })
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    localStorage.setItem('authToken', data.token);
-                    localStorage.setItem('user', JSON.stringify(data.user));
-                    window.location.href = './dashboard.html';
-                } else {
-                    document.getElementById('errorMessage').textContent = data.error || 'Errore';
-                    document.getElementById('errorMessage').style.display = 'block';
-                }
-            } catch (error) {
-                document.getElementById('errorMessage').textContent = 'Errore di connessione';
-                document.getElementById('errorMessage').style.display = 'block';
-            }
-        }
-
-        function handleMicrosoftSignIn() {
-            alert('Microsoft OAuth richiede configurazione');
-        }
-
-        function initializeGoogleSignIn() {
-            google.accounts.id.initialize({
-                client_id: '128379880931-guh70j47lsvplo9m1intpj9tt7escdn8.apps.googleusercontent.com',
-                callback: handleGoogleSignIn
+        navLinks.forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const page = link.getAttribute('data-page');
+                navigateTo(page);
             });
+        });
 
-            google.accounts.id.renderButton(
-                document.getElementById('google-signin-button'),
-                { theme: 'outline', size: 'large', width: '100%', locale: 'it' }
-            );
-        }
-
-        function handleGoogleSignIn(response) {
-            const base64Url = response.credential.split('.')[1];
-            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-            const jsonPayload = decodeURIComponent(atob(base64).split('').map((c) => {
-                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-            }).join(''));
-
-            const userInfo = JSON.parse(jsonPayload);
-            localStorage.setItem('user', JSON.stringify({
-                name: userInfo.name,
-                email: userInfo.email,
-                provider: 'google'
-            }));
+        function navigateTo(page) {
+            // Hide all pages
+            pages.forEach(p => p.classList.remove('active'));
             
-            window.location.href = 'dashboard.html?provider=google';
+            // Show selected page
+            const selectedPage = document.getElementById(page);
+            if (selectedPage) {
+                selectedPage.classList.add('active');
+            }
+
+            // Update nav links
+            document.querySelectorAll('.nav-menu a').forEach(link => {
+                link.classList.remove('active');
+            });
+            document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
+
+            // Scroll to top
+            window.scrollTo(0, 0);
         }
 
-        if (localStorage.getItem('authToken')) {
-            window.location.href = './dashboard.html';
+        // FAQ Toggle
+        function toggleFaq(header) {
+            const icon = header.querySelector('.faq-icon');
+            const content = header.nextElementSibling;
+
+            icon.classList.toggle('open');
+            content.classList.toggle('open');
         }
 
-        window.addEventListener('load', initializeGoogleSignIn);
+        // Form Submit
+        function handleSubmit(e) {
+            e.preventDefault();
+            alert('Grazie! Il tuo messaggio è stato inviato. Ti contatteremo presto!');
+            e.target.reset();
+        }
     </script>
 </body>
 </html>
+<!-- Updated -->
+
+<!-- rebuild -->
+
+<!-- refresh -->
