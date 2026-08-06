@@ -14,7 +14,7 @@ async function loadProjects() {
   projectsList.innerHTML = '<p class="loading">Loading projects...</p>';
 
   try {
-    const response = await fetch(`${API_URL}/projects`, {
+    const response = await fetch(`${API_URL}/data/projects`, {
       headers: { 'Authorization': `Bearer ${getToken()}` }
     });
 
@@ -51,7 +51,7 @@ async function loadTasks() {
   tasksList.innerHTML = '<p class="loading">Loading tasks...</p>';
 
   try {
-    const response = await fetch(`${API_URL}/tasks`, {
+    const response = await fetch(`${API_URL}/data/tasks`, {
       headers: { 'Authorization': `Bearer ${getToken()}` }
     });
 
@@ -88,7 +88,7 @@ async function loadRisks() {
   risksList.innerHTML = '<p class="loading">Loading risks...</p>';
 
   try {
-    const response = await fetch(`${API_URL}/risks`, {
+    const response = await fetch(`${API_URL}/data/risks`, {
       headers: { 'Authorization': `Bearer ${getToken()}` }
     });
 
