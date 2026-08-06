@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - Login</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            background: linear-gradient(135deg, #3B82F6 0%, #10B981 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+
+        .login-container {
+            display: flex;
+            width: 100%;
+            max-width: 1200px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            min-height: 600px;
+        }
+
+        .login-brand {
+            flex: 1;
+            background: linear-gradient(135deg, #3B82F6 0%, #1E40AF 100%);
+            color: white;
+            padding: 4rem 2rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            min-height: 600px;
+        }
+
+        .brand-icon {
+            font-size: 3.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .brand-title {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            font-weight: 700;
+        }
+
+        .brand-subtitle {
+            font-size: 1.2rem;
+            margin-bottom: 2rem;
+            opacity: 0.95;
+        }
+
+        .brand-features {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2rem;
+            border-radius: 12px;
+        }
+
+        .brand-features p {
+            margin: 0;
+            font-size: 0.95rem;
+            line-height: 1.8;
+        }
+
+        .brand-features i {
+            color: #10B981;
+            margin-right: 0.5rem;
+        }
+
+        .login-form-section {
+            flex: 1;
+            padding: 4rem 3rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            overflow-y: auto;
+            max-height: 600px;
+        }
+
+        .form-container {
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto;
+        }
+
+        .form-header {
+            margin-bottom: 2rem;
+        }
+
+        .form-header h2 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            color: #1F2937;
+        }
+
+        .form-header p {
+            color: #6B7280;
+            margin: 0;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #1F2937;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #3B82F6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .forgot-password {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .forgot-password a {
+            color: #3B82F6;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            margin-bottom: 2rem;
+        }
+
+        .checkbox-group input {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            margin-right: 0.75rem;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 0.75rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 1.5rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #3B82F6 0%, #1E40AF 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .error-message {
+            color: #EF4444;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+            display: none;
+        }
+
+        .divider {
+            position: relative;
+            margin-bottom: 2rem;
+        }
+
+        .divider::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            right: 0;
+            height: 1px;
+            background: #E5E7EB;
+        }
+
+        .divider span {
+            position: relative;
+            background: white;
+            padding: 0 1rem;
+            color: #6B7280;
+            font-size: 0.9rem;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .oauth-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .oauth-btn {
+            padding: 0.75rem;
+            border: 1px solid #E5E7EB;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .oauth-btn:hover {
+            background: #F9FAFB;
+            border-color: #3B82F6;
+        }
+
+        .oauth-btn i {
+            color: #1F2937;
+        }
+
+        .oauth-btn span {
+            color: #1F2937;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-title {
+            font-size: 1.5rem;
+            color: #1F2937;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+
+        .modal-description {
+            color: #6B7280;
+            margin-bottom: 1.5rem;
+        }
+
+        .tenant-option {
+            padding: 1rem;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 0.75rem;
+            transition: all 0.3s;
+        }
+
+        .tenant-option:hover {
+            background: #F9FAFB;
+            border-color: #3B82F6;
+        }
+
+        .tenant-option.selected {
+            background: #EFF6FF;
+            border-color: #3B82F6;
+        }
+
+        @media (max-width: 768px) {
+            .login-container {
+                flex-direction: column;
+                min-height: auto;
+            }
+
+            .login-brand {
+                min-height: 300px;
+                padding: 2rem;
+            }
+
+            .login-form-section {
+                max-height: none;
+                min-height: auto;
+                padding: 2rem 1.5rem;
+            }
+
+            .oauth-buttons {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-brand">
+            <div class="brand-icon">
+                <i class="fas fa-cube"></i>
+            </div>
+            <h1 class="brand-title">Projexa</h1>
+            <p class="brand-subtitle">Il tuo assistente per gestire progetti come un professionista</p>
+            <div class="brand-features">
+                <p><i class="fas fa-check"></i> Piani automatici<br></p>
+                <p><i class="fas fa-check"></i> Gantt in real-time<br></p>
+                <p><i class="fas fa-check"></i> Registri rischi<br></p>
+                <p><i class="fas fa-check"></i> Privacy EU</p>
+            </div>
+        </div>
+
+        <div class="login-form-section">
+            <div class="form-container">
+                <div id="loginForm">
+                    <div class="form-header">
+                        <h2>Accedi</h2>
+                        <p>Bentornato! Accedi al tuo account Projexa</p>
+                    </div>
+
+                    <div class="error-message" id="errorMessage"></div>
+
+                    <form id="emailForm" onsubmit="handleEmailLogin(event)">
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" id="emailInput" placeholder="name@company.com" required>
+                        </div>
+
+                        <div class="form-group">
+                            <div class="forgot-password">
+                                <label>Password</label>
+                                <a href="#">Dimenticata?</a>
+                            </div>
+                            <input type="password" id="passwordInput" placeholder="••••••••" required>
+                        </div>
+
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="remember">
+                            <label for="remember">Ricordami su questo dispositivo</label>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" id="loginBtn">Accedi</button>
+                    </form>
+
+                    <div class="divider">
+                        <span>Oppure continua con</span>
+                    </div>
+
+                    <div id="google-signin-button" style="margin-bottom: 2rem;"></div>
+
+                    <div class="oauth-buttons">
+                        <button type="button" class="oauth-btn" onclick="handleMicrosoftSignIn()">
+                            <i class="fab fa-microsoft"></i>
+                            <span>Microsoft</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="tenantModal" class="modal">
+        <div class="modal-content">
+            <h2 class="modal-title">Scegli il tuo tenant</h2>
+            <p class="modal-description">Hai accesso a più organizzazioni. Seleziona quella che vuoi usare:</p>
+            <div id="tenantList"></div>
+            <button type="button" class="btn btn-primary" onclick="selectTenant()" style="margin-top: 1rem;">Continua</button>
+        </div>
+    </div>
+
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <script>
+        const API_URL = 'http://localhost:3001/api';
+        let selectedTenant = null;
+        let loginData = null;
+
+        async function handleEmailLogin(event) {
+            event.preventDefault();
+
+            const email = document.getElementById('emailInput').value;
+            const password = document.getElementById('passwordInput').value;
+            const errorDiv = document.getElementById('errorMessage');
+            const loginBtn = document.getElementById('loginBtn');
+
+            errorDiv.style.display = 'none';
+            loginBtn.disabled = true;
+
+            try {
+                const response = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+
+                if (response.status === 200) {
+                    localStorage.setItem('authToken', data.token);
+                    localStorage.setItem('user', JSON.stringify(data.user));
+                    window.location.href = './dashboard.html';
+                } else if (response.status === 300) {
+                    loginData = { email, password };
+                    showTenantModal(data.tenants);
+                } else {
+                    errorDiv.textContent = data.error || 'Errore durante l\'accesso';
+                    errorDiv.style.display = 'block';
+                }
+            } catch (error) {
+                errorDiv.textContent = 'Errore di connessione al server';
+                errorDiv.style.display = 'block';
+            } finally {
+                loginBtn.disabled = false;
+            }
+        }
+
+        function showTenantModal(tenants) {
+            const tenantList = document.getElementById('tenantList');
+            const modal = document.getElementById('tenantModal');
+
+            tenantList.innerHTML = tenants.map(t => `
+                <div class="tenant-option" onclick="setSelectedTenant('${t.code}', this)">
+                    <div style="font-weight: 600; color: #1F2937;">${t.name}</div>
+                </div>
+            `).join('');
+
+            selectedTenant = null;
+            modal.classList.add('active');
+        }
+
+        function setSelectedTenant(code, element) {
+            selectedTenant = code;
+            document.querySelectorAll('.tenant-option').forEach(el => el.classList.remove('selected'));
+            element.classList.add('selected');
+        }
+
+        async function selectTenant() {
+            if (!selectedTenant || !loginData) return;
+
+            const { email, password } = loginData;
+            document.getElementById('tenantModal').classList.remove('active');
+
+            try {
+                const response = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        email, 
+                        password, 
+                        tenant_code: selectedTenant
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    localStorage.setItem('authToken', data.token);
+                    localStorage.setItem('user', JSON.stringify(data.user));
+                    window.location.href = './dashboard.html';
+                } else {
+                    document.getElementById('errorMessage').textContent = data.error || 'Errore';
+                    document.getElementById('errorMessage').style.display = 'block';
+                }
+            } catch (error) {
+                document.getElementById('errorMessage').textContent = 'Errore di connessione';
+                document.getElementById('errorMessage').style.display = 'block';
+            }
+        }
+
+        function handleMicrosoftSignIn() {
+            alert('Microsoft OAuth richiede configurazione');
+        }
+
+        function initializeGoogleSignIn() {
+            google.accounts.id.initialize({
+                client_id: '128379880931-guh70j47lsvplo9m1intpj9tt7escdn8.apps.googleusercontent.com',
+                callback: handleGoogleSignIn
+            });
+
+            google.accounts.id.renderButton(
+                document.getElementById('google-signin-button'),
+                { theme: 'outline', size: 'large', width: '100%', locale: 'it' }
+            );
+        }
+
+        function handleGoogleSignIn(response) {
+            const base64Url = response.credential.split('.')[1];
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const jsonPayload = decodeURIComponent(atob(base64).split('').map((c) => {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+
+            const userInfo = JSON.parse(jsonPayload);
+            localStorage.setItem('user', JSON.stringify({
+                name: userInfo.name,
+                email: userInfo.email,
+                provider: 'google'
+            }));
+            
+            window.location.href = 'dashboard.html?provider=google';
+        }
+
+        if (localStorage.getItem('authToken')) {
+            window.location.href = './dashboard.html';
+        }
+
+        window.addEventListener('load', initializeGoogleSignIn);
+    </script>
+</body>
+</html>
