@@ -45,7 +45,7 @@ router.post('/login', async (req, res) => {
 
     // Get user's tenants
     const tenants = await db.query(
-      'SELECT id, code, name FROM tenants WHERE id IN (SELECT tenant_id FROM user_tenants WHERE user_id = $1)',
+      'SELECT id, name FROM tenants WHERE id IN (SELECT tenant_id FROM user_tenants WHERE user_id = $1)',
       [userData.id]
     );
 
@@ -61,10 +61,10 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    // Use provided tenant_code or first tenant
+    // Use provided tenant_code (which is the tenant id) or first tenant
     let selectedTenant = tenants.rows[0];
     if (tenant_code) {
-      const found = tenants.rows.find(t => t.code === tenant_code);
+      const found = tenants.rows.find(t => t.id === tenant_code);
       if (found) {
         selectedTenant = found;
       }
