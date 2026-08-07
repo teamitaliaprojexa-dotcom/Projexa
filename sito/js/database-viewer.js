@@ -29,7 +29,7 @@ function renderTablesList() {
   const tablesList = document.getElementById('tablesList');
   tablesList.innerHTML = '';
 
-  allTables.forEach(table => {
+  allTables.filter(table => table.is_active).forEach(table => {
     const tableLink = document.createElement('a');
     tableLink.href = '#';
     tableLink.textContent = table.display_name;
@@ -176,7 +176,7 @@ async function loadTableData(tableName) {
         btn.addEventListener('click', (e) => {
           const rowId = btn.closest('tr').dataset.rowId;
           console.log(`Edit clicked: table=${tableName}, id=${rowId}`);
-          editRecord(tableName, parseInt(rowId));
+          editRecord(tableName, rowId);
         });
       });
 
@@ -184,7 +184,7 @@ async function loadTableData(tableName) {
         btn.addEventListener('click', (e) => {
           const rowId = btn.closest('tr').dataset.rowId;
           console.log(`Delete clicked: table=${tableName}, id=${rowId}`);
-          deleteRecord(tableName, parseInt(rowId));
+          deleteRecord(tableName, rowId);
         });
       });
     } else {
@@ -298,8 +298,19 @@ let currentModalTable = null;
 let currentModalRecordId = null;
 let currentModalColumns = [];
 
-// Create form field (handles foreign keys)
+// Create form field (handles foreign keys, boolean fields, and password fields)
 async function createFormField(columnName, value) {
+  // Check if this is a password field
+  if (columnName === 'password' || columnName === 'password_hash') {
+    return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${columnName}</label><input type="password" name="${columnName}" placeholder="Enter password" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"></div>`;
+  }
+
+  // Check if this is a boolean field (starts with is_ or has_)
+  if (columnName.startsWith('is_') || columnName.startsWith('has_')) {
+    const isChecked = value === true || value === 'true' || value === 1 || value === '1';
+    return `<div style="margin-bottom: 1rem;"><label style="display: flex; align-items: center; gap: 12px; font-weight: 500; cursor: pointer;"><input type="hidden" name="${columnName}" value="false"><input type="checkbox" name="${columnName}" value="true" ${isChecked ? 'checked' : ''} style="width: 20px; height: 20px; cursor: pointer; accent-color: #10B981;"><span>${columnName}</span></label></div>`;
+  }
+
   // Check if this is a foreign key field (ends with _id)
   if (columnName.endsWith('_id')) {
     let relatedTableName = columnName.slice(0, -3); // Remove "_id"
@@ -331,7 +342,8 @@ async function createFormField(columnName, value) {
   }
 
   // Default: text input
-  return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${columnName}</label><input type="text" name="${columnName}" value="${(value || '').replace(/"/g, '&quot;')}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"></div>`;
+  const stringValue = String(value || '').replace(/"/g, '&quot;');
+  return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${columnName}</label><input type="text" name="${columnName}" value="${stringValue}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"></div>`;
 }
 
 // Open modal for editing a record
@@ -364,6 +376,36 @@ async function editRecord(tableName, recordId) {
 
   formFields.innerHTML = htmlContent;
   document.getElementById('recordModal').style.display = 'flex';
+
+  // Auto-populate id_roles when role_id changes
+  const roleSelect = document.querySelector('select[name="role_id"]');
+  const idRolesInput = document.querySelector('input[name="id_roles"]');
+
+  if (roleSelect && idRolesInput) {
+    roleSelect.addEventListener('change', async (e) => {
+      const selectedRoleId = e.target.value;
+      if (!selectedRoleId) {
+        idRolesInput.value = '';
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_URL}/data/roles`, {
+          headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+
+        if (response.ok) {
+          const roles = await response.json();
+          const selectedRole = roles.find(r => r.id == selectedRoleId);
+          if (selectedRole && selectedRole.id_roles) {
+            idRolesInput.value = selectedRole.id_roles;
+          }
+        }
+      } catch (error) {
+        console.error('Error loading role details:', error);
+      }
+    });
+  }
 }
 
 // Open modal for creating a new record
@@ -391,6 +433,36 @@ async function newRecord(tableName) {
 
   formFields.innerHTML = htmlContent;
   document.getElementById('recordModal').style.display = 'flex';
+
+  // Auto-populate id_roles when role_id changes
+  const roleSelect = document.querySelector('select[name="role_id"]');
+  const idRolesInput = document.querySelector('input[name="id_roles"]');
+
+  if (roleSelect && idRolesInput) {
+    roleSelect.addEventListener('change', async (e) => {
+      const selectedRoleId = e.target.value;
+      if (!selectedRoleId) {
+        idRolesInput.value = '';
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_URL}/data/roles`, {
+          headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+
+        if (response.ok) {
+          const roles = await response.json();
+          const selectedRole = roles.find(r => r.id == selectedRoleId);
+          if (selectedRole && selectedRole.id_roles) {
+            idRolesInput.value = selectedRole.id_roles;
+          }
+        }
+      } catch (error) {
+        console.error('Error loading role details:', error);
+      }
+    });
+  }
 }
 
 // Save record (Create or Update)
@@ -400,10 +472,14 @@ async function saveRecord(event) {
   const formData = new FormData(document.getElementById('recordForm'));
   const data = Object.fromEntries(formData);
 
-  const method = currentModalRecordId ? 'PUT' : 'POST';
-  const url = currentModalRecordId
-    ? `${API_URL}/data/${currentModalTable}/${currentModalRecordId}`
-    : `${API_URL}/data/${currentModalTable}`;
+  // Save table name before closeModal() resets it
+  const tableName = currentModalTable;
+  const recordId = currentModalRecordId;
+
+  const method = recordId ? 'PUT' : 'POST';
+  const url = recordId
+    ? `${API_URL}/data/${tableName}/${recordId}`
+    : `${API_URL}/data/${tableName}`;
 
   try {
     const response = await fetch(url, {
@@ -417,9 +493,12 @@ async function saveRecord(event) {
 
     if (response.ok) {
       closeModal();
-      // Reload table data
-      const table = currentTable || { table_name: currentModalTable };
-      await loadTableData(table.table_name || currentModalTable);
+      // If modifying table_structures, reload sidebar
+      if (tableName === 'table_structures') {
+        await loadTableStructures();
+      }
+      // Reload table data using saved table name
+      await loadTableData(tableName);
     } else {
       alert('Error saving record');
     }
@@ -448,6 +527,10 @@ async function deleteRecord(tableName, recordId) {
     });
 
     if (response.ok) {
+      // If deleting from table_structures, reload sidebar
+      if (tableName === 'table_structures') {
+        await loadTableStructures();
+      }
       // Reload table data
       const table = currentTable || { table_name: tableName };
       await loadTableData(table.table_name || tableName);

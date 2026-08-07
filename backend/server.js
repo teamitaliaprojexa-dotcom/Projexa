@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import bcrypt from 'bcrypt';
 import db from './config/database.js';
 import authRoutes from './routes/auth.js';
 import tableStructuresRoutes from './routes/table-structures.js';
@@ -68,7 +69,7 @@ app.get('/api/data/:table', async (req, res) => {
 app.post('/api/data/:table', async (req, res) => {
   try {
     const tableName = req.params.table;
-    const data = req.body;
+    let data = req.body;
 
     // Allow direct access to table_structures (system table)
     if (tableName !== 'table_structures') {
@@ -81,6 +82,14 @@ app.post('/api/data/:table', async (req, res) => {
       if (tableCheck.rows.length === 0) {
         return res.status(404).json({ error: 'Table not found' });
       }
+    }
+
+    // Hash password if present
+    if (data.password || data.password_hash) {
+      const passwordValue = data.password || data.password_hash;
+      const hashedPassword = await bcrypt.hash(passwordValue, 10);
+      data = { ...data, password_hash: hashedPassword };
+      delete data.password; // Remove plain password
     }
 
     const columns = Object.keys(data);
@@ -101,7 +110,7 @@ app.put('/api/data/:table/:id', async (req, res) => {
   try {
     const tableName = req.params.table;
     const id = req.params.id;
-    const data = req.body;
+    let data = req.body;
 
     // Allow direct access to table_structures (system table)
     if (tableName !== 'table_structures') {
@@ -114,6 +123,14 @@ app.put('/api/data/:table/:id', async (req, res) => {
       if (tableCheck.rows.length === 0) {
         return res.status(404).json({ error: 'Table not found' });
       }
+    }
+
+    // Hash password if present
+    if (data.password || data.password_hash) {
+      const passwordValue = data.password || data.password_hash;
+      const hashedPassword = await bcrypt.hash(passwordValue, 10);
+      data = { ...data, password_hash: hashedPassword };
+      delete data.password; // Remove plain password
     }
 
     const columns = Object.keys(data);
