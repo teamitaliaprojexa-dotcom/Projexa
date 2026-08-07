@@ -105,6 +105,20 @@
     </main>
   </div>
 
+  <!-- Modal for Edit/New Record -->
+  <div id="recordModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
+    <div style="background: white; border-radius: 8px; padding: 2rem; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;">
+      <h2 id="modalTitle">Edit Record</h2>
+      <form id="recordForm" onsubmit="saveRecord(event)">
+        <div id="formFields"></div>
+        <div style="display: flex; gap: 10px; margin-top: 2rem; justify-content: flex-end;">
+          <button type="button" onclick="closeModal()" style="padding: 10px 20px; background: #gray; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Annulla</button>
+          <button type="submit" style="padding: 10px 20px; background: #10B981; color: white; border: none; border-radius: 4px; cursor: pointer;">Salva</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script src="js/auth.js"></script>
   <script src="js/database-viewer.js"></script>
 </body>

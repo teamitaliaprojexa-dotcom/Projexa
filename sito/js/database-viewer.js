@@ -276,9 +276,159 @@ async function loadTableStructuresTable() {
   await loadTableData('table_structures');
 }
 
-// Edit a record
-function editRecord(tableName, recordId) {
-  alert('Edit record functionality - coming soon');
+// Modal state
+let currentModalTable = null;
+let currentModalRecordId = null;
+let currentModalColumns = [];
+
+// Create form field (handles foreign keys)
+async function createFormField(columnName, value) {
+  // Check if this is a foreign key field (ends with _id)
+  if (columnName.endsWith('_id')) {
+    const relatedTableName = columnName.slice(0, -3); // Remove "_id"
+
+    try {
+      const response = await fetch(`${API_URL}/data/${relatedTableName}`, {
+        headers: { 'Authorization': `Bearer ${getToken()}` }
+      });
+
+      if (response.ok) {
+        const relatedData = await response.json();
+        const options = relatedData.map(row => ({
+          id: row.id,
+          display: row.name || row.display_name || row.description || `Item ${row.id}`
+        }));
+
+        return `
+          <div style="margin-bottom: 1rem;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${columnName}</label>
+            <select name="${columnName}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;">
+              <option value="">-- Seleziona --</option>
+              ${options.map(opt => `<option value="${opt.id}" ${opt.id == value ? 'selected' : ''}>${opt.display}</option>`).join('')}
+            </select>
+          </div>
+        `;
+      }
+    } catch (error) {
+      console.error('Error loading related data:', error);
+    }
+  }
+
+  // Default: text input
+  return `
+    <div style="margin-bottom: 1rem;">
+      <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${columnName}</label>
+      <input type="text" name="${columnName}" value="${value || ''}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;">
+    </div>
+  `;
+}
+
+// Open modal for editing a record
+async function editRecord(tableName, recordId) {
+  const response = await fetch(`${API_URL}/data/${tableName}`, {
+    headers: { 'Authorization': `Bearer ${getToken()}` }
+  });
+
+  if (!response.ok) return;
+
+  const data = await response.json();
+  const record = data.find(r => r.id === recordId);
+  if (!record) return;
+
+  currentModalTable = tableName;
+  currentModalRecordId = recordId;
+
+  // Get all columns except system ones
+  const hiddenColumns = ['id', 'created_by', 'created_at', 'updated_at'];
+  currentModalColumns = Object.keys(record).filter(col => !hiddenColumns.includes(col));
+
+  document.getElementById('modalTitle').textContent = 'Edit Record';
+
+  const formFields = document.getElementById('formFields');
+  let htmlContent = '';
+
+  for (const col of currentModalColumns) {
+    htmlContent += await createFormField(col, record[col] || '');
+  }
+
+  formFields.innerHTML = htmlContent;
+  document.getElementById('recordModal').style.display = 'flex';
+}
+
+// Open modal for creating a new record
+async function newRecord(tableName) {
+  currentModalTable = tableName;
+  currentModalRecordId = null;
+
+  // Get columns from current table
+  if (currentTable && currentTable.table_name === tableName) {
+    const hiddenColumns = ['id', 'created_by', 'created_at', 'updated_at'];
+    const allData = document.querySelectorAll('table tbody tr');
+    if (allData.length > 0) {
+      const firstRow = allData[0];
+      const cells = firstRow.querySelectorAll('td');
+      // Estimi le colonne dal numero di celle (meno la colonna Azioni)
+      currentModalColumns = Array.from(document.querySelectorAll('table thead th')).slice(0, -1).map(th => th.textContent.trim());
+    }
+  } else {
+    currentModalColumns = [];
+  }
+
+  document.getElementById('modalTitle').textContent = 'New Record';
+
+  const formFields = document.getElementById('formFields');
+  let htmlContent = '';
+
+  for (const col of currentModalColumns) {
+    htmlContent += await createFormField(col, '');
+  }
+
+  formFields.innerHTML = htmlContent;
+  document.getElementById('recordModal').style.display = 'flex';
+}
+
+// Save record (Create or Update)
+async function saveRecord(event) {
+  event.preventDefault();
+
+  const formData = new FormData(document.getElementById('recordForm'));
+  const data = Object.fromEntries(formData);
+
+  const method = currentModalRecordId ? 'PUT' : 'POST';
+  const url = currentModalRecordId
+    ? `${API_URL}/data/${currentModalTable}/${currentModalRecordId}`
+    : `${API_URL}/data/${currentModalTable}`;
+
+  try {
+    const response = await fetch(url, {
+      method: method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getToken()}`
+      },
+      body: JSON.stringify(data)
+    });
+
+    if (response.ok) {
+      closeModal();
+      // Reload table data
+      const table = currentTable || { table_name: currentModalTable };
+      await loadTableData(table.table_name || currentModalTable);
+    } else {
+      alert('Error saving record');
+    }
+  } catch (error) {
+    console.error('Error saving record:', error);
+    alert('Error saving record');
+  }
+}
+
+// Close modal
+function closeModal() {
+  document.getElementById('recordModal').style.display = 'none';
+  currentModalTable = null;
+  currentModalRecordId = null;
+  currentModalColumns = [];
 }
 
 // Delete a record
@@ -302,11 +452,6 @@ async function deleteRecord(tableName, recordId) {
     console.error('Error deleting record:', error);
     alert('Error deleting record');
   }
-}
-
-// Create new record
-function newRecord(tableName) {
-  alert('New record functionality - coming soon');
 }
 
 // Initialize
