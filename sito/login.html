@@ -464,7 +464,7 @@
             const modal = document.getElementById('tenantModal');
 
             tenantList.innerHTML = tenants.map(t => `
-                <div class="tenant-option" onclick="setSelectedTenant('${t.code}', this)">
+                <div class="tenant-option" onclick="setSelectedTenant('${t.id}', this)">
                     <div style="font-weight: 600; color: #1F2937;">${t.name}</div>
                 </div>
             `).join('');
