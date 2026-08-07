@@ -139,7 +139,7 @@ async function loadTableData(tableName) {
             </thead>
             <tbody>
               ${data.map(row => `
-                <tr style="border-bottom: 1px solid var(--gray-200);">
+                <tr style="border-bottom: 1px solid var(--gray-200);" data-row-id="${row.id}">
                   ${columns.map(col => {
                     let value = row[col];
                     if (value === null) {
@@ -152,8 +152,8 @@ async function loadTableData(tableName) {
                     return `<td style="padding: 12px; color: var(--gray-700);">${strValue}</td>`;
                   }).join('')}
                   <td style="padding: 12px; text-align: center; display: flex; gap: 8px; justify-content: center;">
-                    <button onclick="editRecord('${tableName}', ${row.id})" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #3B82F6;" title="Edit">✏️</button>
-                    <button onclick="deleteRecord('${tableName}', ${row.id})" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #EF4444;" title="Delete">✕</button>
+                    <button class="btn-edit" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #3B82F6;" title="Edit">✏️</button>
+                    <button class="btn-delete" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #EF4444;" title="Delete">✕</button>
                   </td>
                 </tr>
               `).join('')}
@@ -170,6 +170,23 @@ async function loadTableData(tableName) {
       const tableDiv = document.createElement('div');
       tableDiv.innerHTML = html;
       tableContent.appendChild(tableDiv);
+
+      // Add event listeners for action buttons
+      tableDiv.querySelectorAll('.btn-edit').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const rowId = btn.closest('tr').dataset.rowId;
+          console.log(`Edit clicked: table=${tableName}, id=${rowId}`);
+          editRecord(tableName, parseInt(rowId));
+        });
+      });
+
+      tableDiv.querySelectorAll('.btn-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const rowId = btn.closest('tr').dataset.rowId;
+          console.log(`Delete clicked: table=${tableName}, id=${rowId}`);
+          deleteRecord(tableName, parseInt(rowId));
+        });
+      });
     } else {
       const buttons = tableContent.querySelector('.table-action-buttons');
       tableContent.innerHTML = '';
