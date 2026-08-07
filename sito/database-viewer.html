@@ -71,11 +71,15 @@
       </div>
       <nav class="sidebar-nav">
         <a href="dashboard.html" class="nav-item">Dashboard</a>
-        <a href="projects.html" class="nav-item">Projects</a>
-        <a href="tasks.html" class="nav-item">Tasks</a>
-        <a href="risks.html" class="nav-item">Risks</a>
-        <a href="database-viewer.html" class="nav-item active">Database Viewer</a>
       </nav>
+
+      <div class="sidebar-section" style="margin-top: 2rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h4 style="margin: 0; font-size: 0.85rem; color: var(--gray-600); text-transform: uppercase;">Tables</h4>
+          <button onclick="loadTableStructuresTable()" style="background: #3B82F6; color: white; border: none; border-radius: 4px; width: 24px; height: 24px; cursor: pointer; font-weight: bold; padding: 0;">+</button>
+        </div>
+        <div id="tablesList"></div>
+      </div>
     </aside>
 
     <main class="main-content">
@@ -89,22 +93,12 @@
 
       <div class="content-area">
         <section class="section">
-          <div class="database-layout">
-            <div class="database-sidebar">
-              <h4>Tables</h4>
-              <div id="tablesList"></div>
-              <button class="add-table-btn" id="addTableBtn">+ Add Table</button>
-            </div>
-
-            <div style="flex: 1;">
-              <div style="margin-bottom: 20px;">
-                <h3 id="selectedTableName">Select a table</h3>
-                <p id="selectedTableDesc" style="color: var(--gray-600);"></p>
-              </div>
-              <div id="tableData" class="table-container">
-                <p class="loading">Select a table from the list</p>
-              </div>
-            </div>
+          <div style="margin-bottom: 20px;">
+            <h3 id="selectedTableName">Select a table</h3>
+            <p id="selectedTableDesc" style="color: var(--gray-600);"></p>
+          </div>
+          <div id="tableData" class="table-container">
+            <p class="loading">Select a table from the list</p>
           </div>
         </section>
       </div>

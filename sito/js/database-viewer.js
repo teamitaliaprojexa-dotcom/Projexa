@@ -24,27 +24,48 @@ async function loadTableStructures() {
   }
 }
 
-// Render tables list on sidebar
+// Render tables list on sidebar - simple list
 function renderTablesList() {
   const tablesList = document.getElementById('tablesList');
   tablesList.innerHTML = '';
 
   allTables.forEach(table => {
-    const tableItem = document.createElement('div');
-    tableItem.className = 'table-item';
-    if (currentTable && currentTable.id === table.id) {
-      tableItem.classList.add('active');
-    }
-
-    tableItem.innerHTML = `
-      <span onclick="selectTable('${table.id}')">${table.display_name}</span>
-      <div class="table-actions">
-        <button class="btn-icon" onclick="editTable('${table.id}')" title="Edit">✏️</button>
-        <button class="btn-icon" onclick="deleteTable('${table.id}')" title="Delete">🗑️</button>
-      </div>
+    const tableLink = document.createElement('a');
+    tableLink.href = '#';
+    tableLink.textContent = table.display_name;
+    tableLink.style.cssText = `
+      display: block;
+      padding: 8px 0;
+      color: var(--primary);
+      cursor: pointer;
+      font-weight: 500;
+      text-decoration: none;
+      border-bottom: 1px solid var(--gray-200);
+      transition: all 0.2s;
     `;
 
-    tablesList.appendChild(tableItem);
+    tableLink.addEventListener('mouseover', () => {
+      tableLink.style.textDecoration = 'underline';
+    });
+
+    tableLink.addEventListener('mouseout', () => {
+      if (!(currentTable && currentTable.id === table.id)) {
+        tableLink.style.textDecoration = 'none';
+      }
+    });
+
+    if (currentTable && currentTable.id === table.id) {
+      tableLink.style.textDecoration = 'underline';
+      tableLink.style.fontWeight = 'bold';
+      tableLink.style.color = '#1E40AF';
+    }
+
+    tableLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      selectTable(table.id);
+    });
+
+    tablesList.appendChild(tableLink);
   });
 }
 
@@ -60,14 +81,33 @@ async function selectTable(tableId) {
   document.getElementById('selectedTableName').textContent = table.display_name;
   document.getElementById('selectedTableDesc').textContent = table.description || 'No description';
 
+  // Add action buttons
+  const tableData = document.getElementById('tableData');
+  const existingButtons = tableData.querySelector('.table-action-buttons');
+  if (existingButtons) existingButtons.remove();
+
+  const buttonsDiv = document.createElement('div');
+  buttonsDiv.className = 'table-action-buttons';
+  buttonsDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 20px;';
+  buttonsDiv.innerHTML = `
+    <button onclick="editTable('${tableId}')" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Edit</button>
+    <button onclick="deleteTable('${tableId}')" style="background: #EF4444; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Delete</button>
+    <button onclick="newRecord('${table.table_name}')" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
+  `;
+  tableData.insertBefore(buttonsDiv, tableData.firstChild);
+
   // Load table data
   await loadTableData(table.table_name);
 }
 
 // Load data from a specific table
 async function loadTableData(tableName) {
-  const tableContent = document.getElementById('tableContent');
+  const tableContent = document.getElementById('tableData');
+  const buttons = tableContent.querySelector('.table-action-buttons');
   tableContent.innerHTML = '<p class="loading">Loading...</p>';
+  if (buttons) {
+    tableContent.insertBefore(buttons, tableContent.firstChild);
+  }
 
   try {
     const response = await fetch(`${API_URL}/data/${tableName}`, {
@@ -82,7 +122,10 @@ async function loadTableData(tableName) {
         return;
       }
 
-      const columns = Object.keys(data[0]);
+      // Filter out system columns
+      const hiddenColumns = ['id', 'created_by', 'created_at', 'updated_at'];
+      const columns = Object.keys(data[0]).filter(col => !hiddenColumns.includes(col));
+
       const html = `
         <div style="overflow-x: auto;">
           <table style="width: 100%; border-collapse: collapse;">
@@ -117,11 +160,19 @@ async function loadTableData(tableName) {
       `;
       tableContent.innerHTML = html;
     } else {
+      const buttons = tableContent.querySelector('.table-action-buttons');
       tableContent.innerHTML = '<div class="empty-state"><p>Error loading data</p></div>';
+      if (buttons) {
+        tableContent.insertBefore(buttons, tableContent.firstChild);
+      }
     }
   } catch (error) {
     console.error('Error loading table data:', error);
+    const buttons = tableContent.querySelector('.table-action-buttons');
     tableContent.innerHTML = '<div class="empty-state"><p>Connection error</p></div>';
+    if (buttons) {
+      tableContent.insertBefore(buttons, tableContent.firstChild);
+    }
   }
 }
 
@@ -173,8 +224,8 @@ async function deleteTable(tableId) {
       await loadTableStructures();
       if (currentTable && currentTable.id === tableId) {
         currentTable = null;
-        document.getElementById('tableContent').innerHTML = `
-          <div class="empty-state"><p>Select a table from the list</p></div>
+        document.getElementById('tableData').innerHTML = `
+          <p class="loading">Select a table from the list</p>
         `;
       }
     }
@@ -183,7 +234,33 @@ async function deleteTable(tableId) {
   }
 }
 
-// Add new table functionality (to be implemented)
+// Load table_structures table directly
+async function loadTableStructuresTable() {
+  // Update header
+  document.getElementById('selectedTableName').textContent = 'Table Structures';
+  document.getElementById('selectedTableDesc').textContent = 'Manage database tables metadata';
+
+  // Add action buttons
+  const tableData = document.getElementById('tableData');
+  const existingButtons = tableData.querySelector('.table-action-buttons');
+  if (existingButtons) existingButtons.remove();
+
+  const buttonsDiv = document.createElement('div');
+  buttonsDiv.className = 'table-action-buttons';
+  buttonsDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 20px;';
+  buttonsDiv.innerHTML = `
+    <button onclick="newRecord('table_structures')" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
+  `;
+  tableData.insertBefore(buttonsDiv, tableData.firstChild);
+
+  // Load table data
+  await loadTableData('table_structures');
+}
+
+// Create new record
+function newRecord(tableName) {
+  alert('New record functionality - coming soon');
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {

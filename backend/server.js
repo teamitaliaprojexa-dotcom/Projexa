@@ -44,14 +44,17 @@ app.get('/api/data/:table', async (req, res) => {
   try {
     const tableName = req.params.table;
 
-    // Validate table exists in table_structures
-    const tableCheck = await db.query(
-      'SELECT * FROM table_structures WHERE table_name = $1 AND is_active = true',
-      [tableName]
-    );
+    // Allow direct access to table_structures (system table)
+    if (tableName !== 'table_structures') {
+      // Validate table exists in table_structures for other tables
+      const tableCheck = await db.query(
+        'SELECT * FROM table_structures WHERE table_name = $1 AND is_active = true',
+        [tableName]
+      );
 
-    if (tableCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Table not found' });
+      if (tableCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Table not found' });
+      }
     }
 
     const result = await db.query(`SELECT * FROM ${tableName} LIMIT 100`);
