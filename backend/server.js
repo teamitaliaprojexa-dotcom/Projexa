@@ -70,14 +70,17 @@ app.post('/api/data/:table', async (req, res) => {
     const tableName = req.params.table;
     const data = req.body;
 
-    // Validate table exists
-    const tableCheck = await db.query(
-      'SELECT * FROM table_structures WHERE table_name = $1 AND is_active = true',
-      [tableName]
-    );
+    // Allow direct access to table_structures (system table)
+    if (tableName !== 'table_structures') {
+      // Validate table exists in table_structures for other tables
+      const tableCheck = await db.query(
+        'SELECT * FROM table_structures WHERE table_name = $1 AND is_active = true',
+        [tableName]
+      );
 
-    if (tableCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Table not found' });
+      if (tableCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Table not found' });
+      }
     }
 
     const columns = Object.keys(data);
@@ -100,14 +103,17 @@ app.put('/api/data/:table/:id', async (req, res) => {
     const id = req.params.id;
     const data = req.body;
 
-    // Validate table exists
-    const tableCheck = await db.query(
-      'SELECT * FROM table_structures WHERE table_name = $1 AND is_active = true',
-      [tableName]
-    );
+    // Allow direct access to table_structures (system table)
+    if (tableName !== 'table_structures') {
+      // Validate table exists in table_structures for other tables
+      const tableCheck = await db.query(
+        'SELECT * FROM table_structures WHERE table_name = $1 AND is_active = true',
+        [tableName]
+      );
 
-    if (tableCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Table not found' });
+      if (tableCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Table not found' });
+      }
     }
 
     const columns = Object.keys(data);
@@ -133,14 +139,17 @@ app.delete('/api/data/:table/:id', async (req, res) => {
     const tableName = req.params.table;
     const id = req.params.id;
 
-    // Validate table exists
-    const tableCheck = await db.query(
-      'SELECT * FROM table_structures WHERE table_name = $1 AND is_active = true',
-      [tableName]
-    );
+    // Allow direct access to table_structures (system table)
+    if (tableName !== 'table_structures') {
+      // Validate table exists in table_structures for other tables
+      const tableCheck = await db.query(
+        'SELECT * FROM table_structures WHERE table_name = $1 AND is_active = true',
+        [tableName]
+      );
 
-    if (tableCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'Table not found' });
+      if (tableCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Table not found' });
+      }
     }
 
     const result = await db.query(`DELETE FROM ${tableName} WHERE id = $1 RETURNING *`, [id]);

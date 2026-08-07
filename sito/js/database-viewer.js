@@ -285,7 +285,12 @@ let currentModalColumns = [];
 async function createFormField(columnName, value) {
   // Check if this is a foreign key field (ends with _id)
   if (columnName.endsWith('_id')) {
-    const relatedTableName = columnName.slice(0, -3); // Remove "_id"
+    let relatedTableName = columnName.slice(0, -3); // Remove "_id"
+
+    // Pluralize table name (simple rules)
+    if (!relatedTableName.endsWith('s')) {
+      relatedTableName = relatedTableName + 's';
+    }
 
     try {
       const response = await fetch(`${API_URL}/data/${relatedTableName}`, {
@@ -296,18 +301,12 @@ async function createFormField(columnName, value) {
         const relatedData = await response.json();
         const options = relatedData.map(row => ({
           id: row.id,
-          display: row.name || row.display_name || row.description || `Item ${row.id}`
+          display: (row.name || row.display_name || row.description || row.title || `Item ${row.id}`).replace(/"/g, '&quot;')
         }));
 
-        return `
-          <div style="margin-bottom: 1rem;">
-            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${columnName}</label>
-            <select name="${columnName}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;">
-              <option value="">-- Seleziona --</option>
-              ${options.map(opt => `<option value="${opt.id}" ${opt.id == value ? 'selected' : ''}>${opt.display}</option>`).join('')}
-            </select>
-          </div>
-        `;
+        const optionsHtml = options.map(opt => `<option value="${opt.id}" ${opt.id == value ? 'selected' : ''}>${opt.display}</option>`).join('');
+
+        return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${columnName}</label><select name="${columnName}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"><option value="">-- Seleziona --</option>${optionsHtml}</select></div>`;
       }
     } catch (error) {
       console.error('Error loading related data:', error);
@@ -315,12 +314,7 @@ async function createFormField(columnName, value) {
   }
 
   // Default: text input
-  return `
-    <div style="margin-bottom: 1rem;">
-      <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${columnName}</label>
-      <input type="text" name="${columnName}" value="${value || ''}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;">
-    </div>
-  `;
+  return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${columnName}</label><input type="text" name="${columnName}" value="${(value || '').replace(/"/g, '&quot;')}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"></div>`;
 }
 
 // Open modal for editing a record
@@ -360,16 +354,11 @@ async function newRecord(tableName) {
   currentModalTable = tableName;
   currentModalRecordId = null;
 
-  // Get columns from current table
-  if (currentTable && currentTable.table_name === tableName) {
-    const hiddenColumns = ['id', 'created_by', 'created_at', 'updated_at'];
-    const allData = document.querySelectorAll('table tbody tr');
-    if (allData.length > 0) {
-      const firstRow = allData[0];
-      const cells = firstRow.querySelectorAll('td');
-      // Estimi le colonne dal numero di celle (meno la colonna Azioni)
-      currentModalColumns = Array.from(document.querySelectorAll('table thead th')).slice(0, -1).map(th => th.textContent.trim());
-    }
+  // Extract columns from the table header (works for any table)
+  const tableHeaders = Array.from(document.querySelectorAll('table thead th'));
+  if (tableHeaders.length > 0) {
+    // Remove last column (Azioni)
+    currentModalColumns = tableHeaders.slice(0, -1).map(th => th.textContent.trim());
   } else {
     currentModalColumns = [];
   }
