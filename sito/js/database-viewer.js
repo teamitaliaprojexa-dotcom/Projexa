@@ -90,8 +90,6 @@ async function selectTable(tableId) {
   buttonsDiv.className = 'table-action-buttons';
   buttonsDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 20px;';
   buttonsDiv.innerHTML = `
-    <button onclick="editTable('${tableId}')" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Edit</button>
-    <button onclick="deleteTable('${tableId}')" style="background: #EF4444; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Delete</button>
     <button onclick="newRecord('${table.table_name}')" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
   `;
   tableData.insertBefore(buttonsDiv, tableData.firstChild);
@@ -136,6 +134,7 @@ async function loadTableData(tableName) {
                     ${col}
                   </th>
                 `).join('')}
+                <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--gray-700);">Azioni</th>
               </tr>
             </thead>
             <tbody>
@@ -152,27 +151,47 @@ async function loadTableData(tableName) {
                     const strValue = String(value).substring(0, 100);
                     return `<td style="padding: 12px; color: var(--gray-700);">${strValue}</td>`;
                   }).join('')}
+                  <td style="padding: 12px; text-align: center; display: flex; gap: 8px; justify-content: center;">
+                    <button onclick="editRecord('${tableName}', ${row.id})" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #3B82F6;" title="Edit">✏️</button>
+                    <button onclick="deleteRecord('${tableName}', ${row.id})" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #EF4444;" title="Delete">✕</button>
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
         </div>
       `;
-      tableContent.innerHTML = html;
+      // Preserve buttons and insert table after them
+      const buttons = tableContent.querySelector('.table-action-buttons');
+      tableContent.innerHTML = '';
+      if (buttons) {
+        tableContent.appendChild(buttons);
+      }
+      const tableDiv = document.createElement('div');
+      tableDiv.innerHTML = html;
+      tableContent.appendChild(tableDiv);
     } else {
       const buttons = tableContent.querySelector('.table-action-buttons');
-      tableContent.innerHTML = '<div class="empty-state"><p>Error loading data</p></div>';
+      tableContent.innerHTML = '';
       if (buttons) {
-        tableContent.insertBefore(buttons, tableContent.firstChild);
+        tableContent.appendChild(buttons);
       }
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'empty-state';
+      errorDiv.innerHTML = '<p>Error loading data</p>';
+      tableContent.appendChild(errorDiv);
     }
   } catch (error) {
     console.error('Error loading table data:', error);
     const buttons = tableContent.querySelector('.table-action-buttons');
-    tableContent.innerHTML = '<div class="empty-state"><p>Connection error</p></div>';
+    tableContent.innerHTML = '';
     if (buttons) {
-      tableContent.insertBefore(buttons, tableContent.firstChild);
+      tableContent.appendChild(buttons);
     }
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'empty-state';
+    errorDiv.innerHTML = '<p>Connection error</p>';
+    tableContent.appendChild(errorDiv);
   }
 }
 
@@ -255,6 +274,34 @@ async function loadTableStructuresTable() {
 
   // Load table data
   await loadTableData('table_structures');
+}
+
+// Edit a record
+function editRecord(tableName, recordId) {
+  alert('Edit record functionality - coming soon');
+}
+
+// Delete a record
+async function deleteRecord(tableName, recordId) {
+  if (!confirm('Are you sure you want to delete this record?')) return;
+
+  try {
+    const response = await fetch(`${API_URL}/data/${tableName}/${recordId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${getToken()}` }
+    });
+
+    if (response.ok) {
+      // Reload table data
+      const table = currentTable || { table_name: tableName };
+      await loadTableData(table.table_name || tableName);
+    } else {
+      alert('Error deleting record');
+    }
+  } catch (error) {
+    console.error('Error deleting record:', error);
+    alert('Error deleting record');
+  }
 }
 
 // Create new record
