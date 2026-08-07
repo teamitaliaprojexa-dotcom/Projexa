@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/material.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/sql/sql.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -260,7 +261,23 @@
         </div>
 
         <div class="results-container">
-            <div class="results-header">Risultati</div>
+            <div class="results-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Risultati</span>
+                <div id="downloadMenu" style="display: none;">
+                    <button class="btn btn-primary" onclick="downloadResults('csv')" style="font-size: 0.9rem; padding: 6px 12px;">
+                        <i class="fas fa-download"></i> CSV
+                    </button>
+                    <button class="btn btn-primary" onclick="downloadResults('json')" style="font-size: 0.9rem; padding: 6px 12px;">
+                        <i class="fas fa-download"></i> JSON
+                    </button>
+                    <button class="btn btn-primary" onclick="downloadResults('xlsx')" style="font-size: 0.9rem; padding: 6px 12px;">
+                        <i class="fas fa-download"></i> Excel
+                    </button>
+                    <button class="btn btn-primary" onclick="downloadResults('xml')" style="font-size: 0.9rem; padding: 6px 12px;">
+                        <i class="fas fa-download"></i> XML
+                    </button>
+                </div>
+            </div>
             <div id="results">
                 <div class="empty-results">Esegui una query per vedere i risultati</div>
             </div>
@@ -271,6 +288,8 @@
         const API_URL = 'https://projexa-4mix.onrender.com/api';
         let editor;
         let transactionActive = false;
+        let lastQueryResults = null;
+        let lastQueryColumns = null;
 
         function getToken() {
             return localStorage.getItem('authToken');
@@ -397,10 +416,17 @@
         function displayResults(rows, columns) {
             if (!rows || rows.length === 0) {
                 document.getElementById('results').innerHTML = '<div class="empty-results">Nessun risultato</div>';
+                document.getElementById('downloadMenu').style.display = 'none';
                 return;
             }
 
-            const cols = columns || Object.keys(rows[0]);
+            // Save results for download
+            lastQueryResults = rows;
+            lastQueryColumns = columns || Object.keys(rows[0]);
+            document.getElementById('downloadMenu').style.display = 'flex';
+            document.getElementById('downloadMenu').style.gap = '0.5rem';
+
+            const cols = lastQueryColumns;
             const html = `
                 <table class="results-table">
                     <thead>
@@ -441,6 +467,88 @@
             document.getElementById('commitBtn').disabled = !transactionActive;
             document.getElementById('rollbackBtn').disabled = !transactionActive;
             document.getElementById('transactionInfo').classList.toggle('active', transactionActive);
+        }
+
+        function downloadResults(format) {
+            if (!lastQueryResults || lastQueryResults.length === 0) {
+                showStatus('Nessun dato da scaricare', 'error');
+                return;
+            }
+
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+            const filename = `query_results_${timestamp}`;
+
+            if (format === 'csv') {
+                downloadAsCSV(filename);
+            } else if (format === 'json') {
+                downloadAsJSON(filename);
+            } else if (format === 'xlsx') {
+                downloadAsXLSX(filename);
+            } else if (format === 'xml') {
+                downloadAsXML(filename);
+            }
+        }
+
+        function downloadAsCSV(filename) {
+            const cols = lastQueryColumns;
+            const csv = [
+                cols.join(','),
+                ...lastQueryResults.map(row =>
+                    cols.map(col => {
+                        const val = row[col];
+                        if (val === null) return '';
+                        if (typeof val === 'string' && (val.includes(',') || val.includes('"') || val.includes('\n'))) {
+                            return `"${val.replace(/"/g, '""')}"`;
+                        }
+                        return val;
+                    }).join(',')
+                )
+            ].join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            downloadBlob(blob, filename + '.csv');
+        }
+
+        function downloadAsJSON(filename) {
+            const json = JSON.stringify(lastQueryResults, null, 2);
+            const blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
+            downloadBlob(blob, filename + '.json');
+        }
+
+        function downloadAsXLSX(filename) {
+            const ws = XLSX.utils.json_to_sheet(lastQueryResults);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Results');
+            XLSX.writeFile(wb, filename + '.xlsx');
+        }
+
+        function downloadAsXML(filename) {
+            let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<results>\n';
+            lastQueryResults.forEach(row => {
+                xml += '  <row>\n';
+                Object.entries(row).forEach(([col, val]) => {
+                    const escapedVal = String(val || '').replace(/[<>&'"]/g, char => ({
+                        '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;'
+                    }[char]));
+                    xml += `    <${col}>${escapedVal}</${col}>\n`;
+                });
+                xml += '  </row>\n';
+            });
+            xml += '</results>';
+
+            const blob = new Blob([xml], { type: 'application/xml;charset=utf-8;' });
+            downloadBlob(blob, filename + '.xml');
+        }
+
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         }
 
         function goBack() {
