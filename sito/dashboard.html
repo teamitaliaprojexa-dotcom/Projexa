@@ -1142,8 +1142,8 @@
             // Aggiorna il profilo nella sidebar
             updateUserProfile(userData);
 
-            // Aggiorna il saluto dinamico con foto
-            updateGreeting(userData.name, userData.picture);
+            // Aggiorna il saluto dinamico con foto e tenant
+            updateGreeting(userData.name, userData.picture, userData.tenant_name);
 
             // Aggiungi pulsante logout in alto a destra
             addLogoutButton();
@@ -1154,22 +1154,23 @@
             return userData;
         }
 
-        // Aggiorna il saluto basato sul nome
-        function updateGreeting(name, picture) {
+        // Aggiorna il saluto basato sul nome e tenant
+        function updateGreeting(name, picture, tenantName) {
             const greetingEl = document.getElementById('greeting');
             if (greetingEl) {
                 const userName = name || 'Utente';
-                
+                const displayText = tenantName ? `Welcome, ${userName} • ${tenantName}` : `Welcome, ${userName}`;
+
                 // Se c'è una foto, la metto prima del testo
                 if (picture) {
                     greetingEl.innerHTML = `
                         <div style="display: flex; align-items: center; gap: 1.5rem;">
                             <img src="${picture}" alt="${userName}" style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover;">
-                            <span>Welcome, ${userName}</span>
+                            <span>${displayText}</span>
                         </div>
                     `;
                 } else {
-                    greetingEl.textContent = `Welcome, ${userName}`;
+                    greetingEl.textContent = displayText;
                 }
             }
         }
