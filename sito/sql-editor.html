@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - SQL Editor</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/material.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/sql/sql.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            background: #f5f5f5;
+            color: #1f2937;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            font-size: 2rem;
+            color: #3B82F6;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: #3B82F6;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #1E40AF;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-success {
+            background: #10B981;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #059669;
+        }
+
+        .btn-warning {
+            background: #F59E0B;
+            color: white;
+        }
+
+        .btn-warning:hover {
+            background: #D97706;
+        }
+
+        .btn-danger {
+            background: #EF4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #DC2626;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .editor-container {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .editor-label {
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+            color: #4b5563;
+            display: block;
+        }
+
+        .CodeMirror {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            height: 300px !important;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+        }
+
+        .status {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            display: none;
+        }
+
+        .status.show {
+            display: block;
+        }
+
+        .status.success {
+            background: #d1fae5;
+            border: 1px solid #10b981;
+            color: #065f46;
+        }
+
+        .status.error {
+            background: #fee2e2;
+            border: 1px solid #ef4444;
+            color: #7f1d1d;
+        }
+
+        .status.info {
+            background: #dbeafe;
+            border: 1px solid #3b82f6;
+            color: #1e3a8a;
+        }
+
+        .results-container {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .results-header {
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #4b5563;
+        }
+
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            overflow-x: auto;
+        }
+
+        .results-table thead {
+            background: #f3f4f6;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .results-table th {
+            padding: 1rem;
+            text-align: left;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .results-table td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .results-table tbody tr:hover {
+            background: #f9fafb;
+        }
+
+        .empty-results {
+            text-align: center;
+            padding: 2rem;
+            color: #9ca3af;
+            font-style: italic;
+        }
+
+        .transaction-info {
+            padding: 1rem;
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            display: none;
+        }
+
+        .transaction-info.active {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .header-actions {
+                flex-wrap: wrap;
+            }
+
+            .CodeMirror {
+                height: 200px !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-database"></i> SQL Editor</h1>
+            <div class="header-actions">
+                <button class="btn btn-primary" onclick="goBack()">
+                    <i class="fas fa-arrow-left"></i> Indietro
+                </button>
+            </div>
+        </header>
+
+        <div id="transactionInfo" class="transaction-info">
+            <i class="fas fa-info-circle"></i> Transazione aperta. Le modifiche non sono ancora salvate.
+        </div>
+
+        <div id="statusMessage" class="status"></div>
+
+        <div class="editor-container">
+            <label class="editor-label">Query SQL</label>
+            <textarea id="sqlEditor"></textarea>
+
+            <div class="header-actions" style="margin-top: 1.5rem;">
+                <button class="btn btn-success" onclick="executeQuery()">
+                    <i class="fas fa-play"></i> Esegui (Ctrl+Enter)
+                </button>
+                <button class="btn btn-warning" id="commitBtn" onclick="commitTransaction()" disabled>
+                    <i class="fas fa-check"></i> Commit
+                </button>
+                <button class="btn btn-danger" id="rollbackBtn" onclick="rollbackTransaction()" disabled>
+                    <i class="fas fa-undo"></i> Rollback
+                </button>
+            </div>
+        </div>
+
+        <div class="results-container">
+            <div class="results-header">Risultati</div>
+            <div id="results">
+                <div class="empty-results">Esegui una query per vedere i risultati</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://projexa-4mix.onrender.com/api';
+        let editor;
+        let transactionActive = false;
+
+        function getToken() {
+            return localStorage.getItem('authToken');
+        }
+
+        // Initialize CodeMirror editor
+        document.addEventListener('DOMContentLoaded', () => {
+            editor = CodeMirror.fromTextArea(document.getElementById('sqlEditor'), {
+                mode: 'text/x-sql',
+                theme: 'material',
+                lineNumbers: true,
+                indentUnit: 4,
+                indentWithTabs: false,
+                lineWrapping: true,
+                extraKeys: {
+                    'Ctrl-Enter': executeQuery,
+                    'Cmd-Enter': executeQuery
+                }
+            });
+
+            // Check if user is authenticated
+            if (!getToken()) {
+                window.location.href = 'index.html';
+            }
+        });
+
+        async function executeQuery() {
+            const sql = editor.getValue().trim();
+            if (!sql) {
+                showStatus('Inserisci una query SQL', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/sql/execute`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${getToken()}`
+                    },
+                    body: JSON.stringify({ sql })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Check if transaction is now active
+                    if (data.transactionActive) {
+                        transactionActive = true;
+                        updateTransactionButtons();
+                    }
+
+                    // Display results
+                    if (data.rows && data.rows.length > 0) {
+                        displayResults(data.rows, data.columns);
+                        showStatus(`Query eseguita con successo (${data.rows.length} righe)`, 'success');
+                    } else if (data.affectedRows !== undefined) {
+                        showStatus(`Query eseguita con successo (${data.affectedRows} righe modificate)`, 'success');
+                        document.getElementById('results').innerHTML = '<div class="empty-results">Nessun risultato da visualizzare</div>';
+                    } else {
+                        showStatus('Query eseguita con successo', 'success');
+                        document.getElementById('results').innerHTML = '<div class="empty-results">Nessun risultato da visualizzare</div>';
+                    }
+                } else {
+                    showStatus(`Errore: ${data.error}`, 'error');
+                    document.getElementById('results').innerHTML = '<div class="empty-results">Errore nell\'esecuzione della query</div>';
+                }
+            } catch (error) {
+                showStatus(`Errore di connessione: ${error.message}`, 'error');
+                console.error('Error:', error);
+            }
+        }
+
+        async function commitTransaction() {
+            if (!confirm('Vuoi salvare le modifiche con COMMIT?')) return;
+
+            try {
+                const response = await fetch(`${API_URL}/sql/commit`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${getToken()}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    transactionActive = false;
+                    updateTransactionButtons();
+                    showStatus('Transazione confermata con successo', 'success');
+                } else {
+                    showStatus(`Errore nel commit: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`Errore di connessione: ${error.message}`, 'error');
+            }
+        }
+
+        async function rollbackTransaction() {
+            if (!confirm('Vuoi annullare le modifiche con ROLLBACK? Le modifiche non salvate verranno perse.')) return;
+
+            try {
+                const response = await fetch(`${API_URL}/sql/rollback`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${getToken()}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    transactionActive = false;
+                    updateTransactionButtons();
+                    showStatus('Transazione annullata', 'info');
+                } else {
+                    showStatus(`Errore nel rollback: ${data.error}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`Errore di connessione: ${error.message}`, 'error');
+            }
+        }
+
+        function displayResults(rows, columns) {
+            if (!rows || rows.length === 0) {
+                document.getElementById('results').innerHTML = '<div class="empty-results">Nessun risultato</div>';
+                return;
+            }
+
+            const cols = columns || Object.keys(rows[0]);
+            const html = `
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            ${cols.map(col => `<th>${col}</th>`).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(row => `
+                            <tr>
+                                ${cols.map(col => `<td>${formatValue(row[col])}</td>`).join('')}
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            document.getElementById('results').innerHTML = html;
+        }
+
+        function formatValue(value) {
+            if (value === null) return '<em style="color: #9ca3af;">null</em>';
+            if (typeof value === 'boolean') return value ? '<strong style="color: #10b981;">true</strong>' : '<strong style="color: #ef4444;">false</strong>';
+            if (typeof value === 'object') return JSON.stringify(value);
+            return String(value).substring(0, 200);
+        }
+
+        function showStatus(message, type) {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.textContent = message;
+            statusEl.className = `status show ${type}`;
+            setTimeout(() => {
+                statusEl.classList.remove('show');
+            }, 5000);
+        }
+
+        function updateTransactionButtons() {
+            document.getElementById('commitBtn').disabled = !transactionActive;
+            document.getElementById('rollbackBtn').disabled = !transactionActive;
+            document.getElementById('transactionInfo').classList.toggle('active', transactionActive);
+        }
+
+        function goBack() {
+            window.location.href = 'database-viewer.html';
+        }
+    </script>
+</body>
+</html>

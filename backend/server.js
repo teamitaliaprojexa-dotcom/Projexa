@@ -181,6 +181,96 @@ app.delete('/api/data/:table/:id', async (req, res) => {
   }
 });
 
+// ==========================================
+// SQL EDITOR ENDPOINTS
+// ==========================================
+
+// Track active transactions per user
+const activeTransactions = new Map();
+
+// Extract JWT payload (simplified - in production use proper middleware)
+function getTokenId(req) {
+  const token = req.headers.authorization?.split(' ')[1];
+  return token || 'anonymous';
+}
+
+// Execute SQL Query
+app.post('/api/sql/execute', async (req, res) => {
+  try {
+    const { sql } = req.body;
+    if (!sql) {
+      return res.status(400).json({ error: 'SQL query required' });
+    }
+
+    const tokenId = getTokenId(req);
+
+    // Check if user has an active transaction
+    let hasTransaction = activeTransactions.has(tokenId);
+
+    // If no transaction and it's a modification query, start a transaction
+    if (!hasTransaction && /^\s*(INSERT|UPDATE|DELETE|ALTER|CREATE|DROP)/i.test(sql)) {
+      try {
+        await db.query('BEGIN');
+        activeTransactions.set(tokenId, true);
+        hasTransaction = true;
+      } catch (e) {
+        console.error('Transaction start error:', e);
+      }
+    }
+
+    // Execute the query
+    const result = await db.query(sql);
+
+    res.json({
+      rows: result.rows,
+      columns: result.fields ? result.fields.map(f => f.name) : Object.keys(result.rows[0] || {}),
+      affectedRows: result.rowCount,
+      transactionActive: hasTransaction
+    });
+  } catch (error) {
+    console.error('SQL Error:', error.message);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Commit Transaction
+app.post('/api/sql/commit', async (req, res) => {
+  try {
+    const tokenId = getTokenId(req);
+
+    if (!activeTransactions.has(tokenId)) {
+      return res.status(400).json({ error: 'No active transaction' });
+    }
+
+    await db.query('COMMIT');
+    activeTransactions.delete(tokenId);
+
+    res.json({ message: 'Transaction committed successfully' });
+  } catch (error) {
+    console.error('Commit Error:', error.message);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Rollback Transaction
+app.post('/api/sql/rollback', async (req, res) => {
+  try {
+    const tokenId = getTokenId(req);
+
+    if (!activeTransactions.has(tokenId)) {
+      return res.status(400).json({ error: 'No active transaction' });
+    }
+
+    await db.query('ROLLBACK');
+    activeTransactions.delete(tokenId);
+
+    res.json({ message: 'Transaction rolled back successfully' });
+  } catch (error) {
+    console.error('Rollback Error:', error.message);
+    res.status(400).json({ error: error.message });
+  }
+});
+
 // 404 Handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });

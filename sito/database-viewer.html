@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Projexa - Database Viewer</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="css/style.css">
   <style>
     .database-layout {
@@ -86,6 +87,9 @@
       <header class="dashboard-header">
         <h1>Database Viewer</h1>
         <div class="header-info">
+          <button onclick="window.location.href='sql-editor.html'" style="background: #8B5CF6; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; margin-right: 1rem;">
+            <i class="fas fa-code"></i> SQL Editor
+          </button>
           <span id="userInfo">User</span>
           <span id="tenantInfo">Tenant</span>
         </div>
