@@ -88,7 +88,8 @@ router.post('/login', async (req, res) => {
       user: {
         id: userData.id,
         email: userData.email,
-        name: userData.name
+        name: userData.name,
+        tenant_name: selectedTenant.name
       },
       tenant: selectedTenant
     });
