@@ -199,9 +199,16 @@ router.get('/google-callback', async (req, res) => {
         [`${name}'s Workspace`, slug]
       );
 
+      // Trova il ruolo di default (owner/admin)
+      const role = await db.query(
+        `SELECT id FROM roles WHERE name = 'owner' OR name = 'admin' LIMIT 1`
+      );
+
+      const roleId = role.rows.length > 0 ? role.rows[0].id : 1; // Default a 1 se non trova
+
       await db.query(
-        'INSERT INTO user_tenants (user_id, tenant_id) VALUES ($1, $2)',
-        [userData.id, defaultTenant.rows[0].id]
+        'INSERT INTO user_tenants (user_id, tenant_id, id_roles) VALUES ($1, $2, $3)',
+        [userData.id, defaultTenant.rows[0].id, roleId]
       );
 
       tenants = defaultTenant;
