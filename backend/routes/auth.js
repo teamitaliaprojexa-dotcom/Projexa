@@ -210,6 +210,7 @@ router.get('/google-callback', async (req, res) => {
       
       // Nuovo utente: crea subito un tenant per lui
       const slug = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-');
+      console.log(`[GOOGLE_AUTH] Creating new tenant for ${email} with slug: ${slug}`);
       
       const defaultTenant = await db.query(
         `INSERT INTO tenants (name, slug, created_at)
@@ -218,13 +219,17 @@ router.get('/google-callback', async (req, res) => {
         [`${name}'s Workspace`, slug]
       );
 
+      console.log(`[GOOGLE_AUTH] Tenant created:`, defaultTenant.rows[0]);
+
       // Assegna il ruolo "Project Manager" (id_roles = 70)
       const roleId = 70;
 
-      await db.query(
-        'INSERT INTO user_tenants (user_id, tenant_id, id_roles) VALUES ($1, $2, $3)',
-        [user.rows[0].id, defaultTenant.rows[0].id, roleId]
+      const userTenantResult = await db.query(
+        'INSERT INTO user_tenants (user_id, tenant_id, role_id, id_roles) VALUES ($1, $2, $3, $4)',
+        [user.rows[0].id, defaultTenant.rows[0].id, 'Project Manager', roleId]
       );
+
+      console.log(`[GOOGLE_AUTH] User-tenant relationship created for ${email}`);
     } else {
       // Utente esiste già: aggiorna l'ultima data
       await db.query(
@@ -242,11 +247,17 @@ router.get('/google-callback', async (req, res) => {
       return res.redirect(`/license-expired.html?expiry=${licenseCheck.expiry}&email=${encodeURIComponent(licenseCheck.email)}`);
     }
 
+    console.log(`[GOOGLE_AUTH] userData after check:`, userData);
+    console.log(`[GOOGLE_AUTH] scadenza value:`, userData.scadenza);
+    console.log(`[GOOGLE_AUTH] licenseCheck:`, licenseCheck);
+
     // Ottieni il tenant dell'utente (deve esistere sempre)
     let tenants = await db.query(
       'SELECT id, name FROM tenants WHERE id IN (SELECT tenant_id FROM user_tenants WHERE user_id = $1)',
       [userData.id]
     );
+
+    console.log(`[GOOGLE_AUTH] Found tenants:`, tenants.rows.length);
 
     // Fallback: se per qualche motivo non ha tenant (non dovrebbe succedere), crea uno
     if (tenants.rows.length === 0) {
@@ -264,8 +275,8 @@ router.get('/google-callback', async (req, res) => {
       const roleId = 70;
 
       await db.query(
-        'INSERT INTO user_tenants (user_id, tenant_id, id_roles) VALUES ($1, $2, $3)',
-        [userData.id, defaultTenant.rows[0].id, roleId]
+        'INSERT INTO user_tenants (user_id, tenant_id, role_id, id_roles) VALUES ($1, $2, $3, $4)',
+        [userData.id, defaultTenant.rows[0].id, 'Project Manager', roleId]
       );
 
       tenants = defaultTenant;

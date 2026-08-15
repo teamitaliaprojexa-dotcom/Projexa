@@ -1946,11 +1946,26 @@
             const params = new URLSearchParams(window.location.search);
             const tokenFromUrl = params.get('access_token');
             if (tokenFromUrl) {
+                // Salva il token in localStorage per usi futuri
+                localStorage.setItem('google_access_token', tokenFromUrl);
                 cachedAccessToken = tokenFromUrl;
+                console.log('[AUTH] Access token salvato da URL e localStorage');
                 return tokenFromUrl;
             }
 
-            // Fallback: leggi da localStorage
+            // Leggi da localStorage (se disponibile)
+            try {
+                const storedToken = localStorage.getItem('google_access_token');
+                if (storedToken) {
+                    cachedAccessToken = storedToken;
+                    console.log('[AUTH] Access token letto da localStorage');
+                    return storedToken;
+                }
+            } catch (e) {
+                console.warn('⚠️ localStorage non accessibile');
+            }
+
+            // Fallback: leggi da userData (legacy)
             try {
                 const user = localStorage.getItem('user');
                 if (!user) return null;
