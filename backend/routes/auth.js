@@ -171,8 +171,30 @@ router.get('/google-callback', async (req, res) => {
         [email, name, randomHash]
       );
       user = result;
+      
+      // Nuovo utente: crea subito un tenant per lui
+      const slug = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-');
+      
+      const defaultTenant = await db.query(
+        `INSERT INTO tenants (name, slug, created_at)
+         VALUES ($1, $2, NOW())
+         RETURNING id, name`,
+        [`${name}'s Workspace`, slug]
+      );
+
+      // Trova il ruolo di default (owner/admin)
+      const role = await db.query(
+        `SELECT id FROM roles WHERE name = 'owner' OR name = 'admin' LIMIT 1`
+      );
+
+      const roleId = role.rows.length > 0 ? role.rows[0].id : 1;
+
+      await db.query(
+        'INSERT INTO user_tenants (user_id, tenant_id, id_roles) VALUES ($1, $2, $3)',
+        [user.rows[0].id, defaultTenant.rows[0].id, roleId]
+      );
     } else {
-      // Aggiorna utente esistente
+      // Utente esiste già: aggiorna l'ultima data
       await db.query(
         'UPDATE users SET updated_at = NOW() WHERE email = $1',
         [email]
@@ -181,32 +203,29 @@ router.get('/google-callback', async (req, res) => {
 
     const userData = user.rows[0];
 
-    // Get user's tenants o crea uno default
+    // Ottieni il tenant dell'utente (deve esistere sempre)
     let tenants = await db.query(
       'SELECT id, name FROM tenants WHERE id IN (SELECT tenant_id FROM user_tenants WHERE user_id = $1)',
       [userData.id]
     );
 
-    // Se non ha tenant, crea uno default
+    // Fallback: se per qualche motivo non ha tenant (non dovrebbe succedere), crea uno
     if (tenants.rows.length === 0) {
-      // Crea uno slug dalla email con timestamp per unicità
-      const timestamp = Date.now();
-      const slug = `${email.split('@')[0]}-${timestamp}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-      const tenantName = `${name}'s Workspace`;
+      console.warn(`[GOOGLE_AUTH] User ${email} has no tenant, creating one...`);
+      const slug = `${email.split('@')[0]}-backup`.toLowerCase().replace(/[^a-z0-9]/g, '-');
       
       const defaultTenant = await db.query(
         `INSERT INTO tenants (name, slug, created_at)
          VALUES ($1, $2, NOW())
          RETURNING id, name`,
-        [tenantName, slug]
+        [`${name}'s Workspace Backup`, slug]
       );
 
-      // Trova il ruolo di default (owner/admin)
       const role = await db.query(
         `SELECT id FROM roles WHERE name = 'owner' OR name = 'admin' LIMIT 1`
       );
 
-      const roleId = role.rows.length > 0 ? role.rows[0].id : 1; // Default a 1 se non trova
+      const roleId = role.rows.length > 0 ? role.rows[0].id : 1;
 
       await db.query(
         'INSERT INTO user_tenants (user_id, tenant_id, id_roles) VALUES ($1, $2, $3)',
@@ -241,11 +260,11 @@ router.get('/google-callback', async (req, res) => {
       success: 'true'
     });
 
-    res.redirect(`/sito/dashboard.html?${params.toString()}`);
+    res.redirect(`/dashboard.html?${params.toString()}`);
 
   } catch (error) {
     console.error('❌ GOOGLE_CALLBACK ERROR:', error.message);
-    res.redirect(`/sito/?error=${encodeURIComponent(error.message)}`);
+    res.redirect(`/?error=${encodeURIComponent(error.message)}`);
   }
 });
 
