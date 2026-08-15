@@ -115,4 +115,123 @@ router.get('/verify', (req, res) => {
   }
 });
 
+// Google OAuth Callback
+router.get('/google-callback', async (req, res) => {
+  try {
+    const { code, state } = req.query;
+
+    if (!code) {
+      return res.redirect('/sito/?error=missing_code');
+    }
+
+    // Scambia il code con l'access token
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID || '128379880931-guh70j47lsvplo9m1intpj9tt7escdn8.apps.googleusercontent.com',
+        client_secret: process.env.GOOGLE_CLIENT_SECRET || '', // Deve essere in .env
+        code: code,
+        grant_type: 'authorization_code',
+        redirect_uri: `${process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com'}/api/auth/google-callback`
+      }).toString()
+    });
+
+    if (!tokenResponse.ok) {
+      console.error('❌ Google Token Error:', await tokenResponse.text());
+      return res.redirect('/sito/?error=token_exchange_failed');
+    }
+
+    const tokenData = await tokenResponse.json();
+    const accessToken = tokenData.access_token;
+    const idToken = tokenData.id_token;
+
+    // Decodifica l'ID token per ottenere le info utente
+    const parts = idToken.split('.');
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = JSON.parse(Buffer.from(base64, 'base64').toString());
+
+    const { email, name, picture } = jsonPayload;
+
+    console.log(`[GOOGLE_AUTH] User: ${email}, Name: ${name}`);
+
+    // Crea o aggiorna l'utente nel database
+    let user = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+
+    if (user.rows.length === 0) {
+      // Crea nuovo utente
+      const result = await db.query(
+        `INSERT INTO users (email, name, picture_url, provider, created_at)
+         VALUES ($1, $2, $3, 'google', NOW())
+         RETURNING id, email, name`,
+        [email, name, picture]
+      );
+      user = result;
+    } else {
+      // Aggiorna utente esistente
+      await db.query(
+        'UPDATE users SET picture_url = $1, updated_at = NOW() WHERE email = $2',
+        [picture, email]
+      );
+    }
+
+    const userData = user.rows[0];
+
+    // Get user's tenants o crea uno default
+    let tenants = await db.query(
+      'SELECT id, name FROM tenants WHERE id IN (SELECT tenant_id FROM user_tenants WHERE user_id = $1)',
+      [userData.id]
+    );
+
+    // Se non ha tenant, crea uno default
+    if (tenants.rows.length === 0) {
+      const defaultTenant = await db.query(
+        `INSERT INTO tenants (name, created_at)
+         VALUES ($1, NOW())
+         RETURNING id, name`,
+        [`${name}'s Workspace`]
+      );
+
+      await db.query(
+        'INSERT INTO user_tenants (user_id, tenant_id) VALUES ($1, $2)',
+        [userData.id, defaultTenant.rows[0].id]
+      );
+
+      tenants = defaultTenant;
+    }
+
+    const selectedTenant = tenants.rows[0];
+
+    // Genera JWT token
+    const jwtToken = jwt.sign(
+      {
+        user_id: userData.id,
+        email: userData.email,
+        tenant_id: selectedTenant.id,
+        tenant_name: selectedTenant.name
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    // Reindirizza al dashboard con i parametri
+    const params = new URLSearchParams({
+      provider: 'google',
+      name: name,
+      email: email,
+      picture: picture || '',
+      access_token: accessToken,
+      jwt_token: jwtToken,
+      success: 'true'
+    });
+
+    res.redirect(`/sito/dashboard.html?${params.toString()}`);
+
+  } catch (error) {
+    console.error('❌ GOOGLE_CALLBACK ERROR:', error.message);
+    res.redirect(`/sito/?error=${encodeURIComponent(error.message)}`);
+  }
+});
+
 export default router;
