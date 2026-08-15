@@ -189,14 +189,16 @@ router.get('/google-callback', async (req, res) => {
 
     // Se non ha tenant, crea uno default
     if (tenants.rows.length === 0) {
-      // Crea uno slug dalla email
-      const slug = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-');
+      // Crea uno slug dalla email con timestamp per unicità
+      const timestamp = Date.now();
+      const slug = `${email.split('@')[0]}-${timestamp}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+      const tenantName = `${name}'s Workspace`;
       
       const defaultTenant = await db.query(
         `INSERT INTO tenants (name, slug, created_at)
          VALUES ($1, $2, NOW())
          RETURNING id, name`,
-        [`${name}'s Workspace`, slug]
+        [tenantName, slug]
       );
 
       // Trova il ruolo di default (owner/admin)
