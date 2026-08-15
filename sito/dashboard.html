@@ -1984,18 +1984,18 @@
                 const timeMin = now.toISOString();
                 const timeMax = endOfDay.toISOString();
 
-                // Chiama Google Calendar API
+                // Chiama Google Calendar API senza la public key (usiamo solo il Bearer token)
                 const response = await fetch(
                     `${GOOGLE_CALENDAR_API}/calendars/primary/events?` +
                     `timeMin=${encodeURIComponent(timeMin)}&` +
                     `timeMax=${encodeURIComponent(timeMax)}&` +
                     `singleEvents=true&` +
-                    `orderBy=startTime&` +
-                    `key=AIzaSyD3_wNkxs_bU6CbYNXJKr5hxJ4eoYyVNwE`,
+                    `orderBy=startTime`,
                     {
                         headers: {
                             'Authorization': `Bearer ${token}`,
-                            'Accept': 'application/json'
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json'
                         }
                     }
                 );

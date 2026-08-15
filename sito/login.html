@@ -417,8 +417,17 @@
 
     <script>
         const API_URL = 'https://projexa-4mix.onrender.com/api';
+        const GOOGLE_CLIENT_ID = '128379880931-guh70j47lsvplo9m1intpj9tt7escdn8.apps.googleusercontent.com';
+        const GOOGLE_SCOPES = [
+            'openid',
+            'email', 
+            'profile',
+            'https://www.googleapis.com/auth/calendar.readonly'
+        ];
+        
         let selectedTenant = null;
         let loginData = null;
+        let googleTokenClient = null;
 
         async function handleEmailLogin(event) {
             event.preventDefault();
@@ -518,17 +527,26 @@
 
         function initializeGoogleSignIn() {
             google.accounts.id.initialize({
-                client_id: '128379880931-guh70j47lsvplo9m1intpj9tt7escdn8.apps.googleusercontent.com',
-                callback: handleGoogleSignIn
+                client_id: GOOGLE_CLIENT_ID,
+                callback: handleGoogleSignInIdToken
             });
 
             google.accounts.id.renderButton(
                 document.getElementById('google-signin-button'),
                 { theme: 'outline', size: 'large', width: '100%', locale: 'it' }
             );
+
+            // Inizializza il token client per OAuth 2.0 (per accedere a Calendar)
+            googleTokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: GOOGLE_CLIENT_ID,
+                scope: GOOGLE_SCOPES.join(' '),
+                callback: handleGoogleTokenResponse
+            });
         }
 
-        function handleGoogleSignIn(response) {
+        // Callback per il login iniziale (ID token)
+        function handleGoogleSignInIdToken(response) {
+            // Decodifica il JWT per estrarre le info utente
             const base64Url = response.credential.split('.')[1];
             const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
             const jsonPayload = decodeURIComponent(atob(base64).split('').map((c) => {
@@ -536,26 +554,43 @@
             }).join(''));
 
             const userInfo = JSON.parse(jsonPayload);
-            const jwtToken = response.credential;
 
-            localStorage.setItem('user', JSON.stringify({
+            // Salva le info utente
+            localStorage.setItem('userInfo', JSON.stringify({
                 name: userInfo.name,
                 email: userInfo.email,
-                picture: userInfo.picture,
-                access_token: jwtToken,
-                provider: 'google'
+                picture: userInfo.picture
             }));
-            
-            // Passa il token nella URL per la compatibilità cross-origin
-            const params = new URLSearchParams({
-                provider: 'google',
-                name: userInfo.name,
-                email: userInfo.email,
-                picture: userInfo.picture || '',
-                access_token: jwtToken
-            });
-            
-            window.location.href = `dashboard.html?${params.toString()}`;
+
+            // Adesso richiedi l'access token per Calendar
+            googleTokenClient.requestAccessToken({ hint: userInfo.email });
+        }
+
+        // Callback per l'access token (dopo il login ID token)
+        function handleGoogleTokenResponse(tokenResponse) {
+            if (tokenResponse.access_token) {
+                const userInfo = JSON.parse(localStorage.getItem('userInfo'));
+                
+                // Salva il token di accesso
+                localStorage.setItem('user', JSON.stringify({
+                    name: userInfo.name,
+                    email: userInfo.email,
+                    picture: userInfo.picture,
+                    access_token: tokenResponse.access_token,
+                    provider: 'google'
+                }));
+
+                // Passa i dati alla dashboard via URL
+                const params = new URLSearchParams({
+                    provider: 'google',
+                    name: userInfo.name,
+                    email: userInfo.email,
+                    picture: userInfo.picture || '',
+                    access_token: tokenResponse.access_token
+                });
+
+                window.location.href = `dashboard.html?${params.toString()}`;
+            }
         }
 
         if (localStorage.getItem('authToken')) {
