@@ -536,13 +536,26 @@
             }).join(''));
 
             const userInfo = JSON.parse(jsonPayload);
+            const jwtToken = response.credential;
+
             localStorage.setItem('user', JSON.stringify({
                 name: userInfo.name,
                 email: userInfo.email,
+                picture: userInfo.picture,
+                access_token: jwtToken,
                 provider: 'google'
             }));
             
-            window.location.href = 'dashboard.html?provider=google';
+            // Passa il token nella URL per la compatibilità cross-origin
+            const params = new URLSearchParams({
+                provider: 'google',
+                name: userInfo.name,
+                email: userInfo.email,
+                picture: userInfo.picture || '',
+                access_token: jwtToken
+            });
+            
+            window.location.href = `dashboard.html?${params.toString()}`;
         }
 
         if (localStorage.getItem('authToken')) {
