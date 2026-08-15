@@ -688,6 +688,146 @@
             margin-bottom: 1.5rem;
         }
 
+        /* MEETING CARDS */
+        .meeting-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: all 0.3s;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .meeting-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: #4285F4;
+            transition: width 0.3s;
+        }
+
+        .meeting-card:hover {
+            border-color: #4285F4;
+            box-shadow: 0 8px 24px rgba(66, 133, 244, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .meeting-card:hover::before {
+            width: 100%;
+            opacity: 0.1;
+        }
+
+        .meeting-time {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #4285F4;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .meeting-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--dark);
+            margin-bottom: 0.75rem;
+            line-height: 1.4;
+        }
+
+        .meeting-duration {
+            display: inline-block;
+            padding: 0.35rem 0.75rem;
+            background: rgba(66, 133, 244, 0.1);
+            color: #4285F4;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+        }
+
+        .meeting-attendees {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .meeting-attendee-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4285F4 0%, #34A853 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+
+        .meeting-link {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            background: rgba(66, 133, 244, 0.05);
+            border: 1px solid rgba(66, 133, 244, 0.2);
+            border-radius: 8px;
+            color: #4285F4;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+            cursor: pointer;
+            width: 100%;
+            text-align: center;
+            justify-content: center;
+        }
+
+        .meeting-link:hover {
+            background: rgba(66, 133, 244, 0.1);
+            border-color: rgba(66, 133, 244, 0.4);
+        }
+
+        .meeting-empty {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-muted);
+        }
+
+        .meeting-loading {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+
+        .meeting-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(66, 133, 244, 0.2);
+            border-radius: 50%;
+            border-top-color: #4285F4;
+            animation: spin 0.6s linear infinite;
+            margin-right: 0.75rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
         /* RESPONSIVE */
         @media (max-width: 768px) {
             .sidebar {
@@ -817,6 +957,37 @@
                     </div>
                     <div class="stat-value">2</div>
                     <div class="stat-label">In ritardo</div>
+                </div>
+            </div>
+
+            <!-- RIUNIONI DI OGGI - GOOGLE CALENDAR -->
+            <div style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                    <div class="section-title" style="margin: 0;">
+                        <i class="fas fa-calendar-alt" style="color: #4285F4;"></i>
+                        Riunioni di Oggi
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <span id="lastSyncTime" style="font-size: 0.8rem; color: var(--text-muted);">Sincronizzazione...</span>
+                        <button id="refreshMeetingsBtn" style="padding: 0.5rem 1rem; background: #4285F4; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem; transition: all 0.3s; display: none;">
+                            <i class="fas fa-sync"></i> Aggiorna
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Griglia Riunioni -->
+                <div id="meetingsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.5rem; min-height: 150px;">
+                    <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; padding: 3rem; color: var(--text-muted);">
+                        <div style="text-align: center;">
+                            <i class="fas fa-calendar" style="font-size: 2.5rem; margin-bottom: 1rem; opacity: 0.3;"></i>
+                            <p style="font-size: 1rem; margin: 0;">Caricamento riunioni da Google Calendar...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Info riunioni -->
+                <div style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;">
+                    <span id="meetingCount">0</span> riunioni oggi • Prossima: <span id="nextMeetingTime">--</span>
                 </div>
             </div>
 
@@ -1761,6 +1932,204 @@
             }
         }
 
+        // === GOOGLE CALENDAR INTEGRATION ===
+        const GOOGLE_CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
+        let meetingsRefreshInterval = null;
+
+        // Recupera il token OAuth da localStorage
+        function getGoogleAccessToken() {
+            const user = localStorage.getItem('user');
+            if (!user) return null;
+            
+            const userData = JSON.parse(user);
+            return userData.access_token || null;
+        }
+
+        // Carica gli eventi di oggi da Google Calendar
+        async function loadTodaysMeetings() {
+            try {
+                const token = getGoogleAccessToken();
+                if (!token) {
+                    displayMeetingsError('Autenticazione Google non disponibile. Accedi per vedere le riunioni.');
+                    return [];
+                }
+
+                // Calcola intervallo temporale: da adesso a mezzanotte
+                const now = new Date();
+                const endOfDay = new Date(now);
+                endOfDay.setHours(23, 59, 59, 999);
+
+                const timeMin = now.toISOString();
+                const timeMax = endOfDay.toISOString();
+
+                // Chiama Google Calendar API
+                const response = await fetch(
+                    `${GOOGLE_CALENDAR_API}/calendars/primary/events?` +
+                    `timeMin=${encodeURIComponent(timeMin)}&` +
+                    `timeMax=${encodeURIComponent(timeMax)}&` +
+                    `singleEvents=true&` +
+                    `orderBy=startTime&` +
+                    `key=AIzaSyD3_wNkxs_bU6CbYNXJKr5hxJ4eoYyVNwE`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Accept': 'application/json'
+                        }
+                    }
+                );
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        throw new Error('Token scaduto o non valido');
+                    }
+                    throw new Error(`API Error: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const events = data.items || [];
+
+                // Filtra escludendo "transparent" events (busy: false)
+                const meetings = events.filter(event => event.transparency !== 'transparent' && !event.eventType?.includes('focusTime'));
+
+                updateMeetingsUI(meetings);
+                updateSyncTime();
+                return meetings;
+
+            } catch (error) {
+                console.warn('⚠️ Google Calendar API Error:', error.message);
+                displayMeetingsError(`Errore nel caricamento: ${error.message}`);
+                return [];
+            }
+        }
+
+        // Renderizza le riunioni nella UI
+        function updateMeetingsUI(meetings) {
+            const container = document.getElementById('meetingsContainer');
+            const meetingCount = document.getElementById('meetingCount');
+            const nextMeetingTime = document.getElementById('nextMeetingTime');
+
+            meetingCount.textContent = meetings.length;
+
+            if (meetings.length === 0) {
+                container.innerHTML = `
+                    <div class="meeting-empty">
+                        <i class="fas fa-calendar-check" style="font-size: 2.5rem; color: var(--light); margin-bottom: 1rem;"></i>
+                        <p style="font-size: 1rem; margin: 0; color: var(--text-muted);">Nessuna riunione oggi dopo questo orario</p>
+                        <p style="font-size: 0.85rem; margin-top: 0.5rem; color: var(--text-muted);">Hai una giornata libera! 🎉</p>
+                    </div>
+                `;
+                nextMeetingTime.textContent = '--';
+                return;
+            }
+
+            // Aggiorna prossima riunione
+            const nextMeeting = meetings[0];
+            const startTime = new Date(nextMeeting.start.dateTime || nextMeeting.start.date);
+            nextMeetingTime.textContent = startTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+
+            // Renderizza le card
+            container.innerHTML = meetings.map(meeting => createMeetingCard(meeting)).join('');
+
+            // Aggiungi listener ai link
+            document.querySelectorAll('.meeting-link').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const url = link.dataset.url;
+                    if (url && url !== 'null') {
+                        window.open(url, '_blank');
+                    }
+                });
+            });
+        }
+
+        // Crea una singola card per la riunione
+        function createMeetingCard(event) {
+            const start = new Date(event.start.dateTime || event.start.date);
+            const end = new Date(event.end.dateTime || event.end.date);
+            
+            // Formatta orario
+            const timeStr = start.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+            
+            // Calcola durata
+            const durationMs = end - start;
+            const durationMinutes = Math.round(durationMs / (1000 * 60));
+            const durationStr = durationMinutes < 60 
+                ? `${durationMinutes}m` 
+                : `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`;
+
+            // Estrai attendees
+            const attendees = event.attendees || [];
+            const attendeesDisplay = attendees.slice(0, 2).map((a, i) => {
+                const name = a.displayName || a.email.split('@')[0];
+                const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+                return `<div class="meeting-attendee-avatar" title="${name}">${initials}</div>`;
+            }).join('');
+            const moreAttendees = attendees.length > 2 ? `<span style="font-size: 0.85rem; color: var(--text-muted);">+${attendees.length - 2}</span>` : '';
+
+            // Link alla riunione
+            const meetingLink = event.conferenceData?.entryPoints?.[0]?.uri || event.hangoutLink || null;
+            const meetingLinkBtn = meetingLink 
+                ? `<button class="meeting-link" data-url="${meetingLink}"><i class="fas fa-video"></i> Partecipa</button>`
+                : `<div style="text-align: center; color: var(--text-muted); font-size: 0.9rem;">Nessun link disponibile</div>`;
+
+            return `
+                <div class="meeting-card">
+                    <div class="meeting-time">
+                        <i class="fas fa-clock"></i> ${timeStr}
+                    </div>
+                    <div class="meeting-title">${event.summary || 'Riunione senza titolo'}</div>
+                    <div class="meeting-duration">${durationStr}</div>
+                    <div class="meeting-attendees">
+                        ${attendeesDisplay}
+                        ${moreAttendees}
+                    </div>
+                    ${meetingLinkBtn}
+                </div>
+            `;
+        }
+
+        // Mostra errore nel caricamento
+        function displayMeetingsError(message) {
+            const container = document.getElementById('meetingsContainer');
+            container.innerHTML = `
+                <div class="meeting-empty">
+                    <i class="fas fa-exclamation-circle" style="font-size: 2rem; color: var(--warning); margin-bottom: 1rem;"></i>
+                    <p style="font-size: 0.95rem; margin: 0; color: var(--dark);">⚠️ ${message}</p>
+                    <p style="font-size: 0.8rem; margin-top: 0.75rem; color: var(--text-muted);">Assicurati di essere autenticato con Google</p>
+                </div>
+            `;
+            document.getElementById('refreshMeetingsBtn').style.display = 'block';
+        }
+
+        // Aggiorna l'orario di sincronizzazione
+        function updateSyncTime() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+            document.getElementById('lastSyncTime').textContent = `Sincronizzato alle ${timeStr}`;
+        }
+
+        // Inizializza il caricamento delle riunioni
+        async function initMeetings() {
+            // Prima carica
+            await loadTodaysMeetings();
+
+            // Auto-refresh ogni 5 minuti
+            if (meetingsRefreshInterval) clearInterval(meetingsRefreshInterval);
+            meetingsRefreshInterval = setInterval(loadTodaysMeetings, 5 * 60 * 1000);
+
+            // Pulsante refresh manuale
+            const refreshBtn = document.getElementById('refreshMeetingsBtn');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', async () => {
+                    refreshBtn.innerHTML = '<i class="fas fa-sync" style="animation: spin 0.6s linear infinite;"></i> Aggiornamento...';
+                    await loadTodaysMeetings();
+                    setTimeout(() => {
+                        refreshBtn.innerHTML = '<i class="fas fa-sync"></i> Aggiorna';
+                    }, 1000);
+                });
+            }
+        }
+
         // === INITIALIZATION ===
         window.addEventListener('DOMContentLoaded', async () => {
             initializeUser();
@@ -1772,6 +2141,7 @@
             initTodoList();
             initRevenueChart();
             initClientFilter();
+            initMeetings(); // Carica le riunioni da Google Calendar
         });
     </script>
 </body>
