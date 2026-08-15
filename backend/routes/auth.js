@@ -189,11 +189,14 @@ router.get('/google-callback', async (req, res) => {
 
     // Se non ha tenant, crea uno default
     if (tenants.rows.length === 0) {
+      // Crea uno slug dalla email
+      const slug = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-');
+      
       const defaultTenant = await db.query(
-        `INSERT INTO tenants (name, created_at)
-         VALUES ($1, NOW())
+        `INSERT INTO tenants (name, slug, created_at)
+         VALUES ($1, $2, NOW())
          RETURNING id, name`,
-        [`${name}'s Workspace`]
+        [`${name}'s Workspace`, slug]
       );
 
       await db.query(
