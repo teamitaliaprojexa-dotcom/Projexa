@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Licenza Scaduta - Projexa</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 100%;
+            padding: 60px 40px;
+            text-align: center;
+        }
+
+        .icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 30px;
+            background: #FEE;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+        }
+
+        h1 {
+            color: #1F2937;
+            font-size: 28px;
+            margin-bottom: 15px;
+            font-weight: 700;
+        }
+
+        .subtitle {
+            color: #6B7280;
+            font-size: 16px;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .message-box {
+            background: #FEF2F2;
+            border-left: 4px solid #DC2626;
+            padding: 20px;
+            margin: 30px 0;
+            border-radius: 8px;
+            text-align: left;
+        }
+
+        .message-box h3 {
+            color: #DC2626;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .message-box p {
+            color: #374151;
+            font-size: 15px;
+            line-height: 1.6;
+        }
+
+        .details {
+            background: #F3F4F6;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 30px 0;
+            font-size: 14px;
+        }
+
+        .details p {
+            color: #4B5563;
+            margin: 8px 0;
+        }
+
+        .details strong {
+            color: #1F2937;
+        }
+
+        .actions {
+            display: flex;
+            gap: 15px;
+            margin-top: 40px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: #667EEA;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568D3;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-secondary {
+            background: white;
+            color: #667EEA;
+            border: 2px solid #667EEA;
+        }
+
+        .btn-secondary:hover {
+            background: #F3F4F6;
+        }
+
+        .contact-info {
+            margin-top: 40px;
+            padding-top: 30px;
+            border-top: 1px solid #E5E7EB;
+        }
+
+        .contact-info p {
+            color: #6B7280;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+
+        .contact-info a {
+            color: #667EEA;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .contact-info a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 40px 25px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            .actions {
+                flex-direction: column;
+            }
+
+            .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">⚠️</div>
+        
+        <h1>Licenza Scaduta</h1>
+        
+        <p class="subtitle">
+            La tua licenza per Projexa è scaduta. Per continuare a utilizzare il servizio, 
+            è necessario rinnovare la sottoscrizione.
+        </p>
+
+        <div class="message-box">
+            <h3>⏰ Accesso Limitato</h3>
+            <p>
+                Attualmente non hai accesso a Projexa. Per ripristinare l'accesso completo 
+                e continuare a gestire i tuoi progetti, contatta il nostro team di supporto 
+                per il rinnovo della licenza.
+            </p>
+        </div>
+
+        <div class="details">
+            <p><strong>Data Scadenza Licenza:</strong> <span id="expiryDate">-</span></p>
+            <p><strong>Account:</strong> <span id="userEmail">-</span></p>
+            <p><strong>Giorni Scaduti:</strong> <span id="expiredDays">-</span></p>
+        </div>
+
+        <div class="actions">
+            <a href="mailto:support@projexa.com" class="btn btn-primary">
+                📧 Contatta il Supporto
+            </a>
+            <button class="btn btn-secondary" onclick="goBack()">
+                ← Indietro
+            </button>
+        </div>
+
+        <div class="contact-info">
+            <p>
+                <strong>Non sai come procedere?</strong>
+            </p>
+            <p>
+                Il nostro team di supporto è disponibile 24/7 per assistere il rinnovo della tua licenza.
+            </p>
+            <p>
+                📧 <a href="mailto:support@projexa.com">support@projexa.com</a><br>
+                📞 <a href="tel:+393330000000">+39 333 000 0000</a><br>
+                🌐 <a href="https://projexa.com/support" target="_blank">Centro Supporto Online</a>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Estrai i parametri dall'URL
+        const params = new URLSearchParams(window.location.search);
+        const expiryDate = params.get('expiry');
+        const userEmail = params.get('email');
+
+        if (expiryDate) {
+            document.getElementById('expiryDate').textContent = new Date(expiryDate).toLocaleDateString('it-IT');
+            
+            const today = new Date();
+            const expiry = new Date(expiryDate);
+            const daysExpired = Math.floor((today - expiry) / (1000 * 60 * 60 * 24));
+            document.getElementById('expiredDays').textContent = daysExpired + ' giorni';
+        }
+
+        if (userEmail) {
+            document.getElementById('userEmail').textContent = userEmail;
+        }
+
+        function goBack() {
+            window.location.href = './index.html';
+        }
+    </script>
+</body>
+</html>

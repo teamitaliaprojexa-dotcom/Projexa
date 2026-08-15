@@ -46,6 +46,7 @@ CREATE TABLE users (
   name VARCHAR(255) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   cognome VARCHAR(255),
+  scadenza DATE NOT NULL DEFAULT (CURRENT_DATE + INTERVAL '30 days'),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -269,6 +270,7 @@ CREATE TABLE email_recaps (
 -- INDEXES
 -- ==========================================
 CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_scadenza ON users(scadenza);
 CREATE INDEX idx_user_tenants_user_id ON user_tenants(user_id);
 CREATE INDEX idx_user_tenants_tenant_id ON user_tenants(tenant_id);
 CREATE INDEX idx_user_roles_user_id ON user_roles(user_id);

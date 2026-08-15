@@ -7,6 +7,32 @@ import db from '../config/database.js';
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
 
+// ==========================================
+// Funzione di controllo scadenza licenza
+// ==========================================
+function checkLicenseExpiry(userData) {
+  if (!userData.scadenza) {
+    return { valid: true }; // Se non ha scadenza, lascia passare
+  }
+
+  const expiryDate = new Date(userData.scadenza);
+  const today = new Date();
+  
+  // Normalizza le date a mezzanotte per confronto corretto
+  today.setHours(0, 0, 0, 0);
+  expiryDate.setHours(0, 0, 0, 0);
+
+  if (expiryDate >= today) {
+    return { valid: true }; // Licenza valida
+  } else {
+    return { 
+      valid: false, 
+      expiry: userData.scadenza,
+      email: userData.email
+    };
+  }
+}
+
 // Login endpoint
 router.post('/login', async (req, res) => {
   try {
@@ -42,6 +68,16 @@ router.post('/login', async (req, res) => {
     if (!passwordMatch) {
       console.log(`[LOGIN] Password mismatch for user: ${email}`);
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Verifica scadenza licenza
+    const licenseCheck = checkLicenseExpiry(userData);
+    if (!licenseCheck.valid) {
+      console.log(`[LOGIN] License expired for user: ${email}`);
+      return res.status(403).json({
+        error: 'License expired',
+        redirect: `/license-expired.html?expiry=${licenseCheck.expiry}&email=${encodeURIComponent(licenseCheck.email)}`
+      });
     }
 
     // Get user's tenants
@@ -182,12 +218,8 @@ router.get('/google-callback', async (req, res) => {
         [`${name}'s Workspace`, slug]
       );
 
-      // Trova il ruolo di default (owner/admin)
-      const role = await db.query(
-        `SELECT id FROM roles WHERE name = 'owner' OR name = 'admin' LIMIT 1`
-      );
-
-      const roleId = role.rows.length > 0 ? role.rows[0].id : 1;
+      // Assegna il ruolo "Project Manager" (id_roles = 70)
+      const roleId = 70;
 
       await db.query(
         'INSERT INTO user_tenants (user_id, tenant_id, id_roles) VALUES ($1, $2, $3)',
@@ -202,6 +234,13 @@ router.get('/google-callback', async (req, res) => {
     }
 
     const userData = user.rows[0];
+
+    // Verifica scadenza licenza
+    const licenseCheck = checkLicenseExpiry(userData);
+    if (!licenseCheck.valid) {
+      console.log(`[GOOGLE_AUTH] License expired for user: ${userData.email}`);
+      return res.redirect(`/license-expired.html?expiry=${licenseCheck.expiry}&email=${encodeURIComponent(licenseCheck.email)}`);
+    }
 
     // Ottieni il tenant dell'utente (deve esistere sempre)
     let tenants = await db.query(
@@ -221,11 +260,8 @@ router.get('/google-callback', async (req, res) => {
         [`${name}'s Workspace Backup`, slug]
       );
 
-      const role = await db.query(
-        `SELECT id FROM roles WHERE name = 'owner' OR name = 'admin' LIMIT 1`
-      );
-
-      const roleId = role.rows.length > 0 ? role.rows[0].id : 1;
+      // Assegna il ruolo "Project Manager" (id_roles = 70)
+      const roleId = 70;
 
       await db.query(
         'INSERT INTO user_tenants (user_id, tenant_id, id_roles) VALUES ($1, $2, $3)',
