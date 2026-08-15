@@ -162,8 +162,8 @@ router.get('/google-callback', async (req, res) => {
     if (user.rows.length === 0) {
       // Crea nuovo utente
       const result = await db.query(
-        `INSERT INTO users (email, name, provider, created_at)
-         VALUES ($1, $2, 'google', NOW())
+        `INSERT INTO users (email, name, created_at)
+         VALUES ($1, $2, NOW())
          RETURNING id, email, name`,
         [email, name]
       );
