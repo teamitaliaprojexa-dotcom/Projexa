@@ -1935,14 +1935,36 @@
         // === GOOGLE CALENDAR INTEGRATION ===
         const GOOGLE_CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
         let meetingsRefreshInterval = null;
+        let cachedAccessToken = null;
 
-        // Recupera il token OAuth da localStorage
+        // Recupera il token OAuth da URL o localStorage
         function getGoogleAccessToken() {
-            const user = localStorage.getItem('user');
-            if (!user) return null;
-            
-            const userData = JSON.parse(user);
-            return userData.access_token || null;
+            // Se abbiamo già in cache, usa quello
+            if (cachedAccessToken) return cachedAccessToken;
+
+            // Leggi dai parametri URL (passati dal login)
+            const params = new URLSearchParams(window.location.search);
+            const tokenFromUrl = params.get('access_token');
+            if (tokenFromUrl) {
+                cachedAccessToken = tokenFromUrl;
+                return tokenFromUrl;
+            }
+
+            // Fallback: leggi da localStorage
+            try {
+                const user = localStorage.getItem('user');
+                if (!user) return null;
+                const userData = JSON.parse(user);
+                const token = userData.access_token || userData.token;
+                if (token) {
+                    cachedAccessToken = token;
+                    return token;
+                }
+            } catch (e) {
+                console.warn('⚠️ Tracking Prevention: localStorage non accessibile');
+            }
+
+            return null;
         }
 
         // Carica gli eventi di oggi da Google Calendar
