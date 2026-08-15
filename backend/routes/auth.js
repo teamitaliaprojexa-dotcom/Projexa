@@ -1,6 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import db from '../config/database.js';
 
 const router = express.Router();
@@ -160,12 +161,14 @@ router.get('/google-callback', async (req, res) => {
     let user = await db.query('SELECT * FROM users WHERE email = $1', [email]);
 
     if (user.rows.length === 0) {
-      // Crea nuovo utente
+      // Crea nuovo utente con hash password casuale (Google non fornisce password)
+      const randomHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
+      
       const result = await db.query(
-        `INSERT INTO users (email, name, created_at)
-         VALUES ($1, $2, NOW())
+        `INSERT INTO users (email, name, password_hash, created_at)
+         VALUES ($1, $2, $3, NOW())
          RETURNING id, email, name`,
-        [email, name]
+        [email, name, randomHash]
       );
       user = result;
     } else {
