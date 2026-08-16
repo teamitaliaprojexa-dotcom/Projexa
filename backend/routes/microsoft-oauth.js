@@ -46,13 +46,13 @@ router.get('/microsoft-callback', async (req, res) => {
     // Verifica errore da Microsoft
     if (error) {
       console.error(`[MICROSOFT_AUTH] Error from Microsoft: ${error} - ${error_description}`);
-      return res.redirect(`/sito/?error=${encodeURIComponent(error_description || error)}`);
+      return res.redirect(`/?error=${encodeURIComponent(error_description || error)}`);
     }
 
     // Verifica che abbiamo il code
     if (!code) {
       console.error('[MICROSOFT_AUTH] No authorization code received');
-      return res.redirect('/sito/?error=missing_code');
+      return res.redirect('/?error=missing_code');
     }
 
     console.log('[MICROSOFT_AUTH] Exchanging code for access_token...');
@@ -76,7 +76,7 @@ router.get('/microsoft-callback', async (req, res) => {
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
       console.error(`[MICROSOFT_AUTH] Token exchange failed: ${tokenResponse.status}`, errorText);
-      return res.redirect(`/sito/?error=token_exchange_failed`);
+      return res.redirect(`/?error=token_exchange_failed`);
     }
 
     const tokenData = await tokenResponse.json();
@@ -84,7 +84,7 @@ router.get('/microsoft-callback', async (req, res) => {
 
     if (!accessToken) {
       console.error('[MICROSOFT_AUTH] No access_token in response');
-      return res.redirect('/sito/?error=no_access_token');
+      return res.redirect('/?error=no_access_token');
     }
 
     console.log('[MICROSOFT_AUTH] ✓ Access token received');
@@ -99,7 +99,7 @@ router.get('/microsoft-callback', async (req, res) => {
 
     if (!userResponse.ok) {
       console.error(`[MICROSOFT_AUTH] Failed to fetch user info: ${userResponse.status}`);
-      return res.redirect('/sito/?error=user_info_failed');
+      return res.redirect('/?error=user_info_failed');
     }
 
     const userData = await userResponse.json();
@@ -214,12 +214,12 @@ router.get('/microsoft-callback', async (req, res) => {
     });
 
     console.log(`[MICROSOFT_AUTH] ✓ Authentication successful for ${email}, redirecting to dashboard`);
-    res.redirect(`/sito/dashboard.html?${params.toString()}`);
+    res.redirect(`/dashboard.html?${params.toString()}`);
 
   } catch (error) {
     console.error('❌ MICROSOFT_CALLBACK ERROR:', error.message);
     console.error('Stack:', error.stack);
-    res.redirect(`/sito/?error=${encodeURIComponent(error.message)}`);
+    res.redirect(`/?error=${encodeURIComponent(error.message)}`);
   }
 });
 
