@@ -528,7 +528,7 @@
                 'profile',
                 'Calendars.Read',
                 'Mail.Read'
-            ].join('%20');
+            ].join(' ');
 
             const authUrl = new URL(`https://login.microsoftonline.com/${MICROSOFT_TENANT_ID}/oauth2/v2.0/authorize`);
             authUrl.searchParams.set('client_id', MICROSOFT_CLIENT_ID);
