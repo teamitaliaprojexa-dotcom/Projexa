@@ -972,6 +972,10 @@
                         Riunioni di Oggi
                     </div>
                     <div style="display: flex; gap: 1rem; align-items: center;">
+                        <select id="calendarProviderSelector" style="padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; cursor: pointer; background: white; color: var(--dark); font-weight: 500;">
+                            <option value="google">📅 Google Calendar</option>
+                            <option value="microsoft">📧 Outlook Calendar</option>
+                        </select>
                         <span id="lastSyncTime" style="font-size: 0.8rem; color: var(--text-muted);">Sincronizzazione...</span>
                         <button id="refreshMeetingsBtn" style="padding: 0.5rem 1rem; background: #4285F4; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem; transition: all 0.3s; display: inline-block;">
                             <i class="fas fa-sync"></i> Aggiorna
@@ -1936,15 +1940,18 @@
             }
         }
 
-        // === GOOGLE CALENDAR INTEGRATION ===
+        // === CALENDAR INTEGRATION (Google + Microsoft) ===
         const GOOGLE_CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
+        const MICROSOFT_CALENDAR_API = 'https://graph.microsoft.com/v1.0';
         let meetingsRefreshInterval = null;
-        let cachedAccessToken = null;
+        let cachedGoogleAccessToken = null;
+        let cachedMicrosoftAccessToken = null;
+        let currentCalendarProvider = 'google';
 
-        // Recupera il token OAuth da URL o localStorage
+        // Recupera il token Google OAuth da URL o localStorage
         function getGoogleAccessToken() {
             // Se abbiamo già in cache, usa quello
-            if (cachedAccessToken) return cachedAccessToken;
+            if (cachedGoogleAccessToken) return cachedGoogleAccessToken;
 
             // Leggi dai parametri URL (passati dal login)
             const params = new URLSearchParams(window.location.search);
@@ -1952,8 +1959,8 @@
             if (tokenFromUrl) {
                 // Salva il token in localStorage per usi futuri
                 localStorage.setItem('google_access_token', tokenFromUrl);
-                cachedAccessToken = tokenFromUrl;
-                console.log('[AUTH] Access token salvato da URL e localStorage');
+                cachedGoogleAccessToken = tokenFromUrl;
+                console.log('[AUTH] Google Access token salvato da URL e localStorage');
                 return tokenFromUrl;
             }
 
@@ -1961,8 +1968,8 @@
             try {
                 const storedToken = localStorage.getItem('google_access_token');
                 if (storedToken) {
-                    cachedAccessToken = storedToken;
-                    console.log('[AUTH] Access token letto da localStorage');
+                    cachedGoogleAccessToken = storedToken;
+                    console.log('[AUTH] Google Access token letto da localStorage');
                     return storedToken;
                 }
             } catch (e) {
@@ -1976,7 +1983,7 @@
                 const userData = JSON.parse(user);
                 const token = userData.access_token || userData.token;
                 if (token) {
-                    cachedAccessToken = token;
+                    cachedGoogleAccessToken = token;
                     return token;
                 }
             } catch (e) {
@@ -1986,8 +1993,62 @@
             return null;
         }
 
-        // Carica gli eventi di oggi da Google Calendar
+        // Recupera il token Microsoft OAuth da URL o localStorage
+        function getMicrosoftAccessToken() {
+            // Se abbiamo già in cache, usa quello
+            if (cachedMicrosoftAccessToken) return cachedMicrosoftAccessToken;
+
+            // Leggi dai parametri URL (passati dal login)
+            const params = new URLSearchParams(window.location.search);
+            const tokenFromUrl = params.get('microsoft_access_token');
+            if (tokenFromUrl) {
+                // Salva il token in localStorage per usi futuri
+                localStorage.setItem('microsoft_access_token', tokenFromUrl);
+                cachedMicrosoftAccessToken = tokenFromUrl;
+                console.log('[AUTH] Microsoft Access token salvato da URL e localStorage');
+                return tokenFromUrl;
+            }
+
+            // Leggi da localStorage (se disponibile)
+            try {
+                const storedToken = localStorage.getItem('microsoft_access_token');
+                if (storedToken) {
+                    cachedMicrosoftAccessToken = storedToken;
+                    console.log('[AUTH] Microsoft Access token letto da localStorage');
+                    return storedToken;
+                }
+            } catch (e) {
+                console.warn('⚠️ localStorage non accessibile');
+            }
+
+            // Fallback: leggi da userData (legacy)
+            try {
+                const user = localStorage.getItem('user');
+                if (!user) return null;
+                const userData = JSON.parse(user);
+                const token = userData.microsoft_access_token || userData.microsoft_token;
+                if (token) {
+                    cachedMicrosoftAccessToken = token;
+                    return token;
+                }
+            } catch (e) {
+                console.warn('⚠️ Tracking Prevention: localStorage non accessibile');
+            }
+
+            return null;
+        }
+
+        // Carica gli eventi di oggi dal provider selezionato
         async function loadTodaysMeetings() {
+            if (currentCalendarProvider === 'microsoft') {
+                return await loadMicrosoftCalendarEvents();
+            } else {
+                return await loadGoogleCalendarEvents();
+            }
+        }
+
+        // Carica gli eventi di oggi da Google Calendar
+        async function loadGoogleCalendarEvents() {
             try {
                 const token = getGoogleAccessToken();
                 if (!token) {
@@ -2038,6 +2099,78 @@
 
             } catch (error) {
                 console.warn('⚠️ Google Calendar API Error:', error.message);
+                displayMeetingsError(`Errore nel caricamento: ${error.message}`);
+                return [];
+            }
+        }
+
+        // Carica gli eventi di oggi da Microsoft Outlook Calendar
+        async function loadMicrosoftCalendarEvents() {
+            try {
+                const token = getMicrosoftAccessToken();
+                if (!token) {
+                    displayMeetingsError('Autenticazione Outlook non disponibile. Accedi per vedere le riunioni.');
+                    return [];
+                }
+
+                // Calcola intervallo temporale: da adesso a 24 ore dopo
+                const now = new Date();
+                const tomorrow = new Date(now);
+                tomorrow.setHours(now.getHours() + 24);
+
+                const timeMin = now.toISOString();
+                const timeMax = tomorrow.toISOString();
+
+                // Chiama Microsoft Graph API per gli eventi di oggi
+                const response = await fetch(
+                    `${MICROSOFT_CALENDAR_API}/me/calendarview?` +
+                    `startDateTime=${encodeURIComponent(timeMin)}&` +
+                    `endDateTime=${encodeURIComponent(timeMax)}&` +
+                    `$orderby=start/dateTime`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json'
+                        }
+                    }
+                );
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        throw new Error('Token scaduto o non valido');
+                    }
+                    throw new Error(`API Error: ${response.status}`);
+                }
+
+                const data = await response.json();
+                let events = data.value || [];
+
+                // Converti formato Microsoft in formato Google per compatibilità con updateMeetingsUI
+                const meetings = events.map(event => ({
+                    id: event.id,
+                    summary: event.subject,
+                    start: {
+                        dateTime: event.start.dateTime,
+                        date: event.start.date
+                    },
+                    end: {
+                        dateTime: event.end.dateTime,
+                        date: event.end.date
+                    },
+                    conferenceData: event.onlineMeetingUrl ? {
+                        entryPoints: [{ uri: event.onlineMeetingUrl }]
+                    } : null,
+                    attendees: event.attendees || [],
+                    organizer: event.organizer
+                })).filter(event => event.summary); // Esclude eventi senza titolo
+
+                updateMeetingsUI(meetings);
+                updateSyncTime();
+                return meetings;
+
+            } catch (error) {
+                console.warn('⚠️ Microsoft Calendar API Error:', error.message);
                 displayMeetingsError(`Errore nel caricamento: ${error.message}`);
                 return [];
             }
@@ -2140,6 +2273,17 @@
 
         // Inizializza il caricamento delle riunioni
         async function initMeetings() {
+            // Listener al cambio provider
+            const providerSelector = document.getElementById('calendarProviderSelector');
+            if (providerSelector) {
+                providerSelector.addEventListener('change', async (e) => {
+                    currentCalendarProvider = e.target.value;
+                    console.log(`📅 Provider cambiato a: ${currentCalendarProvider}`);
+                    // Ricarica le riunioni con il nuovo provider
+                    await loadTodaysMeetings();
+                });
+            }
+
             // Prima carica
             await loadTodaysMeetings();
 
