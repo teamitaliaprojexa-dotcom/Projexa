@@ -8,6 +8,7 @@ import db from './config/database.js';
 import authRoutes from './routes/auth.js';
 import microsoftOAuthRoutes from './routes/microsoft-oauth.js';
 import tableStructuresRoutes from './routes/table-structures.js';
+import calendarRoutes from './routes/calendar.js';
 
 dotenv.config();
 
@@ -41,6 +42,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/auth', microsoftOAuthRoutes);
 app.use('/api/table-structures', tableStructuresRoutes);
+app.use('/api/calendar', calendarRoutes);
 
 // Dynamic Generic Table Routes - reads from table_structures
 app.get('/api/data/:table', async (req, res) => {

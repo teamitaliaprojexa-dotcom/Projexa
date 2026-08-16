@@ -2104,7 +2104,7 @@
             }
         }
 
-        // Carica gli eventi di oggi da Microsoft Outlook Calendar
+        // Carica gli eventi di oggi da Microsoft Outlook Calendar (via backend proxy)
         async function loadMicrosoftCalendarEvents() {
             try {
                 const token = getMicrosoftAccessToken();
@@ -2118,18 +2118,19 @@
                 const tomorrow = new Date(now);
                 tomorrow.setHours(now.getHours() + 24);
 
-                const timeMin = now.toISOString();
-                const timeMax = tomorrow.toISOString();
+                const startDateTime = now.toISOString();
+                const endDateTime = tomorrow.toISOString();
 
-                // Chiama Microsoft Graph API per gli eventi di oggi
+                console.log('[CALENDAR] Calling backend proxy for Microsoft Calendar...');
+
+                // Chiama il BACKEND PROXY invece di Microsoft Graph direttamente
                 const response = await fetch(
-                    `${MICROSOFT_CALENDAR_API}/me/calendarview?` +
-                    `startDateTime=${encodeURIComponent(timeMin)}&` +
-                    `endDateTime=${encodeURIComponent(timeMax)}&` +
-                    `$orderby=start/dateTime`,
+                    `/api/calendar/microsoft-events?` +
+                    `token=${encodeURIComponent(token)}&` +
+                    `startDateTime=${encodeURIComponent(startDateTime)}&` +
+                    `endDateTime=${encodeURIComponent(endDateTime)}`,
                     {
                         headers: {
-                            'Authorization': `Bearer ${token}`,
                             'Accept': 'application/json',
                             'Content-Type': 'application/json'
                         }
@@ -2144,7 +2145,9 @@
                 }
 
                 const data = await response.json();
-                let events = data.value || [];
+                let events = data.events || [];
+
+                console.log(`[CALENDAR] ✓ Received ${events.length} Microsoft Calendar events from backend`);
 
                 // Converti formato Microsoft in formato Google per compatibilità con updateMeetingsUI
                 const meetings = events.map(event => ({
@@ -2170,7 +2173,7 @@
                 return meetings;
 
             } catch (error) {
-                console.warn('⚠️ Microsoft Calendar API Error:', error.message);
+                console.warn('⚠️ Microsoft Calendar Error:', error.message);
                 displayMeetingsError(`Errore nel caricamento: ${error.message}`);
                 return [];
             }
