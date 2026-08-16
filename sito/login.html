@@ -391,10 +391,16 @@
                         <span>Oppure continua con</span>
                     </div>
 
-                    <button type="button" class="oauth-btn" onclick="loginWithGoogle()" style="grid-column: 1 / -1; padding: 0.75rem;">
-                        <i class="fab fa-google"></i>
-                        <span>Accedi con Google</span>
-                    </button>
+                    <div class="oauth-buttons">
+                        <button type="button" class="oauth-btn" onclick="loginWithGoogle()">
+                            <i class="fab fa-google"></i>
+                            <span>Google</span>
+                        </button>
+                        <button type="button" class="oauth-btn" onclick="loginWithMicrosoft()">
+                            <i class="fab fa-microsoft"></i>
+                            <span>Microsoft</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -414,6 +420,8 @@
     <script>
         const API_URL = 'https://projexa-4mix.onrender.com/api';
         const GOOGLE_CLIENT_ID = '128379880931-guh70j47lsvplo9m1intpj9tt7escdn8.apps.googleusercontent.com';
+        const MICROSOFT_CLIENT_ID = '9f2bbd57-07ad-4368-83ed-14dd373e86e8';
+        const MICROSOFT_TENANT_ID = '1977b365-a1d3-4119-9f29-e676094eb845';
         const BACKEND_URL = 'https://projexa-4mix.onrender.com';
         
         let selectedTenant = null;
@@ -511,8 +519,26 @@
             }
         }
 
-        function handleMicrosoftSignIn() {
-            alert('Microsoft OAuth richiede configurazione');
+        // Microsoft OAuth Redirect Flow
+        function loginWithMicrosoft() {
+            const redirectUri = `${BACKEND_URL}/api/auth/microsoft-callback`;
+            const scopes = [
+                'openid',
+                'email',
+                'profile',
+                'Calendars.Read',
+                'Mail.Read'
+            ].join('%20');
+
+            const authUrl = new URL(`https://login.microsoftonline.com/${MICROSOFT_TENANT_ID}/oauth2/v2.0/authorize`);
+            authUrl.searchParams.set('client_id', MICROSOFT_CLIENT_ID);
+            authUrl.searchParams.set('redirect_uri', redirectUri);
+            authUrl.searchParams.set('response_type', 'code');
+            authUrl.searchParams.set('scope', scopes);
+            authUrl.searchParams.set('response_mode', 'query');
+            authUrl.searchParams.set('prompt', 'select_account');
+
+            window.location.href = authUrl.toString();
         }
 
         // Google OAuth Redirect Flow
