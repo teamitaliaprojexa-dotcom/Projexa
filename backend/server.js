@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import bcrypt from 'bcrypt';
 import db from './config/database.js';
 import authRoutes from './routes/auth.js';
+import microsoftOAuthRoutes from './routes/microsoft-oauth.js';
 import tableStructuresRoutes from './routes/table-structures.js';
 
 dotenv.config();
@@ -38,6 +39,7 @@ app.get('/api/health', (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/auth', microsoftOAuthRoutes);
 app.use('/api/table-structures', tableStructuresRoutes);
 
 // Dynamic Generic Table Routes - reads from table_structures
