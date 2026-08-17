@@ -418,14 +418,29 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 
     <script>
-        const API_URL = 'https://projexa-4mix.onrender.com/api';
+        // URL auto-rilevati dall'origine corrente: in locale (backend Node su
+        // http://localhost:3001) puntano al locale; su Render puntano a Render.
+        // Nota: per il login Microsoft/Google in locale, il redirect_uri diventa
+        // http://localhost:3001/... e va registrato nell'app registration (Azure/Google).
+        const API_URL = window.location.origin + '/api';
         const GOOGLE_CLIENT_ID = '128379880931-guh70j47lsvplo9m1intpj9tt7escdn8.apps.googleusercontent.com';
         const MICROSOFT_CLIENT_ID = '9f2bbd57-07ad-4368-83ed-14dd373e86e8';
         const MICROSOFT_TENANT_ID = '1977b365-a1d3-4119-9f29-e676094eb845';
-        const BACKEND_URL = 'https://projexa-4mix.onrender.com';
+        const BACKEND_URL = window.location.origin;
         
         let selectedTenant = null;
         let loginData = null;
+
+        // Escaping HTML per evitare XSS quando dati dal server finiscono in innerHTML.
+        function escapeHtml(value) {
+            if (value === null || value === undefined) return '';
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
 
         async function handleEmailLogin(event) {
             event.preventDefault();
@@ -471,10 +486,15 @@
             const modal = document.getElementById('tenantModal');
 
             tenantList.innerHTML = tenants.map(t => `
-                <div class="tenant-option" onclick="setSelectedTenant('${t.id}', this)">
-                    <div style="font-weight: 600; color: #1F2937;">${t.name}</div>
+                <div class="tenant-option" data-tenant-id="${escapeHtml(t.id)}">
+                    <div style="font-weight: 600; color: #1F2937;">${escapeHtml(t.name)}</div>
                 </div>
             `).join('');
+
+            // Aggancio i listener via JS (niente onclick con dati interpolati → no XSS).
+            tenantList.querySelectorAll('.tenant-option').forEach(el => {
+                el.addEventListener('click', () => setSelectedTenant(el.dataset.tenantId, el));
+            });
 
             selectedTenant = null;
             modal.classList.add('active');
@@ -528,7 +548,7 @@
                 'profile',
                 'Calendars.Read',
                 'Mail.Read'
-            ].join('%20');
+            ].join(' ');
 
             const authUrl = new URL(`https://login.microsoftonline.com/${MICROSOFT_TENANT_ID}/oauth2/v2.0/authorize`);
             authUrl.searchParams.set('client_id', MICROSOFT_CLIENT_ID);

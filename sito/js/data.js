@@ -1,5 +1,5 @@
 // Load and display data from API
-const API_URL = 'https://projexa-4mix.onrender.com/api';
+const API_URL = window.location.origin + '/api';
 
 // Get token from session
 function getToken() {

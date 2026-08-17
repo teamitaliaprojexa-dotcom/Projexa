@@ -3,15 +3,21 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import db from '../config/database.js';
+import JWT_SECRET from '../config/jwt.js';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
 
 // === CREDENZIALI MICROSOFT ===
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID;
 const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET;
 const MICROSOFT_TENANT_ID = process.env.MICROSOFT_TENANT_ID;
 const BACKEND_URL = process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
+
+// Costruisce il nome visualizzato: name + " " + cognome (copiata da auth.js).
+// Cognome assente/vuoto => solo il nome, senza spazio finale.
+function buildFullName(user) {
+  return [user.name, user.cognome].filter(Boolean).join(' ').trim() || user.name || '';
+}
 
 // Funzione di controllo scadenza licenza (copiata da auth.js)
 function checkLicenseExpiry(userData) {
@@ -46,13 +52,13 @@ router.get('/microsoft-callback', async (req, res) => {
     // Verifica errore da Microsoft
     if (error) {
       console.error(`[MICROSOFT_AUTH] Error from Microsoft: ${error} - ${error_description}`);
-      return res.redirect(`/sito/?error=${encodeURIComponent(error_description || error)}`);
+      return res.redirect(`/?error=${encodeURIComponent(error_description || error)}`);
     }
 
     // Verifica che abbiamo il code
     if (!code) {
       console.error('[MICROSOFT_AUTH] No authorization code received');
-      return res.redirect('/sito/?error=missing_code');
+      return res.redirect('/?error=missing_code');
     }
 
     console.log('[MICROSOFT_AUTH] Exchanging code for access_token...');
@@ -76,7 +82,7 @@ router.get('/microsoft-callback', async (req, res) => {
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
       console.error(`[MICROSOFT_AUTH] Token exchange failed: ${tokenResponse.status}`, errorText);
-      return res.redirect(`/sito/?error=token_exchange_failed`);
+      return res.redirect(`/?error=token_exchange_failed`);
     }
 
     const tokenData = await tokenResponse.json();
@@ -84,7 +90,7 @@ router.get('/microsoft-callback', async (req, res) => {
 
     if (!accessToken) {
       console.error('[MICROSOFT_AUTH] No access_token in response');
-      return res.redirect('/sito/?error=no_access_token');
+      return res.redirect('/?error=no_access_token');
     }
 
     console.log('[MICROSOFT_AUTH] ✓ Access token received');
@@ -99,7 +105,7 @@ router.get('/microsoft-callback', async (req, res) => {
 
     if (!userResponse.ok) {
       console.error(`[MICROSOFT_AUTH] Failed to fetch user info: ${userResponse.status}`);
-      return res.redirect('/sito/?error=user_info_failed');
+      return res.redirect('/?error=user_info_failed');
     }
 
     const userData = await userResponse.json();
@@ -206,7 +212,7 @@ router.get('/microsoft-callback', async (req, res) => {
     // === STEP 7: Reindirizza al dashboard con i parametri ===
     const params = new URLSearchParams({
       provider: 'microsoft',
-      name: displayName,
+      name: buildFullName(userDbData),
       email: email,
       microsoft_access_token: accessToken,
       jwt_token: jwtToken,
@@ -214,12 +220,12 @@ router.get('/microsoft-callback', async (req, res) => {
     });
 
     console.log(`[MICROSOFT_AUTH] ✓ Authentication successful for ${email}, redirecting to dashboard`);
-    res.redirect(`/sito/dashboard.html?${params.toString()}`);
+    res.redirect(`/dashboard.html?${params.toString()}`);
 
   } catch (error) {
     console.error('❌ MICROSOFT_CALLBACK ERROR:', error.message);
     console.error('Stack:', error.stack);
-    res.redirect(`/sito/?error=${encodeURIComponent(error.message)}`);
+    res.redirect(`/?error=${encodeURIComponent(error.message)}`);
   }
 });
 
@@ -228,8 +234,8 @@ router.get('/microsoft-check', (req, res) => {
   res.json({
     status: 'ok',
     message: 'Microsoft OAuth endpoint is ready',
-    clientId: MICROSOFT_CLIENT_ID.slice(0, 8) + '...',
-    tenantId: MICROSOFT_TENANT_ID.slice(0, 8) + '...',
+    clientId: MICROSOFT_CLIENT_ID ? MICROSOFT_CLIENT_ID.slice(0, 8) + '...' : 'NON CONFIGURATO',
+    tenantId: MICROSOFT_TENANT_ID ? MICROSOFT_TENANT_ID.slice(0, 8) + '...' : 'NON CONFIGURATO',
     redirectUri: `${BACKEND_URL}/api/auth/microsoft-callback`
   });
 });

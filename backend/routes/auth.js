@@ -3,9 +3,17 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import db from '../config/database.js';
+import JWT_SECRET from '../config/jwt.js';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
+
+// ==========================================
+// Costruisce il nome visualizzato: name + " " + cognome.
+// Se il cognome è assente/vuoto restituisce solo il nome (niente spazio finale).
+// ==========================================
+function buildFullName(user) {
+  return [user.name, user.cognome].filter(Boolean).join(' ').trim() || user.name || '';
+}
 
 // ==========================================
 // Funzione di controllo scadenza licenza
@@ -125,7 +133,7 @@ router.post('/login', async (req, res) => {
       user: {
         id: userData.id,
         email: userData.email,
-        name: userData.name,
+        name: buildFullName(userData),
         tenant_name: selectedTenant.name
       },
       tenant: selectedTenant
@@ -299,7 +307,7 @@ router.get('/google-callback', async (req, res) => {
     // Reindirizza al dashboard con i parametri
     const params = new URLSearchParams({
       provider: 'google',
-      name: name,
+      name: buildFullName(userData),
       email: email,
       picture: picture || '',
       access_token: accessToken,
