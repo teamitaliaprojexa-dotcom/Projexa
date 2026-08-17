@@ -1,5 +1,6 @@
 -- ==========================================
 -- PROJEXA v1.0.0 - DATABASE SCHEMA (REAL)
+-----doc Yanko e Fede
 -- PostgreSQL on Neon
 -- ==========================================
 -- This file documents the ACTUAL database structure
