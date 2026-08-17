@@ -1,5 +1,8 @@
 // API Configuration
-const API_URL = 'https://projexa-4mix.onrender.com/api';
+// URL auto-rilevato dall'origine corrente: in locale (servito dal backend Node
+// su http://localhost:3001) punta al backend locale; su Render punta a Render.
+// Stesso codice in entrambi gli ambienti, nessuna modifica da rifare prima del push.
+const API_URL = window.location.origin + '/api';
 
 // State
 let currentUser = null;

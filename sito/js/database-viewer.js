@@ -6,6 +6,17 @@ function getToken() {
   return localStorage.getItem('authToken');
 }
 
+// Escaping HTML per evitare XSS: i dati del DB non sono fidati e vengono inseriti in innerHTML.
+function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Load all table structures from database
 async function loadTableStructures() {
   try {
@@ -131,7 +142,7 @@ async function loadTableData(tableName) {
               <tr style="background-color: var(--gray-100); border-bottom: 2px solid var(--gray-300);">
                 ${columns.map(col => `
                   <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--gray-700);">
-                    ${col}
+                    ${escapeHtml(col)}
                   </th>
                 `).join('')}
                 <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--gray-700);">Azioni</th>
@@ -149,7 +160,7 @@ async function loadTableData(tableName) {
                       value = JSON.stringify(value);
                     }
                     const strValue = String(value).substring(0, 100);
-                    return `<td style="padding: 12px; color: var(--gray-700);">${strValue}</td>`;
+                    return `<td style="padding: 12px; color: var(--gray-700);">${escapeHtml(strValue)}</td>`;
                   }).join('')}
                   <td style="padding: 12px; text-align: center; display: flex; gap: 8px; justify-content: center;">
                     <button class="btn-edit" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #3B82F6;" title="Edit">✏️</button>
@@ -300,15 +311,17 @@ let currentModalColumns = [];
 
 // Create form field (handles foreign keys, boolean fields, and password fields)
 async function createFormField(columnName, value) {
+  const safeColumn = escapeHtml(columnName);
+
   // Check if this is a password field
   if (columnName === 'password' || columnName === 'password_hash') {
-    return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${columnName}</label><input type="password" name="${columnName}" placeholder="Enter password" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"></div>`;
+    return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><input type="password" name="${safeColumn}" placeholder="Enter password" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"></div>`;
   }
 
   // Check if this is a boolean field (starts with is_ or has_)
   if (columnName.startsWith('is_') || columnName.startsWith('has_')) {
     const isChecked = value === true || value === 'true' || value === 1 || value === '1';
-    return `<div style="margin-bottom: 1rem;"><label style="display: flex; align-items: center; gap: 12px; font-weight: 500; cursor: pointer;"><input type="hidden" name="${columnName}" value="false"><input type="checkbox" name="${columnName}" value="true" ${isChecked ? 'checked' : ''} style="width: 20px; height: 20px; cursor: pointer; accent-color: #10B981;"><span>${columnName}</span></label></div>`;
+    return `<div style="margin-bottom: 1rem;"><label style="display: flex; align-items: center; gap: 12px; font-weight: 500; cursor: pointer;"><input type="hidden" name="${safeColumn}" value="false"><input type="checkbox" name="${safeColumn}" value="true" ${isChecked ? 'checked' : ''} style="width: 20px; height: 20px; cursor: pointer; accent-color: #10B981;"><span>${safeColumn}</span></label></div>`;
   }
 
   // Check if this is a foreign key field (ends with _id)
@@ -329,12 +342,12 @@ async function createFormField(columnName, value) {
         const relatedData = await response.json();
         const options = relatedData.map(row => ({
           id: row.id,
-          display: (row.name || row.display_name || row.description || row.title || `Item ${row.id}`).replace(/"/g, '&quot;')
+          display: escapeHtml(row.name || row.display_name || row.description || row.title || `Item ${row.id}`)
         }));
 
-        const optionsHtml = options.map(opt => `<option value="${opt.id}" ${opt.id == value ? 'selected' : ''}>${opt.display}</option>`).join('');
+        const optionsHtml = options.map(opt => `<option value="${escapeHtml(opt.id)}" ${opt.id == value ? 'selected' : ''}>${opt.display}</option>`).join('');
 
-        return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${columnName}</label><select name="${columnName}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"><option value="">-- Seleziona --</option>${optionsHtml}</select></div>`;
+        return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><select name="${safeColumn}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"><option value="">-- Seleziona --</option>${optionsHtml}</select></div>`;
       }
     } catch (error) {
       console.error('Error loading related data:', error);
@@ -342,8 +355,8 @@ async function createFormField(columnName, value) {
   }
 
   // Default: text input
-  const stringValue = String(value || '').replace(/"/g, '&quot;');
-  return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${columnName}</label><input type="text" name="${columnName}" value="${stringValue}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"></div>`;
+  const stringValue = escapeHtml(value);
+  return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><input type="text" name="${safeColumn}" value="${stringValue}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"></div>`;
 }
 
 // Open modal for editing a record
@@ -355,7 +368,9 @@ async function editRecord(tableName, recordId) {
   if (!response.ok) return;
 
   const data = await response.json();
-  const record = data.find(r => r.id === recordId);
+  // recordId arriva da dataset.rowId (stringa); r.id può essere numerico.
+  // Confronto per stringa per evitare il mismatch "5" === 5 → false.
+  const record = data.find(r => String(r.id) === String(recordId));
   if (!record) return;
 
   currentModalTable = tableName;

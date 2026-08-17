@@ -1,5 +1,5 @@
 // Database Viewer
-const API_URL = 'https://projexa-4mix.onrender.com/api';
+const API_URL = window.location.origin + '/api';
 
 function getToken() {
   return localStorage.getItem('authToken');

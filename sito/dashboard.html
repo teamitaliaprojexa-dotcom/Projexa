@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="it">
 <head>
     <meta charset="UTF-8">
@@ -1284,6 +1285,31 @@
     </main>
 
     <script>
+        // === HELPER DI SICUREZZA ===
+        // Esegue l'escaping dei caratteri HTML per evitare XSS quando si inseriscono
+        // dati non fidati (URL, API, calendari) in innerHTML.
+        function escapeHtml(value) {
+            if (value === null || value === undefined) return '';
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        // Restituisce l'URL solo se usa uno schema sicuro (http/https), altrimenti stringa vuota.
+        // Blocca vettori come javascript: e data: negli href/src.
+        function safeUrl(value) {
+            if (!value) return '';
+            try {
+                const url = new URL(value, window.location.origin);
+                return (url.protocol === 'http:' || url.protocol === 'https:') ? url.href : '';
+            } catch (e) {
+                return '';
+            }
+        }
+
         // === GESTIONE UTENTE ===
         function initializeUser() {
             // Leggi da localStorage
@@ -1301,6 +1327,7 @@
             const pictureFromUrl = params.get('picture');
             const genderFromUrl = params.get('gender');
             const provider = params.get('provider');
+            const jwtFromUrl = params.get('jwt_token');
 
             // Merge dei dati (URL ha priorità)
             if (nameFromUrl) userData.name = decodeURIComponent(nameFromUrl);
@@ -1309,11 +1336,27 @@
             if (genderFromUrl) userData.gender = genderFromUrl;
             if (provider) userData.provider = provider;
 
+            // Salva il JWT dell'app (usato per autenticare le chiamate API protette).
+            if (jwtFromUrl) {
+                localStorage.setItem('authToken', jwtFromUrl);
+            }
+
+            // I token (access token OAuth + JWT) arrivano in query string dal redirect di login.
+            // Vengono già letti/salvati; qui li rimuoviamo subito dalla URL per non lasciarli
+            // nella cronologia del browser, nei log o nell'header Referer.
+            if (jwtFromUrl || params.get('access_token') || params.get('microsoft_access_token')) {
+                // getGoogle/MicrosoftAccessToken leggono i token dall'URL: assicuriamoci che
+                // vengano messi in cache/localStorage prima di ripulire la query string.
+                getGoogleAccessToken();
+                getMicrosoftAccessToken();
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+
             // Se non abbiamo dati, mostra un warning
             if (!userData.email && !userData.name) {
                 console.warn('⚠️ Nessun utente autenticato - reindirizzamento a login');
                 setTimeout(() => {
-                    window.location.href = 'login-demo.html';
+                    window.location.href = 'login.html';
                 }, 2000);
                 return;
             }
@@ -1340,12 +1383,13 @@
                 const userName = name || 'Utente';
                 const displayText = tenantName ? `Welcome, ${userName} • ${tenantName}` : `Welcome, ${userName}`;
 
-                // Se c'è una foto, la metto prima del testo
-                if (picture) {
+                // Se c'è una foto (con URL sicuro), la metto prima del testo
+                const safePicture = safeUrl(picture);
+                if (safePicture) {
                     greetingEl.innerHTML = `
                         <div style="display: flex; align-items: center; gap: 1.5rem;">
-                            <img src="${picture}" alt="${userName}" style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover;">
-                            <span>${displayText}</span>
+                            <img src="${escapeHtml(safePicture)}" alt="${escapeHtml(userName)}" style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover;">
+                            <span>${escapeHtml(displayText)}</span>
                         </div>
                     `;
                 } else {
@@ -1383,10 +1427,16 @@
 
         function logout() {
             if (confirm('Sei sicuro di voler effettuare il logout?')) {
+                // Rimuovi TUTTE le credenziali, non solo i dati profilo.
                 localStorage.removeItem('user');
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('google_access_token');
+                localStorage.removeItem('microsoft_access_token');
+                localStorage.removeItem('currentUser');
+                localStorage.removeItem('currentTenant');
                 showNotification('Logout effettuato', 'success');
                 setTimeout(() => {
-                    window.location.href = 'index.html';
+                    window.location.href = 'login.html';
                 }, 1000);
             }
         }
@@ -1783,6 +1833,8 @@
         function applyFiltersAndRender() {
             const filtered = getFilteredTodos();
             document.getElementById('todoTotal').textContent = filtered.length;
+            // Allinea il contatore "visualizzati" a quanti task sono realmente mostrati.
+            document.getElementById('todoCount').textContent = Math.min(currentTodoPage, filtered.length);
             renderTodoList(filtered);
         }
 
@@ -1795,8 +1847,8 @@
                     <input type="checkbox" class="todo-checkbox" data-id="${todo.id}" ${todo.completed ? 'checked' : ''}>
                     <div class="todo-content">
                         <div style="display: flex; align-items: center; gap: 0.5rem; margin-right: auto;">
-                            <div class="todo-title" style="margin: 0;">${todo.title}</div>
-                            <div style="font-size: 0.85rem; color: var(--primary); font-weight: 500; white-space: nowrap;">${todo.client || 'N/A'}</div>
+                            <div class="todo-title" style="margin: 0;">${escapeHtml(todo.title)}</div>
+                            <div style="font-size: 0.85rem; color: var(--primary); font-weight: 500; white-space: nowrap;">${escapeHtml(todo.client || 'N/A')}</div>
                         </div>
                         <div class="todo-meta">
                             <div class="todo-duedate">${new Date(todo.dueDate).toLocaleDateString('it-IT')}</div>
@@ -1856,6 +1908,13 @@
         }
 
         // === PROJECT INTERACTIONS ===
+        // Stub: la funzionalità "prompt" non è ancora implementata in questa pagina.
+        // Definendola qui evitiamo il ReferenceError che bloccava i click sulle card.
+        function sendPrompt(message) {
+            console.log('[sendPrompt]', message);
+            showNotification('Funzionalità in arrivo', 'info');
+        }
+
         document.querySelectorAll('.project-card').forEach(card => {
             card.addEventListener('click', function() {
                 sendPrompt('Mostrami il dettaglio di un progetto: Gantt chart, rischi, action items, email recap');
@@ -1898,27 +1957,42 @@
         }
 
         // === API INTEGRATION ===
-        const API_URL = 'https://projexa-4mix.onrender.com/api';
+        // URL auto-rilevato dall'origine (locale o Render), senza modifiche da rifare.
+        const API_URL = window.location.origin + '/api';
+
+        function getAuthHeaders() {
+            const token = localStorage.getItem('authToken');
+            return token ? { 'Authorization': `Bearer ${token}` } : {};
+        }
 
         async function loadDataFromAPI() {
             try {
-                // Carica progetti
-                const projectsResponse = await fetch(`${API_URL}/projects`);
-                const projects = await projectsResponse.json();
-                console.log('✓ Projects loaded:', projects);
+                const headers = getAuthHeaders();
 
-                // Carica task
-                const tasksResponse = await fetch(`${API_URL}/tasks`);
+                // Carica progetti e task dagli endpoint dati protetti
+                const projectsResponse = await fetch(`${API_URL}/data/projects`, { headers });
+                const tasksResponse = await fetch(`${API_URL}/data/tasks`, { headers });
+
+                // Se le chiamate falliscono (non autenticato, tabella non gestita, ecc.)
+                // restiamo sui dati demo senza rompere la pagina.
+                if (!projectsResponse.ok || !tasksResponse.ok) {
+                    console.warn('⚠️  API dati non disponibile (status projects/tasks:',
+                        projectsResponse.status, '/', tasksResponse.status, ') - uso i dati locali');
+                    return;
+                }
+
+                const projects = await projectsResponse.json();
                 const tasks = await tasksResponse.json();
+                console.log('✓ Projects loaded:', projects);
                 console.log('✓ Tasks loaded:', tasks);
 
                 // Se non ci sono dati, usa i dati di esempio
-                if (projects.length > 0) {
+                if (Array.isArray(projects) && projects.length > 0) {
                     // Aggiorna i dati globali con dati reali
                     window.projectsData = projects;
                 }
 
-                if (tasks.length > 0) {
+                if (Array.isArray(tasks) && tasks.length > 0) {
                     todoData.length = 0; // Svuota i dati di esempio
                     tasks.forEach(task => {
                         todoData.push({
@@ -2123,16 +2197,18 @@
 
                 console.log('[CALENDAR] Calling backend proxy for Microsoft Calendar...');
 
-                // Chiama il BACKEND PROXY invece di Microsoft Graph direttamente
+                // Chiama il BACKEND PROXY invece di Microsoft Graph direttamente.
+                // Il token viaggia nell'header Authorization (non in query string)
+                // per non finire nei log del server / cronologia / Referer.
                 const response = await fetch(
-                    `/api/calendar/microsoft-events?` +
-                    `token=${encodeURIComponent(token)}&` +
+                    `${API_URL}/calendar/microsoft-events?` +
                     `startDateTime=${encodeURIComponent(startDateTime)}&` +
                     `endDateTime=${encodeURIComponent(endDateTime)}`,
                     {
                         headers: {
                             'Accept': 'application/json',
-                            'Content-Type': 'application/json'
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
                         }
                     }
                 );
@@ -2223,28 +2299,31 @@
                 ? `${durationMinutes}m` 
                 : `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`;
 
-            // Estrai attendees
+            // Estrai attendees (gestisce sia il formato Google {email, displayName}
+            // sia quello Microsoft Graph {emailAddress: {name, address}})
             const attendees = event.attendees || [];
-            const attendeesDisplay = attendees.slice(0, 2).map((a, i) => {
-                const name = a.displayName || a.email.split('@')[0];
-                const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-                return `<div class="meeting-attendee-avatar" title="${name}">${initials}</div>`;
+            const attendeesDisplay = attendees.slice(0, 2).map((a) => {
+                const email = a.email || a.emailAddress?.address || '';
+                const name = a.displayName || a.emailAddress?.name || (email ? email.split('@')[0] : 'Ospite');
+                const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?';
+                return `<div class="meeting-attendee-avatar" title="${escapeHtml(name)}">${escapeHtml(initials)}</div>`;
             }).join('');
             const moreAttendees = attendees.length > 2 ? `<span style="font-size: 0.85rem; color: var(--text-muted);">+${attendees.length - 2}</span>` : '';
 
-            // Link alla riunione
-            const meetingLink = event.conferenceData?.entryPoints?.[0]?.uri || event.hangoutLink || null;
-            const meetingLinkBtn = meetingLink 
-                ? `<button class="meeting-link" onclick="window.open('${meetingLink}', '_blank'); return false;"><i class="fas fa-video"></i> Partecipa</button>`
+            // Link alla riunione (solo se URL con schema sicuro)
+            const rawLink = event.conferenceData?.entryPoints?.[0]?.uri || event.hangoutLink || null;
+            const meetingLink = safeUrl(rawLink);
+            const meetingLinkBtn = meetingLink
+                ? `<button class="meeting-link" data-meeting-link="${escapeHtml(meetingLink)}" onclick="window.open(this.dataset.meetingLink, '_blank'); return false;"><i class="fas fa-video"></i> Partecipa</button>`
                 : `<div style="text-align: center; color: var(--text-muted); font-size: 0.9rem;">Nessun link disponibile</div>`;
 
             return `
                 <div class="meeting-card">
                     <div class="meeting-time">
-                        <i class="fas fa-clock"></i> ${timeStr}
+                        <i class="fas fa-clock"></i> ${escapeHtml(timeStr)}
                     </div>
-                    <div class="meeting-title">${event.summary || 'Riunione senza titolo'}</div>
-                    <div class="meeting-duration">${durationStr}</div>
+                    <div class="meeting-title">${escapeHtml(event.summary || 'Riunione senza titolo')}</div>
+                    <div class="meeting-duration">${escapeHtml(durationStr)}</div>
                     <div class="meeting-attendees">
                         ${attendeesDisplay}
                         ${moreAttendees}
