@@ -418,15 +418,16 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 
     <script>
-        // URL auto-rilevati dall'origine corrente: in locale (backend Node su
-        // http://localhost:3001) puntano al locale; su Render puntano a Render.
-        // Nota: per il login Microsoft/Google in locale, il redirect_uri diventa
+        // In locale (localhost) usa l'origine corrente (backend Node che serve anche
+        // il sito); in produzione il frontend è su GitHub Pages, quindi punta al
+        // backend Render. Nota: per OAuth in locale il redirect_uri diventa
         // http://localhost:3001/... e va registrato nell'app registration (Azure/Google).
-        const API_URL = window.location.origin + '/api';
+        const IS_LOCAL_HOST = (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+        const API_URL = (IS_LOCAL_HOST ? location.origin : 'https://projexa-4mix.onrender.com') + '/api';
         const GOOGLE_CLIENT_ID = '128379880931-guh70j47lsvplo9m1intpj9tt7escdn8.apps.googleusercontent.com';
         const MICROSOFT_CLIENT_ID = '9f2bbd57-07ad-4368-83ed-14dd373e86e8';
         const MICROSOFT_TENANT_ID = '1977b365-a1d3-4119-9f29-e676094eb845';
-        const BACKEND_URL = window.location.origin;
+        const BACKEND_URL = IS_LOCAL_HOST ? location.origin : 'https://projexa-4mix.onrender.com';
         
         let selectedTenant = null;
         let loginData = null;

@@ -101,6 +101,25 @@ async function isManagedTable(tableName) {
   return tableCheck.rows.length > 0;
 }
 
+// Admin di sistema (ruolo "Admin" = id_roles 1): bypassa l'isolamento per tenant,
+// così può leggere/scrivere/scegliere qualsiasi tenant dal database-viewer.
+function isAdminUser(req) {
+  return Number(req.user?.id_roles) === 1;
+}
+
+// Chiavi di filtro per identificare la riga "del login" in una tabella di riferimento
+// (usata dai campi settings di tipo 4). Usa le colonne user_id/tenant_id se presenti,
+// altrimenti la PK id per le tabelle users (= utente del login) e tenants (= tenant del login).
+async function referenceKeys(tabella, user) {
+  const cols = await getTableColumns(tabella);
+  const keys = [];
+  if (cols.has('user_id')) keys.push({ col: 'user_id', val: user.user_id });
+  else if (tabella === 'users') keys.push({ col: 'id', val: user.user_id });
+  if (cols.has('tenant_id')) keys.push({ col: 'tenant_id', val: user.tenant_id });
+  else if (tabella === 'tenants') keys.push({ col: 'id', val: user.tenant_id });
+  return keys;
+}
+
 // Dynamic Generic Table Routes - reads from table_structures
 app.get('/api/data/:table', requireAuth, async (req, res) => {
   try {
@@ -110,10 +129,22 @@ app.get('/api/data/:table', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Table not found' });
     }
 
+    // Caso speciale: la tabella "tenants" non ha una colonna tenant_id.
+    // Un non-admin deve vedere SOLO il proprio tenant (la riga con id = tenant del login),
+    // così nell'elenco/select dei tenant non compaiono gli altri. Gli admin li vedono tutti.
+    if (tableName === 'tenants' && !isAdminUser(req)) {
+      const result = await db.query(
+        'SELECT * FROM tenants WHERE id = $1 LIMIT 100',
+        [req.user.tenant_id]
+      );
+      return res.json(stripSensitive(result.rows));
+    }
+
     // Isolamento multi-tenant: se la tabella ha una colonna tenant_id,
     // restituisce solo le righe del tenant dell'utente autenticato.
+    // Gli admin vedono tutti i tenant.
     const columns = await getTableColumns(tableName);
-    if (columns.has('tenant_id')) {
+    if (columns.has('tenant_id') && !isAdminUser(req)) {
       const result = await db.query(
         `SELECT * FROM "${tableName}" WHERE tenant_id = $1 LIMIT 100`,
         [req.user.tenant_id]
@@ -134,6 +165,11 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
     const tableName = assertValidIdentifier(req.params.table);
     let data = { ...req.body };
 
+    // Le stringhe vuote diventano NULL: colonne numeriche/date/boolean non accettano ''.
+    for (const k of Object.keys(data)) {
+      if (data[k] === '') data[k] = null;
+    }
+
     if (!(await isManagedTable(tableName))) {
       return res.status(404).json({ error: 'Table not found' });
     }
@@ -146,10 +182,11 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
       delete data.password; // Remove plain password
     }
 
-    // Isolamento multi-tenant: forza il tenant_id a quello dell'utente autenticato,
-    // ignorando un eventuale valore inviato dal client.
+    // Isolamento multi-tenant: per gli utenti normali forza il tenant_id a quello
+    // del login, ignorando quello inviato dal client. Gli admin possono invece
+    // scegliere liberamente il tenant (mantengono il valore del form).
     const tableColumns = await getTableColumns(tableName);
-    if (tableColumns.has('tenant_id')) {
+    if (tableColumns.has('tenant_id') && !isAdminUser(req)) {
       data.tenant_id = req.user.tenant_id;
     }
 
@@ -177,6 +214,11 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
     const id = req.params.id;
     let data = { ...req.body };
 
+    // Le stringhe vuote diventano NULL: colonne numeriche/date/boolean non accettano ''.
+    for (const k of Object.keys(data)) {
+      if (data[k] === '') data[k] = null;
+    }
+
     if (!(await isManagedTable(tableName))) {
       return res.status(404).json({ error: 'Table not found' });
     }
@@ -189,9 +231,13 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       delete data.password; // Remove plain password
     }
 
-    // Non permettere al client di riassegnare il tenant_id di un record.
+    // Gli utenti non-admin non possono riassegnare il tenant_id di un record;
+    // gli admin sì (mantengono il valore inviato dal form).
     const tableColumns = await getTableColumns(tableName);
-    delete data.tenant_id;
+    const admin = isAdminUser(req);
+    if (!admin) {
+      delete data.tenant_id;
+    }
 
     const columns = Object.keys(data).map(assertValidIdentifier);
     if (columns.length === 0) {
@@ -200,10 +246,10 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
     const updates = columns.map((col, i) => `"${col}" = $${i + 1}`).join(', ');
     const values = [...columns.map((col) => data[col]), id];
 
-    // Isolamento multi-tenant: se la tabella ha tenant_id, l'update tocca
-    // solo i record del tenant dell'utente autenticato.
+    // Isolamento multi-tenant per i non-admin: l'update tocca solo i record del
+    // proprio tenant. Gli admin possono modificare record di qualsiasi tenant.
     let whereClause = `id = $${columns.length + 1}`;
-    if (tableColumns.has('tenant_id')) {
+    if (tableColumns.has('tenant_id') && !admin) {
       values.push(req.user.tenant_id);
       whereClause += ` AND tenant_id = $${columns.length + 2}`;
     }
@@ -231,11 +277,12 @@ app.delete('/api/data/:table/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Table not found' });
     }
 
-    // Isolamento multi-tenant: si possono cancellare solo i record del proprio tenant.
+    // Isolamento multi-tenant: i non-admin cancellano solo i record del proprio
+    // tenant; gli admin possono cancellare record di qualsiasi tenant.
     const tableColumns = await getTableColumns(tableName);
     let query = `DELETE FROM "${tableName}" WHERE id = $1 RETURNING *`;
     const values = [id];
-    if (tableColumns.has('tenant_id')) {
+    if (tableColumns.has('tenant_id') && !isAdminUser(req)) {
       query = `DELETE FROM "${tableName}" WHERE id = $1 AND tenant_id = $2 RETURNING *`;
       values.push(req.user.tenant_id);
     }
@@ -247,6 +294,348 @@ app.delete('/api/data/:table/:id', requireAuth, async (req, res) => {
     }
 
     res.json({ message: 'Record deleted', data: stripSensitive(result.rows)[0] });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Import in sospeso per utente: userKey -> { client, timer }.
+// La transazione resta aperta finché l'utente non fa commit/rollback (o scade il timeout).
+const activeImports = new Map();
+
+function takePendingImport(userKey) {
+  const entry = activeImports.get(userKey);
+  if (!entry) return null;
+  clearTimeout(entry.timer);
+  activeImports.delete(userKey);
+  return entry.client;
+}
+
+// IMPORT - Upsert di più righe (da CSV), in ANTEPRIMA: elabora i dati in una
+// transazione aperta e restituisce i conteggi, SENZA salvare. L'utente deve poi
+// confermare (/api/data/import/commit) o annullare (/api/data/import/rollback).
+// Per ogni riga:
+//  - se contiene un id esistente -> UPDATE; se l'id non esiste -> INSERT con quell'id;
+//  - se l'id non è presente -> INSERT con id generato automaticamente.
+app.post('/api/data/:table/import', requireAuth, async (req, res) => {
+  try {
+    const tableName = assertValidIdentifier(req.params.table);
+
+    if (!(await isManagedTable(tableName))) {
+      return res.status(404).json({ error: 'Table not found' });
+    }
+
+    const rows = req.body && req.body.rows;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: 'Nessun dato da importare' });
+    }
+
+    const tableColumns = await getTableColumns(tableName);
+    const admin = isAdminUser(req);
+    const userKey = req.user.user_id || req.user.email;
+
+    // Se c'era già un import in sospeso per l'utente, annullalo prima di iniziarne uno nuovo
+    const prev = takePendingImport(userKey);
+    if (prev) {
+      try { await prev.query('ROLLBACK'); } catch (e) { /* ignore */ }
+      prev.release();
+    }
+
+    const client = await db.connect();
+    let inserted = 0, updated = 0, skipped = 0;
+    const errors = [];
+
+    try {
+      await client.query('BEGIN');
+
+      for (let i = 0; i < rows.length; i++) {
+        try {
+          let data = { ...rows[i] };
+
+          // Stringhe vuote -> NULL; scarta le colonne non presenti nella tabella
+          for (const k of Object.keys(data)) {
+            if (data[k] === '') data[k] = null;
+            if (!tableColumns.has(k)) delete data[k];
+          }
+
+          // Hash della password se presente
+          if (data.password || data.password_hash) {
+            const pw = data.password || data.password_hash;
+            data.password_hash = await bcrypt.hash(pw, 10);
+            delete data.password;
+          }
+
+          // Isolamento tenant per i non-admin
+          if (tableColumns.has('tenant_id') && !admin) {
+            data.tenant_id = req.user.tenant_id;
+          }
+
+          const hasId = data.id !== undefined && data.id !== null && data.id !== '';
+          if (!hasId) delete data.id;
+
+          const columns = Object.keys(data).map(assertValidIdentifier);
+          if (columns.length === 0) {
+            errors.push({ row: i + 1, error: 'Riga vuota' });
+            continue;
+          }
+          const values = columns.map((c) => data[c]);
+          const placeholders = columns.map((_, idx) => `$${idx + 1}`).join(', ');
+          const quotedCols = columns.map((c) => `"${c}"`).join(', ');
+
+          await client.query('SAVEPOINT sp_import');
+          try {
+            if (hasId) {
+              const updateCols = columns.filter((c) => c !== 'id');
+              let query, params;
+              if (updateCols.length > 0) {
+                const setClause = updateCols.map((c) => `"${c}" = EXCLUDED."${c}"`).join(', ');
+                const setExtra = tableColumns.has('updated_at') ? ', updated_at = CURRENT_TIMESTAMP' : '';
+                params = values;
+                let conflictWhere = '';
+                if (tableColumns.has('tenant_id') && !admin) {
+                  // I non-admin non possono aggiornare righe di altri tenant
+                  conflictWhere = ` WHERE "${tableName}".tenant_id = $${columns.length + 1}`;
+                  params = [...values, req.user.tenant_id];
+                }
+                query = `INSERT INTO "${tableName}" (${quotedCols}) VALUES (${placeholders})
+                         ON CONFLICT (id) DO UPDATE SET ${setClause}${setExtra}${conflictWhere}
+                         RETURNING (xmax = 0) AS inserted`;
+              } else {
+                query = `INSERT INTO "${tableName}" (${quotedCols}) VALUES (${placeholders})
+                         ON CONFLICT (id) DO NOTHING RETURNING (xmax = 0) AS inserted`;
+                params = values;
+              }
+              const r = await client.query(query, params);
+              if (r.rows.length === 0) skipped++;          // conflitto ma escluso (altro tenant) o DO NOTHING
+              else if (r.rows[0].inserted) inserted++;
+              else updated++;
+            } else {
+              await client.query(
+                `INSERT INTO "${tableName}" (${quotedCols}) VALUES (${placeholders}) RETURNING id`,
+                values
+              );
+              inserted++;
+            }
+            await client.query('RELEASE SAVEPOINT sp_import');
+          } catch (dbErr) {
+            await client.query('ROLLBACK TO SAVEPOINT sp_import');
+            throw dbErr;
+          }
+        } catch (rowErr) {
+          errors.push({ row: i + 1, error: rowErr.message });
+        }
+      }
+
+      // NON committare: lascia la transazione aperta in attesa di conferma dell'utente.
+      // Auto-rollback di sicurezza dopo 5 minuti se non arriva commit/rollback.
+      const timer = setTimeout(async () => {
+        const c = takePendingImport(userKey);
+        if (c) {
+          try { await c.query('ROLLBACK'); } catch (e) { /* ignore */ }
+          c.release();
+        }
+      }, 5 * 60 * 1000);
+      activeImports.set(userKey, { client, timer });
+    } catch (txErr) {
+      try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
+      client.release();
+      throw txErr;
+    }
+
+    res.json({ inserted, updated, skipped, errors, pending: true });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Conferma (COMMIT) dell'import in sospeso per l'utente
+app.post('/api/data/import/commit', requireAuth, async (req, res) => {
+  const userKey = req.user.user_id || req.user.email;
+  const client = takePendingImport(userKey);
+  if (!client) {
+    return res.status(400).json({ error: 'Nessun import in sospeso da confermare' });
+  }
+  try {
+    await client.query('COMMIT');
+    res.json({ message: 'Import confermato e salvato' });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Annulla (ROLLBACK) dell'import in sospeso per l'utente
+app.post('/api/data/import/rollback', requireAuth, async (req, res) => {
+  const userKey = req.user.user_id || req.user.email;
+  const client = takePendingImport(userKey);
+  if (!client) {
+    return res.status(400).json({ error: 'Nessun import in sospeso da annullare' });
+  }
+  try {
+    await client.query('ROLLBACK');
+    res.json({ message: 'Import annullato, nessuna modifica salvata' });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ==========================================
+// SETTINGS ENDPOINTS
+// ==========================================
+
+// Elenco degli "argument" distinti per l'utente + tenant del token di login.
+// Equivale a: SELECT DISTINCT argument FROM settings WHERE tenant_id = ? AND user_id = ?
+app.get('/api/settings/arguments', requireAuth, async (req, res) => {
+  try {
+    // Livello di privilegio dell'utente (id_roles più basso = più privilegi).
+    // Mostra solo gli argomenti con almeno una riga il cui id_roles >= quello dell'utente
+    // (oppure id_roles NULL = nessuna restrizione).
+    const uid = Number(req.user.id_roles);
+    const roleLevel = Number.isFinite(uid) ? uid : 9999;
+    const result = await db.query(
+      `SELECT argument
+       FROM settings
+       WHERE tenant_id = $1 AND user_id = $2 AND argument IS NOT NULL
+         AND (id_roles IS NULL OR id_roles >= $3)
+       GROUP BY argument
+       ORDER BY MIN(ordinamento) NULLS LAST, argument`,
+      [req.user.tenant_id, req.user.user_id, roleLevel]
+    );
+    res.json(result.rows.map(r => r.argument));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Elenco clienti (valore2) per l'utente + tenant del token di login.
+// Equivale a: SELECT DISTINCT valore2 FROM clients
+//   WHERE argument='Cliente' AND campo='Cliente' AND tenant_id=? AND user_id=?
+app.get('/api/clients/names', requireAuth, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT DISTINCT valore2
+       FROM clients
+       WHERE argument = 'Cliente' AND campo = 'Cliente'
+         AND tenant_id = $1 AND user_id = $2 AND valore2 IS NOT NULL
+       ORDER BY valore2`,
+      [req.user.tenant_id, req.user.user_id]
+    );
+    res.json(result.rows.map(r => r.valore2));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Dettaglio delle righe (settings o clients) per un dato "argument", filtrate per
+// tenant e utente del token. Il :source è vincolato a settings|clients dalla route.
+app.get('/api/:source(settings|clients)/details', requireAuth, async (req, res) => {
+  try {
+    const table = req.params.source;
+    const { argument } = req.query;
+    if (!argument) {
+      return res.status(400).json({ error: 'Parametro argument richiesto' });
+    }
+    // Filtro per privilegio: mostra solo i campi il cui id_roles >= id_roles dell'utente
+    // (id_roles più basso = più privilegi), oppure id_roles NULL = nessuna restrizione.
+    const uid = Number(req.user.id_roles);
+    const roleLevel = Number.isFinite(uid) ? uid : 9999;
+    const result = await db.query(
+      `SELECT * FROM "${table}"
+       WHERE argument = $1 AND tenant_id = $2 AND user_id = $3
+         AND (id_roles IS NULL OR id_roles >= $4)
+       ORDER BY ordinamento NULLS LAST, campo`,
+      [argument, req.user.tenant_id, req.user.user_id, roleLevel]
+    );
+
+    // Per i campi di tipo 4 risolve il valore leggendolo dalla tabella/colonna di
+    // riferimento, sulla riga del login (WHERE su user_id/tenant_id o PK id).
+    const rows = result.rows;
+    for (const row of rows) {
+      if (Number(row.tipo_valore) === 4 && row.tabella && row.colonna) {
+        try {
+          assertValidIdentifier(row.tabella);
+          assertValidIdentifier(row.colonna);
+          const keys = await referenceKeys(row.tabella, req.user);
+          const where = keys.length
+            ? 'WHERE ' + keys.map((k, i) => `"${k.col}" = $${i + 1}`).join(' AND ')
+            : '';
+          const ref = await db.query(
+            `SELECT "${row.colonna}" AS v FROM "${row.tabella}" ${where} LIMIT 1`,
+            keys.map(k => k.val)
+          );
+          row.resolved_value = ref.rows[0] ? ref.rows[0].v : null;
+        } catch (e) {
+          row.resolved_value = null;
+        }
+      }
+    }
+
+    res.json(stripSensitive(rows));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Salvataggio di un campo di tipo 4 (riferimento a un'altra tabella) per settings o clients.
+// Prima di scrivere il valore nella tabella di riferimento, verifica che non esista già
+// nella colonna <colonna> della tabella <tabella> indicate nella riga (settings/clients).
+app.put('/api/:source(settings|clients)/:id/reference-value', requireAuth, async (req, res) => {
+  try {
+    const table = req.params.source;
+    const { id } = req.params;
+    const { value } = req.body;
+
+    // Carica la riga (settings/clients) dell'utente per leggere tabella/colonna
+    const s = await db.query(
+      `SELECT tabella, colonna FROM "${table}" WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+      [id, req.user.tenant_id, req.user.user_id]
+    );
+    if (s.rows.length === 0) {
+      return res.status(404).json({ error: 'Impostazione non trovata' });
+    }
+
+    const { tabella, colonna } = s.rows[0];
+    if (!tabella || !colonna) {
+      return res.status(400).json({ error: 'Tabella o colonna non definite per questa impostazione' });
+    }
+
+    // Valida gli identificatori prima di interpolarli (anti SQL injection)
+    assertValidIdentifier(tabella);
+    assertValidIdentifier(colonna);
+
+    // Individua la riga del login nella tabella di riferimento
+    const keys = await referenceKeys(tabella, req.user);
+    if (keys.length === 0) {
+      return res.status(400).json({ error: 'Impossibile identificare la riga di riferimento (mancano user_id/tenant_id)' });
+    }
+    const whereConds = keys.map((k, i) => `"${k.col}" = $${i + 2}`).join(' AND ');
+    const keyValues = keys.map(k => k.val);
+
+    // Controllo di unicità: il valore non deve già esistere in un'ALTRA riga di
+    // tabella.colonna (la riga corrente del login è esclusa dal controllo).
+    if (value !== null && value !== undefined && value !== '') {
+      const dup = await db.query(
+        `SELECT 1 FROM "${tabella}" WHERE "${colonna}" = $1 AND NOT (${whereConds}) LIMIT 1`,
+        [value, ...keyValues]
+      );
+      if (dup.rows.length > 0) {
+        return res.status(409).json({ error: 'Valore già esistente nel database' });
+      }
+    }
+
+    // Scrive il valore nella tabella di riferimento, sulla riga del login
+    const upd = await db.query(
+      `UPDATE "${tabella}" SET "${colonna}" = $1 WHERE ${whereConds} RETURNING "${colonna}" AS v`,
+      [value === '' ? null : value, ...keyValues]
+    );
+    if (upd.rows.length === 0) {
+      return res.status(404).json({ error: 'Riga di riferimento non trovata' });
+    }
+
+    res.json({ message: 'Salvato', value: upd.rows[0].v });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }

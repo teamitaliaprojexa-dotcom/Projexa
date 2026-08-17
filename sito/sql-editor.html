@@ -285,8 +285,11 @@
     </div>
 
     <script>
-        // URL auto-rilevato dall'origine (locale o Render), senza modifiche da rifare.
-        const API_URL = window.location.origin + '/api';
+        // In locale (localhost) usa l'origine corrente; in produzione il frontend è
+        // su GitHub Pages, quindi punta al backend Render. Stesso codice ovunque.
+        const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+          ? location.origin
+          : 'https://projexa-4mix.onrender.com') + '/api';
         let editor;
         let transactionActive = false;
         let lastQueryResults = null;

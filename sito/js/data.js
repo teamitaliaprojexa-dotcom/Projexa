@@ -1,5 +1,7 @@
 // Load and display data from API
-const API_URL = window.location.origin + '/api';
+const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+  ? location.origin
+  : 'https://projexa-4mix.onrender.com') + '/api';
 
 // Get token from session
 function getToken() {

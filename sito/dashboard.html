@@ -50,6 +50,8 @@
             border-right: 1px solid var(--border);
             overflow-y: auto;
             z-index: 100;
+            display: flex;
+            flex-direction: column;
         }
 
         .sidebar-header {
@@ -147,6 +149,9 @@
         .sidebar-menu {
             padding: 1rem 0;
             list-style: none;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
         }
 
         .sidebar-menu li {
@@ -184,6 +189,190 @@
             border-top: 1px solid var(--border);
             background: white;
             display: none;
+        }
+
+        /* Pannello a comparsa delle Impostazioni (apertura fluida da sinistra a destra) */
+        .settings-flyout {
+            position: fixed;
+            left: 250px;            /* bordo destro della sidebar */
+            top: 0;                 /* parte dall'alto come la sidebar */
+            height: 100vh;
+            width: 0;
+            overflow: hidden;
+            transition: width 0.3s ease;
+            z-index: 300;
+            pointer-events: none;
+        }
+
+        .nav-settings.open .settings-flyout,
+        .nav-clients.open .settings-flyout {
+            width: 300px;
+            pointer-events: auto;
+        }
+
+        .settings-flyout-inner {
+            width: 300px;
+            height: 100vh;            /* alto quanto la sidebar */
+            overflow-y: auto;
+            background: white;
+            border: 1px solid var(--border);
+            border-left: none;
+            border-radius: 0;
+            box-shadow: 4px 0 20px rgba(0,0,0,0.14);
+            padding: 1.5rem 1.25rem;  /* contenuto che parte dall'alto */
+            transition: background 0.3s ease;
+        }
+
+        /* Quando è aperto il secondo flyout, il primo passa in grigio chiaro
+           (il flyout attivo resta bianco). */
+        .nav-settings.detail-open .settings-flyout-inner,
+        .nav-clients.detail-open .settings-flyout-inner {
+            background: #f3f4f6;
+        }
+
+        .settings-flyout-title {
+            font-weight: 600;
+            color: var(--dark);
+            margin-bottom: 0.75rem;
+        }
+
+        .settings-flyout ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .settings-flyout ul li {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border);
+            color: var(--dark);
+            font-size: 0.9rem;
+            white-space: normal;
+        }
+
+        .settings-flyout ul li:last-child {
+            border-bottom: none;
+        }
+
+        .settings-flyout ul li[data-argument],
+        .settings-flyout ul li[data-client] {
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .settings-flyout ul li[data-argument]:hover,
+        .settings-flyout ul li[data-client]:hover {
+            color: var(--primary);
+        }
+
+        /* Secondo flyout: dettaglio dei campi dell'argomento selezionato */
+        .settings-detail-flyout {
+            position: fixed;
+            left: 550px;            /* subito a destra del primo flyout (250 + 300) */
+            top: 0;
+            height: 100vh;
+            width: 0;
+            overflow: hidden;
+            transition: width 0.3s ease;
+            z-index: 300;
+            pointer-events: none;
+        }
+
+        .settings-detail-flyout.open {
+            width: 360px;
+            pointer-events: auto;
+        }
+
+        .settings-detail-flyout-inner {
+            width: 360px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            border: 1px solid var(--border);
+            border-left: none;
+            box-shadow: 4px 0 20px rgba(0,0,0,0.14);
+            padding: 1.5rem 1.25rem;
+        }
+
+        #settingsDetailList {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .settings-detail-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .settings-detail-row .campo-label {
+            font-size: 0.9rem;
+            color: var(--dark);
+            word-break: break-word;
+        }
+
+        .settings-detail-row input[type="text"],
+        .settings-detail-row input[type="number"] {
+            width: 150px;
+            padding: 6px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: inherit;
+        }
+
+        /* Niente frecce su/giù nei campi numerici */
+        .settings-detail-row input[type="number"]::-webkit-outer-spin-button,
+        .settings-detail-row input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        .settings-detail-row input[type="number"] {
+            -moz-appearance: textfield;
+            appearance: textfield;
+        }
+
+        /* Interruttore a levetta (toggle) per i campi booleani */
+        .settings-detail-row .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+            flex: 0 0 auto;
+        }
+        .settings-detail-row .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            margin: 0;
+        }
+        .settings-detail-row .toggle-slider {
+            position: absolute;
+            inset: 0;
+            cursor: pointer;
+            background: #ccc;
+            border-radius: 24px;
+            transition: background 0.25s;
+        }
+        .settings-detail-row .toggle-slider::before {
+            content: "";
+            position: absolute;
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.25s;
+        }
+        .settings-detail-row .toggle-switch input:checked + .toggle-slider {
+            background: #10B981;
+        }
+        .settings-detail-row .toggle-switch input:checked + .toggle-slider::before {
+            transform: translateX(20px);
         }
 
         .user-profile {
@@ -237,7 +426,7 @@
 
         .header {
             background: white;
-            padding: 2rem 1.5rem;
+            padding: 1.4rem 1.5rem;
             border-bottom: 1px solid var(--border);
             margin-bottom: 2rem;
         }
@@ -250,7 +439,7 @@
         }
 
         .header-title h1 {
-            font-size: 2rem;
+            font-size: 1rem;
             margin-bottom: 0.25rem;
         }
 
@@ -868,7 +1057,7 @@
     <!-- SIDEBAR -->
     <aside class="sidebar">
         <div class="sidebar-header">
-            <img src="../Logo_Projexa.png" alt="Projexa" style="height: 36px; width: auto;">
+            <img src="Logo_Projexa.png" alt="Projexa" style="height: 40px; width: auto; flex: 0 0 auto;">
             <div class="sidebar-logo">Projexa</div>
             <button id="sidebarToggle" class="sidebar-toggle" title="Riduci/Espandi">
                 <i class="fas fa-chevron-left"></i>
@@ -877,12 +1066,32 @@
 
         <ul class="sidebar-menu">
             <li><a href="#" class="active"><i class="fas fa-home"></i> <span>Dashboard</span></a></li>
+            <li class="nav-clients" style="position: relative;">
+                <a href="#"><i class="fas fa-users"></i> <span>Clienti</span></a>
+                <div class="settings-flyout">
+                    <div class="settings-flyout-inner">
+                        <div class="settings-flyout-title">Clienti</div>
+                        <ul id="clientsList">
+                            <li style="color: var(--text-muted); border: none;">Caricamento…</li>
+                        </ul>
+                    </div>
+                </div>
+            </li>
             <li><a href="#"><i class="fas fa-folder"></i> <span>I miei progetti</span></a></li>
-            <li><a href="#"><i class="fas fa-star"></i> <span>Preferiti</span></a></li>
-            <li><a href="#"><i class="fas fa-clock"></i> <span>Recenti</span></a></li>
             <li><a href="#"><i class="fas fa-trash"></i> <span>Archivio</span></a></li>
-            <li><a href="database-viewer.html"><i class="fas fa-database"></i> <span>Database</span></a></li>
-            <li style="border: none; margin-top: 2rem;"><a href="#"><i class="fas fa-cog"></i> <span>Impostazioni</span></a></li>
+            <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
+            <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><i class="fas fa-database"></i> <span>Database</span></a></li>
+            <li class="nav-settings" style="border: none; position: relative;">
+                <a href="#"><i class="fas fa-cog"></i> <span>Impostazioni</span></a>
+                <div class="settings-flyout">
+                    <div class="settings-flyout-inner">
+                        <div class="settings-flyout-title">Impostazioni</div>
+                        <ul id="settingsArgumentsList">
+                            <li style="color: var(--text-muted); border: none;">Caricamento…</li>
+                        </ul>
+                    </div>
+                </div>
+            </li>
         </ul>
 
         <div class="sidebar-footer">
@@ -896,13 +1105,23 @@
         </div>
     </aside>
 
+    <!-- Flyout di dettaglio condiviso (Impostazioni / Clienti) -->
+    <div class="settings-detail-flyout" id="settingsDetailFlyout">
+        <div class="settings-detail-flyout-inner">
+            <div class="settings-flyout-title" id="settingsDetailTitle">Dettaglio</div>
+            <div id="settingsDetailList"></div>
+            <div id="settingsDetailSaveBar" style="display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;">
+                <button id="settingsDetailSaveBtn" style="width: 100%; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button>
+            </div>
+        </div>
+    </div>
+
     <!-- MAIN CONTENT -->
     <main class="main">
         <div class="header">
             <div class="header-top">
                 <div class="header-title">
                     <h1 id="greeting">Benvenuta, Federica! 👋</h1>
-                    <p>Qui puoi gestire tutti i tuoi progetti con Projexa</p>
                 </div>
                 <div class="header-actions">
                     <div class="search-box">
@@ -1364,8 +1583,8 @@
             // Aggiorna il profilo nella sidebar
             updateUserProfile(userData);
 
-            // Aggiorna il saluto dinamico con foto e tenant
-            updateGreeting(userData.name, userData.picture, userData.tenant_name);
+            // Aggiorna il saluto dinamico con foto, email, tenant e ruolo (dal token)
+            updateGreeting(userData.name, userData.picture, userData.tenant_name, userData.email, decodeJwtPayload().role_name);
 
             // Aggiungi pulsante logout in alto a destra
             addLogoutButton();
@@ -1376,24 +1595,32 @@
             return userData;
         }
 
-        // Aggiorna il saluto basato sul nome e tenant
-        function updateGreeting(name, picture, tenantName) {
+        // Aggiorna il saluto: riga 1 "Welcome, Nome Cognome", riga 2 email, riga 3 tenant, riga 4 ruolo.
+        function updateGreeting(name, picture, tenantName, email, roleName) {
             const greetingEl = document.getElementById('greeting');
             if (greetingEl) {
                 const userName = name || 'Utente';
-                const displayText = tenantName ? `Welcome, ${userName} • ${tenantName}` : `Welcome, ${userName}`;
 
-                // Se c'è una foto (con URL sicuro), la metto prima del testo
+                // Righe sotto (email, tenant, ruolo): più piccole e attenuate, ognuna a capo.
+                const subLineStyle = 'display: block; font-size: 0.8rem; font-weight: 400; color: var(--text-muted); margin-top: 0.15rem;';
+                let subLines = '';
+                if (email) subLines += `<span style="${subLineStyle}">${escapeHtml(email)}</span>`;
+                if (tenantName) subLines += `<span style="${subLineStyle}">${escapeHtml(tenantName)}</span>`;
+                if (roleName) subLines += `<span style="${subLineStyle}">${escapeHtml(roleName)}</span>`;
+
+                const textBlock = `<span style="display: block;">Welcome, ${escapeHtml(userName)}</span>${subLines}`;
+
+                // Se c'è una foto (con URL sicuro), la metto a fianco del blocco di testo.
                 const safePicture = safeUrl(picture);
                 if (safePicture) {
                     greetingEl.innerHTML = `
                         <div style="display: flex; align-items: center; gap: 1.5rem;">
                             <img src="${escapeHtml(safePicture)}" alt="${escapeHtml(userName)}" style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover;">
-                            <span>${escapeHtml(displayText)}</span>
+                            <div>${textBlock}</div>
                         </div>
                     `;
                 } else {
-                    greetingEl.textContent = displayText;
+                    greetingEl.innerHTML = textBlock;
                 }
             }
         }
@@ -1957,8 +2184,11 @@
         }
 
         // === API INTEGRATION ===
-        // URL auto-rilevato dall'origine (locale o Render), senza modifiche da rifare.
-        const API_URL = window.location.origin + '/api';
+        // In locale (localhost) usa l'origine corrente; in produzione il frontend è
+        // su GitHub Pages, quindi punta al backend Render. Stesso codice ovunque.
+        const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+          ? location.origin
+          : 'https://projexa-4mix.onrender.com') + '/api';
 
         function getAuthHeaders() {
             const token = localStorage.getItem('authToken');
@@ -2386,9 +2616,277 @@
             }
         }
 
+        // Decodifica il payload del JWT (authToken) per leggere i claim (ruolo, ecc.).
+        function decodeJwtPayload() {
+            const token = localStorage.getItem('authToken');
+            if (!token) return {};
+            try {
+                const part = token.split('.')[1];
+                const json = decodeURIComponent(escape(atob(part.replace(/-/g, '+').replace(/_/g, '/'))));
+                return JSON.parse(json);
+            } catch (e) {
+                return {};
+            }
+        }
+
+        // Mostra la voce "Database" nella sidebar solo agli admin.
+        // Il ruolo "Admin" corrisponde a id_roles === 1 nella tabella roles
+        // (la colonna user_tenants.role_id è inaffidabile: a volte UUID, a volte testo).
+        function applyRoleVisibility() {
+            const claims = decodeJwtPayload();
+            const isAdmin = Number(claims.id_roles) === 1;
+            const dbNav = document.getElementById('navDatabase');
+            if (dbNav) {
+                dbNav.style.display = isAdmin ? '' : 'none';
+            }
+        }
+
+        // Carica nel pannello Impostazioni gli "argument" distinti dalla tabella settings,
+        // filtrati per tenant e utente del login (il backend usa i valori del token).
+        async function loadSettingsArguments() {
+            const listEl = document.getElementById('settingsArgumentsList');
+            if (!listEl) return;
+            try {
+                const res = await fetch(`${API_URL}/settings/arguments`, { headers: getAuthHeaders() });
+                if (!res.ok) {
+                    listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore nel caricamento</li>';
+                    return;
+                }
+                const args = await res.json();
+                if (!Array.isArray(args) || args.length === 0) {
+                    listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Nessuna impostazione</li>';
+                    return;
+                }
+                listEl.innerHTML = args.map(a => `<li data-argument="${escapeHtml(a)}">${escapeHtml(a)}</li>`).join('');
+                listEl.querySelectorAll('li[data-argument]').forEach(li => {
+                    li.addEventListener('click', () => openDetailFlyout('settings', li.dataset.argument));
+                });
+            } catch (e) {
+                listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore di connessione</li>';
+            }
+        }
+
+        // Carica nel flyout Clienti le Ragioni Sociali (query su clients, filtrata per tenant+utente del login).
+        async function loadClientsNames() {
+            const listEl = document.getElementById('clientsList');
+            if (!listEl) return;
+            try {
+                const res = await fetch(`${API_URL}/clients/names`, { headers: getAuthHeaders() });
+                if (!res.ok) {
+                    listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore nel caricamento</li>';
+                    return;
+                }
+                const names = await res.json();
+                if (!Array.isArray(names) || names.length === 0) {
+                    listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Nessun cliente</li>';
+                    return;
+                }
+                listEl.innerHTML = names.map(n => `<li data-client="${escapeHtml(n)}">${escapeHtml(n)}</li>`).join('');
+                listEl.querySelectorAll('li[data-client]').forEach(li => {
+                    li.addEventListener('click', () => openDetailFlyout('clients', li.dataset.client));
+                });
+            } catch (e) {
+                listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore di connessione</li>';
+            }
+        }
+
+        // Apre il secondo flyout con i dettagli (campo + valore) dell'argomento cliccato.
+        // Sorgente corrente del flyout di dettaglio: 'settings' oppure 'clients'
+        let currentDetailSource = 'settings';
+
+        // Chiude tutti i flyout (primo livello e dettaglio)
+        function closeAllFlyouts() {
+            document.querySelector('.nav-settings')?.classList.remove('open', 'detail-open');
+            document.querySelector('.nav-clients')?.classList.remove('open', 'detail-open');
+            document.getElementById('settingsDetailFlyout')?.classList.remove('open');
+        }
+
+        // Apre il flyout di dettaglio per la sorgente indicata (settings o clients),
+        // filtrando per l'argument/cliente selezionato.
+        async function openDetailFlyout(source, argument) {
+            currentDetailSource = source;
+            const flyout = document.getElementById('settingsDetailFlyout');
+            const titleEl = document.getElementById('settingsDetailTitle');
+            const listEl = document.getElementById('settingsDetailList');
+            if (!flyout || !listEl) return;
+
+            titleEl.textContent = argument;
+            listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
+            const saveBar = document.getElementById('settingsDetailSaveBar');
+            if (saveBar) saveBar.style.display = 'none';
+            flyout.classList.add('open');
+            // Il primo flyout attivo (Impostazioni o Clienti) diventa grigio chiaro
+            document.querySelector('.nav-settings')?.classList.toggle('detail-open', source === 'settings');
+            document.querySelector('.nav-clients')?.classList.toggle('detail-open', source === 'clients');
+
+            try {
+                const res = await fetch(`${API_URL}/${source}/details?argument=${encodeURIComponent(argument)}`, { headers: getAuthHeaders() });
+                if (!res.ok) {
+                    listEl.innerHTML = '<div style="color: var(--text-muted);">Errore nel caricamento</div>';
+                    return;
+                }
+                const rows = await res.json();
+                if (!Array.isArray(rows) || rows.length === 0) {
+                    listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>';
+                    return;
+                }
+                listEl.innerHTML = rows.map(renderSettingRow).join('');
+                // Ad ogni modifica: segna il campo come "da salvare" e mostra il pulsante Salva.
+                listEl.querySelectorAll('[data-setting-id]').forEach(inp => {
+                    const onEdit = () => {
+                        inp.dataset.dirty = '1';
+                        if (saveBar) saveBar.style.display = 'block';
+                    };
+                    inp.addEventListener('input', onEdit);
+                    inp.addEventListener('change', onEdit);
+                });
+            } catch (e) {
+                listEl.innerHTML = '<div style="color: var(--text-muted);">Errore di connessione</div>';
+            }
+        }
+
+        // Renderizza una riga: "campo" a sinistra, input del valore a destra in base a tipo_valore.
+        function renderSettingRow(row) {
+            const campo = escapeHtml(row.campo || '');
+            const tipo = Number(row.tipo_valore);
+            const id = escapeHtml(row.id);
+            let input;
+
+            if (tipo === 1) {
+                // Booleano modificabile -> valore1, mostrato come interruttore a levetta (toggle)
+                const checked = (row.valore1 === true || row.valore1 === 'true' || row.valore1 === 't') ? 'checked' : '';
+                input = `<label class="toggle-switch"><input type="checkbox" data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>`;
+            } else if (tipo === 2) {
+                // Alfanumerico modificabile -> valore2
+                input = `<input type="text" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(row.valore2 == null ? '' : row.valore2)}">`;
+            } else if (tipo === 3) {
+                // Numerico intero modificabile -> valore3
+                input = `<input type="number" step="1" data-setting-id="${id}" data-field="valore3" value="${escapeHtml(row.valore3 == null ? '' : row.valore3)}">`;
+            } else if (tipo === 4) {
+                // Riferimento a un'altra tabella: mostra il valore letto da tabella.colonna
+                // (risolto dal backend). Testo editabile; salvataggio col pulsante "Salva"
+                // che scrive nella tabella di riferimento previo controllo di unicità.
+                input = `<input type="text" data-setting-id="${id}" data-type4="1" value="${escapeHtml(row.resolved_value == null ? '' : row.resolved_value)}">`;
+            } else {
+                input = `<span style="color: var(--text-muted);">—</span>`;
+            }
+
+            return `<div class="settings-detail-row"><span class="campo-label">${campo}</span>${input}</div>`;
+        }
+
+        // Salva i campi di tipo 4 modificati: il backend controlla l'unicità del valore
+        // nella tabella/colonna di riferimento prima di scriverlo.
+        async function saveDetailChanges() {
+            const listEl = document.getElementById('settingsDetailList');
+            const saveBar = document.getElementById('settingsDetailSaveBar');
+            if (!listEl) return;
+            const dirty = listEl.querySelectorAll('[data-setting-id][data-dirty="1"]');
+            let allOk = true;
+
+            for (const inp of dirty) {
+                const id = inp.dataset.settingId;
+                try {
+                    if (inp.dataset.type4 === '1') {
+                        // Tipo 4: scrive nella tabella di riferimento con controllo di unicità
+                        const res = await fetch(`${API_URL}/${currentDetailSource}/${id}/reference-value`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                            body: JSON.stringify({ value: inp.value })
+                        });
+                        if (res.status === 409) {
+                            allOk = false;
+                            inp.style.borderColor = '#EF4444';
+                            showNotification('Valore già esistente, scegline un altro', 'info');
+                        } else if (!res.ok) {
+                            allOk = false;
+                            showNotification('Errore nel salvataggio', 'info');
+                        } else {
+                            delete inp.dataset.dirty;
+                            inp.style.borderColor = '';
+                        }
+                    } else {
+                        // Tipi 1/2/3: aggiorna la colonna valoreN della riga
+                        const field = inp.dataset.field;
+                        let value;
+                        if (inp.type === 'checkbox') value = inp.checked;
+                        else if (inp.type === 'number') value = inp.value === '' ? null : parseInt(inp.value, 10);
+                        else value = inp.value;
+
+                        const res = await fetch(`${API_URL}/data/${currentDetailSource}/${id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                            body: JSON.stringify({ [field]: value })
+                        });
+                        if (!res.ok) {
+                            allOk = false;
+                            showNotification('Errore nel salvataggio', 'info');
+                        } else {
+                            delete inp.dataset.dirty;
+                        }
+                    }
+                } catch (e) {
+                    allOk = false;
+                    showNotification('Errore di connessione', 'info');
+                }
+            }
+
+            if (allOk) {
+                if (saveBar) saveBar.style.display = 'none';
+                showNotification('Salvato', 'success');
+            }
+        }
+
+        // Gestione del settings-flyout: si apre al passaggio del mouse e resta aperto
+        // (non si richiude all'uscita del mouse); si chiude solo quando si clicca
+        // un'altra voce della sidebar diversa da "Impostazioni".
+        function initSettingsFlyout() {
+            const navSettings = document.querySelector('.nav-settings');
+            const sidebarMenu = document.querySelector('.sidebar-menu');
+            if (!navSettings || !sidebarMenu) return;
+
+            const saveBtn = document.getElementById('settingsDetailSaveBtn');
+            if (saveBtn) saveBtn.addEventListener('click', saveDetailChanges);
+
+            // Apre al passaggio del mouse; se era attivo il flyout Clienti lo chiude col suo dettaglio
+            navSettings.addEventListener('mouseenter', () => {
+                const nc = document.querySelector('.nav-clients');
+                if (nc && nc.classList.contains('open')) {
+                    nc.classList.remove('open', 'detail-open');
+                    document.getElementById('settingsDetailFlyout')?.classList.remove('open');
+                }
+                navSettings.classList.add('open');
+            });
+
+            // Click su una voce della sidebar fuori da entrambi i flyout -> chiude tutto
+            sidebarMenu.addEventListener('click', (e) => {
+                if (!e.target.closest('.nav-settings') && !e.target.closest('.nav-clients')) {
+                    closeAllFlyouts();
+                }
+            });
+        }
+
+        // Flyout Clienti: si apre al passaggio del mouse; se era attivo Impostazioni lo chiude col dettaglio.
+        function initClientsFlyout() {
+            const navClients = document.querySelector('.nav-clients');
+            if (!navClients) return;
+            navClients.addEventListener('mouseenter', () => {
+                const ns = document.querySelector('.nav-settings');
+                if (ns && ns.classList.contains('open')) {
+                    ns.classList.remove('open', 'detail-open');
+                    document.getElementById('settingsDetailFlyout')?.classList.remove('open');
+                }
+                navClients.classList.add('open');
+            });
+        }
+
         // === INITIALIZATION ===
         window.addEventListener('DOMContentLoaded', async () => {
             initializeUser();
+            applyRoleVisibility();
+            loadSettingsArguments();
+            loadClientsNames();
+            initSettingsFlyout();
+            initClientsFlyout();
             initSidebarToggle();
 
             // Carica dati dalle API

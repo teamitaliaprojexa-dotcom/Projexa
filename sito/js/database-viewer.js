@@ -17,6 +17,112 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+// Parser CSV: gestisce campi tra virgolette (con virgole/newline interni e "" per l'apice),
+// rileva il delimitatore (',' o ';') e usa la prima riga come intestazione.
+// Ritorna un array di oggetti { intestazione: valore }.
+function parseCsv(text) {
+  text = text.replace(/^﻿/, ''); // rimuove eventuale BOM
+  const nl = text.indexOf('\n');
+  const firstLine = nl === -1 ? text : text.slice(0, nl);
+  const delim = firstLine.split(';').length > firstLine.split(',').length ? ';' : ',';
+
+  const records = [];
+  let field = '', row = [], inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === delim) { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); records.push(row); row = []; field = ''; }
+      else if (c === '\r') { /* ignora */ }
+      else field += c;
+    }
+  }
+  if (field !== '' || row.length > 0) { row.push(field); records.push(row); }
+  if (records.length === 0) return [];
+
+  const headers = records[0].map(h => h.trim());
+  const objs = [];
+  for (let r = 1; r < records.length; r++) {
+    const rec = records[r];
+    if (rec.length === 1 && rec[0].trim() === '') continue; // salta righe vuote
+    const obj = {};
+    headers.forEach((h, idx) => { obj[h] = rec[idx] !== undefined ? rec[idx] : ''; });
+    objs.push(obj);
+  }
+  return objs;
+}
+
+// Import CSV con upsert (insert se nuovo, update se l'id esiste già).
+function importCsv(tableName) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv,text/csv';
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+
+    let rows;
+    try {
+      rows = parseCsv(await file.text());
+    } catch (e) {
+      alert('Impossibile leggere il file: ' + e.message);
+      return;
+    }
+    if (!rows || rows.length === 0) {
+      alert('Il file CSV è vuoto o non contiene righe valide.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/data/${tableName}/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
+        body: JSON.stringify({ rows })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        alert('Errore nell\'import: ' + (result.error || response.status));
+        return;
+      }
+
+      // Anteprima: i dati NON sono ancora salvati, serve conferma (commit) o annullamento (rollback)
+      let msg = `Anteprima import (NON ancora salvato):\n- ${result.inserted} inseriti\n- ${result.updated} aggiornati`;
+      if (result.skipped) msg += `\n- ${result.skipped} saltati`;
+      if (result.errors && result.errors.length) {
+        msg += `\n- ${result.errors.length} errori (riga ${result.errors[0].row}: ${result.errors[0].error})`;
+      }
+      msg += `\n\nOK = CONFERMA e salva (Commit)\nAnnulla = ANNULLA senza salvare (Rollback)`;
+      const doCommit = confirm(msg);
+      const endpoint = doCommit ? 'commit' : 'rollback';
+
+      try {
+        const fin = await fetch(`${API_URL}/data/import/${endpoint}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        const finRes = await fin.json();
+        if (fin.ok) {
+          alert(doCommit ? 'Modifiche confermate e salvate.' : 'Import annullato: nessuna modifica salvata.');
+          if (doCommit) await loadTableData(tableName);
+        } else {
+          alert('Errore: ' + (finRes.error || fin.status));
+        }
+      } catch (e) {
+        alert('Errore di connessione durante la conferma: ' + e.message);
+      }
+    } catch (e) {
+      alert('Errore di connessione: ' + e.message);
+    }
+  };
+  input.click();
+}
+
 // Load all table structures from database
 async function loadTableStructures() {
   try {
@@ -102,6 +208,7 @@ async function selectTable(tableId) {
   buttonsDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 20px;';
   buttonsDiv.innerHTML = `
     <button onclick="newRecord('${table.table_name}')" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
+    <button onclick="importCsv('${table.table_name}')" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Import CSV</button>
   `;
   tableData.insertBefore(buttonsDiv, tableData.firstChild);
 
@@ -127,7 +234,14 @@ async function loadTableData(tableName) {
       const data = await response.json();
 
       if (!data || data.length === 0) {
-        tableContent.innerHTML = '<div class="empty-state"><p>No data in this table</p></div>';
+        // Preserva i pulsanti (New/Import) anche quando la tabella è vuota
+        const buttons = tableContent.querySelector('.table-action-buttons');
+        tableContent.innerHTML = '';
+        if (buttons) tableContent.appendChild(buttons);
+        const emptyDiv = document.createElement('div');
+        emptyDiv.className = 'empty-state';
+        emptyDiv.innerHTML = '<p>No data in this table</p>';
+        tableContent.appendChild(emptyDiv);
         return;
       }
 
@@ -164,6 +278,7 @@ async function loadTableData(tableName) {
                   }).join('')}
                   <td style="padding: 12px; text-align: center; display: flex; gap: 8px; justify-content: center;">
                     <button class="btn-edit" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #3B82F6;" title="Edit">✏️</button>
+                    <button class="btn-duplicate" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #10B981;" title="Duplica">📋</button>
                     <button class="btn-delete" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #EF4444;" title="Delete">✕</button>
                   </td>
                 </tr>
@@ -188,6 +303,13 @@ async function loadTableData(tableName) {
           const rowId = btn.closest('tr').dataset.rowId;
           console.log(`Edit clicked: table=${tableName}, id=${rowId}`);
           editRecord(tableName, rowId);
+        });
+      });
+
+      tableDiv.querySelectorAll('.btn-duplicate').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const rowId = btn.closest('tr').dataset.rowId;
+          duplicateRecord(tableName, rowId);
         });
       });
 
@@ -297,6 +419,7 @@ async function loadTableStructuresTable() {
   buttonsDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 20px;';
   buttonsDiv.innerHTML = `
     <button onclick="newRecord('table_structures')" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
+    <button onclick="importCsv('table_structures')" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Import CSV</button>
   `;
   tableData.insertBefore(buttonsDiv, tableData.firstChild);
 
@@ -352,6 +475,22 @@ async function createFormField(columnName, value) {
     } catch (error) {
       console.error('Error loading related data:', error);
     }
+  }
+
+  // Campi data: usa un selettore data (input type="date") così il valore è sempre
+  // nel formato AAAA-MM-GG accettato dal database. Riconosce nomi tipo "data_*",
+  // "scadenza", "*_data"/"*_date".
+  if (columnName === 'scadenza' || /^data(_|$)/i.test(columnName) || /(^|_)(data|date)(_|$)/i.test(columnName)) {
+    let dateVal = '';
+    if (value) {
+      const d = new Date(value);
+      if (!isNaN(d.getTime())) {
+        dateVal = d.toISOString().slice(0, 10);
+      } else if (/^\d{4}-\d{2}-\d{2}/.test(String(value))) {
+        dateVal = String(value).slice(0, 10);
+      }
+    }
+    return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><input type="date" name="${safeColumn}" value="${escapeHtml(dateVal)}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"></div>`;
   }
 
   // Default: text input
@@ -412,6 +551,67 @@ async function editRecord(tableName, recordId) {
         if (response.ok) {
           const roles = await response.json();
           const selectedRole = roles.find(r => r.id == selectedRoleId);
+          if (selectedRole && selectedRole.id_roles) {
+            idRolesInput.value = selectedRole.id_roles;
+          }
+        }
+      } catch (error) {
+        console.error('Error loading role details:', error);
+      }
+    });
+  }
+}
+
+// Apri la modale pre-compilata con i valori della riga, ma salvando come NUOVO record.
+async function duplicateRecord(tableName, recordId) {
+  const response = await fetch(`${API_URL}/data/${tableName}`, {
+    headers: { 'Authorization': `Bearer ${getToken()}` }
+  });
+
+  if (!response.ok) return;
+
+  const data = await response.json();
+  const record = data.find(r => String(r.id) === String(recordId));
+  if (!record) return;
+
+  currentModalTable = tableName;
+  currentModalRecordId = null; // null => al salvataggio esegue POST (crea un nuovo record)
+
+  // Stesse colonne dell'edit, escluse quelle di sistema
+  const hiddenColumns = ['id', 'created_by', 'created_at', 'updated_at'];
+  currentModalColumns = Object.keys(record).filter(col => !hiddenColumns.includes(col));
+
+  document.getElementById('modalTitle').textContent = 'Duplica Record';
+
+  const formFields = document.getElementById('formFields');
+  let htmlContent = '';
+
+  for (const col of currentModalColumns) {
+    htmlContent += await createFormField(col, record[col] || '');
+  }
+
+  formFields.innerHTML = htmlContent;
+  document.getElementById('recordModal').style.display = 'flex';
+
+  // Auto-popola id_roles quando cambia role_id (come nelle altre modali)
+  const roleSelect = document.querySelector('select[name="role_id"]');
+  const idRolesInput = document.querySelector('input[name="id_roles"]');
+
+  if (roleSelect && idRolesInput) {
+    roleSelect.addEventListener('change', async (e) => {
+      const selectedRoleId = e.target.value;
+      if (!selectedRoleId) {
+        idRolesInput.value = '';
+        return;
+      }
+
+      try {
+        const r = await fetch(`${API_URL}/data/roles`, {
+          headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        if (r.ok) {
+          const roles = await r.json();
+          const selectedRole = roles.find(x => x.id == selectedRoleId);
           if (selectedRole && selectedRole.id_roles) {
             idRolesInput.value = selectedRole.id_roles;
           }

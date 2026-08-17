@@ -265,6 +265,66 @@ CREATE TABLE email_recaps (
 -- user_tenants → users (user_id)
 -- user_tenants → tenants (tenant_id)
 -- user_tenants → roles (id_roles)
+-- settings → tenants (tenant_id)
+-- settings → users (user_id)
+-- settings → roles (id_roles)
+-- clients → tenants (tenant_id)
+-- clients → users (user_id)
+-- clients → roles (id_roles)
+
+-- ==========================================
+-- SETTINGS TABLE
+-- ==========================================
+-- Nomi in snake_case minuscolo: non serve citarli tra apici nelle query.
+-- tenant_id abilita l'isolamento automatico per tenant degli endpoint /api/data.
+CREATE TABLE settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL,          -- FK -> tenants.id
+  user_id UUID NOT NULL,            -- FK -> users.id
+  argument VARCHAR(255),            -- argomento (alfanumerico)
+  campo VARCHAR(255),               -- alfanumerico
+  valore1 BOOLEAN,                  -- booleano
+  valore2 VARCHAR(255),             -- alfanumerico
+  valore3 INTEGER,                  -- numerico intero
+  tabella VARCHAR(255),             -- alfanumerico
+  colonna VARCHAR(255),             -- alfanumerico
+  tipo_valore VARCHAR(255),         -- alfanumerico
+  id_roles SMALLINT,                -- FK -> roles.id_roles
+  data_inizio DATE,                 -- data
+  scadenza DATE,                    -- data
+  ordinamento INTEGER,              -- numerico intero (ordine di visualizzazione)
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (id_roles) REFERENCES roles(id_roles)
+);
+
+-- ==========================================
+-- CLIENTS TABLE (stessa struttura e nomi di settings)
+-- ==========================================
+CREATE TABLE clients (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL,          -- FK -> tenants.id
+  user_id UUID NOT NULL,            -- FK -> users.id
+  argument VARCHAR(255),
+  campo VARCHAR(255),
+  valore1 BOOLEAN,
+  valore2 VARCHAR(255),
+  valore3 INTEGER,
+  tabella VARCHAR(255),
+  colonna VARCHAR(255),
+  tipo_valore VARCHAR(255),
+  id_roles SMALLINT,                -- FK -> roles.id_roles
+  data_inizio DATE,
+  scadenza DATE,
+  ordinamento INTEGER,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (id_roles) REFERENCES roles(id_roles)
+);
 
 -- ==========================================
 -- INDEXES
@@ -285,6 +345,18 @@ CREATE INDEX idx_risks_project_id ON risks(project_id);
 CREATE INDEX idx_stakeholders_project_id ON stakeholders(project_id);
 CREATE INDEX idx_activity_logs_tenant_id ON activity_logs(tenant_id);
 CREATE INDEX idx_table_structures_active ON table_structures(is_active);
+CREATE INDEX idx_settings_tenant_id ON settings(tenant_id);
+CREATE INDEX idx_settings_user_id ON settings(user_id);
+CREATE INDEX idx_settings_tenant_user ON settings(tenant_id, user_id);
+CREATE INDEX idx_settings_data_inizio ON settings(data_inizio);
+CREATE INDEX idx_settings_scadenza ON settings(scadenza);
+CREATE INDEX idx_settings_id_roles ON settings(id_roles);
+CREATE INDEX idx_clients_tenant_id ON clients(tenant_id);
+CREATE INDEX idx_clients_user_id ON clients(user_id);
+CREATE INDEX idx_clients_tenant_user ON clients(tenant_id, user_id);
+CREATE INDEX idx_clients_data_inizio ON clients(data_inizio);
+CREATE INDEX idx_clients_scadenza ON clients(scadenza);
+CREATE INDEX idx_clients_id_roles ON clients(id_roles);
 
 -- ==========================================
 -- ARCHITECTURE NOTES

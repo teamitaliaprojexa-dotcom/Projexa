@@ -115,13 +115,26 @@ router.post('/login', async (req, res) => {
       }
     }
 
+    // Recupera il ruolo dell'utente per il tenant selezionato (usato per i permessi UI)
+    const roleRes = await db.query(
+      `SELECT ut.role_id, ut.id_roles, r.name AS role_name
+       FROM user_tenants ut
+       LEFT JOIN roles r ON r.id_roles = ut.id_roles
+       WHERE ut.user_id = $1 AND ut.tenant_id = $2 LIMIT 1`,
+      [userData.id, selectedTenant.id]
+    );
+    const userRole = roleRes.rows[0] || {};
+
     // Generate JWT token
     const token = jwt.sign(
       {
         user_id: userData.id,
         email: userData.email,
         tenant_id: selectedTenant.id,
-        tenant_name: selectedTenant.name
+        tenant_name: selectedTenant.name,
+        role_id: userRole.role_id,
+        id_roles: userRole.id_roles,
+        role_name: userRole.role_name
       },
       JWT_SECRET,
       { expiresIn: '24h' }
@@ -292,13 +305,26 @@ router.get('/google-callback', async (req, res) => {
 
     const selectedTenant = tenants.rows[0];
 
+    // Recupera il ruolo dell'utente per il tenant selezionato (usato per i permessi UI)
+    const roleRes = await db.query(
+      `SELECT ut.role_id, ut.id_roles, r.name AS role_name
+       FROM user_tenants ut
+       LEFT JOIN roles r ON r.id_roles = ut.id_roles
+       WHERE ut.user_id = $1 AND ut.tenant_id = $2 LIMIT 1`,
+      [userData.id, selectedTenant.id]
+    );
+    const userRole = roleRes.rows[0] || {};
+
     // Genera JWT token
     const jwtToken = jwt.sign(
       {
         user_id: userData.id,
         email: userData.email,
         tenant_id: selectedTenant.id,
-        tenant_name: selectedTenant.name
+        tenant_name: selectedTenant.name,
+        role_id: userRole.role_id,
+        id_roles: userRole.id_roles,
+        role_name: userRole.role_name
       },
       JWT_SECRET,
       { expiresIn: '24h' }
