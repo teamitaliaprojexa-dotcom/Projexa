@@ -90,6 +90,24 @@ async function getTableColumns(tableName) {
   return columns;
 }
 
+// Colonne GENERATE (GENERATED ALWAYS AS ... STORED): non sono scrivibili, vanno
+// escluse da INSERT/UPDATE altrimenti Postgres rifiuta la query. Cache per tabella.
+const generatedColumnsCache = new Map();
+
+async function getGeneratedColumns(tableName) {
+  if (generatedColumnsCache.has(tableName)) {
+    return generatedColumnsCache.get(tableName);
+  }
+  const result = await db.query(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = $1 AND is_generated = 'ALWAYS'`,
+    [tableName]
+  );
+  const columns = new Set(result.rows.map((r) => r.column_name));
+  generatedColumnsCache.set(tableName, columns);
+  return columns;
+}
+
 // Verifica che la tabella richiesta sia gestita (presente in table_structures)
 // oppure sia la tabella di sistema table_structures. Restituisce true/false.
 async function isManagedTable(tableName) {
@@ -121,6 +139,8 @@ async function referenceKeys(tabella, user) {
 }
 
 // Dynamic Generic Table Routes - reads from table_structures
+// Supporta filtri per colonna: qualsiasi query param con chiave = nome di una colonna
+// filtra quella colonna con ILIKE %valore% (case-insensitive, ricerca parziale).
 app.get('/api/data/:table', requireAuth, async (req, res) => {
   try {
     const tableName = assertValidIdentifier(req.params.table);
@@ -129,31 +149,73 @@ app.get('/api/data/:table', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Table not found' });
     }
 
-    // Caso speciale: la tabella "tenants" non ha una colonna tenant_id.
-    // Un non-admin deve vedere SOLO il proprio tenant (la riga con id = tenant del login),
-    // così nell'elenco/select dei tenant non compaiono gli altri. Gli admin li vedono tutti.
-    if (tableName === 'tenants' && !isAdminUser(req)) {
-      const result = await db.query(
-        'SELECT * FROM tenants WHERE id = $1 LIMIT 100',
-        [req.user.tenant_id]
-      );
-      return res.json(stripSensitive(result.rows));
-    }
-
-    // Isolamento multi-tenant: se la tabella ha una colonna tenant_id,
-    // restituisce solo le righe del tenant dell'utente autenticato.
-    // Gli admin vedono tutti i tenant.
     const columns = await getTableColumns(tableName);
-    if (columns.has('tenant_id') && !isAdminUser(req)) {
-      const result = await db.query(
-        `SELECT * FROM "${tableName}" WHERE tenant_id = $1 LIMIT 100`,
-        [req.user.tenant_id]
-      );
-      return res.json(stripSensitive(result.rows));
+    const admin = isAdminUser(req);
+    const conditions = [];
+    const params = [];
+
+    // Filtri per colonna (dal query string)
+    for (const [key, val] of Object.entries(req.query)) {
+      if (columns.has(key) && val != null && String(val) !== '') {
+        assertValidIdentifier(key);
+        params.push('%' + String(val) + '%');
+        conditions.push(`"${key}"::text ILIKE $${params.length}`);
+      }
     }
 
-    const result = await db.query(`SELECT * FROM "${tableName}" LIMIT 100`);
+    // Isolamento multi-tenant per i non-admin
+    if (!admin) {
+      if (tableName === 'tenants') {
+        // "tenants" non ha tenant_id: il proprio tenant è la riga con id = tenant del login
+        params.push(req.user.tenant_id);
+        conditions.push(`id = $${params.length}`);
+      } else if (columns.has('tenant_id')) {
+        params.push(req.user.tenant_id);
+        conditions.push(`tenant_id = $${params.length}`);
+      }
+    }
+
+    const whereClause = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+    const result = await db.query(`SELECT * FROM "${tableName}" ${whereClause} LIMIT 100`, params);
     res.json(stripSensitive(result.rows));
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Metadati colonne di una tabella gestita: nome + flag "generated" (colonna calcolata,
+// non scrivibile). Serve al database-viewer per costruire il form New anche con tabella
+// vuota e per escludere/segnalare le colonne generate.
+app.get('/api/data/:table/columns', requireAuth, async (req, res) => {
+  try {
+    const tableName = assertValidIdentifier(req.params.table);
+    if (!(await isManagedTable(tableName))) {
+      return res.status(404).json({ error: 'Table not found' });
+    }
+    const result = await db.query(
+      `SELECT column_name, is_generated FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = $1
+       ORDER BY ordinal_position`,
+      [tableName]
+    );
+    // Foreign key della tabella: colonna -> tabella referenziata (per i dropdown nel form).
+    const fk = await db.query(
+      `SELECT kcu.column_name, ccu.table_name AS foreign_table
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu
+         ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+       JOIN information_schema.constraint_column_usage ccu
+         ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' AND tc.table_name = $1`,
+      [tableName]
+    );
+    const fkMap = {};
+    for (const r of fk.rows) fkMap[r.column_name] = r.foreign_table;
+    res.json(result.rows.map((r) => ({
+      name: r.column_name,
+      generated: r.is_generated === 'ALWAYS',
+      references: fkMap[r.column_name] || null
+    })));
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -189,6 +251,10 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
     if (tableColumns.has('tenant_id') && !isAdminUser(req)) {
       data.tenant_id = req.user.tenant_id;
     }
+
+    // Le colonne generate non sono scrivibili: rimuovile dai dati in ingresso.
+    const generatedColumns = await getGeneratedColumns(tableName);
+    for (const g of generatedColumns) delete data[g];
 
     const columns = Object.keys(data).map(assertValidIdentifier);
     if (columns.length === 0) {
@@ -239,6 +305,10 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       delete data.tenant_id;
     }
 
+    // Le colonne generate non sono scrivibili: rimuovile dai dati in ingresso.
+    const generatedColumns = await getGeneratedColumns(tableName);
+    for (const g of generatedColumns) delete data[g];
+
     const columns = Object.keys(data).map(assertValidIdentifier);
     if (columns.length === 0) {
       return res.status(400).json({ error: 'Nessun dato da aggiornare' });
@@ -254,7 +324,9 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       whereClause += ` AND tenant_id = $${columns.length + 2}`;
     }
 
-    const query = `UPDATE "${tableName}" SET ${updates}, updated_at = CURRENT_TIMESTAMP WHERE ${whereClause} RETURNING *`;
+    // Aggiorna updated_at solo se la tabella ha quella colonna (alcune tabelle non ce l'hanno)
+    const updatedAtClause = tableColumns.has('updated_at') ? ', updated_at = CURRENT_TIMESTAMP' : '';
+    const query = `UPDATE "${tableName}" SET ${updates}${updatedAtClause} WHERE ${whereClause} RETURNING *`;
     const result = await db.query(query, values);
 
     if (result.rows.length === 0) {
@@ -331,6 +403,7 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
     }
 
     const tableColumns = await getTableColumns(tableName);
+    const generatedColumns = await getGeneratedColumns(tableName);
     const admin = isAdminUser(req);
     const userKey = req.user.user_id || req.user.email;
 
@@ -352,10 +425,10 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
         try {
           let data = { ...rows[i] };
 
-          // Stringhe vuote -> NULL; scarta le colonne non presenti nella tabella
+          // Stringhe vuote -> NULL; scarta le colonne non presenti o generate (non scrivibili)
           for (const k of Object.keys(data)) {
             if (data[k] === '') data[k] = null;
-            if (!tableColumns.has(k)) delete data[k];
+            if (!tableColumns.has(k) || generatedColumns.has(k)) delete data[k];
           }
 
           // Hash della password se presente
@@ -510,22 +583,554 @@ app.get('/api/settings/arguments', requireAuth, async (req, res) => {
   }
 });
 
-// Elenco clienti (valore2) per l'utente + tenant del token di login.
-// Equivale a: SELECT DISTINCT valore2 FROM clients
+// Crea un nuovo argomento (settings) con un campo custom segnaposto, per TUTTI gli utenti
+// del tenant (scope 'this-tenant') o di tutti i tenant (scope 'all-tenants', solo admin).
+// Usa user_tenants per enumerare le coppie (utente, tenant).
+app.post('/api/settings/argument', requireAuth, async (req, res) => {
+  try {
+    const name = ((req.body && req.body.name) || '').trim();
+    const scope = (req.body && req.body.scope) || 'this-tenant';
+    if (!name) return res.status(400).json({ error: 'Nome argomento richiesto' });
+    if (scope === 'all-tenants' && Number(req.user.id_roles) !== 1) {
+      return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
+    }
+    // 'this-tenant' = argomento "custom": prefisso "(*)" (pallino verde in UI) e ordinamento da 200.
+    // 'all-tenants' = argomento "standard": nessun prefisso, ordinamento nella fascia 1-199.
+    const isCustomArg = (scope !== 'all-tenants');
+    const argName = isCustomArg ? ('(*) ' + name) : name;
+    let ordRes;
+    if (isCustomArg) {
+      ordRes = await db.query(
+        `SELECT MAX(ordinamento) AS m FROM settings WHERE tenant_id = $1 AND ordinamento >= 200`,
+        [req.user.tenant_id]
+      );
+    } else {
+      ordRes = await db.query(`SELECT MAX(ordinamento) AS m FROM settings WHERE ordinamento BETWEEN 1 AND 199`);
+    }
+    const base = isCustomArg ? 200 : 1;
+    const newOrd = (ordRes.rows[0].m != null) ? Number(ordRes.rows[0].m) + 1 : base;
+
+    // Riga "segnaposto" solo per far comparire l'argomento: campo/tipo_valore NULL (non è un campo,
+    // viene nascosta in visualizzazione). I campi veri si aggiungono poi dal dettaglio con il "+".
+    let query, params;
+    if (scope === 'all-tenants') {
+      query = `INSERT INTO settings (argument, tenant_id, user_id, ordinamento)
+               SELECT $1, ut.tenant_id, ut.user_id, $2 FROM user_tenants ut`;
+      params = [argName, newOrd];
+    } else {
+      query = `INSERT INTO settings (argument, tenant_id, user_id, ordinamento)
+               SELECT $1, ut.tenant_id, ut.user_id, $2
+               FROM user_tenants ut WHERE ut.tenant_id = $3`;
+      params = [argName, newOrd, req.user.tenant_id];
+    }
+    const result = await db.query(query, params);
+    res.status(201).json({ inserted: result.rowCount });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Elimina un intero argomento (settings) con tutti i suoi campi: su tutti gli utenti del
+// tenant ('this-tenant') o di tutti i tenant ('all-tenants', solo admin).
+app.delete('/api/settings/argument', requireAuth, async (req, res) => {
+  try {
+    const name = ((req.query && req.query.name) || '').trim();
+    const scope = (req.query && req.query.scope) || 'this-tenant';
+    if (!name) return res.status(400).json({ error: 'Nome argomento richiesto' });
+    if (scope === 'all-tenants' && Number(req.user.id_roles) !== 1) {
+      return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
+    }
+    let query, params;
+    if (scope === 'all-tenants') {
+      query = `DELETE FROM settings WHERE argument = $1`;
+      params = [name];
+    } else {
+      query = `DELETE FROM settings WHERE argument = $1 AND tenant_id = $2`;
+      params = [name, req.user.tenant_id];
+    }
+    const result = await db.query(query, params);
+    res.json({ deleted: result.rowCount });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Elenco clienti: id (della riga) + nome (valore2), per l'utente + tenant del login.
+// L'id serve come "argument" per il flyout di dettaglio del cliente.
+// Equivale a: SELECT id, valore2 FROM clients
 //   WHERE argument='Cliente' AND campo='Cliente' AND tenant_id=? AND user_id=?
 app.get('/api/clients/names', requireAuth, async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT DISTINCT valore2
+      `SELECT id, valore2 AS name
        FROM clients
        WHERE argument = 'Cliente' AND campo = 'Cliente'
          AND tenant_id = $1 AND user_id = $2 AND valore2 IS NOT NULL
        ORDER BY valore2`,
       [req.user.tenant_id, req.user.user_id]
     );
-    res.json(result.rows.map(r => r.valore2));
+    res.json(result.rows); // [{ id, name }, ...]
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Crea un nuovo cliente (riga argument='Cliente', campo='Cliente', valore2=<nome>)
+// e replica per lui, VUOTI, tutti i campi distinti dei clienti dello STESSO tenant
+// (collegati con argument = id del nuovo cliente, così appaiono nel suo dettaglio).
+// Consentito solo agli utenti con ruolo id_roles <= 50 (numeri più bassi = più privilegi).
+app.post('/api/clients', requireAuth, async (req, res) => {
+  const roleLevel = Number(req.user.id_roles);
+  if (!Number.isFinite(roleLevel) || roleLevel > 50) {
+    return res.status(403).json({ error: 'Non autorizzato a creare clienti' });
+  }
+  const name = ((req.body && req.body.name) || '').trim();
+  if (!name) {
+    return res.status(400).json({ error: 'Nome cliente richiesto' });
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1) Riga identità del cliente
+    const ins = await client.query(
+      `INSERT INTO clients (argument, campo, valore2, tenant_id, user_id)
+       VALUES ('Cliente', 'Cliente', $1, $2, $3) RETURNING *`,
+      [name, req.user.tenant_id, req.user.user_id]
+    );
+    const newClient = ins.rows[0];
+
+    // 2) Replica i campi distinti del tenant (vuoti) per il nuovo cliente.
+    //    Mantiene campo/tipo_valore/id_roles/ordinamento/tabella/colonna; azzera i valori.
+    //    Solo dati dello stesso tenant, esclusa la riga identità (campo='Cliente').
+    await client.query(
+      `INSERT INTO clients (tenant_id, user_id, argument, campo, tipo_valore, id_roles, ordinamento, tabella, colonna)
+       SELECT DISTINCT $1::uuid, $2::uuid, $3::text, campo, tipo_valore, id_roles, ordinamento, tabella, colonna
+       FROM clients
+       WHERE tenant_id = $1::uuid AND campo IS NOT NULL AND campo <> 'Cliente'`,
+      [req.user.tenant_id, req.user.user_id, newClient.id]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json(newClient);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Elenco dei tipi valore (per la scelta del tipo quando si crea un campo custom),
+// filtrato per ruolo: l'utente vede un tipo se il proprio id_roles <= id_roles del tipo
+// (cioè tipo_valore.id_roles >= id_roles utente), oppure id_roles NULL = nessuna restrizione.
+// Numeri più bassi = più privilegi: così gli admin vedono tutto.
+app.get('/api/tipo-valore', requireAuth, async (req, res) => {
+  try {
+    const uid = Number(req.user.id_roles);
+    const roleLevel = Number.isFinite(uid) ? uid : 9999;
+    const result = await db.query(
+      `SELECT id_code, description FROM tipo_valore
+       WHERE id_roles IS NULL OR id_roles >= $1
+       ORDER BY description`,
+      [roleLevel]
+    );
+    res.json(result.rows); // [{ id_code, description }, ...]
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Elenco ruoli (per scegliere id_roles alla creazione di un campo). Mostra solo i ruoli
+// con id_roles >= quello dell'utente (così il creatore vede comunque il campo).
+app.get('/api/roles', requireAuth, async (req, res) => {
+  try {
+    const uid = Number(req.user.id_roles);
+    const roleLevel = Number.isFinite(uid) ? uid : 9999;
+    const result = await db.query(
+      `SELECT DISTINCT id_roles, name FROM roles WHERE id_roles >= $1 ORDER BY id_roles`,
+      [roleLevel]
+    );
+    res.json(result.rows); // [{ id_roles, name }, ...]
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Aggiunge un campo. scope = 'this' -> solo sul contenitore indicato (argument = id contenitore);
+// 'all' -> sotto ogni contenitore col campo indicato (top-level: identità campo='Cliente').
+// kind = 'standard' (senza "(*)", ordinamento fascia 1-100) oppure 'custom' (con "(*)", ordinamento
+// da 200). 'standard' è consentito solo agli utenti con id_roles <= 20, altrimenti forzato a custom.
+app.post('/api/:source(settings|clients)/field', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const clientId = ((req.body && req.body.clientId) || '').trim();
+    const rawCampo = ((req.body && req.body.campo) || '').trim();
+    const tipoValore = (req.body && req.body.tipo_valore) || null;
+    const tabella = ((req.body && req.body.tabella) || '').trim() || null;
+    const colonna = ((req.body && req.body.colonna) || '').trim() || null;
+    const scope = (req.body && req.body.scope) || 'this';
+    const kind = (req.body && req.body.kind) || 'custom';
+    // Contenitore dello scope 'all': 'Cliente' al top-level, oppure il campo del Nodo Padre.
+    const containerCampo = ((req.body && req.body.containerCampo) || 'Cliente').trim() || 'Cliente';
+    // id_roles del nuovo campo (visibilità per ruolo); vuoto/assente = NULL (nessuna restrizione).
+    const idRolesRaw = (req.body && req.body.id_roles);
+    const idRoles = (idRolesRaw === '' || idRolesRaw == null) ? null : Number(idRolesRaw);
+    if (!rawCampo) {
+      return res.status(400).json({ error: 'nome campo richiesto' });
+    }
+    if (scope === 'this' && !clientId) {
+      return res.status(400).json({ error: 'clientId richiesto' });
+    }
+
+    // 'standard' consentito solo a id_roles <= 20; altrimenti campo custom.
+    const roleLevel = Number(req.user.id_roles);
+    const isStandard = (kind === 'standard') && Number.isFinite(roleLevel) && roleLevel <= 20;
+    // Standard: nessun prefisso, ordinamento tra i campi NON custom (parte da 1, resta < 200).
+    // Custom: prefisso "(*)", ordinamento tra i campi >= 200 (parte da 200). In entrambi i casi
+    // il nuovo ordinamento è MAX della fascia + 1, senza accatastarsi.
+    const campo = isStandard ? rawCampo : ('(*) ' + rawCampo);
+    const bandClause = isStandard
+      ? "AND campo NOT LIKE '(*)%' AND (ordinamento IS NULL OR ordinamento < 200)"
+      : 'AND ordinamento >= 200';
+    const bandBase = isStandard ? 1 : 200;
+
+    // IMPOSTAZIONI: scope tenant. Inserisce il campo per ogni (tenant,utente) che possiede
+    // già l'argomento/contenitore -> 'this-tenant' (solo tenant corrente) o 'all-tenants' (admin).
+    if (source === 'settings') {
+      if (!clientId) return res.status(400).json({ error: 'argomento richiesto' });
+      const isAllTenants = (scope === 'all-tenants');
+      if (isAllTenants && Number(req.user.id_roles) !== 1) {
+        return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
+      }
+      let ordRes;
+      if (isAllTenants) {
+        ordRes = await db.query(`SELECT MAX(ordinamento) AS m FROM settings WHERE argument = $1 ${bandClause}`, [clientId]);
+      } else {
+        ordRes = await db.query(`SELECT MAX(ordinamento) AS m FROM settings WHERE argument = $1 AND tenant_id = $2 ${bandClause}`, [clientId, req.user.tenant_id]);
+      }
+      const newOrd = (ordRes.rows[0].m != null) ? Number(ordRes.rows[0].m) + 1 : bandBase;
+      let q, p;
+      if (isAllTenants) {
+        q = `INSERT INTO settings (argument, campo, tipo_valore, tabella, colonna, tenant_id, user_id, ordinamento, id_roles)
+             SELECT DISTINCT $1, $2, $3, $4, $5, s.tenant_id, s.user_id, $6::integer, $7::smallint FROM settings s WHERE s.argument = $1`;
+        p = [clientId, campo, tipoValore, tabella, colonna, newOrd, idRoles];
+      } else {
+        q = `INSERT INTO settings (argument, campo, tipo_valore, tabella, colonna, tenant_id, user_id, ordinamento, id_roles)
+             SELECT DISTINCT $1, $2, $3, $4, $5, s.tenant_id, s.user_id, $6::integer, $8::smallint FROM settings s WHERE s.argument = $1 AND s.tenant_id = $7`;
+        p = [clientId, campo, tipoValore, tabella, colonna, newOrd, req.user.tenant_id, idRoles];
+      }
+      const result = await db.query(q, p);
+      return res.status(201).json({ inserted: result.rowCount });
+    }
+
+    if (scope === 'all') {
+      // Ordinamento coerente su tutti i contenitori (max della fascia nel tenant/utente, +1)
+      const ord = await db.query(
+        `SELECT MAX(ordinamento) AS maxord FROM "${source}"
+         WHERE tenant_id = $1 AND user_id = $2 ${bandClause}`,
+        [req.user.tenant_id, req.user.user_id]
+      );
+      const maxord = ord.rows[0].maxord;
+      const newOrd = (maxord != null) ? Number(maxord) + 1 : bandBase;
+      // Una riga del campo sotto ogni contenitore col campo indicato:
+      // 'Cliente' = righe identità (top-level); altrimenti i Nodo Padre con quel campo.
+      // argument = id del contenitore (così i figli si legano al contenitore giusto).
+      const result = await db.query(
+        `INSERT INTO "${source}" (argument, campo, tipo_valore, tabella, colonna, tenant_id, user_id, ordinamento, id_roles)
+         SELECT c.id::text, $1, $2, $3, $4, $5, $6, $7, $9::smallint
+         FROM "${source}" c
+         WHERE c.campo = $8 AND c.tenant_id = $5 AND c.user_id = $6`,
+        [campo, tipoValore, tabella, colonna, req.user.tenant_id, req.user.user_id, newOrd, containerCampo, idRoles]
+      );
+      return res.status(201).json({ inserted: result.rowCount });
+    }
+
+    // scope 'this': primo ordinamento disponibile nella fascia per questo contenitore
+    const ord = await db.query(
+      `SELECT MAX(ordinamento) AS maxord FROM "${source}"
+       WHERE argument = $1 AND tenant_id = $2 AND user_id = $3 ${bandClause}`,
+      [clientId, req.user.tenant_id, req.user.user_id]
+    );
+    const maxord = ord.rows[0].maxord;
+    const newOrd = (maxord != null) ? Number(maxord) + 1 : bandBase;
+
+    const result = await db.query(
+      `INSERT INTO "${source}" (argument, campo, tipo_valore, tabella, colonna, tenant_id, user_id, ordinamento, id_roles)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [clientId, campo, tipoValore, tabella, colonna, req.user.tenant_id, req.user.user_id, newOrd, idRoles]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Eliminazione di campi, identificati per nome "campo". Di norma solo i campi custom
+// (ordinamento >= 100); gli admin (id_roles = 1) possono eliminare anche i campi standard.
+// scope = 'all' -> tutti i contenitori del tenant/utente; 'this' -> solo il contenitore indicato.
+app.post('/api/:source(settings|clients)/delete-fields', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const campos = (req.body && req.body.campos) || [];
+    const scope = (req.body && req.body.scope) || 'this';
+    const clientId = ((req.body && req.body.clientId) || '').trim();
+    if (!Array.isArray(campos) || campos.length === 0) {
+      return res.status(400).json({ error: 'Nessun campo selezionato' });
+    }
+    // Admin (id_roles = 1): nessun vincolo di fascia -> elimina anche i campi standard.
+    const isAdmin = Number(req.user.id_roles) === 1;
+    const ordGuard = isAdmin ? '' : 'AND ordinamento >= 100';
+    let query, params;
+    if (source === 'settings') {
+      // Impostazioni: scope tenant. 'all-tenants' (tutti i tenant, solo admin) oppure
+      // 'this-tenant' (tutti gli utenti del tenant corrente). Filtra per argomento.
+      if (!clientId) return res.status(400).json({ error: 'argomento richiesto' });
+      if (scope === 'all-tenants') {
+        if (!isAdmin) return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
+        query = `DELETE FROM settings WHERE campo = ANY($1::text[]) AND argument = $2 ${ordGuard}`;
+        params = [campos, clientId];
+      } else {
+        query = `DELETE FROM settings WHERE campo = ANY($1::text[]) AND argument = $2 AND tenant_id = $3 ${ordGuard}`;
+        params = [campos, clientId, req.user.tenant_id];
+      }
+    } else if (scope === 'all') {
+      query = `DELETE FROM clients
+               WHERE campo = ANY($1::text[]) AND tenant_id = $2 AND user_id = $3 ${ordGuard}`;
+      params = [campos, req.user.tenant_id, req.user.user_id];
+    } else {
+      if (!clientId) return res.status(400).json({ error: 'clientId richiesto' });
+      query = `DELETE FROM clients
+               WHERE campo = ANY($1::text[]) AND argument = $2 AND tenant_id = $3 AND user_id = $4 ${ordGuard}`;
+      params = [campos, clientId, req.user.tenant_id, req.user.user_id];
+    }
+    const result = await db.query(query, params);
+    res.json({ deleted: result.rowCount });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Rinomina di campi custom (ordinamento >= 100). renames = [{ old, new }, ...].
+// scope = 'all' -> su tutti i clienti del tenant/utente; 'this' -> solo sul cliente indicato.
+app.post('/api/:source(settings|clients)/rename-fields', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const renames = (req.body && req.body.renames) || [];
+    const scope = (req.body && req.body.scope) || 'all';
+    const clientId = ((req.body && req.body.clientId) || '').trim();
+    if (!Array.isArray(renames) || renames.length === 0) {
+      return res.status(400).json({ error: 'Nessuna rinomina' });
+    }
+    const isAdmin = Number(req.user.id_roles) === 1;
+    if (source === 'settings') {
+      if (!clientId) return res.status(400).json({ error: 'argomento richiesto' });
+      if (scope === 'all-tenants' && !isAdmin) {
+        return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
+      }
+    } else if (scope === 'this' && !clientId) {
+      return res.status(400).json({ error: 'clientId richiesto' });
+    }
+    let updated = 0;
+    for (const rn of renames) {
+      const oldName = ((rn && rn.old) || '').trim();
+      let newName = ((rn && rn.new) || '').trim();
+      // I campi custom devono sempre mantenere il prefisso "(*)": se rimosso, reinseriscilo.
+      if (newName && !newName.startsWith('(*)')) newName = '(*) ' + newName;
+      if (!oldName || !newName || oldName === newName) continue;
+      let query, params;
+      if (source === 'settings') {
+        // Impostazioni: scope tenant, per argomento (tutti gli utenti del/dei tenant)
+        if (scope === 'all-tenants') {
+          query = `UPDATE settings SET campo = $1 WHERE campo = $2 AND argument = $3 AND ordinamento >= 100`;
+          params = [newName, oldName, clientId];
+        } else {
+          query = `UPDATE settings SET campo = $1 WHERE campo = $2 AND argument = $3 AND tenant_id = $4 AND ordinamento >= 100`;
+          params = [newName, oldName, clientId, req.user.tenant_id];
+        }
+      } else if (scope === 'this') {
+        query = `UPDATE clients SET campo = $1
+                 WHERE campo = $2 AND argument = $3 AND tenant_id = $4 AND user_id = $5 AND ordinamento >= 100`;
+        params = [newName, oldName, clientId, req.user.tenant_id, req.user.user_id];
+      } else {
+        query = `UPDATE clients SET campo = $1
+                 WHERE campo = $2 AND tenant_id = $3 AND user_id = $4 AND ordinamento >= 100`;
+        params = [newName, oldName, req.user.tenant_id, req.user.user_id];
+      }
+      const result = await db.query(query, params);
+      updated += result.rowCount;
+    }
+    res.json({ updated });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// tipo_valore = 20: elenco valori da una tabella esterna. Il campo (fieldId) contiene
+// tabella (clients.tabella) e colonna (clients.colonna). Restituisce { id, value } per
+// ogni riga, filtrando per tenant_id, user_id e id_cliente (se presenti nella tabella).
+app.get('/api/:source(settings|clients)/linked-list', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const fieldId = ((req.query && req.query.fieldId) || '').trim();
+    const clientId = ((req.query && req.query.clientId) || '').trim();
+    if (!fieldId) {
+      return res.status(400).json({ error: 'fieldId richiesto' });
+    }
+    const f = await db.query(
+      `SELECT tabella, colonna FROM "${source}" WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+      [fieldId, req.user.tenant_id, req.user.user_id]
+    );
+    if (f.rows.length === 0) return res.status(404).json({ error: 'Campo non trovato' });
+    const tabella = f.rows[0].tabella;
+    const colonna = f.rows[0].colonna;
+    if (!tabella || !colonna) return res.status(400).json({ error: 'tabella/colonna non impostate sul campo' });
+    assertValidIdentifier(tabella);
+    assertValidIdentifier(colonna);
+    if (!(await isManagedTable(tabella))) return res.status(404).json({ error: 'Tabella non gestita' });
+
+    const cols = await getTableColumns(tabella);
+    const conds = [];
+    const params = [];
+    if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
+    if (cols.has('user_id')) { params.push(req.user.user_id); conds.push(`user_id = $${params.length}`); }
+    if (cols.has('id_cliente') && clientId) { params.push(clientId); conds.push(`id_cliente = $${params.length}`); }
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+    const result = await db.query(
+      `SELECT id, "${colonna}" AS value FROM "${tabella}" ${where} ORDER BY "${colonna}" NULLS LAST LIMIT 200`,
+      params
+    );
+    res.json({ tabella, colonna, items: stripSensitive(result.rows) });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// tipo_valore = 20: dettaglio completo (tutti i valori) di una riga della tabella esterna,
+// filtrato per tenant_id, user_id e id_cliente.
+app.get('/api/:source(settings|clients)/linked-row', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const fieldId = ((req.query && req.query.fieldId) || '').trim();
+    const clientId = ((req.query && req.query.clientId) || '').trim();
+    const rowId = ((req.query && req.query.rowId) || '').trim();
+    if (!fieldId || !rowId) {
+      return res.status(400).json({ error: 'fieldId e rowId richiesti' });
+    }
+    const f = await db.query(
+      `SELECT tabella FROM "${source}" WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+      [fieldId, req.user.tenant_id, req.user.user_id]
+    );
+    if (f.rows.length === 0) return res.status(404).json({ error: 'Campo non trovato' });
+    const tabella = f.rows[0].tabella;
+    if (!tabella) return res.status(400).json({ error: 'tabella non impostata sul campo' });
+    assertValidIdentifier(tabella);
+    if (!(await isManagedTable(tabella))) return res.status(404).json({ error: 'Tabella non gestita' });
+
+    const cols = await getTableColumns(tabella);
+    const conds = ['id = $1'];
+    const params = [rowId];
+    if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
+    if (cols.has('user_id')) { params.push(req.user.user_id); conds.push(`user_id = $${params.length}`); }
+    if (cols.has('id_cliente') && clientId) { params.push(clientId); conds.push(`id_cliente = $${params.length}`); }
+    const result = await db.query(
+      `SELECT * FROM "${tabella}" WHERE ${conds.join(' AND ')} LIMIT 1`,
+      params
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
+    res.json(stripSensitive(result.rows)[0]);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// tipo_valore = 20: aggiunge una riga alla tabella collegata, impostando in automatico
+// tenant_id, user_id e id_cliente (dal login + cliente). I valori generati/di sistema
+// vengono ignorati.
+app.post('/api/:source(settings|clients)/linked-row', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const fieldId = ((req.body && req.body.fieldId) || '').trim();
+    const clientId = ((req.body && req.body.clientId) || '').trim();
+    const values = (req.body && req.body.values) || {};
+    if (!fieldId) {
+      return res.status(400).json({ error: 'fieldId richiesto' });
+    }
+    const f = await db.query(
+      `SELECT tabella FROM "${source}" WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+      [fieldId, req.user.tenant_id, req.user.user_id]
+    );
+    if (f.rows.length === 0) return res.status(404).json({ error: 'Campo non trovato' });
+    const tabella = f.rows[0].tabella;
+    if (!tabella) return res.status(400).json({ error: 'tabella non impostata sul campo' });
+    assertValidIdentifier(tabella);
+    if (!(await isManagedTable(tabella))) return res.status(404).json({ error: 'Tabella non gestita' });
+
+    const cols = await getTableColumns(tabella);
+    const generated = await getGeneratedColumns(tabella);
+    const managedByServer = new Set(['id', 'tenant_id', 'user_id', 'id_cliente', 'created_at', 'updated_at', 'created_by']);
+    const data = {};
+    for (const [k, v] of Object.entries(values)) {
+      if (cols.has(k) && !generated.has(k) && !managedByServer.has(k)) {
+        data[k] = v === '' ? null : v;
+      }
+    }
+    // Colonne di scoping impostate dal server (mai dal client)
+    if (cols.has('tenant_id')) data.tenant_id = req.user.tenant_id;
+    if (cols.has('user_id')) data.user_id = req.user.user_id;
+    if (cols.has('id_cliente') && clientId) data.id_cliente = clientId;
+
+    const columns = Object.keys(data).map(assertValidIdentifier);
+    if (columns.length === 0) return res.status(400).json({ error: 'Nessun dato da inserire' });
+    const params = columns.map((c) => data[c]);
+    const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+    const quoted = columns.map((c) => `"${c}"`).join(', ');
+    const result = await db.query(
+      `INSERT INTO "${tabella}" (${quoted}) VALUES (${placeholders}) RETURNING *`,
+      params
+    );
+    res.status(201).json(stripSensitive(result.rows)[0]);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// tipo_valore = 20: elimina una riga della tabella collegata, filtrando per
+// tenant_id, user_id e id_cliente.
+app.delete('/api/:source(settings|clients)/linked-row', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const fieldId = ((req.query && req.query.fieldId) || '').trim();
+    const clientId = ((req.query && req.query.clientId) || '').trim();
+    const rowId = ((req.query && req.query.rowId) || '').trim();
+    if (!fieldId || !rowId) {
+      return res.status(400).json({ error: 'fieldId e rowId richiesti' });
+    }
+    const f = await db.query(
+      `SELECT tabella FROM "${source}" WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+      [fieldId, req.user.tenant_id, req.user.user_id]
+    );
+    if (f.rows.length === 0) return res.status(404).json({ error: 'Campo non trovato' });
+    const tabella = f.rows[0].tabella;
+    if (!tabella) return res.status(400).json({ error: 'tabella non impostata sul campo' });
+    assertValidIdentifier(tabella);
+    if (!(await isManagedTable(tabella))) return res.status(404).json({ error: 'Tabella non gestita' });
+
+    const cols = await getTableColumns(tabella);
+    const conds = ['id = $1'];
+    const params = [rowId];
+    if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
+    if (cols.has('user_id')) { params.push(req.user.user_id); conds.push(`user_id = $${params.length}`); }
+    if (cols.has('id_cliente') && clientId) { params.push(clientId); conds.push(`id_cliente = $${params.length}`); }
+    const result = await db.query(
+      `DELETE FROM "${tabella}" WHERE ${conds.join(' AND ')} RETURNING id`,
+      params
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
+    res.json({ deleted: result.rowCount });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 

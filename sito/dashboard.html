@@ -255,14 +255,27 @@
         }
 
         .settings-flyout ul li[data-argument],
-        .settings-flyout ul li[data-client] {
+        .settings-flyout ul li[data-client-id] {
             cursor: pointer;
             transition: color 0.2s;
         }
 
         .settings-flyout ul li[data-argument]:hover,
-        .settings-flyout ul li[data-client]:hover {
+        .settings-flyout ul li[data-client-id]:hover {
             color: var(--primary);
+        }
+
+        /* Cliente attualmente selezionato: evidenziato in verde tenue */
+        .settings-flyout ul li.active-client {
+            background: #A7F3D0;
+            color: #065F46;
+            font-weight: 600;
+            border-radius: 6px;
+            padding-left: 8px;
+            padding-right: 8px;
+        }
+        .settings-flyout ul li.active-client:hover {
+            color: #065F46;
         }
 
         /* Secondo flyout: dettaglio dei campi dell'argomento selezionato */
@@ -279,12 +292,12 @@
         }
 
         .settings-detail-flyout.open {
-            width: 360px;
+            width: 468px;
             pointer-events: auto;
         }
 
         .settings-detail-flyout-inner {
-            width: 360px;
+            width: 468px;
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -298,6 +311,7 @@
         #settingsDetailList {
             flex: 1;
             overflow-y: auto;
+            overflow-x: hidden;
         }
 
         .settings-detail-row {
@@ -309,19 +323,127 @@
             border-bottom: 1px solid var(--border);
         }
 
+        /* Consente ai campi di restringersi per adattarsi alla larghezza del flyout */
+        .settings-detail-row > * {
+            min-width: 0;
+        }
+
         .settings-detail-row .campo-label {
             font-size: 0.9rem;
             color: var(--dark);
             word-break: break-word;
+            flex: 0 0 30%;
+        }
+        /* In rinomina l'input del nome campo occupa lo stesso 30% dell'etichetta */
+        .settings-detail-row .field-rename {
+            flex: 0 0 30%;
+            box-sizing: border-box;
+        }
+        /* Campo custom: pallino verde al posto di "(*)" in visualizzazione */
+        .custom-dot {
+            display: inline-block;
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #10B981;
+            margin-right: 7px;
+            vertical-align: middle;
+        }
+
+        /* Righe cliccabili con freccia: Nodo padre (tipo 0), link a tabella esterna
+           (tipo 20) e valori dell'elenco collegato. Aprono un nuovo flyout. */
+        .settings-detail-parent,
+        .settings-detail-link,
+        .linked-value {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            font-weight: 400;
+            color: var(--dark);
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+        }
+        .settings-detail-parent:hover,
+        .settings-detail-link:hover,
+        .linked-value:hover {
+            color: var(--primary);
+        }
+        .settings-detail-parent .parent-arrow,
+        .settings-detail-link .parent-arrow,
+        .linked-value .parent-arrow {
+            flex: 0 0 auto;
+            font-size: 1.2rem;
+            line-height: 1;
+            color: var(--text-muted);
+        }
+        .settings-detail-parent:hover .parent-arrow,
+        .settings-detail-link:hover .parent-arrow,
+        .linked-value:hover .parent-arrow {
+            color: var(--primary);
+        }
+
+        /* Nodo Padre (tipo 0) e link a tabella collegata (tipo 20): evidenziati in verde
+           con lo stesso stile del cliente selezionato (sfondo verde, testo bianco). */
+        .settings-detail-parent,
+        .settings-detail-link {
+            background: #A7F3D0;
+            color: #065F46;
+            font-weight: 600;
+            border-bottom: none;
+            border-radius: 6px;
+            padding: 0.28rem 8px;
+            margin-bottom: 3px;
+        }
+        .settings-detail-parent .parent-arrow,
+        .settings-detail-link .parent-arrow {
+            color: #065F46;
+        }
+        .settings-detail-parent:hover,
+        .settings-detail-link:hover {
+            background: #6EE7B7;
+            color: #065F46;
+        }
+        .settings-detail-parent:hover .parent-arrow,
+        .settings-detail-link:hover .parent-arrow {
+            color: #065F46;
         }
 
         .settings-detail-row input[type="text"],
-        .settings-detail-row input[type="number"] {
-            width: 150px;
+        .settings-detail-row input[type="number"],
+        .settings-detail-row input[type="date"],
+        .settings-detail-row select {
+            width: auto;
+            flex: 1 1 0;
+            box-sizing: border-box;
             padding: 6px 8px;
             border: 1px solid #ccc;
             border-radius: 4px;
             font-family: inherit;
+        }
+
+        /* Campi con icona (URL/Email): icona in overlay a sinistra dentro la casella,
+           così tutte le caselle (con e senza icona) partono dallo stesso punto (il 30%). */
+        .settings-detail-row .field-icon-wrap {
+            position: relative;
+            flex: 1 1 0;
+            min-width: 0;
+        }
+        .settings-detail-row .field-icon-wrap input {
+            width: 100%;
+            min-width: 0;
+            padding-left: 30px;
+        }
+        .settings-detail-row .field-icon-wrap .field-icon {
+            position: absolute;
+            left: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            text-decoration: none;
+            line-height: 1;
+            font-size: 0.95rem;
+            z-index: 1;
         }
 
         /* Niente frecce su/giù nei campi numerici */
@@ -335,21 +457,21 @@
             appearance: textfield;
         }
 
-        /* Interruttore a levetta (toggle) per i campi booleani */
-        .settings-detail-row .toggle-switch {
+        /* Interruttore a levetta (toggle) per i campi booleani e per "Abilita modifica" */
+        .toggle-switch {
             position: relative;
             display: inline-block;
             width: 44px;
             height: 24px;
             flex: 0 0 auto;
         }
-        .settings-detail-row .toggle-switch input {
+        .toggle-switch input {
             opacity: 0;
             width: 0;
             height: 0;
             margin: 0;
         }
-        .settings-detail-row .toggle-slider {
+        .toggle-slider {
             position: absolute;
             inset: 0;
             cursor: pointer;
@@ -357,7 +479,7 @@
             border-radius: 24px;
             transition: background 0.25s;
         }
-        .settings-detail-row .toggle-slider::before {
+        .toggle-slider::before {
             content: "";
             position: absolute;
             height: 18px;
@@ -368,10 +490,10 @@
             border-radius: 50%;
             transition: transform 0.25s;
         }
-        .settings-detail-row .toggle-switch input:checked + .toggle-slider {
+        .toggle-switch input:checked + .toggle-slider {
             background: #10B981;
         }
-        .settings-detail-row .toggle-switch input:checked + .toggle-slider::before {
+        .toggle-switch input:checked + .toggle-slider::before {
             transform: translateX(20px);
         }
 
@@ -1071,6 +1193,7 @@
                 <div class="settings-flyout">
                     <div class="settings-flyout-inner">
                         <div class="settings-flyout-title">Clienti</div>
+                        <button id="clientsNewBtn" style="display: none; width: 100%; margin-bottom: 0.9rem; padding: 0.5rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">+ Nuovo cliente</button>
                         <ul id="clientsList">
                             <li style="color: var(--text-muted); border: none;">Caricamento…</li>
                         </ul>
@@ -1086,6 +1209,11 @@
                 <div class="settings-flyout">
                     <div class="settings-flyout-inner">
                         <div class="settings-flyout-title">Impostazioni</div>
+                        <div id="settingsListEditWrap" style="display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 0.8rem; margin-bottom: 0.5rem;">
+                            <span>Abilita modifica</span>
+                            <label class="toggle-switch"><input type="checkbox" id="settingsListEditToggle"><span class="toggle-slider"></span></label>
+                        </div>
+                        <button id="settingsNewArgBtn" style="display: none; width: 100%; margin-bottom: 0.9rem; padding: 0.5rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">+ Aggiungi</button>
                         <ul id="settingsArgumentsList">
                             <li style="color: var(--text-muted); border: none;">Caricamento…</li>
                         </ul>
@@ -1108,10 +1236,122 @@
     <!-- Flyout di dettaglio condiviso (Impostazioni / Clienti) -->
     <div class="settings-detail-flyout" id="settingsDetailFlyout">
         <div class="settings-detail-flyout-inner">
-            <div class="settings-flyout-title" id="settingsDetailTitle">Dettaglio</div>
+            <!-- Titolo + toggle "Abilita modifica" (solo per i Clienti) -->
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem;">
+                <div style="display: flex; align-items: center; gap: 0.4rem; min-width: 0;">
+                    <button id="detailBackBtn" type="button" title="Indietro" style="display: none; flex: 0 0 auto; width: 26px; height: 26px; background: #e5e7eb; border: none; border-radius: 6px; font-size: 1.2rem; line-height: 1; cursor: pointer;">‹</button>
+                    <div class="settings-flyout-title" id="settingsDetailTitle" style="margin-bottom: 0;">Dettaglio</div>
+                </div>
+                <label id="clientEditToggleWrap" style="display: none; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">
+                    <span>Abilita modifica</span>
+                    <span class="toggle-switch"><input type="checkbox" id="clientEditToggle"><span class="toggle-slider"></span></span>
+                </label>
+            </div>
+            <!-- Pulsanti struttura campi (Nuovo / Elimina / Rinomina), visibili solo con modifica abilitata -->
+            <div id="clientEditButtons" style="display: none; gap: 0.35rem; margin-bottom: 0.75rem;">
+                <button id="clientNewFieldBtn" type="button" title="Nuovo campo" style="flex: 0 0 auto; padding: 0 0.55rem; height: 24px; background: #3B82F6; color: white; border: none; border-radius: 5px; font-size: 0.72rem; font-weight: 600; line-height: 1; cursor: pointer;">Aggiungi</button>
+                <button id="clientDeleteBtn" type="button" style="flex: 0 0 auto; padding: 0 0.55rem; height: 24px; background: #EF4444; color: white; border: none; border-radius: 5px; font-size: 0.72rem; font-weight: 600; line-height: 1; cursor: pointer;">Elimina</button>
+                <button id="clientRenameBtn" type="button" style="flex: 0 0 auto; padding: 0 0.55rem; height: 24px; background: #6B7280; color: white; border: none; border-radius: 5px; font-size: 0.72rem; font-weight: 600; line-height: 1; cursor: pointer;">Rinomina</button>
+            </div>
+            <div id="clientNewFieldForm" style="display: none; margin-bottom: 0.75rem;">
+                <input id="clientNewFieldName" type="text" placeholder="Nome del campo" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;">
+                <select id="clientNewFieldType" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;"></select>
+                <div id="clientNewFieldTabellaWrap" style="display: none; margin-bottom: 0.5rem;">
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Tabella</label>
+                    <input id="clientNewFieldTabella" type="text" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                </div>
+                <div id="clientNewFieldColonnaWrap" style="display: none; margin-bottom: 0.5rem;">
+                    <label id="clientNewFieldColonnaLabel" style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Colonna</label>
+                    <input id="clientNewFieldColonna" type="text" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                </div>
+                <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Visibile a (ruolo)</label>
+                <select id="clientNewFieldRoles" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;"></select>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button id="clientNewFieldAdd" type="button" style="flex: 1; padding: 0.4rem; background: #10B981; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Aggiungi</button>
+                    <button id="clientNewFieldCancel" type="button" style="flex: 0 0 auto; padding: 0.4rem 0.8rem; background: #e5e7eb; border: none; border-radius: 4px; cursor: pointer;">Annulla</button>
+                </div>
+            </div>
             <div id="settingsDetailList"></div>
+            <!-- Barra conferma eliminazione campi custom -->
+            <div id="clientDeleteBar" style="display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;">
+                <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0 0 0.5rem;">Seleziona i campi custom da eliminare.</p>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button id="clientDeleteConfirm" type="button" disabled style="flex: 1; padding: 0.6rem 1rem; background: #EF4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: not-allowed; opacity: 0.5;">Salva</button>
+                    <button id="clientDeleteCancel" type="button" style="flex: 0 0 auto; padding: 0.6rem 0.9rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button>
+                </div>
+            </div>
+            <!-- Barra conferma rinomina campi custom -->
+            <div id="clientRenameBar" style="display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;">
+                <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0 0 0.5rem;">Modifica i nomi dei campi custom, poi salva.</p>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button id="clientRenameConfirm" type="button" style="flex: 1; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva rinomina</button>
+                    <button id="clientRenameCancel" type="button" style="flex: 0 0 auto; padding: 0.6rem 0.9rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button>
+                </div>
+            </div>
             <div id="settingsDetailSaveBar" style="display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;">
                 <button id="settingsDetailSaveBtn" style="width: 100%; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modale: ambito tenant per aggiunta/eliminazione argomenti Impostazioni -->
+    <div id="settingsTenantScopeModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: 90vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+            <h3 id="settingsTenantScopeTitle" style="margin: 0 0 0.5rem; color: var(--dark);">Argomento impostazioni</h3>
+            <p id="settingsTenantScopeText" style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.25rem;">La modifica deve avvenire su questo tenant o su tutti i tenant?</p>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <button id="settingsScopeThisTenant" type="button" style="padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Questo tenant</button>
+                <button id="settingsScopeAllTenants" type="button" style="padding: 0.6rem 1rem; background: #EF4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Tutti i tenant</button>
+                <button id="settingsScopeCancel" type="button" style="padding: 0.6rem 1rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modale: tipo campo (standard / custom) — solo per id_roles <= 20 -->
+    <div id="clientKindModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: 90vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+            <h3 style="margin: 0 0 0.5rem; color: var(--dark);">Nuovo campo</h3>
+            <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.25rem;">Vuoi rendere il campo standard o custom?</p>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <button id="clientKindStandard" type="button" style="padding: 0.6rem 1rem; background: #3B82F6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Standard</button>
+                <button id="clientKindCustom" type="button" style="padding: 0.6rem 1rem; background: #8B5CF6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Custom</button>
+                <button id="clientKindCancel" type="button" style="padding: 0.6rem 1rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modale: ambito eliminazione campi custom (tutti i clienti / solo questo) -->
+    <div id="clientDeleteScopeModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: 90vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+            <h3 id="clientScopeTitle" style="margin: 0 0 0.5rem; color: var(--dark);">Elimina campi custom</h3>
+            <p id="clientScopeText" style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.25rem;">L'eliminazione deve avvenire su tutti i clienti o solo su quello selezionato?</p>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <button id="clientDeleteScopeAll" type="button" style="padding: 0.6rem 1rem; background: #EF4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Tutti i clienti</button>
+                <button id="clientDeleteScopeThis" type="button" style="padding: 0.6rem 1rem; background: #F59E0B; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Solo questo cliente</button>
+                <button id="clientDeleteScopeCancel" type="button" style="padding: 0.6rem 1rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Barra impersonificazione (in alto al centro, solo admin) -->
+    <div id="impersonateBar" style="display: none; align-items: center; gap: 0.6rem;">
+        <span id="impersonateLabel" style="font-size: 0.85rem; color: var(--text-muted);"></span>
+        <button id="impersonateBtn" type="button" style="padding: 0.4rem 0.9rem; background: #8B5CF6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Impersona</button>
+        <button id="impersonateReturnBtn" type="button" style="display: none; padding: 0.4rem 0.9rem; background: #EF4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Ritorna</button>
+    </div>
+
+    <!-- Modale selezione tenant + utente per impersonificazione -->
+    <div id="impersonateModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 500; display: none; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: 90vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+            <h3 style="margin: 0 0 1rem; color: var(--dark);">Impersona utente</h3>
+            <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Tenant</label>
+            <select id="impersonateTenant" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 1rem;"></select>
+            <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Utente</label>
+            <select id="impersonateUser" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.75rem;"></select>
+            <div style="font-size: 0.9rem; margin-bottom: 1.25rem;">Ruolo: <strong id="impersonateRole" style="color: var(--primary);">—</strong></div>
+            <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+                <button id="impersonateCancel" type="button" style="padding: 0.5rem 1rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button>
+                <button id="impersonateConfirm" type="button" style="padding: 0.5rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Conferma</button>
             </div>
         </div>
     </div>
@@ -1661,6 +1901,8 @@
                 localStorage.removeItem('microsoft_access_token');
                 localStorage.removeItem('currentUser');
                 localStorage.removeItem('currentTenant');
+                localStorage.removeItem('originalToken');
+                localStorage.removeItem('originalUser');
                 showNotification('Logout effettuato', 'success');
                 setTimeout(() => {
                     window.location.href = 'login.html';
@@ -2178,8 +2420,14 @@
                     logoutBtn.style.borderColor = 'rgba(239, 68, 68, 0.3)';
                 };
                 logoutBtn.onclick = logout;
-                
-                headerActions.appendChild(logoutBtn);
+
+                // Colonna in alto a destra: "Impersona" sopra, "Logout" sotto
+                const rightStack = document.createElement('div');
+                rightStack.style.cssText = 'display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem;';
+                const impBar = document.getElementById('impersonateBar');
+                if (impBar) rightStack.appendChild(impBar);
+                rightStack.appendChild(logoutBtn);
+                headerActions.appendChild(rightStack);
             }
         }
 
@@ -2657,12 +2905,129 @@
                     listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Nessuna impostazione</li>';
                     return;
                 }
-                listEl.innerHTML = args.map(a => `<li data-argument="${escapeHtml(a)}">${escapeHtml(a)}</li>`).join('');
+                listEl.innerHTML = args.map(a => {
+                    const del = settingsListEditMode ? `<span class="arg-del" data-argument="${escapeHtml(a)}" title="Elimina" style="float: right; color: #EF4444; font-weight: 700; cursor: pointer; padding: 0 6px;">✕</span>` : '';
+                    // Argomenti "(*)" mostrati con il pallino verde (come i campi custom dei clienti)
+                    return `<li data-argument="${escapeHtml(a)}">${campoLabelHtml(a)}${del}</li>`;
+                }).join('');
+                // Elimina argomento (✕): non deve aprire il dettaglio
+                listEl.querySelectorAll('.arg-del').forEach(x => {
+                    x.addEventListener('click', (e) => { e.stopPropagation(); deleteSettingsArgument(x.dataset.argument); });
+                });
                 listEl.querySelectorAll('li[data-argument]').forEach(li => {
-                    li.addEventListener('click', () => openDetailFlyout('settings', li.dataset.argument));
+                    li.addEventListener('click', () => {
+                        detailNavStack = [];
+                        currentClientId = null;      // le impostazioni non sono legate a un cliente
+                        currentContainerCampo = li.dataset.argument;
+                        openDetailFlyout('settings', li.dataset.argument);
+                    });
                 });
             } catch (e) {
                 listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore di connessione</li>';
+            }
+        }
+
+        // Crea un nuovo argomento (settings): chiede il nome, poi l'ambito tenant.
+        function addSettingsArgument() {
+            const name = prompt('Nome del nuovo argomento:');
+            if (!name || !name.trim()) return;
+            openSettingsTenantScope({ op: 'add', name: name.trim() });
+        }
+
+        // Elimina un intero argomento (settings): chiede l'ambito tenant (funge da conferma).
+        function deleteSettingsArgument(name) {
+            openSettingsTenantScope({ op: 'delete', name });
+        }
+
+        // Apre il popup di scelta ambito (questo tenant / tutti i tenant) per le operazioni settings.
+        // pending = { op: 'add'|'delete'|'delete-field', name, campos? }
+        function openSettingsTenantScope(pending) {
+            pendingSettingsArg = pending;
+            const modal = document.getElementById('settingsTenantScopeModal');
+            const title = document.getElementById('settingsTenantScopeTitle');
+            const text = document.getElementById('settingsTenantScopeText');
+            let t, p;
+            if (pending.op === 'add') {
+                t = 'Aggiungi argomento';
+                p = `Creare l'argomento "${pending.name}" su questo tenant o su tutti i tenant?`;
+            } else if (pending.op === 'add-field') {
+                t = 'Aggiungi campo';
+                p = 'Aggiungere il campo su questo tenant o su tutti i tenant?';
+            } else if (pending.op === 'rename-field') {
+                t = 'Rinomina campi';
+                p = 'Applicare la rinomina su questo tenant o su tutti i tenant?';
+            } else if (pending.op === 'delete-field') {
+                t = 'Elimina campi';
+                p = 'Eliminare i campi selezionati su questo tenant o su tutti i tenant?';
+            } else {
+                t = 'Elimina argomento';
+                p = `Eliminare l'argomento "${pending.name}" su questo tenant o su tutti i tenant?`;
+            }
+            if (title) title.textContent = t;
+            if (text) text.textContent = p;
+            // "Tutti i tenant" solo per admin (id_roles = 1)
+            const allBtn = document.getElementById('settingsScopeAllTenants');
+            if (allBtn) allBtn.style.display = (Number(decodeJwtPayload().id_roles) === 1) ? 'block' : 'none';
+            if (modal) modal.style.display = 'flex';
+        }
+
+        // Esegue l'operazione con l'ambito scelto ('this-tenant' | 'all-tenants').
+        async function performSettingsArgScope(scope) {
+            const modal = document.getElementById('settingsTenantScopeModal');
+            if (modal) modal.style.display = 'none';
+            const p = pendingSettingsArg;
+            if (!p) return;
+            try {
+                if (p.op === 'add-field') {
+                    // Impostazioni: "questo tenant" = custom "(*)"; "tutti i tenant" = standard
+                    pendingFieldKind = (scope === 'all-tenants') ? 'standard' : 'custom';
+                    await performAddField(scope);
+                    return;
+                }
+                if (p.op === 'rename-field') { await performRenameFields(scope); return; }
+                if (p.op === 'delete-field') {
+                    // Elimina i campi selezionati sull'argomento, con ambito tenant scelto
+                    const res = await fetch(`${API_URL}/settings/delete-fields`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ campos: p.campos, scope, clientId: p.name })
+                    });
+                    if (res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        showNotification(`Eliminati ${data.deleted ?? 0} campi`, 'success');
+                        clientDetailMode = 'edit';
+                        await openDetailFlyout('settings', currentDetailArgument, currentDetailLabel, true);
+                    } else {
+                        const err = await res.json().catch(() => ({}));
+                        showNotification('Errore: ' + (err.error || res.status), 'info');
+                    }
+                    return;
+                }
+                let res;
+                if (p.op === 'add') {
+                    res = await fetch(`${API_URL}/settings/argument`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ name: p.name, scope })
+                    });
+                } else {
+                    res = await fetch(`${API_URL}/settings/argument?name=${encodeURIComponent(p.name)}&scope=${encodeURIComponent(scope)}`, {
+                        method: 'DELETE',
+                        headers: getAuthHeaders()
+                    });
+                }
+                if (res.ok) {
+                    showNotification(p.op === 'add' ? 'Argomento aggiunto' : 'Argomento eliminato', 'success');
+                    if (p.op === 'delete' && currentDetailSource === 'settings' && currentDetailArgument === p.name) {
+                        document.getElementById('settingsDetailFlyout')?.classList.remove('open');
+                    }
+                    await loadSettingsArguments();
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
             }
         }
 
@@ -2676,14 +3041,24 @@
                     listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore nel caricamento</li>';
                     return;
                 }
-                const names = await res.json();
-                if (!Array.isArray(names) || names.length === 0) {
+                const clients = await res.json();
+                if (!Array.isArray(clients) || clients.length === 0) {
                     listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Nessun cliente</li>';
                     return;
                 }
-                listEl.innerHTML = names.map(n => `<li data-client="${escapeHtml(n)}">${escapeHtml(n)}</li>`).join('');
-                listEl.querySelectorAll('li[data-client]').forEach(li => {
-                    li.addEventListener('click', () => openDetailFlyout('clients', li.dataset.client));
+                // Ogni voce mostra il nome ma porta con sé l'id della riga cliente,
+                // che verrà usato come "argument" per il flyout di dettaglio.
+                listEl.innerHTML = clients.map(c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}">${escapeHtml(c.name)}</li>`).join('');
+                listEl.querySelectorAll('li[data-client-id]').forEach(li => {
+                    li.addEventListener('click', () => {
+                        detailNavStack = [];
+                        currentContainerCampo = 'Cliente';
+                        currentClientId = li.dataset.clientId;
+                        // Evidenzia in verde il cliente selezionato
+                        listEl.querySelectorAll('li[data-client-id]').forEach(x => x.classList.remove('active-client'));
+                        li.classList.add('active-client');
+                        openDetailFlyout('clients', li.dataset.clientId, li.dataset.clientName);
+                    });
                 });
             } catch (e) {
                 listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore di connessione</li>';
@@ -2693,6 +3068,34 @@
         // Apre il secondo flyout con i dettagli (campo + valore) dell'argomento cliccato.
         // Sorgente corrente del flyout di dettaglio: 'settings' oppure 'clients'
         let currentDetailSource = 'settings';
+        let currentDetailArgument = null; // argument attivo (per i clienti: id del cliente)
+        let currentDetailLabel = null;    // etichetta mostrata (per i clienti: nome cliente)
+        // Modalità del dettaglio Clienti: 'view' (sola lettura), 'edit' (valori modificabili),
+        // 'delete' (checkbox sui campi custom), 'rename' (nomi campi custom modificabili).
+        let clientDetailMode = 'view';
+        // Azione in attesa del popup di scelta ambito: 'delete' oppure 'rename'.
+        let clientScopeAction = null;
+        // Tipo del nuovo campo scelto: 'standard' oppure 'custom' (default custom).
+        let pendingFieldKind = 'custom';
+        // Stack di navigazione del dettaglio: ogni voce è un "descrittore di vista".
+        // Serve per entrare nei Nodo Padre (tipo 0), nei link a tabella (tipo 20) e tornare indietro.
+        let detailNavStack = [];
+        // Descrittore della vista corrente (per push nello stack di navigazione).
+        let currentView = null;
+        // Id del cliente su cui si sta lavorando (per i filtri delle tabelle collegate).
+        let currentClientId = null;
+        // Modalità modifica del dettaglio riga collegata (tipo 20).
+        let linkedRowEditMode = false;
+        // Modalità modifica dell'elenco collegato (aggiungi/elimina righe).
+        let linkedListEditMode = false;
+        // Modalità modifica del primo flyout Impostazioni (aggiungi/elimina argomenti).
+        let settingsListEditMode = false;
+        // Operazione argomento settings in attesa della scelta ambito tenant: { op, name }.
+        let pendingSettingsArg = null;
+        // "campo" del contenitore corrente: 'Cliente' al top-level (righe identità),
+        // oppure il campo del Nodo Padre quando si è dentro un suo flyout. Usato per lo
+        // scope 'all' dell'aggiunta campo: inserisce sotto ogni contenitore con quel campo.
+        let currentContainerCampo = 'Cliente';
 
         // Chiude tutti i flyout (primo livello e dettaglio)
         function closeAllFlyouts() {
@@ -2701,19 +3104,335 @@
             document.getElementById('settingsDetailFlyout')?.classList.remove('open');
         }
 
+        // Entra in un Nodo Padre: salva il livello corrente sullo stack e apre il dettaglio
+        // con argument = id della riga del Nodo Padre (i suoi campi figli).
+        // Il nuovo contenitore è il Nodo Padre stesso (campo = label).
+        function navigateToChild(argument, label) {
+            if (currentView) detailNavStack.push(currentView);
+            currentContainerCampo = label;
+            openDetailFlyout(currentDetailSource, argument, label);
+        }
+
+        // Mostra/nasconde il pulsante "Indietro" in base allo stack.
+        function updateBackButton() {
+            const b = document.getElementById('detailBackBtn');
+            if (b) b.style.display = detailNavStack.length > 0 ? 'inline-block' : 'none';
+        }
+
+        // Nasconde tutta l'UI di gestione (toggle/pulsanti/barre): usata nelle viste collegate.
+        function hideDetailManagement() {
+            ['clientEditToggleWrap', 'clientEditButtons', 'clientNewFieldForm',
+             'clientDeleteBar', 'clientRenameBar', 'settingsDetailSaveBar'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+        }
+
+        // Riapre una vista dallo stack (senza spingerne una nuova).
+        function reopenView(desc) {
+            if (!desc) return;
+            if (desc.kind === 'linkedList') renderLinkedList(desc);
+            else if (desc.kind === 'linkedRow') renderLinkedRow(desc);
+            else {
+                currentContainerCampo = desc.containerCampo;
+                openDetailFlyout(desc.source, desc.argument, desc.label, true);
+            }
+        }
+
+        // tipo_valore = 20: apre l'elenco dei valori della tabella collegata.
+        function openLinkedList(fieldId, label) {
+            if (currentView) detailNavStack.push(currentView);
+            linkedListEditMode = false; // l'elenco si apre in sola lettura
+            renderLinkedList({ kind: 'linkedList', source: currentDetailSource, fieldId, clientId: currentClientId, label });
+        }
+
+        // Torna alla vista precedente dallo stack (usato da Indietro e da Annulla/Salva del nuovo record).
+        function goBackDetail() {
+            const prev = detailNavStack.pop();
+            if (prev) reopenView(prev);
+        }
+
+        // Click su un valore dell'elenco collegato: apre il dettaglio di quella riga.
+        function openLinkedRow(rowId, label) {
+            const cv = currentView;
+            if (cv) detailNavStack.push(cv);
+            linkedRowEditMode = false; // ogni nuova riga si apre in sola lettura
+            renderLinkedRow({ kind: 'linkedRow', source: cv.source, fieldId: cv.fieldId, clientId: cv.clientId, rowId, label, tabella: cv.tabella });
+        }
+
+        // Rende l'elenco dei valori (colonna) della tabella collegata (tipo 20).
+        async function renderLinkedList(desc) {
+            currentView = desc;
+            const flyout = document.getElementById('settingsDetailFlyout');
+            const titleEl = document.getElementById('settingsDetailTitle');
+            const listEl = document.getElementById('settingsDetailList');
+            if (!flyout || !listEl) return;
+            flyout.classList.add('open');
+            titleEl.textContent = desc.label || 'Elenco';
+            hideDetailManagement();
+            updateBackButton();
+            listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
+            try {
+                const res = await fetch(`${API_URL}/${desc.source}/linked-list?fieldId=${encodeURIComponent(desc.fieldId)}&clientId=${encodeURIComponent(desc.clientId || '')}`, { headers: getAuthHeaders() });
+                if (!res.ok) { listEl.innerHTML = '<div style="color: var(--text-muted);">Errore nel caricamento</div>'; return; }
+                const data = await res.json();
+                desc.tabella = data.tabella; // serve al dettaglio riga per la modifica/salvataggio
+                const items = data.items || [];
+                const edit = linkedListEditMode;
+
+                const toggleHtml = `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;"><span>Abilita modifica</span><label class="toggle-switch"><input type="checkbox" id="linkedListEditToggle" ${edit ? 'checked' : ''}><span class="toggle-slider"></span></label></div>`;
+                const addHtml = edit ? `<div style="margin-bottom: 0.75rem;"><button id="linkedAddBtn" type="button" style="padding: 0 0.7rem; height: 28px; background: #3B82F6; color: white; border: none; border-radius: 5px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">+ Aggiungi</button></div>` : '';
+                let itemsHtml;
+                if (items.length === 0) {
+                    itemsHtml = '<div style="color: var(--text-muted);">Nessun dato</div>';
+                } else {
+                    itemsHtml = items.map(it => {
+                        const val = it.value == null ? '' : String(it.value);
+                        const del = edit ? `<span class="linked-del" data-row-id="${escapeHtml(it.id)}" title="Elimina" style="flex: 0 0 auto; color: #EF4444; font-weight: 700; cursor: pointer; padding: 0 6px;">✕</span>` : '';
+                        return `<div class="linked-value" data-row-id="${escapeHtml(it.id)}" data-row-label="${escapeHtml(val)}"><span style="flex: 1 1 0; min-width: 0;">${escapeHtml(val)}</span>${del}<span class="parent-arrow">›</span></div>`;
+                    }).join('');
+                }
+                listEl.innerHTML = toggleHtml + addHtml + itemsHtml;
+
+                const tg = document.getElementById('linkedListEditToggle');
+                if (tg) tg.addEventListener('change', () => { linkedListEditMode = tg.checked; renderLinkedList(desc); });
+                const addBtn = document.getElementById('linkedAddBtn');
+                if (addBtn) addBtn.addEventListener('click', () => openLinkedNewRow());
+            } catch (e) {
+                listEl.innerHTML = '<div style="color: var(--text-muted);">Errore di connessione</div>';
+            }
+        }
+
+        // Apre il form per aggiungere una nuova riga alla tabella collegata.
+        function openLinkedNewRow() {
+            const cv = currentView;
+            if (cv) detailNavStack.push(cv);
+            renderLinkedNewRow({ kind: 'linkedNew', source: cv.source, fieldId: cv.fieldId, clientId: cv.clientId, tabella: cv.tabella, label: 'Nuovo' });
+        }
+
+        // Opzioni per un campo FK (id + testo), con caso speciale per clients (nomi identità).
+        async function linkedFkOptions(refTable) {
+            let options = [];
+            try {
+                if (refTable === 'clients') {
+                    const r = await fetch(`${API_URL}/clients/names`, { headers: getAuthHeaders() });
+                    if (r.ok) { const d = await r.json(); options = d.map(c => ({ id: c.id, display: c.name || ('Item ' + c.id) })); }
+                } else {
+                    const r = await fetch(`${API_URL}/data/${encodeURIComponent(refTable)}`, { headers: getAuthHeaders() });
+                    if (r.ok) {
+                        const d = await r.json();
+                        options = d.map(row => ({ id: row.id, display: row.nominativo || row.name || row.display_name || row.description || row.title || row.valore2 || ('Item ' + row.id) }));
+                    }
+                }
+            } catch (e) { /* ignore */ }
+            return options;
+        }
+
+        // HTML di un campo del form collegato: select se FK (col.references), altrimenti text.
+        // disabled = sola lettura (usato quando la modifica non è abilitata o la colonna è generata).
+        async function renderLinkedFieldHtml(col, value, className, disabled) {
+            const cls = className || 'linked-new-field';
+            const dis = disabled ? 'disabled' : '';
+            const style = 'flex: 1 1 0; min-width: 0; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;';
+            const val = value == null ? '' : String(value);
+            if (col.references) {
+                const opts = await linkedFkOptions(col.references);
+                const optsHtml = opts.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
+                return `<div class="settings-detail-row"><span class="campo-label">${escapeHtml(col.name)}</span><select class="${cls}" data-col="${escapeHtml(col.name)}" ${dis} style="${style}"><option value="">-- Seleziona --</option>${optsHtml}</select></div>`;
+            }
+            return `<div class="settings-detail-row"><span class="campo-label">${escapeHtml(col.name)}</span><input type="text" class="${cls}" data-col="${escapeHtml(col.name)}" value="${escapeHtml(val)}" ${dis} style="${style}"></div>`;
+        }
+
+        // Rende il form di inserimento di una nuova riga (campi editabili, escluse generate/sistema).
+        async function renderLinkedNewRow(desc) {
+            currentView = desc;
+            const flyout = document.getElementById('settingsDetailFlyout');
+            const titleEl = document.getElementById('settingsDetailTitle');
+            const listEl = document.getElementById('settingsDetailList');
+            if (!flyout || !listEl) return;
+            flyout.classList.add('open');
+            titleEl.textContent = desc.label || 'Nuovo';
+            hideDetailManagement();
+            updateBackButton();
+            listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
+
+            let cols = [];
+            try {
+                const mres = await fetch(`${API_URL}/data/${encodeURIComponent(desc.tabella)}/columns`, { headers: getAuthHeaders() });
+                if (mres.ok) cols = await mres.json();
+            } catch (e) { /* ignore */ }
+            const hidden = ['id', 'id_cliente', 'ordinamento', 'tenant_id', 'user_id', 'created_by', 'created_at', 'updated_at'];
+            const editable = cols.filter(c => !hidden.includes(c.name) && !c.generated);
+
+            // I campi FK (references) diventano menu a discesa dalla tabella referenziata.
+            let fieldsHtml = '';
+            for (const c of editable) {
+                fieldsHtml += await renderLinkedFieldHtml(c, '');
+            }
+            const barHtml = `<div style="display: flex; gap: 0.5rem; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;"><button id="linkedNewSave" style="flex: 1; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button><button id="linkedNewCancel" style="flex: 0 0 auto; padding: 0.6rem 0.9rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button></div>`;
+            listEl.innerHTML = fieldsHtml + barHtml;
+
+            document.getElementById('linkedNewSave').addEventListener('click', () => saveLinkedNewRow(desc));
+            document.getElementById('linkedNewCancel').addEventListener('click', goBackDetail);
+        }
+
+        // Salva la nuova riga (POST con scoping automatico tenant/user/cliente lato server).
+        async function saveLinkedNewRow(desc) {
+            const listEl = document.getElementById('settingsDetailList');
+            if (!listEl) return;
+            const values = {};
+            listEl.querySelectorAll('.linked-new-field').forEach(inp => { values[inp.dataset.col] = inp.value; });
+            try {
+                const res = await fetch(`${API_URL}/${desc.source}/linked-row`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ fieldId: desc.fieldId, clientId: desc.clientId || '', values })
+                });
+                if (res.ok) {
+                    showNotification('Aggiunto', 'success');
+                    goBackDetail(); // torna all'elenco (che si ricarica)
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
+        }
+
+        // Elimina una riga dall'elenco collegato.
+        async function deleteLinkedRow(rowId) {
+            const cv = currentView;
+            if (!cv || cv.kind !== 'linkedList') return;
+            if (!confirm('Eliminare questa riga?')) return;
+            try {
+                const res = await fetch(`${API_URL}/${cv.source}/linked-row?fieldId=${encodeURIComponent(cv.fieldId)}&clientId=${encodeURIComponent(cv.clientId || '')}&rowId=${encodeURIComponent(rowId)}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                if (res.ok) {
+                    showNotification('Eliminato', 'success');
+                    renderLinkedList(cv);
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
+        }
+
+        // Rende il dettaglio completo (tutti i valori) di una riga della tabella collegata,
+        // con toggle "Abilita modifica" e salvataggio delle modifiche.
+        async function renderLinkedRow(desc) {
+            currentView = desc;
+            const flyout = document.getElementById('settingsDetailFlyout');
+            const titleEl = document.getElementById('settingsDetailTitle');
+            const listEl = document.getElementById('settingsDetailList');
+            if (!flyout || !listEl) return;
+            flyout.classList.add('open');
+            titleEl.textContent = desc.label || 'Dettaglio';
+            hideDetailManagement();
+            updateBackButton();
+            listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
+            try {
+                const res = await fetch(`${API_URL}/${desc.source}/linked-row?fieldId=${encodeURIComponent(desc.fieldId)}&clientId=${encodeURIComponent(desc.clientId || '')}&rowId=${encodeURIComponent(desc.rowId)}`, { headers: getAuthHeaders() });
+                if (!res.ok) { listEl.innerHTML = '<div style="color: var(--text-muted);">Errore nel caricamento</div>'; return; }
+                const row = await res.json();
+
+                // Metadati colonne (generate + foreign key) per rendere i campi correttamente.
+                const metaMap = {};
+                if (desc.tabella) {
+                    try {
+                        const mres = await fetch(`${API_URL}/data/${encodeURIComponent(desc.tabella)}/columns`, { headers: getAuthHeaders() });
+                        if (mres.ok) { (await mres.json()).forEach(c => { metaMap[c.name] = c; }); }
+                    } catch (e) { /* ignore */ }
+                }
+
+                const hidden = ['id', 'id_cliente', 'ordinamento', 'tenant_id', 'user_id', 'created_by', 'created_at', 'updated_at'];
+                const entries = Object.entries(row).filter(([k]) => !hidden.includes(k));
+                if (entries.length === 0) { listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>'; return; }
+
+                const edit = linkedRowEditMode;
+                const toggleHtml = `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;"><span>Abilita modifica</span><label class="toggle-switch"><input type="checkbox" id="linkedEditToggle" ${edit ? 'checked' : ''}><span class="toggle-slider"></span></label></div>`;
+                // Campi: FK -> menu a discesa (valore corrente selezionato); generate/sola lettura -> disabilitati.
+                let fieldsHtml = '';
+                for (const [k, v] of entries) {
+                    const meta = metaMap[k] || { name: k };
+                    const readonly = !edit || meta.generated;
+                    fieldsHtml += await renderLinkedFieldHtml(meta, v, 'linked-field', readonly);
+                }
+                const saveHtml = `<div id="linkedSaveBar" style="display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;"><button id="linkedSaveBtn" style="width: 100%; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button></div>`;
+                listEl.innerHTML = toggleHtml + fieldsHtml + saveHtml;
+
+                // Toggle: abilita/disabilita la modifica (ri-render)
+                const tg = document.getElementById('linkedEditToggle');
+                if (tg) tg.addEventListener('change', () => { linkedRowEditMode = tg.checked; renderLinkedRow(desc); });
+
+                // Ad ogni modifica (testo o select): mostra il pulsante Salva
+                const saveBar = document.getElementById('linkedSaveBar');
+                listEl.querySelectorAll('.linked-field').forEach(inp => {
+                    const onEdit = () => { inp.dataset.dirty = '1'; if (saveBar) saveBar.style.display = 'block'; };
+                    inp.addEventListener('input', onEdit);
+                    inp.addEventListener('change', onEdit);
+                });
+                const saveBtn = document.getElementById('linkedSaveBtn');
+                if (saveBtn) saveBtn.addEventListener('click', () => saveLinkedRow(desc));
+            } catch (e) {
+                listEl.innerHTML = '<div style="color: var(--text-muted);">Errore di connessione</div>';
+            }
+        }
+
+        // Salva le modifiche della riga collegata (PUT generico sulla tabella target).
+        async function saveLinkedRow(desc) {
+            const listEl = document.getElementById('settingsDetailList');
+            if (!listEl || !desc.tabella) return;
+            const dirty = listEl.querySelectorAll('.linked-field[data-dirty="1"]');
+            if (dirty.length === 0) return;
+            const payload = {};
+            dirty.forEach(inp => { payload[inp.dataset.col] = inp.value; });
+            try {
+                const res = await fetch(`${API_URL}/data/${encodeURIComponent(desc.tabella)}/${encodeURIComponent(desc.rowId)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    showNotification('Salvato', 'success');
+                    linkedRowEditMode = false;
+                    renderLinkedRow(desc);
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
+        }
+
         // Apre il flyout di dettaglio per la sorgente indicata (settings o clients),
         // filtrando per l'argument/cliente selezionato.
-        async function openDetailFlyout(source, argument) {
+        async function openDetailFlyout(source, argument, label, keepMode = false) {
             currentDetailSource = source;
+            currentDetailArgument = argument;
+            currentDetailLabel = label;
+            // Aprendo un nuovo dettaglio si torna in sola lettura; con keepMode=true
+            // (ri-render dopo cambio modalità/salvataggio) la modalità corrente resta.
+            if (!keepMode) clientDetailMode = 'view';
             const flyout = document.getElementById('settingsDetailFlyout');
             const titleEl = document.getElementById('settingsDetailTitle');
             const listEl = document.getElementById('settingsDetailList');
             if (!flyout || !listEl) return;
 
-            titleEl.textContent = argument;
+            titleEl.innerHTML = campoLabelHtml(label || argument);
             listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
             const saveBar = document.getElementById('settingsDetailSaveBar');
             if (saveBar) saveBar.style.display = 'none';
+            const newFieldForm = document.getElementById('clientNewFieldForm');
+            if (newFieldForm) newFieldForm.style.display = 'none';
+            // Descrittore della vista corrente (per la navigazione avanti/indietro)
+            currentView = { kind: 'detail', source, argument, label, containerCampo: currentContainerCampo };
+            updateBackButton();
             flyout.classList.add('open');
             // Il primo flyout attivo (Impostazioni o Clienti) diventa grigio chiaro
             document.querySelector('.nav-settings')?.classList.toggle('detail-open', source === 'settings');
@@ -2725,9 +3444,12 @@
                     listEl.innerHTML = '<div style="color: var(--text-muted);">Errore nel caricamento</div>';
                     return;
                 }
-                const rows = await res.json();
+                let rows = await res.json();
+                // Nasconde le righe "segnaposto" senza campo (usate solo per far comparire l'argomento vuoto)
+                if (Array.isArray(rows)) rows = rows.filter(r => r.campo != null && String(r.campo).trim() !== '');
                 if (!Array.isArray(rows) || rows.length === 0) {
                     listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>';
+                    applyDetailMode();
                     return;
                 }
                 listEl.innerHTML = rows.map(renderSettingRow).join('');
@@ -2740,9 +3462,67 @@
                     inp.addEventListener('input', onEdit);
                     inp.addEventListener('change', onEdit);
                 });
+                applyDetailMode();
             } catch (e) {
                 listEl.innerHTML = '<div style="color: var(--text-muted);">Errore di connessione</div>';
             }
+        }
+
+        // Applica la modalità corrente (view/edit/delete/rename) al flyout di dettaglio:
+        // abilita/disabilita i valori, mostra/nasconde toggle, pulsanti e barre.
+        // Vale sia per Clienti che per Impostazioni.
+        function applyDetailMode() {
+            const mode = clientDetailMode;
+            const listEl = document.getElementById('settingsDetailList');
+
+            // Valori modificabili solo in 'edit'
+            if (listEl) {
+                const disabled = (mode !== 'edit');
+                listEl.querySelectorAll('[data-setting-id]').forEach(inp => { inp.disabled = disabled; });
+            }
+
+            // Toggle "Abilita modifica"
+            const toggleWrap = document.getElementById('clientEditToggleWrap');
+            if (toggleWrap) toggleWrap.style.display = 'inline-flex';
+            const toggle = document.getElementById('clientEditToggle');
+            if (toggle) toggle.checked = (mode !== 'view');
+
+            // Pulsanti +/Elimina/Rinomina: visibili con modifica abilitata
+            const editButtons = document.getElementById('clientEditButtons');
+            if (editButtons) editButtons.style.display = (mode !== 'view') ? 'flex' : 'none';
+
+            const newForm = document.getElementById('clientNewFieldForm');
+            if (newForm && mode !== 'edit') newForm.style.display = 'none';
+
+            const delBar = document.getElementById('clientDeleteBar');
+            if (delBar) delBar.style.display = (mode === 'delete') ? 'block' : 'none';
+            const renBar = document.getElementById('clientRenameBar');
+            if (renBar) renBar.style.display = (mode === 'rename') ? 'block' : 'none';
+
+            const saveBar = document.getElementById('settingsDetailSaveBar');
+            if (saveBar && mode !== 'edit') saveBar.style.display = 'none';
+
+            updateDeleteConfirmState();
+        }
+
+        // Abilita il pulsante "Salva" (eliminazione) solo se almeno un campo è selezionato.
+        function updateDeleteConfirmState() {
+            const confirmBtn = document.getElementById('clientDeleteConfirm');
+            const listEl = document.getElementById('settingsDetailList');
+            if (!confirmBtn || !listEl) return;
+            const anyChecked = listEl.querySelectorAll('.field-del-check:checked').length > 0;
+            confirmBtn.disabled = !anyChecked;
+            confirmBtn.style.opacity = anyChecked ? '1' : '0.5';
+            confirmBtn.style.cursor = anyChecked ? 'pointer' : 'not-allowed';
+        }
+
+        // Etichetta del campo: se custom (inizia con "(*)") mostra un pallino verde al posto di "(*)".
+        function campoLabelHtml(rawCampo) {
+            const s = String(rawCampo || '');
+            if (s.startsWith('(*)')) {
+                return `<span class="custom-dot" title="Campo custom"></span>${escapeHtml(s.replace(/^\(\*\)\s*/, ''))}`;
+            }
+            return escapeHtml(s);
         }
 
         // Renderizza una riga: "campo" a sinistra, input del valore a destra in base a tipo_valore.
@@ -2750,28 +3530,78 @@
             const campo = escapeHtml(row.campo || '');
             const tipo = Number(row.tipo_valore);
             const id = escapeHtml(row.id);
+            // Campo custom = ordinamento >= 100 (vale per settings e clients)
+            const isClientCustom = Number(row.ordinamento) >= 100;
+            const mode = clientDetailMode;
             let input;
 
-            if (tipo === 1) {
-                // Booleano modificabile -> valore1, mostrato come interruttore a levetta (toggle)
+            if (tipo === 0) {
+                // Nodo padre: riga cliccabile con freccia, apre un nuovo flyout
+                return `<div class="settings-detail-parent" data-parent-id="${id}" data-parent-campo="${campo}"><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+            } else if (tipo === 20) {
+                // Collegamento a tabella esterna: riga cliccabile con freccia (settings e clients).
+                return `<div class="settings-detail-link" data-link-id="${id}" data-link-label="${campo}"><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+            } else if (tipo === 1) {
+                // Booleano -> valore1, interruttore a levetta (toggle)
                 const checked = (row.valore1 === true || row.valore1 === 'true' || row.valore1 === 't') ? 'checked' : '';
                 input = `<label class="toggle-switch"><input type="checkbox" data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>`;
             } else if (tipo === 2) {
-                // Alfanumerico modificabile -> valore2
+                // Alfanumerico -> valore2
                 input = `<input type="text" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(row.valore2 == null ? '' : row.valore2)}">`;
             } else if (tipo === 3) {
-                // Numerico intero modificabile -> valore3
+                // Numerico intero -> valore3
                 input = `<input type="number" step="1" data-setting-id="${id}" data-field="valore3" value="${escapeHtml(row.valore3 == null ? '' : row.valore3)}">`;
             } else if (tipo === 4) {
-                // Riferimento a un'altra tabella: mostra il valore letto da tabella.colonna
-                // (risolto dal backend). Testo editabile; salvataggio col pulsante "Salva"
-                // che scrive nella tabella di riferimento previo controllo di unicità.
+                // Database: valore letto da tabella.colonna (risolto dal backend), con Salva + unicità
                 input = `<input type="text" data-setting-id="${id}" data-type4="1" value="${escapeHtml(row.resolved_value == null ? '' : row.resolved_value)}">`;
+            } else if (tipo === 5) {
+                // URL -> valore2: testo editabile + link cliccabile (icona dentro la casella)
+                const val = row.valore2 == null ? '' : row.valore2;
+                const link = safeUrl(val);
+                const icon = link ? `<a class="field-icon" href="${escapeHtml(link)}" target="_blank" rel="noopener" title="Apri">🔗</a>` : '';
+                input = `<span class="field-icon-wrap">${icon}<input type="text" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(val)}" placeholder="https://..."></span>`;
+            } else if (tipo === 6) {
+                // Email -> valore2: testo editabile + link mailto (icona dentro la casella).
+                // Supporta più indirizzi separati da ";" (mailto li unisce con la virgola).
+                const val = row.valore2 == null ? '' : row.valore2;
+                const emails = String(val).split(';').map(s => s.trim()).filter(s => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
+                const icon = emails.length ? `<a class="field-icon" href="mailto:${escapeHtml(emails.join(','))}" title="Invia email">✉️</a>` : '';
+                input = `<span class="field-icon-wrap">${icon}<input type="text" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(val)}" placeholder="nome@dominio.it"></span>`;
+            } else if (tipo === 7) {
+                // Date -> valore2: selettore data (formato AAAA-MM-GG)
+                let dateVal = '';
+                const v = row.valore2;
+                if (v) {
+                    const d = new Date(v);
+                    if (!isNaN(d.getTime())) dateVal = d.toISOString().slice(0, 10);
+                    else if (/^\d{4}-\d{2}-\d{2}/.test(String(v))) dateVal = String(v).slice(0, 10);
+                }
+                input = `<input type="date" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(dateVal)}">`;
+            } else if (tipo === 10) {
+                // Elenco -> menu a discesa; opzioni dal campo "colonna" separate da ";", valore in valore2
+                const current = row.valore2 == null ? '' : String(row.valore2);
+                const opts = String(row.colonna || '').split(';').map(s => s.trim()).filter(s => s !== '');
+                const optionsHtml = ['<option value=""></option>']
+                    .concat(opts.map(o => `<option value="${escapeHtml(o)}" ${o === current ? 'selected' : ''}>${escapeHtml(o)}</option>`))
+                    .join('');
+                input = `<select data-setting-id="${id}" data-field="valore2">${optionsHtml}</select>`;
             } else {
                 input = `<span style="color: var(--text-muted);">—</span>`;
             }
 
-            return `<div class="settings-detail-row"><span class="campo-label">${campo}</span>${input}</div>`;
+            // In modalità 'delete' i campi custom mostrano una checkbox di selezione.
+            // Eliminazione: checkbox sui campi custom; gli admin (id_roles=1) la vedono su TUTTI i campi.
+            const isAdminUser = Number(decodeJwtPayload().id_roles) === 1;
+            const canDelete = isClientCustom || isAdminUser;
+            const checkbox = (mode === 'delete' && canDelete)
+                ? `<input type="checkbox" class="field-del-check" data-campo="${campo}" style="margin-right: 8px; flex: 0 0 auto;">`
+                : '';
+            // In modalità 'rename' l'etichetta dei campi custom diventa modificabile.
+            const label = (mode === 'rename' && isClientCustom)
+                ? `<input type="text" class="field-rename" data-oldcampo="${campo}" value="${campo}" style="width: 140px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem;">`
+                : `<span class="campo-label">${campoLabelHtml(row.campo)}</span>`;
+
+            return `<div class="settings-detail-row">${checkbox}${label}${input}</div>`;
         }
 
         // Salva i campi di tipo 4 modificati: il backend controlla l'unicità del valore
@@ -2847,6 +3677,27 @@
             const saveBtn = document.getElementById('settingsDetailSaveBtn');
             if (saveBtn) saveBtn.addEventListener('click', saveDetailChanges);
 
+            // Toggle "Abilita modifica" del primo flyout: mostra + Aggiungi e le ✕ sugli argomenti.
+            const listToggle = document.getElementById('settingsListEditToggle');
+            const newArgBtn = document.getElementById('settingsNewArgBtn');
+            if (listToggle) listToggle.addEventListener('change', () => {
+                settingsListEditMode = listToggle.checked;
+                if (newArgBtn) newArgBtn.style.display = settingsListEditMode ? 'block' : 'none';
+                loadSettingsArguments();
+            });
+            if (newArgBtn) newArgBtn.addEventListener('click', addSettingsArgument);
+
+            // Popup ambito tenant (questo tenant / tutti i tenant / annulla)
+            const stThis = document.getElementById('settingsScopeThisTenant');
+            const stAll = document.getElementById('settingsScopeAllTenants');
+            const stCancel = document.getElementById('settingsScopeCancel');
+            if (stThis) stThis.addEventListener('click', () => performSettingsArgScope('this-tenant'));
+            if (stAll) stAll.addEventListener('click', () => performSettingsArgScope('all-tenants'));
+            if (stCancel) stCancel.addEventListener('click', () => {
+                const m = document.getElementById('settingsTenantScopeModal');
+                if (m) m.style.display = 'none';
+            });
+
             // Apre al passaggio del mouse; se era attivo il flyout Clienti lo chiude col suo dettaglio
             navSettings.addEventListener('mouseenter', () => {
                 const nc = document.querySelector('.nav-clients');
@@ -2877,6 +3728,468 @@
                 }
                 navClients.classList.add('open');
             });
+
+            // Pulsante "Nuovo cliente": visibile solo agli utenti con id_roles <= 50.
+            const newBtn = document.getElementById('clientsNewBtn');
+            if (newBtn) {
+                const roleLevel = Number(decodeJwtPayload().id_roles);
+                if (Number.isFinite(roleLevel) && roleLevel <= 50) {
+                    newBtn.style.display = 'block';
+                }
+                newBtn.addEventListener('click', async () => {
+                    const name = prompt('Nome del nuovo cliente:');
+                    if (!name || !name.trim()) return;
+                    try {
+                        const res = await fetch(`${API_URL}/clients`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                            body: JSON.stringify({ name: name.trim() })
+                        });
+                        if (res.ok) {
+                            showNotification('Cliente aggiunto', 'success');
+                            await loadClientsNames();
+                        } else {
+                            const err = await res.json().catch(() => ({}));
+                            showNotification('Errore: ' + (err.error || res.status), 'info');
+                        }
+                    } catch (e) {
+                        showNotification('Errore di connessione', 'info');
+                    }
+                });
+            }
+        }
+
+        // Gestione creazione di un campo custom nel flyout di dettaglio Clienti.
+        async function initClientNewField() {
+            const btn = document.getElementById('clientNewFieldBtn');
+            const form = document.getElementById('clientNewFieldForm');
+            const nameInp = document.getElementById('clientNewFieldName');
+            const typeSel = document.getElementById('clientNewFieldType');
+            const addBtn = document.getElementById('clientNewFieldAdd');
+            const cancelBtn = document.getElementById('clientNewFieldCancel');
+            const tabWrap = document.getElementById('clientNewFieldTabellaWrap');
+            const colWrap = document.getElementById('clientNewFieldColonnaWrap');
+            const colLabel = document.getElementById('clientNewFieldColonnaLabel');
+            const tabInp = document.getElementById('clientNewFieldTabella');
+            const colInp = document.getElementById('clientNewFieldColonna');
+            if (!btn || !form || !nameInp || !typeSel || !addBtn || !cancelBtn) return;
+
+            // Campi extra in base al tipo: Database (4) -> tabella + colonna;
+            // Elenco (10) -> solo colonna, con etichetta "Elenco dati".
+            function updateFieldExtras() {
+                const v = typeSel.value;
+                if (v === '4') {
+                    if (tabWrap) tabWrap.style.display = 'block';
+                    if (colWrap) colWrap.style.display = 'block';
+                    if (colLabel) colLabel.textContent = 'Colonna';
+                } else if (v === '10') {
+                    if (tabWrap) tabWrap.style.display = 'none';
+                    if (colWrap) colWrap.style.display = 'block';
+                    if (colLabel) colLabel.textContent = 'Elenco dati';
+                } else {
+                    if (tabWrap) tabWrap.style.display = 'none';
+                    if (colWrap) colWrap.style.display = 'none';
+                }
+            }
+
+            // Popola le opzioni con i tipi_valore
+            try {
+                const res = await fetch(`${API_URL}/tipo-valore`, { headers: getAuthHeaders() });
+                if (res.ok) {
+                    const types = await res.json();
+                    typeSel.innerHTML = types.map(t => `<option value="${escapeHtml(t.id_code)}">${escapeHtml(t.description || t.id_code)}</option>`).join('');
+                }
+            } catch (e) { /* ignore */ }
+
+            // Popola la tendina "Visibile a (ruolo)" (id_roles); prima opzione = nessuna restrizione
+            const rolesSel = document.getElementById('clientNewFieldRoles');
+            try {
+                const rres = await fetch(`${API_URL}/roles`, { headers: getAuthHeaders() });
+                if (rres.ok && rolesSel) {
+                    const roles = await rres.json();
+                    rolesSel.innerHTML = '<option value="">Tutti (nessuna restrizione)</option>' +
+                        roles.map(r => `<option value="${escapeHtml(r.id_roles)}">${escapeHtml(r.name || r.id_roles)}</option>`).join('');
+                }
+            } catch (e) { /* ignore */ }
+
+            typeSel.addEventListener('change', updateFieldExtras);
+            updateFieldExtras();
+
+            btn.addEventListener('click', () => {
+                form.style.display = 'block';
+                nameInp.value = '';
+                if (tabInp) tabInp.value = '';
+                if (colInp) colInp.value = '';
+                if (rolesSel) rolesSel.value = '';
+                updateFieldExtras();
+                nameInp.focus();
+            });
+            cancelBtn.addEventListener('click', () => { form.style.display = 'none'; });
+
+            // Clienti: ambito clienti (tutti/questo). Impostazioni: ambito tenant (questo/tutti).
+            const proceedAdd = () => {
+                if (currentDetailSource === 'clients') openClientScopeModal('add');
+                else openSettingsTenantScope({ op: 'add-field' });
+            };
+
+            addBtn.addEventListener('click', () => {
+                const campo = nameInp.value.trim();
+                if (!campo) { nameInp.focus(); return; }
+                // Impostazioni: niente standard/custom. Solo ambito tenant (il kind lo deriva dall'ambito).
+                if (currentDetailSource === 'settings') {
+                    openSettingsTenantScope({ op: 'add-field' });
+                    return;
+                }
+                // Clienti: id_roles <= 20 -> chiede se standard o custom; altrimenti sempre custom.
+                const roleLevel = Number(decodeJwtPayload().id_roles);
+                if (Number.isFinite(roleLevel) && roleLevel <= 20) {
+                    const kindModal = document.getElementById('clientKindModal');
+                    if (kindModal) kindModal.style.display = 'flex';
+                } else {
+                    pendingFieldKind = 'custom';
+                    proceedAdd();
+                }
+            });
+
+            // Modale tipo campo: Standard / Custom / Annulla -> poi procede (con o senza ambito)
+            const kindModal = document.getElementById('clientKindModal');
+            const kindStd = document.getElementById('clientKindStandard');
+            const kindCst = document.getElementById('clientKindCustom');
+            const kindCancel = document.getElementById('clientKindCancel');
+            if (kindStd) kindStd.addEventListener('click', () => {
+                pendingFieldKind = 'standard';
+                if (kindModal) kindModal.style.display = 'none';
+                proceedAdd();
+            });
+            if (kindCst) kindCst.addEventListener('click', () => {
+                pendingFieldKind = 'custom';
+                if (kindModal) kindModal.style.display = 'none';
+                proceedAdd();
+            });
+            if (kindCancel) kindCancel.addEventListener('click', () => { if (kindModal) kindModal.style.display = 'none'; });
+        }
+
+        // Gestione modifica struttura campi Clienti: toggle "Abilita modifica" + Elimina + Rinomina.
+        function initClientFieldManagement() {
+            const toggle = document.getElementById('clientEditToggle');
+            const delBtn = document.getElementById('clientDeleteBtn');
+            const renBtn = document.getElementById('clientRenameBtn');
+            const listEl = document.getElementById('settingsDetailList');
+
+            const rerender = () => openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
+
+            // Toggle: ON -> 'edit' (valori modificabili + pulsanti), OFF -> 'view' (sola lettura)
+            if (toggle) toggle.addEventListener('change', () => {
+                clientDetailMode = toggle.checked ? 'edit' : 'view';
+                rerender();
+            });
+
+            // Elimina / Rinomina: entrano nella rispettiva modalità
+            if (delBtn) delBtn.addEventListener('click', () => { clientDetailMode = 'delete'; rerender(); });
+            if (renBtn) renBtn.addEventListener('click', () => { clientDetailMode = 'rename'; rerender(); });
+
+            // Selezione checkbox campi custom -> abilita il pulsante "Salva" (eliminazione)
+            if (listEl) listEl.addEventListener('change', (e) => {
+                if (e.target && e.target.classList && e.target.classList.contains('field-del-check')) {
+                    updateDeleteConfirmState();
+                }
+            });
+
+            // Click delegato sulle righe cliccabili del dettaglio:
+            //  - valore di un elenco collegato (tipo 20) -> dettaglio riga
+            //  - link a tabella esterna (tipo 20) -> elenco valori
+            //  - Nodo Padre (tipo 0) -> figli del nodo
+            if (listEl) listEl.addEventListener('click', (e) => {
+                const del = e.target.closest('.linked-del');
+                if (del) { deleteLinkedRow(del.dataset.rowId); return; }
+                const linkedVal = e.target.closest('.linked-value');
+                if (linkedVal) { openLinkedRow(linkedVal.dataset.rowId, linkedVal.dataset.rowLabel); return; }
+                const link = e.target.closest('.settings-detail-link');
+                if (link) { openLinkedList(link.dataset.linkId, link.dataset.linkLabel); return; }
+                const parent = e.target.closest('.settings-detail-parent');
+                if (parent) navigateToChild(parent.dataset.parentId, parent.dataset.parentCampo);
+            });
+
+            // Pulsante "Indietro": riapre la vista precedente dallo stack
+            const backBtn = document.getElementById('detailBackBtn');
+            if (backBtn) backBtn.addEventListener('click', goBackDetail);
+
+            const scopeModal = document.getElementById('clientDeleteScopeModal');
+
+            // Barra eliminazione: Salva (apre il popup scope) / Annulla (torna in edit)
+            const delConfirm = document.getElementById('clientDeleteConfirm');
+            const delCancel = document.getElementById('clientDeleteCancel');
+            if (delConfirm) delConfirm.addEventListener('click', () => {
+                if (delConfirm.disabled) return;
+                if (currentDetailSource === 'clients') { openClientScopeModal('delete'); return; }
+                // Impostazioni: chiede l'ambito tenant (questo tenant / tutti i tenant)
+                const listEl = document.getElementById('settingsDetailList');
+                const campos = Array.from(listEl.querySelectorAll('.field-del-check:checked')).map(c => c.dataset.campo);
+                if (campos.length === 0) return;
+                openSettingsTenantScope({ op: 'delete-field', campos, name: currentDetailArgument });
+            });
+            if (delCancel) delCancel.addEventListener('click', () => { clientDetailMode = 'edit'; rerender(); });
+
+            // Barra rinomina: Salva (apre il popup scope se ci sono modifiche) / Annulla
+            const renConfirm = document.getElementById('clientRenameConfirm');
+            const renCancel = document.getElementById('clientRenameCancel');
+            if (renConfirm) renConfirm.addEventListener('click', () => {
+                if (collectRenames().length === 0) { clientDetailMode = 'edit'; rerender(); return; }
+                if (currentDetailSource === 'clients') openClientScopeModal('rename');
+                else openSettingsTenantScope({ op: 'rename-field' });
+            });
+            if (renCancel) renCancel.addEventListener('click', () => { clientDetailMode = 'edit'; rerender(); });
+
+            // Popup scope (generico): tutti i clienti / solo questo / annulla
+            const scopeAll = document.getElementById('clientDeleteScopeAll');
+            const scopeThis = document.getElementById('clientDeleteScopeThis');
+            const scopeCancel = document.getElementById('clientDeleteScopeCancel');
+            if (scopeAll) scopeAll.addEventListener('click', () => dispatchClientScope('all'));
+            if (scopeThis) scopeThis.addEventListener('click', () => dispatchClientScope('this'));
+            if (scopeCancel) scopeCancel.addEventListener('click', () => { if (scopeModal) scopeModal.style.display = 'none'; });
+        }
+
+        // Popup scelta ambito (tutti i clienti / solo questo) — condiviso da aggiungi/elimina/rinomina.
+        function openClientScopeModal(action) {
+            clientScopeAction = action;
+            const modal = document.getElementById('clientDeleteScopeModal');
+            const title = document.getElementById('clientScopeTitle');
+            const text = document.getElementById('clientScopeText');
+            let t, p;
+            if (action === 'rename') {
+                t = 'Rinomina campi custom';
+                p = 'La rinomina deve avvenire su tutti i clienti o solo su quello selezionato?';
+            } else if (action === 'add') {
+                t = 'Aggiungi campo custom';
+                p = 'Il nuovo campo deve essere aggiunto a tutti i clienti o solo a quello selezionato?';
+            } else {
+                t = 'Elimina campi custom';
+                p = "L'eliminazione deve avvenire su tutti i clienti o solo su quello selezionato?";
+            }
+            if (title) title.textContent = t;
+            if (text) text.textContent = p;
+            if (modal) modal.style.display = 'flex';
+        }
+
+        // Instrada la scelta del popup all'azione corretta.
+        function dispatchClientScope(scope) {
+            if (clientScopeAction === 'rename') performRenameFields(scope);
+            else if (clientScopeAction === 'add') performAddField(scope);
+            else performDeleteFields(scope);
+        }
+
+        // Crea il nuovo campo custom leggendo i valori dal form; scope = 'all' | 'this'.
+        async function performAddField(scope) {
+            const modal = document.getElementById('clientDeleteScopeModal');
+            if (modal) modal.style.display = 'none';
+            const nameInp = document.getElementById('clientNewFieldName');
+            const typeSel = document.getElementById('clientNewFieldType');
+            const tabInp = document.getElementById('clientNewFieldTabella');
+            const colInp = document.getElementById('clientNewFieldColonna');
+            const form = document.getElementById('clientNewFieldForm');
+            const campo = nameInp ? nameInp.value.trim() : '';
+            if (!campo) return;
+            const tipo_valore = typeSel ? (typeSel.value || null) : null;
+            const tabella = tabInp ? tabInp.value.trim() : '';
+            const colonna = colInp ? colInp.value.trim() : '';
+            const rolesSel = document.getElementById('clientNewFieldRoles');
+            const id_roles = (rolesSel && rolesSel.value !== '') ? rolesSel.value : null;
+            try {
+                const res = await fetch(`${API_URL}/${currentDetailSource}/field`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ clientId: currentDetailArgument, campo, tipo_valore, tabella, colonna, scope, containerCampo: currentContainerCampo, kind: pendingFieldKind, id_roles })
+                });
+                if (res.ok) {
+                    showNotification('Campo aggiunto', 'success');
+                    if (form) form.style.display = 'none';
+                    clientDetailMode = 'edit';
+                    await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
+        }
+
+        // Raccoglie i campi custom rinominati dal DOM: [{ old, new }, ...]
+        function collectRenames() {
+            const listEl = document.getElementById('settingsDetailList');
+            const renames = [];
+            if (!listEl) return renames;
+            listEl.querySelectorAll('.field-rename').forEach(inp => {
+                const oldName = inp.dataset.oldcampo;
+                const newName = inp.value.trim();
+                if (newName && newName !== oldName) renames.push({ old: oldName, new: newName });
+            });
+            return renames;
+        }
+
+        // Elimina i campi custom selezionati; scope = 'all' (tutti i clienti) | 'this' (solo questo).
+        async function performDeleteFields(scope) {
+            const modal = document.getElementById('clientDeleteScopeModal');
+            const listEl = document.getElementById('settingsDetailList');
+            if (modal) modal.style.display = 'none';
+            if (!listEl) return;
+            const campos = Array.from(listEl.querySelectorAll('.field-del-check:checked')).map(c => c.dataset.campo);
+            if (campos.length === 0) return;
+            try {
+                const res = await fetch(`${API_URL}/${currentDetailSource}/delete-fields`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ campos, scope, clientId: currentDetailArgument })
+                });
+                if (res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    showNotification(`Eliminati ${data.deleted ?? 0} campi`, 'success');
+                    clientDetailMode = 'edit';
+                    await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
+        }
+
+        // Rinomina i campi custom modificati; scope = 'all' (tutti i clienti) | 'this' (solo questo).
+        async function performRenameFields(scope) {
+            const modal = document.getElementById('clientDeleteScopeModal');
+            if (modal) modal.style.display = 'none';
+            const renames = collectRenames();
+            if (renames.length === 0) {
+                clientDetailMode = 'edit';
+                await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
+                return;
+            }
+            try {
+                const res = await fetch(`${API_URL}/${currentDetailSource}/rename-fields`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ renames, scope, clientId: currentDetailArgument })
+                });
+                if (res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    showNotification(`Rinominati ${data.updated ?? 0} campi`, 'success');
+                    clientDetailMode = 'edit';
+                    await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
+        }
+
+        // Impersonificazione: pulsante "Impersona" (solo admin id_roles=1) e "Ritorna".
+        function initImpersonate() {
+            const bar = document.getElementById('impersonateBar');
+            const label = document.getElementById('impersonateLabel');
+            const btn = document.getElementById('impersonateBtn');
+            const returnBtn = document.getElementById('impersonateReturnBtn');
+            const modal = document.getElementById('impersonateModal');
+            const tenantSel = document.getElementById('impersonateTenant');
+            const userSel = document.getElementById('impersonateUser');
+            const confirmBtn = document.getElementById('impersonateConfirm');
+            const cancelBtn = document.getElementById('impersonateCancel');
+            if (!bar) return;
+
+            const isImpersonating = !!localStorage.getItem('originalToken');
+            const isAdmin = Number(decodeJwtPayload().id_roles) === 1;
+
+            if (isImpersonating) {
+                bar.style.display = 'flex';
+                btn.style.display = 'none';
+                returnBtn.style.display = 'inline-block';
+                let uname = '';
+                try { uname = (JSON.parse(localStorage.getItem('user') || '{}').name) || ''; } catch (e) {}
+                label.textContent = uname ? `Stai impersonando: ${uname}` : 'Stai impersonando';
+            } else if (isAdmin) {
+                bar.style.display = 'flex';
+                btn.style.display = 'inline-block';
+                returnBtn.style.display = 'none';
+                label.textContent = '';
+            } else {
+                bar.style.display = 'none';
+            }
+
+            const roleEl = document.getElementById('impersonateRole');
+            let impersonateUsers = [];
+
+            function updateImpersonateRole() {
+                const u = impersonateUsers.find(x => String(x.id) === String(userSel.value));
+                if (roleEl) roleEl.textContent = u ? (u.role_name || (u.id_roles != null ? String(u.id_roles) : '—')) : '—';
+            }
+
+            async function loadImpersonateUsers(tenantId) {
+                userSel.innerHTML = '';
+                impersonateUsers = [];
+                if (roleEl) roleEl.textContent = '—';
+                if (!tenantId) return;
+                try {
+                    const res = await fetch(`${API_URL}/auth/impersonate/users?tenant_id=${encodeURIComponent(tenantId)}`, { headers: getAuthHeaders() });
+                    if (!res.ok) return;
+                    impersonateUsers = await res.json();
+                    userSel.innerHTML = impersonateUsers.map(u => {
+                        const nome = [u.name, u.cognome].filter(Boolean).join(' ');
+                        return `<option value="${escapeHtml(u.id)}">${escapeHtml(nome)} — ${escapeHtml(u.email)}</option>`;
+                    }).join('');
+                    updateImpersonateRole();
+                } catch (e) { /* ignore */ }
+            }
+
+            if (userSel) userSel.addEventListener('change', updateImpersonateRole);
+
+            if (btn) btn.addEventListener('click', async () => {
+                try {
+                    const res = await fetch(`${API_URL}/auth/impersonate/tenants`, { headers: getAuthHeaders() });
+                    if (!res.ok) { showNotification('Errore nel caricamento tenant', 'info'); return; }
+                    const tenants = await res.json();
+                    tenantSel.innerHTML = tenants.map(t => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name)}</option>`).join('');
+                    await loadImpersonateUsers(tenantSel.value);
+                    modal.style.display = 'flex';
+                } catch (e) { showNotification('Errore di connessione', 'info'); }
+            });
+
+            if (tenantSel) tenantSel.addEventListener('change', () => loadImpersonateUsers(tenantSel.value));
+            if (cancelBtn) cancelBtn.addEventListener('click', () => { modal.style.display = 'none'; });
+
+            if (confirmBtn) confirmBtn.addEventListener('click', async () => {
+                const tenant_id = tenantSel.value;
+                const user_id = userSel.value;
+                if (!tenant_id || !user_id) return;
+                try {
+                    const res = await fetch(`${API_URL}/auth/impersonate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ tenant_id, user_id })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) { showNotification('Errore: ' + (data.error || res.status), 'info'); return; }
+                    // Conserva token/utente originali solo la prima volta (per il "Ritorna")
+                    if (!localStorage.getItem('originalToken')) {
+                        localStorage.setItem('originalToken', localStorage.getItem('authToken') || '');
+                        localStorage.setItem('originalUser', localStorage.getItem('user') || '');
+                    }
+                    localStorage.setItem('authToken', data.token);
+                    localStorage.setItem('user', JSON.stringify(data.user));
+                    window.location.reload();
+                } catch (e) { showNotification('Errore di connessione', 'info'); }
+            });
+
+            if (returnBtn) returnBtn.addEventListener('click', () => {
+                const orig = localStorage.getItem('originalToken');
+                if (orig) localStorage.setItem('authToken', orig);
+                const origUser = localStorage.getItem('originalUser');
+                if (origUser) localStorage.setItem('user', origUser); else localStorage.removeItem('user');
+                localStorage.removeItem('originalToken');
+                localStorage.removeItem('originalUser');
+                window.location.reload();
+            });
         }
 
         // === INITIALIZATION ===
@@ -2887,6 +4200,9 @@
             loadClientsNames();
             initSettingsFlyout();
             initClientsFlyout();
+            initClientNewField();
+            initClientFieldManagement();
+            initImpersonate();
             initSidebarToggle();
 
             // Carica dati dalle API

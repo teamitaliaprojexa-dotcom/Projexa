@@ -268,9 +268,26 @@ CREATE TABLE email_recaps (
 -- settings → tenants (tenant_id)
 -- settings → users (user_id)
 -- settings → roles (id_roles)
+-- settings → tipo_valore (tipo_valore -> id_code)
 -- clients → tenants (tenant_id)
 -- clients → users (user_id)
 -- clients → roles (id_roles)
+-- clients → tipo_valore (tipo_valore -> id_code)
+-- tipo_valore → roles (id_roles)
+
+-- ==========================================
+-- TIPO_VALORE TABLE (lookup dei tipi valore)
+-- ==========================================
+-- id_code è VARCHAR e UNIQUE per poter essere referenziato da settings.tipo_valore
+-- e clients.tipo_valore (colonne VARCHAR).
+CREATE TABLE tipo_valore (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id_code VARCHAR(255) NOT NULL UNIQUE,
+  description TEXT,
+  tooltip TEXT,
+  id_roles SMALLINT,                -- FK -> roles.id_roles
+  FOREIGN KEY (id_roles) REFERENCES roles(id_roles)
+);
 
 -- ==========================================
 -- SETTINGS TABLE
@@ -297,7 +314,8 @@ CREATE TABLE settings (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id),
   FOREIGN KEY (user_id) REFERENCES users(id),
-  FOREIGN KEY (id_roles) REFERENCES roles(id_roles)
+  FOREIGN KEY (id_roles) REFERENCES roles(id_roles),
+  FOREIGN KEY (tipo_valore) REFERENCES tipo_valore(id_code)
 );
 
 -- ==========================================
@@ -323,12 +341,48 @@ CREATE TABLE clients (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id),
   FOREIGN KEY (user_id) REFERENCES users(id),
-  FOREIGN KEY (id_roles) REFERENCES roles(id_roles)
+  FOREIGN KEY (id_roles) REFERENCES roles(id_roles),
+  FOREIGN KEY (tipo_valore) REFERENCES tipo_valore(id_code)
+);
+
+-- ==========================================
+-- CONTACTS TABLE (rubrica contatti, legata ai clienti)
+-- ==========================================
+-- "nominativo" è una colonna GENERATA (non scrivibile): il DB la calcola da solo
+-- concatenando nome + cognome. Gli endpoint generici /api/data escludono in automatico
+-- le colonne generate da INSERT/UPDATE.
+CREATE TABLE contacts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID NOT NULL,           -- FK -> tenants.id
+  user_id UUID NOT NULL,             -- FK -> users.id
+  id_cliente UUID,                   -- FK -> clients.id (riga identità del cliente)
+  nome VARCHAR(255),
+  cognome VARCHAR(255),
+  nominativo VARCHAR(511)
+    GENERATED ALWAYS AS (TRIM(COALESCE(nome,'') || ' ' || COALESCE(cognome,''))) STORED,
+  bu VARCHAR(255),                   -- business unit / reparto
+  qualifica VARCHAR(255),
+  email VARCHAR(255),
+  telefono VARCHAR(50),
+  cellulare VARCHAR(50),
+  responsabile UUID,                 -- FK -> contacts.id (un altro contatto)
+  sede VARCHAR(255),
+  note TEXT,
+  ordinamento INTEGER,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (id_cliente) REFERENCES clients(id) ON DELETE SET NULL,
+  FOREIGN KEY (responsabile) REFERENCES contacts(id) ON DELETE SET NULL
 );
 
 -- ==========================================
 -- INDEXES
 -- ==========================================
+CREATE INDEX idx_contacts_tenant ON contacts(tenant_id);
+CREATE INDEX idx_contacts_cliente ON contacts(id_cliente);
+CREATE INDEX idx_contacts_responsabile ON contacts(responsabile);
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_scadenza ON users(scadenza);
 CREATE INDEX idx_user_tenants_user_id ON user_tenants(user_id);
@@ -351,12 +405,15 @@ CREATE INDEX idx_settings_tenant_user ON settings(tenant_id, user_id);
 CREATE INDEX idx_settings_data_inizio ON settings(data_inizio);
 CREATE INDEX idx_settings_scadenza ON settings(scadenza);
 CREATE INDEX idx_settings_id_roles ON settings(id_roles);
+CREATE INDEX idx_settings_tipo_valore ON settings(tipo_valore);
 CREATE INDEX idx_clients_tenant_id ON clients(tenant_id);
 CREATE INDEX idx_clients_user_id ON clients(user_id);
 CREATE INDEX idx_clients_tenant_user ON clients(tenant_id, user_id);
 CREATE INDEX idx_clients_data_inizio ON clients(data_inizio);
 CREATE INDEX idx_clients_scadenza ON clients(scadenza);
 CREATE INDEX idx_clients_id_roles ON clients(id_roles);
+CREATE INDEX idx_clients_tipo_valore ON clients(tipo_valore);
+CREATE INDEX idx_tipo_valore_id_roles ON tipo_valore(id_roles);
 
 -- ==========================================
 -- ARCHITECTURE NOTES
