@@ -290,6 +290,22 @@ CREATE TABLE tipo_valore (
 );
 
 -- ==========================================
+-- FUNCTION_DB TABLE (catalogo funzioni)
+-- ==========================================
+CREATE TABLE function_db (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID,                   -- FK -> tenants.id
+  cod_istruzione INTEGER,           -- numerico intero
+  istruzione VARCHAR(255),          -- alfanumerico
+  funzione VARCHAR(255),            -- alfanumerico
+  fun_tenant VARCHAR(255),          -- alfanumerico (NON referenziato)
+  fun_user VARCHAR(255),            -- alfanumerico
+  fun_tabella VARCHAR(255),         -- alfanumerico
+  fun_colonna VARCHAR(255),         -- alfanumerico
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+);
+
+-- ==========================================
 -- SETTINGS TABLE
 -- ==========================================
 -- Nomi in snake_case minuscolo: non serve citarli tra apici nelle query.
@@ -310,6 +326,8 @@ CREATE TABLE settings (
   data_inizio DATE,                 -- data
   scadenza DATE,                    -- data
   ordinamento INTEGER,              -- numerico intero (ordine di visualizzazione)
+  layout_col INTEGER,               -- numerico intero (colonna di layout)
+  "VariabDB" VARCHAR(500),          -- alfanumerico
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id),
@@ -337,6 +355,8 @@ CREATE TABLE clients (
   data_inizio DATE,
   scadenza DATE,
   ordinamento INTEGER,
+  layout_col INTEGER,               -- numerico intero (colonna di layout)
+  "VariabDB" VARCHAR(500),          -- alfanumerico
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id),
