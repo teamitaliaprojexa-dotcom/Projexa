@@ -4,6 +4,7 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import db from '../config/database.js';
 import JWT_SECRET from '../config/jwt.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -346,6 +347,95 @@ router.get('/google-callback', async (req, res) => {
   } catch (error) {
     console.error('❌ GOOGLE_CALLBACK ERROR:', error.message);
     res.redirect(`/?error=${encodeURIComponent(error.message)}`);
+  }
+});
+
+// ==========================================
+// IMPERSONIFICAZIONE (solo admin id_roles = 1)
+// ==========================================
+
+function requireAdmin(req, res, next) {
+  if (Number(req.user?.id_roles) !== 1) {
+    return res.status(403).json({ error: 'Operazione riservata agli amministratori' });
+  }
+  next();
+}
+
+// Elenco tenant selezionabili
+router.get('/impersonate/tenants', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const r = await db.query('SELECT id, name FROM tenants ORDER BY name');
+    res.json(r.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Elenco utenti di un dato tenant
+router.get('/impersonate/users', requireAuth, requireAdmin, async (req, res) => {
+  const tenantId = req.query.tenant_id;
+  if (!tenantId) return res.status(400).json({ error: 'tenant_id richiesto' });
+  try {
+    const r = await db.query(
+      `SELECT DISTINCT u.id, u.name, u.cognome, u.email, ut.id_roles, rol.name AS role_name
+       FROM users u
+       JOIN user_tenants ut ON ut.user_id = u.id
+       LEFT JOIN roles rol ON rol.id_roles = ut.id_roles
+       WHERE ut.tenant_id = $1
+       ORDER BY u.name`,
+      [tenantId]
+    );
+    res.json(r.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Genera un token impersonando l'utente scelto nel tenant scelto
+router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
+  const { tenant_id, user_id } = req.body || {};
+  if (!tenant_id || !user_id) {
+    return res.status(400).json({ error: 'tenant_id e user_id richiesti' });
+  }
+  try {
+    const q = await db.query(
+      `SELECT ut.role_id, ut.id_roles, r.name AS role_name,
+              u.email, u.name, u.cognome, t.name AS tenant_name
+       FROM user_tenants ut
+       JOIN users u ON u.id = ut.user_id
+       JOIN tenants t ON t.id = ut.tenant_id
+       LEFT JOIN roles r ON r.id_roles = ut.id_roles
+       WHERE ut.user_id = $1 AND ut.tenant_id = $2 LIMIT 1`,
+      [user_id, tenant_id]
+    );
+    if (q.rows.length === 0) {
+      return res.status(404).json({ error: 'Utente non trovato in quel tenant' });
+    }
+    const row = q.rows[0];
+    const token = jwt.sign(
+      {
+        user_id,
+        email: row.email,
+        tenant_id,
+        tenant_name: row.tenant_name,
+        role_id: row.role_id,
+        id_roles: row.id_roles,
+        role_name: row.role_name
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    res.json({
+      token,
+      user: {
+        id: user_id,
+        email: row.email,
+        name: buildFullName(row),
+        tenant_name: row.tenant_name
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
