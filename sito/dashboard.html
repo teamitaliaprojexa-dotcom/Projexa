@@ -1395,6 +1395,23 @@
         </div>
     </div>
 
+    <!-- Modale: Nuovo utente (routine tipo_valore=50, valore2='Nuovo_utente') -->
+    <div id="newUserModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 650; display: none; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 460px; max-width: 92vw; max-height: 85vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+            <div id="newUserTenant" style="font-size: 0.8rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.25rem;"></div>
+            <h3 id="newUserTitle" style="margin: 0 0 1rem; color: var(--dark);">Nuovo utente</h3>
+            <div id="newUserFields"></div>
+            <div style="margin-bottom: 0.6rem;">
+                <label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Ruolo</label>
+                <select id="newUserRole" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;"></select>
+            </div>
+            <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+                <button id="newUserSave" type="button" onclick="saveNewUser()" style="flex:1; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva</button>
+                <button id="newUserCancel" type="button" onclick="document.getElementById('newUserModal').style.display='none'" style="flex:0 0 auto; padding:0.6rem 0.9rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modale: tipo campo (standard / custom) — solo per id_roles <= 20 -->
     <div id="clientKindModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: 90vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
@@ -3002,14 +3019,24 @@
                     return;
                 }
                 listEl.innerHTML = args.map(a => {
+                    // Ogni voce è un oggetto { argument, tipo_valore, id, valore2 }
+                    // (fallback a stringa per compatibilità).
+                    const name = (a && typeof a === 'object') ? a.argument : a;
+                    const tipo = (a && typeof a === 'object') ? Number(a.tipo_valore) : NaN;
                     let icon = '';
                     if (settingsListEditMode && settingsArgSubMode === 'delete') {
-                        icon = `<span class="arg-del" data-argument="${escapeHtml(a)}" title="Elimina" style="float: right; color: #EF4444; font-weight: 700; cursor: pointer; padding: 0 6px;">✕</span>`;
+                        icon = `<span class="arg-del" data-argument="${escapeHtml(name)}" title="Elimina" style="float: right; color: #EF4444; font-weight: 700; cursor: pointer; padding: 0 6px;">✕</span>`;
                     } else if (settingsListEditMode && settingsArgSubMode === 'rename') {
-                        icon = `<span class="arg-ren" data-argument="${escapeHtml(a)}" title="Rinomina" style="float: right; color: #6B7280; font-weight: 700; cursor: pointer; padding: 0 6px;">✎</span>`;
+                        icon = `<span class="arg-ren" data-argument="${escapeHtml(name)}" title="Rinomina" style="float: right; color: #6B7280; font-weight: 700; cursor: pointer; padding: 0 6px;">✎</span>`;
+                    }
+                    // tipo_valore = 50: l'argomento mostra inline un campo valore2 editabile
+                    // (nessuna navigazione al dettaglio: si scrive direttamente qui).
+                    if (tipo === 50 && a && a.id) {
+                        const val = a.valore2 == null ? '' : a.valore2;
+                        return `<li class="arg-inline" data-argument="${escapeHtml(name)}" style="display:flex; align-items:center; gap:8px;"><span style="flex:0 0 auto;">${campoLabelHtml(name)}</span><input type="text" class="arg-val-input" data-setting-id="${escapeHtml(a.id)}" data-field="valore2" value="${escapeHtml(val)}" style="flex:1 1 0; min-width:0; padding:4px 6px; border:1px solid #ccc; border-radius:4px; font-size:0.85rem;">${icon}</li>`;
                     }
                     // Argomenti "(*)" mostrati con il pallino verde (come i campi custom dei clienti)
-                    return `<li data-argument="${escapeHtml(a)}">${campoLabelHtml(a)}${icon}</li>`;
+                    return `<li data-argument="${escapeHtml(name)}">${campoLabelHtml(name)}${icon}</li>`;
                 }).join('');
                 // Elimina argomento (✕): non deve aprire il dettaglio
                 listEl.querySelectorAll('.arg-del').forEach(x => {
@@ -3024,10 +3051,26 @@
                         // In modalità rinomina/elimina il click sulla riga NON apre il dettaglio.
                         if (settingsListEditMode && settingsArgSubMode === 'rename') { renameSettingsArgument(li.dataset.argument); return; }
                         if (settingsListEditMode && settingsArgSubMode === 'delete') { deleteSettingsArgument(li.dataset.argument); return; }
+                        if (li.classList.contains('arg-inline')) return; // tipo 50: si edita inline, niente dettaglio
                         detailNavStack = [];
                         currentClientId = null;      // le impostazioni non sono legate a un cliente
                         currentContainerCampo = li.dataset.argument;
                         openDetailFlyout('settings', li.dataset.argument);
+                    });
+                });
+                // tipo 50: salva valore2 al cambio (PUT sulla riga segnaposto), senza navigare.
+                listEl.querySelectorAll('input.arg-val-input').forEach(inp => {
+                    inp.addEventListener('click', (e) => e.stopPropagation());
+                    inp.addEventListener('change', async () => {
+                        const id = inp.dataset.settingId;
+                        try {
+                            const r = await fetch(`${API_URL}/data/settings/${id}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                                body: JSON.stringify({ valore2: inp.value })
+                            });
+                            showNotification(r.ok ? 'Salvato' : 'Errore nel salvataggio', r.ok ? 'success' : 'info');
+                        } catch (e) { showNotification('Errore di connessione', 'info'); }
                     });
                 });
             } catch (e) {
@@ -3481,9 +3524,10 @@
                 const items = data.items || [];
                 desc.tabella = data.tabella;
                 desc.colonna = data.colonna;
-                const mode = Number(data.mode);      // valore3: 1 = elimina, 2 = rinomina
+                const mode = Number(data.mode);      // valore3: 1 = elimina, 2 = rinomina, 5 = condividi
                 const canRename = (mode === 2);
                 const canDelete = (mode === 1);
+                const canShare = (mode === 5);
                 if (items.length === 0) {
                     listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>';
                     return;
@@ -3498,7 +3542,11 @@
                 const saveBarHtml = (canRename || canDelete)
                     ? `<div id="optSaveBar" style="display:none; padding-top:1rem; border-top:1px solid var(--border); margin-top:0.5rem;"><button id="optSaveBtn" type="button" style="width:100%; padding:0.6rem 1rem; background:${canDelete ? '#EF4444' : '#10B981'}; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">${canDelete ? 'Elimina' : 'Salva'}</button></div>`
                     : '';
-                listEl.innerHTML = rowsHtml + saveBarHtml;
+                // Area condivisione (mode 5): elenco utenti del tenant + pulsante Condividi.
+                const shareAreaHtml = canShare
+                    ? `<div id="shareArea" style="display:none; padding-top:0.75rem; border-top:1px solid var(--border); margin-top:0.75rem;"><div style="font-size:0.85rem; font-weight:600; margin-bottom:0.5rem;">Condividi con:</div><div id="shareUsers" style="color: var(--text-muted); font-size:0.85rem;"></div><div id="shareBtnWrap" style="display:none; margin-top:0.75rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Permesso</label><select id="sharePermission" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px; margin-bottom:0.5rem;"><option value="write">Scrittura (può modificare)</option><option value="read">Lettura (sola visualizzazione)</option></select><button id="shareBtn" type="button" style="width:100%; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Condividi</button></div></div>`
+                    : '';
+                listEl.innerHTML = rowsHtml + saveBarHtml + shareAreaHtml;
 
                 const checks = listEl.querySelectorAll('.opt-check');
                 const saveBar = document.getElementById('optSaveBar');
@@ -3508,6 +3556,18 @@
                         if (chk.checked) checks.forEach(o => { if (o !== chk) o.checked = false; });
                         // Elimina (mode 1): il solo click sul checkbox abilita il pulsante.
                         if (canDelete) { if (saveBar) saveBar.style.display = chk.checked ? 'block' : 'none'; return; }
+                        // Condividi (mode 5): selezionato un cliente, carica gli utenti del tenant.
+                        if (canShare) {
+                            const area = document.getElementById('shareArea');
+                            if (chk.checked) {
+                                const cid = chk.closest('.opt-row').dataset.id;
+                                loadShareUsers(desc, cid);
+                                if (area) area.style.display = 'block';
+                            } else if (area) {
+                                area.style.display = 'none';
+                            }
+                            return;
+                        }
                         if (!canRename) return;
                         // Rinomina (mode 2): mostra l'editor solo sulla riga selezionata.
                         listEl.querySelectorAll('.opt-row').forEach(row => {
@@ -3607,6 +3667,63 @@
                     // Aggiorna anche le liste già caricate impattate (no refresh pagina)
                     if (desc.tabella === 'clients') { try { loadClientsNames(); } catch (e) {} }
                     if (desc.tabella === 'settings') { try { loadSettingsArguments(); } catch (e) {} }
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
+        }
+
+        // Condividi cliente (tipo 15, valore3=5): carica gli utenti del tenant con cui condividere.
+        async function loadShareUsers(desc, clientId) {
+            const wrap = document.getElementById('shareUsers');
+            const btnWrap = document.getElementById('shareBtnWrap');
+            if (!wrap) return;
+            if (btnWrap) btnWrap.style.display = 'none';
+            wrap.innerHTML = 'Caricamento…';
+            try {
+                const res = await fetch(`${API_URL}/${desc.source}/share-users?fieldId=${encodeURIComponent(desc.fieldId)}&clientId=${encodeURIComponent(clientId)}`, { headers: getAuthHeaders() });
+                if (!res.ok) { const e = await res.json().catch(() => ({})); wrap.innerHTML = '<span style="color:#EF4444;">' + escapeHtml(e.error || 'Errore') + '</span>'; return; }
+                const users = (await res.json()).users || [];
+                if (users.length === 0) { wrap.innerHTML = 'Nessun altro utente nel tenant.'; return; }
+                wrap.innerHTML = users.map(u => {
+                    const label = [[u.name, u.cognome].filter(Boolean).join(' '), u.email].filter(Boolean).join(' — ');
+                    return `<div class="settings-detail-row share-user-row" data-user-id="${escapeHtml(u.user_id)}" style="justify-content:flex-start; gap:8px;"><input type="checkbox" class="share-user-check" style="flex:0 0 auto; cursor:pointer;"><span style="flex:1 1 0; min-width:0;">${escapeHtml(label || u.user_id)}</span></div>`;
+                }).join('');
+                const checks = wrap.querySelectorAll('.share-user-check');
+                checks.forEach(chk => {
+                    chk.addEventListener('change', () => {
+                        if (chk.checked) checks.forEach(o => { if (o !== chk) o.checked = false; });
+                        const anySel = wrap.querySelector('.share-user-check:checked');
+                        if (btnWrap) btnWrap.style.display = anySel ? 'block' : 'none';
+                    });
+                });
+                const btn = document.getElementById('shareBtn');
+                if (btn) btn.onclick = () => {
+                    const sel = wrap.querySelector('.share-user-check:checked');
+                    if (!sel) return;
+                    shareClient(desc, clientId, sel.closest('.share-user-row').dataset.userId);
+                };
+            } catch (e) {
+                wrap.innerHTML = '<span style="color:#EF4444;">Errore di connessione</span>';
+            }
+        }
+
+        // Esegue la condivisione (ACL): concede al destinatario l'accesso al cliente.
+        async function shareClient(desc, clientId, targetUserId) {
+            const permSel = document.getElementById('sharePermission');
+            const permission = permSel ? permSel.value : 'write';
+            try {
+                const res = await fetch(`${API_URL}/${desc.source}/share-client`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ fieldId: desc.fieldId, clientId, targetUserId, permission })
+                });
+                if (res.ok) {
+                    showNotification('Cliente condiviso', 'success');
+                    goBackDetail();
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showNotification('Errore: ' + (err.error || res.status), 'info');
@@ -4133,6 +4250,72 @@
             el.style.background = `linear-gradient(to right, #1a73e8 0%, #1a73e8 ${pct}%, #b0b0b0 ${pct}%, #b0b0b0 100%)`;
         }
 
+        // Routine custom (tipo_valore = 50): l'azione dipende dal contenuto di valore2.
+        function openRoutineFlyout(routine) {
+            if (routine === 'Nuovo_utente') { openNewUserFlyout(); return; }
+            showNotification('Routine non riconosciuta: ' + (routine || '(vuoto)'), 'info');
+        }
+
+        // Flyout "Nuovo utente": carica i campi editabili delle tabelle users (Projexa + Projexa-Auth)
+        // e i ruoli selezionabili, poi al salvataggio crea l'utente in cascata sui due DB + user_tenants.
+        async function openNewUserFlyout() {
+            const modal = document.getElementById('newUserModal');
+            const fieldsEl = document.getElementById('newUserFields');
+            const roleSel = document.getElementById('newUserRole');
+            const tenantEl = document.getElementById('newUserTenant');
+            if (!modal || !fieldsEl || !roleSel) return;
+            if (tenantEl) tenantEl.textContent = '';
+            fieldsEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
+            roleSel.innerHTML = '';
+            modal.style.display = 'flex';
+            try {
+                const res = await fetch(`${API_URL}/provisioning/new-user-config`, { headers: getAuthHeaders() });
+                if (!res.ok) { fieldsEl.innerHTML = '<div style="color:#EF4444;">Errore nel caricamento</div>'; return; }
+                const cfg = await res.json();
+                if (tenantEl) tenantEl.textContent = cfg.tenantName || '';
+                fieldsEl.innerHTML = (cfg.fields || []).map(f => {
+                    const ro = f.readonly ? ' readonly' : '';
+                    const bg = f.readonly ? ' background:#f3f4f6; color:#6b7280;' : '';
+                    const val = f.value == null ? '' : f.value;
+                    const type = (f.type === 'email') ? 'email' : (f.type === 'date') ? 'date' : 'text';
+                    return `<div style="margin-bottom:0.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">${escapeHtml(f.label || f.name)}</label><input type="${type}" data-field="${escapeHtml(f.name)}" data-source="${escapeHtml(f.source)}" value="${escapeHtml(val)}"${ro} style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;${bg}"></div>`;
+                }).join('');
+                roleSel.innerHTML = (cfg.roles || []).map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml((r.name ? r.name + ' (' + r.id_roles + ')' : r.id_roles))}</option>`).join('');
+            } catch (e) {
+                fieldsEl.innerHTML = '<div style="color:#EF4444;">Errore di connessione</div>';
+            }
+        }
+
+        // Salva il nuovo utente: invia i campi editabili + il ruolo scelto.
+        async function saveNewUser() {
+            const fieldsEl = document.getElementById('newUserFields');
+            const roleSel = document.getElementById('newUserRole');
+            if (!fieldsEl || !roleSel) return;
+            const data = {};
+            fieldsEl.querySelectorAll('input[data-field]').forEach(inp => {
+                if (inp.readOnly) return; // i campi in sola lettura (es. scadenza) li imposta il backend
+                data[inp.dataset.field] = inp.value.trim();
+            });
+            if (!data.email) { showNotification('Email obbligatoria', 'info'); return; }
+            if (!roleSel.value) { showNotification('Ruolo obbligatorio', 'info'); return; }
+            try {
+                const res = await fetch(`${API_URL}/provisioning/new-user`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ fields: data, roleId: roleSel.value })
+                });
+                if (res.ok) {
+                    showNotification('Utente creato', 'success');
+                    document.getElementById('newUserModal').style.display = 'none';
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
+        }
+
         // Renderizza una riga: "campo" a sinistra, input del valore a destra in base a tipo_valore.
         function renderSettingRow(row) {
             const campo = escapeHtml(row.campo || '');
@@ -4206,6 +4389,10 @@
                 // Barra (slider) -> valore3: min 35, max 150, default 100.
                 const v = (row.valore3 == null || row.valore3 === '') ? 100 : parseInt(row.valore3, 10);
                 input = `<span class="value-bar-wrap" style="display:flex; align-items:center; gap:10px; flex:1 1 0; min-width:0;"><input type="range" class="value-bar" min="35" max="150" step="1" data-setting-id="${id}" data-field="valore3" value="${escapeHtml(v)}" style="flex:1 1 0; min-width:0;"><span class="value-bar-num" style="font-size:0.8rem; color:var(--text-muted); min-width:2.4em; text-align:right;">${escapeHtml(v)}</span></span>`;
+            } else if (tipo === 50) {
+                // Routine custom: riga verde cliccabile. L'azione dipende da valore2
+                // (es. valore2='Nuovo_utente' apre il flyout di creazione utente).
+                return `<div class="settings-detail-link settings-detail-routine drag-handle" data-row-id="${id}" data-campo="${campo}" data-routine="${escapeHtml(row.valore2 == null ? '' : row.valore2)}"${drag}><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
             } else {
                 input = `<span style="color: var(--text-muted);">—</span>`;
             }
@@ -4513,6 +4700,7 @@
             //  - tipo 15       -> tabella + colonna + VariabDB
             //  - Elenco (10)   -> solo colonna, con etichetta "Elenco dati"
             //  - Barra (30)    -> valore2
+            //  - Routine (50)  -> valore2
             function updateFieldExtras() {
                 const v = typeSel.value;
                 if (v === '4' || v === '15') {
@@ -4527,7 +4715,7 @@
                     if (colLabel) colLabel.textContent = 'Elenco dati';
                     if (varWrap) varWrap.style.display = 'none';
                     if (val2Wrap) val2Wrap.style.display = 'none';
-                } else if (v === '30') {
+                } else if (v === '30' || v === '50') {
                     if (tabWrap) tabWrap.style.display = 'none';
                     if (colWrap) colWrap.style.display = 'none';
                     if (varWrap) varWrap.style.display = 'none';
@@ -4658,6 +4846,9 @@
                 // tipo 16: apre il flyout di creazione nuovo cliente.
                 const nc = e.target.closest('.settings-detail-newclient');
                 if (nc) { openNewClientView(nc.dataset.ncLabel); return; }
+                // tipo 50: routine custom — azione in base a valore2 (deve precedere il link tipo 20).
+                const routine = e.target.closest('.settings-detail-routine');
+                if (routine) { openRoutineFlyout(routine.dataset.routine); return; }
                 const link = e.target.closest('.settings-detail-link');
                 if (link) { openLinkedList(link.dataset.linkId, link.dataset.linkLabel); return; }
                 const parent = e.target.closest('.settings-detail-parent');

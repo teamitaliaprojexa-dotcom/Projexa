@@ -510,17 +510,32 @@ async function createFormField(columnName, value, fkInfo) {
 
 // Open modal for editing a record
 async function editRecord(tableName, recordId) {
-  const response = await fetch(`${API_URL}/data/${tableName}`, {
+  // Se la riga non ha un id (tabella con PK diversa da "id" o composita) non possiamo
+  // identificarla: avvisa invece di fallire in silenzio.
+  if (recordId === undefined || recordId === null || recordId === '' || recordId === 'undefined') {
+    alert(`Impossibile modificare: la tabella "${tableName}" non ha una colonna "id" per identificare la riga.`);
+    return;
+  }
+
+  // Recupero mirato per id: la tabella può avere >100 righe (LIMIT lato server),
+  // quindi NON scarico tutta la tabella ma filtro sull'id della riga cliccata.
+  const response = await fetch(`${API_URL}/data/${tableName}?id=${encodeURIComponent(recordId)}`, {
     headers: { 'Authorization': `Bearer ${getToken()}` }
   });
 
-  if (!response.ok) return;
+  if (!response.ok) {
+    alert(`Errore nel caricamento dei dati (${response.status}).`);
+    return;
+  }
 
   const data = await response.json();
   // recordId arriva da dataset.rowId (stringa); r.id può essere numerico.
   // Confronto per stringa per evitare il mismatch "5" === 5 → false.
   const record = data.find(r => String(r.id) === String(recordId));
-  if (!record) return;
+  if (!record) {
+    alert(`Record con id "${recordId}" non trovato nella tabella "${tableName}".`);
+    return;
+  }
 
   currentModalTable = tableName;
   currentModalRecordId = recordId;
@@ -577,7 +592,8 @@ async function editRecord(tableName, recordId) {
 
 // Apri la modale pre-compilata con i valori della riga, ma salvando come NUOVO record.
 async function duplicateRecord(tableName, recordId) {
-  const response = await fetch(`${API_URL}/data/${tableName}`, {
+  // Recupero mirato per id (vedi editRecord): evita il LIMIT su tabelle grandi.
+  const response = await fetch(`${API_URL}/data/${tableName}?id=${encodeURIComponent(recordId)}`, {
     headers: { 'Authorization': `Bearer ${getToken()}` }
   });
 

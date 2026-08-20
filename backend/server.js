@@ -248,7 +248,9 @@ app.get('/api/data/:table', requireAuth, async (req, res) => {
     }
 
     const whereClause = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
-    const result = await pool.query(`SELECT * FROM "${tableName}" ${whereClause} LIMIT 100`, params);
+    // Ordinamento deterministico (evita che due query identiche restituiscano ordini diversi).
+    const orderBy = columns.has('id') ? 'ORDER BY id' : '';
+    const result = await pool.query(`SELECT * FROM "${tableName}" ${whereClause} ${orderBy} LIMIT 100`, params);
     res.json(stripSensitive(result.rows));
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
@@ -382,6 +384,13 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       delete data.tenant_id;
     }
 
+    // Isolamento clienti (ACL): un non-admin può modificare una riga di "clients" solo se
+    // proprietario del cliente o con condivisione in scrittura. Enforce del permesso 'read'.
+    if (tableName === 'clients' && !admin && dbKey === 'main') {
+      const acc = await clientAccessByArgument(id, req, true);
+      if (!acc) return res.status(403).json({ error: 'Non autorizzato a modificare questo cliente' });
+    }
+
     // Le colonne generate non sono scrivibili: rimuovile dai dati in ingresso.
     const generatedColumns = await getGeneratedColumns(tableName, pool, dbKey);
     for (const g of generatedColumns) delete data[g];
@@ -425,6 +434,13 @@ app.delete('/api/data/:table/:id', requireAuth, async (req, res) => {
 
     if (!(await isManagedTable(tableName, pool))) {
       return res.status(404).json({ error: 'Table not found' });
+    }
+
+    // Isolamento clienti (ACL): un non-admin può eliminare una riga di "clients" solo se
+    // proprietario o con condivisione in scrittura.
+    if (tableName === 'clients' && !isAdminUser(req) && dbKey === 'main') {
+      const acc = await clientAccessByArgument(id, req, true);
+      if (!acc) return res.status(403).json({ error: 'Non autorizzato a eliminare questo cliente' });
     }
 
     // Isolamento multi-tenant: i non-admin cancellano solo i record del proprio
@@ -654,8 +670,13 @@ app.get('/api/settings/arguments', requireAuth, async (req, res) => {
     // (oppure id_roles NULL = nessuna restrizione).
     const uid = Number(req.user.id_roles);
     const roleLevel = Number.isFinite(uid) ? uid : 9999;
+    // Oltre al nome dell'argomento restituisce i dati della riga "segnaposto" (campo IS NULL):
+    // tipo_valore, id e valore2. Servono a mostrare inline un campo editabile (es. tipo 50).
     const result = await db.query(
-      `SELECT argument
+      `SELECT argument,
+              MAX(CASE WHEN campo IS NULL THEN tipo_valore END) AS tipo_valore,
+              MAX(CASE WHEN campo IS NULL THEN id::text END)    AS id,
+              MAX(CASE WHEN campo IS NULL THEN valore2 END)     AS valore2
        FROM settings
        WHERE tenant_id = $1 AND user_id = $2 AND argument IS NOT NULL
          AND (id_roles IS NULL OR id_roles >= $3)
@@ -663,7 +684,7 @@ app.get('/api/settings/arguments', requireAuth, async (req, res) => {
        ORDER BY MIN(ordinamento) NULLS LAST, argument`,
       [req.user.tenant_id, req.user.user_id, roleLevel]
     );
-    res.json(result.rows.map(r => r.argument));
+    res.json(result.rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -719,6 +740,154 @@ app.post('/api/settings/argument', requireAuth, async (req, res) => {
     }
     const result = await db.query(query, params);
     res.status(201).json({ inserted: result.rowCount });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===================== PROVISIONING NUOVO UTENTE =====================
+// Routine per il campo tipo_valore=50 con valore2='Nuovo_utente': un super user crea un
+// nuovo utente della propria azienda. Scrive in cascata: Projexa-Auth.users (genera l'id) ->
+// Projexa.users (stesso id) -> user_tenants (associa al tenant del creatore).
+// Colonne mai mostrate/gestite dal form (auto o sensibili).
+const NEW_USER_HIDDEN = new Set(['id', 'created_at', 'updated_at', 'updated_by', 'password_hash']);
+const NEW_USER_LABELS = { email: 'Email', name: 'Nome', cognome: 'Cognome', scadenza: 'Scadenza' };
+
+// Config del form: campi editabili delle due tabelle users + ruoli selezionabili (>= al proprio) +
+// scadenza ereditata dal creatore (sola lettura).
+app.get('/api/provisioning/new-user-config', requireAuth, async (req, res) => {
+  try {
+    const mainCols = await getTableColumns('users', db, 'main');
+    const authCols = await getTableColumns('users', authDb, 'auth');
+
+    // Scadenza del creatore (super user), letta da Projexa-Auth.
+    let inheritedScadenza = '';
+    try {
+      const sc = await authDb.query('SELECT scadenza FROM users WHERE id = $1', [req.user.user_id]);
+      const v = sc.rows[0] && sc.rows[0].scadenza;
+      if (v) inheritedScadenza = new Date(v).toISOString().slice(0, 10);
+    } catch (e) { /* ignore */ }
+
+    const editable = [];
+    let scadenzaField = null;
+    // Projexa-Auth.users: email editabile; scadenza sola lettura (ereditata).
+    for (const c of authCols) {
+      if (NEW_USER_HIDDEN.has(c)) continue;
+      if (c === 'scadenza') {
+        scadenzaField = { name: 'scadenza', source: 'auth', label: NEW_USER_LABELS.scadenza, type: 'date', readonly: true, value: inheritedScadenza };
+      } else {
+        editable.push({ name: c, source: 'auth', label: NEW_USER_LABELS[c] || c, type: (c === 'email' ? 'email' : 'text'), readonly: false, value: '' });
+      }
+    }
+    // Projexa.users (stub): name, cognome, ecc.
+    for (const c of mainCols) {
+      if (NEW_USER_HIDDEN.has(c)) continue;
+      editable.push({ name: c, source: 'main', label: NEW_USER_LABELS[c] || c, type: 'text', readonly: false, value: '' });
+    }
+    const fields = scadenzaField ? [...editable, scadenzaField] : editable;
+
+    // Ruoli selezionabili: solo id_roles >= a quello del creatore (uguale o meno privilegiato).
+    const level = Number(req.user.id_roles);
+    const rolesRes = await db.query(
+      `SELECT id, id_roles, name FROM roles WHERE id_roles >= $1 ORDER BY id_roles`,
+      [Number.isFinite(level) ? level : 9999]
+    );
+
+    // Nome del tenant del creatore (mostrato in sola lettura in cima al flyout).
+    let tenantName = '';
+    try {
+      const t = await db.query('SELECT name FROM tenants WHERE id = $1', [req.user.tenant_id]);
+      if (t.rows[0]) tenantName = t.rows[0].name || '';
+    } catch (e) { /* ignore */ }
+
+    res.json({ fields, roles: rolesRes.rows, tenantName });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Crea il nuovo utente in cascata sui due DB + user_tenants.
+app.post('/api/provisioning/new-user', requireAuth, async (req, res) => {
+  const fieldsIn = (req.body && req.body.fields) || {};
+  const roleId = (req.body && req.body.roleId) ? String(req.body.roleId) : '';
+  const email = String(fieldsIn.email || '').trim();
+  const name = String(fieldsIn.name || '').trim();
+  try {
+    if (!email) return res.status(400).json({ error: 'Email obbligatoria' });
+    if (!name) return res.status(400).json({ error: 'Nome obbligatorio' });
+    if (!roleId) return res.status(400).json({ error: 'Ruolo obbligatorio' });
+
+    // Ricava id_roles dalla riga ruolo selezionata (role_id = roles.id).
+    const roleRow = await db.query('SELECT id, id_roles FROM roles WHERE id = $1 LIMIT 1', [roleId]);
+    if (!roleRow.rows[0]) return res.status(400).json({ error: 'Ruolo non valido' });
+    const idRoles = Number(roleRow.rows[0].id_roles);
+
+    // Privilegio: non si può assegnare un ruolo più privilegiato del proprio (id_roles più basso).
+    const myLevel = Number(req.user.id_roles);
+    if (Number.isFinite(myLevel) && idRoles < myLevel) {
+      return res.status(403).json({ error: 'Non puoi assegnare un ruolo più privilegiato del tuo' });
+    }
+
+    const mainCols = await getTableColumns('users', db, 'main');
+    const authCols = await getTableColumns('users', authDb, 'auth');
+
+    // Scadenza ereditata dal creatore (Projexa-Auth).
+    let inheritedScadenza = null;
+    const scRes = await authDb.query('SELECT scadenza FROM users WHERE id = $1', [req.user.user_id]);
+    if (scRes.rows[0]) inheritedScadenza = scRes.rows[0].scadenza;
+
+    // 1) Projexa-Auth.users: password non gestita ora -> hash casuale (accesso via OAuth o reset).
+    const randomHash = await bcrypt.hash(String(Date.now()) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2), 10);
+    const aCols = ['email', 'password_hash'];
+    const aVals = [email, randomHash];
+    if (authCols.has('scadenza'))   { aCols.push('scadenza');   aVals.push(inheritedScadenza); }
+    if (authCols.has('created_at')) { aCols.push('created_at'); aVals.push(new Date()); }
+    if (authCols.has('updated_at')) { aCols.push('updated_at'); aVals.push(new Date()); }
+    let newId;
+    try {
+      const insAuth = await authDb.query(
+        `INSERT INTO users (${aCols.map(c => `"${c}"`).join(', ')}) VALUES (${aCols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id`,
+        aVals
+      );
+      newId = insAuth.rows[0].id;
+    } catch (e) {
+      if (e && e.code === '23505') return res.status(409).json({ error: 'Email già registrata' });
+      throw e;
+    }
+
+    // 2) Projexa.users (stesso id) + user_tenants, in transazione (stesso DB).
+    //    In caso di errore: ROLLBACK e compensazione della riga già creata su Auth.
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      const mCols = ['id'];
+      const mVals = [newId];
+      if (mainCols.has('name'))       { mCols.push('name');       mVals.push(name); }
+      if (mainCols.has('cognome'))    { mCols.push('cognome');    mVals.push(String(fieldsIn.cognome || '').trim() || null); }
+      if (mainCols.has('created_at')) { mCols.push('created_at'); mVals.push(new Date()); }
+      if (mainCols.has('updated_at')) { mCols.push('updated_at'); mVals.push(new Date()); }
+      // updated_by è un uuid (riferimento utente): registra chi ha creato la riga = il super user.
+      if (mainCols.has('updated_by')) { mCols.push('updated_by'); mVals.push(req.user.user_id); }
+      await client.query(
+        `INSERT INTO users (${mCols.map(c => `"${c}"`).join(', ')}) VALUES (${mCols.map((_, i) => `$${i + 1}`).join(', ')})`,
+        mVals
+      );
+      // user_tenants: associa al tenant del creatore (attiva il trigger di seeding settings).
+      // role_id = id (uuid) della riga in roles; id_roles = livello del ruolo.
+      await client.query(
+        `INSERT INTO user_tenants (user_id, tenant_id, role_id, id_roles) VALUES ($1, $2, $3, $4)`,
+        [newId, req.user.tenant_id, roleId, idRoles]
+      );
+      await client.query('COMMIT');
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
+      try { await authDb.query('DELETE FROM users WHERE id = $1', [newId]); } catch (_) { /* compensazione */ }
+      client.release();
+      throw e;
+    }
+    client.release();
+
+    res.status(201).json({ success: true, id: newId });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -788,15 +957,20 @@ app.put('/api/settings/argument/rename', requireAuth, async (req, res) => {
 //   WHERE argument='Cliente' AND campo='Cliente' AND tenant_id=? AND user_id=?
 app.get('/api/clients/names', requireAuth, async (req, res) => {
   try {
+    // Clienti propri + clienti condivisi con me (ACL). Un flag "shared" distingue i secondi.
     const result = await db.query(
-      `SELECT id, valore2 AS name
-       FROM clients
+      `SELECT id, valore2 AS name,
+              (user_id <> $2) AS shared
+       FROM clients c
        WHERE argument = 'Cliente' AND campo = 'Cliente'
-         AND tenant_id = $1 AND user_id = $2 AND valore2 IS NOT NULL
+         AND tenant_id = $1 AND valore2 IS NOT NULL
+         AND (user_id = $2 OR EXISTS (
+               SELECT 1 FROM client_shares s
+               WHERE s.client_id = c.id AND s.shared_with_user_id = $2 AND s.tenant_id = $1))
        ORDER BY valore2`,
       [req.user.tenant_id, req.user.user_id]
     );
-    res.json(result.rows); // [{ id, name }, ...]
+    res.json(result.rows); // [{ id, name, shared }, ...]
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -828,6 +1002,158 @@ async function deepCopyClientTree(dbClient, tenantId, userId, srcArg, newArg) {
     }
   }
 }
+
+// ===== Condivisione "viva" (ACL) dei clienti =====
+// Risale dalla riga (id) alla riga identità del cliente (argument='Cliente') e ne restituisce
+// { clientId, ownerUserId }, oppure null. idOrArgument = id di una qualsiasi riga dell'albero.
+async function resolveClientRoot(idOrArgument, tenantId) {
+  let cur = idOrArgument, guard = 0;
+  while (cur && guard++ < 60) {
+    const r = await db.query('SELECT id, argument, user_id FROM clients WHERE id = $1 AND tenant_id = $2', [cur, tenantId]);
+    if (r.rows.length === 0) return null;
+    const row = r.rows[0];
+    if (row.argument === 'Cliente') return { clientId: row.id, ownerUserId: row.user_id };
+    cur = row.argument; // sali al contenitore padre
+  }
+  return null;
+}
+
+// Accesso dell'utente corrente a un cliente (id riga identità). Restituisce
+// { ownerUserId, permission, isOwner } oppure null se nessun accesso.
+async function clientAccess(clientId, req, needWrite) {
+  const c = await db.query(
+    `SELECT user_id FROM clients WHERE id = $1 AND argument = 'Cliente' AND campo = 'Cliente' AND tenant_id = $2`,
+    [clientId, req.user.tenant_id]
+  );
+  if (c.rows.length === 0) return null;
+  const ownerUserId = c.rows[0].user_id;
+  if (String(ownerUserId) === String(req.user.user_id)) return { ownerUserId, permission: 'write', isOwner: true };
+  const s = await db.query(
+    'SELECT permission FROM client_shares WHERE client_id = $1 AND shared_with_user_id = $2 AND tenant_id = $3 LIMIT 1',
+    [clientId, req.user.user_id, req.user.tenant_id]
+  );
+  if (s.rows.length === 0) return null;
+  const permission = s.rows[0].permission || 'read';
+  if (needWrite && permission !== 'write') return null;
+  return { ownerUserId, permission, isOwner: false };
+}
+
+// Accesso a partire da un "argument" (container: id cliente o id Nodo Padre).
+async function clientAccessByArgument(argument, req, needWrite) {
+  const root = await resolveClientRoot(argument, req.user.tenant_id);
+  if (!root) return null;
+  const acc = await clientAccess(root.clientId, req, needWrite);
+  return acc ? { ...acc, clientId: root.clientId } : null;
+}
+
+// Verifica che il campo tipo 15 (fieldId) sia configurato per la condivisione cliente:
+// in function_db deve esistere una riga con cod_istruzione = <campo>.valore3, istruzione='insert'
+// e funzione 'Condvidi_Cliente' (accetto anche la grafia corretta 'Condividi_Cliente').
+async function assertShareClientFunction(source, fieldId, req) {
+  const f = await db.query(
+    `SELECT valore3 FROM "${source}" WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+    [fieldId, req.user.tenant_id, req.user.user_id]
+  );
+  if (f.rows.length === 0) throw Object.assign(new Error('Campo non trovato'), { statusCode: 404 });
+  const cod = (f.rows[0].valore3 == null) ? null : Number(f.rows[0].valore3);
+  if (!Number.isFinite(cod)) throw Object.assign(new Error('valore3 non impostato sul campo'), { statusCode: 400 });
+  const fdb = await db.query(
+    `SELECT 1 FROM function_db
+     WHERE cod_istruzione = $1 AND lower(istruzione) = 'insert'
+       AND funzione IN ('Condvidi_Cliente', 'Condividi_Cliente') LIMIT 1`,
+    [cod]
+  );
+  if (fdb.rows.length === 0) throw Object.assign(new Error('Funzione di condivisione non configurata'), { statusCode: 400 });
+  return { cod };
+}
+
+// Condivisione cliente — passo 1: elenco degli utenti dello stesso tenant con cui condividere,
+// escluso l'utente corrente, il proprietario del cliente e chi ha già accesso.
+// Restituisce nome, cognome (da Projexa) ed email (da Projexa-Auth).
+app.get('/api/:source(settings|clients)/share-users', requireAuth, async (req, res) => {
+  try {
+    const fieldId = ((req.query && req.query.fieldId) || '').trim();
+    const clientId = ((req.query && req.query.clientId) || '').trim();
+    if (!fieldId) return res.status(400).json({ error: 'fieldId richiesto' });
+    await assertShareClientFunction(req.params.source, fieldId, req);
+
+    // Chi può condividere: proprietario o chi ha una condivisione 'write'.
+    let ownerUserId = null;
+    if (clientId) {
+      const acc = await clientAccess(clientId, req, true);
+      if (!acc) return res.status(403).json({ error: 'Non hai i permessi per condividere questo cliente' });
+      ownerUserId = acc.ownerUserId;
+    }
+
+    const us = await db.query(
+      `SELECT ut.user_id, u.name, u.cognome
+       FROM user_tenants ut JOIN users u ON u.id = ut.user_id
+       WHERE ut.tenant_id = $1 AND ut.user_id <> $2
+         AND ($3::uuid IS NULL OR ut.user_id <> $3)
+         AND ($4::uuid IS NULL OR NOT EXISTS (
+               SELECT 1 FROM client_shares s
+               WHERE s.client_id = $4 AND s.shared_with_user_id = ut.user_id))
+       ORDER BY u.name NULLS LAST, u.cognome NULLS LAST`,
+      [req.user.tenant_id, req.user.user_id, ownerUserId, clientId || null]
+    );
+    const users = us.rows;
+    if (users.length) {
+      const ids = users.map(u => u.user_id);
+      try {
+        const em = await authDb.query('SELECT id, email FROM users WHERE id = ANY($1)', [ids]);
+        const byId = new Map(em.rows.map(r => [String(r.id), r.email]));
+        for (const u of users) u.email = byId.get(String(u.user_id)) || '';
+      } catch (e) { for (const u of users) u.email = ''; }
+    }
+    res.json({ users });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Condivisione cliente — passo 2: crea/aggiorna la condivisione ACL (nessuna copia dei dati).
+// body: { fieldId, clientId, targetUserId, permission ('read'|'write') }.
+app.post('/api/:source(settings|clients)/share-client', requireAuth, async (req, res) => {
+  const source = req.params.source;
+  const fieldId = ((req.body && req.body.fieldId) || '').trim();
+  const clientId = ((req.body && req.body.clientId) || '').trim();
+  const targetUserId = ((req.body && req.body.targetUserId) || '').trim();
+  let permission = ((req.body && req.body.permission) || 'write').trim().toLowerCase();
+  if (permission !== 'read' && permission !== 'write') permission = 'write';
+  if (!fieldId || !clientId || !targetUserId) {
+    return res.status(400).json({ error: 'fieldId, clientId e targetUserId richiesti' });
+  }
+  try {
+    await assertShareClientFunction(source, fieldId, req);
+    if (String(targetUserId) === String(req.user.user_id)) {
+      return res.status(400).json({ error: 'Non puoi condividere con te stesso' });
+    }
+    // Chi condivide deve avere accesso in scrittura al cliente (proprietario o share 'write').
+    const acc = await clientAccess(clientId, req, true);
+    if (!acc) return res.status(403).json({ error: 'Non hai i permessi per condividere questo cliente' });
+    if (String(targetUserId) === String(acc.ownerUserId)) {
+      return res.status(400).json({ error: 'Il cliente è già del proprietario' });
+    }
+    // Il destinatario deve appartenere allo stesso tenant.
+    const tgt = await db.query(
+      'SELECT 1 FROM user_tenants WHERE user_id = $1 AND tenant_id = $2 LIMIT 1',
+      [targetUserId, req.user.tenant_id]
+    );
+    if (tgt.rows.length === 0) return res.status(400).json({ error: 'Utente non appartenente al tenant' });
+
+    // Crea/aggiorna la condivisione (ri-condividere aggiorna il permesso).
+    await db.query(
+      `INSERT INTO client_shares (tenant_id, client_id, shared_with_user_id, owner_user_id, permission, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (client_id, shared_with_user_id)
+       DO UPDATE SET permission = EXCLUDED.permission`,
+      [req.user.tenant_id, clientId, targetUserId, acc.ownerUserId, permission, req.user.user_id]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
 
 // Crea un nuovo cliente (riga argument='Cliente', campo='Cliente', valore2=<nome>) e
 // ne copia la STRUTTURA (valori vuoti) da un cliente modello, preservando la gerarchia.
@@ -1252,7 +1578,17 @@ app.get('/api/:source(settings|clients)/field-options', requireAuth, async (req,
     const conds = [];
     const params = [];
     if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
-    if (cols.has('user_id')) { params.push(req.user.user_id); conds.push(`user_id = $${params.length}`); }
+    if (cols.has('user_id')) {
+      params.push(req.user.user_id);
+      const up = params.length;
+      if (tabella === 'clients') {
+        // Includi anche i clienti condivisi con me (ACL), non solo i miei.
+        params.push(req.user.tenant_id);
+        conds.push(`(user_id = $${up} OR EXISTS (SELECT 1 FROM client_shares s WHERE s.client_id = clients.id AND s.shared_with_user_id = $${up} AND s.tenant_id = $${params.length}))`);
+      } else {
+        conds.push(`user_id = $${up}`);
+      }
+    }
     // VariabDB contiene sempre l'operatore iniziale (AND/OR) e viene aggiunta così com'è
     // dopo i filtri di visibilità. Se non ci sono filtri precedenti, l'operatore iniziale
     // viene rimosso per non generare "WHERE AND ...".
@@ -1541,12 +1877,21 @@ app.get('/api/:source(settings|clients)/details', requireAuth, async (req, res) 
     // (id_roles più basso = più privilegi), oppure id_roles NULL = nessuna restrizione.
     const uid = Number(req.user.id_roles);
     const roleLevel = Number.isFinite(uid) ? uid : 9999;
+    // Per i clienti l'accesso può derivare da una condivisione (ACL): le righe appartengono al
+    // proprietario, quindi il filtro user_id usa l'id del proprietario del cliente accessibile.
+    // La visibilità dei campi resta filtrata sul RUOLO del destinatario (come richiesto).
+    let effectiveUserId = req.user.user_id;
+    if (table === 'clients') {
+      const acc = await clientAccessByArgument(argument, req, false);
+      if (!acc) return res.status(403).json({ error: 'Non autorizzato' });
+      effectiveUserId = acc.ownerUserId;
+    }
     const result = await db.query(
       `SELECT * FROM "${table}"
        WHERE argument = $1 AND tenant_id = $2 AND user_id = $3
          AND (id_roles IS NULL OR id_roles >= $4)
        ORDER BY ordinamento NULLS LAST, campo`,
-      [argument, req.user.tenant_id, req.user.user_id, roleLevel]
+      [argument, req.user.tenant_id, effectiveUserId, roleLevel]
     );
 
     // Per i campi di tipo 4 risolve il valore leggendolo dalla tabella/colonna di
