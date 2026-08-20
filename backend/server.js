@@ -681,7 +681,11 @@ app.get('/api/settings/arguments', requireAuth, async (req, res) => {
        WHERE tenant_id = $1 AND user_id = $2 AND argument IS NOT NULL
          AND (id_roles IS NULL OR id_roles >= $3)
        GROUP BY argument
-       ORDER BY MIN(ordinamento) NULLS LAST, argument`,
+       -- Nascondi gli argomenti la cui riga segnaposto (campo IS NULL) ha scadenza < oggi.
+       HAVING COALESCE(MAX(CASE WHEN campo IS NULL AND scadenza IS NOT NULL AND scadenza < CURRENT_DATE THEN 1 END), 0) = 0
+       -- Ordina per l'ordinamento della riga segnaposto (campo IS NULL) = posizione dell'argomento,
+       -- non per il MIN su tutte le righe (i campi di dettaglio hanno un proprio ordinamento).
+       ORDER BY MAX(CASE WHEN campo IS NULL THEN ordinamento END) NULLS LAST, argument`,
       [req.user.tenant_id, req.user.user_id, roleLevel]
     );
     res.json(result.rows);
@@ -957,13 +961,26 @@ app.put('/api/settings/argument/rename', requireAuth, async (req, res) => {
 //   WHERE argument='Cliente' AND campo='Cliente' AND tenant_id=? AND user_id=?
 app.get('/api/clients/names', requireAuth, async (req, res) => {
   try {
+    // Eccezione: la visibilità dei clienti scaduti dipende dal booleano
+    // Impostazioni/Gestione Clienti/"Mostra tutti i clienti" (valore1).
+    // ON = mostra tutti; OFF (o assente) = nascondi i clienti con scadenza < oggi.
+    const pref = await db.query(
+      `SELECT valore1 FROM settings
+       WHERE tenant_id = $1 AND user_id = $2
+         AND argument = 'Gestione Clienti' AND campo = 'Mostra tutti i clienti' LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id]
+    );
+    const v = pref.rows[0] && pref.rows[0].valore1;
+    const showAll = (v === true || v === 't' || v === 'true');
+    const scadCond = showAll ? '' : ` AND (c.scadenza IS NULL OR c.scadenza >= CURRENT_DATE)`;
+
     // Clienti propri + clienti condivisi con me (ACL). Un flag "shared" distingue i secondi.
     const result = await db.query(
       `SELECT id, valore2 AS name,
               (user_id <> $2) AS shared
        FROM clients c
        WHERE argument = 'Cliente' AND campo = 'Cliente'
-         AND tenant_id = $1 AND valore2 IS NOT NULL
+         AND tenant_id = $1 AND valore2 IS NOT NULL${scadCond}
          AND (user_id = $2 OR EXISTS (
                SELECT 1 FROM client_shares s
                WHERE s.client_id = c.id AND s.shared_with_user_id = $2 AND s.tenant_id = $1))
@@ -1157,10 +1174,11 @@ app.post('/api/:source(settings|clients)/share-client', requireAuth, async (req,
 
 // Crea un nuovo cliente (riga argument='Cliente', campo='Cliente', valore2=<nome>) e
 // ne copia la STRUTTURA (valori vuoti) da un cliente modello, preservando la gerarchia.
-// Consentito solo agli utenti con ruolo id_roles <= 50 (numeri più bassi = più privilegi).
+// Consentito agli utenti con ruolo id_roles <= 70 (numeri più bassi = più privilegi):
+// super user, admin e Project Manager.
 app.post('/api/clients', requireAuth, async (req, res) => {
   const roleLevel = Number(req.user.id_roles);
-  if (!Number.isFinite(roleLevel) || roleLevel > 50) {
+  if (!Number.isFinite(roleLevel) || roleLevel > 70) {
     return res.status(403).json({ error: 'Non autorizzato a creare clienti' });
   }
   const name = ((req.body && req.body.name) || '').trim();
@@ -1547,6 +1565,94 @@ app.post('/api/:source(settings|clients)/reorder-fields', requireAuth, async (re
   }
 });
 
+// Elenco "decodificato": colonna = lista separata da virgole di token "col" o "decode:col".
+// "decode:col" mostra il valore leggibile invece dell'id:
+//   - client_id            -> nome del cliente (clients.valore2 della riga identità)
+//   - *_user_id/created_by -> "Cognome Nome" dell'utente
+// Scope: righe della tabella filtrate per tenant e (se presente) owner_user_id/user_id = utente.
+// campo/mode servono per abilitare l'eliminazione (mode=1) via function_db.
+async function respondDecodedOptions(req, res, tabella, colonna, campo, mode) {
+  assertValidIdentifier(tabella);
+  const cols = await getTableColumns(tabella);
+  if (!cols || cols.size === 0) return res.status(400).json({ error: 'Tabella inesistente: ' + tabella });
+
+  // Parsing dei token e validazione dei nomi colonna.
+  const specs = String(colonna).split(',').map(s => s.trim()).filter(Boolean).map(tok => {
+    const decode = /^decode:/i.test(tok);
+    const col = tok.replace(/^decode:/i, '').trim();
+    return { col, decode };
+  });
+  for (const s of specs) {
+    assertValidIdentifier(s.col);
+    if (!cols.has(s.col)) return res.status(400).json({ error: 'Colonna inesistente: ' + s.col });
+  }
+
+  // Filtri di visibilità.
+  const conds = [];
+  const params = [];
+  if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
+  if (cols.has('owner_user_id')) { params.push(req.user.user_id); conds.push(`owner_user_id = $${params.length}`); }
+  else if (cols.has('user_id')) { params.push(req.user.user_id); conds.push(`user_id = $${params.length}`); }
+  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+  const selCols = ['id', ...specs.map(s => s.col)].map(c => `"${c}"`).join(', ');
+  const rows = (await db.query(`SELECT ${selCols} FROM "${tabella}" ${where} ORDER BY id LIMIT 500`, params)).rows;
+
+  // Classifica le colonne da decodificare e raccoglie gli id per la risoluzione in blocco.
+  const isUserCol = (c) => /_user_id$/i.test(c) || c === 'created_by' || c === 'user_id' || c === 'owner_user_id';
+  const isClientCol = (c) => c === 'client_id';
+  const clientIds = new Set(), userIds = new Set();
+  for (const r of rows) for (const s of specs) {
+    if (!s.decode) continue;
+    const v = r[s.col];
+    if (v == null) continue;
+    if (isClientCol(s.col)) clientIds.add(v);
+    else if (isUserCol(s.col)) userIds.add(v);
+  }
+  const clientMap = new Map(), userMap = new Map();
+  if (clientIds.size) {
+    const cr = await db.query(
+      `SELECT id, valore2 FROM clients WHERE id = ANY($1) AND argument='Cliente' AND campo='Cliente'`,
+      [[...clientIds]]
+    );
+    for (const x of cr.rows) clientMap.set(String(x.id), x.valore2);
+  }
+  if (userIds.size) {
+    const ur = await db.query('SELECT id, name, cognome FROM users WHERE id = ANY($1)', [[...userIds]]);
+    for (const x of ur.rows) userMap.set(String(x.id), [x.cognome, x.name].filter(Boolean).join(' '));
+  }
+
+  const items = rows.map(r => {
+    const parts = specs.map(s => {
+      const v = r[s.col];
+      if (v == null) return '';
+      if (!s.decode) return String(v);
+      if (isClientCol(s.col)) return clientMap.get(String(v)) || String(v);
+      if (isUserCol(s.col)) return userMap.get(String(v)) || String(v);
+      return String(v);
+    }).filter(p => p !== '');
+    return { id: r.id, value: parts.join(' — ') };
+  });
+  // Modalità 1 (elimina/revoca): abilita il pulsante solo se function_db ha la riga
+  // cod_istruzione=valore3, istruzione='delete', funzione=campo.
+  let deleteEnabled = false;
+  if (mode === 1 && campo) {
+    const fd = await db.query(
+      `SELECT 1 FROM function_db WHERE cod_istruzione = $1 AND lower(istruzione) = 'delete' AND funzione = $2 LIMIT 1`,
+      [mode, campo]
+    );
+    deleteEnabled = fd.rows.length > 0;
+  }
+  let updateEnabled = false;
+  if (mode === 3 && campo) {
+    const fu = await db.query(
+      `SELECT 1 FROM function_db WHERE cod_istruzione = $1 AND lower(istruzione) = 'update' AND funzione = $2 LIMIT 1`,
+      [mode, campo]
+    );
+    updateEnabled = fu.rows.length > 0;
+  }
+  res.json({ tabella, colonna, mode: (mode == null ? null : mode), deleteEnabled, updateEnabled, items });
+}
+
 // tipo_valore = 15: opzioni per un menu a discesa. Il campo (fieldId) contiene:
 //   tabella  -> tabella del DB da cui leggere
 //   colonna  -> colonna i cui valori popolano l'elenco (DISTINCT)
@@ -1560,16 +1666,21 @@ app.get('/api/:source(settings|clients)/field-options', requireAuth, async (req,
     const fieldId = ((req.query && req.query.fieldId) || '').trim();
     if (!fieldId) return res.status(400).json({ error: 'fieldId richiesto' });
     const f = await db.query(
-      `SELECT tabella, colonna, "VariabDB" AS variabdb, valore3 FROM "${source}"
+      `SELECT campo, tabella, colonna, "VariabDB" AS variabdb, valore3 FROM "${source}"
        WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
       [fieldId, req.user.tenant_id, req.user.user_id]
     );
     if (f.rows.length === 0) return res.status(404).json({ error: 'Campo non trovato' });
+    const campo = f.rows[0].campo;
     const tabella = f.rows[0].tabella;
     const colonna = f.rows[0].colonna;
     const variab = (f.rows[0].variabdb || '').trim();
     const mode = (f.rows[0].valore3 == null) ? null : Number(f.rows[0].valore3); // valore3 = modalità
     if (!tabella || !colonna) return res.status(400).json({ error: 'tabella/colonna non impostate sul campo' });
+    // Elenco "decodificato" (colonna con token decode:...): risoluzione id -> nome leggibile.
+    if (/(^|,)\s*decode:/i.test(colonna)) {
+      return await respondDecodedOptions(req, res, tabella, colonna, campo, mode);
+    }
     assertValidIdentifier(tabella);
     assertValidIdentifier(colonna);
     if (!(await isManagedTable(tabella))) return res.status(404).json({ error: 'Tabella non gestita' });
@@ -1604,7 +1715,27 @@ app.get('/api/:source(settings|clients)/field-options', requireAuth, async (req,
       `SELECT id, "${colonna}" AS value FROM "${tabella}" ${where} ORDER BY "${colonna}" NULLS LAST LIMIT 500`,
       params
     );
-    res.json({ tabella, colonna, mode, items: stripSensitive(result.rows) });
+    // Modalità 1 (elimina): il pulsante Cancella compare solo se in function_db esiste la riga
+    // cod_istruzione=valore3, istruzione='delete', funzione=campo.
+    let deleteEnabled = false;
+    if (mode === 1 && campo) {
+      const fd = await db.query(
+        `SELECT 1 FROM function_db WHERE cod_istruzione = $1 AND lower(istruzione) = 'delete' AND funzione = $2 LIMIT 1`,
+        [mode, campo]
+      );
+      deleteEnabled = fd.rows.length > 0;
+    }
+    // Modalità 3 (update/disattiva): pulsante attivo solo se function_db ha la riga
+    // cod_istruzione=valore3, istruzione='update', funzione=campo.
+    let updateEnabled = false;
+    if (mode === 3 && campo) {
+      const fu = await db.query(
+        `SELECT 1 FROM function_db WHERE cod_istruzione = $1 AND lower(istruzione) = 'update' AND funzione = $2 LIMIT 1`,
+        [mode, campo]
+      );
+      updateEnabled = fu.rows.length > 0;
+    }
+    res.json({ tabella, colonna, mode, deleteEnabled, updateEnabled, items: stripSensitive(result.rows) });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -1638,42 +1769,64 @@ app.post('/api/:source(settings|clients)/execute-function', requireAuth, async (
     const params = [cod];
     conds.push('(funzione IS NULL OR funzione = $' + (params.push(campo)) + ')');
     if (cod === 1) conds.push("istruzione = 'delete'"); // guardia di sicurezza
+    if (cod === 3) conds.push("istruzione = 'update'"); // guardia di sicurezza
     const fdb = await db.query(`SELECT * FROM function_db WHERE ${conds.join(' AND ')}`, params);
-    if (fdb.rows.length === 0) return res.json({ deleted: 0, executed: 0 });
+    if (fdb.rows.length === 0) return res.json({ deleted: 0, updated: 0, executed: 0 });
 
     // 3) Esecuzione in transazione (tutte o nessuna)
     const isAdmin = isAdminUser(req);
     const client = await db.connect();
-    let deleted = 0, executed = 0;
+    let deleted = 0, updated = 0, executed = 0;
     try {
       await client.query('BEGIN');
       for (const r of fdb.rows) {
         const istr = (r.istruzione || '').toLowerCase();
-        if (istr !== 'delete') continue; // per ora è supportata solo la delete
+        if (istr !== 'delete' && istr !== 'update') continue; // supportate delete e update
         const tab = r.fun_tabella, col = r.fun_colonna;
         if (!tab || !col) continue;
         assertValidIdentifier(tab);
         assertValidIdentifier(col);
-        if (!(await isManagedTable(tab))) throw Object.assign(new Error('Tabella non gestita: ' + tab), { statusCode: 400 });
+        // fun_tabella proviene da function_db (configurazione privilegiata, non input utente):
+        // basta che la tabella/colonna esistano fisicamente (ammesse anche tabelle di sistema
+        // non presenti in table_structures, es. client_shares).
         const tcols = await getTableColumns(tab);
-        const parts = [`"${col}" = $1`];
-        const p = [selectedId];
-        // Filtro tenant: usa la colonna indicata in fun_tenant; in mancanza, forza tenant_id
-        // per i non-admin (difesa contro cancellazioni cross-tenant accidentali).
+        if (tcols.size === 0) throw Object.assign(new Error('Tabella inesistente: ' + tab), { statusCode: 400 });
+        if (!tcols.has(col)) throw Object.assign(new Error('Colonna inesistente: ' + col), { statusCode: 400 });
+
+        // Filtri di sicurezza tenant/user (colonne indicate in fun_tenant/fun_user; per i
+        // non-admin, in mancanza, forza tenant_id/user_id).
         let tenCol = (r.fun_tenant || '').trim();
         if (!tenCol && tcols.has('tenant_id') && !isAdmin) tenCol = 'tenant_id';
-        if (tenCol) { assertValidIdentifier(tenCol); p.push(req.user.tenant_id); parts.push(`"${tenCol}" = $${p.length}`); }
-        // Filtro user: come sopra
         let usrCol = (r.fun_user || '').trim();
         if (!usrCol && tcols.has('user_id') && !isAdmin) usrCol = 'user_id';
-        if (usrCol) { assertValidIdentifier(usrCol); p.push(req.user.user_id); parts.push(`"${usrCol}" = $${p.length}`); }
-        const q = `DELETE FROM "${tab}" WHERE ${parts.join(' AND ')}`;
-        const rr = await client.query(q, p);
-        deleted += rr.rowCount;
-        executed++;
+
+        if (istr === 'delete') {
+          // DELETE: la riga da eliminare è identificata da fun_colonna = record selezionato.
+          const parts = [`"${col}" = $1`];
+          const p = [selectedId];
+          if (tenCol) { assertValidIdentifier(tenCol); p.push(req.user.tenant_id); parts.push(`"${tenCol}" = $${p.length}`); }
+          if (usrCol) { assertValidIdentifier(usrCol); p.push(req.user.user_id); parts.push(`"${usrCol}" = $${p.length}`); }
+          const rr = await client.query(`DELETE FROM "${tab}" WHERE ${parts.join(' AND ')}`, p);
+          deleted += rr.rowCount;
+          executed++;
+        } else {
+          // UPDATE: imposta fun_colonna = ieri (data sistema -1) sul record SELEZIONATO
+          // (match sull'id della riga) + filtri tenant/user.
+          if (!tcols.has('id')) throw Object.assign(new Error("La tabella non ha colonna 'id': " + tab), { statusCode: 400 });
+          const parts = ['id = $1'];
+          const p = [selectedId];
+          if (tenCol) { assertValidIdentifier(tenCol); p.push(req.user.tenant_id); parts.push(`"${tenCol}" = $${p.length}`); }
+          if (usrCol) { assertValidIdentifier(usrCol); p.push(req.user.user_id); parts.push(`"${usrCol}" = $${p.length}`); }
+          const rr = await client.query(
+            `UPDATE "${tab}" SET "${col}" = CURRENT_DATE - INTERVAL '1 day' WHERE ${parts.join(' AND ')}`,
+            p
+          );
+          updated += rr.rowCount;
+          executed++;
+        }
       }
       await client.query('COMMIT');
-      res.json({ deleted, executed });
+      res.json({ deleted, updated, executed });
     } catch (e) {
       await client.query('ROLLBACK');
       res.status(e.statusCode || 500).json({ error: e.message });
@@ -1890,6 +2043,7 @@ app.get('/api/:source(settings|clients)/details', requireAuth, async (req, res) 
       `SELECT * FROM "${table}"
        WHERE argument = $1 AND tenant_id = $2 AND user_id = $3
          AND (id_roles IS NULL OR id_roles >= $4)
+         AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)  -- nascondi i campi scaduti
        ORDER BY ordinamento NULLS LAST, campo`,
       [argument, req.user.tenant_id, effectiveUserId, roleLevel]
     );

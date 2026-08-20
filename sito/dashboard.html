@@ -1266,9 +1266,9 @@
                             <label class="toggle-switch"><input type="checkbox" id="settingsListEditToggle"><span class="toggle-slider"></span></label>
                         </div>
                         <div id="settingsArgToolbar" style="display: none; gap: 6px; margin-bottom: 0.9rem;">
-                            <button id="settingsAddArgBtn" type="button" style="flex: 0 0 auto; padding: 0 0.6rem; height: 26px; background: #3B82F6; color: white; border: none; border-radius: 5px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">Aggiungi</button>
-                            <button id="settingsDelArgBtn" type="button" style="flex: 0 0 auto; padding: 0 0.6rem; height: 26px; background: #EF4444; color: white; border: none; border-radius: 5px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">Elimina</button>
-                            <button id="settingsRenArgBtn" type="button" style="flex: 0 0 auto; padding: 0 0.6rem; height: 26px; background: #6B7280; color: white; border: none; border-radius: 5px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">Rinomina</button>
+                            <button id="settingsAddArgBtn" type="button" title="Aggiungi argomento" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #3B82F6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-plus"></i></button>
+                            <button id="settingsDelArgBtn" type="button" title="Elimina argomento" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #EF4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-trash"></i></button>
+                            <button id="settingsRenArgBtn" type="button" title="Rinomina argomento" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #6B7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-pen"></i></button>
                         </div>
                         <!-- Form aggiunta argomento (stile flyout 2): nome + tipo + ruolo -->
                         <div id="settingsNewArgForm" style="display: none; margin-bottom: 0.75rem;">
@@ -1329,9 +1329,10 @@
             </div>
             <!-- Pulsanti struttura campi (Nuovo / Elimina / Rinomina), visibili solo con modifica abilitata -->
             <div id="clientEditButtons" style="display: none; gap: 0.35rem; margin-bottom: 0.75rem;">
-                <button id="clientNewFieldBtn" type="button" title="Nuovo campo" style="flex: 0 0 auto; padding: 0 0.55rem; height: 24px; background: #3B82F6; color: white; border: none; border-radius: 5px; font-size: 0.72rem; font-weight: 600; line-height: 1; cursor: pointer;">Aggiungi</button>
-                <button id="clientDeleteBtn" type="button" style="flex: 0 0 auto; padding: 0 0.55rem; height: 24px; background: #EF4444; color: white; border: none; border-radius: 5px; font-size: 0.72rem; font-weight: 600; line-height: 1; cursor: pointer;">Elimina</button>
-                <button id="clientRenameBtn" type="button" style="flex: 0 0 auto; padding: 0 0.55rem; height: 24px; background: #6B7280; color: white; border: none; border-radius: 5px; font-size: 0.72rem; font-weight: 600; line-height: 1; cursor: pointer;">Rinomina</button>
+                <button id="clientNewFieldBtn" type="button" title="Aggiungi campo" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #3B82F6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-plus"></i></button>
+                <button id="clientDeleteBtn" type="button" title="Elimina campi" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #EF4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-trash"></i></button>
+                <button id="clientRenameBtn" type="button" title="Rinomina campi" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #6B7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-pen"></i></button>
+                <button id="clientReorderBtn" type="button" title="Sposta campi (trascina per riordinare)" style="display: none; flex: 0 0 auto; width: 28px; height: 28px; align-items: center; justify-content: center; padding: 0; background: #10B981; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-up-down-left-right"></i></button>
             </div>
             <div id="clientNewFieldForm" style="display: none; margin-bottom: 0.75rem;">
                 <input id="clientNewFieldName" type="text" placeholder="Nome del campo" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;">
@@ -3360,6 +3361,9 @@
         // Modalità del dettaglio Clienti: 'view' (sola lettura), 'edit' (valori modificabili),
         // 'delete' (checkbox sui campi custom), 'rename' (nomi campi custom modificabili).
         let clientDetailMode = 'view';
+        // Sotto-modalità di 'edit': il drag&drop di riordino è attivo solo quando è true
+        // (attivato dal pulsante "sposta"), non appena si abilita la modifica.
+        let detailReorderMode = false;
         // Azione in attesa del popup di scelta ambito: 'delete' oppure 'rename'.
         let clientScopeAction = null;
         // Tipo del nuovo campo scelto: 'standard' oppure 'custom' (default custom).
@@ -3524,9 +3528,12 @@
                 const items = data.items || [];
                 desc.tabella = data.tabella;
                 desc.colonna = data.colonna;
-                const mode = Number(data.mode);      // valore3: 1 = elimina, 2 = rinomina, 5 = condividi
+                const mode = Number(data.mode);      // valore3: 1=elimina, 2=rinomina, 3=disattiva, 5=condividi
                 const canRename = (mode === 2);
-                const canDelete = (mode === 1);
+                // Elimina: solo se function_db conferma la funzione (cod_istruzione=1, delete, funzione=campo).
+                const canDelete = (mode === 1) && (data.deleteEnabled === true);
+                // Disattiva (update): solo se function_db conferma (cod_istruzione=3, update, funzione=campo).
+                const canUpdate = (mode === 3) && (data.updateEnabled === true);
                 const canShare = (mode === 5);
                 if (items.length === 0) {
                     listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>';
@@ -3539,8 +3546,12 @@
                         : '';
                     return `<div class="settings-detail-row opt-row" data-id="${escapeHtml(it.id)}" data-value="${escapeHtml(val)}" style="justify-content: flex-start; gap: 8px;"><input type="checkbox" class="opt-check" style="flex: 0 0 auto; cursor: pointer;"><span class="opt-text" style="flex:1 1 0; min-width:0;">${escapeHtml(val)}</span>${editHtml}</div>`;
                 }).join('');
-                const saveBarHtml = (canRename || canDelete)
-                    ? `<div id="optSaveBar" style="display:none; padding-top:1rem; border-top:1px solid var(--border); margin-top:0.5rem;"><button id="optSaveBtn" type="button" style="width:100%; padding:0.6rem 1rem; background:${canDelete ? '#EF4444' : '#10B981'}; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">${canDelete ? 'Elimina' : 'Salva'}</button></div>`
+                // Pulsante azione in fondo: Elimina (rosso), Disattiva (arancione) o Salva (verde).
+                const actionBtn = canDelete ? { bg: '#EF4444', label: 'Elimina' }
+                    : canUpdate ? { bg: '#F59E0B', label: (desc.label || 'Chiudi') }
+                    : canRename ? { bg: '#10B981', label: 'Salva' } : null;
+                const saveBarHtml = actionBtn
+                    ? `<div id="optSaveBar" style="display:none; padding-top:1rem; border-top:1px solid var(--border); margin-top:0.5rem;"><button id="optSaveBtn" type="button" style="width:100%; padding:0.6rem 1rem; background:${actionBtn.bg}; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">${actionBtn.label}</button></div>`
                     : '';
                 // Area condivisione (mode 5): elenco utenti del tenant + pulsante Condividi.
                 const shareAreaHtml = canShare
@@ -3554,8 +3565,8 @@
                     chk.addEventListener('change', () => {
                         // Selezione singola
                         if (chk.checked) checks.forEach(o => { if (o !== chk) o.checked = false; });
-                        // Elimina (mode 1): il solo click sul checkbox abilita il pulsante.
-                        if (canDelete) { if (saveBar) saveBar.style.display = chk.checked ? 'block' : 'none'; return; }
+                        // Elimina (mode 1) / Disattiva (mode 3): il click sul checkbox abilita il pulsante.
+                        if (canDelete || canUpdate) { if (saveBar) saveBar.style.display = chk.checked ? 'block' : 'none'; return; }
                         // Condividi (mode 5): selezionato un cliente, carica gli utenti del tenant.
                         if (canShare) {
                             const area = document.getElementById('shareArea');
@@ -3597,6 +3608,7 @@
                 const saveBtn = document.getElementById('optSaveBtn');
                 if (saveBtn) saveBtn.addEventListener('click', () => {
                     if (canDelete) deleteFieldOption(desc);
+                    else if (canUpdate) updateFieldOption(desc);
                     else if (canRename) saveFieldOptionRename(desc);
                 });
             } catch (e) {
@@ -3667,6 +3679,41 @@
                     // Aggiorna anche le liste già caricate impattate (no refresh pagina)
                     if (desc.tabella === 'clients') { try { loadClientsNames(); } catch (e) {} }
                     if (desc.tabella === 'settings') { try { loadSettingsArguments(); } catch (e) {} }
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
+        }
+
+        // Disattiva il record selezionato (tipo 15, valore3=3): esegue l'update di function_db
+        // che imposta la colonna indicata (fun_colonna) alla data di ieri. Richiede conferma.
+        async function updateFieldOption(desc) {
+            const listEl = document.getElementById('settingsDetailList');
+            if (!listEl) return;
+            const chk = listEl.querySelector('.opt-check:checked');
+            if (!chk) return;
+            const row = chk.closest('.opt-row');
+            const id = row ? row.dataset.id : '';
+            const label = row ? (row.dataset.value || '') : '';
+            if (!id) return;
+            const ok = window.confirm('Confermi l\'operazione "' + (desc.label || '') + '" su "' + label + '"?');
+            if (!ok) return;
+            try {
+                const res = await fetch(`${API_URL}/${desc.source}/execute-function`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ fieldId: desc.fieldId, selectedId: id })
+                });
+                if (res.ok) {
+                    const d = await res.json().catch(() => ({}));
+                    showNotification(`Operazione eseguita (${d.updated ?? 0} righe)`, 'success');
+                    // Aggiorna gli elenchi (la scadenza appena impostata può nascondere l'elemento).
+                    try { loadClientsNames(); } catch (e) {}
+                    try { loadSettingsArguments(); } catch (e) {}
+                    goBackDetail(); // chiude e torna alla vista precedente
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showNotification('Errore: ' + (err.error || res.status), 'info');
@@ -4138,7 +4185,8 @@
                 // mostra tutte e 3 le colonne (drop zone per il riordino drag&drop).
                 const byCol = { 1: [], 2: [], 3: [] };
                 rows.forEach(r => { byCol[layoutColumnOf(r)].push(r); });
-                const editing = (clientDetailMode === 'edit');
+                // Le drop-zone e le 3 colonne compaiono solo in modalità riordino (pulsante "sposta").
+                const editing = detailReorderMode;
                 let showCols = editing ? [1, 2, 3] : [1, 2, 3].filter(n => byCol[n].length);
                 if (showCols.length === 0) showCols = [1];
                 setDetailColumns(editing ? 3 : showCols.length);
@@ -4193,6 +4241,15 @@
             // Pulsanti +/Elimina/Rinomina: visibili con modifica abilitata
             const editButtons = document.getElementById('clientEditButtons');
             if (editButtons) editButtons.style.display = (mode !== 'view') ? 'flex' : 'none';
+
+            // Fuori dalla modalità 'edit' il riordino non ha senso: azzeralo.
+            if (mode !== 'edit') detailReorderMode = false;
+            // Pulsante "sposta" (riordino): visibile solo in 'edit', evidenziato se attivo.
+            const reorderBtn = document.getElementById('clientReorderBtn');
+            if (reorderBtn) {
+                reorderBtn.style.display = (mode === 'edit') ? 'inline-flex' : 'none';
+                reorderBtn.style.outline = detailReorderMode ? '2px solid #065F46' : 'none';
+            }
 
             const newForm = document.getElementById('clientNewFieldForm');
             if (newForm && mode !== 'edit') newForm.style.display = 'none';
@@ -4324,7 +4381,7 @@
             // Campo custom = nome con prefisso "(*)" (vale per settings e clients)
             const isClientCustom = String(row.campo || '').startsWith('(*)');
             const mode = clientDetailMode;
-            const drag = (mode === 'edit') ? ' draggable="true"' : '';   // trascinabile in modifica
+            const drag = detailReorderMode ? ' draggable="true"' : '';   // trascinabile solo in riordino
             let input;
             let extraRow = ''; // eventuale riga aggiuntiva (es. valore2 per il tipo 30)
 
@@ -4409,7 +4466,7 @@
             const canRename = isClientCustom || isAdminUser;
             const label = (mode === 'rename' && canRename)
                 ? `<input type="text" class="field-rename" data-oldcampo="${campo}" value="${campo}" style="width: 140px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem;">`
-                : `<span class="campo-label${mode === 'edit' ? ' drag-handle' : ''}"${mode === 'edit' ? ' draggable="true"' : ''}>${campoLabelHtml(row.campo)}</span>`;
+                : `<span class="campo-label${detailReorderMode ? ' drag-handle' : ''}"${detailReorderMode ? ' draggable="true"' : ''}>${campoLabelHtml(row.campo)}</span>`;
 
             return `<div class="settings-detail-row" data-row-id="${id}" data-campo="${campo}">${checkbox}${label}${input}</div>${extraRow}`;
         }
@@ -4510,6 +4567,10 @@
                 if (saveBar) saveBar.style.display = 'none';
                 showNotification('Salvato', 'success');
                 applyScreenScale(); // se è cambiato il valore "schermo", riadatta subito lo zoom
+                // Aggiorna gli elenchi dei primi flyout senza refresh pagina: un cambio di valore
+                // (es. "Mostra tutti i clienti", scadenze) può cambiare la visibilità di clienti/argomenti.
+                try { loadClientsNames(); } catch (e) {}
+                try { loadSettingsArguments(); } catch (e) {}
                 // Dopo il salvataggio (valori e/o spostamento label) "Abilita modifica" torna spento.
                 clientDetailMode = 'view';
                 await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
@@ -4824,6 +4885,14 @@
             if (delBtn) delBtn.addEventListener('click', () => { clientDetailMode = 'delete'; rerender(); });
             if (renBtn) renBtn.addEventListener('click', () => { clientDetailMode = 'rename'; rerender(); });
 
+            // Sposta: attiva/disattiva il riordino drag&drop (solo in modalità 'edit').
+            const reorderBtn = document.getElementById('clientReorderBtn');
+            if (reorderBtn) reorderBtn.addEventListener('click', () => {
+                if (clientDetailMode !== 'edit') return;
+                detailReorderMode = !detailReorderMode;
+                rerender();
+            });
+
             // Selezione checkbox campi custom -> abilita il pulsante "Salva" (eliminazione)
             if (listEl) listEl.addEventListener('change', (e) => {
                 if (e.target && e.target.classList && e.target.classList.contains('field-del-check')) {
@@ -4869,7 +4938,7 @@
             };
             if (listEl) {
                 listEl.addEventListener('dragstart', (e) => {
-                    if (clientDetailMode !== 'edit') return;
+                    if (!detailReorderMode) return;
                     const h = e.target.closest('.drag-handle');
                     if (!h) return;
                     draggedRow = h.closest('[data-row-id]');
