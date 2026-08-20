@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import db from '../config/database.js';
+import authDb from '../config/authDatabase.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -53,34 +54,27 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password required' });
     }
 
-    // Find user by email
-    const user = await db.query(
-      'SELECT * FROM users WHERE email = $1',
+    // FASE 1 (Projexa-Auth): trova l'utente per email, verifica password e scadenza licenza.
+    const authRes = await authDb.query(
+      'SELECT id, email, password_hash, scadenza FROM users WHERE email = $1',
       [email]
     );
-
-    console.log(`[LOGIN] User query result: ${user.rows.length} rows found`);
-
-    if (user.rows.length === 0) {
+    console.log(`[LOGIN] Auth query result: ${authRes.rows.length} rows found`);
+    if (authRes.rows.length === 0) {
       console.log(`[LOGIN] No user found with email: ${email}`);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
+    const authUser = authRes.rows[0];
 
-    const userData = user.rows[0];
-    console.log(`[LOGIN] User found: ${userData.email}, ID: ${userData.id}`);
-
-    // Verify password
-    console.log(`[LOGIN] Comparing password... Hash length: ${userData.password_hash.length}`);
-    const passwordMatch = await bcrypt.compare(password, userData.password_hash);
+    const passwordMatch = await bcrypt.compare(password, authUser.password_hash);
     console.log(`[LOGIN] Password match result: ${passwordMatch}`);
-
     if (!passwordMatch) {
       console.log(`[LOGIN] Password mismatch for user: ${email}`);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // Verifica scadenza licenza
-    const licenseCheck = checkLicenseExpiry(userData);
+    // Verifica scadenza licenza (scadenza è su Projexa-Auth)
+    const licenseCheck = checkLicenseExpiry(authUser);
     if (!licenseCheck.valid) {
       console.log(`[LOGIN] License expired for user: ${email}`);
       return res.status(403).json({
@@ -88,6 +82,12 @@ router.post('/login', async (req, res) => {
         redirect: `/license-expired.html?expiry=${licenseCheck.expiry}&email=${encodeURIComponent(licenseCheck.email)}`
       });
     }
+
+    // FASE 2 (Projexa): recupera nome/cognome per la visualizzazione (stesso id).
+    const nameRes = await db.query('SELECT name, cognome FROM users WHERE id = $1', [authUser.id]);
+    const nameRow = nameRes.rows[0] || {};
+    const userData = { id: authUser.id, email: authUser.email, name: nameRow.name, cognome: nameRow.cognome };
+    console.log(`[LOGIN] User authenticated: ${userData.email}, ID: ${userData.id}`);
 
     // Get user's tenants
     const tenants = await db.query(
@@ -215,52 +215,50 @@ router.get('/google-callback', async (req, res) => {
 
     console.log(`[GOOGLE_AUTH] User: ${email}, Name: ${name}`);
 
-    // Crea o aggiorna l'utente nel database
-    let user = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    // Crea o aggiorna l'utente. Autenticazione su Projexa-Auth; stub (nome) + tenant su Projexa.
+    let authUser = (await authDb.query('SELECT id, email, scadenza FROM users WHERE email = $1', [email])).rows[0];
 
-    if (user.rows.length === 0) {
-      // Crea nuovo utente con hash password casuale (Google non fornisce password)
+    if (!authUser) {
+      // Nuovo utente: prima su Projexa-Auth (id generato lì), poi stub + tenant su Projexa (stesso id).
       const randomHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
-      
-      const result = await db.query(
-        `INSERT INTO users (email, name, password_hash, created_at)
-         VALUES ($1, $2, $3, NOW())
-         RETURNING id, email, name`,
-        [email, name, randomHash]
+      const ins = await authDb.query(
+        `INSERT INTO users (email, password_hash, created_at)
+         VALUES ($1, $2, NOW()) RETURNING id, email, scadenza`,
+        [email, randomHash]
       );
-      user = result;
-      
-      // Nuovo utente: crea subito un tenant per lui
-      const slug = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-');
-      console.log(`[GOOGLE_AUTH] Creating new tenant for ${email} with slug: ${slug}`);
-      
-      const defaultTenant = await db.query(
-        `INSERT INTO tenants (name, slug, created_at)
-         VALUES ($1, $2, NOW())
-         RETURNING id, name`,
-        [`${name}'s Workspace`, slug]
-      );
+      authUser = ins.rows[0];
+      const userId = authUser.id;
 
-      console.log(`[GOOGLE_AUTH] Tenant created:`, defaultTenant.rows[0]);
-
-      // Assegna il ruolo "Project Manager" (id_roles = 70)
-      const roleId = 70;
-
-      const userTenantResult = await db.query(
-        'INSERT INTO user_tenants (user_id, tenant_id, role_id, id_roles) VALUES ($1, $2, $3, $4)',
-        [user.rows[0].id, defaultTenant.rows[0].id, 'Project Manager', roleId]
-      );
-
-      console.log(`[GOOGLE_AUTH] User-tenant relationship created for ${email}`);
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('INSERT INTO users (id, name) VALUES ($1, $2)', [userId, name]);
+        const slug = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-');
+        const defaultTenant = await client.query(
+          `INSERT INTO tenants (name, slug, created_at) VALUES ($1, $2, NOW()) RETURNING id, name`,
+          [`${name}'s Workspace`, slug]
+        );
+        await client.query(
+          'INSERT INTO user_tenants (user_id, tenant_id, role_id, id_roles) VALUES ($1, $2, $3, $4)',
+          [userId, defaultTenant.rows[0].id, 'Project Manager', 70]
+        );
+        await client.query('COMMIT');
+        console.log(`[GOOGLE_AUTH] New user created (auth + stub + tenant) for ${email}`);
+      } catch (e) {
+        await client.query('ROLLBACK');
+        await authDb.query('DELETE FROM users WHERE id = $1', [userId]).catch(() => {}); // compensazione
+        throw e;
+      } finally {
+        client.release();
+      }
     } else {
-      // Utente esiste già: aggiorna l'ultima data
-      await db.query(
-        'UPDATE users SET updated_at = NOW() WHERE email = $1',
-        [email]
-      );
+      await authDb.query('UPDATE users SET updated_at = NOW() WHERE id = $1', [authUser.id]);
     }
 
-    const userData = user.rows[0];
+    // Nome/cognome per la visualizzazione dallo stub Projexa (stesso id)
+    const nameRes = await db.query('SELECT name, cognome FROM users WHERE id = $1', [authUser.id]);
+    const nameRow = nameRes.rows[0] || {};
+    const userData = { id: authUser.id, email: authUser.email, scadenza: authUser.scadenza, name: nameRow.name, cognome: nameRow.cognome };
 
     // Verifica scadenza licenza
     const licenseCheck = checkLicenseExpiry(userData);
@@ -377,7 +375,7 @@ router.get('/impersonate/users', requireAuth, requireAdmin, async (req, res) => 
   if (!tenantId) return res.status(400).json({ error: 'tenant_id richiesto' });
   try {
     const r = await db.query(
-      `SELECT DISTINCT u.id, u.name, u.cognome, u.email, ut.id_roles, rol.name AS role_name
+      `SELECT DISTINCT u.id, u.name, u.cognome, ut.id_roles, rol.name AS role_name
        FROM users u
        JOIN user_tenants ut ON ut.user_id = u.id
        LEFT JOIN roles rol ON rol.id_roles = ut.id_roles
@@ -385,7 +383,14 @@ router.get('/impersonate/users', requireAuth, requireAdmin, async (req, res) => 
        ORDER BY u.name`,
       [tenantId]
     );
-    res.json(r.rows);
+    // email da Projexa-Auth (stessi id)
+    const ids = r.rows.map(x => x.id);
+    const emailById = {};
+    if (ids.length) {
+      const er = await authDb.query('SELECT id, email FROM users WHERE id = ANY($1::uuid[])', [ids]);
+      er.rows.forEach(x => { emailById[x.id] = x.email; });
+    }
+    res.json(r.rows.map(x => ({ ...x, email: emailById[x.id] || null })));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -400,7 +405,7 @@ router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
   try {
     const q = await db.query(
       `SELECT ut.role_id, ut.id_roles, r.name AS role_name,
-              u.email, u.name, u.cognome, t.name AS tenant_name
+              u.name, u.cognome, t.name AS tenant_name
        FROM user_tenants ut
        JOIN users u ON u.id = ut.user_id
        JOIN tenants t ON t.id = ut.tenant_id
@@ -412,10 +417,13 @@ router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Utente non trovato in quel tenant' });
     }
     const row = q.rows[0];
+    // email da Projexa-Auth (stesso id)
+    const emailRes = await authDb.query('SELECT email FROM users WHERE id = $1', [user_id]);
+    const email = emailRes.rows[0] ? emailRes.rows[0].email : null;
     const token = jwt.sign(
       {
         user_id,
-        email: row.email,
+        email,
         tenant_id,
         tenant_name: row.tenant_name,
         role_id: row.role_id,
@@ -429,7 +437,7 @@ router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
       token,
       user: {
         id: user_id,
-        email: row.email,
+        email,
         name: buildFullName(row),
         tenant_name: row.tenant_name
       }

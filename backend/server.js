@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcrypt';
 import db from './config/database.js';
+import authDb from './config/authDatabase.js';
 import authRoutes from './routes/auth.js';
 import microsoftOAuthRoutes from './routes/microsoft-oauth.js';
 import tableStructuresRoutes from './routes/table-structures.js';
@@ -1619,7 +1620,12 @@ app.get('/api/gdpr/export', requireAuth, async (req, res) => {
       try { const r = await db.query(sql, params); data[label] = stripSensitive(r.rows); }
       catch (e) { data[label] = { nota: 'non disponibile', dettaglio: e.message }; }
     };
-    await q('profilo_utente', 'SELECT * FROM users WHERE id = $1', [uid]);
+    await q('profilo_utente', 'SELECT * FROM users WHERE id = $1', [uid]); // Projexa: nome/cognome
+    // Dati di autenticazione (email/scadenza) da Projexa-Auth
+    try {
+      const ar = await authDb.query('SELECT email, scadenza, created_at FROM users WHERE id = $1', [uid]);
+      data.autenticazione = stripSensitive(ar.rows);
+    } catch (e) { data.autenticazione = { nota: 'non disponibile', dettaglio: e.message }; }
     await q('organizzazioni', 'SELECT * FROM user_tenants WHERE user_id = $1', [uid]);
     await q('ruoli', 'SELECT * FROM user_roles WHERE user_id = $1', [uid]);
     await q('impostazioni', 'SELECT * FROM settings WHERE user_id = $1', [uid]);
@@ -1658,6 +1664,14 @@ app.delete('/api/gdpr/erase', requireAuth, async (req, res) => {
     setIf('password_hash', null); setIf('password', null);
     setIf('telefono', null); setIf('cellulare', null); setIf('avatar', null);
     if (sets.length) { params.push(uid); await db.query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${params.length}`, params); }
+    // Anonimizza anche il record di autenticazione su Projexa-Auth (email + password inutilizzabile):
+    // così l'utente non può più autenticarsi (diritto all'oblio).
+    try {
+      await authDb.query(
+        "UPDATE users SET email = $1, password_hash = 'DISABLED', updated_at = NOW() WHERE id = $2",
+        [anon + '@rimosso.invalid', uid]
+      );
+    } catch (e) { /* ignore */ }
     // Revoca gli accessi (l'utente non potrà più autenticarsi)
     try { await db.query('DELETE FROM user_tenants WHERE user_id = $1', [uid]); } catch (e) { /* ignore */ }
     try { await db.query('DELETE FROM user_roles WHERE user_id = $1', [uid]); } catch (e) { /* ignore */ }
