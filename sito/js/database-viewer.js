@@ -428,8 +428,11 @@ let currentModalRecordId = null;
 let currentModalColumns = [];
 
 // Create form field (handles foreign keys, boolean fields, and password fields)
-async function createFormField(columnName, value, fkTable) {
+async function createFormField(columnName, value, fkInfo) {
   const safeColumn = escapeHtml(columnName);
+  // fkInfo può essere una stringa (vecchio formato) o { table, column }.
+  const fkTable = fkInfo && typeof fkInfo === 'object' ? fkInfo.table : fkInfo;
+  const fkColumn = (fkInfo && typeof fkInfo === 'object' && fkInfo.column) ? fkInfo.column : 'id';
 
   // Check if this is a password field
   if (columnName === 'password' || columnName === 'password_hash') {
@@ -459,7 +462,7 @@ async function createFormField(columnName, value, fkTable) {
         });
         if (response.ok) {
           const data = await response.json();
-          options = data.map(c => ({ id: c.id, display: escapeHtml(c.name || `Item ${c.id}`) }));
+          options = data.map(c => ({ val: c[fkColumn] != null ? c[fkColumn] : c.id, display: escapeHtml(c.name || `Item ${c.id}`) }));
         }
       } else {
         const response = await fetch(`${API_URL}/data/${relatedTableName}`, {
@@ -468,14 +471,15 @@ async function createFormField(columnName, value, fkTable) {
         if (response.ok) {
           const relatedData = await response.json();
           options = relatedData.map(row => ({
-            id: row.id,
+            // Valore inviato = colonna referenziata dalla FK (es. roles.id_roles), non row.id.
+            val: row[fkColumn] != null ? row[fkColumn] : row.id,
             display: escapeHtml(row.nominativo || row.name || row.display_name || row.description || row.title || row.valore2 || `Item ${row.id}`)
           }));
         }
       }
 
       if (options) {
-        const optionsHtml = options.map(opt => `<option value="${escapeHtml(opt.id)}" ${opt.id == value ? 'selected' : ''}>${opt.display}</option>`).join('');
+        const optionsHtml = options.map(opt => `<option value="${escapeHtml(opt.val)}" ${opt.val == value ? 'selected' : ''}>${opt.display}</option>`).join('');
         return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><select name="${safeColumn}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"><option value="">-- Seleziona --</option>${optionsHtml}</select></div>`;
       }
     } catch (error) {
@@ -650,7 +654,8 @@ async function fetchColumnsMeta(tableName) {
 // Mappa colonna -> tabella referenziata (foreign key), dai metadati.
 function fkMapFromMeta(meta) {
   const m = {};
-  (meta || []).forEach(c => { if (c.references) m[c.name] = c.references; });
+  // Per ogni FK memorizza tabella e colonna referenziata (es. id_roles -> roles.id_roles).
+  (meta || []).forEach(c => { if (c.references) m[c.name] = { table: c.references, column: c.referencesColumn || 'id' }; });
   return m;
 }
 
@@ -787,7 +792,9 @@ async function deleteRecord(tableName, recordId) {
       const table = currentTable || { table_name: tableName };
       await loadTableData(table.table_name || tableName);
     } else {
-      alert('Error deleting record');
+      // Mostra il messaggio del server (es. 409: record collegato ad altri dati).
+      const err = await response.json().catch(() => ({}));
+      alert(err.error || 'Error deleting record');
     }
   } catch (error) {
     console.error('Error deleting record:', error);

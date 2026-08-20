@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import db from '../config/database.js';
+import authDb from '../config/authDatabase.js';
 import JWT_SECRET from '../config/jwt.js';
 
 const router = express.Router();
@@ -114,53 +115,21 @@ router.get('/microsoft-callback', async (req, res) => {
 
     console.log(`[MICROSOFT_AUTH] User: ${email}, Name: ${displayName}`);
 
-    // === STEP 3: Crea o aggiorna l'utente nel database ===
-    let user = await db.query('SELECT * FROM users WHERE email = $1', [email]);
-
-    if (user.rows.length === 0) {
-      // Crea nuovo utente
-      console.log(`[MICROSOFT_AUTH] Creating new user: ${email}`);
-      
-      const randomHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
-      
-      const result = await db.query(
-        `INSERT INTO users (email, name, password_hash, created_at)
-         VALUES ($1, $2, $3, NOW())
-         RETURNING id, email, name`,
-        [email, displayName, randomHash]
-      );
-      user = result;
-      
-      // Crea un tenant per il nuovo utente
-      const slug = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-');
-      console.log(`[MICROSOFT_AUTH] Creating new tenant for ${email} with slug: ${slug}`);
-      
-      const defaultTenant = await db.query(
-        `INSERT INTO tenants (name, slug, created_at)
-         VALUES ($1, $2, NOW())
-         RETURNING id, name`,
-        [`${displayName}'s Workspace`, slug]
-      );
-
-      console.log(`[MICROSOFT_AUTH] Tenant created:`, defaultTenant.rows[0]);
-
-      // Assegna il ruolo "Project Manager" (id_roles = 70)
-      await db.query(
-        'INSERT INTO user_tenants (user_id, tenant_id, role_id, id_roles) VALUES ($1, $2, $3, $4)',
-        [user.rows[0].id, defaultTenant.rows[0].id, 'Project Manager', 70]
-      );
-
-      console.log(`[MICROSOFT_AUTH] User-tenant relationship created for ${email}`);
-    } else {
-      // Aggiorna utente esistente
-      console.log(`[MICROSOFT_AUTH] User already exists: ${email}`);
-      await db.query(
-        'UPDATE users SET updated_at = NOW() WHERE email = $1',
-        [email]
-      );
+    // === STEP 3: Cerca l'utente su Projexa-Auth. ===
+    let authUser = (await authDb.query('SELECT id, email, scadenza FROM users WHERE email = $1', [email])).rows[0];
+    if (!authUser) {
+      // Nuovo utente: instradalo alla pagina "Prova gratuita" (niente auto-creazione qui).
+      console.log(`[MICROSOFT_AUTH] Nuovo utente, redirect a prova gratuita: ${email}`);
+      const p = new URLSearchParams({ email, name: displayName || '', method: 'microsoft' });
+      return res.redirect(`/prova-gratuita.html?${p.toString()}`);
     }
+    console.log(`[MICROSOFT_AUTH] User already exists: ${email}`);
+    await authDb.query('UPDATE users SET updated_at = NOW() WHERE id = $1', [authUser.id]);
 
-    const userDbData = user.rows[0];
+    // Nome/cognome per la visualizzazione dallo stub Projexa (stesso id)
+    const nameRes = await db.query('SELECT name, cognome FROM users WHERE id = $1', [authUser.id]);
+    const nameRow = nameRes.rows[0] || {};
+    const userDbData = { id: authUser.id, email: authUser.email, scadenza: authUser.scadenza, name: nameRow.name, cognome: nameRow.cognome };
 
     // === STEP 4: Verifica scadenza licenza ===
     const licenseCheck = checkLicenseExpiry(userDbData);

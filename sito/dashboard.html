@@ -149,7 +149,9 @@
         .sidebar-menu {
             padding: 1rem 0;
             list-style: none;
-            flex: 1;
+            flex: 1 1 auto;
+            min-height: 0;      /* consente lo scroll interno in flex column */
+            overflow-y: auto;   /* con molti bottoni la lista scorre su/giù */
             display: flex;
             flex-direction: column;
         }
@@ -206,12 +208,12 @@
 
         .nav-settings.open .settings-flyout,
         .nav-clients.open .settings-flyout {
-            width: 300px;
+            width: var(--menu-w, 300px);
             pointer-events: auto;
         }
 
         .settings-flyout-inner {
-            width: 300px;
+            width: var(--menu-w, 300px);
             height: 100vh;            /* alto quanto la sidebar */
             overflow-y: auto;
             background: white;
@@ -291,13 +293,15 @@
             pointer-events: none;
         }
 
+        /* La larghezza usa --detail-w (impostata dall'utente col trascinamento);
+           in mancanza si usa il default della modalità corrente. Chiuso = width 0. */
         .settings-detail-flyout.open {
-            width: 468px;
+            width: var(--detail-w, 468px);
             pointer-events: auto;
         }
 
         .settings-detail-flyout-inner {
-            width: 468px;
+            width: var(--detail-w, 468px);
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -307,6 +311,46 @@
             box-shadow: 4px 0 20px rgba(0,0,0,0.14);
             padding: 1.5rem 1.25rem;
         }
+
+        /* Flyout dei Contatti: +25% in larghezza (468 -> 585px) */
+        .settings-detail-flyout.contacts-wide.open { width: var(--detail-w, 585px); }
+        .settings-detail-flyout.contacts-wide .settings-detail-flyout-inner { width: var(--detail-w, 585px); }
+        /* Layout a più colonne del dettaglio (campo layout_col) */
+        .settings-detail-flyout.cols-2.open { width: var(--detail-w, 780px); }
+        .settings-detail-flyout.cols-3.open { width: var(--detail-w, 1080px); }
+        .settings-detail-flyout.cols-2 .settings-detail-flyout-inner { width: var(--detail-w, 780px); }
+        .settings-detail-flyout.cols-3 .settings-detail-flyout-inner { width: var(--detail-w, 1080px); }
+
+        /* Maniglia di ridimensionamento (bordo destro dei flyout) */
+        .flyout-resizer { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: ew-resize; z-index: 350; }
+        .flyout-resizer:hover { background: rgba(52, 211, 153, 0.35); }
+        .settings-detail-flyout.resizing, .settings-flyout.resizing { transition: none; }
+        .detail-columns { display: flex; gap: 1.25rem; align-items: flex-start; }
+        .detail-column { flex: 1 1 0; min-width: 0; }
+        /* Modalità modifica: colonne come drop-zone per il riordino drag&drop */
+        .detail-columns.editing .detail-column { border: 1px dashed #CBD5E1; border-radius: 8px; padding: 6px; min-height: 90px; }
+        .col-placeholder { color: #9CA3AF; font-size: 0.8rem; text-align: center; padding: 24px 4px; }
+        .drag-handle { cursor: grab; }
+        .drag-handle:active { cursor: grabbing; }
+        /* Evidenzia in verde la label sotto il mouse quando è spostabile */
+        .detail-columns.editing .drag-handle:hover { border-color: #16A34A; box-shadow: 0 0 0 1px #16A34A; }
+        /* Organigramma (albero verticale dei contatti per "responsabile") */
+        .org-tree { font-size: 0.85rem; }
+        .org-children { border-left: 2px solid #E2E8F0; } /* margin/padding impostati inline per livello (+15% composto) */
+        .org-tree .org-node { position: relative; display: inline-flex; max-width: 100%; align-items: center; justify-content: flex-start; gap: 10px; margin-top: 8px; background: #A7F3D0; border: 1px solid #34D399; border-radius: 8px; padding: 7px 10px; cursor: pointer; }
+        .org-tree .org-node:hover { border-color: #059669; color: #065F46; }
+        .org-children .org-node::before { content: ""; position: absolute; left: -16px; top: 50%; width: 12px; height: 2px; background: #E2E8F0; }
+        .org-avatar { width: 28px; height: 28px; border-radius: 50%; background: #065F46; color: #A7F3D0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex: 0 0 auto; }
+        .org-name { display: block; font-weight: 600; color: #065F46; line-height: 1.2; }
+        .org-sub { display: block; font-size: 0.72rem; color: #0F6E56; line-height: 1.25; }
+        /* Barra/slider per tipo_valore = 30 (0-200, default 100); il riempimento blu è impostato via JS */
+        .value-bar { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: #b0b0b0; outline: none; cursor: pointer; }
+        .value-bar::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #1a73e8; border: 2px solid #fff; box-shadow: 0 0 2px rgba(0,0,0,0.45); cursor: pointer; }
+        .value-bar::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #1a73e8; border: 2px solid #fff; box-shadow: 0 0 2px rgba(0,0,0,0.45); cursor: pointer; }
+        .value-bar:disabled { cursor: default; }
+        .settings-detail-row.dragging,
+        .settings-detail-parent.dragging,
+        .settings-detail-link.dragging { opacity: 0.45; }
 
         #settingsDetailList {
             flex: 1;
@@ -329,10 +373,16 @@
         }
 
         .settings-detail-row .campo-label {
-            font-size: 0.9rem;
+            font-size: 0.82rem;
+            font-weight: 500;
             color: var(--dark);
             word-break: break-word;
             flex: 0 0 30%;
+            box-sizing: border-box;
+            border: 1px solid #CBD5E1;
+            border-radius: 6px;
+            padding: 5px 10px;
+            background: transparent;
         }
         /* In rinomina l'input del nome campo occupa lo stesso 30% dell'etichetta */
         .settings-detail-row .field-rename {
@@ -391,7 +441,7 @@
             background: #A7F3D0;
             color: #065F46;
             font-weight: 600;
-            border-bottom: none;
+            border: 1px solid #34D399;
             border-radius: 6px;
             padding: 0.28rem 8px;
             margin-bottom: 3px;
@@ -1191,9 +1241,9 @@
             <li class="nav-clients" style="position: relative;">
                 <a href="#"><i class="fas fa-users"></i> <span>Clienti</span></a>
                 <div class="settings-flyout">
+                    <div class="flyout-resizer"></div>
                     <div class="settings-flyout-inner">
                         <div class="settings-flyout-title">Clienti</div>
-                        <button id="clientsNewBtn" style="display: none; width: 100%; margin-bottom: 0.9rem; padding: 0.5rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">+ Nuovo cliente</button>
                         <ul id="clientsList">
                             <li style="color: var(--text-muted); border: none;">Caricamento…</li>
                         </ul>
@@ -1202,18 +1252,47 @@
             </li>
             <li><a href="#"><i class="fas fa-folder"></i> <span>I miei progetti</span></a></li>
             <li><a href="#"><i class="fas fa-trash"></i> <span>Archivio</span></a></li>
+            <li><a href="#"><i class="fas fa-exclamation-circle"></i> <span>Issue</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
             <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><i class="fas fa-database"></i> <span>Database</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
                 <a href="#"><i class="fas fa-cog"></i> <span>Impostazioni</span></a>
                 <div class="settings-flyout">
+                    <div class="flyout-resizer"></div>
                     <div class="settings-flyout-inner">
                         <div class="settings-flyout-title">Impostazioni</div>
                         <div id="settingsListEditWrap" style="display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 0.8rem; margin-bottom: 0.5rem;">
                             <span>Abilita modifica</span>
                             <label class="toggle-switch"><input type="checkbox" id="settingsListEditToggle"><span class="toggle-slider"></span></label>
                         </div>
-                        <button id="settingsNewArgBtn" style="display: none; width: 100%; margin-bottom: 0.9rem; padding: 0.5rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">+ Aggiungi</button>
+                        <div id="settingsArgToolbar" style="display: none; gap: 6px; margin-bottom: 0.9rem;">
+                            <button id="settingsAddArgBtn" type="button" style="flex: 0 0 auto; padding: 0 0.6rem; height: 26px; background: #3B82F6; color: white; border: none; border-radius: 5px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">Aggiungi</button>
+                            <button id="settingsDelArgBtn" type="button" style="flex: 0 0 auto; padding: 0 0.6rem; height: 26px; background: #EF4444; color: white; border: none; border-radius: 5px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">Elimina</button>
+                            <button id="settingsRenArgBtn" type="button" style="flex: 0 0 auto; padding: 0 0.6rem; height: 26px; background: #6B7280; color: white; border: none; border-radius: 5px; font-size: 0.75rem; font-weight: 600; cursor: pointer;">Rinomina</button>
+                        </div>
+                        <!-- Form aggiunta argomento (stile flyout 2): nome + tipo + ruolo -->
+                        <div id="settingsNewArgForm" style="display: none; margin-bottom: 0.75rem;">
+                            <input id="settingsNewArgName" type="text" placeholder="Nome dell'argomento" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;">
+                            <select id="settingsNewArgType" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;"></select>
+                            <div id="settingsNewArgTabellaWrap" style="display: none; margin-bottom: 0.5rem;">
+                                <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Tabella</label>
+                                <input id="settingsNewArgTabella" type="text" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            </div>
+                            <div id="settingsNewArgColonnaWrap" style="display: none; margin-bottom: 0.5rem;">
+                                <label id="settingsNewArgColonnaLabel" style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Colonna</label>
+                                <input id="settingsNewArgColonna" type="text" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            </div>
+                            <div id="settingsNewArgVariabDBWrap" style="display: none; margin-bottom: 0.5rem;">
+                                <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">VariabDB</label>
+                                <input id="settingsNewArgVariabDB" type="text" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            </div>
+                            <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Visibile a (ruolo)</label>
+                            <select id="settingsNewArgRoles" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;"></select>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button id="settingsNewArgAdd" type="button" style="flex: 1; padding: 0.4rem; background: #10B981; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Aggiungi</button>
+                                <button id="settingsNewArgCancel" type="button" style="flex: 0 0 auto; padding: 0.4rem 0.8rem; background: #e5e7eb; border: none; border-radius: 4px; cursor: pointer;">Annulla</button>
+                            </div>
+                        </div>
                         <ul id="settingsArgumentsList">
                             <li style="color: var(--text-muted); border: none;">Caricamento…</li>
                         </ul>
@@ -1235,6 +1314,7 @@
 
     <!-- Flyout di dettaglio condiviso (Impostazioni / Clienti) -->
     <div class="settings-detail-flyout" id="settingsDetailFlyout">
+        <div class="flyout-resizer"></div>
         <div class="settings-detail-flyout-inner">
             <!-- Titolo + toggle "Abilita modifica" (solo per i Clienti) -->
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem;">
@@ -1263,6 +1343,14 @@
                 <div id="clientNewFieldColonnaWrap" style="display: none; margin-bottom: 0.5rem;">
                     <label id="clientNewFieldColonnaLabel" style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Colonna</label>
                     <input id="clientNewFieldColonna" type="text" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                </div>
+                <div id="clientNewFieldVariabDBWrap" style="display: none; margin-bottom: 0.5rem;">
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">VariabDB</label>
+                    <input id="clientNewFieldVariabDB" type="text" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                </div>
+                <div id="clientNewFieldValore2Wrap" style="display: none; margin-bottom: 0.5rem;">
+                    <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">valore2</label>
+                    <input id="clientNewFieldValore2" type="text" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;">
                 </div>
                 <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Visibile a (ruolo)</label>
                 <select id="clientNewFieldRoles" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;"></select>
@@ -2421,12 +2509,20 @@
                 };
                 logoutBtn.onclick = logout;
 
-                // Colonna in alto a destra: "Impersona" sopra, "Logout" sotto
+                // Link "Privacy e dati" (GDPR)
+                const privacyBtn = document.createElement('button');
+                privacyBtn.type = 'button';
+                privacyBtn.style.cssText = 'padding: 0.35rem 0.8rem; background: transparent; color: #6B7280; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-size: 0.8rem;';
+                privacyBtn.innerHTML = '<i class="fas fa-user-shield"></i> Privacy e dati';
+                privacyBtn.onclick = () => { const m = document.getElementById('privacyModal'); if (m) m.style.display = 'flex'; };
+
+                // Colonna in alto a destra: "Impersona" sopra, "Logout" e "Privacy" sotto
                 const rightStack = document.createElement('div');
                 rightStack.style.cssText = 'display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem;';
                 const impBar = document.getElementById('impersonateBar');
                 if (impBar) rightStack.appendChild(impBar);
                 rightStack.appendChild(logoutBtn);
+                rightStack.appendChild(privacyBtn);
                 headerActions.appendChild(rightStack);
             }
         }
@@ -2906,16 +3002,28 @@
                     return;
                 }
                 listEl.innerHTML = args.map(a => {
-                    const del = settingsListEditMode ? `<span class="arg-del" data-argument="${escapeHtml(a)}" title="Elimina" style="float: right; color: #EF4444; font-weight: 700; cursor: pointer; padding: 0 6px;">✕</span>` : '';
+                    let icon = '';
+                    if (settingsListEditMode && settingsArgSubMode === 'delete') {
+                        icon = `<span class="arg-del" data-argument="${escapeHtml(a)}" title="Elimina" style="float: right; color: #EF4444; font-weight: 700; cursor: pointer; padding: 0 6px;">✕</span>`;
+                    } else if (settingsListEditMode && settingsArgSubMode === 'rename') {
+                        icon = `<span class="arg-ren" data-argument="${escapeHtml(a)}" title="Rinomina" style="float: right; color: #6B7280; font-weight: 700; cursor: pointer; padding: 0 6px;">✎</span>`;
+                    }
                     // Argomenti "(*)" mostrati con il pallino verde (come i campi custom dei clienti)
-                    return `<li data-argument="${escapeHtml(a)}">${campoLabelHtml(a)}${del}</li>`;
+                    return `<li data-argument="${escapeHtml(a)}">${campoLabelHtml(a)}${icon}</li>`;
                 }).join('');
                 // Elimina argomento (✕): non deve aprire il dettaglio
                 listEl.querySelectorAll('.arg-del').forEach(x => {
                     x.addEventListener('click', (e) => { e.stopPropagation(); deleteSettingsArgument(x.dataset.argument); });
                 });
+                // Rinomina argomento (✎): non deve aprire il dettaglio
+                listEl.querySelectorAll('.arg-ren').forEach(x => {
+                    x.addEventListener('click', (e) => { e.stopPropagation(); renameSettingsArgument(x.dataset.argument); });
+                });
                 listEl.querySelectorAll('li[data-argument]').forEach(li => {
                     li.addEventListener('click', () => {
+                        // In modalità rinomina/elimina il click sulla riga NON apre il dettaglio.
+                        if (settingsListEditMode && settingsArgSubMode === 'rename') { renameSettingsArgument(li.dataset.argument); return; }
+                        if (settingsListEditMode && settingsArgSubMode === 'delete') { deleteSettingsArgument(li.dataset.argument); return; }
                         detailNavStack = [];
                         currentClientId = null;      // le impostazioni non sono legate a un cliente
                         currentContainerCampo = li.dataset.argument;
@@ -2927,16 +3035,104 @@
             }
         }
 
-        // Crea un nuovo argomento (settings): chiede il nome, poi l'ambito tenant.
-        function addSettingsArgument() {
-            const name = prompt('Nome del nuovo argomento:');
-            if (!name || !name.trim()) return;
-            openSettingsTenantScope({ op: 'add', name: name.trim() });
+        // Mostra/nasconde Tabella/Colonna/VariabDB nel form argomento in base al tipo
+        // (stesse regole del flyout 2): 4 -> tab+col; 15 -> tab+col+VariabDB; 10 -> solo colonna.
+        function updateArgFieldExtras() {
+            const v = (document.getElementById('settingsNewArgType') || {}).value || '';
+            const tabWrap = document.getElementById('settingsNewArgTabellaWrap');
+            const colWrap = document.getElementById('settingsNewArgColonnaWrap');
+            const colLabel = document.getElementById('settingsNewArgColonnaLabel');
+            const varWrap = document.getElementById('settingsNewArgVariabDBWrap');
+            if (v === '4' || v === '15') {
+                if (tabWrap) tabWrap.style.display = 'block';
+                if (colWrap) colWrap.style.display = 'block';
+                if (colLabel) colLabel.textContent = 'Colonna';
+                if (varWrap) varWrap.style.display = (v === '15') ? 'block' : 'none';
+            } else if (v === '10') {
+                if (tabWrap) tabWrap.style.display = 'none';
+                if (colWrap) colWrap.style.display = 'block';
+                if (colLabel) colLabel.textContent = 'Elenco dati';
+                if (varWrap) varWrap.style.display = 'none';
+            } else {
+                if (tabWrap) tabWrap.style.display = 'none';
+                if (colWrap) colWrap.style.display = 'none';
+                if (varWrap) varWrap.style.display = 'none';
+            }
+        }
+
+        // Crea un nuovo argomento (settings): mostra il form (stile flyout 2) con nome + tipo + ruolo.
+        async function addSettingsArgument() {
+            const form = document.getElementById('settingsNewArgForm');
+            const nameInp = document.getElementById('settingsNewArgName');
+            const typeSel = document.getElementById('settingsNewArgType');
+            const rolesSel = document.getElementById('settingsNewArgRoles');
+            const tabInp = document.getElementById('settingsNewArgTabella');
+            const colInp = document.getElementById('settingsNewArgColonna');
+            const varInp = document.getElementById('settingsNewArgVariabDB');
+            if (nameInp) nameInp.value = '';
+            if (tabInp) tabInp.value = '';
+            if (colInp) colInp.value = '';
+            if (varInp) varInp.value = '';
+            // Popola la tendina dei tipi_valore (come nel flyout 2)
+            if (typeSel) {
+                typeSel.innerHTML = '';
+                try {
+                    const tres = await fetch(`${API_URL}/tipo-valore`, { headers: getAuthHeaders() });
+                    if (tres.ok) {
+                        const types = await tres.json();
+                        typeSel.innerHTML = types.map(t => `<option value="${escapeHtml(t.id_code)}">${escapeHtml(t.description || t.id_code)}</option>`).join('');
+                    }
+                } catch (e) { /* ignore */ }
+            }
+            // Popola la tendina "Visibile a (ruolo)" (come nel flyout 2)
+            if (rolesSel) {
+                rolesSel.innerHTML = '<option value="">Tutti (nessuna restrizione)</option>';
+                try {
+                    const rres = await fetch(`${API_URL}/roles`, { headers: getAuthHeaders() });
+                    if (rres.ok) {
+                        const roles = await rres.json();
+                        rolesSel.innerHTML += roles.map(r => `<option value="${escapeHtml(r.id_roles)}">${escapeHtml(r.name || r.id_roles)}</option>`).join('');
+                    }
+                } catch (e) { /* ignore */ }
+            }
+            updateArgFieldExtras();
+            if (form) form.style.display = 'block';
+            if (nameInp) nameInp.focus();
+        }
+
+        // Conferma del form: apre poi la scelta ambito tenant con nome + tipo + extra + id_roles.
+        function confirmAddSettingsArgument() {
+            const nameInp = document.getElementById('settingsNewArgName');
+            const typeSel = document.getElementById('settingsNewArgType');
+            const rolesSel = document.getElementById('settingsNewArgRoles');
+            const tabInp = document.getElementById('settingsNewArgTabella');
+            const colInp = document.getElementById('settingsNewArgColonna');
+            const varInp = document.getElementById('settingsNewArgVariabDB');
+            const name = nameInp ? nameInp.value.trim() : '';
+            if (!name) { if (nameInp) nameInp.focus(); return; }
+            const idRoles = (rolesSel && rolesSel.value !== '') ? rolesSel.value : null;
+            const tipo_valore = typeSel ? (typeSel.value || null) : null;
+            const tabella = tabInp ? tabInp.value.trim() : '';
+            const colonna = colInp ? colInp.value.trim() : '';
+            const VariabDB = varInp ? varInp.value.trim() : '';
+            const form = document.getElementById('settingsNewArgForm');
+            if (form) form.style.display = 'none';
+            openSettingsTenantScope({ op: 'add', name, idRoles, tipo_valore, tabella, colonna, VariabDB });
         }
 
         // Elimina un intero argomento (settings): chiede l'ambito tenant (funge da conferma).
         function deleteSettingsArgument(name) {
             openSettingsTenantScope({ op: 'delete', name });
+        }
+
+        // Rinomina un intero argomento (settings): chiede il nuovo nome, poi l'ambito tenant.
+        function renameSettingsArgument(name) {
+            const bare = String(name || '').replace(/^\(\*\)\s*/, ''); // nome senza il prefisso "(*)"
+            const nuovo = prompt('Nuovo nome dell\'argomento:', bare);
+            if (nuovo == null) return;
+            const trimmed = nuovo.trim();
+            if (!trimmed || trimmed === bare) return;
+            openSettingsTenantScope({ op: 'rename', name, newName: trimmed });
         }
 
         // Apre il popup di scelta ambito (questo tenant / tutti i tenant) per le operazioni settings.
@@ -2959,6 +3155,12 @@
             } else if (pending.op === 'delete-field') {
                 t = 'Elimina campi';
                 p = 'Eliminare i campi selezionati su questo tenant o su tutti i tenant?';
+            } else if (pending.op === 'rename') {
+                t = 'Rinomina argomento';
+                p = `Rinominare l'argomento in "${pending.newName}" su questo tenant o su tutti i tenant?`;
+            } else if (pending.op === 'reorder') {
+                t = 'Sposta campo';
+                p = 'Applicare lo spostamento dei campi su questo tenant o su tutti i tenant?';
             } else {
                 t = 'Elimina argomento';
                 p = `Eliminare l'argomento "${pending.name}" su questo tenant o su tutti i tenant?`;
@@ -3003,12 +3205,53 @@
                     }
                     return;
                 }
+                if (p.op === 'reorder') {
+                    // Spostamento campi (drag&drop) dell'admin: applica ordinamento+colonna con l'ambito scelto.
+                    const res = await fetch(`${API_URL}/${p.source}/reorder-fields`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ argument: p.argument, scope, items: p.items })
+                    });
+                    if (res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        showNotification(`Disposizione aggiornata (${data.updated ?? 0} campi)`, 'success');
+                        detailLayoutDirty = false;
+                        clientDetailMode = 'view';
+                        await openDetailFlyout(p.source, p.argument, currentDetailLabel, true);
+                    } else {
+                        const err = await res.json().catch(() => ({}));
+                        showNotification('Errore: ' + (err.error || res.status), 'info');
+                    }
+                    return;
+                }
+                if (p.op === 'rename') {
+                    const res = await fetch(`${API_URL}/settings/argument/rename`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ oldName: p.name, newName: p.newName, scope })
+                    });
+                    if (res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        showNotification(`Argomento rinominato (${data.updated ?? 0} righe)`, 'success');
+                        // Se il dettaglio dell'argomento rinominato è aperto, chiudilo (l'argument è cambiato)
+                        if (currentDetailSource === 'settings' && currentDetailArgument === p.name) {
+                            document.getElementById('settingsDetailFlyout')?.classList.remove('open');
+                        }
+                        resetSettingsListEdit(); // dopo il salvataggio "Abilita modifica" torna spento
+                        await loadSettingsArguments();
+                    } else {
+                        const err = await res.json().catch(() => ({}));
+                        showNotification('Errore: ' + (err.error || res.status), 'info');
+                    }
+                    return;
+                }
                 let res;
                 if (p.op === 'add') {
                     res = await fetch(`${API_URL}/settings/argument`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                        body: JSON.stringify({ name: p.name, scope })
+                        body: JSON.stringify({ name: p.name, scope, idRoles: p.idRoles,
+                            tipo_valore: p.tipo_valore, tabella: p.tabella, colonna: p.colonna, VariabDB: p.VariabDB })
                     });
                 } else {
                     res = await fetch(`${API_URL}/settings/argument?name=${encodeURIComponent(p.name)}&scope=${encodeURIComponent(scope)}`, {
@@ -3021,6 +3264,7 @@
                     if (p.op === 'delete' && currentDetailSource === 'settings' && currentDetailArgument === p.name) {
                         document.getElementById('settingsDetailFlyout')?.classList.remove('open');
                     }
+                    if (p.op === 'add') resetSettingsListEdit(); // dopo l'aggiunta "Abilita modifica" torna spento
                     await loadSettingsArguments();
                 } else {
                     const err = await res.json().catch(() => ({}));
@@ -3090,6 +3334,69 @@
         let linkedListEditMode = false;
         // Modalità modifica del primo flyout Impostazioni (aggiungi/elimina argomenti).
         let settingsListEditMode = false;
+        // Sotto-modo del primo flyout Impostazioni: 'delete' (✕) | 'rename' (✎) | null.
+        let settingsArgSubMode = null;
+        // Evidenzia il pulsante attivo (Elimina/Rinomina) nella barra del primo flyout.
+        function updateArgToolbarState() {
+            const del = document.getElementById('settingsDelArgBtn');
+            const ren = document.getElementById('settingsRenArgBtn');
+            if (del) del.style.outline = (settingsArgSubMode === 'delete') ? '2px solid #991B1B' : 'none';
+            if (ren) ren.style.outline = (settingsArgSubMode === 'rename') ? '2px solid #374151' : 'none';
+        }
+        // Spegne "Abilita modifica" del primo flyout Impostazioni (dopo aggiungi/rinomina).
+        function resetSettingsListEdit() {
+            settingsListEditMode = false;
+            settingsArgSubMode = null;
+            const t = document.getElementById('settingsListEditToggle');
+            if (t) t.checked = false;
+            const tb = document.getElementById('settingsArgToolbar');
+            if (tb) tb.style.display = 'none';
+            const f = document.getElementById('settingsNewArgForm');
+            if (f) f.style.display = 'none';
+            updateArgToolbarState();
+        }
+        // True quando l'utente ha riordinato/spostato dei campi nel flyout (drag&drop).
+        let detailLayoutDirty = false;
+        // Legge se l'organigramma è abilitato per l'utente/tenant (settings:
+        // argument=Preferenze, campo=Organigramma, valore1 bool).
+        // Letta ad ogni apertura del flyout, così le modifiche si vedono senza refresh.
+        async function isOrganigrammaEnabled() {
+            try {
+                const url = `${API_URL}/settings/preference?argument=${encodeURIComponent('Preferenze')}&campo=${encodeURIComponent('Organigramma')}`;
+                const r = await fetch(url, { headers: getAuthHeaders() });
+                if (r.ok) { const d = await r.json(); return !!(d && d.value); }
+            } catch (e) { /* ignore */ }
+            return false;
+        }
+        // Fattore di zoom corrente dell'interfaccia (1 = 100%).
+        let currentUiZoom = 1;
+        // Con lo zoom sul body, l'altezza 100vh degli elementi fissi (sidebar/flyout) viene
+        // scalata: diventerebbero più alti della finestra e le voci in fondo uscirebbero fuori.
+        // Compensiamo impostando l'altezza a (finestra reale / zoom) così restano alti quanto
+        // lo schermo; con overflow-y:auto le voci in basso risalgono e diventano scorribili.
+        function adjustFixedHeightsForZoom() {
+            const z = currentUiZoom || 1;
+            const h = Math.round(window.innerHeight / z);
+            document.querySelectorAll('.sidebar, .settings-flyout, .settings-detail-flyout, .settings-flyout-inner, .settings-detail-flyout-inner')
+                .forEach(el => { el.style.height = h + 'px'; });
+        }
+        // Adatta la scala dell'interfaccia (zoom) in base al campo settings tipo_valore=30
+        // con valore2='schermo' (valore3 = percentuale; 100 = normale, 70 = tutto al 70%).
+        async function applyScreenScale() {
+            try {
+                const r = await fetch(`${API_URL}/settings/screen-scale`, { headers: getAuthHeaders() });
+                if (r.ok) {
+                    const d = await r.json();
+                    let pct = Number(d && d.value);
+                    if (!Number.isFinite(pct) || pct <= 0) pct = 100;
+                    // limiti di sicurezza per non rendere la UI inutilizzabile
+                    pct = Math.max(35, Math.min(pct, 150));
+                    currentUiZoom = pct / 100;
+                    document.body.style.zoom = currentUiZoom;
+                    adjustFixedHeightsForZoom();
+                }
+            } catch (e) { /* ignore */ }
+        }
         // Operazione argomento settings in attesa della scelta ambito tenant: { op, name }.
         let pendingSettingsArg = null;
         // "campo" del contenitore corrente: 'Cliente' al top-level (righe identità),
@@ -3121,6 +3428,7 @@
 
         // Nasconde tutta l'UI di gestione (toggle/pulsanti/barre): usata nelle viste collegate.
         function hideDetailManagement() {
+            setDetailColumns(1); // le viste collegate sono sempre a colonna singola
             ['clientEditToggleWrap', 'clientEditButtons', 'clientNewFieldForm',
              'clientDeleteBar', 'clientRenameBar', 'settingsDetailSaveBar'].forEach(id => {
                 const el = document.getElementById(id);
@@ -3133,6 +3441,8 @@
             if (!desc) return;
             if (desc.kind === 'linkedList') renderLinkedList(desc);
             else if (desc.kind === 'linkedRow') renderLinkedRow(desc);
+            else if (desc.kind === 'fieldOptions') renderFieldOptionsList(desc);
+            else if (desc.kind === 'newClient') renderNewClientView(desc);
             else {
                 currentContainerCampo = desc.containerCampo;
                 openDetailFlyout(desc.source, desc.argument, desc.label, true);
@@ -3144,6 +3454,166 @@
             if (currentView) detailNavStack.push(currentView);
             linkedListEditMode = false; // l'elenco si apre in sola lettura
             renderLinkedList({ kind: 'linkedList', source: currentDetailSource, fieldId, clientId: currentClientId, label });
+        }
+
+        // tipo_valore = 15: apre un nuovo flyout con l'elenco derivato dalla query
+        // (tabella.colonna + condizione VariabDB), filtrato per tenant/utente.
+        function openFieldOptionsList(fieldId, label) {
+            if (currentView) detailNavStack.push(currentView);
+            renderFieldOptionsList({ kind: 'fieldOptions', source: currentDetailSource, fieldId, label });
+        }
+
+        async function renderFieldOptionsList(desc) {
+            currentView = desc;
+            const flyout = document.getElementById('settingsDetailFlyout');
+            const titleEl = document.getElementById('settingsDetailTitle');
+            const listEl = document.getElementById('settingsDetailList');
+            if (!flyout || !listEl) return;
+            flyout.classList.add('open');
+            titleEl.textContent = desc.label || 'Elenco';
+            hideDetailManagement();
+            updateBackButton();
+            listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
+            try {
+                const res = await fetch(`${API_URL}/${desc.source}/field-options?fieldId=${encodeURIComponent(desc.fieldId)}`, { headers: getAuthHeaders() });
+                if (!res.ok) { listEl.innerHTML = '<div style="color: var(--text-muted);">Errore nel caricamento</div>'; return; }
+                const data = await res.json();
+                const items = data.items || [];
+                desc.tabella = data.tabella;
+                desc.colonna = data.colonna;
+                const mode = Number(data.mode);      // valore3: 1 = elimina, 2 = rinomina
+                const canRename = (mode === 2);
+                const canDelete = (mode === 1);
+                if (items.length === 0) {
+                    listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>';
+                    return;
+                }
+                const rowsHtml = items.map(it => {
+                    const val = it.value == null ? '' : String(it.value);
+                    const editHtml = canRename
+                        ? `<input type="text" class="opt-edit" value="${escapeHtml(val)}" style="display:none; flex:1 1 0; min-width:0; padding:4px 6px; border:1px solid #ccc; border-radius:4px; font-size:0.85rem;">`
+                        : '';
+                    return `<div class="settings-detail-row opt-row" data-id="${escapeHtml(it.id)}" data-value="${escapeHtml(val)}" style="justify-content: flex-start; gap: 8px;"><input type="checkbox" class="opt-check" style="flex: 0 0 auto; cursor: pointer;"><span class="opt-text" style="flex:1 1 0; min-width:0;">${escapeHtml(val)}</span>${editHtml}</div>`;
+                }).join('');
+                const saveBarHtml = (canRename || canDelete)
+                    ? `<div id="optSaveBar" style="display:none; padding-top:1rem; border-top:1px solid var(--border); margin-top:0.5rem;"><button id="optSaveBtn" type="button" style="width:100%; padding:0.6rem 1rem; background:${canDelete ? '#EF4444' : '#10B981'}; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">${canDelete ? 'Elimina' : 'Salva'}</button></div>`
+                    : '';
+                listEl.innerHTML = rowsHtml + saveBarHtml;
+
+                const checks = listEl.querySelectorAll('.opt-check');
+                const saveBar = document.getElementById('optSaveBar');
+                checks.forEach(chk => {
+                    chk.addEventListener('change', () => {
+                        // Selezione singola
+                        if (chk.checked) checks.forEach(o => { if (o !== chk) o.checked = false; });
+                        // Elimina (mode 1): il solo click sul checkbox abilita il pulsante.
+                        if (canDelete) { if (saveBar) saveBar.style.display = chk.checked ? 'block' : 'none'; return; }
+                        if (!canRename) return;
+                        // Rinomina (mode 2): mostra l'editor solo sulla riga selezionata.
+                        listEl.querySelectorAll('.opt-row').forEach(row => {
+                            const txt = row.querySelector('.opt-text');
+                            const edit = row.querySelector('.opt-edit');
+                            const isSel = row.querySelector('.opt-check') === chk && chk.checked;
+                            if (edit) edit.style.display = isSel ? 'block' : 'none';
+                            if (txt) txt.style.display = isSel ? 'none' : 'block';
+                            if (edit && !isSel) edit.value = row.dataset.value; // ripristina se deselezionata
+                        });
+                        if (saveBar) saveBar.style.display = 'none';
+                        const selRow = chk.checked ? chk.closest('.opt-row') : null;
+                        const selEdit = selRow ? selRow.querySelector('.opt-edit') : null;
+                        if (selEdit) { selEdit.focus(); selEdit.select && selEdit.select(); }
+                    });
+                });
+                // Modifica del testo -> compare Salva (solo rinomina)
+                if (canRename) {
+                    listEl.querySelectorAll('.opt-edit').forEach(edit => {
+                        edit.addEventListener('input', () => {
+                            const row = edit.closest('.opt-row');
+                            const changed = edit.value.trim() !== (row.dataset.value || '');
+                            if (saveBar) saveBar.style.display = changed ? 'block' : 'none';
+                        });
+                    });
+                }
+                const saveBtn = document.getElementById('optSaveBtn');
+                if (saveBtn) saveBtn.addEventListener('click', () => {
+                    if (canDelete) deleteFieldOption(desc);
+                    else if (canRename) saveFieldOptionRename(desc);
+                });
+            } catch (e) {
+                listEl.innerHTML = '<div style="color: var(--text-muted);">Errore di connessione</div>';
+            }
+        }
+
+        // Salva la rinomina del valore selezionato (tipo 15, valore3=2): UPDATE della riga
+        // nella tabella target, colonna indicata dal campo.
+        async function saveFieldOptionRename(desc) {
+            const listEl = document.getElementById('settingsDetailList');
+            if (!listEl || !desc.tabella || !desc.colonna) return;
+            const chk = listEl.querySelector('.opt-check:checked');
+            if (!chk) return;
+            const row = chk.closest('.opt-row');
+            const edit = row ? row.querySelector('.opt-edit') : null;
+            const id = row ? row.dataset.id : '';
+            const newVal = edit ? edit.value.trim() : '';
+            if (!id || newVal === '' || newVal === (row.dataset.value || '')) return;
+            try {
+                const res = await fetch(`${API_URL}/data/${encodeURIComponent(desc.tabella)}/${encodeURIComponent(id)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ [desc.colonna]: newVal })
+                });
+                if (res.ok) {
+                    showNotification('Salvato', 'success');
+                    renderFieldOptionsList(desc); // ricarica l'elenco aggiornato
+                    // Aggiorna anche le liste già caricate impattate dalla rinomina (no refresh pagina):
+                    if (desc.tabella === 'clients') { try { loadClientsNames(); } catch (e) {} }
+                    if (desc.tabella === 'settings') { try { loadSettingsArguments(); } catch (e) {} }
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
+        }
+
+        // Elimina il valore selezionato (tipo 15, valore3=1): esegue l'istruzione di function_db.
+        // Richiede una conferma esplicita (operazione irreversibile).
+        async function deleteFieldOption(desc) {
+            const listEl = document.getElementById('settingsDetailList');
+            if (!listEl) return;
+            const chk = listEl.querySelector('.opt-check:checked');
+            if (!chk) return;
+            const row = chk.closest('.opt-row');
+            const id = row ? row.dataset.id : '';
+            const label = row ? (row.dataset.value || '') : '';
+            if (!id) return;
+            const ok = window.confirm(
+                '⚠️ ATTENZIONE — OPERAZIONE IRREVERSIBILE\n\n' +
+                'Stai per ELIMINARE definitivamente "' + label + '" e TUTTI i dati collegati.\n\n' +
+                'Questa azione NON può essere annullata. Vuoi davvero procedere?'
+            );
+            if (!ok) return;
+            try {
+                const res = await fetch(`${API_URL}/${desc.source}/execute-function`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ fieldId: desc.fieldId, selectedId: id })
+                });
+                if (res.ok) {
+                    const d = await res.json().catch(() => ({}));
+                    showNotification(`Eliminato (${d.deleted ?? 0} righe)`, 'success');
+                    renderFieldOptionsList(desc); // ricarica l'elenco aggiornato
+                    // Aggiorna anche le liste già caricate impattate (no refresh pagina)
+                    if (desc.tabella === 'clients') { try { loadClientsNames(); } catch (e) {} }
+                    if (desc.tabella === 'settings') { try { loadSettingsArguments(); } catch (e) {} }
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
         }
 
         // Torna alla vista precedente dallo stack (usato da Indietro e da Annulla/Salva del nuovo record).
@@ -3160,6 +3630,86 @@
             renderLinkedRow({ kind: 'linkedRow', source: cv.source, fieldId: cv.fieldId, clientId: cv.clientId, rowId, label, tabella: cv.tabella });
         }
 
+        // Iniziali (prima + ultima parola) del nominativo, per il cerchietto del nodo.
+        function orgInitials(name) {
+            const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+            if (!parts.length) return '?';
+            const first = parts[0][0];
+            const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
+            return (first + last).toUpperCase();
+        }
+
+        // Costruisce l'HTML dell'organigramma dei contatti a partire dalle righe
+        // { id, value(=nominativo), responsabile, qualifica, bu }. I nodi sono collegati
+        // per "responsabile"; chi non ha (o ha un responsabile fuori dall'insieme) è radice.
+        function buildOrganigrammaHtml(items, edit) {
+            const byId = new Map();
+            items.forEach(it => byId.set(String(it.id), it));
+            const childrenOf = new Map();
+            const roots = [];
+            items.forEach(it => {
+                const resp = it.responsabile == null ? '' : String(it.responsabile);
+                if (resp && byId.has(resp) && resp !== String(it.id)) {
+                    if (!childrenOf.has(resp)) childrenOf.set(resp, []);
+                    childrenOf.get(resp).push(it);
+                } else {
+                    roots.push(it); // radice o responsabile orfano
+                }
+            });
+            // Un colore diverso per ogni BU (Business Unit): sfondo chiaro, bordo, testo.
+            const palette = [
+                { bg: '#E1F5EE', bd: '#5DCAA5', tx: '#0F6E56' }, // teal
+                { bg: '#E6F1FB', bd: '#85B7EB', tx: '#0C447C' }, // blu
+                { bg: '#FAEEDA', bd: '#EF9F27', tx: '#854F0B' }, // ambra
+                { bg: '#EEEDFE', bd: '#AFA9EC', tx: '#3C3489' }, // viola
+                { bg: '#FBEAF0', bd: '#ED93B1', tx: '#72243E' }, // rosa
+                { bg: '#FAECE7', bd: '#F0997B', tx: '#712B13' }, // corallo
+                { bg: '#EAF3DE', bd: '#97C459', tx: '#27500A' }, // verde
+                { bg: '#FCEBEB', bd: '#F09595', tx: '#791F1F' }  // rosso
+            ];
+            const neutral = { bg: '#F1EFE8', bd: '#B4B2A9', tx: '#444441' }; // BU assente
+            const buList = [...new Set(items
+                .map(it => (it.bu == null ? '' : String(it.bu).trim()))
+                .filter(Boolean))].sort();
+            const buColor = new Map();
+            buList.forEach((bu, i) => buColor.set(bu, palette[i % palette.length]));
+            const colorFor = (it) => {
+                const b = it.bu == null ? '' : String(it.bu).trim();
+                return (b && buColor.has(b)) ? buColor.get(b) : neutral;
+            };
+
+            // Indentazione base dei riporti (livello 1) e fattore +15% per ogni livello sotto.
+            const BASE_ML = 15, BASE_PL = 16, STEP = 1.15;
+            const visited = new Set();
+            // depth = livello del nodo (radici = 0). I figli sono al livello depth+1
+            // e vengono indentati del 15% in più rispetto al livello superiore (composto).
+            const renderNode = (it, depth) => {
+                const id = String(it.id);
+                if (visited.has(id)) return ''; // protezione da cicli (A->B->A)
+                visited.add(id);
+                const name = it.value == null ? '' : String(it.value);
+                const sub = [it.qualifica, it.bu]
+                    .map(s => (s == null ? '' : String(s).trim()))
+                    .filter(Boolean).join(' · ');
+                const c = colorFor(it);
+                const kids = childrenOf.get(id) || [];
+                let childrenHtml = '';
+                if (kids.length) {
+                    const lvl = depth + 1;
+                    const ml = (BASE_ML * Math.pow(STEP, lvl)).toFixed(2);
+                    const pl = (BASE_PL * Math.pow(STEP, lvl)).toFixed(2);
+                    childrenHtml = `<div class="org-children" style="margin-left:${ml}px; padding-left:${pl}px;">${kids.map(k => renderNode(k, lvl)).join('')}</div>`;
+                }
+                const del = edit ? `<span class="linked-del" data-row-id="${escapeHtml(it.id)}" title="Elimina" style="flex: 0 0 auto; color: #EF4444; font-weight: 700; cursor: pointer; padding: 0 6px;">✕</span>` : '';
+                return `<div class="org-node-wrap"><div class="linked-value org-node" data-row-id="${escapeHtml(it.id)}" data-row-label="${escapeHtml(name)}" style="background:${c.bg}; border-color:${c.bd};"><span class="org-avatar" style="background:${c.tx}; color:${c.bg};">${escapeHtml(orgInitials(name))}</span><span style="min-width:0;"><span class="org-name" style="color:${c.tx};">${escapeHtml(name)}</span>${sub ? `<span class="org-sub" style="color:${c.tx};">${escapeHtml(sub)}</span>` : ''}</span>${del}</div>${childrenHtml}</div>`;
+            };
+            let html = roots.map(it => renderNode(it, 0)).join('');
+            // Nodi mai raggiunti (solo cicli puri): mostrali come radici per non perderli.
+            const leftover = items.filter(it => !visited.has(String(it.id)));
+            html += leftover.map(it => renderNode(it, 0)).join('');
+            return `<div class="org-tree">${html}</div>`;
+        }
+
         // Rende l'elenco dei valori (colonna) della tabella collegata (tipo 20).
         async function renderLinkedList(desc) {
             currentView = desc;
@@ -3173,18 +3723,27 @@
             updateBackButton();
             listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
             try {
-                const res = await fetch(`${API_URL}/${desc.source}/linked-list?fieldId=${encodeURIComponent(desc.fieldId)}&clientId=${encodeURIComponent(desc.clientId || '')}`, { headers: getAuthHeaders() });
+                // L'organigramma è vincolato alla preferenza settings (Preferenze /
+                // Abilita Organigramma = valore1). Se attiva, chiediamo anche l'albero (tree=1).
+                const orgEnabled = await isOrganigrammaEnabled();
+                const treeParam = orgEnabled ? '&tree=1' : '';
+                const res = await fetch(`${API_URL}/${desc.source}/linked-list?fieldId=${encodeURIComponent(desc.fieldId)}&clientId=${encodeURIComponent(desc.clientId || '')}${treeParam}`, { headers: getAuthHeaders() });
                 if (!res.ok) { listEl.innerHTML = '<div style="color: var(--text-muted);">Errore nel caricamento</div>'; return; }
                 const data = await res.json();
                 desc.tabella = data.tabella; // serve al dettaglio riga per la modifica/salvataggio
+                flyout.classList.toggle('contacts-wide', data.tabella === 'contacts'); // +25% per i Contatti
                 const items = data.items || [];
-                const edit = linkedListEditMode;
+                // Albero disponibile solo se abilitato e la tabella ha "responsabile".
+                const orgView = orgEnabled && data.tree;
+                const edit = linkedListEditMode; // "Abilita modifica" attivo anche in organigramma
 
-                const toggleHtml = `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;"><span>Abilita modifica</span><label class="toggle-switch"><input type="checkbox" id="linkedListEditToggle" ${edit ? 'checked' : ''}><span class="toggle-slider"></span></label></div>`;
+                const toggleHtml = `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;"><label style="display: flex; align-items: center; gap: 6px; cursor: pointer;"><span>Abilita modifica</span><span class="toggle-switch"><input type="checkbox" id="linkedListEditToggle" ${edit ? 'checked' : ''}><span class="toggle-slider"></span></span></label></div>`;
                 const addHtml = edit ? `<div style="margin-bottom: 0.75rem;"><button id="linkedAddBtn" type="button" style="padding: 0 0.7rem; height: 28px; background: #3B82F6; color: white; border: none; border-radius: 5px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">+ Aggiungi</button></div>` : '';
                 let itemsHtml;
                 if (items.length === 0) {
                     itemsHtml = '<div style="color: var(--text-muted);">Nessun dato</div>';
+                } else if (orgView) {
+                    itemsHtml = buildOrganigrammaHtml(items, edit);
                 } else {
                     itemsHtml = items.map(it => {
                         const val = it.value == null ? '' : String(it.value);
@@ -3251,6 +3810,7 @@
             const listEl = document.getElementById('settingsDetailList');
             if (!flyout || !listEl) return;
             flyout.classList.add('open');
+            flyout.classList.toggle('contacts-wide', desc.tabella === 'contacts');
             titleEl.textContent = desc.label || 'Nuovo';
             hideDetailManagement();
             updateBackButton();
@@ -3331,6 +3891,7 @@
             const listEl = document.getElementById('settingsDetailList');
             if (!flyout || !listEl) return;
             flyout.classList.add('open');
+            flyout.classList.toggle('contacts-wide', desc.tabella === 'contacts');
             titleEl.textContent = desc.label || 'Dettaglio';
             hideDetailManagement();
             updateBackButton();
@@ -3434,6 +3995,8 @@
             currentView = { kind: 'detail', source, argument, label, containerCampo: currentContainerCampo };
             updateBackButton();
             flyout.classList.add('open');
+            flyout.classList.remove('contacts-wide'); // la vista standard non è allargata
+            setDetailColumns(1); // default; il conteggio reale viene impostato dopo il caricamento
             // Il primo flyout attivo (Impostazioni o Clienti) diventa grigio chiaro
             document.querySelector('.nav-settings')?.classList.toggle('detail-open', source === 'settings');
             document.querySelector('.nav-clients')?.classList.toggle('detail-open', source === 'clients');
@@ -3448,11 +4011,28 @@
                 // Nasconde le righe "segnaposto" senza campo (usate solo per far comparire l'argomento vuoto)
                 if (Array.isArray(rows)) rows = rows.filter(r => r.campo != null && String(r.campo).trim() !== '');
                 if (!Array.isArray(rows) || rows.length === 0) {
+                    setDetailColumns(1);
                     listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>';
                     applyDetailMode();
                     return;
                 }
-                listEl.innerHTML = rows.map(renderSettingRow).join('');
+                // Suddivide i campi nelle colonne del flyout in base a layout_col (1/2/3),
+                // mantenendo l'ordinamento all'interno di ciascuna colonna. In modifica
+                // mostra tutte e 3 le colonne (drop zone per il riordino drag&drop).
+                const byCol = { 1: [], 2: [], 3: [] };
+                rows.forEach(r => { byCol[layoutColumnOf(r)].push(r); });
+                const editing = (clientDetailMode === 'edit');
+                let showCols = editing ? [1, 2, 3] : [1, 2, 3].filter(n => byCol[n].length);
+                if (showCols.length === 0) showCols = [1];
+                setDetailColumns(editing ? 3 : showCols.length);
+                detailLayoutDirty = false;
+                listEl.innerHTML = '<div class="detail-columns' + (editing ? ' editing' : '') + '">' +
+                    showCols.map(n => {
+                        const inner = byCol[n].map(renderSettingRow).join('') ||
+                            (editing ? '<div class="col-placeholder">Trascina qui</div>' : '');
+                        return '<div class="detail-column" data-col="' + n + '">' + inner + '</div>';
+                    }).join('') +
+                    '</div>';
                 // Ad ogni modifica: segna il campo come "da salvare" e mostra il pulsante Salva.
                 listEl.querySelectorAll('[data-setting-id]').forEach(inp => {
                     const onEdit = () => {
@@ -3461,6 +4041,12 @@
                     };
                     inp.addEventListener('input', onEdit);
                     inp.addEventListener('change', onEdit);
+                });
+                // Barre (tipo 30): riempimento iniziale + aggiornamento colore/numero al variare.
+                listEl.querySelectorAll('.value-bar').forEach(bar => {
+                    updateValueBarFill(bar);
+                    const numEl = bar.parentElement ? bar.parentElement.querySelector('.value-bar-num') : null;
+                    bar.addEventListener('input', () => { updateValueBarFill(bar); if (numEl) numEl.textContent = bar.value; });
                 });
                 applyDetailMode();
             } catch (e) {
@@ -3516,6 +4102,20 @@
             confirmBtn.style.cursor = anyChecked ? 'pointer' : 'not-allowed';
         }
 
+        // Colonna di layout del campo: layout_col 2 -> 2ª colonna, 3 -> 3ª; vuoto/0/1/altro -> 1ª.
+        function layoutColumnOf(row) {
+            const v = Number(row && row.layout_col);
+            return (v === 2) ? 2 : (v === 3 ? 3 : 1);
+        }
+        // Imposta la larghezza del flyout in base al numero di colonne usate.
+        function setDetailColumns(n) {
+            const fly = document.getElementById('settingsDetailFlyout');
+            if (!fly) return;
+            fly.classList.remove('cols-2', 'cols-3');
+            if (n === 2) fly.classList.add('cols-2');
+            else if (n >= 3) fly.classList.add('cols-3');
+        }
+
         // Etichetta del campo: se custom (inizia con "(*)") mostra un pallino verde al posto di "(*)".
         function campoLabelHtml(rawCampo) {
             const s = String(rawCampo || '');
@@ -3525,22 +4125,32 @@
             return escapeHtml(s);
         }
 
+        // Colora la barra (tipo 30): blu fino al valore, grigio per il resto.
+        function updateValueBarFill(el) {
+            const min = Number(el.min) || 0, max = Number(el.max) || 100;
+            const val = Number(el.value);
+            const pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
+            el.style.background = `linear-gradient(to right, #1a73e8 0%, #1a73e8 ${pct}%, #b0b0b0 ${pct}%, #b0b0b0 100%)`;
+        }
+
         // Renderizza una riga: "campo" a sinistra, input del valore a destra in base a tipo_valore.
         function renderSettingRow(row) {
             const campo = escapeHtml(row.campo || '');
             const tipo = Number(row.tipo_valore);
             const id = escapeHtml(row.id);
-            // Campo custom = ordinamento >= 100 (vale per settings e clients)
-            const isClientCustom = Number(row.ordinamento) >= 100;
+            // Campo custom = nome con prefisso "(*)" (vale per settings e clients)
+            const isClientCustom = String(row.campo || '').startsWith('(*)');
             const mode = clientDetailMode;
+            const drag = (mode === 'edit') ? ' draggable="true"' : '';   // trascinabile in modifica
             let input;
+            let extraRow = ''; // eventuale riga aggiuntiva (es. valore2 per il tipo 30)
 
             if (tipo === 0) {
                 // Nodo padre: riga cliccabile con freccia, apre un nuovo flyout
-                return `<div class="settings-detail-parent" data-parent-id="${id}" data-parent-campo="${campo}"><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+                return `<div class="settings-detail-parent drag-handle" data-row-id="${id}" data-campo="${campo}" data-parent-id="${id}" data-parent-campo="${campo}"${drag}><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
             } else if (tipo === 20) {
                 // Collegamento a tabella esterna: riga cliccabile con freccia (settings e clients).
-                return `<div class="settings-detail-link" data-link-id="${id}" data-link-label="${campo}"><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+                return `<div class="settings-detail-link drag-handle" data-row-id="${id}" data-campo="${campo}" data-link-id="${id}" data-link-label="${campo}"${drag}><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
             } else if (tipo === 1) {
                 // Booleano -> valore1, interruttore a levetta (toggle)
                 const checked = (row.valore1 === true || row.valore1 === 'true' || row.valore1 === 't') ? 'checked' : '';
@@ -3585,6 +4195,17 @@
                     .concat(opts.map(o => `<option value="${escapeHtml(o)}" ${o === current ? 'selected' : ''}>${escapeHtml(o)}</option>`))
                     .join('');
                 input = `<select data-setting-id="${id}" data-field="valore2">${optionsHtml}</select>`;
+            } else if (tipo === 15) {
+                // Riga cliccabile: apre un nuovo flyout con l'elenco derivato dalla query
+                // (tabella.colonna + VariabDB). Riusa lo stile verde di settings-detail-link.
+                return `<div class="settings-detail-link settings-detail-opt drag-handle" data-row-id="${id}" data-campo="${campo}" data-opt-id="${id}" data-opt-label="${campo}"${drag}><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+            } else if (tipo === 16) {
+                // Riga cliccabile: apre il flyout di creazione nuovo cliente (ex pulsante "+ Nuovo cliente").
+                return `<div class="settings-detail-link settings-detail-newclient drag-handle" data-row-id="${id}" data-campo="${campo}" data-nc-label="${campo}"${drag}><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+            } else if (tipo === 30) {
+                // Barra (slider) -> valore3: min 35, max 150, default 100.
+                const v = (row.valore3 == null || row.valore3 === '') ? 100 : parseInt(row.valore3, 10);
+                input = `<span class="value-bar-wrap" style="display:flex; align-items:center; gap:10px; flex:1 1 0; min-width:0;"><input type="range" class="value-bar" min="35" max="150" step="1" data-setting-id="${id}" data-field="valore3" value="${escapeHtml(v)}" style="flex:1 1 0; min-width:0;"><span class="value-bar-num" style="font-size:0.8rem; color:var(--text-muted); min-width:2.4em; text-align:right;">${escapeHtml(v)}</span></span>`;
             } else {
                 input = `<span style="color: var(--text-muted);">—</span>`;
             }
@@ -3596,12 +4217,14 @@
             const checkbox = (mode === 'delete' && canDelete)
                 ? `<input type="checkbox" class="field-del-check" data-campo="${campo}" style="margin-right: 8px; flex: 0 0 auto;">`
                 : '';
-            // In modalità 'rename' l'etichetta dei campi custom diventa modificabile.
-            const label = (mode === 'rename' && isClientCustom)
+            // In modalità 'rename' l'etichetta diventa modificabile. Per gli utenti normali
+            // solo i campi custom "(*)"; per l'admin (id_roles=1) TUTTI i campi.
+            const canRename = isClientCustom || isAdminUser;
+            const label = (mode === 'rename' && canRename)
                 ? `<input type="text" class="field-rename" data-oldcampo="${campo}" value="${campo}" style="width: 140px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem;">`
-                : `<span class="campo-label">${campoLabelHtml(row.campo)}</span>`;
+                : `<span class="campo-label${mode === 'edit' ? ' drag-handle' : ''}"${mode === 'edit' ? ' draggable="true"' : ''}>${campoLabelHtml(row.campo)}</span>`;
 
-            return `<div class="settings-detail-row">${checkbox}${label}${input}</div>`;
+            return `<div class="settings-detail-row" data-row-id="${id}" data-campo="${campo}">${checkbox}${label}${input}</div>${extraRow}`;
         }
 
         // Salva i campi di tipo 4 modificati: il backend controlla l'unicità del valore
@@ -3639,7 +4262,7 @@
                         const field = inp.dataset.field;
                         let value;
                         if (inp.type === 'checkbox') value = inp.checked;
-                        else if (inp.type === 'number') value = inp.value === '' ? null : parseInt(inp.value, 10);
+                        else if (inp.type === 'number' || inp.type === 'range') value = inp.value === '' ? null : parseInt(inp.value, 10);
                         else value = inp.value;
 
                         const res = await fetch(`${API_URL}/data/${currentDetailSource}/${id}`, {
@@ -3660,9 +4283,49 @@
                 }
             }
 
+            // Persistenza del layout (ordinamento + colonna) se l'utente ha
+            // riordinato le label via drag&drop con "Abilita modifica" attivo.
+            if (allOk && detailLayoutDirty) {
+                // Ordine sequenziale attraverso le colonne (alto->basso), con campo e colonna.
+                const items = [];
+                let ord = 1;
+                listEl.querySelectorAll('.detail-column[data-col]').forEach(col => {
+                    const colNum = Number(col.dataset.col) || 1;
+                    col.querySelectorAll('[data-row-id]').forEach(r => {
+                        if (!r.dataset.rowId) return;
+                        items.push({ rowId: r.dataset.rowId, campo: r.dataset.campo || '', ordinamento: ord, layout_col: colNum });
+                        ord++;
+                    });
+                });
+                const isAdmin = Number(decodeJwtPayload().id_roles) === 1;
+                if (isAdmin) {
+                    // Admin: chiede se applicare lo spostamento a questo tenant o a tutti i tenant.
+                    // Il salvataggio del layout e la chiusura modifica avvengono dopo la scelta.
+                    if (saveBar) saveBar.style.display = 'none';
+                    openSettingsTenantScope({ op: 'reorder', source: currentDetailSource, argument: currentDetailArgument, items });
+                    return;
+                }
+                // Utente normale: salva riga per riga (solo il proprio tenant/utente).
+                for (const it of items) {
+                    try {
+                        const res = await fetch(`${API_URL}/data/${currentDetailSource}/${it.rowId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                            body: JSON.stringify({ ordinamento: it.ordinamento, layout_col: it.layout_col })
+                        });
+                        if (!res.ok) { allOk = false; showNotification('Errore nel salvataggio della disposizione', 'info'); }
+                    } catch (e) { allOk = false; showNotification('Errore di connessione', 'info'); }
+                }
+                if (allOk) detailLayoutDirty = false;
+            }
+
             if (allOk) {
                 if (saveBar) saveBar.style.display = 'none';
                 showNotification('Salvato', 'success');
+                applyScreenScale(); // se è cambiato il valore "schermo", riadatta subito lo zoom
+                // Dopo il salvataggio (valori e/o spostamento label) "Abilita modifica" torna spento.
+                clientDetailMode = 'view';
+                await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
             }
         }
 
@@ -3677,15 +4340,41 @@
             const saveBtn = document.getElementById('settingsDetailSaveBtn');
             if (saveBtn) saveBtn.addEventListener('click', saveDetailChanges);
 
-            // Toggle "Abilita modifica" del primo flyout: mostra + Aggiungi e le ✕ sugli argomenti.
+            // Toggle "Abilita modifica" del primo flyout: mostra la barra Aggiungi/Elimina/Rinomina.
             const listToggle = document.getElementById('settingsListEditToggle');
-            const newArgBtn = document.getElementById('settingsNewArgBtn');
+            const argToolbar = document.getElementById('settingsArgToolbar');
             if (listToggle) listToggle.addEventListener('change', () => {
                 settingsListEditMode = listToggle.checked;
-                if (newArgBtn) newArgBtn.style.display = settingsListEditMode ? 'block' : 'none';
+                settingsArgSubMode = settingsListEditMode ? 'delete' : null; // default: mostra le ✕
+                if (argToolbar) argToolbar.style.display = settingsListEditMode ? 'flex' : 'none';
+                updateArgToolbarState();
                 loadSettingsArguments();
             });
-            if (newArgBtn) newArgBtn.addEventListener('click', addSettingsArgument);
+            // Barra a tre pulsanti: Aggiungi / Elimina (mostra ✕) / Rinomina (mostra ✎)
+            const addArgBtn = document.getElementById('settingsAddArgBtn');
+            const delArgBtn = document.getElementById('settingsDelArgBtn');
+            const renArgBtn = document.getElementById('settingsRenArgBtn');
+            if (addArgBtn) addArgBtn.addEventListener('click', addSettingsArgument);
+            // Form aggiunta argomento (nome + tipo + ruolo)
+            const newArgAdd = document.getElementById('settingsNewArgAdd');
+            const newArgCancel = document.getElementById('settingsNewArgCancel');
+            const newArgType = document.getElementById('settingsNewArgType');
+            if (newArgType) newArgType.addEventListener('change', updateArgFieldExtras);
+            if (newArgAdd) newArgAdd.addEventListener('click', confirmAddSettingsArgument);
+            if (newArgCancel) newArgCancel.addEventListener('click', () => {
+                const f = document.getElementById('settingsNewArgForm');
+                if (f) f.style.display = 'none';
+            });
+            if (delArgBtn) delArgBtn.addEventListener('click', () => {
+                settingsArgSubMode = (settingsArgSubMode === 'delete') ? null : 'delete';
+                updateArgToolbarState();
+                loadSettingsArguments();
+            });
+            if (renArgBtn) renArgBtn.addEventListener('click', () => {
+                settingsArgSubMode = (settingsArgSubMode === 'rename') ? null : 'rename';
+                updateArgToolbarState();
+                loadSettingsArguments();
+            });
 
             // Popup ambito tenant (questo tenant / tutti i tenant / annulla)
             const stThis = document.getElementById('settingsScopeThisTenant');
@@ -3729,33 +4418,76 @@
                 navClients.classList.add('open');
             });
 
-            // Pulsante "Nuovo cliente": visibile solo agli utenti con id_roles <= 50.
-            const newBtn = document.getElementById('clientsNewBtn');
-            if (newBtn) {
-                const roleLevel = Number(decodeJwtPayload().id_roles);
-                if (Number.isFinite(roleLevel) && roleLevel <= 50) {
-                    newBtn.style.display = 'block';
-                }
-                newBtn.addEventListener('click', async () => {
-                    const name = prompt('Nome del nuovo cliente:');
-                    if (!name || !name.trim()) return;
-                    try {
-                        const res = await fetch(`${API_URL}/clients`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                            body: JSON.stringify({ name: name.trim() })
-                        });
-                        if (res.ok) {
-                            showNotification('Cliente aggiunto', 'success');
-                            await loadClientsNames();
-                        } else {
-                            const err = await res.json().catch(() => ({}));
-                            showNotification('Errore: ' + (err.error || res.status), 'info');
-                        }
-                    } catch (e) {
-                        showNotification('Errore di connessione', 'info');
+        }
+
+        // Apre un flyout con il form di creazione nuovo cliente (attivato da un campo tipo_valore=16).
+        function openNewClientView(label) {
+            if (currentView) detailNavStack.push(currentView);
+            renderNewClientView({ kind: 'newClient', source: currentDetailSource, label });
+        }
+
+        // Rende il form "Nuovo cliente" nel flyout: nome + "copia struttura da" + Crea/Annulla.
+        async function renderNewClientView(desc) {
+            currentView = desc;
+            const flyout = document.getElementById('settingsDetailFlyout');
+            const titleEl = document.getElementById('settingsDetailTitle');
+            const listEl = document.getElementById('settingsDetailList');
+            if (!flyout || !listEl) return;
+            flyout.classList.add('open');
+            titleEl.textContent = desc.label || 'Nuovo cliente';
+            hideDetailManagement();
+            updateBackButton();
+            listEl.innerHTML =
+                '<label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Nome cliente</label>' +
+                '<input id="ncFlyName" type="text" placeholder="Nome del cliente" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px; margin-bottom:0.75rem;">' +
+                '<label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Copia struttura da</label>' +
+                '<select id="ncFlyModel" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px; margin-bottom:1rem;"></select>' +
+                '<div style="display:flex; gap:0.5rem;">' +
+                '<button id="ncFlyCreate" type="button" style="flex:1; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Crea</button>' +
+                '<button id="ncFlyCancel" type="button" style="flex:0 0 auto; padding:0.6rem 0.9rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button>' +
+                '</div>';
+            const modelSel = document.getElementById('ncFlyModel');
+            if (modelSel) {
+                modelSel.innerHTML = '<option value="">— Modello standard —</option>';
+                try {
+                    const r = await fetch(`${API_URL}/clients/names`, { headers: getAuthHeaders() });
+                    if (r.ok) {
+                        const list = await r.json();
+                        modelSel.innerHTML += (list || []).map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name || ('Cliente ' + c.id))}</option>`).join('');
                     }
+                } catch (e) { /* ignore */ }
+            }
+            const nameInp = document.getElementById('ncFlyName');
+            if (nameInp) nameInp.focus();
+            const createBtn = document.getElementById('ncFlyCreate');
+            if (createBtn) createBtn.addEventListener('click', createNewClient);
+            const cancelBtn = document.getElementById('ncFlyCancel');
+            if (cancelBtn) cancelBtn.addEventListener('click', goBackDetail);
+        }
+
+        // Crea il cliente copiando la struttura dal modello scelto (o dal template standard).
+        async function createNewClient() {
+            const nameInp = document.getElementById('ncFlyName');
+            const modelSel = document.getElementById('ncFlyModel');
+            const name = nameInp ? nameInp.value.trim() : '';
+            if (!name) { if (nameInp) nameInp.focus(); return; }
+            const sourceClientId = modelSel ? (modelSel.value || '') : '';
+            try {
+                const res = await fetch(`${API_URL}/clients`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ name, sourceClientId })
                 });
+                if (res.ok) {
+                    showNotification('Cliente aggiunto', 'success');
+                    await loadClientsNames();
+                    goBackDetail(); // torna alla vista precedente
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
             }
         }
 
@@ -3770,25 +4502,41 @@
             const tabWrap = document.getElementById('clientNewFieldTabellaWrap');
             const colWrap = document.getElementById('clientNewFieldColonnaWrap');
             const colLabel = document.getElementById('clientNewFieldColonnaLabel');
+            const varWrap = document.getElementById('clientNewFieldVariabDBWrap');
+            const val2Wrap = document.getElementById('clientNewFieldValore2Wrap');
             const tabInp = document.getElementById('clientNewFieldTabella');
             const colInp = document.getElementById('clientNewFieldColonna');
             if (!btn || !form || !nameInp || !typeSel || !addBtn || !cancelBtn) return;
 
-            // Campi extra in base al tipo: Database (4) -> tabella + colonna;
-            // Elenco (10) -> solo colonna, con etichetta "Elenco dati".
+            // Campi extra in base al tipo:
+            //  - Database (4)  -> tabella + colonna
+            //  - tipo 15       -> tabella + colonna + VariabDB
+            //  - Elenco (10)   -> solo colonna, con etichetta "Elenco dati"
+            //  - Barra (30)    -> valore2
             function updateFieldExtras() {
                 const v = typeSel.value;
-                if (v === '4') {
+                if (v === '4' || v === '15') {
                     if (tabWrap) tabWrap.style.display = 'block';
                     if (colWrap) colWrap.style.display = 'block';
                     if (colLabel) colLabel.textContent = 'Colonna';
+                    if (varWrap) varWrap.style.display = (v === '15') ? 'block' : 'none';
+                    if (val2Wrap) val2Wrap.style.display = 'none';
                 } else if (v === '10') {
                     if (tabWrap) tabWrap.style.display = 'none';
                     if (colWrap) colWrap.style.display = 'block';
                     if (colLabel) colLabel.textContent = 'Elenco dati';
+                    if (varWrap) varWrap.style.display = 'none';
+                    if (val2Wrap) val2Wrap.style.display = 'none';
+                } else if (v === '30') {
+                    if (tabWrap) tabWrap.style.display = 'none';
+                    if (colWrap) colWrap.style.display = 'none';
+                    if (varWrap) varWrap.style.display = 'none';
+                    if (val2Wrap) val2Wrap.style.display = 'block';
                 } else {
                     if (tabWrap) tabWrap.style.display = 'none';
                     if (colWrap) colWrap.style.display = 'none';
+                    if (varWrap) varWrap.style.display = 'none';
+                    if (val2Wrap) val2Wrap.style.display = 'none';
                 }
             }
 
@@ -3904,11 +4652,61 @@
                 if (del) { deleteLinkedRow(del.dataset.rowId); return; }
                 const linkedVal = e.target.closest('.linked-value');
                 if (linkedVal) { openLinkedRow(linkedVal.dataset.rowId, linkedVal.dataset.rowLabel); return; }
+                // tipo 15: elenco da query (VariabDB) — deve avere priorità sul link tipo 20.
+                const opt = e.target.closest('.settings-detail-opt');
+                if (opt) { openFieldOptionsList(opt.dataset.optId, opt.dataset.optLabel); return; }
+                // tipo 16: apre il flyout di creazione nuovo cliente.
+                const nc = e.target.closest('.settings-detail-newclient');
+                if (nc) { openNewClientView(nc.dataset.ncLabel); return; }
                 const link = e.target.closest('.settings-detail-link');
                 if (link) { openLinkedList(link.dataset.linkId, link.dataset.linkLabel); return; }
                 const parent = e.target.closest('.settings-detail-parent');
                 if (parent) navigateToChild(parent.dataset.parentId, parent.dataset.parentCampo);
             });
+
+            // Drag & drop per riordinare/spostare i campi (solo in modalità 'edit').
+            let draggedRow = null;
+            const getDragAfterEl = (col, y) => {
+                const els = [...col.querySelectorAll('[data-row-id]:not(.dragging)')];
+                let closest = { offset: Number.NEGATIVE_INFINITY, el: null };
+                for (const child of els) {
+                    const box = child.getBoundingClientRect();
+                    const offset = y - box.top - box.height / 2;
+                    if (offset < 0 && offset > closest.offset) closest = { offset, el: child };
+                }
+                return closest.el;
+            };
+            if (listEl) {
+                listEl.addEventListener('dragstart', (e) => {
+                    if (clientDetailMode !== 'edit') return;
+                    const h = e.target.closest('.drag-handle');
+                    if (!h) return;
+                    draggedRow = h.closest('[data-row-id]');
+                    if (!draggedRow) return;
+                    draggedRow.classList.add('dragging');
+                    if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', draggedRow.dataset.rowId); } catch (_) {} }
+                });
+                listEl.addEventListener('dragover', (e) => {
+                    if (!draggedRow) return;
+                    const col = e.target.closest('.detail-column');
+                    if (!col) return;
+                    e.preventDefault();
+                    const ph = col.querySelector('.col-placeholder');
+                    if (ph) ph.remove();
+                    const after = getDragAfterEl(col, e.clientY);
+                    if (after == null) col.appendChild(draggedRow);
+                    else col.insertBefore(draggedRow, after);
+                });
+                listEl.addEventListener('drop', (e) => { if (draggedRow) e.preventDefault(); });
+                listEl.addEventListener('dragend', () => {
+                    if (!draggedRow) return;
+                    draggedRow.classList.remove('dragging');
+                    draggedRow = null;
+                    detailLayoutDirty = true;
+                    const sb = document.getElementById('settingsDetailSaveBar');
+                    if (sb) sb.style.display = 'block';
+                });
+            }
 
             // Pulsante "Indietro": riapre la vista precedente dallo stack
             const backBtn = document.getElementById('detailBackBtn');
@@ -3992,18 +4790,22 @@
             const tipo_valore = typeSel ? (typeSel.value || null) : null;
             const tabella = tabInp ? tabInp.value.trim() : '';
             const colonna = colInp ? colInp.value.trim() : '';
+            const varInp = document.getElementById('clientNewFieldVariabDB');
+            const VariabDB = varInp ? varInp.value.trim() : '';
+            const val2Inp = document.getElementById('clientNewFieldValore2');
+            const valore2 = val2Inp ? val2Inp.value.trim() : '';
             const rolesSel = document.getElementById('clientNewFieldRoles');
             const id_roles = (rolesSel && rolesSel.value !== '') ? rolesSel.value : null;
             try {
                 const res = await fetch(`${API_URL}/${currentDetailSource}/field`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ clientId: currentDetailArgument, campo, tipo_valore, tabella, colonna, scope, containerCampo: currentContainerCampo, kind: pendingFieldKind, id_roles })
+                    body: JSON.stringify({ clientId: currentDetailArgument, campo, tipo_valore, tabella, colonna, VariabDB, valore2, scope, containerCampo: currentContainerCampo, kind: pendingFieldKind, id_roles })
                 });
                 if (res.ok) {
                     showNotification('Campo aggiunto', 'success');
                     if (form) form.style.display = 'none';
-                    clientDetailMode = 'edit';
+                    clientDetailMode = 'view'; // dopo il salvataggio "Abilita modifica" torna spento
                     await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
                 } else {
                     const err = await res.json().catch(() => ({}));
@@ -4074,7 +4876,7 @@
                 if (res.ok) {
                     const data = await res.json().catch(() => ({}));
                     showNotification(`Rinominati ${data.updated ?? 0} campi`, 'success');
-                    clientDetailMode = 'edit';
+                    clientDetailMode = 'view'; // dopo il salvataggio "Abilita modifica" torna spento
                     await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
                 } else {
                     const err = await res.json().catch(() => ({}));
@@ -4083,6 +4885,50 @@
             } catch (e) {
                 showNotification('Errore di connessione', 'info');
             }
+        }
+
+        // Privacy e dati (GDPR): esportazione e cancellazione dell'account.
+        function initPrivacyModal() {
+            const modal = document.getElementById('privacyModal');
+            const close = document.getElementById('pmClose');
+            const exp = document.getElementById('pmExport');
+            const era = document.getElementById('pmErase');
+            if (close) close.addEventListener('click', () => { if (modal) modal.style.display = 'none'; });
+            if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+
+            if (exp) exp.addEventListener('click', async () => {
+                try {
+                    const res = await fetch(`${API_URL}/gdpr/export`, { headers: getAuthHeaders() });
+                    if (!res.ok) { showNotification('Errore nell\'esportazione', 'info'); return; }
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = 'miei_dati_projexa.json';
+                    document.body.appendChild(a); a.click(); a.remove();
+                    URL.revokeObjectURL(url);
+                    showNotification('Dati esportati', 'success');
+                } catch (e) { showNotification('Errore di connessione', 'info'); }
+            });
+
+            if (era) era.addEventListener('click', async () => {
+                if (!confirm("Eliminare definitivamente il tuo account? I dati personali verranno anonimizzati e perderai l'accesso. Operazione irreversibile.")) return;
+                try {
+                    const res = await fetch(`${API_URL}/gdpr/erase`, {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ confirm: true })
+                    });
+                    if (res.ok) {
+                        ['authToken', 'user', 'currentUser', 'currentTenant', 'originalToken', 'originalUser']
+                            .forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+                        alert('Account eliminato. Verrai reindirizzato alla pagina di accesso.');
+                        window.location.href = 'login.html';
+                    } else {
+                        const err = await res.json().catch(() => ({}));
+                        showNotification('Errore: ' + (err.error || res.status), 'info');
+                    }
+                } catch (e) { showNotification('Errore di connessione', 'info'); }
+            });
         }
 
         // Impersonificazione: pulsante "Impersona" (solo admin id_roles=1) e "Ritorna".
@@ -4193,6 +5039,47 @@
         }
 
         // === INITIALIZATION ===
+        // Rende un flyout ridimensionabile in larghezza trascinando la maniglia sul bordo
+        // destro. La larghezza scelta viene scritta nella variabile CSS del flyout (varName)
+        // e resta valida fino al logout (il logout ricarica la pagina e azzera la variabile).
+        function makeFlyoutResizable(flyoutEl, varName, minW) {
+            if (!flyoutEl) return;
+            const handle = flyoutEl.querySelector(':scope > .flyout-resizer');
+            if (!handle) return;
+            let startX = 0, startW = 0, active = false;
+            const onMove = (e) => {
+                if (!active) return;
+                const left = flyoutEl.getBoundingClientRect().left;
+                let w = startW + (e.clientX - startX);
+                const maxW = window.innerWidth - left - 20;
+                w = Math.max(minW, Math.min(w, maxW));
+                flyoutEl.style.setProperty(varName, w + 'px');
+            };
+            const onUp = () => {
+                active = false;
+                flyoutEl.classList.remove('resizing');
+                document.body.style.userSelect = '';
+                window.removeEventListener('mousemove', onMove);
+                window.removeEventListener('mouseup', onUp);
+            };
+            handle.addEventListener('mousedown', (e) => {
+                active = true;
+                startX = e.clientX;
+                startW = flyoutEl.getBoundingClientRect().width;
+                flyoutEl.classList.add('resizing');
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onUp);
+            });
+        }
+
+        // Attiva il ridimensionamento su tutti i flyout: dettaglio + primo livello (Clienti/Impostazioni).
+        function initFlyoutResizers() {
+            makeFlyoutResizable(document.getElementById('settingsDetailFlyout'), '--detail-w', 320);
+            document.querySelectorAll('.settings-flyout').forEach(fl => makeFlyoutResizable(fl, '--menu-w', 200));
+        }
+
         window.addEventListener('DOMContentLoaded', async () => {
             initializeUser();
             applyRoleVisibility();
@@ -4203,7 +5090,11 @@
             initClientNewField();
             initClientFieldManagement();
             initImpersonate();
+            initPrivacyModal();
             initSidebarToggle();
+            initFlyoutResizers();
+            applyScreenScale(); // adatta lo zoom dell'interfaccia alla preferenza "schermo"
+            window.addEventListener('resize', adjustFixedHeightsForZoom);
 
             // Carica dati dalle API
             await loadDataFromAPI();
@@ -4214,5 +5105,19 @@
             initMeetings(); // Carica le riunioni da Google Calendar
         });
     </script>
+    <!-- Modale Privacy e dati personali (GDPR: export / cancellazione) -->
+    <div id="privacyModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 700; display: none; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 440px; max-width: 92vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+            <h3 style="margin: 0 0 0.5rem; color: var(--dark);">Privacy e dati personali</h3>
+            <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.2rem;">Puoi scaricare una copia dei tuoi dati oppure richiedere la cancellazione dell'account (diritti artt. 15, 17 e 20 GDPR).</p>
+            <div style="display: flex; flex-direction: column; gap: 0.6rem;">
+                <button id="pmExport" type="button" style="padding: 0.6rem 1rem; background: #3B82F6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">⬇ Esporta i miei dati (JSON)</button>
+                <button id="pmErase" type="button" style="padding: 0.6rem 1rem; background: #EF4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">🗑 Elimina il mio account</button>
+                <a href="privacy.html" target="_blank" rel="noopener" style="text-align: center; font-size: 0.85rem; color: var(--primary);">Leggi l'informativa privacy e cookie</a>
+                <button id="pmClose" type="button" style="padding: 0.5rem 1rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Chiudi</button>
+            </div>
+        </div>
+    </div>
+    <script src="js/privacy.js"></script>
 </body>
 </html>
