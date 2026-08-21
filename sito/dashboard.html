@@ -207,7 +207,8 @@
         }
 
         .nav-settings.open .settings-flyout,
-        .nav-clients.open .settings-flyout {
+        .nav-clients.open .settings-flyout,
+        .nav-projects.open .settings-flyout {
             width: var(--menu-w, 300px);
             pointer-events: auto;
         }
@@ -228,7 +229,8 @@
         /* Quando è aperto il secondo flyout, il primo passa in grigio chiaro
            (il flyout attivo resta bianco). */
         .nav-settings.detail-open .settings-flyout-inner,
-        .nav-clients.detail-open .settings-flyout-inner {
+        .nav-clients.detail-open .settings-flyout-inner,
+        .nav-projects.detail-open .settings-flyout-inner {
             background: #f3f4f6;
         }
 
@@ -318,8 +320,14 @@
         /* Layout a più colonne del dettaglio (campo layout_col) */
         .settings-detail-flyout.cols-2.open { width: var(--detail-w, 780px); }
         .settings-detail-flyout.cols-3.open { width: var(--detail-w, 1080px); }
+        .settings-detail-flyout.cols-4.open { width: var(--detail-w, 1360px); }
+        .settings-detail-flyout.cols-5.open { width: var(--detail-w, 1650px); }
         .settings-detail-flyout.cols-2 .settings-detail-flyout-inner { width: var(--detail-w, 780px); }
         .settings-detail-flyout.cols-3 .settings-detail-flyout-inner { width: var(--detail-w, 1080px); }
+        .settings-detail-flyout.cols-4 .settings-detail-flyout-inner { width: var(--detail-w, 1360px); }
+        .settings-detail-flyout.cols-5 .settings-detail-flyout-inner { width: var(--detail-w, 1650px); }
+        /* Dettaglio progetto: attaccato alla sidebar (il primo flyout è chiuso) */
+        .settings-detail-flyout.near-sidebar { left: 250px; }
 
         /* Maniglia di ridimensionamento (bordo destro dei flyout) */
         .flyout-resizer { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: ew-resize; z-index: 350; }
@@ -330,6 +338,44 @@
         /* Modalità modifica: colonne come drop-zone per il riordino drag&drop */
         .detail-columns.editing .detail-column { border: 1px dashed #CBD5E1; border-radius: 8px; padding: 6px; min-height: 90px; }
         .col-placeholder { color: #9CA3AF; font-size: 0.8rem; text-align: center; padding: 24px 4px; }
+        /* Progetti: 4 colonne sempre visibili (anche vuote) */
+        .detail-columns.fixed-cols .detail-column { min-height: 120px; border: 1px solid #EEF2F7; border-radius: 8px; padding: 6px; }
+        /* Progetti (vista): layout a righe responsive — in ogni riga i campi si dividono la larghezza */
+        .detail-rows { display: flex; flex-direction: column; gap: 0.5rem; }
+        .detail-row { display: flex; gap: 1rem; align-items: flex-start; }
+        .detail-row > * { flex: 1 1 0; min-width: 0; }
+        /* Nel layout a righe (progetti) niente linee separatrici tra i campi */
+        .detail-row .settings-detail-row { border-bottom: none; }
+        /* Griglia di riordino progetti: righe come drop-zone + zone "nuova riga" */
+        .reorder-grid .reorder-row { border: 1px dashed #CBD5E1; border-radius: 8px; padding: 6px; min-height: 46px; }
+        .reorder-grid .reorder-row .drag-handle:hover { border-color: #16A34A; box-shadow: 0 0 0 1px #16A34A; }
+        .reorder-newrow { border: 1px dashed #E5E7EB; border-radius: 8px; color: #9CA3AF; font-size: 0.75rem; text-align: center; padding: 6px; }
+        .reorder-newrow:hover { border-color: #16A34A; color: #16A34A; }
+        /* Riga dei widget progetto: avanzamento (metà sinistra) + card Sottotask */
+        .proj-widgets { display: flex; gap: 1.25rem; align-items: stretch; padding: 0.25rem 0 0.6rem; border-bottom: 1px solid var(--border); margin-bottom: 0.9rem; }
+        .proj-progress { flex: 0 0 50%; max-width: 50%; display: flex; align-items: center; gap: 1rem; }
+        .pp-donut { flex: 0 0 auto; }
+        .pp-timeline { flex: 1 1 0; min-width: 0; }
+        .pp-dates { display: flex; justify-content: space-between; font-size: 0.72rem; color: #6B7280; margin-bottom: 0.3rem; }
+        .pp-bar { position: relative; height: 7px; background: #E5E7EB; border-radius: 4px; }
+        .pp-fill { position: absolute; left: 0; top: 0; height: 100%; background: #3B82F6; border-radius: 4px; }
+        .pp-marker { position: absolute; top: 50%; width: 14px; height: 14px; background: #3B82F6; border: 3px solid white; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
+        .pp-remaining { text-align: center; color: #6B7280; font-size: 0.72rem; margin-top: 0.3rem; }
+        /* Seconda barra (avanzamento reale) con label sulla stessa riga */
+        .pp-comp-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
+        .pp-comp-row .pp-comp-label { font-size: 0.72rem; color: #6B7280; white-space: nowrap; }
+        .pp-comp-row .pp-bar { flex: 1 1 0; }
+        .pp-comp-row .pp-comp-val { font-size: 0.72rem; color: #6B7280; min-width: 2.6em; text-align: right; }
+        .pp-fill-comp { background: #10B981; }
+        /* Multi-selezione (tipo 9): lista verticale di checkbox con separatori */
+        .multi9-opts { display: flex; flex-direction: column; }
+        .multi9-opt { display: flex; align-items: center; gap: 12px; padding: 9px 2px; border-bottom: 1px solid #EEF2F7; font-size: 0.95rem; cursor: pointer; }
+        .multi9-opt:last-child { border-bottom: none; }
+        .multi9-opt input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 auto; cursor: pointer; accent-color: #3B82F6; }
+        /* Card statistica (es. Sottotask) */
+        .proj-stat { flex: 0 0 auto; align-self: center; min-width: 120px; background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 14px; padding: 0.8rem 1.1rem; }
+        .proj-stat-label { color: #9CA3AF; font-size: 0.85rem; margin-bottom: 0.25rem; }
+        .proj-stat-value { color: #1F2937; font-size: 1.6rem; font-weight: 700; line-height: 1; }
         .drag-handle { cursor: grab; }
         .drag-handle:active { cursor: grabbing; }
         /* Evidenzia in verde la label sotto il mouse quando è spostabile */
@@ -361,7 +407,7 @@
         .settings-detail-row {
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: flex-start;
             gap: 0.75rem;
             padding: 0.6rem 0;
             border-bottom: 1px solid var(--border);
@@ -376,8 +422,11 @@
             font-size: 0.82rem;
             font-weight: 500;
             color: var(--dark);
-            word-break: break-word;
-            flex: 0 0 30%;
+            white-space: nowrap;
+            flex: 0 0 auto;          /* larghezza adattata al testo della label */
+            max-width: 50%;
+            overflow: hidden;
+            text-overflow: ellipsis;
             box-sizing: border-box;
             border: 1px solid #CBD5E1;
             border-radius: 6px;
@@ -1250,7 +1299,18 @@
                     </div>
                 </div>
             </li>
-            <li><a href="#"><i class="fas fa-folder"></i> <span>I miei progetti</span></a></li>
+            <li class="nav-projects" style="position: relative;">
+                <a href="#"><i class="fas fa-folder"></i> <span>Progetti clienti</span></a>
+                <div class="settings-flyout">
+                    <div class="flyout-resizer"></div>
+                    <div class="settings-flyout-inner">
+                        <div class="settings-flyout-title">Progetti clienti</div>
+                        <ul id="projectClientsList">
+                            <li style="color: var(--text-muted); border: none;">Caricamento…</li>
+                        </ul>
+                    </div>
+                </div>
+            </li>
             <li><a href="#"><i class="fas fa-trash"></i> <span>Archivio</span></a></li>
             <li><a href="#"><i class="fas fa-exclamation-circle"></i> <span>Issue</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
@@ -1322,10 +1382,13 @@
                     <button id="detailBackBtn" type="button" title="Indietro" style="display: none; flex: 0 0 auto; width: 26px; height: 26px; background: #e5e7eb; border: none; border-radius: 6px; font-size: 1.2rem; line-height: 1; cursor: pointer;">‹</button>
                     <div class="settings-flyout-title" id="settingsDetailTitle" style="margin-bottom: 0;">Dettaglio</div>
                 </div>
-                <label id="clientEditToggleWrap" style="display: none; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">
-                    <span>Abilita modifica</span>
-                    <span class="toggle-switch"><input type="checkbox" id="clientEditToggle"><span class="toggle-slider"></span></span>
-                </label>
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex: 0 0 auto;">
+                    <label id="clientEditToggleWrap" style="display: none; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">
+                        <span>Abilita modifica</span>
+                        <span class="toggle-switch"><input type="checkbox" id="clientEditToggle"><span class="toggle-slider"></span></span>
+                    </label>
+                    <button id="detailCloseBtn" type="button" title="Chiudi" style="display: none; flex: 0 0 auto; width: 26px; height: 26px; background: #e5e7eb; border: none; border-radius: 6px; font-size: 1rem; line-height: 1; cursor: pointer;">✕</button>
+                </div>
             </div>
             <!-- Pulsanti struttura campi (Nuovo / Elimina / Rinomina), visibili solo con modifica abilitata -->
             <div id="clientEditButtons" style="display: none; gap: 0.35rem; margin-bottom: 0.75rem;">
@@ -3092,11 +3155,6 @@
                 if (colWrap) colWrap.style.display = 'block';
                 if (colLabel) colLabel.textContent = 'Colonna';
                 if (varWrap) varWrap.style.display = (v === '15') ? 'block' : 'none';
-            } else if (v === '10') {
-                if (tabWrap) tabWrap.style.display = 'none';
-                if (colWrap) colWrap.style.display = 'block';
-                if (colLabel) colLabel.textContent = 'Elenco dati';
-                if (varWrap) varWrap.style.display = 'none';
             } else {
                 if (tabWrap) tabWrap.style.display = 'none';
                 if (colWrap) colWrap.style.display = 'none';
@@ -3353,6 +3411,152 @@
             }
         }
 
+        // ===== PROGETTI CLIENTI (sidebar "Progetti clienti") =====
+        let projectClientId = null;      // client_id del progetto attualmente aperto
+        let projectDetailActive = false; // true quando il flyout progetti è aperto (persistente)
+        let detailMaxCols = 3;           // colonne del flyout dettaglio (4 per i progetti)
+
+        // Livello 1: elenco clienti nel flyout della voce "Progetti clienti".
+        async function loadProjectClients() {
+            const listEl = document.getElementById('projectClientsList');
+            if (!listEl) return;
+            try {
+                const res = await fetch(`${API_URL}/clients/names`, { headers: getAuthHeaders() });
+                if (!res.ok) { listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore</li>'; return; }
+                const clients = await res.json();
+                if (!Array.isArray(clients) || clients.length === 0) { listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Nessun cliente</li>'; return; }
+                listEl.innerHTML = clients.map(c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}">${escapeHtml(c.name)}</li>`).join('');
+                listEl.querySelectorAll('li[data-client-id]').forEach(li => {
+                    li.addEventListener('click', () => {
+                        listEl.querySelectorAll('li[data-client-id]').forEach(x => x.classList.remove('active-client'));
+                        li.classList.add('active-client');
+                        detailNavStack = [];
+                        renderProjectList(li.dataset.clientId, li.dataset.clientName);
+                    });
+                });
+            } catch (e) { listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore di connessione</li>'; }
+        }
+
+        // Livello 2: elenco progetti del cliente + "Nuovo progetto".
+        async function renderProjectList(clientId, clientName) {
+            currentView = { kind: 'projectList', clientId, label: clientName };
+            const flyout = document.getElementById('settingsDetailFlyout');
+            const titleEl = document.getElementById('settingsDetailTitle');
+            const listEl = document.getElementById('settingsDetailList');
+            if (!flyout || !listEl) return;
+            projectDetailActive = true;  // flyout persistente (si chiude solo con la X)
+            detailMaxCols = 3;
+            setDetailColumns(1);
+            flyout.classList.remove('contacts-wide', 'near-sidebar');
+            flyout.classList.add('open');
+            document.querySelector('.nav-projects')?.classList.add('detail-open');
+            titleEl.textContent = clientName || 'Progetti';
+            hideDetailManagement();
+            updateBackButton();
+            const closeBtn = document.getElementById('detailCloseBtn');
+            if (closeBtn) closeBtn.style.display = 'inline-flex';
+            listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
+            try {
+                const res = await fetch(`${API_URL}/projects/list?clientId=${encodeURIComponent(clientId)}`, { headers: getAuthHeaders() });
+                const projects = res.ok ? await res.json() : [];
+                const addBtn = `<button id="projAddBtn" type="button" style="margin-bottom:0.75rem; padding:0.4rem 0.7rem; background:#3B82F6; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">+ Nuovo progetto</button>`;
+                const rows = (projects || []).map(p => `<div class="settings-detail-link proj-row" data-proj-id="${escapeHtml(p.id)}" data-proj-name="${escapeHtml(p.name)}"><span>${escapeHtml(p.name)}</span><span class="parent-arrow">›</span></div>`).join('')
+                    || '<div style="color: var(--text-muted);">Nessun progetto</div>';
+                listEl.innerHTML = addBtn + rows;
+                listEl.querySelectorAll('.proj-row').forEach(r => r.addEventListener('click', (e) => {
+                    e.stopPropagation(); // evita l'handler delegato di .settings-detail-link (clienti)
+                    openProjectDetail(r.dataset.projId, r.dataset.projName, clientId);
+                }));
+                const ab = document.getElementById('projAddBtn');
+                if (ab) ab.addEventListener('click', () => openNewProjectForm(clientId, clientName));
+            } catch (e) { listEl.innerHTML = '<div style="color: var(--text-muted);">Errore di connessione</div>'; }
+        }
+
+        // Form "Nuovo progetto": nome + modello (progetto esistente o standard) -> POST /projects.
+        async function openNewProjectForm(clientId, clientName) {
+            const listEl = document.getElementById('settingsDetailList');
+            const titleEl = document.getElementById('settingsDetailTitle');
+            if (!listEl) return;
+            if (titleEl) titleEl.textContent = 'Nuovo progetto';
+            let models = [];
+            try { const r = await fetch(`${API_URL}/projects/list`, { headers: getAuthHeaders() }); if (r.ok) models = await r.json(); } catch (e) {}
+            const opts = ['<option value="">Modello standard</option>'].concat((models || []).map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`)).join('');
+            listEl.innerHTML = `<div style="margin-bottom:0.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Nome progetto</label><input id="npName" type="text" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;"></div>
+                <div style="margin-bottom:0.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Copia struttura da</label><select id="npModel" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">${opts}</select></div>
+                <div style="display:flex; gap:0.5rem;"><button id="npCreate" type="button" style="flex:1; padding:0.5rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Crea</button><button id="npCancel" type="button" style="flex:0 0 auto; padding:0.5rem 0.8rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button></div>`;
+            document.getElementById('npCancel').addEventListener('click', () => renderProjectList(clientId, clientName));
+            document.getElementById('npCreate').addEventListener('click', async () => {
+                const name = document.getElementById('npName').value.trim();
+                if (!name) { showNotification('Nome obbligatorio', 'info'); return; }
+                const sourceProjectId = document.getElementById('npModel').value || '';
+                try {
+                    const res = await fetch(`${API_URL}/projects`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }, body: JSON.stringify({ clientId, name, sourceProjectId }) });
+                    if (res.ok) { const p = await res.json(); showNotification('Progetto creato', 'success'); openProjectDetail(p.id, name, clientId); }
+                    else { const e = await res.json().catch(() => ({})); showNotification('Errore: ' + (e.error || res.status), 'info'); }
+                } catch (e) { showNotification('Errore di connessione', 'info'); }
+            });
+        }
+
+        // Livello 3: dettaglio del progetto (campi EAV, 4 colonne). Riusa openDetailFlyout.
+        function openProjectDetail(projectId, name, clientId) {
+            if (currentView) detailNavStack.push(currentView);
+            projectClientId = clientId;
+            detailMaxCols = 5;
+            detailReorderMode = false;     // apre in vista (non riordino)
+            clientDetailMode = 'edit';     // ...ma già modificabile (schermata di data entry)
+            openDetailFlyout('projects', projectId, name, true); // keepMode: non resettare a 'view'
+        }
+
+        // Widget avanzamento del progetto: donut % (tempo trascorso) + timeline Start->End con
+        // marker "oggi" e giorni rimanenti. Start/End = campi data del progetto (valore2).
+        function renderProjectProgress(rows) {
+            const norm = (c) => String(c || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
+            const valOf = (name) => { const r = (rows || []).find(x => norm(x.campo) === name); return r ? r.valore2 : null; };
+            const sVal = valOf('start'), eVal = valOf('end');
+            if (!sVal || !eVal) return '';
+            const start = new Date(sVal), end = new Date(eVal);
+            if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) return '';
+            const day = 86400000;
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const total = Math.round((end - start) / day);
+            let elapsed = Math.round((today - start) / day);
+            elapsed = Math.max(0, Math.min(elapsed, total));
+            const pct = total > 0 ? Math.round((elapsed / total) * 100) : 0;
+            let remaining = Math.ceil((end - today) / day); if (remaining < 0) remaining = 0;
+            const fmt = (d) => d.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' });
+            const R = 30, C = 2 * Math.PI * R, dash = (pct / 100) * C;
+            // Avanzamento reale dal campo numerico "% Completamento" (valore3, fallback valore2).
+            const compRow = (rows || []).find(x => norm(x.campo) === 'completamento');
+            let comp = null;
+            if (compRow) {
+                const cv = (compRow.valore3 != null && compRow.valore3 !== '') ? compRow.valore3 : compRow.valore2;
+                comp = parseInt(cv, 10);
+                if (isNaN(comp)) comp = null; else comp = Math.max(0, Math.min(100, comp));
+            }
+            // Barra completamento reale con label sulla stessa riga.
+            const compHtml = (comp == null) ? '' :
+                '<div class="pp-comp-row"><span class="pp-comp-label">Completamento</span>' +
+                '<div class="pp-bar"><div class="pp-fill pp-fill-comp" style="width:' + comp + '%"></div></div>' +
+                '<span class="pp-comp-val">' + comp + '%</span></div>';
+            // Widget avanzamento (metà sinistra) + card Sottotask (dati forniti in seguito).
+            const progress = '<div class="proj-progress">' +
+                '<div class="pp-donut"><svg viewBox="0 0 80 80" width="62" height="62">' +
+                '<circle cx="40" cy="40" r="' + R + '" fill="none" stroke="#E5E7EB" stroke-width="10"></circle>' +
+                '<circle cx="40" cy="40" r="' + R + '" fill="none" stroke="#3B82F6" stroke-width="10" stroke-dasharray="' + dash + ' ' + C + '" stroke-linecap="round" transform="rotate(-90 40 40)"></circle>' +
+                '<text x="40" y="39" text-anchor="middle" font-size="15" font-weight="700" fill="#1F2937">' + pct + '%</text>' +
+                '<text x="40" y="51" text-anchor="middle" font-size="7" fill="#6B7280">completato</text>' +
+                '</svg></div>' +
+                '<div class="pp-timeline">' +
+                '<div class="pp-dates"><span>' + escapeHtml(fmt(start)) + '</span><span>' + escapeHtml(fmt(end)) + '</span></div>' +
+                '<div class="pp-bar"><div class="pp-fill" style="width:' + pct + '%"></div><div class="pp-marker" style="left:' + pct + '%"></div></div>' +
+                '<div class="pp-remaining">' + remaining + ' giorni rimanenti</div>' +
+                compHtml +
+                '</div></div>';
+            const statCard = '<div class="proj-stat"><div class="proj-stat-label">Sottotask</div>' +
+                '<div class="proj-stat-value" id="projSubtasks">— / —</div></div>';
+            return '<div class="proj-widgets">' + progress + statCard + '</div>';
+        }
+
         // Apre il secondo flyout con i dettagli (campo + valore) dell'argomento cliccato.
         // Sorgente corrente del flyout di dettaglio: 'settings' oppure 'clients'
         let currentDetailSource = 'settings';
@@ -3490,6 +3694,7 @@
             else if (desc.kind === 'linkedRow') renderLinkedRow(desc);
             else if (desc.kind === 'fieldOptions') renderFieldOptionsList(desc);
             else if (desc.kind === 'newClient') renderNewClientView(desc);
+            else if (desc.kind === 'projectList') renderProjectList(desc.clientId, desc.label);
             else {
                 currentContainerCampo = desc.containerCampo;
                 openDetailFlyout(desc.source, desc.argument, desc.label, true);
@@ -3963,6 +4168,21 @@
                 const optsHtml = opts.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
                 return `<div class="settings-detail-row"><span class="campo-label">${escapeHtml(col.name)}</span><select class="${cls}" data-col="${escapeHtml(col.name)}" ${dis} style="${style}"><option value="">-- Seleziona --</option>${optsHtml}</select></div>`;
             }
+            // Rende l'input in base al TIPO della colonna (dai metadati): data -> selettore data
+            // con calendario (formato AAAA-MM-GG), intero/numerico -> input numerico.
+            const type = String(col.type || '').toLowerCase();
+            if (/date|timestamp/.test(type)) {
+                let dv = '';
+                if (val) {
+                    const d = new Date(val);
+                    if (!isNaN(d.getTime())) dv = d.toISOString().slice(0, 10);
+                    else if (/^\d{4}-\d{2}-\d{2}/.test(val)) dv = val.slice(0, 10);
+                }
+                return `<div class="settings-detail-row"><span class="campo-label">${escapeHtml(col.name)}</span><input type="date" class="${cls}" data-col="${escapeHtml(col.name)}" value="${escapeHtml(dv)}" ${dis} style="${style}"></div>`;
+            }
+            if (/int|numeric|double|real|decimal/.test(type)) {
+                return `<div class="settings-detail-row"><span class="campo-label">${escapeHtml(col.name)}</span><input type="number" class="${cls}" data-col="${escapeHtml(col.name)}" value="${escapeHtml(val)}" ${dis} style="${style}"></div>`;
+            }
             return `<div class="settings-detail-row"><span class="campo-label">${escapeHtml(col.name)}</span><input type="text" class="${cls}" data-col="${escapeHtml(col.name)}" value="${escapeHtml(val)}" ${dis} style="${style}"></div>`;
         }
 
@@ -4164,9 +4384,19 @@
             // Il primo flyout attivo (Impostazioni o Clienti) diventa grigio chiaro
             document.querySelector('.nav-settings')?.classList.toggle('detail-open', source === 'settings');
             document.querySelector('.nav-clients')?.classList.toggle('detail-open', source === 'clients');
+            // Dettaglio progetto: chiudi il pannello hover di "Progetti clienti" (elenco clienti),
+            // così resta visibile SOLO il flyout del progetto.
+            document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
+            // Progetti: flyout persistente (X per chiudere), 5 colonne, attaccato alla sidebar.
+            projectDetailActive = (source === 'projects');
+            if (source !== 'projects') detailMaxCols = 3;
+            flyout.classList.toggle('near-sidebar', source === 'projects');
+            const closeBtn = document.getElementById('detailCloseBtn');
+            if (closeBtn) closeBtn.style.display = (source === 'projects') ? 'inline-flex' : 'none';
 
             try {
-                const res = await fetch(`${API_URL}/${source}/details?argument=${encodeURIComponent(argument)}`, { headers: getAuthHeaders() });
+                const clientQs = (source === 'projects' && projectClientId) ? `&clientId=${encodeURIComponent(projectClientId)}` : '';
+                const res = await fetch(`${API_URL}/${source}/details?argument=${encodeURIComponent(argument)}${clientQs}`, { headers: getAuthHeaders() });
                 if (!res.ok) {
                     listEl.innerHTML = '<div style="color: var(--text-muted);">Errore nel caricamento</div>';
                     return;
@@ -4183,21 +4413,60 @@
                 // Suddivide i campi nelle colonne del flyout in base a layout_col (1/2/3),
                 // mantenendo l'ordinamento all'interno di ciascuna colonna. In modifica
                 // mostra tutte e 3 le colonne (drop zone per il riordino drag&drop).
-                const byCol = { 1: [], 2: [], 3: [] };
-                rows.forEach(r => { byCol[layoutColumnOf(r)].push(r); });
-                // Le drop-zone e le 3 colonne compaiono solo in modalità riordino (pulsante "sposta").
+                const byCol = {};
+                const allCols = [];
+                for (let i = 1; i <= detailMaxCols; i++) { byCol[i] = []; allCols.push(i); }
+                rows.forEach(r => { const c = Math.min(Math.max(layoutColumnOf(r), 1), detailMaxCols); byCol[c].push(r); });
+                // Le drop-zone e tutte le colonne compaiono solo in modalità riordino (pulsante "sposta").
                 const editing = detailReorderMode;
-                let showCols = editing ? [1, 2, 3] : [1, 2, 3].filter(n => byCol[n].length);
+                // Progetti (detailMaxCols>=4): mostra SEMPRE tutte e 4 le colonne, anche vuote.
+                const fixedCols = (detailMaxCols >= 4);
+                let showCols = (editing || fixedCols) ? allCols : allCols.filter(n => byCol[n].length);
                 if (showCols.length === 0) showCols = [1];
-                setDetailColumns(editing ? 3 : showCols.length);
+                setDetailColumns((editing || fixedCols) ? detailMaxCols : showCols.length);
                 detailLayoutDirty = false;
-                listEl.innerHTML = '<div class="detail-columns' + (editing ? ' editing' : '') + '">' +
-                    showCols.map(n => {
-                        const inner = byCol[n].map(renderSettingRow).join('') ||
-                            (editing ? '<div class="col-placeholder">Trascina qui</div>' : '');
-                        return '<div class="detail-column" data-col="' + n + '">' + inner + '</div>';
-                    }).join('') +
-                    '</div>';
+                if (source === 'projects') {
+                    // Widget avanzamento (donut % + timeline Start->End) in cima al flyout.
+                    const progressHtml = renderProjectProgress(rows);
+                    // PROGETTI: ordinamento = RIGA, layout_col = COLONNA (posizione nella riga).
+                    // Raggruppa per ordinamento; in ogni riga ordina per layout_col.
+                    const byRow = new Map();
+                    rows.forEach(r => {
+                        const o = Number(r.ordinamento);
+                        const k = Number.isFinite(o) ? o : 999999;
+                        if (!byRow.has(k)) byRow.set(k, []);
+                        byRow.get(k).push(r);
+                    });
+                    const keys = [...byRow.keys()].sort((a, b) => a - b);
+                    if (!editing) {
+                        // Vista: righe responsive (le celle piene si dividono la larghezza).
+                        const rowsHtml = keys.map(k => {
+                            const cells = byRow.get(k).slice().sort((a, b) => layoutColumnOf(a) - layoutColumnOf(b));
+                            return '<div class="detail-row">' + cells.map(renderSettingRow).join('') + '</div>';
+                        });
+                        listEl.innerHTML = progressHtml + '<div class="detail-rows">' + (rowsHtml.join('') || '<div style="color: var(--text-muted);">Nessun dato</div>') + '</div>';
+                    } else {
+                        // Riordino: griglia con righe trascinabili + zone "nuova riga" per posizionare
+                        // il campo sulla riga voluta (drop nella riga = quella riga; drop nella zona = nuova riga).
+                        let html = progressHtml + '<div class="detail-rows reorder-grid">';
+                        html += '<div class="reorder-newrow">— rilascia qui per una nuova riga —</div>';
+                        keys.forEach(k => {
+                            const cells = byRow.get(k).slice().sort((a, b) => layoutColumnOf(a) - layoutColumnOf(b));
+                            html += '<div class="detail-row reorder-row">' + cells.map(renderSettingRow).join('') + '</div>';
+                            html += '<div class="reorder-newrow">— rilascia qui per una nuova riga —</div>';
+                        });
+                        html += '</div>';
+                        listEl.innerHTML = html;
+                    }
+                } else {
+                    listEl.innerHTML = '<div class="detail-columns' + (editing ? ' editing' : '') + (fixedCols ? ' fixed-cols' : '') + '">' +
+                        showCols.map(n => {
+                            const inner = byCol[n].map(renderSettingRow).join('') ||
+                                (editing ? '<div class="col-placeholder">Trascina qui</div>' : '');
+                            return '<div class="detail-column" data-col="' + n + '">' + inner + '</div>';
+                        }).join('') +
+                        '</div>';
+                }
                 // Ad ogni modifica: segna il campo come "da salvare" e mostra il pulsante Salva.
                 listEl.querySelectorAll('[data-setting-id]').forEach(inp => {
                     const onEdit = () => {
@@ -4212,6 +4481,28 @@
                     updateValueBarFill(bar);
                     const numEl = bar.parentElement ? bar.parentElement.querySelector('.value-bar-num') : null;
                     bar.addEventListener('input', () => { updateValueBarFill(bar); if (numEl) numEl.textContent = bar.value; });
+                });
+                // Multi-selezione (tipo 9): i checkbox aggiornano l'input nascosto (valore2 = selezionati uniti da ;).
+                listEl.querySelectorAll('.multi9').forEach(wrap => {
+                    const hidden = wrap.querySelector('input[type="hidden"][data-setting-id]');
+                    if (!hidden) return;
+                    wrap.querySelectorAll('.multi9-check').forEach(chk => {
+                        chk.addEventListener('change', () => {
+                            const vals = Array.from(wrap.querySelectorAll('.multi9-check:checked')).map(c => c.value);
+                            hidden.value = vals.join(';');
+                            hidden.dispatchEvent(new Event('change', { bubbles: true }));
+                        });
+                    });
+                });
+                // Selettore "colonne occupate" (span) in riordino: aggiorna larghezza live e segna da salvare.
+                listEl.querySelectorAll('.span-sel').forEach(sel => {
+                    sel.addEventListener('mousedown', e => e.stopPropagation());
+                    sel.addEventListener('change', () => {
+                        const rowEl = sel.closest('.settings-detail-row');
+                        if (rowEl) { rowEl.dataset.span = sel.value; rowEl.style.flex = sel.value + ' 1 0'; }
+                        detailLayoutDirty = true;
+                        const sb = document.getElementById('settingsDetailSaveBar'); if (sb) sb.style.display = 'block';
+                    });
                 });
                 applyDetailMode();
             } catch (e) {
@@ -4279,15 +4570,17 @@
         // Colonna di layout del campo: layout_col 2 -> 2ª colonna, 3 -> 3ª; vuoto/0/1/altro -> 1ª.
         function layoutColumnOf(row) {
             const v = Number(row && row.layout_col);
-            return (v === 2) ? 2 : (v === 3 ? 3 : 1);
+            return (v >= 2 && v <= 5) ? v : 1;
         }
         // Imposta la larghezza del flyout in base al numero di colonne usate.
         function setDetailColumns(n) {
             const fly = document.getElementById('settingsDetailFlyout');
             if (!fly) return;
-            fly.classList.remove('cols-2', 'cols-3');
+            fly.classList.remove('cols-2', 'cols-3', 'cols-4', 'cols-5');
             if (n === 2) fly.classList.add('cols-2');
-            else if (n >= 3) fly.classList.add('cols-3');
+            else if (n === 3) fly.classList.add('cols-3');
+            else if (n === 4) fly.classList.add('cols-4');
+            else if (n >= 5) fly.classList.add('cols-5');
         }
 
         // Etichetta del campo: se custom (inizia con "(*)") mostra un pallino verde al posto di "(*)".
@@ -4428,13 +4721,36 @@
                 }
                 input = `<input type="date" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(dateVal)}">`;
             } else if (tipo === 10) {
-                // Elenco -> menu a discesa; opzioni dal campo "colonna" separate da ";", valore in valore2
+                // Elenco -> menu a discesa; opzioni da lookup_values (row.lookup_options), valore in valore2
                 const current = row.valore2 == null ? '' : String(row.valore2);
-                const opts = String(row.colonna || '').split(';').map(s => s.trim()).filter(s => s !== '');
+                const opts = Array.isArray(row.lookup_options) ? row.lookup_options.slice() : [];
+                if (current && !opts.includes(current)) opts.unshift(current); // mantieni il valore attuale
                 const optionsHtml = ['<option value=""></option>']
                     .concat(opts.map(o => `<option value="${escapeHtml(o)}" ${o === current ? 'selected' : ''}>${escapeHtml(o)}</option>`))
                     .join('');
                 input = `<select data-setting-id="${id}" data-field="valore2">${optionsHtml}</select>`;
+            } else if (tipo === 8) {
+                // Percentuale (numerico intero) -> valore3. In modifica: input numerico + "%";
+                // in vista: mostra "X%".
+                const v = (row.valore3 == null || row.valore3 === '') ? '' : row.valore3;
+                if (mode === 'edit') {
+                    input = `<span style="display:flex; align-items:center; gap:6px; flex:1 1 0; min-width:0;"><input type="number" step="1" data-setting-id="${id}" data-field="valore3" value="${escapeHtml(v)}" style="flex:1 1 0; min-width:0;"><span style="color:var(--text-muted);">%</span></span>`;
+                } else {
+                    input = `<span>${v === '' ? '' : escapeHtml(v) + '%'}</span>`;
+                }
+            } else if (tipo === 9) {
+                // Multi-selezione: opzioni da lookup_values (row.lookup_options), selezionati in valore2 (sep ;).
+                // In modifica: checkbox; in vista: solo i valori selezionati.
+                const selected = String(row.valore2 == null ? '' : row.valore2).split(';').map(s => s.trim()).filter(s => s !== '');
+                const opts = Array.isArray(row.lookup_options) ? row.lookup_options.slice() : [];
+                selected.forEach(s => { if (!opts.includes(s)) opts.push(s); }); // non perdere i selezionati fuori elenco
+                if (mode === 'edit') {
+                    const boxes = opts.map(o => `<label class="multi9-opt"><input type="checkbox" class="multi9-check" value="${escapeHtml(o)}" ${selected.includes(o) ? 'checked' : ''}><span>${escapeHtml(o)}</span></label>`).join('');
+                    // input nascosto (data-field=valore2) tiene i selezionati uniti da ";"; aggiornato al cambio dei checkbox.
+                    input = `<span class="multi9" style="flex:1 1 0; min-width:0;"><input type="hidden" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(selected.join(';'))}"><span class="multi9-opts">${boxes}</span></span>`;
+                } else {
+                    input = `<span>${escapeHtml(selected.join(', '))}</span>`;
+                }
             } else if (tipo === 15) {
                 // Riga cliccabile: apre un nuovo flyout con l'elenco derivato dalla query
                 // (tabella.colonna + VariabDB). Riusa lo stile verde di settings-detail-link.
@@ -4457,18 +4773,28 @@
             // In modalità 'delete' i campi custom mostrano una checkbox di selezione.
             // Eliminazione: checkbox sui campi custom; gli admin (id_roles=1) la vedono su TUTTI i campi.
             const isAdminUser = Number(decodeJwtPayload().id_roles) === 1;
-            const canDelete = isClientCustom || isAdminUser;
+            // Nei progetti (dati personali) il proprietario può eliminare/rinominare qualsiasi campo.
+            const isProjectsDetail = (currentDetailSource === 'projects');
+            const canDelete = isClientCustom || isAdminUser || isProjectsDetail;
             const checkbox = (mode === 'delete' && canDelete)
                 ? `<input type="checkbox" class="field-del-check" data-campo="${campo}" style="margin-right: 8px; flex: 0 0 auto;">`
                 : '';
             // In modalità 'rename' l'etichetta diventa modificabile. Per gli utenti normali
             // solo i campi custom "(*)"; per l'admin (id_roles=1) TUTTI i campi.
-            const canRename = isClientCustom || isAdminUser;
+            const canRename = isClientCustom || isAdminUser || isProjectsDetail;
             const label = (mode === 'rename' && canRename)
                 ? `<input type="text" class="field-rename" data-oldcampo="${campo}" value="${campo}" style="width: 140px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem;">`
                 : `<span class="campo-label${detailReorderMode ? ' drag-handle' : ''}"${detailReorderMode ? ' draggable="true"' : ''}>${campoLabelHtml(row.campo)}</span>`;
 
-            return `<div class="settings-detail-row" data-row-id="${id}" data-campo="${campo}">${checkbox}${label}${input}</div>${extraRow}`;
+            // Progetti: un campo può occupare 1, 2 o 3 colonne (layout_span) -> peso flex nella riga.
+            const span = isProjectsDetail ? Math.max(1, Math.min(3, Number(row.layout_span) || 1)) : 1;
+            const spanStyle = ` style="flex: ${span} 1 0;"`;
+            // In riordino (progetti) mostra un selettore per impostare quante colonne occupa.
+            const spanSel = (detailReorderMode && isProjectsDetail)
+                ? `<select class="span-sel" title="Colonne occupate" style="flex:0 0 auto; width:auto; padding:2px 4px; font-size:0.72rem;">${[1, 2, 3].map(n => `<option value="${n}" ${span === n ? 'selected' : ''}>${n} col</option>`).join('')}</select>`
+                : '';
+
+            return `<div class="settings-detail-row" data-row-id="${id}" data-campo="${campo}" data-span="${span}"${spanStyle}>${checkbox}${label}${input}${spanSel}</div>${extraRow}`;
         }
 
         // Salva i campi di tipo 4 modificati: il backend controlla l'unicità del valore
@@ -4506,6 +4832,7 @@
                         const field = inp.dataset.field;
                         let value;
                         if (inp.type === 'checkbox') value = inp.checked;
+                        else if (inp.tagName === 'SELECT' && inp.multiple) value = Array.from(inp.selectedOptions).map(o => o.value).join(';');
                         else if (inp.type === 'number' || inp.type === 'range') value = inp.value === '' ? null : parseInt(inp.value, 10);
                         else value = inp.value;
 
@@ -4530,32 +4857,52 @@
             // Persistenza del layout (ordinamento + colonna) se l'utente ha
             // riordinato le label via drag&drop con "Abilita modifica" attivo.
             if (allOk && detailLayoutDirty) {
-                // Ordine sequenziale attraverso le colonne (alto->basso), con campo e colonna.
+                const isProjects = (currentDetailSource === 'projects');
                 const items = [];
-                let ord = 1;
-                listEl.querySelectorAll('.detail-column[data-col]').forEach(col => {
-                    const colNum = Number(col.dataset.col) || 1;
-                    col.querySelectorAll('[data-row-id]').forEach(r => {
-                        if (!r.dataset.rowId) return;
-                        items.push({ rowId: r.dataset.rowId, campo: r.dataset.campo || '', ordinamento: ord, layout_col: colNum });
-                        ord++;
+                if (isProjects) {
+                    // PROGETTI: griglia a righe. ordinamento = indice riga, layout_col = posizione nella riga.
+                    let rowIdx = 1;
+                    listEl.querySelectorAll('.reorder-row').forEach(rowEl => {
+                        const fields = [...rowEl.querySelectorAll('[data-row-id]')].filter(r => r.dataset.rowId);
+                        if (!fields.length) return;
+                        let colIdx = 1;
+                        fields.forEach(r => {
+                            const spanEl = r.querySelector('.span-sel');
+                            const layout_span = Math.max(1, Math.min(3, Number(spanEl ? spanEl.value : r.dataset.span) || 1));
+                            items.push({ rowId: r.dataset.rowId, campo: r.dataset.campo || '', ordinamento: rowIdx, layout_col: colIdx, layout_span });
+                            colIdx++;
+                        });
+                        rowIdx++;
                     });
-                });
+                } else {
+                    // Clienti/Impostazioni: colonne verticali, ordinamento sequenziale globale.
+                    let ord = 1;
+                    listEl.querySelectorAll('.detail-column[data-col]').forEach(col => {
+                        const colNum = Number(col.dataset.col) || 1;
+                        col.querySelectorAll('[data-row-id]').forEach(r => {
+                            if (!r.dataset.rowId) return;
+                            items.push({ rowId: r.dataset.rowId, campo: r.dataset.campo || '', ordinamento: ord, layout_col: colNum });
+                            ord++;
+                        });
+                    });
+                }
                 const isAdmin = Number(decodeJwtPayload().id_roles) === 1;
-                if (isAdmin) {
-                    // Admin: chiede se applicare lo spostamento a questo tenant o a tutti i tenant.
-                    // Il salvataggio del layout e la chiusura modifica avvengono dopo la scelta.
+                if (isAdmin && !isProjects) {
+                    // Admin (clienti/impostazioni): chiede l'ambito tenant. I PROGETTI invece salvano
+                    // sempre riga per riga (dati personali), così includono anche layout_span.
                     if (saveBar) saveBar.style.display = 'none';
                     openSettingsTenantScope({ op: 'reorder', source: currentDetailSource, argument: currentDetailArgument, items });
                     return;
                 }
-                // Utente normale: salva riga per riga (solo il proprio tenant/utente).
+                // Salvataggio riga per riga (solo il proprio tenant/utente).
                 for (const it of items) {
                     try {
+                        const body = { ordinamento: it.ordinamento, layout_col: it.layout_col };
+                        if (isProjects) body.layout_span = it.layout_span;
                         const res = await fetch(`${API_URL}/data/${currentDetailSource}/${it.rowId}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                            body: JSON.stringify({ ordinamento: it.ordinamento, layout_col: it.layout_col })
+                            body: JSON.stringify(body)
                         });
                         if (!res.ok) { allOk = false; showNotification('Errore nel salvataggio della disposizione', 'info'); }
                     } catch (e) { allOk = false; showNotification('Errore di connessione', 'info'); }
@@ -4575,6 +4922,19 @@
                 clientDetailMode = 'view';
                 await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
             }
+        }
+
+        // Porta "in primo piano" un flyout di primo livello (Impostazioni/Clienti/Progetti):
+        // apre quello indicato e chiude gli altri due; chiude anche il flyout di dettaglio,
+        // tranne il dettaglio progetto persistente.
+        function focusFirstFlyout(navSel) {
+            ['.nav-settings', '.nav-clients', '.nav-projects'].forEach(sel => {
+                const n = document.querySelector(sel);
+                if (!n) return;
+                if (sel === navSel) n.classList.add('open');
+                else n.classList.remove('open', 'detail-open');
+            });
+            if (!projectDetailActive) document.getElementById('settingsDetailFlyout')?.classList.remove('open');
         }
 
         // Gestione del settings-flyout: si apre al passaggio del mouse e resta aperto
@@ -4635,20 +4995,14 @@
                 if (m) m.style.display = 'none';
             });
 
-            // Apre al passaggio del mouse; se era attivo il flyout Clienti lo chiude col suo dettaglio
-            navSettings.addEventListener('mouseenter', () => {
-                const nc = document.querySelector('.nav-clients');
-                if (nc && nc.classList.contains('open')) {
-                    nc.classList.remove('open', 'detail-open');
-                    document.getElementById('settingsDetailFlyout')?.classList.remove('open');
-                }
-                navSettings.classList.add('open');
-            });
+            // Apre al passaggio del mouse; se era attivo il flyout Clienti lo chiude col suo dettaglio.
+            // Il flyout Progetti è persistente: non viene chiuso qui (solo con la sua X).
+            navSettings.addEventListener('mouseenter', () => focusFirstFlyout('.nav-settings'));
 
-            // Click su una voce della sidebar fuori da entrambi i flyout -> chiude tutto
+            // Click su una voce della sidebar fuori dai flyout -> chiude tutto (tranne Progetti, persistente).
             sidebarMenu.addEventListener('click', (e) => {
-                if (!e.target.closest('.nav-settings') && !e.target.closest('.nav-clients')) {
-                    closeAllFlyouts();
+                if (!e.target.closest('.nav-settings') && !e.target.closest('.nav-clients') && !e.target.closest('.nav-projects')) {
+                    if (!projectDetailActive) closeAllFlyouts();
                 }
             });
         }
@@ -4657,15 +5011,27 @@
         function initClientsFlyout() {
             const navClients = document.querySelector('.nav-clients');
             if (!navClients) return;
-            navClients.addEventListener('mouseenter', () => {
-                const ns = document.querySelector('.nav-settings');
-                if (ns && ns.classList.contains('open')) {
-                    ns.classList.remove('open', 'detail-open');
-                    document.getElementById('settingsDetailFlyout')?.classList.remove('open');
-                }
-                navClients.classList.add('open');
-            });
+            navClients.addEventListener('mouseenter', () => focusFirstFlyout('.nav-clients'));
 
+        }
+
+        // Flyout "Progetti clienti": apre l'elenco clienti al passaggio del mouse; il dettaglio
+        // progetto è persistente (si chiude solo con la X). Gestisce anche il pulsante X.
+        function initProjectsFlyout() {
+            const navProjects = document.querySelector('.nav-projects');
+            if (navProjects) {
+                navProjects.addEventListener('mouseenter', () => focusFirstFlyout('.nav-projects'));
+            }
+            // X: chiude il flyout persistente dei progetti.
+            const closeBtn = document.getElementById('detailCloseBtn');
+            if (closeBtn) closeBtn.addEventListener('click', () => {
+                projectDetailActive = false;
+                detailMaxCols = 3;
+                projectClientId = null;
+                document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar');
+                document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
+                closeBtn.style.display = 'none';
+            });
         }
 
         // Apre un flyout con il form di creazione nuovo cliente (attivato da un campo tipo_valore=16).
@@ -4769,12 +5135,6 @@
                     if (colWrap) colWrap.style.display = 'block';
                     if (colLabel) colLabel.textContent = 'Colonna';
                     if (varWrap) varWrap.style.display = (v === '15') ? 'block' : 'none';
-                    if (val2Wrap) val2Wrap.style.display = 'none';
-                } else if (v === '10') {
-                    if (tabWrap) tabWrap.style.display = 'none';
-                    if (colWrap) colWrap.style.display = 'block';
-                    if (colLabel) colLabel.textContent = 'Elenco dati';
-                    if (varWrap) varWrap.style.display = 'none';
                     if (val2Wrap) val2Wrap.style.display = 'none';
                 } else if (v === '30' || v === '50') {
                     if (tabWrap) tabWrap.style.display = 'none';
@@ -4936,6 +5296,17 @@
                 }
                 return closest.el;
             };
+            // Versione orizzontale (per la griglia a righe dei progetti): posizione lungo X.
+            const getDragAfterElX = (rowEl, x) => {
+                const els = [...rowEl.querySelectorAll('[data-row-id]:not(.dragging)')];
+                let closest = { offset: Number.NEGATIVE_INFINITY, el: null };
+                for (const child of els) {
+                    const box = child.getBoundingClientRect();
+                    const offset = x - box.left - box.width / 2;
+                    if (offset < 0 && offset > closest.offset) closest = { offset, el: child };
+                }
+                return closest.el;
+            };
             if (listEl) {
                 listEl.addEventListener('dragstart', (e) => {
                     if (!detailReorderMode) return;
@@ -4948,6 +5319,18 @@
                 });
                 listEl.addEventListener('dragover', (e) => {
                     if (!draggedRow) return;
+                    // Griglia progetti: inserimento orizzontale in una riga.
+                    const rrow = e.target.closest('.reorder-row');
+                    if (rrow) {
+                        e.preventDefault();
+                        const after = getDragAfterElX(rrow, e.clientX);
+                        if (after == null) rrow.appendChild(draggedRow);
+                        else rrow.insertBefore(draggedRow, after);
+                        return;
+                    }
+                    // Zona "nuova riga": consenti il drop (la riga viene creata al drop).
+                    if (e.target.closest('.reorder-newrow')) { e.preventDefault(); return; }
+                    // Clienti/Impostazioni: colonne verticali.
                     const col = e.target.closest('.detail-column');
                     if (!col) return;
                     e.preventDefault();
@@ -4957,11 +5340,29 @@
                     if (after == null) col.appendChild(draggedRow);
                     else col.insertBefore(draggedRow, after);
                 });
-                listEl.addEventListener('drop', (e) => { if (draggedRow) e.preventDefault(); });
+                listEl.addEventListener('drop', (e) => {
+                    if (!draggedRow) return;
+                    e.preventDefault();
+                    // Drop su "nuova riga": crea una riga e mettici il campo.
+                    const nr = e.target.closest('.reorder-newrow');
+                    if (nr) {
+                        const row = document.createElement('div');
+                        row.className = 'detail-row reorder-row';
+                        nr.after(row);
+                        row.appendChild(draggedRow);
+                        // aggiungi una zona "nuova riga" dopo la nuova riga
+                        const z = document.createElement('div');
+                        z.className = 'reorder-newrow';
+                        z.textContent = '— rilascia qui per una nuova riga —';
+                        row.after(z);
+                    }
+                });
                 listEl.addEventListener('dragend', () => {
                     if (!draggedRow) return;
                     draggedRow.classList.remove('dragging');
                     draggedRow = null;
+                    // Rimuovi le righe rimaste vuote (nella griglia progetti).
+                    listEl.querySelectorAll('.reorder-row').forEach(r => { if (!r.querySelector('[data-row-id]')) r.remove(); });
                     detailLayoutDirty = true;
                     const sb = document.getElementById('settingsDetailSaveBar');
                     if (sb) sb.style.display = 'block';
@@ -4980,6 +5381,7 @@
             if (delConfirm) delConfirm.addEventListener('click', () => {
                 if (delConfirm.disabled) return;
                 if (currentDetailSource === 'clients') { openClientScopeModal('delete'); return; }
+                if (currentDetailSource === 'projects') { performDeleteFields('this'); return; } // progetto singolo
                 // Impostazioni: chiede l'ambito tenant (questo tenant / tutti i tenant)
                 const listEl = document.getElementById('settingsDetailList');
                 const campos = Array.from(listEl.querySelectorAll('.field-del-check:checked')).map(c => c.dataset.campo);
@@ -4994,6 +5396,7 @@
             if (renConfirm) renConfirm.addEventListener('click', () => {
                 if (collectRenames().length === 0) { clientDetailMode = 'edit'; rerender(); return; }
                 if (currentDetailSource === 'clients') openClientScopeModal('rename');
+                else if (currentDetailSource === 'projects') performRenameFields('this'); // progetto singolo
                 else openSettingsTenantScope({ op: 'rename-field' });
             });
             if (renCancel) renCancel.addEventListener('click', () => { clientDetailMode = 'edit'; rerender(); });
@@ -5060,7 +5463,7 @@
                 const res = await fetch(`${API_URL}/${currentDetailSource}/field`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ clientId: currentDetailArgument, campo, tipo_valore, tabella, colonna, VariabDB, valore2, scope, containerCampo: currentContainerCampo, kind: pendingFieldKind, id_roles })
+                    body: JSON.stringify({ clientId: currentDetailArgument, projClientId: (currentDetailSource === 'projects' ? projectClientId : undefined), campo, tipo_valore, tabella, colonna, VariabDB, valore2, scope, containerCampo: currentContainerCampo, kind: pendingFieldKind, id_roles })
                 });
                 if (res.ok) {
                     showNotification('Campo aggiunto', 'success');
@@ -5345,8 +5748,10 @@
             applyRoleVisibility();
             loadSettingsArguments();
             loadClientsNames();
+            loadProjectClients();
             initSettingsFlyout();
             initClientsFlyout();
+            initProjectsFlyout();
             initClientNewField();
             initClientFieldManagement();
             initImpersonate();

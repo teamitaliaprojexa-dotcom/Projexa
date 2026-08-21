@@ -268,7 +268,7 @@ app.get('/api/data/:table/columns', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Table not found' });
     }
     const result = await pool.query(
-      `SELECT column_name, is_generated FROM information_schema.columns
+      `SELECT column_name, is_generated, data_type FROM information_schema.columns
        WHERE table_schema = 'public' AND table_name = $1
        ORDER BY ordinal_position`,
       [tableName]
@@ -290,6 +290,7 @@ app.get('/api/data/:table/columns', requireAuth, async (req, res) => {
     res.json(result.rows.map((r) => ({
       name: r.column_name,
       generated: r.is_generated === 'ALWAYS',
+      type: r.data_type,                       // tipo Postgres (es. 'date', 'timestamp without time zone')
       references: fkMap[r.column_name] || null,
       referencesColumn: fkColMap[r.column_name] || null
     })));
@@ -1000,7 +1001,7 @@ app.get('/api/clients/names', requireAuth, async (req, res) => {
 // newArg = argument (id) del nuovo contenitore.
 async function deepCopyClientTree(dbClient, tenantId, userId, srcArg, newArg) {
   const rows = (await dbClient.query(
-    `SELECT id, campo, tipo_valore, id_roles, ordinamento, tabella, colonna, layout_col, "VariabDB" AS variabdb
+    `SELECT id, campo, tipo_valore, id_roles, ordinamento, tabella, colonna, layout_col, layout_span, "VariabDB" AS variabdb
      FROM clients
      WHERE argument = $1 AND campo IS NOT NULL AND campo <> 'Cliente'
      ORDER BY ordinamento NULLS LAST, campo`,
@@ -1008,9 +1009,9 @@ async function deepCopyClientTree(dbClient, tenantId, userId, srcArg, newArg) {
   )).rows;
   for (const r of rows) {
     const insRes = await dbClient.query(
-      `INSERT INTO clients (tenant_id, user_id, argument, campo, tipo_valore, id_roles, ordinamento, tabella, colonna, layout_col, "VariabDB")
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
-      [tenantId, userId, newArg, r.campo, r.tipo_valore, r.id_roles, r.ordinamento, r.tabella, r.colonna, r.layout_col, r.variabdb]
+      `INSERT INTO clients (tenant_id, user_id, argument, campo, tipo_valore, id_roles, ordinamento, tabella, colonna, layout_col, layout_span, "VariabDB")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
+      [tenantId, userId, newArg, r.campo, r.tipo_valore, r.id_roles, r.ordinamento, r.tabella, r.colonna, r.layout_col, r.layout_span, r.variabdb]
     );
     const newId = insRes.rows[0].id;
     // Nodo Padre: copia ricorsivamente i figli (argument = id del nodo sorgente -> nuovo nodo).
@@ -1234,6 +1235,104 @@ app.post('/api/clients', requireAuth, async (req, res) => {
   }
 });
 
+// ===================== PROGETTI CLIENTI (tabella projects, EAV, scoped per client_id) =====================
+// Copia ricorsivamente la STRUTTURA dei campi di un progetto (valori vuoti), preservando la
+// gerarchia (Nodo Padre + figli). I nuovi campi ereditano tenant/user/client del destinatario.
+async function deepCopyProjectTree(dbClient, tenantId, userId, clientId, srcArg, newArg) {
+  const rows = (await dbClient.query(
+    `SELECT id, campo, tipo_valore, id_roles, ordinamento, tabella, colonna, layout_col, layout_span, "VariabDB" AS variabdb
+     FROM projects WHERE argument = $1 AND campo IS NOT NULL AND campo <> 'Progetto'
+     ORDER BY ordinamento NULLS LAST, campo`,
+    [srcArg]
+  )).rows;
+  for (const r of rows) {
+    const ins = await dbClient.query(
+      `INSERT INTO projects (tenant_id, user_id, client_id, argument, campo, tipo_valore, id_roles, ordinamento, tabella, colonna, layout_col, layout_span, "VariabDB")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+      [tenantId, userId, clientId, newArg, r.campo, r.tipo_valore, r.id_roles, r.ordinamento, r.tabella, r.colonna, r.layout_col, r.layout_span, r.variabdb]
+    );
+    if (String(r.tipo_valore) === '0') {
+      await deepCopyProjectTree(dbClient, tenantId, userId, clientId, String(r.id), String(ins.rows[0].id));
+    }
+  }
+}
+
+// Elenco progetti. Con clientId -> i progetti di quel cliente (livello 2); senza clientId ->
+// tutti i progetti dell'utente (per la tendina "modello" alla creazione).
+app.get('/api/projects/list', requireAuth, async (req, res) => {
+  try {
+    const clientId = ((req.query && req.query.clientId) || '').trim();
+    const params = [req.user.tenant_id, req.user.user_id];
+    let where = `argument = 'Progetto' AND campo = 'Progetto' AND tenant_id = $1 AND user_id = $2 AND valore2 IS NOT NULL
+                 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`;
+    if (clientId) { params.push(clientId); where += ` AND client_id = $${params.length}`; }
+    const r = await db.query(
+      `SELECT id, valore2 AS name, client_id FROM projects WHERE ${where} ORDER BY valore2`,
+      params
+    );
+    res.json(r.rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Crea un nuovo progetto per un cliente: riga identità (argument='Progetto', campo='Progetto',
+// valore2=nome, client_id) + copia della struttura da un progetto modello scelto
+// (sourceProjectId) o, in mancanza, dal master 'PROGETTO_COPIA' del tenant PROJEXA.
+app.post('/api/projects', requireAuth, async (req, res) => {
+  const roleLevel = Number(req.user.id_roles);
+  if (!Number.isFinite(roleLevel) || roleLevel > 70) {
+    return res.status(403).json({ error: 'Non autorizzato a creare progetti' });
+  }
+  const clientId = ((req.body && req.body.clientId) || '').trim();
+  const name = ((req.body && req.body.name) || '').trim();
+  const sourceProjectId = ((req.body && req.body.sourceProjectId) || '').trim();
+  if (!clientId) return res.status(400).json({ error: 'clientId richiesto' });
+  if (!name) return res.status(400).json({ error: 'Nome progetto richiesto' });
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    // 1) Riga identità del progetto.
+    const ins = await client.query(
+      `INSERT INTO projects (argument, campo, valore2, tenant_id, user_id, client_id)
+       VALUES ('Progetto', 'Progetto', $1, $2, $3, $4) RETURNING *`,
+      [name, req.user.tenant_id, req.user.user_id, clientId]
+    );
+    const newProject = ins.rows[0];
+
+    // 2) Sorgente struttura: progetto modello scelto (stesso tenant+utente) o master PROGETTO_COPIA.
+    let srcId = null;
+    if (sourceProjectId) {
+      const v = await client.query(
+        `SELECT id FROM projects WHERE id = $1 AND argument='Progetto' AND campo='Progetto'
+           AND tenant_id = $2 AND user_id = $3`,
+        [sourceProjectId, req.user.tenant_id, req.user.user_id]
+      );
+      if (v.rows.length) srcId = v.rows[0].id;
+    }
+    if (!srcId) {
+      const m = await client.query(
+        `SELECT p.id FROM projects p JOIN tenants t ON t.id = p.tenant_id
+         WHERE t.name = 'PROJEXA' AND p.argument='Progetto' AND p.campo='Progetto'
+           AND p.valore2 = 'PROGETTO_COPIA' LIMIT 1`
+      );
+      if (m.rows.length) srcId = m.rows[0].id;
+    }
+    if (srcId) {
+      await deepCopyProjectTree(client, req.user.tenant_id, req.user.user_id, clientId, srcId, newProject.id);
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json(newProject);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 // Elenco dei tipi valore (per la scelta del tipo quando si crea un campo custom),
 // filtrato per ruolo: l'utente vede un tipo se il proprio id_roles <= id_roles del tipo
 // (cioè tipo_valore.id_roles >= id_roles utente), oppure id_roles NULL = nessuna restrizione.
@@ -1314,10 +1413,12 @@ app.get('/api/settings/screen-scale', requireAuth, async (req, res) => {
 // 'all' -> sotto ogni contenitore col campo indicato (top-level: identità campo='Cliente').
 // kind = 'standard' (senza "(*)", ordinamento fascia 1-100) oppure 'custom' (con "(*)", ordinamento
 // da 200). 'standard' è consentito solo agli utenti con id_roles <= 20, altrimenti forzato a custom.
-app.post('/api/:source(settings|clients)/field', requireAuth, async (req, res) => {
+app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (req, res) => {
   try {
     const source = req.params.source;
     const clientId = ((req.body && req.body.clientId) || '').trim();
+    // Per i progetti: id del cliente (colonna client_id); "clientId" qui è invece l'id del progetto (argument).
+    const projClientId = ((req.body && req.body.projClientId) || '').trim() || null;
     const rawCampo = ((req.body && req.body.campo) || '').trim();
     const tipoValore = (req.body && req.body.tipo_valore) || null;
     const tabella = ((req.body && req.body.tabella) || '').trim() || null;
@@ -1410,6 +1511,16 @@ app.post('/api/:source(settings|clients)/field', requireAuth, async (req, res) =
     const maxord = ord.rows[0].maxord;
     const newOrd = (maxord != null) ? Number(maxord) + 1 : bandBase;
 
+    // Progetti: il nuovo campo porta anche client_id (scope tenant+user+client).
+    if (source === 'projects') {
+      const result = await db.query(
+        `INSERT INTO projects (argument, campo, tipo_valore, tabella, colonna, "VariabDB", valore2, tenant_id, user_id, ordinamento, id_roles, client_id)
+         VALUES ($1, $2, $3, $4, $5, $10, $11, $6, $7, $8, $9, $12) RETURNING *`,
+        [clientId, campo, tipoValore, tabella, colonna, req.user.tenant_id, req.user.user_id, newOrd, idRoles, variabDb, valore2, projClientId]
+      );
+      return res.status(201).json(result.rows[0]);
+    }
+
     const result = await db.query(
       `INSERT INTO "${source}" (argument, campo, tipo_valore, tabella, colonna, "VariabDB", valore2, tenant_id, user_id, ordinamento, id_roles)
        VALUES ($1, $2, $3, $4, $5, $10, $11, $6, $7, $8, $9) RETURNING *`,
@@ -1424,7 +1535,7 @@ app.post('/api/:source(settings|clients)/field', requireAuth, async (req, res) =
 // Eliminazione di campi, identificati per nome "campo". Di norma solo i campi custom
 // (ordinamento >= 100); gli admin (id_roles = 1) possono eliminare anche i campi standard.
 // scope = 'all' -> tutti i contenitori del tenant/utente; 'this' -> solo il contenitore indicato.
-app.post('/api/:source(settings|clients)/delete-fields', requireAuth, async (req, res) => {
+app.post('/api/:source(settings|clients|projects)/delete-fields', requireAuth, async (req, res) => {
   try {
     const source = req.params.source;
     const campos = (req.body && req.body.campos) || [];
@@ -1436,7 +1547,8 @@ app.post('/api/:source(settings|clients)/delete-fields', requireAuth, async (req
     // Admin (id_roles = 1): nessun vincolo -> elimina anche i campi standard.
     // Altrimenti solo i campi custom (nome con prefisso "(*)").
     const isAdmin = Number(req.user.id_roles) === 1;
-    const ordGuard = isAdmin ? '' : "AND campo LIKE '(*)%'";
+    // Progetti: dati personali → il proprietario può eliminare qualsiasi campo (anche standard).
+    const ordGuard = (isAdmin || source === 'projects') ? '' : "AND campo LIKE '(*)%'";
     let query, params;
     if (source === 'settings') {
       // Impostazioni: scope tenant. 'all-tenants' (tutti i tenant, solo admin) oppure
@@ -1451,12 +1563,12 @@ app.post('/api/:source(settings|clients)/delete-fields', requireAuth, async (req
         params = [campos, clientId, req.user.tenant_id];
       }
     } else if (scope === 'all') {
-      query = `DELETE FROM clients
+      query = `DELETE FROM "${source}"
                WHERE campo = ANY($1::text[]) AND tenant_id = $2 AND user_id = $3 ${ordGuard}`;
       params = [campos, req.user.tenant_id, req.user.user_id];
     } else {
       if (!clientId) return res.status(400).json({ error: 'clientId richiesto' });
-      query = `DELETE FROM clients
+      query = `DELETE FROM "${source}"
                WHERE campo = ANY($1::text[]) AND argument = $2 AND tenant_id = $3 AND user_id = $4 ${ordGuard}`;
       params = [campos, clientId, req.user.tenant_id, req.user.user_id];
     }
@@ -1469,7 +1581,7 @@ app.post('/api/:source(settings|clients)/delete-fields', requireAuth, async (req
 
 // Rinomina di campi custom (ordinamento >= 100). renames = [{ old, new }, ...].
 // scope = 'all' -> su tutti i clienti del tenant/utente; 'this' -> solo sul cliente indicato.
-app.post('/api/:source(settings|clients)/rename-fields', requireAuth, async (req, res) => {
+app.post('/api/:source(settings|clients|projects)/rename-fields', requireAuth, async (req, res) => {
   try {
     const source = req.params.source;
     const renames = (req.body && req.body.renames) || [];
@@ -1489,7 +1601,7 @@ app.post('/api/:source(settings|clients)/rename-fields', requireAuth, async (req
     }
     // Guard: gli utenti normali rinominano solo i campi custom "(*)"; l'admin (id_roles=1)
     // rinomina TUTTI i campi (custom e non).
-    const custGuard = isAdmin ? '' : " AND campo LIKE '(*)%'";
+    const custGuard = (isAdmin || source === 'projects') ? '' : " AND campo LIKE '(*)%'";
     let updated = 0;
     for (const rn of renames) {
       const oldName = ((rn && rn.old) || '').trim();
@@ -1510,11 +1622,11 @@ app.post('/api/:source(settings|clients)/rename-fields', requireAuth, async (req
           params = [newName, oldName, clientId, req.user.tenant_id];
         }
       } else if (scope === 'this') {
-        query = `UPDATE clients SET campo = $1
+        query = `UPDATE "${source}" SET campo = $1
                  WHERE campo = $2 AND argument = $3 AND tenant_id = $4 AND user_id = $5${custGuard}`;
         params = [newName, oldName, clientId, req.user.tenant_id, req.user.user_id];
       } else {
-        query = `UPDATE clients SET campo = $1
+        query = `UPDATE "${source}" SET campo = $1
                  WHERE campo = $2 AND tenant_id = $3 AND user_id = $4${custGuard}`;
         params = [newName, oldName, req.user.tenant_id, req.user.user_id];
       }
@@ -1530,7 +1642,7 @@ app.post('/api/:source(settings|clients)/rename-fields', requireAuth, async (req
 // Riordino/spostamento campi (drag&drop): aggiorna ordinamento + layout_col per campo.
 // items = [{ campo, ordinamento, layout_col }, ...].
 // scope = 'this-tenant' (solo il tenant del login) | 'all-tenants' (tutti, solo admin id_roles=1).
-app.post('/api/:source(settings|clients)/reorder-fields', requireAuth, async (req, res) => {
+app.post('/api/:source(settings|clients|projects)/reorder-fields', requireAuth, async (req, res) => {
   try {
     const source = req.params.source;
     const argument = ((req.body && req.body.argument) || '').trim();
@@ -2019,7 +2131,7 @@ app.delete('/api/:source(settings|clients)/linked-row', requireAuth, async (req,
 
 // Dettaglio delle righe (settings o clients) per un dato "argument", filtrate per
 // tenant e utente del token. Il :source è vincolato a settings|clients dalla route.
-app.get('/api/:source(settings|clients)/details', requireAuth, async (req, res) => {
+app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (req, res) => {
   try {
     const table = req.params.source;
     const { argument } = req.query;
@@ -2039,13 +2151,21 @@ app.get('/api/:source(settings|clients)/details', requireAuth, async (req, res) 
       if (!acc) return res.status(403).json({ error: 'Non autorizzato' });
       effectiveUserId = acc.ownerUserId;
     }
+    // Progetti: filtro aggiuntivo per client_id (accesso a parità di tenant+user+client).
+    const params = [argument, req.user.tenant_id, effectiveUserId, roleLevel];
+    let projClause = '';
+    if (table === 'projects') {
+      const projClientId = ((req.query && req.query.clientId) || '').trim();
+      if (projClientId) { params.push(projClientId); projClause = ` AND client_id = $${params.length}`; }
+    }
     const result = await db.query(
       `SELECT * FROM "${table}"
        WHERE argument = $1 AND tenant_id = $2 AND user_id = $3
          AND (id_roles IS NULL OR id_roles >= $4)
          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)  -- nascondi i campi scaduti
+         ${projClause}
        ORDER BY ordinamento NULLS LAST, campo`,
-      [argument, req.user.tenant_id, effectiveUserId, roleLevel]
+      params
     );
 
     // Per i campi di tipo 4 risolve il valore leggendolo dalla tabella/colonna di
@@ -2068,6 +2188,26 @@ app.get('/api/:source(settings|clients)/details', requireAuth, async (req, res) 
         } catch (e) {
           row.resolved_value = null;
         }
+      }
+      // Tipi 9 (multi-selezione) e 10 (elenco): le opzioni arrivano da lookup_values, non da "colonna".
+      // Match per (tenant, user, tipo_valore, nome_campo=campo), filtrate per ruolo e date attive.
+      const t = Number(row.tipo_valore);
+      if (t === 9 || t === 10) {
+        try {
+          const rawCampo = String(row.campo || '');
+          const stripped = rawCampo.replace(/^\(\*\)\s*/, '');
+          const lv = await db.query(
+            `SELECT valore FROM lookup_values
+             WHERE tenant_id = $1 AND user_id = $2 AND tipo_valore = $3
+               AND (nome_campo = $4 OR nome_campo = $5)
+               AND (id_roles IS NULL OR id_roles = '' OR (id_roles ~ '^[0-9]+$' AND id_roles::int >= $6))
+               AND (data_inizio IS NULL OR data_inizio <= CURRENT_DATE)
+               AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+             ORDER BY ordinamento NULLS LAST, valore`,
+            [req.user.tenant_id, effectiveUserId, String(row.tipo_valore), rawCampo, stripped, roleLevel]
+          );
+          row.lookup_options = lv.rows.map(x => x.valore);
+        } catch (e) { row.lookup_options = []; }
       }
     }
 
