@@ -556,105 +556,6 @@
             appearance: textfield;
         }
 
-        /* Widget a griglia (tipo_valore = 11). La label è sopra la tabella. */
-        .settings-detail-row.type11-grid-row {
-            flex-direction: column;
-            align-items: stretch;
-            gap: 0.55rem;
-            padding: 0.45rem 0 0.7rem;
-            border-bottom: none;
-        }
-        .settings-detail-row.type11-grid-row > .campo-label {
-            align-self: flex-start;
-            flex: 0 0 auto;
-            max-width: 100%;
-            padding: 0;
-            border: none;
-            border-radius: 0;
-            background: transparent;
-            font-size: 0.95rem;
-            font-weight: 700;
-            white-space: normal;
-            overflow: visible;
-            color: #243247;
-        }
-        .type11-grid-widget {
-            flex: 0 0 auto;
-            width: 100%;
-            min-width: 0;
-            border: none;
-            border-radius: 12px;
-            background: transparent;
-            overflow: hidden;
-        }
-        .type11-grid-scroll {
-            width: 100%;
-            max-height: 320px;
-            overflow: auto;
-            padding: 1px;
-        }
-        .type11-grid-table {
-            width: 100%;
-            min-width: max-content;
-            border-collapse: separate;
-            border-spacing: 0 7px;
-            font-size: 0.82rem;
-        }
-        .type11-grid-table th,
-        .type11-grid-table td {
-            padding: 0.65rem 0.8rem;
-            border: none;
-            text-align: left;
-            vertical-align: middle;
-            white-space: nowrap;
-        }
-        .type11-grid-table th {
-            position: sticky;
-            top: 0;
-            z-index: 2;
-            background: #f5f7fa;
-            color: #536174;
-            font-weight: 600;
-            box-shadow: inset -1px 0 rgba(148, 163, 184, 0.12);
-        }
-        .type11-grid-table th:first-child {
-            background: linear-gradient(135deg, #7186a3, #8fa2bb);
-            color: white;
-            border-radius: 10px 0 0 10px;
-        }
-        .type11-grid-table th:last-child { border-radius: 0 10px 10px 0; }
-        .type11-grid-table th:not(:first-child),
-        .type11-grid-table td:not(:first-child) { text-align: center; }
-        .type11-grid-table tbody td {
-            color: #344054;
-            background: #f4effb;
-            box-shadow: inset -1px 0 rgba(255, 255, 255, 0.55);
-            transition: filter 0.18s ease, transform 0.18s ease;
-        }
-        .type11-grid-table tbody td:first-child {
-            min-width: 150px;
-            color: white;
-            font-weight: 600;
-            border-radius: 10px 0 0 10px;
-        }
-        .type11-grid-table tbody td:last-child { border-radius: 0 10px 10px 0; }
-        .type11-grid-table tbody tr:nth-child(5n+1) td { background: #f2ecfb; }
-        .type11-grid-table tbody tr:nth-child(5n+1) td:first-child { background: linear-gradient(135deg, #a873d3, #bc8ce0); }
-        .type11-grid-table tbody tr:nth-child(5n+2) td { background: #eeedff; }
-        .type11-grid-table tbody tr:nth-child(5n+2) td:first-child { background: linear-gradient(135deg, #8378e8, #9b91f2); }
-        .type11-grid-table tbody tr:nth-child(5n+3) td { background: #eaf1ff; }
-        .type11-grid-table tbody tr:nth-child(5n+3) td:first-child { background: linear-gradient(135deg, #5f91ee, #76a7f7); }
-        .type11-grid-table tbody tr:nth-child(5n+4) td { background: #e8f7ff; }
-        .type11-grid-table tbody tr:nth-child(5n+4) td:first-child { background: linear-gradient(135deg, #45a9e8, #62bdf0); }
-        .type11-grid-table tbody tr:nth-child(5n) td { background: #e7f9fc; }
-        .type11-grid-table tbody tr:nth-child(5n) td:first-child { background: linear-gradient(135deg, #2eb8d7, #4cc8e3); }
-        .type11-grid-table tbody tr:hover td { filter: brightness(0.97); }
-        .type11-grid-state {
-            padding: 0.65rem;
-            color: var(--text-muted);
-            font-size: 0.8rem;
-        }
-
         /* Interruttore a levetta (toggle) per i campi booleani e per "Abilita modifica" */
         .toggle-switch {
             position: relative;
@@ -4566,8 +4467,6 @@
                         }).join('') +
                         '</div>';
                 }
-                // Il contenitore del tipo 11 è ora nel DOM: carica le griglie presenti.
-                hydrateType11Grids(listEl);
                 // Ad ogni modifica: segna il campo come "da salvare" e mostra il pulsante Salva.
                 listEl.querySelectorAll('[data-setting-id]').forEach(inp => {
                     const onEdit = () => {
@@ -4767,174 +4666,6 @@
             }
         }
 
-        // tipo_valore = 11: normalizza l'elenco configurato nel campo "colonna".
-        // Sono supportati array JSON, nomi separati da virgola o da punto e virgola.
-        function parseType11Columns(value) {
-            if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
-            const raw = String(value == null ? '' : value).trim();
-            if (!raw) return [];
-            if (raw.startsWith('[')) {
-                try {
-                    const parsed = JSON.parse(raw);
-                    if (Array.isArray(parsed)) return parsed.map(v => String(v).trim()).filter(Boolean);
-                } catch (e) { /* usa il formato separato */ }
-            }
-            return raw.split(/[;,]/).map(v => v.trim()).filter(Boolean);
-        }
-
-        function type11CellValue(record, column) {
-            if (!record || typeof record !== 'object') return '';
-            if (Object.prototype.hasOwnProperty.call(record, column)) return record[column];
-            const actualKey = Object.keys(record).find(k => k.toLowerCase() === String(column).toLowerCase());
-            return actualKey ? record[actualKey] : '';
-        }
-
-        const TYPE11_EUR_FORMATTER = new Intl.NumberFormat('it-IT', {
-            style: 'currency',
-            currency: 'EUR'
-        });
-
-        function formatType11Cell(value, column) {
-            if (value == null || value === '') return '';
-
-            if (isType11CurrencyColumn(column)) {
-                const rawValue = String(value).trim();
-                const normalizedValue = rawValue.includes(',') && rawValue.includes('.')
-                    ? rawValue.replace(/\./g, '').replace(',', '.')
-                    : rawValue.replace(',', '.');
-                const numericValue = typeof value === 'number' ? value : Number(normalizedValue);
-
-                if (Number.isFinite(numericValue)) {
-                    return TYPE11_EUR_FORMATTER.format(numericValue);
-                }
-            }
-
-            if (typeof value === 'object') {
-                try { return JSON.stringify(value); } catch (e) { return String(value); }
-            }
-            return String(value);
-        }
-
-        // Etichette leggibili solo per le intestazioni note. Qualsiasi altro nome
-        // di colonna viene mostrato esattamente come configurato nel database.
-        const TYPE11_COLUMN_LABELS = Object.freeze({
-            worker_cost_id: 'Team/Worker',
-            effort_hh: 'Effort',
-            effort_gg: 'Effort',
-            tariffa_hh: 'Tariffa',
-            tariffa_gg: 'Tariffa',
-            costo_hh: 'Costo',
-            costo_gg: 'Costo',
-            time_spent_hh: 'Time_spent',
-            time_spent_gg: 'Time_spent',
-            cost_time_spent_hh: 'Costo time spent',
-            cost_time_spent_gg: 'Costo time spent',
-            diff_hh: 'Differenza',
-            diff_gg: 'Differenza'
-        });
-
-        function type11ColumnLabel(column) {
-            return Object.prototype.hasOwnProperty.call(TYPE11_COLUMN_LABELS, column)
-                ? TYPE11_COLUMN_LABELS[column]
-                : column;
-        }
-
-        function isType11CurrencyColumn(column) {
-            const label = String(type11ColumnLabel(column) || '').trim().toLowerCase();
-            return label.startsWith('costo') || label === 'tariffa' || label === 'differenza';
-        }
-
-        // Ricava i tre valori usati dalla WHERE del widget. Tenant e utente
-        // provengono dal contesto autenticato; il cliente dipende dalla vista aperta.
-        function getType11GridContext(widget) {
-            const claims = decodeJwtPayload();
-            let storedUser = {};
-            try { storedUser = JSON.parse(localStorage.getItem('user') || '{}'); } catch (e) { /* ignore */ }
-            const source = widget.dataset.gridSource || currentDetailSource;
-            const tenantId = widget.dataset.gridTenantId || claims.tenant_id || claims.tenantId || storedUser.tenant_id || storedUser.tenantId || '';
-            const userId = widget.dataset.gridUserId || claims.user_id || claims.userId || claims.id || claims.sub || storedUser.user_id || storedUser.userId || storedUser.id || '';
-            let clientId = widget.dataset.gridClientId || '';
-            if (!clientId && source === 'projects') clientId = projectClientId || '';
-            if (!clientId && source === 'clients') clientId = currentClientId || currentDetailArgument || '';
-            if (!clientId) clientId = claims.client_id || claims.clientId || storedUser.client_id || storedUser.clientId || '';
-            return { tenantId: String(tenantId), userId: String(userId), clientId: String(clientId) };
-        }
-
-        function type11RecordMatchesContext(record, context) {
-            if (!record || typeof record !== 'object') return false;
-            const matches = (field, expected) => {
-                // Se il backend non restituisce le colonne di contesto, la WHERE è già
-                // demandata all'endpoint; se le restituisce, verifichiamo anche nel browser.
-                if (!Object.prototype.hasOwnProperty.call(record, field)) return true;
-                return String(record[field]) === String(expected);
-            };
-            return matches('tenant_id', context.tenantId)
-                && matches('user_id', context.userId)
-                && matches('client_id', context.clientId);
-        }
-
-        // Legge la tabella indicata dalla riga del contesto corrente (settings,
-        // clients o projects) e mostra esclusivamente le colonne configurate.
-        async function loadType11Grid(widget) {
-            const tableName = String(widget.dataset.gridTable || '').trim();
-            const columns = parseType11Columns(widget.dataset.gridColumns);
-            const context = getType11GridContext(widget);
-            const source = String(widget.dataset.gridSource || '').trim();
-            const fieldId = String(widget.dataset.gridFieldId || '').trim();
-            if (!tableName) {
-                widget.innerHTML = '<div class="type11-grid-state">Tabella non configurata</div>';
-                return;
-            }
-            if (columns.length === 0) {
-                widget.innerHTML = '<div class="type11-grid-state">Colonne non configurate</div>';
-                return;
-            }
-            if (!source || !fieldId || !context.clientId) {
-                widget.innerHTML = '<div class="type11-grid-state">Contesto della griglia non disponibile</div>';
-                return;
-            }
-
-            widget.innerHTML = '<div class="type11-grid-state">Caricamento griglia…</div>';
-            try {
-                const query = new URLSearchParams({ fieldId, clientId: context.clientId });
-                const res = await fetch(`${API_URL}/${encodeURIComponent(source)}/grid-widget?${query.toString()}`, { headers: getAuthHeaders() });
-                if (!res.ok) {
-                    const error = await res.json().catch(() => ({}));
-                    widget.innerHTML = `<div class="type11-grid-state">${escapeHtml(error.error || 'Errore nel caricamento della griglia')}</div>`;
-                    return;
-                }
-                const payload = await res.json();
-                const visibleColumns = !Array.isArray(payload) && Array.isArray(payload.columns)
-                    ? parseType11Columns(payload.columns)
-                    : columns;
-                if (visibleColumns.length === 0) {
-                    widget.innerHTML = '<div class="type11-grid-state">Nessuna colonna da visualizzare</div>';
-                    return;
-                }
-                const allRecords = Array.isArray(payload)
-                    ? payload
-                    : (Array.isArray(payload.rows) ? payload.rows : (Array.isArray(payload.items) ? payload.items : []));
-                const records = allRecords;
-                if (records.length === 0) {
-                    widget.innerHTML = '<div class="type11-grid-state">Nessun dato</div>';
-                    return;
-                }
-
-                const head = visibleColumns.map(column => `<th scope="col" title="${escapeHtml(column)}">${escapeHtml(type11ColumnLabel(column))}</th>`).join('');
-                const body = records.map(record => '<tr>' + visibleColumns.map(column =>
-                    `<td>${escapeHtml(formatType11Cell(type11CellValue(record, column), column))}</td>`
-                ).join('') + '</tr>').join('');
-                widget.innerHTML = `<div class="type11-grid-scroll"><table class="type11-grid-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
-            } catch (e) {
-                widget.innerHTML = '<div class="type11-grid-state">Errore di connessione</div>';
-            }
-        }
-
-        function hydrateType11Grids(root) {
-            if (!root) return;
-            root.querySelectorAll('.type11-grid-widget').forEach(widget => loadType11Grid(widget));
-        }
-
         // Renderizza una riga: "campo" a sinistra, input del valore a destra in base a tipo_valore.
         function renderSettingRow(row) {
             const campo = escapeHtml(row.campo || '');
@@ -4998,10 +4729,6 @@
                     .concat(opts.map(o => `<option value="${escapeHtml(o)}" ${o === current ? 'selected' : ''}>${escapeHtml(o)}</option>`))
                     .join('');
                 input = `<select data-setting-id="${id}" data-field="valore2">${optionsHtml}</select>`;
-            } else if (tipo === 11) {
-                // Griglia: tabella e colonne arrivano dalla riga del contesto corrente
-                // (settings, clients o projects). Il caricamento avviene dopo il render.
-                input = `<div class="type11-grid-widget" data-grid-source="${escapeHtml(currentDetailSource)}" data-grid-field-id="${id}" data-grid-table="${escapeHtml(row.tabella == null ? '' : row.tabella)}" data-grid-columns="${escapeHtml(row.colonna == null ? '' : row.colonna)}" data-grid-tenant-id="${escapeHtml(row.tenant_id == null ? '' : row.tenant_id)}" data-grid-user-id="${escapeHtml(row.user_id == null ? '' : row.user_id)}" data-grid-client-id="${escapeHtml(row.client_id == null ? '' : row.client_id)}"><div class="type11-grid-state">Caricamento griglia…</div></div>`;
             } else if (tipo === 8) {
                 // Percentuale (numerico intero) -> valore3. In modifica: input numerico + "%";
                 // in vista: mostra "X%".
@@ -5067,8 +4794,7 @@
                 ? `<select class="span-sel" title="Colonne occupate" style="flex:0 0 auto; width:auto; padding:2px 4px; font-size:0.72rem;">${[1, 2, 3].map(n => `<option value="${n}" ${span === n ? 'selected' : ''}>${n} col</option>`).join('')}</select>`
                 : '';
 
-            const type11Class = (tipo === 11) ? ' type11-grid-row' : '';
-            return `<div class="settings-detail-row${type11Class}" data-row-id="${id}" data-campo="${campo}" data-span="${span}"${spanStyle}>${checkbox}${label}${input}${spanSel}</div>${extraRow}`;
+            return `<div class="settings-detail-row" data-row-id="${id}" data-campo="${campo}" data-span="${span}"${spanStyle}>${checkbox}${label}${input}${spanSel}</div>${extraRow}`;
         }
 
         // Salva i campi di tipo 4 modificati: il backend controlla l'unicità del valore

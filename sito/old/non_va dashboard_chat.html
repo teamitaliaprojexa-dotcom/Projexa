@@ -4841,7 +4841,7 @@
 
         function isType11CurrencyColumn(column) {
             const label = String(type11ColumnLabel(column) || '').trim().toLowerCase();
-            return label.startsWith('costo') || label === 'tariffa' || label === 'differenza';
+            return label.startsWith('costo') ||  return label.startsWith('Fatt') ||label === 'tariffa' || label === 'differenza';
         }
 
         // Ricava i tre valori usati dalla WHERE del widget. Tenant e utente
