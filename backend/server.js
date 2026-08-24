@@ -209,6 +209,487 @@ async function referenceKeys(tabella, user) {
   return keys;
 }
 
+// Etichette delle pagine HTML. Per ogni valore usa la configurazione piu'
+// specifica disponibile, con questa precedenza:
+// tenant+utente, tenant, utente globale, configurazione globale.
+app.get('/api/page-labels', requireAuth, async (req, res) => {
+  try {
+    const requestedLanguage = String(req.query.lang || 'IT').trim().toUpperCase();
+    const language = /^[A-Z]{2,3}$/.test(requestedLanguage) ? requestedLanguage : 'IT';
+    const result = await db.query(
+      `WITH ranked_labels AS (
+         SELECT valore, new_valore,
+                ROW_NUMBER() OVER (
+                  PARTITION BY valore
+                  ORDER BY CASE
+                    WHEN tenant_id = $1 AND user_id = $2 THEN 4
+                    WHEN tenant_id = $1 AND user_id IS NULL THEN 3
+                    WHEN tenant_id IS NULL AND user_id = $2 THEN 2
+                    ELSE 1
+                  END DESC,
+                  (UPPER(COALESCE(id_lingua, '')) = $3) DESC,
+                  id::text DESC
+                ) AS priority
+         FROM set_label
+         WHERE da_pagina IS TRUE
+           AND (tenant_id = $1 OR tenant_id IS NULL)
+           AND (user_id = $2 OR user_id IS NULL)
+           AND (id_lingua IS NULL OR UPPER(id_lingua) = $3)
+           AND (data_inizio IS NULL OR data_inizio <= CURRENT_DATE)
+           AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+       )
+       SELECT valore, new_valore
+       FROM ranked_labels
+       WHERE priority = 1
+       ORDER BY valore`,
+      [req.user.tenant_id, req.user.user_id, language]
+    );
+    res.json({ labels: result.rows });
+  } catch (error) {
+    console.error('[PAGE LABELS]', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+const DASHBOARD_TASK_HIDDEN_COLUMNS = new Set([
+  'id', 'tenant_id', 'user_id', 'created_by', 'created_at',
+  'data_inizio', 'scadenza', 'id_roles', 'id_roles_write'
+]);
+const DASHBOARD_TASK_READONLY_COLUMNS = new Set(['updated_at']);
+
+async function getDashboardTaskMetadata() {
+  const result = await db.query(
+    `SELECT column_name, data_type, udt_name, ordinal_position,
+            is_nullable, column_default
+     FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'tasks'
+     ORDER BY ordinal_position`
+  );
+  return result.rows;
+}
+
+function dashboardTaskInput(body, metadata) {
+  const source = body && typeof body.values === 'object' && body.values !== null
+    ? body.values : {};
+  const allowed = new Set(metadata
+    .map(column => column.column_name)
+    .filter(column => !DASHBOARD_TASK_HIDDEN_COLUMNS.has(column)
+      && !DASHBOARD_TASK_READONLY_COLUMNS.has(column)));
+  const clean = {};
+  for (const [column, rawValue] of Object.entries(source)) {
+    if (!allowed.has(column)) continue;
+    let value = rawValue;
+    if (typeof value === 'string') value = value.trim();
+    clean[column] = value === '' ? null : value;
+  }
+  return clean;
+}
+
+async function validateDashboardTaskRelations(data, req) {
+  if (data.client_id) {
+    const access = await clientAccessByArgument(String(data.client_id), req, false);
+    if (!access) {
+      const error = new Error('Cliente non disponibile per l\'utente corrente');
+      error.statusCode = 403;
+      throw error;
+    }
+  }
+  if (data.project_id) {
+    if (!data.client_id) {
+      const error = new Error('Per selezionare un progetto devi indicare anche il cliente');
+      error.statusCode = 400;
+      throw error;
+    }
+    const project = await db.query(
+      `SELECT 1 FROM projects
+       WHERE id = $1 AND tenant_id = $2 AND user_id = $3 AND client_id = $4
+         AND argument = 'Progetto' AND campo = 'Progetto'
+       LIMIT 1`,
+      [data.project_id, req.user.tenant_id, req.user.user_id, data.client_id]
+    );
+    if (project.rows.length === 0) {
+      const error = new Error('Progetto non disponibile per il cliente selezionato');
+      error.statusCode = 403;
+      throw error;
+    }
+  }
+  if (data.assigned_to) {
+    if (!data.client_id) {
+      const error = new Error('Per assegnare la task devi indicare il cliente');
+      error.statusCode = 400;
+      throw error;
+    }
+    const parameters = [data.assigned_to, req.user.tenant_id, data.client_id];
+    let projectCondition = '';
+    if (data.project_id) {
+      parameters.push(data.project_id);
+      projectCondition = ` AND project_id = $${parameters.length}`;
+    }
+    const component = await db.query(
+      `SELECT 1
+       FROM proj_componenti
+       WHERE id = $1
+         AND tenant_id = $2
+         AND client_id = $3${projectCondition}
+       LIMIT 1`,
+      parameters
+    );
+    if (component.rows.length === 0) {
+      const error = new Error('Assegnatario non disponibile per il cliente e il progetto selezionati');
+      error.statusCode = 403;
+      throw error;
+    }
+  }
+}
+
+// Task della dashboard. Tenant e utente sono sempre ricavati dal token:
+// il browser non puo' ampliare il perimetro della query passando altri id.
+app.get('/api/dashboard/tasks', requireAuth, async (req, res) => {
+  try {
+    // Rilegge lo schema per includere automaticamente eventuali nuovi campi.
+    tableColumnsCache.delete('main:tasks');
+    const metadata = await getDashboardTaskMetadata();
+    if (metadata.length === 0) {
+      return res.status(404).json({ error: 'Tabella tasks non trovata' });
+    }
+
+    const visibleMetadata = metadata.filter(
+      column => !DASHBOARD_TASK_HIDDEN_COLUMNS.has(column.column_name)
+    );
+
+    const fkResult = await db.query(
+      `SELECT kcu.column_name,
+              ccu.table_name AS foreign_table,
+              ccu.column_name AS foreign_column
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu
+         ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+       JOIN information_schema.constraint_column_usage ccu
+         ON ccu.constraint_name = tc.constraint_name
+        AND ccu.table_schema = tc.table_schema
+       WHERE tc.constraint_type = 'FOREIGN KEY'
+         AND tc.table_schema = 'public'
+         AND tc.table_name = 'tasks'`
+    );
+    const fkByColumn = new Map(fkResult.rows.map(fk => [fk.column_name, fk]));
+    // L'id e gli UUID originali delle foreign vengono restituiti con chiavi
+    // interne: servono al form di modifica ma non vengono mostrati in griglia.
+    const selectExpressions = ['src.id AS "__task_id"'];
+    const joins = [];
+    const responseColumns = [];
+    let joinIndex = 0;
+
+    for (const metadata of visibleMetadata) {
+      const column = metadata.column_name;
+      assertValidIdentifier(column);
+      const fk = fkByColumn.get(column);
+      let resolvedForeign = false;
+
+      // assigned_to contiene proj_componenti.id; in griglia viene restituito
+      // il relativo proj_componenti.nominativo.
+      if (column === 'assigned_to' && metadata.udt_name === 'uuid') {
+        tableColumnsCache.delete('main:proj_componenti');
+        const componentColumns = await getTableColumns('proj_componenti');
+        if (['id', 'nominativo', 'tenant_id', 'client_id'].every(name => componentColumns.has(name))) {
+          const projectOrdering = componentColumns.has('project_id')
+            ? ', (src.project_id IS NOT NULL AND pc.project_id = src.project_id) DESC'
+            : '';
+          selectExpressions.push('src."assigned_to" AS "__raw_assigned_to"');
+          selectExpressions.push(
+            `COALESCE((
+               SELECT NULLIF(TRIM(pc.nominativo::text), '')
+               FROM proj_componenti pc
+               WHERE pc.id = src.assigned_to
+                 AND pc.tenant_id = src.tenant_id
+               ORDER BY (pc.client_id = src.client_id) DESC
+                 ${projectOrdering}, pc.nominativo NULLS LAST
+               LIMIT 1
+             ), 'Nominativo non disponibile') AS "assigned_to"`
+          );
+          resolvedForeign = true;
+        }
+      }
+
+      if (!resolvedForeign && metadata.udt_name === 'uuid' && fk) {
+        assertValidIdentifier(fk.foreign_table);
+        assertValidIdentifier(fk.foreign_column);
+        tableColumnsCache.delete('main:' + fk.foreign_table);
+        const foreignColumns = await getTableColumns(fk.foreign_table);
+        const foreignNames = [...foreignColumns];
+        const preferredNames = ['description', 'descrizione', 'name', 'nome', 'title', 'titile', 'label', 'valore2'];
+        // In Projexa clienti e progetti sono contenitori EAV: il loro nome
+        // leggibile e' nella riga identita', colonna valore2.
+        const eavDisplayColumn = ['clients', 'projects'].includes(fk.foreign_table)
+          && foreignColumns.has('valore2') ? 'valore2' : null;
+        const displayColumn = eavDisplayColumn
+          || foreignNames.find(name => /^desc_/i.test(name))
+          || preferredNames.find(name => foreignColumns.has(name))
+          || null;
+
+        if (displayColumn) {
+          assertValidIdentifier(displayColumn);
+          const alias = `task_fk_${joinIndex++}`;
+          const tenantJoin = foreignColumns.has('tenant_id') ? ` AND ${alias}.tenant_id = $1` : '';
+          joins.push(`LEFT JOIN "${fk.foreign_table}" ${alias}
+                        ON ${alias}."${fk.foreign_column}" = src."${column}"${tenantJoin}`);
+          selectExpressions.push(`src."${column}" AS "__raw_${column}"`);
+          selectExpressions.push(
+            `COALESCE(${alias}."${displayColumn}"::text, src."${column}"::text) AS "${column}"`
+          );
+          resolvedForeign = true;
+        }
+      }
+
+      if (!resolvedForeign) selectExpressions.push(`src."${column}"`);
+      responseColumns.push({
+        name: column,
+        type: metadata.data_type,
+        uuid: metadata.udt_name === 'uuid',
+        resolvedForeign,
+        references: fk ? fk.foreign_table : (column === 'assigned_to' ? 'proj_componenti' : null),
+        nullable: metadata.is_nullable === 'YES',
+        hasDefault: metadata.column_default != null,
+        editable: !DASHBOARD_TASK_READONLY_COLUMNS.has(column)
+      });
+    }
+
+    const result = await db.query(
+      `SELECT ${selectExpressions.join(', ')}
+       FROM tasks src
+       ${joins.join('\n       ')}
+       WHERE src.tenant_id = $1 AND src.user_id = $2
+       ORDER BY src.due_date NULLS LAST, src.created_at DESC
+       LIMIT 500`,
+      [req.user.tenant_id, req.user.user_id]
+    );
+
+    res.json({ columns: responseColumns, rows: result.rows });
+  } catch (error) {
+    console.error('[DASHBOARD TASKS]', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Opzioni leggibili per le foreign key editabili della task. La relazione viene
+// ricavata dallo schema DB: il browser puo' chiedere solo colonne FK di tasks.
+app.get('/api/dashboard/tasks/foreign-options/:column', requireAuth, async (req, res) => {
+  try {
+    const column = assertValidIdentifier(String(req.params.column || '').trim());
+
+    if (column === 'assigned_to') {
+      const clientId = String(req.query.clientId || '').trim();
+      const projectId = String(req.query.projectId || '').trim();
+      const selectedValue = String(req.query.selectedValue || '').trim();
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if ((clientId && !uuidPattern.test(clientId)) || (projectId && !uuidPattern.test(projectId))
+          || (selectedValue && !uuidPattern.test(selectedValue))) {
+        return res.status(400).json({ error: 'Cliente, progetto o assegnatario non valido' });
+      }
+
+      tableColumnsCache.delete('main:proj_componenti');
+      const componentColumns = await getTableColumns('proj_componenti');
+      const requiredColumns = ['id', 'tenant_id', 'client_id', 'nominativo'];
+      if (projectId) requiredColumns.push('project_id');
+      if (requiredColumns.some(name => !componentColumns.has(name))) {
+        return res.status(500).json({ error: 'Struttura proj_componenti non compatibile con il filtro assegnatari' });
+      }
+      if (!clientId) {
+        if (!selectedValue) return res.json({ options: [] });
+        const selected = await db.query(
+          `SELECT pc.id::text AS value,
+                  COALESCE(NULLIF(TRIM(pc.nominativo::text), ''), 'Nominativo non disponibile') AS label
+           FROM proj_componenti pc
+           WHERE pc.tenant_id = $1 AND pc.id = $2
+           LIMIT 1`,
+          [req.user.tenant_id, selectedValue]
+        );
+        return res.json({ options: selected.rows });
+      }
+      const parameters = [req.user.tenant_id, clientId];
+      let projectCondition = '';
+      if (projectId) {
+        parameters.push(projectId);
+        projectCondition = ` AND pc.project_id = $${parameters.length}`;
+      }
+      let selectedFallback = '';
+      if (selectedValue) {
+        parameters.push(selectedValue);
+        selectedFallback = `
+          UNION
+          SELECT pc.id::text AS value,
+                 COALESCE(NULLIF(TRIM(pc.nominativo::text), ''), 'Nominativo non disponibile') AS label
+          FROM proj_componenti pc
+          WHERE pc.tenant_id = $1
+            AND pc.id = $${parameters.length}`;
+      }
+      const result = await db.query(
+        `SELECT DISTINCT options.value, options.label
+         FROM (
+           SELECT pc.id::text AS value,
+                  COALESCE(NULLIF(TRIM(pc.nominativo::text), ''), 'Nominativo non disponibile') AS label
+           FROM proj_componenti pc
+           WHERE pc.tenant_id = $1
+             AND pc.client_id = $2
+             AND pc.id IS NOT NULL${projectCondition}
+           ${selectedFallback}
+         ) options
+         ORDER BY label
+         LIMIT 500`,
+        parameters
+      );
+      return res.json({ options: result.rows });
+    }
+
+    const relationResult = await db.query(
+      `SELECT ccu.table_name AS foreign_table,
+              ccu.column_name AS foreign_column
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu
+         ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+       JOIN information_schema.constraint_column_usage ccu
+         ON ccu.constraint_name = tc.constraint_name
+        AND ccu.table_schema = tc.table_schema
+       WHERE tc.constraint_type = 'FOREIGN KEY'
+         AND tc.table_schema = 'public'
+         AND tc.table_name = 'tasks'
+         AND kcu.column_name = $1
+       LIMIT 1`,
+      [column]
+    );
+    if (relationResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Foreign key non trovata per il campo richiesto' });
+    }
+
+    const relation = relationResult.rows[0];
+    const foreignTable = assertValidIdentifier(relation.foreign_table);
+    const foreignColumn = assertValidIdentifier(relation.foreign_column);
+    tableColumnsCache.delete('main:' + foreignTable);
+    const foreignColumns = await getTableColumns(foreignTable);
+
+    // Per le altre foreign verso users resta valido il perimetro tenant.
+    if (foreignTable === 'users' && foreignColumns.has('name') && foreignColumns.has('cognome')) {
+      const result = await db.query(
+        `SELECT DISTINCT u."${foreignColumn}"::text AS value,
+                COALESCE(
+                  NULLIF(TRIM(CONCAT_WS(' ', u.cognome, u.name)), ''),
+                  u."${foreignColumn}"::text
+                ) AS label
+         FROM users u
+         JOIN user_tenants ut
+           ON ut.user_id = u."${foreignColumn}" AND ut.tenant_id = $1
+         ORDER BY label
+         LIMIT 500`,
+        [req.user.tenant_id]
+      );
+      return res.json({ options: result.rows });
+    }
+
+    const foreignNames = [...foreignColumns];
+    const preferredNames = ['description', 'descrizione', 'name', 'nome', 'title', 'titile', 'label', 'valore2'];
+    const displayColumn = foreignNames.find(name => /^desc_/i.test(name))
+      || preferredNames.find(name => foreignColumns.has(name))
+      || foreignColumn;
+    assertValidIdentifier(displayColumn);
+
+    const conditions = [];
+    const parameters = [];
+    if (foreignColumns.has('tenant_id')) {
+      parameters.push(req.user.tenant_id);
+      conditions.push(`ref.tenant_id = $${parameters.length}`);
+    }
+    if (foreignColumns.has('user_id')) {
+      parameters.push(req.user.user_id);
+      conditions.push(`ref.user_id = $${parameters.length}`);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const result = await db.query(
+      `SELECT ref."${foreignColumn}"::text AS value,
+              COALESCE(ref."${displayColumn}"::text, ref."${foreignColumn}"::text) AS label
+       FROM "${foreignTable}" ref
+       ${where}
+       ORDER BY label
+       LIMIT 500`,
+      parameters
+    );
+    res.json({ options: result.rows });
+  } catch (error) {
+    console.error('[DASHBOARD TASK FOREIGN OPTIONS]', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Inserimento di una task nel contesto autenticato.
+app.post('/api/dashboard/tasks', requireAuth, async (req, res) => {
+  try {
+    const metadata = await getDashboardTaskMetadata();
+    if (metadata.length === 0) return res.status(404).json({ error: 'Tabella tasks non trovata' });
+    const data = dashboardTaskInput(req.body, metadata);
+    if (!String(data.titile || '').trim()) {
+      return res.status(400).json({ error: 'Il titolo della task e\' obbligatorio' });
+    }
+    await validateDashboardTaskRelations(data, req);
+
+    data.tenant_id = req.user.tenant_id;
+    data.user_id = req.user.user_id;
+    if (metadata.some(column => column.column_name === 'created_by')) {
+      data.created_by = req.user.user_id;
+    }
+
+    const columns = Object.keys(data);
+    const values = Object.values(data);
+    const quotedColumns = columns.map(column => `"${assertValidIdentifier(column)}"`).join(', ');
+    const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ');
+    const result = await db.query(
+      `INSERT INTO tasks (${quotedColumns}) VALUES (${placeholders}) RETURNING id`,
+      values
+    );
+    res.status(201).json({ id: result.rows[0].id });
+  } catch (error) {
+    console.error('[DASHBOARD TASK CREATE]', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Modifica consentita solo sulla task dello stesso tenant e dello stesso utente.
+app.put('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
+  try {
+    const taskId = String(req.params.id || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      return res.status(400).json({ error: 'Id task non valido' });
+    }
+    const metadata = await getDashboardTaskMetadata();
+    const data = dashboardTaskInput(req.body, metadata);
+    if (Object.prototype.hasOwnProperty.call(data, 'titile') && !String(data.titile || '').trim()) {
+      return res.status(400).json({ error: 'Il titolo della task e\' obbligatorio' });
+    }
+    await validateDashboardTaskRelations(data, req);
+    const columns = Object.keys(data);
+    if (columns.length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
+
+    const values = Object.values(data);
+    const assignments = columns.map((column, index) =>
+      `"${assertValidIdentifier(column)}" = $${index + 1}`
+    );
+    assignments.push('updated_at = CURRENT_TIMESTAMP');
+    values.push(taskId, req.user.tenant_id, req.user.user_id);
+    const result = await db.query(
+      `UPDATE tasks SET ${assignments.join(', ')}
+       WHERE id = $${columns.length + 1}
+         AND tenant_id = $${columns.length + 2}
+         AND user_id = $${columns.length + 3}
+       RETURNING id`,
+      values
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Task non trovata' });
+    res.json({ id: result.rows[0].id });
+  } catch (error) {
+    console.error('[DASHBOARD TASK UPDATE]', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 // Widget griglia (tipo_valore = 11). La configurazione della tabella e delle
 // colonne viene letta dalla riga EAV del contesto corrente; tenant e utente non
 // vengono accettati dal browser ma ricavati dall'autenticazione.

@@ -961,6 +961,224 @@
             color: #10B981;
         }
 
+        .todo-section,
+        #todoList,
+        #todoListContainer {
+            min-width: 0;
+            max-width: 100%;
+        }
+
+        .todo-section { overflow: hidden; }
+
+        .todo-table-wrap {
+            width: 100%;
+            max-width: 100%;
+            max-height: 600px;
+            overflow-x: auto;
+            overflow-y: auto;
+            box-sizing: border-box;
+            padding-left: 44px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+        }
+
+        .todo-table {
+            width: max-content;
+            min-width: 100%;
+            table-layout: auto;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-size: 0.85rem;
+        }
+
+        .todo-table th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            padding: 0.75rem;
+            background: #F8FAFC;
+            color: var(--dark);
+            text-align: left;
+            white-space: nowrap;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .todo-table td {
+            padding: 0.75rem;
+            color: var(--text-muted);
+            vertical-align: middle;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+        }
+
+        .todo-table tbody tr:last-child td { border-bottom: none; }
+        .todo-table tbody tr:hover td { background: var(--light); }
+        .todo-table tbody td:first-child { position: relative; }
+
+        .todo-badge {
+            display: inline-block;
+            padding: 0.2rem 0.55rem;
+            border-radius: 999px;
+            background: rgba(107, 114, 128, 0.12);
+            color: #4B5563;
+            font-size: 0.75rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .todo-empty {
+            padding: 2.5rem 1rem;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        .todo-edit-btn {
+            position: absolute;
+            left: -39px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 32px;
+            height: 32px;
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            border-radius: 7px;
+            background: rgba(59, 130, 246, 0.08);
+            color: var(--primary);
+            cursor: pointer;
+        }
+
+        .todo-edit-btn:hover { background: rgba(59, 130, 246, 0.16); }
+
+        .todo-description-btn {
+            width: 32px;
+            height: 32px;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 7px;
+            background: rgba(16, 185, 129, 0.09);
+            color: #059669;
+            cursor: pointer;
+        }
+
+        .todo-description-btn:hover { background: rgba(16, 185, 129, 0.18); }
+
+        .description-window {
+            position: absolute;
+            z-index: 900;
+            display: flex;
+            flex-direction: column;
+            min-width: 280px;
+            min-height: 130px;
+            max-width: calc(100vw - 30px);
+            max-height: calc(100vh - 30px);
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: white;
+            box-shadow: 0 18px 50px rgba(15, 23, 42, 0.28);
+        }
+
+        .description-window-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.75rem 0.9rem;
+            border-bottom: 1px solid var(--border);
+            background: #F8FAFC;
+            color: var(--dark);
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: move;
+            user-select: none;
+            touch-action: none;
+        }
+
+        .description-window-close {
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .description-window-content {
+            flex: 1;
+            overflow: auto;
+            padding: 1rem;
+            color: var(--dark);
+            line-height: 1.5;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .task-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 800;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            background: rgba(15, 23, 42, 0.5);
+        }
+
+        .task-modal.open { display: flex; }
+
+        .task-modal-card {
+            width: min(900px, 96vw);
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            border-radius: 14px;
+            background: white;
+            box-shadow: 0 20px 60px rgba(15, 23, 42, 0.25);
+        }
+
+        .task-modal-header,
+        .task-modal-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .task-modal-footer {
+            justify-content: flex-end;
+            border-top: 1px solid var(--border);
+            border-bottom: none;
+        }
+
+        .task-form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+            padding: 1.25rem;
+            overflow-y: auto;
+        }
+
+        .task-form-field { display: flex; flex-direction: column; gap: 0.4rem; }
+        .task-form-field.wide { grid-column: 1 / -1; }
+        .task-form-field label { font-size: 0.82rem; font-weight: 600; color: var(--dark); }
+        .task-form-field input,
+        .task-form-field select,
+        .task-form-field textarea {
+            width: 100%;
+            padding: 0.65rem 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: white;
+            color: var(--dark);
+            font: inherit;
+        }
+        .task-form-field textarea { min-height: 90px; resize: vertical; }
+
+        @media (max-width: 700px) {
+            .task-form-grid { grid-template-columns: 1fr; }
+            .task-form-field.wide { grid-column: auto; }
+        }
+
         /* PROJECTS SECTION */
         .section-title {
             font-size: 1.3rem;
@@ -1640,13 +1858,6 @@
                         <i class="fas fa-building" style="color: var(--text-muted); font-size: 1rem;"></i>
                         <select id="clientSelector" style="padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.95rem; cursor: pointer; background: white; color: var(--dark); font-weight: 500;">
                             <option value="">Tutti i clienti</option>
-                            <option value="Acme Corp">Acme Corp</option>
-                            <option value="Tech Solutions">Tech Solutions</option>
-                            <option value="Global Industries">Global Industries</option>
-                            <option value="Digital Ventures">Digital Ventures</option>
-                            <option value="Smart Systems">Smart Systems</option>
-                            <option value="Future Works">Future Works</option>
-                            <option value="Network Plus">Network Plus</option>
                         </select>
                     </div>
                     <button class="btn-icon">
@@ -1728,13 +1939,16 @@
             </div>
 
             <!-- TO DO LIST -->
-            <div style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
+            <div class="todo-section" style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
                     <div class="section-title" style="margin: 0;">
                         <i class="fas fa-list-check" style="color: var(--primary);"></i>
                         To Do List
                     </div>
                     <div style="display: flex; gap: 0.5rem;">
+                        <button id="newTodoBtn" style="padding: 0.5rem 1rem; background: #10B981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem;">
+                            <i class="fas fa-plus"></i> Nuovo task
+                        </button>
                         <button id="expandTodoBtn" style="padding: 0.5rem 1rem; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem;">
                             Espandi
                         </button>
@@ -1750,6 +1964,17 @@
                             <option value="high">🔴 Alta</option>
                             <option value="medium">🟡 Media</option>
                             <option value="low">🟢 Bassa</option>
+                        </select>
+                    </div>
+
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Status:</label>
+                        <select id="statusFilter" style="padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; cursor: pointer; background: white; color: var(--dark);">
+                            <option value="">Tutti</option>
+                            <option value="todo">Da fare</option>
+                            <option value="in_progress">In corso</option>
+                            <option value="completed">Completata</option>
+                            <option value="cancelled">Annullata</option>
                         </select>
                     </div>
 
@@ -1770,7 +1995,7 @@
                 </div>
 
                 <!-- Lista To Do -->
-                <div id="todoListContainer" style="max-height: 600px; overflow-y: auto;">
+                <div id="todoListContainer">
                     <div id="todoList"></div>
                 </div>
 
@@ -2295,14 +2520,16 @@
 
             if (selectedClient === '') {
                 // Mostra tutti i clienti
-                clients = Object.keys(revenueData);
-                revenues = clients.map(client => revenueData[client][year_num].revenue || 0);
-                forecasts = clients.map(client => revenueData[client][year_num].forecast || 0);
+                clients = dashboardClients.length
+                    ? dashboardClients.map(client => client.name)
+                    : Object.keys(revenueData);
+                revenues = clients.map(client => revenueData[client]?.[year_num]?.revenue || 0);
+                forecasts = clients.map(client => revenueData[client]?.[year_num]?.forecast || 0);
             } else {
                 // Mostra solo il cliente selezionato
                 clients = [selectedClient];
-                revenues = [revenueData[selectedClient][year_num].revenue || 0];
-                forecasts = [revenueData[selectedClient][year_num].forecast || 0];
+                revenues = [revenueData[selectedClient]?.[year_num]?.revenue || 0];
+                forecasts = [revenueData[selectedClient]?.[year_num]?.forecast || 0];
             }
 
             // Calcola i totali
@@ -2409,6 +2636,24 @@
         }
 
         // === CLIENT FILTER ===
+        let dashboardClients = [];
+
+        function syncDashboardClientSelector(clients) {
+            dashboardClients = Array.isArray(clients) ? clients : [];
+            const selector = document.getElementById('clientSelector');
+            if (!selector) return;
+            const previousValue = selector.value;
+            selector.innerHTML = '<option value="">Tutti i clienti</option>' + dashboardClients.map(client =>
+                `<option value="${escapeHtml(client.name)}">${escapeHtml(client.name)}</option>`
+            ).join('');
+            if (dashboardClients.some(client => client.name === previousValue)) {
+                selector.value = previousValue;
+            } else {
+                selector.value = '';
+                currentClientFilter = '';
+            }
+        }
+
         function initClientFilter() {
             const clientSelector = document.getElementById('clientSelector');
             
@@ -2450,39 +2695,25 @@
         // === TO DO LIST ===
         let currentTodoPage = 10; // Mostra 10 per default
         let currentPriorityFilter = '';
+        let currentStatusFilter = '';
         let currentDateFilter = '';
         let currentClientFilter = '';
-
-        const todoData = [
-            { id: 1, title: 'Revisione proposta progetto', client: 'Acme Corp', priority: 'high', dueDate: '2026-08-07', completed: false, type: 'task' },
-            { id: 2, title: 'Approvazione budget Q3', client: 'Digital Ventures', priority: 'high', dueDate: '2026-08-08', completed: false, type: 'task' },
-            { id: 3, title: 'Riunione kickoff Project Phoenix', client: 'Acme Corp', priority: 'high', dueDate: '2026-08-09', completed: false, type: 'task' },
-            { id: 4, title: 'Aggiornare timeline', client: 'Global Industries', priority: 'medium', dueDate: '2026-08-10', completed: false, type: 'task' },
-            { id: 5, title: 'Review rischi', client: 'Tech Solutions', priority: 'medium', dueDate: '2026-08-10', completed: false, type: 'task' },
-            { id: 6, title: 'Validare deliverables Sprint 3', client: 'Tech Solutions', priority: 'medium', dueDate: '2026-08-12', completed: false, type: 'task' },
-            { id: 7, title: 'Sincronizzazione stakeholder', client: 'Smart Systems', priority: 'medium', dueDate: '2026-08-12', completed: false, type: 'task' },
-            { id: 8, title: 'Preparare report mensile fatturato', client: 'Global Industries', priority: 'high', dueDate: '2026-08-11', completed: false, type: 'task' },
-            { id: 9, title: 'Feedback al team', client: 'Future Works', priority: 'low', dueDate: '2026-08-15', completed: false, type: 'task' },
-            { id: 10, title: 'Pianificazione risorse Q4', client: 'Acme Corp', priority: 'medium', dueDate: '2026-08-13', completed: false, type: 'task' },
-            { id: 11, title: 'Verifica milestone', client: 'Network Plus', priority: 'low', dueDate: '2026-08-16', completed: false, type: 'task' },
-            { id: 12, title: 'Aggiornare documentazione progetti', client: 'Global Industries', priority: 'low', dueDate: '2026-08-17', completed: false, type: 'task' },
-            { id: 13, title: 'Onboarding nuovo PM team', client: 'Digital Ventures', priority: 'medium', dueDate: '2026-08-14', completed: false, type: 'task' },
-            { id: 14, title: 'Analisi competitiva mercato', client: 'Smart Systems', priority: 'low', dueDate: '2026-08-18', completed: false, type: 'task' },
-            { id: 15, title: 'Riesame performance progetto', client: 'Acme Corp', priority: 'medium', dueDate: '2026-08-13', completed: false, type: 'task' },
-            { id: 16, title: 'Implementazione feedback clienti', client: 'Future Works', priority: 'low', dueDate: '2026-08-20', completed: false, type: 'task' },
-            { id: 17, title: 'Planning sessione strategica annuale', client: 'Network Plus', priority: 'high', dueDate: '2026-08-21', completed: false, type: 'task' },
-            { id: 18, title: 'Audit compliance progetti', client: 'Tech Solutions', priority: 'medium', dueDate: '2026-08-22', completed: false, type: 'task' },
-            { id: 19, title: 'Aggiornare KPI dashboard', client: 'Digital Ventures', priority: 'low', dueDate: '2026-08-25', completed: false, type: 'task' },
-            { id: 20, title: 'Pianificazione training team', client: 'Smart Systems', priority: 'low', dueDate: '2026-08-26', completed: false, type: 'task' },
-            { id: 21, title: 'Meeting - Allineamento Team Leadership', client: 'Global Industries', priority: 'high', dueDate: '2026-08-05', completed: false, type: 'meeting', time: '16:00', meetingLink: 'https://meet.google.com/abc-defg-hij' },
-        ];
+        let todoData = [];
+        let todoColumns = [];
+        let todoLoadError = '';
+        let editingTodoId = null;
+        let descriptionWindow = null;
 
         function initTodoList() {
-            // Aggiorna il totale
-            document.getElementById('todoTotal').textContent = todoData.length;
-
-            // Renderizza i task
             applyFiltersAndRender();
+
+            document.getElementById('newTodoBtn').addEventListener('click', () => openTaskModal());
+            document.getElementById('taskModalClose').addEventListener('click', closeTaskModal);
+            document.getElementById('taskModalCancel').addEventListener('click', closeTaskModal);
+            document.getElementById('taskModalSave').addEventListener('click', saveTaskFromModal);
+            document.getElementById('taskModal').addEventListener('click', event => {
+                if (event.target.id === 'taskModal') closeTaskModal();
+            });
 
             // Listener sul pulsante Espandi
             document.getElementById('expandTodoBtn').addEventListener('click', () => {
@@ -2501,6 +2732,12 @@
                 applyFiltersAndRender();
             });
 
+            document.getElementById('statusFilter').addEventListener('change', (e) => {
+                currentStatusFilter = e.target.value;
+                currentTodoPage = 10;
+                applyFiltersAndRender();
+            });
+
             document.getElementById('dateFilter').addEventListener('change', (e) => {
                 currentDateFilter = e.target.value;
                 currentTodoPage = 10; // Reset pagina
@@ -2510,9 +2747,11 @@
             // Listener Reset
             document.getElementById('resetFiltersBtn').addEventListener('click', () => {
                 currentPriorityFilter = '';
+                currentStatusFilter = '';
                 currentDateFilter = '';
                 currentTodoPage = 10;
                 document.getElementById('priorityFilter').value = '';
+                document.getElementById('statusFilter').value = '';
                 document.getElementById('dateFilter').value = '';
                 applyFiltersAndRender();
             });
@@ -2523,12 +2762,17 @@
 
             // Filtra per cliente
             if (currentClientFilter) {
-                filtered = filtered.filter(t => t.client === currentClientFilter);
+                filtered = filtered.filter(t => String(t.client_id || '') === currentClientFilter);
             }
 
             // Filtra per priorità
             if (currentPriorityFilter) {
                 filtered = filtered.filter(t => t.priority === currentPriorityFilter);
+            }
+
+            // Filtra per stato
+            if (currentStatusFilter) {
+                filtered = filtered.filter(t => t.status === currentStatusFilter);
             }
 
             // Filtra per data
@@ -2537,7 +2781,8 @@
                 today.setHours(0, 0, 0, 0);
 
                 filtered = filtered.filter(todo => {
-                    const dueDate = new Date(todo.dueDate);
+                    if (!todo.due_date) return false;
+                    const dueDate = parseTodoDate(todo.due_date);
                     dueDate.setHours(0, 0, 0, 0);
 
                     if (currentDateFilter === 'today') {
@@ -2559,9 +2804,11 @@
             // Ordina per priorità (high > medium > low) e per data
             filtered.sort((a, b) => {
                 const priorityOrder = { high: 0, medium: 1, low: 2 };
-                const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
+                const priorityDiff = (priorityOrder[a.priority] ?? 99) - (priorityOrder[b.priority] ?? 99);
                 if (priorityDiff !== 0) return priorityDiff;
-                return new Date(a.dueDate) - new Date(b.dueDate);
+                if (!a.due_date) return 1;
+                if (!b.due_date) return -1;
+                return parseTodoDate(a.due_date) - parseTodoDate(b.due_date);
             });
 
             return filtered;
@@ -2576,35 +2823,52 @@
         }
 
         function renderTodoList(todos) {
+            closeDescriptionWindow();
             const todoList = document.getElementById('todoList');
             const displayedTodos = todos.slice(0, currentTodoPage);
 
-            todoList.innerHTML = displayedTodos.map(todo => `
-                <div class="todo-item">
-                    <input type="checkbox" class="todo-checkbox" data-id="${todo.id}" ${todo.completed ? 'checked' : ''}>
-                    <div class="todo-content">
-                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-right: auto;">
-                            <div class="todo-title" style="margin: 0;">${escapeHtml(todo.title)}</div>
-                            <div style="font-size: 0.85rem; color: var(--primary); font-weight: 500; white-space: nowrap;">${escapeHtml(todo.client || 'N/A')}</div>
-                        </div>
-                        <div class="todo-meta">
-                            <div class="todo-duedate">${new Date(todo.dueDate).toLocaleDateString('it-IT')}</div>
-                            <div class="todo-priority ${todo.priority}">
-                                ${todo.priority === 'high' ? '🔴 Alta' : todo.priority === 'medium' ? '🟡 Media' : '🟢 Bassa'}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `).join('');
-
-            // Listener sulle checkbox
-            document.querySelectorAll('.todo-checkbox').forEach(checkbox => {
-                checkbox.addEventListener('change', (e) => {
-                    const todoId = parseInt(e.target.dataset.id);
-                    const todo = todoData.find(t => t.id === todoId);
-                    if (todo) todo.completed = e.target.checked;
+            if (todoLoadError) {
+                todoList.innerHTML = `<div class="todo-empty"><i class="fas fa-triangle-exclamation"></i> ${escapeHtml(todoLoadError)}</div>`;
+            } else if (displayedTodos.length === 0) {
+                todoList.innerHTML = '<div class="todo-empty">Nessuna task trovata</div>';
+            } else {
+                const header = todoColumns.map(column =>
+                    `<th title="${escapeHtml(column.name)}">${escapeHtml(todoColumnLabel(column.name))}</th>`
+                ).join('');
+                const body = displayedTodos.map(todo => `
+                    <tr>
+                    ${todoColumns.map((column, columnIndex) => {
+                        const editButton = columnIndex === 0
+                            ? `<button type="button" class="todo-edit-btn" data-task-id="${escapeHtml(todo.__task_id)}" title="Modifica task"><i class="fas fa-pen"></i></button>`
+                            : '';
+                        const cellValue = column.name === 'description'
+                            ? (todo.description
+                            ? `<button type="button" class="todo-description-btn" data-task-id="${escapeHtml(todo.__task_id)}" title="Visualizza descrizione"><i class="fas fa-magnifying-glass"></i></button>`
+                            : '<span style="color:#9CA3AF;">—</span>')
+                            : formatTodoValue(todo[column.name], column);
+                        return `<td>${editButton}${cellValue}</td>`;
+                    }).join('')}</tr>
+                `).join('');
+                todoList.innerHTML = `
+                    <div class="todo-table-wrap">
+                        <table class="todo-table">
+                            <thead><tr>${header}</tr></thead>
+                            <tbody>${body}</tbody>
+                        </table>
+                    </div>`;
+                todoList.querySelectorAll('.todo-edit-btn').forEach(button => {
+                    button.addEventListener('click', () => {
+                        const task = todoData.find(row => String(row.__task_id) === button.dataset.taskId);
+                        if (task) openTaskModal(task);
+                    });
                 });
-            });
+                todoList.querySelectorAll('.todo-description-btn').forEach(button => {
+                    button.addEventListener('click', () => {
+                        const task = todoData.find(row => String(row.__task_id) === button.dataset.taskId);
+                        if (task?.description) openDescriptionWindow(task.description, button);
+                    });
+                });
+            }
 
             // Update pulsante Espandi
             const expandBtn = document.getElementById('expandTodoBtn');
@@ -2616,6 +2880,361 @@
                 expandBtn.style.opacity = '1';
                 expandBtn.disabled = false;
                 expandBtn.textContent = `Espandi (${Math.min(currentTodoPage + 10, todos.length)} di ${todos.length})`;
+            }
+        }
+
+        function todoColumnLabel(name) {
+            return String(name);
+        }
+
+        function parseTodoDate(value) {
+            const text = String(value);
+            const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+            return dateOnly
+                ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+                : new Date(text);
+        }
+
+        function formatTodoValue(value, column) {
+            if (value === null || value === undefined || value === '') return '<span style="color:#9CA3AF;">—</span>';
+            if (column.type === 'date') {
+                const date = parseTodoDate(value);
+                return Number.isNaN(date.getTime()) ? escapeHtml(String(value)) : escapeHtml(date.toLocaleDateString('it-IT'));
+            }
+            if (String(column.type).includes('timestamp')) {
+                const date = new Date(value);
+                return Number.isNaN(date.getTime()) ? escapeHtml(String(value)) : escapeHtml(date.toLocaleString('it-IT'));
+            }
+            if (column.type === 'boolean') return value ? 'Sì' : 'No';
+            if (column.name === 'priority') {
+                const labels = { high: '🔴 Alta', medium: '🟡 Media', low: '🟢 Bassa' };
+                return `<span class="todo-priority ${escapeHtml(String(value))}">${escapeHtml(labels[value] || String(value))}</span>`;
+            }
+            if (column.name === 'status' || column.name === 'tipo_task') {
+                return `<span class="todo-badge">${escapeHtml(String(value))}</span>`;
+            }
+            return escapeHtml(String(value));
+        }
+
+        function closeDescriptionWindow() {
+            if (descriptionWindow) descriptionWindow.remove();
+            descriptionWindow = null;
+        }
+
+        function openDescriptionWindow(value, trigger) {
+            closeDescriptionWindow();
+            const text = String(value || '');
+            const lines = text.split(/\r?\n/);
+            const longestLine = Math.max(1, ...lines.map(line => line.length));
+            const panelWidth = Math.min(window.innerWidth - 30, Math.max(300, Math.min(900, longestLine * 7.5 + 75)));
+            const charsPerLine = Math.max(25, Math.floor((panelWidth - 40) / 7.5));
+            const visualLines = lines.reduce((total, line) => total + Math.max(1, Math.ceil(line.length / charsPerLine)), 0);
+            const panelHeight = Math.min(window.innerHeight - 30, Math.max(145, Math.min(650, 92 + visualLines * 22)));
+
+            const panel = document.createElement('div');
+            panel.className = 'description-window';
+            panel.style.width = `${panelWidth}px`;
+            panel.style.height = `${panelHeight}px`;
+            panel.innerHTML = `
+                <div class="description-window-header">
+                    <span><i class="fas fa-align-left"></i> Description</span>
+                    <button type="button" class="description-window-close" aria-label="Chiudi"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="description-window-content"></div>`;
+            panel.querySelector('.description-window-content').textContent = text;
+            document.body.appendChild(panel);
+            descriptionWindow = panel;
+
+            const triggerRect = trigger.getBoundingClientRect();
+            let left = window.scrollX + triggerRect.left;
+            let top = window.scrollY + triggerRect.bottom + 8;
+            left = Math.min(left, window.scrollX + window.innerWidth - panelWidth - 15);
+            left = Math.max(window.scrollX + 15, left);
+            if (top + panelHeight > window.scrollY + window.innerHeight - 15) {
+                top = Math.max(window.scrollY + 15, window.scrollY + triggerRect.top - panelHeight - 8);
+            }
+            panel.style.left = `${left}px`;
+            panel.style.top = `${top}px`;
+            panel.querySelector('.description-window-close').addEventListener('click', closeDescriptionWindow);
+
+            const header = panel.querySelector('.description-window-header');
+            header.addEventListener('pointerdown', event => {
+                if (event.target.closest('.description-window-close')) return;
+                event.preventDefault();
+                const startX = event.clientX;
+                const startY = event.clientY;
+                const startLeft = parseFloat(panel.style.left) || 0;
+                const startTop = parseFloat(panel.style.top) || 0;
+
+                const onMove = moveEvent => {
+                    const minLeft = window.scrollX;
+                    const minTop = window.scrollY;
+                    const maxLeft = window.scrollX + window.innerWidth - panel.offsetWidth;
+                    const maxTop = window.scrollY + window.innerHeight - panel.offsetHeight;
+                    panel.style.left = `${Math.max(minLeft, Math.min(maxLeft, startLeft + moveEvent.clientX - startX))}px`;
+                    panel.style.top = `${Math.max(minTop, Math.min(maxTop, startTop + moveEvent.clientY - startY))}px`;
+                };
+                const onUp = () => {
+                    document.removeEventListener('pointermove', onMove);
+                    document.removeEventListener('pointerup', onUp);
+                };
+                document.addEventListener('pointermove', onMove);
+                document.addEventListener('pointerup', onUp);
+            });
+        }
+
+        function todoDefaultValue(column) {
+            const defaults = { tipo_task: 'manual', status: 'todo', priority: 'medium' };
+            return defaults[column.name] ?? '';
+        }
+
+        function taskSelectOptions(values, selectedValue) {
+            const selected = String(selectedValue ?? '');
+            const options = [...values];
+            if (selected && !options.some(option => String(option.value) === selected)) {
+                options.push({ value: selected, label: selected });
+            }
+            return options.map(option =>
+                `<option value="${escapeHtml(String(option.value))}" ${String(option.value) === selected ? 'selected' : ''}>${escapeHtml(String(option.label))}</option>`
+            ).join('');
+        }
+
+        function taskFormValue(column, value) {
+            if (value === null || value === undefined) return '';
+            const text = String(value);
+            if (column.type === 'date') {
+                const match = /^(\d{4}-\d{2}-\d{2})/.exec(text);
+                return match ? match[1] : '';
+            }
+            if (String(column.type).includes('timestamp')) {
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) return text;
+                const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+                return local.toISOString().slice(0, 16);
+            }
+            return text;
+        }
+
+        function taskBooleanValue(value) {
+            return value === true || value === 1 || ['true', 't', '1', 'yes', 'on'].includes(String(value).toLowerCase());
+        }
+
+        function renderTaskFormField(column, task) {
+            if (column.editable === false) return '';
+            const rawKey = `__raw_${column.name}`;
+            const currentValue = task
+                ? (Object.prototype.hasOwnProperty.call(task, rawKey) ? task[rawKey] : task[column.name])
+                : todoDefaultValue(column);
+            const formValue = taskFormValue(column, currentValue);
+            const required = column.name === 'titile' ? 'required' : '';
+            const wide = column.type === 'text' || ['description', 'appo_task_2', 'appo_task_4'].includes(column.name);
+            let control;
+
+            if (column.name === 'client_id') {
+                const options = [{ value: '', label: 'Nessun cliente' }, ...dashboardClients.map(client => ({
+                    value: client.id,
+                    label: client.name + (client.shared ? ' (condiviso)' : '')
+                }))];
+                control = `<select id="taskField_client_id" name="client_id">${taskSelectOptions(options, currentValue)}</select>`;
+            } else if (column.name === 'project_id') {
+                control = '<select id="taskField_project_id" name="project_id"><option value="">Nessun progetto</option></select>';
+            } else if (column.uuid && column.references) {
+                control = `<select id="taskField_${escapeHtml(column.name)}" name="${escapeHtml(column.name)}"><option value="">Nessun valore</option></select>`;
+            } else if (column.name === 'priority') {
+                control = `<select id="taskField_priority" name="priority">${taskSelectOptions([
+                    { value: 'high', label: 'Alta' }, { value: 'medium', label: 'Media' }, { value: 'low', label: 'Bassa' }
+                ], currentValue)}</select>`;
+            } else if (column.name === 'status') {
+                control = `<select id="taskField_status" name="status">${taskSelectOptions([
+                    { value: 'todo', label: 'Da fare' }, { value: 'in_progress', label: 'In corso' }, { value: 'completed', label: 'Completata' }, { value: 'cancelled', label: 'Annullata' }
+                ], currentValue)}</select>`;
+            } else if (column.name === 'tipo_task') {
+                control = `<select id="taskField_tipo_task" name="tipo_task">${taskSelectOptions([
+                    { value: 'manual', label: 'Manuale' }, { value: 'automatic', label: 'Automatica' }
+                ], currentValue)}</select>`;
+            } else if (column.type === 'text' || wide) {
+                control = `<textarea id="taskField_${escapeHtml(column.name)}" name="${escapeHtml(column.name)}" ${required}>${escapeHtml(formValue)}</textarea>`;
+            } else if (column.type === 'boolean') {
+                control = `<input id="taskField_${escapeHtml(column.name)}" name="${escapeHtml(column.name)}" type="checkbox" ${taskBooleanValue(currentValue) ? 'checked' : ''}>`;
+            } else {
+                const inputType = column.type === 'date' ? 'date'
+                    : String(column.type).includes('timestamp') ? 'datetime-local'
+                    : (String(column.type).includes('integer') || String(column.type).includes('numeric')) ? 'number'
+                    : 'text';
+                const step = String(column.type).includes('numeric') ? 'step="any"' : '';
+                control = `<input id="taskField_${escapeHtml(column.name)}" name="${escapeHtml(column.name)}" type="${inputType}" ${step} value="${escapeHtml(formValue)}" ${required}>`;
+            }
+
+            return `<div class="task-form-field ${wide ? 'wide' : ''}">
+                <label for="taskField_${escapeHtml(column.name)}"><span>${escapeHtml(todoColumnLabel(column.name))}</span>${required ? '<span aria-hidden="true"> *</span>' : ''}</label>
+                ${control}
+            </div>`;
+        }
+
+        async function loadTaskProjectOptions(clientId, selectedProjectId = '', selectedProjectName = '') {
+            const select = document.getElementById('taskField_project_id');
+            if (!select) return;
+            select.innerHTML = '<option value="">Nessun progetto</option>';
+            if (!clientId) return;
+            select.disabled = true;
+            try {
+                const response = await fetch(`${API_URL}/projects/list?clientId=${encodeURIComponent(clientId)}`, { headers: getAuthHeaders() });
+                const projects = response.ok ? await response.json() : [];
+                const options = [{ value: '', label: 'Nessun progetto' }, ...(Array.isArray(projects) ? projects.map(project => ({
+                    value: project.id, label: project.name
+                })) : [])];
+                if (selectedProjectId && !options.some(option => String(option.value) === String(selectedProjectId))) {
+                    options.push({ value: selectedProjectId, label: selectedProjectName || selectedProjectId });
+                }
+                select.innerHTML = taskSelectOptions(options, selectedProjectId);
+            } catch (error) {
+                if (selectedProjectId) {
+                    select.innerHTML = taskSelectOptions([
+                        { value: '', label: 'Nessun progetto' },
+                        { value: selectedProjectId, label: selectedProjectName || selectedProjectId }
+                    ], selectedProjectId);
+                }
+            } finally {
+                select.disabled = false;
+            }
+        }
+
+        async function loadTaskForeignOptions(column, selectedValue = '', selectedLabel = '') {
+            const select = document.getElementById(`taskField_${column.name}`);
+            if (!select) return;
+            select.disabled = true;
+            try {
+                const query = new URLSearchParams();
+                if (column.name === 'assigned_to') {
+                    const clientId = document.getElementById('taskField_client_id')?.value || '';
+                    const projectId = document.getElementById('taskField_project_id')?.value || '';
+                    if (clientId) query.set('clientId', clientId);
+                    if (projectId) query.set('projectId', projectId);
+                    if (selectedValue) query.set('selectedValue', selectedValue);
+                }
+                const queryString = query.toString();
+                const response = await fetch(`${API_URL}/dashboard/tasks/foreign-options/${encodeURIComponent(column.name)}${queryString ? `?${queryString}` : ''}`, {
+                    headers: getAuthHeaders()
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(result.error || `Errore HTTP ${response.status}`);
+                const options = [{ value: '', label: 'Nessun valore' }, ...(Array.isArray(result.options) ? result.options : [])];
+                if (selectedValue && !options.some(option => String(option.value) === String(selectedValue))) {
+                    const usableLabel = selectedLabel && String(selectedLabel) !== String(selectedValue)
+                        ? selectedLabel : 'Nominativo non disponibile';
+                    options.push({ value: selectedValue, label: usableLabel });
+                }
+                select.innerHTML = taskSelectOptions(options, selectedValue);
+            } catch (error) {
+                select.innerHTML = taskSelectOptions([
+                    { value: '', label: 'Nessun valore' },
+                    ...(selectedValue ? [{ value: selectedValue, label: 'Errore nel caricamento del nominativo' }] : [])
+                ], selectedValue);
+                showNotification('Errore assegnatari: ' + error.message, 'info');
+            } finally {
+                select.disabled = false;
+            }
+        }
+
+        async function reloadTaskAssignedTo(selectedValue = '', selectedLabel = '') {
+            const assignedColumn = todoColumns.find(column => column.name === 'assigned_to');
+            if (!assignedColumn) return;
+            await loadTaskForeignOptions(assignedColumn, selectedValue, selectedLabel);
+        }
+
+        async function openTaskModal(task = null) {
+            if (todoColumns.length === 0) {
+                showNotification('Impossibile aprire il task: struttura non disponibile', 'info');
+                return;
+            }
+            editingTodoId = task?.__task_id || null;
+            document.getElementById('taskModalTitle').textContent = editingTodoId ? 'Modifica task' : 'Nuovo task';
+            document.getElementById('taskForm').innerHTML = todoColumns.map(column => renderTaskFormField(column, task)).join('');
+            document.getElementById('taskModal').classList.add('open');
+
+            const clientSelect = document.getElementById('taskField_client_id');
+            const selectedProjectId = task?.__raw_project_id || '';
+            const saveButton = document.getElementById('taskModalSave');
+            saveButton.disabled = true;
+            try {
+                if (clientSelect) {
+                    clientSelect.addEventListener('change', async () => {
+                        saveButton.disabled = true;
+                        try {
+                            await loadTaskProjectOptions(clientSelect.value);
+                            await reloadTaskAssignedTo();
+                        } finally {
+                            saveButton.disabled = false;
+                        }
+                    });
+                }
+                await loadTaskProjectOptions(
+                    clientSelect?.value || '', selectedProjectId, task?.project_id || ''
+                );
+                const projectSelect = document.getElementById('taskField_project_id');
+                if (projectSelect) {
+                    projectSelect.addEventListener('change', async () => {
+                        saveButton.disabled = true;
+                        try {
+                            await reloadTaskAssignedTo();
+                        } finally {
+                            saveButton.disabled = false;
+                        }
+                    });
+                }
+                const foreignPromises = todoColumns
+                    .filter(column => column.editable !== false
+                        && column.uuid && column.references
+                        && !['client_id', 'project_id'].includes(column.name))
+                    .map(column => loadTaskForeignOptions(
+                        column,
+                        task?.[`__raw_${column.name}`] ?? task?.[column.name] ?? '',
+                        task?.[column.name] || ''
+                    ));
+                await Promise.all(foreignPromises);
+            } finally {
+                saveButton.disabled = false;
+            }
+        }
+
+        function closeTaskModal() {
+            editingTodoId = null;
+            document.getElementById('taskModal').classList.remove('open');
+            document.getElementById('taskForm').innerHTML = '';
+        }
+
+        async function saveTaskFromModal() {
+            const form = document.getElementById('taskForm');
+            if (!form.reportValidity()) return;
+            const wasEditing = Boolean(editingTodoId);
+            const values = {};
+            todoColumns.filter(column => column.editable !== false).forEach(column => {
+                const input = document.getElementById(`taskField_${column.name}`);
+                if (!input) return;
+                values[column.name] = column.type === 'boolean' ? input.checked : input.value;
+            });
+
+            const saveButton = document.getElementById('taskModalSave');
+            saveButton.disabled = true;
+            try {
+                const response = await fetch(editingTodoId
+                    ? `${API_URL}/dashboard/tasks/${encodeURIComponent(editingTodoId)}`
+                    : `${API_URL}/dashboard/tasks`, {
+                    method: editingTodoId ? 'PUT' : 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ values })
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(result.error || `Errore HTTP ${response.status}`);
+                closeTaskModal();
+                await loadTodoData();
+                currentTodoPage = 10;
+                applyFiltersAndRender();
+                showNotification(wasEditing ? 'Task aggiornata' : 'Task inserita', 'success');
+            } catch (error) {
+                showNotification('Errore: ' + error.message, 'info');
+            } finally {
+                saveButton.disabled = false;
             }
         }
 
@@ -2719,53 +3338,121 @@
             return token ? { 'Authorization': `Bearer ${token}` } : {};
         }
 
-        async function loadDataFromAPI() {
+        // Sostituzione standard delle etichette della pagina tramite set_label.
+        // I valori contenuti nelle celle dati della To Do List non vengono toccati.
+        const pageLabelMap = new Map();
+        const lastAppliedPageLabel = new WeakMap();
+        let pageLabelObserver = null;
+
+        function isPageLabelTextNode(node) {
+            const parent = node?.parentElement;
+            if (!parent) return false;
+            return !parent.closest('script, style, textarea, code, pre, .description-window-content, .todo-table tbody td, [data-page-label-ignore]');
+        }
+
+        function applyPageLabelTextNode(node) {
+            if (!isPageLabelTextNode(node)) return;
+            const rawText = node.nodeValue || '';
+            if (lastAppliedPageLabel.get(node) === rawText) return;
+            const original = rawText.trim();
+            if (!original || !pageLabelMap.has(original)) return;
+            const leading = (rawText.match(/^\s*/) || [''])[0];
+            const trailing = (rawText.match(/\s*$/) || [''])[0];
+            const replaced = leading + pageLabelMap.get(original) + trailing;
+            lastAppliedPageLabel.set(node, replaced);
+            node.nodeValue = replaced;
+        }
+
+        function applyPageLabelAttributes(element) {
+            if (!(element instanceof Element) || element.closest('[data-page-label-ignore]')) return;
+            ['placeholder', 'title', 'aria-label'].forEach(attribute => {
+                const current = element.getAttribute(attribute);
+                if (current && pageLabelMap.has(current.trim())) {
+                    element.setAttribute(attribute, pageLabelMap.get(current.trim()));
+                }
+            });
+            if (element instanceof HTMLInputElement && ['button', 'submit', 'reset'].includes(element.type)) {
+                const current = element.value;
+                if (current && pageLabelMap.has(current.trim())) element.value = pageLabelMap.get(current.trim());
+            }
+        }
+
+        function applyPageLabels(root = document.body) {
+            if (!root || pageLabelMap.size === 0) return;
+            if (root.nodeType === Node.TEXT_NODE) {
+                applyPageLabelTextNode(root);
+                return;
+            }
+            if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) return;
+            if (root.nodeType === Node.ELEMENT_NODE) applyPageLabelAttributes(root);
+            root.querySelectorAll?.('*').forEach(applyPageLabelAttributes);
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            let textNode;
+            while ((textNode = walker.nextNode())) applyPageLabelTextNode(textNode);
+        }
+
+        async function loadPageLabels() {
             try {
-                const headers = getAuthHeaders();
-
-                // Carica progetti e task dagli endpoint dati protetti
-                const projectsResponse = await fetch(`${API_URL}/data/projects`, { headers });
-                const tasksResponse = await fetch(`${API_URL}/data/tasks`, { headers });
-
-                // Se le chiamate falliscono (non autenticato, tabella non gestita, ecc.)
-                // restiamo sui dati demo senza rompere la pagina.
-                if (!projectsResponse.ok || !tasksResponse.ok) {
-                    console.warn('⚠️  API dati non disponibile (status projects/tasks:',
-                        projectsResponse.status, '/', tasksResponse.status, ') - uso i dati locali');
-                    return;
-                }
-
-                const projects = await projectsResponse.json();
-                const tasks = await tasksResponse.json();
-                console.log('✓ Projects loaded:', projects);
-                console.log('✓ Tasks loaded:', tasks);
-
-                // Se non ci sono dati, usa i dati di esempio
-                if (Array.isArray(projects) && projects.length > 0) {
-                    // Aggiorna i dati globali con dati reali
-                    window.projectsData = projects;
-                }
-
-                if (Array.isArray(tasks) && tasks.length > 0) {
-                    todoData.length = 0; // Svuota i dati di esempio
-                    tasks.forEach(task => {
-                        todoData.push({
-                            id: task.id,
-                            title: task.title,
-                            client: task.assigned_to || 'N/A',
-                            priority: task.priority || 'medium',
-                            dueDate: task.due_date,
-                            completed: task.status === 'completed',
-                            type: 'task'
+                const pageLanguage = String(document.documentElement.lang || 'IT').slice(0, 3);
+                const response = await fetch(`${API_URL}/page-labels?lang=${encodeURIComponent(pageLanguage)}`, { headers: getAuthHeaders() });
+                if (!response.ok) return;
+                const payload = await response.json();
+                pageLabelMap.clear();
+                (Array.isArray(payload.labels) ? payload.labels : []).forEach(item => {
+                    if (item.valore !== null && item.valore !== undefined) {
+                        pageLabelMap.set(String(item.valore), String(item.new_valore ?? ''));
+                    }
+                });
+                applyPageLabels(document.body);
+                if (!pageLabelObserver) {
+                    pageLabelObserver = new MutationObserver(mutations => {
+                        mutations.forEach(mutation => {
+                            if (mutation.type === 'characterData') applyPageLabelTextNode(mutation.target);
+                            mutation.addedNodes?.forEach(applyPageLabels);
                         });
                     });
-                    console.log('✓ Todo list updated with API data');
-                    applyFiltersAndRender();
+                    pageLabelObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
                 }
             } catch (error) {
-                console.warn('⚠️  API data not available - using local data:', error.message);
-                // Continua con i dati locali se l'API non è disponibile
+                console.warn('[PAGE LABELS]', error.message);
             }
+        }
+
+        async function loadTodoData() {
+            try {
+                const tasksResponse = await fetch(`${API_URL}/dashboard/tasks`, { headers: getAuthHeaders() });
+                const payload = await tasksResponse.json().catch(() => ({}));
+                if (!tasksResponse.ok) {
+                    throw new Error(payload.error || `Errore HTTP ${tasksResponse.status}`);
+                }
+                todoColumns = Array.isArray(payload.columns) ? payload.columns : [];
+                todoData = Array.isArray(payload.rows) ? payload.rows : [];
+                todoLoadError = '';
+                console.log(`✓ ${todoData.length} task caricate dal database`);
+            } catch (error) {
+                todoColumns = [];
+                todoData = [];
+                todoLoadError = 'Impossibile caricare le task: ' + error.message;
+                console.warn('[TO DO LIST]', error.message);
+            }
+        }
+
+        async function loadDataFromAPI() {
+            const headers = getAuthHeaders();
+
+            // I progetti mantengono il caricamento esistente, ma un loro errore
+            // non deve impedire il caricamento indipendente della To Do List.
+            try {
+                const projectsResponse = await fetch(`${API_URL}/data/projects`, { headers });
+                if (projectsResponse.ok) {
+                    const projects = await projectsResponse.json();
+                    if (Array.isArray(projects)) window.projectsData = projects;
+                }
+            } catch (error) {
+                console.warn('⚠️ Progetti non disponibili:', error.message);
+            }
+
+            await loadTodoData();
         }
 
         // === CALENDAR INTEGRATION (Google + Microsoft) ===
@@ -3487,6 +4174,9 @@
                     return;
                 }
                 const clients = await res.json();
+                // La tendina aziende in testata usa esattamente lo stesso elenco
+                // (compresi i clienti condivisi) della voce laterale "Clienti".
+                syncDashboardClientSelector(clients);
                 if (!Array.isArray(clients) || clients.length === 0) {
                     listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Nessun cliente</li>';
                     return;
@@ -4815,33 +5505,16 @@
             return String(value);
         }
 
-        // Etichette leggibili solo per le intestazioni note. Qualsiasi altro nome
-        // di colonna viene mostrato esattamente come configurato nel database.
-        const TYPE11_COLUMN_LABELS = Object.freeze({
-            worker_cost_id: 'Team/Worker',
-            effort_hh: 'Effort',
-            effort_gg: 'Effort',
-            tariffa_hh: 'Tariffa',
-            tariffa_gg: 'Tariffa',
-            costo_hh: 'Costo',
-            costo_gg: 'Costo',
-            time_spent_hh: 'Time_spent',
-            time_spent_gg: 'Time_spent',
-            cost_time_spent_hh: 'Costo time spent',
-            cost_time_spent_gg: 'Costo time spent',
-            diff_hh: 'Differenza',
-            diff_gg: 'Differenza'
-        });
-
         function type11ColumnLabel(column) {
-            return Object.prototype.hasOwnProperty.call(TYPE11_COLUMN_LABELS, column)
-                ? TYPE11_COLUMN_LABELS[column]
-                : column;
+            return String(column);
         }
 
         function isType11CurrencyColumn(column) {
-            const label = String(type11ColumnLabel(column) || '').trim().toLowerCase();
-            return label.startsWith('costo') || label === 'tariffa' || label === 'differenza';
+            const technicalName = String(column || '').trim().toLowerCase();
+            return technicalName.startsWith('costo')
+                || technicalName.startsWith('cost_')
+                || technicalName.startsWith('tariffa')
+                || technicalName.startsWith('diff');
         }
 
         // Ricava i tre valori usati dalla WHERE del widget. Tenant e utente
@@ -6019,9 +6692,10 @@
 
         window.addEventListener('DOMContentLoaded', async () => {
             initializeUser();
+            await loadPageLabels();
             applyRoleVisibility();
             loadSettingsArguments();
-            loadClientsNames();
+            await loadClientsNames();
             loadProjectClients();
             initSettingsFlyout();
             initClientsFlyout();
@@ -6044,6 +6718,21 @@
             initMeetings(); // Carica le riunioni da Google Calendar
         });
     </script>
+    <div id="taskModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
+        <div class="task-modal-card">
+            <div class="task-modal-header">
+                <h3 id="taskModalTitle" style="margin: 0; color: var(--dark);">Nuovo task</h3>
+                <button id="taskModalClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="taskForm" class="task-form-grid"></form>
+            <div class="task-modal-footer">
+                <button id="taskModalCancel" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
+                <button id="taskModalSave" type="button" style="padding: 0.6rem 1rem; border: none; border-radius: 8px; background: var(--primary); color: white; font-weight: 600; cursor: pointer;">Salva task</button>
+            </div>
+        </div>
+    </div>
     <!-- Modale Privacy e dati personali (GDPR: export / cancellazione) -->
     <div id="privacyModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 700; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 440px; max-width: 92vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
