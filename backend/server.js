@@ -209,6 +209,34 @@ async function referenceKeys(tabella, user) {
   return keys;
 }
 
+// Risolve le opzioni di lookup_values (tipi 9/10) con ricerca a cascata:
+// 1) tenant_id = login E user_id = login (custom personale)
+// 2) tenant_id = login E user_id IS NULL (custom di tenant)
+// 3) tenant_id IS NULL E user_id IS NULL (standard, globale)
+// Il primo livello con risultati vince. isCustom = true per i livelli 1 e 2.
+async function resolveLookupValues(tenantId, userId, tipoValore, campoRaw, campoStripped, roleLevel) {
+  const baseWhere = `tipo_valore = $1 AND (nome_campo = $2 OR nome_campo = $3)
+    AND (id_roles IS NULL OR id_roles = '' OR (id_roles ~ '^[0-9]+$' AND id_roles::int >= $4))
+    AND (data_inizio IS NULL OR data_inizio <= CURRENT_DATE)
+    AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`;
+  const baseParams = [tipoValore, campoRaw, campoStripped, roleLevel];
+
+  const attempts = [
+    { extra: 'tenant_id = $5 AND user_id = $6', extraParams: [tenantId, userId], custom: true },
+    { extra: 'tenant_id = $5 AND user_id IS NULL', extraParams: [tenantId], custom: true },
+    { extra: 'tenant_id IS NULL AND user_id IS NULL', extraParams: [], custom: false }
+  ];
+  for (const attempt of attempts) {
+    const params = [...baseParams, ...attempt.extraParams];
+    const r = await db.query(
+      `SELECT valore FROM lookup_values WHERE ${baseWhere} AND ${attempt.extra} ORDER BY ordinamento NULLS LAST, valore`,
+      params
+    );
+    if (r.rows.length > 0) return { rows: r.rows, isCustom: attempt.custom };
+  }
+  return { rows: [], isCustom: false };
+}
+
 // Etichette delle pagine HTML. Per ogni valore usa la configurazione piu'
 // specifica disponibile, con questa precedenza:
 // tenant+utente, tenant, utente globale, configurazione globale.
@@ -494,19 +522,26 @@ app.get('/api/dashboard/tasks/foreign-options/:column', requireAuth, async (req,
       if (requiredColumns.some(name => !componentColumns.has(name))) {
         return res.status(500).json({ error: 'Struttura proj_componenti non compatibile con il filtro assegnatari' });
       }
+      // Filtro user_id: applicato quando la colonna esiste, oltre a tenant/client/project.
+      const hasUserCol = componentColumns.has('user_id');
       if (!clientId) {
         if (!selectedValue) return res.json({ options: [] });
+        const selParams = [req.user.tenant_id, selectedValue];
+        let selUserCond = '';
+        if (hasUserCol) { selParams.push(req.user.user_id); selUserCond = ` AND pc.user_id = $${selParams.length}`; }
         const selected = await db.query(
           `SELECT pc.id::text AS value,
                   COALESCE(NULLIF(TRIM(pc.nominativo::text), ''), 'Nominativo non disponibile') AS label
            FROM proj_componenti pc
-           WHERE pc.tenant_id = $1 AND pc.id = $2
+           WHERE pc.tenant_id = $1 AND pc.id = $2${selUserCond}
            LIMIT 1`,
-          [req.user.tenant_id, selectedValue]
+          selParams
         );
         return res.json({ options: selected.rows });
       }
       const parameters = [req.user.tenant_id, clientId];
+      let userCondition = '';
+      if (hasUserCol) { parameters.push(req.user.user_id); userCondition = ` AND pc.user_id = $${parameters.length}`; }
       let projectCondition = '';
       if (projectId) {
         parameters.push(projectId);
@@ -531,7 +566,7 @@ app.get('/api/dashboard/tasks/foreign-options/:column', requireAuth, async (req,
            FROM proj_componenti pc
            WHERE pc.tenant_id = $1
              AND pc.client_id = $2
-             AND pc.id IS NOT NULL${projectCondition}
+             AND pc.id IS NOT NULL${userCondition}${projectCondition}
            ${selectedFallback}
          ) options
          ORDER BY label
@@ -851,12 +886,24 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     const selectList = selectExpressions.join(', ');
     const joinClause = joins.length ? '\n       ' + joins.join('\n       ') : '';
     const orderBy = tableColumns.has('id') ? ' ORDER BY src.id' : '';
+
+    // Tabelle con colonna project_id (es. proj_anno_fatt, proj_componenti) vanno SEMPRE
+    // filtrate anche per progetto, non solo tenant/utente/cliente. Nel contesto "projects"
+    // l'id del progetto corrente è l'argument della riga di configurazione del widget
+    // (la riga del campo tipo_valore=11 vive sotto il progetto stesso).
+    const queryParams = [req.user.tenant_id, effectiveUserId, clientId];
+    let projectFilter = '';
+    if (source === 'projects' && tableColumns.has('project_id')) {
+      queryParams.push(config.argument);
+      projectFilter = ` AND src.project_id = $${queryParams.length}`;
+    }
+
     const result = await db.query(
       `SELECT ${selectList}
        FROM "${tableName}" src${joinClause}
-       WHERE src.tenant_id = $1 AND src.user_id = $2 AND src.client_id = $3${orderBy}
+       WHERE src.tenant_id = $1 AND src.user_id = $2 AND src.client_id = $3${projectFilter}${orderBy}
        LIMIT 100`,
-      [req.user.tenant_id, effectiveUserId, clientId]
+      queryParams
     );
     // Per i progetti restituisce anche le colonne effettivamente visibili,
     // dopo il filtro HH/GG; gli altri contesti mantengono il formato storico.
@@ -865,6 +912,41 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       : result.rows);
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// KPI Fatturato: legge la vista kpi_fatturazione, filtrata SEMPRE per tenant_id e user_id
+// del login; anno e client_id sono filtri opzionali (client_id assente = tutti i clienti).
+app.get('/api/kpi-fatturazione', requireAuth, async (req, res) => {
+  try {
+    const anno = req.query.anno ? Number(req.query.anno) : null;
+    const clientId = ((req.query && req.query.clientId) || '').trim();
+    const conditions = ['tenant_id = $1', 'user_id = $2'];
+    const params = [req.user.tenant_id, req.user.user_id];
+    if (Number.isFinite(anno)) { params.push(anno); conditions.push(`anno = $${params.length}`); }
+    if (clientId) { params.push(clientId); conditions.push(`client_id = $${params.length}`); }
+    const result = await db.query(
+      `SELECT tenant_id, client_id, user_id, anno, totale, forecast
+       FROM kpi_fatturazione WHERE ${conditions.join(' AND ')}`,
+      params
+    );
+    res.json(result.rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Elenco degli anni disponibili in kpi_fatturazione per il login (tenant+utente), a
+// prescindere dai filtri correnti: serve a popolare la tendina "Anno".
+app.get('/api/kpi-fatturazione/years', requireAuth, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT DISTINCT anno FROM kpi_fatturazione WHERE tenant_id = $1 AND user_id = $2 ORDER BY anno`,
+      [req.user.tenant_id, req.user.user_id]
+    );
+    res.json(result.rows.map(r => r.anno));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -885,12 +967,13 @@ app.get('/api/data/:table', requireAuth, async (req, res) => {
     const conditions = [];
     const params = [];
 
-    // Filtri per colonna (dal query string)
+    // Filtri per colonna (dal query string). Colonne qualificate con "src." per coerenza
+    // con la query sottostante.
     for (const [key, val] of Object.entries(req.query)) {
       if (columns.has(key) && val != null && String(val) !== '') {
         assertValidIdentifier(key);
         params.push('%' + String(val) + '%');
-        conditions.push(`"${key}"::text ILIKE $${params.length}`);
+        conditions.push(`src."${key}"::text ILIKE $${params.length}`);
       }
     }
 
@@ -899,17 +982,24 @@ app.get('/api/data/:table', requireAuth, async (req, res) => {
       if (tableName === 'tenants') {
         // "tenants" non ha tenant_id: il proprio tenant è la riga con id = tenant del login
         params.push(req.user.tenant_id);
-        conditions.push(`id = $${params.length}`);
+        conditions.push(`src.id = $${params.length}`);
       } else if (columns.has('tenant_id')) {
         params.push(req.user.tenant_id);
-        conditions.push(`tenant_id = $${params.length}`);
+        conditions.push(`src.tenant_id = $${params.length}`);
       }
     }
 
     const whereClause = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
     // Ordinamento deterministico (evita che due query identiche restituiscano ordini diversi).
-    const orderBy = columns.has('id') ? 'ORDER BY id' : '';
-    const result = await pool.query(`SELECT * FROM "${tableName}" ${whereClause} ${orderBy} LIMIT 100`, params);
+    const orderBy = columns.has('id') ? 'ORDER BY src.id' : '';
+
+    // NOTA: niente colonne aggiuntive "<col>_label" qui. Questo endpoint alimenta anche
+    // le PUT/POST del database-viewer, che rispediscono al server tutte le chiavi ricevute:
+    // colonne extra non esistenti sul DB causavano errore di scrittura.
+    const result = await pool.query(
+      `SELECT src.* FROM "${tableName}" src ${whereClause} ${orderBy} LIMIT 100`,
+      params
+    );
     res.json(stripSensitive(result.rows));
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
@@ -1641,20 +1731,9 @@ app.get('/api/clients/names', requireAuth, async (req, res) => {
     }
     const scadCond = showAll ? '' : ` AND (c.scadenza IS NULL OR c.scadenza >= CURRENT_DATE)`;
 
-    // Admin di sistema (database-viewer): stesso bypass dell'isolamento per tenant
-    // usato dagli altri endpoint /api/data — vede i clienti di TUTTI i tenant,
-    // non filtra per proprietà/condivisione.
-    if (admin) {
-      const result = await db.query(
-        `SELECT id, valore2 AS name, tenant_id, false AS shared
-         FROM clients c
-         WHERE argument = 'Cliente' AND campo = 'Cliente'
-           AND valore2 IS NOT NULL${scadCond}
-         ORDER BY valore2`
-      );
-      return res.json(result.rows); // [{ id, name, tenant_id, shared }, ...]
-    }
-
+    // Sempre filtrato per tenant_id e user_id del login, anche per gli amministratori:
+    // un admin loggato sul tenant Projexa non deve vedere i clienti di altri tenant
+    // (es. Teamsystem) in questa lista (Clienti / Progetti clienti / filtro in alto).
     // Clienti propri + clienti condivisi con me (ACL). Un flag "shared" distingue i secondi.
     const result = await db.query(
       `SELECT id, valore2 AS name,
@@ -1931,7 +2010,14 @@ async function deepCopyProjectTree(dbClient, tenantId, userId, clientId, srcArg,
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
       [tenantId, userId, clientId, newArg, r.campo, r.tipo_valore, r.id_roles, r.ordinamento, r.tabella, r.colonna, r.layout_col, r.layout_span, r.variabdb]
     );
-    if (String(r.tipo_valore) === '0') {
+    // Verifica se esistono figli reali sotto questa riga (argument = id sorgente), a prescindere
+    // dal flag tipo_valore: nel template master alcuni contenitori non sono marcati "0" ma hanno
+    // comunque righe figlie (argument = id di questa riga) che vanno copiate ricorsivamente.
+    const hasChildren = await dbClient.query(
+      `SELECT 1 FROM projects WHERE argument = $1 AND campo IS NOT NULL AND campo <> 'Progetto' LIMIT 1`,
+      [String(r.id)]
+    );
+    if (hasChildren.rows.length > 0) {
       await deepCopyProjectTree(dbClient, tenantId, userId, clientId, String(r.id), String(ins.rows[0].id));
     }
   }
@@ -2010,6 +2096,35 @@ app.post('/api/projects', requireAuth, async (req, res) => {
     res.status(500).json({ error: error.message });
   } finally {
     client.release();
+  }
+});
+
+// Colonne configurate per un dato tipo_valore (usate dal form mobile Aggiungi/Modifica campo).
+// Filtra SEMPRE anche per tabella (settings/clients/projects, cioè la sorgente corrente del
+// flyout): la stessa configurazione tipo_valore può avere colonne diverse a seconda della
+// tabella di destinazione. Cerca prima le righe del proprio tenant; se assenti, ripiega
+// sulle righe globali (tenant_id IS NULL), configurazione standard di sistema.
+app.get('/api/set-var-layout', requireAuth, async (req, res) => {
+  try {
+    const tipoValore = ((req.query && req.query.tipo_valore) || '').trim();
+    const tabella = ((req.query && req.query.source) || '').trim();
+    if (!tipoValore) return res.status(400).json({ error: 'tipo_valore richiesto' });
+    if (!tabella || !['settings', 'clients', 'projects'].includes(tabella)) {
+      return res.status(400).json({ error: 'source richiesto (settings, clients o projects)' });
+    }
+    let r = await db.query(
+      `SELECT colonna FROM set_var_layout WHERE tenant_id = $1 AND tipo_valore = $2 AND tabella = $3 ORDER BY ordinamento NULLS LAST, colonna`,
+      [req.user.tenant_id, tipoValore, tabella]
+    );
+    if (r.rows.length === 0) {
+      r = await db.query(
+        `SELECT colonna FROM set_var_layout WHERE tenant_id IS NULL AND tipo_valore = $1 AND tabella = $2 ORDER BY ordinamento NULLS LAST, colonna`,
+        [tipoValore, tabella]
+      );
+    }
+    res.json({ columns: r.rows.map(x => x.colonna).filter(Boolean) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -2876,17 +2991,11 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
         try {
           const rawCampo = String(row.campo || '');
           const stripped = rawCampo.replace(/^\(\*\)\s*/, '');
-          const lv = await db.query(
-            `SELECT valore FROM lookup_values
-             WHERE tenant_id = $1 AND user_id = $2 AND tipo_valore = $3
-               AND (nome_campo = $4 OR nome_campo = $5)
-               AND (id_roles IS NULL OR id_roles = '' OR (id_roles ~ '^[0-9]+$' AND id_roles::int >= $6))
-               AND (data_inizio IS NULL OR data_inizio <= CURRENT_DATE)
-               AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
-             ORDER BY ordinamento NULLS LAST, valore`,
-            [req.user.tenant_id, effectiveUserId, String(row.tipo_valore), rawCampo, stripped, roleLevel]
+          const lookup = await resolveLookupValues(
+            req.user.tenant_id, effectiveUserId, String(row.tipo_valore), rawCampo, stripped, roleLevel
           );
-          row.lookup_options = lv.rows.map(x => x.valore);
+          row.lookup_options = lookup.rows.map(x => x.valore);
+          row.lookup_is_custom = lookup.isCustom; // true se la sorgente ha tenant_id/user_id valorizzati
         } catch (e) { row.lookup_options = []; }
       }
     }

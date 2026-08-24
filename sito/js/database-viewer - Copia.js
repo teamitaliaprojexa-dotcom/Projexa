@@ -470,30 +470,11 @@ async function createFormField(columnName, value, fkInfo) {
         });
         if (response.ok) {
           const relatedData = await response.json();
-          const rawOptions = relatedData.map(row => {
-            // Priorità alle colonne "desc_*" (es. proj_worker_cost.desc_worker), come nelle
-            // altre risoluzioni FK dell'app; altrimenti i soliti fallback per nome leggibile.
-            const descKey = Object.keys(row).find(k => /^desc_/i.test(k));
-            const display = descKey && row[descKey] != null && row[descKey] !== ''
-              ? row[descKey]
-              : (row.nominativo || row.name || row.display_name || row.description || row.title || row.valore2 || `Item ${row.id}`);
-            return {
-              // Valore inviato = colonna referenziata dalla FK (es. roles.id_roles), non row.id.
-              val: row[fkColumn] != null ? row[fkColumn] : row.id,
-              display: escapeHtml(display)
-            };
-          });
-          // DISTINCT per testo visualizzato: più righe possono condividere la stessa
-          // descrizione (es. più tariffe con lo stesso desc_worker) e nel menu deve
-          // comparire una sola voce per ciascun testo. Se tra i duplicati c'è il valore
-          // attualmente selezionato, si preferisce quello per non perdere la selezione.
-          const byDisplay = new Map();
-          rawOptions.forEach(opt => {
-            const key = opt.display;
-            const existing = byDisplay.get(key);
-            if (!existing || String(opt.val) == String(value)) byDisplay.set(key, opt);
-          });
-          options = [...byDisplay.values()];
+          options = relatedData.map(row => ({
+            // Valore inviato = colonna referenziata dalla FK (es. roles.id_roles), non row.id.
+            val: row[fkColumn] != null ? row[fkColumn] : row.id,
+            display: escapeHtml(row.nominativo || row.name || row.display_name || row.description || row.title || row.valore2 || `Item ${row.id}`)
+          }));
         }
       }
 
