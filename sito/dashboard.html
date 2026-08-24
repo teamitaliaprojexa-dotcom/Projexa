@@ -612,14 +612,12 @@
             position: sticky;
             top: 0;
             z-index: 2;
-            background: #f5f7fa;
-            color: #536174;
-            font-weight: 600;
-            box-shadow: inset -1px 0 rgba(148, 163, 184, 0.12);
-        }
-        .type11-grid-table th:first-child {
             background: linear-gradient(135deg, #7186a3, #8fa2bb);
             color: white;
+            font-weight: 600;
+            box-shadow: inset -1px 0 rgba(255, 255, 255, 0.18);
+        }
+        .type11-grid-table th:first-child {
             border-radius: 10px 0 0 10px;
         }
         .type11-grid-table th:last-child { border-radius: 0 10px 10px 0; }
@@ -633,21 +631,21 @@
         }
         .type11-grid-table tbody td:first-child {
             min-width: 150px;
-            color: white;
+            color: #344054;
             font-weight: 600;
             border-radius: 10px 0 0 10px;
         }
         .type11-grid-table tbody td:last-child { border-radius: 0 10px 10px 0; }
-        .type11-grid-table tbody tr:nth-child(5n+1) td { background: #f2ecfb; }
-        .type11-grid-table tbody tr:nth-child(5n+1) td:first-child { background: linear-gradient(135deg, #a873d3, #bc8ce0); }
-        .type11-grid-table tbody tr:nth-child(5n+2) td { background: #eeedff; }
-        .type11-grid-table tbody tr:nth-child(5n+2) td:first-child { background: linear-gradient(135deg, #8378e8, #9b91f2); }
-        .type11-grid-table tbody tr:nth-child(5n+3) td { background: #eaf1ff; }
-        .type11-grid-table tbody tr:nth-child(5n+3) td:first-child { background: linear-gradient(135deg, #5f91ee, #76a7f7); }
-        .type11-grid-table tbody tr:nth-child(5n+4) td { background: #e8f7ff; }
-        .type11-grid-table tbody tr:nth-child(5n+4) td:first-child { background: linear-gradient(135deg, #45a9e8, #62bdf0); }
-        .type11-grid-table tbody tr:nth-child(5n) td { background: #e7f9fc; }
-        .type11-grid-table tbody tr:nth-child(5n) td:first-child { background: linear-gradient(135deg, #2eb8d7, #4cc8e3); }
+        .type11-grid-table tbody tr.group-color-0 td { background: #f2ecfb; }
+        .type11-grid-table tbody tr.group-color-0 td:first-child { background: #f2ecfb; color: #4f46a5; }
+        .type11-grid-table tbody tr.group-color-1 td { background: #e8f7ee; }
+        .type11-grid-table tbody tr.group-color-1 td:first-child { background: #e8f7ee; color: #15803d; }
+        .type11-grid-table tbody tr.group-color-2 td { background: #fff4df; }
+        .type11-grid-table tbody tr.group-color-2 td:first-child { background: #fff4df; color: #92400e; }
+        .type11-grid-table tbody tr.group-color-3 td { background: #eaf1ff; }
+        .type11-grid-table tbody tr.group-color-3 td:first-child { background: #eaf1ff; color: #1d4ed8; }
+        .type11-grid-table tbody tr.group-color-4 td { background: #e8f7fc; }
+        .type11-grid-table tbody tr.group-color-4 td:first-child { background: #e8f7fc; color: #0f766e; }
         .type11-grid-table tbody tr:hover td { filter: brightness(0.97); }
         .type11-grid-state {
             padding: 0.65rem;
@@ -2017,11 +2015,7 @@
                     <div style="display: flex; gap: 1rem; align-items: center;">
                         <label style="font-weight: 500; color: var(--dark);">Anno:</label>
                         <select id="yearSelector" style="padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; cursor: pointer;">
-                            <option value="2022">2022</option>
-                            <option value="2023">2023</option>
-                            <option value="2024" selected>2024</option>
-                            <option value="2025">2025</option>
-                            <option value="2026">2026</option>
+                            <option value="">Caricamento...</option>
                         </select>
                     </div>
                 </div>
@@ -2442,59 +2436,57 @@
 
         // === KPI FATTURATO CHART ===
         let revenueChart = null;
+        let kpiFatturazioneData = [];
 
-        // Dati di esempio: clienti con fatturato e forecast per anno
-        const revenueData = {
-            'Acme Corp': { 
-                2022: { revenue: 45000, forecast: 8000 }, 
-                2023: { revenue: 52000, forecast: 10000 }, 
-                2024: { revenue: 68000, forecast: 15000 }, 
-                2025: { revenue: 75000, forecast: 18000 },
-                2026: { revenue: 82000, forecast: 20000 }
-            },
-            'Tech Solutions': { 
-                2022: { revenue: 38000, forecast: 6000 }, 
-                2023: { revenue: 41000, forecast: 8000 }, 
-                2024: { revenue: 55000, forecast: 12000 }, 
-                2025: { revenue: 62000, forecast: 15000 },
-                2026: { revenue: 70000, forecast: 17000 }
-            },
-            'Global Industries': { 
-                2022: { revenue: 52000, forecast: 10000 }, 
-                2023: { revenue: 58000, forecast: 12000 }, 
-                2024: { revenue: 71000, forecast: 18000 }, 
-                2025: { revenue: 85000, forecast: 22000 },
-                2026: { revenue: 95000, forecast: 26000 }
-            },
-            'Digital Ventures': { 
-                2022: { revenue: 31000, forecast: 5000 }, 
-                2023: { revenue: 36000, forecast: 7000 }, 
-                2024: { revenue: 48000, forecast: 11000 }, 
-                2025: { revenue: 58000, forecast: 14000 },
-                2026: { revenue: 68000, forecast: 16000 }
-            },
-            'Smart Systems': { 
-                2022: { revenue: 42000, forecast: 8000 }, 
-                2023: { revenue: 47000, forecast: 9000 }, 
-                2024: { revenue: 59000, forecast: 13000 }, 
-                2025: { revenue: 70000, forecast: 16000 },
-                2026: { revenue: 80000, forecast: 19000 }
-            },
-            'Future Works': { 
-                2022: { revenue: 28000, forecast: 4000 }, 
-                2023: { revenue: 33000, forecast: 6000 }, 
-                2024: { revenue: 45000, forecast: 10000 }, 
-                2025: { revenue: 54000, forecast: 12000 },
-                2026: { revenue: 62000, forecast: 14000 }
-            },
-            'Network Plus': { 
-                2022: { revenue: 35000, forecast: 6000 }, 
-                2023: { revenue: 39000, forecast: 7000 }, 
-                2024: { revenue: 51000, forecast: 11000 }, 
-                2025: { revenue: 61000, forecast: 14000 },
-                2026: { revenue: 71000, forecast: 17000 }
-            },
-        };
+        // Carica i dati reali dalla view PostgreSQL kpi_fatturazione.
+        // La view espone: tenant_id, client_id, user_id, anno, totale, forecast.
+        async function loadKpiFatturazione() {
+            try {
+                const response = await fetch(`${API_URL}/data/kpi_fatturazione`, {
+                    headers: getAuthHeaders()
+                });
+
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.error || `Errore HTTP ${response.status}`);
+                }
+
+                const payload = await response.json();
+                kpiFatturazioneData = Array.isArray(payload)
+                    ? payload
+                    : (Array.isArray(payload.rows) ? payload.rows : []);
+
+                populateRevenueYears();
+                console.log(`✓ ${kpiFatturazioneData.length} record caricati da kpi_fatturazione`);
+            } catch (error) {
+                kpiFatturazioneData = [];
+                console.warn('[KPI FATTURATO]', error.message);
+                showNotification('Impossibile caricare i dati del KPI Fatturato', 'info');
+            }
+        }
+
+        // Popola dinamicamente la tendina degli anni sulla base della view.
+        function populateRevenueYears() {
+            const yearSelector = document.getElementById('yearSelector');
+            if (!yearSelector) return;
+
+            const years = [...new Set(
+                kpiFatturazioneData
+                    .map(row => Number(row.anno))
+                    .filter(year => Number.isFinite(year))
+            )].sort((a, b) => a - b);
+
+            const currentYear = new Date().getFullYear();
+            const selectedYear = years.includes(currentYear)
+                ? currentYear
+                : (years.length ? Math.max(...years) : currentYear);
+
+            yearSelector.innerHTML = years.map(year =>
+                `<option value="${year}">${year}</option>`
+            ).join('');
+
+            yearSelector.value = String(selectedYear);
+        }
 
         function initRevenueChart() {
             const yearSelector = document.getElementById('yearSelector');
@@ -2502,62 +2494,80 @@
 
             if (!ctx || !yearSelector) return;
 
-            // Listener per cambio anno
             yearSelector.addEventListener('change', (e) => {
                 updateRevenueChart(e.target.value);
             });
 
-            // Carica il grafico per l'anno selezionato
             updateRevenueChart(yearSelector.value);
         }
 
+        function getKpiClientYearTotals(clientId, year) {
+            const rows = kpiFatturazioneData.filter(item =>
+                String(item.client_id) === String(clientId) && Number(item.anno) === Number(year)
+            );
+
+            return rows.reduce((totals, item) => {
+                totals.totale += Number(item.totale) || 0;
+                totals.forecast += Number(item.forecast) || 0;
+                return totals;
+            }, { totale: 0, forecast: 0 });
+        }
+
         function updateRevenueChart(year) {
-            const year_num = parseInt(year);
+            const year_num = parseInt(year, 10);
             const clientSelector = document.getElementById('clientSelector');
             const selectedClient = clientSelector ? clientSelector.value : '';
 
-            let clients, revenues, forecasts;
+            let clients = [];
+            let revenues = [];
+            let forecasts = [];
 
             if (selectedClient === '') {
-                // Mostra tutti i clienti
-                clients = dashboardClients.length
-                    ? dashboardClients.map(client => client.name)
-                    : Object.keys(revenueData);
-                revenues = clients.map(client => revenueData[client]?.[year_num]?.revenue || 0);
-                forecasts = clients.map(client => revenueData[client]?.[year_num]?.forecast || 0);
+                // Tutti i clienti presenti nel filtro clienti.
+                clients = dashboardClients.map(client => client.name);
+
+                revenues = clients.map(clientName => {
+                    const client = dashboardClients.find(c => c.name === clientName);
+                    const clientId = client?.id == null ? null : String(client.id);
+                    return getKpiClientYearTotals(clientId, year_num).totale;
+                });
+
+                forecasts = clients.map(clientName => {
+                    const client = dashboardClients.find(c => c.name === clientName);
+                    const clientId = client?.id == null ? null : String(client.id);
+                    return getKpiClientYearTotals(clientId, year_num).forecast;
+                });
             } else {
-                // Mostra solo il cliente selezionato
+                const client = dashboardClients.find(c => c.name === selectedClient);
+                const clientId = client?.id == null ? null : String(client.id);
+                const totals = getKpiClientYearTotals(clientId, year_num);
+
                 clients = [selectedClient];
-                revenues = [revenueData[selectedClient]?.[year_num]?.revenue || 0];
-                forecasts = [revenueData[selectedClient]?.[year_num]?.forecast || 0];
+                revenues = [totals.totale];
+                forecasts = [totals.forecast];
             }
 
-            // Calcola i totali
             const totalRevenue = revenues.reduce((a, b) => a + b, 0);
             const totalForecast = forecasts.reduce((a, b) => a + b, 0);
             const totalClients = clients.length;
 
-            // Aggiorna il display totale
             document.getElementById('selectedYear').textContent = year;
             document.getElementById('totalRevenue').innerHTML = `
-                <div style="font-size: 2rem; font-weight: bold; color: var(--primary);">€${totalRevenue.toLocaleString('it-IT')}</div>
-                <div style="font-size: 1rem; color: #10B981; margin-top: 0.5rem; font-weight: 600;">+ €${totalForecast.toLocaleString('it-IT')} forecast</div>
+                <div style="font-size: 2rem; font-weight: bold; color: var(--primary);">€${totalRevenue.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                <div style="font-size: 1rem; color: #10B981; margin-top: 0.5rem; font-weight: 600;">+ €${totalForecast.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} forecast</div>
             `;
             document.getElementById('totalClients').textContent = totalClients;
 
-            // Distruggi il grafico precedente se esiste
             if (revenueChart) {
                 revenueChart.destroy();
             }
 
-            // Calcola l'altezza dinamica: 60px per cliente, minimo 150px
             const chartHeight = Math.max(150, clients.length * 60);
             const chartContainer = document.getElementById('chartContainer');
             if (chartContainer) {
                 chartContainer.style.height = chartHeight + 'px';
             }
 
-            // Crea il nuovo grafico con fatturato e forecast
             const ctx = document.getElementById('revenueChart');
             revenueChart = new Chart(ctx, {
                 type: 'bar',
@@ -2585,7 +2595,7 @@
                     ]
                 },
                 options: {
-                    indexAxis: 'y', // Grafico orizzontale
+                    indexAxis: 'y',
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
@@ -2601,13 +2611,18 @@
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    return context.dataset.label + ': €' + context.parsed.x.toLocaleString('it-IT');
+                                    return context.dataset.label + ': €' + context.parsed.x.toLocaleString('it-IT', {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2
+                                    });
                                 },
                                 afterLabel: function(context) {
-                                    // Se è il dataset fatturato, aggiungi il forecast nel tooltip
                                     if (context.datasetIndex === 0) {
-                                        const forecastValue = context.chart.data.datasets[1].data[context.dataIndex];
-                                        return 'Forecast: €' + forecastValue.toLocaleString('it-IT');
+                                        const forecastValue = context.chart.data.datasets[1].data[context.dataIndex] || 0;
+                                        return 'Forecast: €' + Number(forecastValue).toLocaleString('it-IT', {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2
+                                        });
                                     }
                                 }
                             }
@@ -6713,6 +6728,7 @@
             await loadDataFromAPI();
 
             initTodoList();
+            await loadKpiFatturazione();
             initRevenueChart();
             initClientFilter();
             initMeetings(); // Carica le riunioni da Google Calendar
@@ -6747,5 +6763,74 @@
         </div>
     </div>
     <script src="js/privacy.js"></script>
+<script>
+(function () {
+    const colorClasses = [
+        "group-color-0", "group-color-1", "group-color-2",
+        "group-color-3", "group-color-4"
+    ];
+
+    function normalizeGroupValue(value) {
+        return (value || "").replace(/\s+/g, " ").trim().toLocaleLowerCase("it-IT");
+    }
+
+    function applyGridGrouping() {
+        document.querySelectorAll(".type11-grid-table").forEach(function (table) {
+            const tbody = table.querySelector("tbody");
+            if (!tbody) return;
+
+            const rows = Array.from(tbody.querySelectorAll("tr"));
+            if (!rows.length) return;
+
+            const groups = new Map();
+            const groupRows = new Map();
+
+            // Il colore viene assegnato nell'ordine in cui compare per la prima volta
+            // un valore nella prima colonna.
+            rows.forEach(function (row, index) {
+                const firstCell = row.querySelector("td:first-child");
+                const key = normalizeGroupValue(firstCell ? firstCell.textContent : "");
+                row.__gridOriginalIndex = index;
+                row.__gridGroupKey = key;
+
+                if (!groups.has(key)) {
+                    groups.set(key, groups.size % colorClasses.length);
+                    groupRows.set(key, []);
+                }
+                groupRows.get(key).push(row);
+            });
+
+            // Riordina fisicamente le righe: tutte quelle con lo stesso valore
+            // della prima colonna diventano consecutive.
+            const orderedRows = [];
+            groupRows.forEach(function (group) {
+                orderedRows.push.apply(orderedRows, group);
+            });
+
+            orderedRows.forEach(function (row) {
+                colorClasses.forEach(c => row.classList.remove(c));
+                row.classList.add("group-color-" + groups.get(row.__gridGroupKey));
+                tbody.appendChild(row);
+            });
+        });
+    }
+
+    let applying = false;
+    const observer = new MutationObserver(function () {
+        if (applying) return;
+        applying = true;
+        observer.disconnect();
+        applyGridGrouping();
+        observer.observe(document.body, { childList: true, subtree: true });
+        applying = false;
+    });
+
+    // La griglia viene creata dinamicamente dal caricamento dei widget,
+    // quindi osserviamo il body e applichiamo il raggruppamento appena compare.
+    observer.observe(document.body, { childList: true, subtree: true });
+    applyGridGrouping();
+    window.applyType11GridGrouping = applyGridGrouping;
+})();
+</script>
 </body>
 </html>

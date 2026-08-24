@@ -1621,18 +1621,39 @@ app.put('/api/settings/argument/rename', requireAuth, async (req, res) => {
 //   WHERE argument='Cliente' AND campo='Cliente' AND tenant_id=? AND user_id=?
 app.get('/api/clients/names', requireAuth, async (req, res) => {
   try {
+    const admin = isAdminUser(req);
+
     // Eccezione: la visibilità dei clienti scaduti dipende dal booleano
     // Impostazioni/Gestione Clienti/"Mostra tutti i clienti" (valore1).
     // ON = mostra tutti; OFF (o assente) = nascondi i clienti con scadenza < oggi.
-    const pref = await db.query(
-      `SELECT valore1 FROM settings
-       WHERE tenant_id = $1 AND user_id = $2
-         AND argument = 'Gestione Clienti' AND campo = 'Mostra tutti i clienti' LIMIT 1`,
-      [req.user.tenant_id, req.user.user_id]
-    );
-    const v = pref.rows[0] && pref.rows[0].valore1;
-    const showAll = (v === true || v === 't' || v === 'true');
+    // Per l'admin (nessun tenant/utente proprio su cui leggere questa preferenza)
+    // usiamo il default prudente: nascondi i clienti scaduti.
+    let showAll = false;
+    if (!admin) {
+      const pref = await db.query(
+        `SELECT valore1 FROM settings
+         WHERE tenant_id = $1 AND user_id = $2
+           AND argument = 'Gestione Clienti' AND campo = 'Mostra tutti i clienti' LIMIT 1`,
+        [req.user.tenant_id, req.user.user_id]
+      );
+      const v = pref.rows[0] && pref.rows[0].valore1;
+      showAll = (v === true || v === 't' || v === 'true');
+    }
     const scadCond = showAll ? '' : ` AND (c.scadenza IS NULL OR c.scadenza >= CURRENT_DATE)`;
+
+    // Admin di sistema (database-viewer): stesso bypass dell'isolamento per tenant
+    // usato dagli altri endpoint /api/data — vede i clienti di TUTTI i tenant,
+    // non filtra per proprietà/condivisione.
+    if (admin) {
+      const result = await db.query(
+        `SELECT id, valore2 AS name, tenant_id, false AS shared
+         FROM clients c
+         WHERE argument = 'Cliente' AND campo = 'Cliente'
+           AND valore2 IS NOT NULL${scadCond}
+         ORDER BY valore2`
+      );
+      return res.json(result.rows); // [{ id, name, tenant_id, shared }, ...]
+    }
 
     // Clienti propri + clienti condivisi con me (ACL). Un flag "shared" distingue i secondi.
     const result = await db.query(
