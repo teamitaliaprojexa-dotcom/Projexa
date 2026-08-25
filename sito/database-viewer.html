@@ -87,6 +87,14 @@
       <header class="dashboard-header">
         <h1>Database Viewer</h1>
         <div class="header-info">
+          <label style="font-size: 0.9rem; margin-right: 1rem;">Ambiente:
+            <select id="dbSelect" style="padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-left: 4px;">
+              <option value="main">Projexa</option>
+              <option value="auth">Projexa-Auth</option>
+              <option value="lic">Projexa-Lic</option>
+              <option value="notif">Projexa-Notif</option>
+            </select>
+          </label>
           <button onclick="window.location.href='sql-editor.html'" style="background: #8B5CF6; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; margin-right: 1rem;">
             <i class="fas fa-code"></i> SQL Editor
           </button>
@@ -123,6 +131,37 @@
     </div>
   </div>
 
+  <!-- Selezione ambiente Neon (Projexa vs Projexa-Auth): inietta l'header X-Target-DB su tutte le chiamate /api/ -->
+  <script>
+    window.__TARGET_DB = sessionStorage.getItem('targetDb') || 'main';
+    (function () {
+      const orig = window.fetch.bind(window);
+      window.fetch = (input, init) => {
+        init = init || {};
+        try {
+          if (window.__TARGET_DB && window.__TARGET_DB !== 'main') {
+            const url = (typeof input === 'string') ? input : (input && input.url) || '';
+            if (url.indexOf('/api/') !== -1) {
+              const h = new Headers(init.headers || {});
+              h.set('X-Target-DB', window.__TARGET_DB);
+              init = { ...init, headers: h };
+            }
+          }
+        } catch (e) { /* ignore */ }
+        return orig(input, init);
+      };
+    })();
+    document.addEventListener('DOMContentLoaded', () => {
+      const sel = document.getElementById('dbSelect');
+      if (sel) {
+        sel.value = window.__TARGET_DB;
+        sel.addEventListener('change', () => {
+          sessionStorage.setItem('targetDb', sel.value);
+          location.reload(); // ricarica con il nuovo ambiente selezionato
+        });
+      }
+    });
+  </script>
   <script src="js/auth.js"></script>
   <script src="js/database-viewer.js"></script>
 </body>

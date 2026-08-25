@@ -1,9 +1,46 @@
 // Database Viewer - Dynamic Table Management
 let currentTable = null;
 let allTables = [];
+let currentFilters = {};   // filtri per colonna attivi { colonna: valore }
+let currentColumns = [];   // ultime colonne note (per mostrare i filtri anche a 0 risultati)
 
 function getToken() {
   return localStorage.getItem('authToken');
+}
+
+// Decodifica il payload del JWT (authToken) per leggere i claim (ruolo, tenant, ecc.).
+function decodeJwtPayload() {
+  const token = getToken();
+  if (!token) return {};
+  try {
+    const part = token.split('.')[1];
+    const json = decodeURIComponent(escape(atob(part.replace(/-/g, '+').replace(/_/g, '/'))));
+    return JSON.parse(json);
+  } catch (e) {
+    return {};
+  }
+}
+
+function isAdminViewer() {
+  return Number(decodeJwtPayload().id_roles) === 1;
+}
+
+// Tenant del contesto (sola lettura), usato in cima ai form Aggiungi/Modifica.
+let cachedCurrentTenant = null;
+async function getCurrentTenant() {
+  if (cachedCurrentTenant) return cachedCurrentTenant;
+  try {
+    const res = await fetch(`${API_URL}/tenant/current`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+    if (res.ok) cachedCurrentTenant = await res.json();
+  } catch (e) { /* ignore */ }
+  return cachedCurrentTenant || { id: '', name: '' };
+}
+
+// Campo "Tenant" non editabile, mostrato in cima a tutti i form Aggiungi/Modifica.
+async function renderTenantFieldHtml() {
+  const t = await getCurrentTenant();
+  const label = t.name || t.id || '—';
+  return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Tenant</label><input type="text" value="${escapeHtml(label)}" disabled style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; background: #f3f4f6; color: #6b7280;"></div>`;
 }
 
 // Escaping HTML per evitare XSS: i dati del DB non sono fidati e vengono inseriti in innerHTML.
@@ -15,6 +52,112 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// Parser CSV: gestisce campi tra virgolette (con virgole/newline interni e "" per l'apice),
+// rileva il delimitatore (',' o ';') e usa la prima riga come intestazione.
+// Ritorna un array di oggetti { intestazione: valore }.
+function parseCsv(text) {
+  text = text.replace(/^﻿/, ''); // rimuove eventuale BOM
+  const nl = text.indexOf('\n');
+  const firstLine = nl === -1 ? text : text.slice(0, nl);
+  const delim = firstLine.split(';').length > firstLine.split(',').length ? ';' : ',';
+
+  const records = [];
+  let field = '', row = [], inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === delim) { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); records.push(row); row = []; field = ''; }
+      else if (c === '\r') { /* ignora */ }
+      else field += c;
+    }
+  }
+  if (field !== '' || row.length > 0) { row.push(field); records.push(row); }
+  if (records.length === 0) return [];
+
+  const headers = records[0].map(h => h.trim());
+  const objs = [];
+  for (let r = 1; r < records.length; r++) {
+    const rec = records[r];
+    if (rec.length === 1 && rec[0].trim() === '') continue; // salta righe vuote
+    const obj = {};
+    headers.forEach((h, idx) => { obj[h] = rec[idx] !== undefined ? rec[idx] : ''; });
+    objs.push(obj);
+  }
+  return objs;
+}
+
+// Import CSV con upsert (insert se nuovo, update se l'id esiste già).
+function importCsv(tableName) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv,text/csv';
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+
+    let rows;
+    try {
+      rows = parseCsv(await file.text());
+    } catch (e) {
+      alert('Impossibile leggere il file: ' + e.message);
+      return;
+    }
+    if (!rows || rows.length === 0) {
+      alert('Il file CSV è vuoto o non contiene righe valide.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/data/${tableName}/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
+        body: JSON.stringify({ rows })
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        alert('Errore nell\'import: ' + (result.error || response.status));
+        return;
+      }
+
+      // Anteprima: i dati NON sono ancora salvati, serve conferma (commit) o annullamento (rollback)
+      let msg = `Anteprima import (NON ancora salvato):\n- ${result.inserted} inseriti\n- ${result.updated} aggiornati`;
+      if (result.skipped) msg += `\n- ${result.skipped} saltati`;
+      if (result.errors && result.errors.length) {
+        msg += `\n- ${result.errors.length} errori (riga ${result.errors[0].row}: ${result.errors[0].error})`;
+      }
+      msg += `\n\nOK = CONFERMA e salva (Commit)\nAnnulla = ANNULLA senza salvare (Rollback)`;
+      const doCommit = confirm(msg);
+      const endpoint = doCommit ? 'commit' : 'rollback';
+
+      try {
+        const fin = await fetch(`${API_URL}/data/import/${endpoint}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        const finRes = await fin.json();
+        if (fin.ok) {
+          alert(doCommit ? 'Modifiche confermate e salvate.' : 'Import annullato: nessuna modifica salvata.');
+          if (doCommit) await loadTableData(tableName);
+        } else {
+          alert('Errore: ' + (finRes.error || fin.status));
+        }
+      } catch (e) {
+        alert('Errore di connessione durante la conferma: ' + e.message);
+      }
+    } catch (e) {
+      alert('Errore di connessione: ' + e.message);
+    }
+  };
+  input.click();
 }
 
 // Load all table structures from database
@@ -86,6 +229,8 @@ async function selectTable(tableId) {
   if (!table) return;
 
   currentTable = table;
+  currentFilters = {};   // reset filtri al cambio tabella
+  currentColumns = [];
   renderTablesList();
 
   // Update header
@@ -102,6 +247,7 @@ async function selectTable(tableId) {
   buttonsDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 20px;';
   buttonsDiv.innerHTML = `
     <button onclick="newRecord('${table.table_name}')" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
+    <button onclick="importCsv('${table.table_name}')" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Import CSV</button>
   `;
   tableData.insertBefore(buttonsDiv, tableData.firstChild);
 
@@ -109,117 +255,121 @@ async function selectTable(tableId) {
   await loadTableData(table.table_name);
 }
 
-// Load data from a specific table
+// Load data from a specific table (con filtri per colonna)
 async function loadTableData(tableName) {
   const tableContent = document.getElementById('tableData');
   const buttons = tableContent.querySelector('.table-action-buttons');
   tableContent.innerHTML = '<p class="loading">Loading...</p>';
-  if (buttons) {
-    tableContent.insertBefore(buttons, tableContent.firstChild);
-  }
+  if (buttons) tableContent.insertBefore(buttons, tableContent.firstChild);
+
+  // Ricostruisce il contenuto preservando i pulsanti, con eventuale messaggio
+  const restore = (msgHtml) => {
+    const btns = tableContent.querySelector('.table-action-buttons');
+    tableContent.innerHTML = '';
+    if (btns) tableContent.appendChild(btns);
+    if (msgHtml) {
+      const d = document.createElement('div');
+      d.className = 'empty-state';
+      d.innerHTML = msgHtml;
+      tableContent.appendChild(d);
+    }
+    return tableContent;
+  };
+
+  // Query string dai filtri attivi
+  const qs = Object.entries(currentFilters)
+    .filter(([, v]) => v !== '' && v != null)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&');
 
   try {
-    const response = await fetch(`${API_URL}/data/${tableName}`, {
+    const response = await fetch(`${API_URL}/data/${tableName}${qs ? '?' + qs : ''}`, {
       headers: { 'Authorization': `Bearer ${getToken()}` }
     });
 
-    if (response.ok) {
-      const data = await response.json();
+    if (!response.ok) { restore('<p>Error loading data</p>'); return; }
 
-      if (!data || data.length === 0) {
-        tableContent.innerHTML = '<div class="empty-state"><p>No data in this table</p></div>';
-        return;
-      }
+    const data = await response.json();
+    const hasFilters = Object.keys(currentFilters).length > 0;
+    const hiddenColumns = ['id', 'created_by', 'created_at', 'updated_at'];
 
-      // Filter out system columns
-      const hiddenColumns = ['id', 'created_by', 'created_at', 'updated_at'];
-      const columns = Object.keys(data[0]).filter(col => !hiddenColumns.includes(col));
-
-      const html = `
-        <div style="overflow-x: auto;">
-          <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="background-color: var(--gray-100); border-bottom: 2px solid var(--gray-300);">
-                ${columns.map(col => `
-                  <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--gray-700);">
-                    ${escapeHtml(col)}
-                  </th>
-                `).join('')}
-                <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--gray-700);">Azioni</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${data.map(row => `
-                <tr style="border-bottom: 1px solid var(--gray-200);" data-row-id="${row.id}">
-                  ${columns.map(col => {
-                    let value = row[col];
-                    if (value === null) {
-                      return '<td style="padding: 12px; color: var(--gray-400);"><em>null</em></td>';
-                    }
-                    if (typeof value === 'object') {
-                      value = JSON.stringify(value);
-                    }
-                    const strValue = String(value).substring(0, 100);
-                    return `<td style="padding: 12px; color: var(--gray-700);">${escapeHtml(strValue)}</td>`;
-                  }).join('')}
-                  <td style="padding: 12px; text-align: center; display: flex; gap: 8px; justify-content: center;">
-                    <button class="btn-edit" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #3B82F6;" title="Edit">✏️</button>
-                    <button class="btn-delete" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #EF4444;" title="Delete">✕</button>
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      `;
-      // Preserve buttons and insert table after them
-      const buttons = tableContent.querySelector('.table-action-buttons');
-      tableContent.innerHTML = '';
-      if (buttons) {
-        tableContent.appendChild(buttons);
-      }
-      const tableDiv = document.createElement('div');
-      tableDiv.innerHTML = html;
-      tableContent.appendChild(tableDiv);
-
-      // Add event listeners for action buttons
-      tableDiv.querySelectorAll('.btn-edit').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const rowId = btn.closest('tr').dataset.rowId;
-          console.log(`Edit clicked: table=${tableName}, id=${rowId}`);
-          editRecord(tableName, rowId);
-        });
-      });
-
-      tableDiv.querySelectorAll('.btn-delete').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const rowId = btn.closest('tr').dataset.rowId;
-          console.log(`Delete clicked: table=${tableName}, id=${rowId}`);
-          deleteRecord(tableName, rowId);
-        });
-      });
+    // Determina le colonne: da un record, o le ultime note se il filtro non ha risultati
+    let columns;
+    if (data && data.length > 0) {
+      columns = Object.keys(data[0]).filter(col => !hiddenColumns.includes(col));
+      currentColumns = columns;
+    } else if (hasFilters && currentColumns.length) {
+      columns = currentColumns;
     } else {
-      const buttons = tableContent.querySelector('.table-action-buttons');
-      tableContent.innerHTML = '';
-      if (buttons) {
-        tableContent.appendChild(buttons);
-      }
-      const errorDiv = document.createElement('div');
-      errorDiv.className = 'empty-state';
-      errorDiv.innerHTML = '<p>Error loading data</p>';
-      tableContent.appendChild(errorDiv);
+      restore('<p>No data in this table</p>');
+      return;
     }
+
+    const html = `
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead>
+            <tr style="background-color: var(--gray-100); border-bottom: 2px solid var(--gray-300);">
+              ${columns.map(col => `<th style="padding: 12px; text-align: left; font-weight: 600; color: var(--gray-700);">${escapeHtml(col)}</th>`).join('')}
+              <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--gray-700);">Azioni</th>
+            </tr>
+            <tr style="background-color: var(--gray-100); border-bottom: 1px solid var(--gray-300);">
+              ${columns.map(col => `<th style="padding: 4px 8px;"><input type="text" class="col-filter" data-col="${escapeHtml(col)}" value="${escapeHtml(currentFilters[col] || '')}" placeholder="Filtra…" style="width: 100%; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-weight: normal; font-size: 0.85rem;"></th>`).join('')}
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(data || []).map(row => `
+              <tr style="border-bottom: 1px solid var(--gray-200);" data-row-id="${row.id}">
+                ${columns.map(col => {
+                  let value = row[col];
+                  if (value === null) return '<td style="padding: 12px; color: var(--gray-400);"><em>null</em></td>';
+                  if (typeof value === 'object') value = JSON.stringify(value);
+                  const strValue = String(value).substring(0, 100);
+                  return `<td style="padding: 12px; color: var(--gray-700);">${escapeHtml(strValue)}</td>`;
+                }).join('')}
+                <td style="padding: 12px; text-align: center; display: flex; gap: 8px; justify-content: center;">
+                  <button class="btn-edit" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #3B82F6;" title="Edit">✏️</button>
+                  <button class="btn-duplicate" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #10B981;" title="Duplica">📋</button>
+                  <button class="btn-delete" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #EF4444;" title="Delete">✕</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    const container = restore(null);
+    const tableDiv = document.createElement('div');
+    tableDiv.innerHTML = html;
+    container.appendChild(tableDiv);
+
+    if (!data || data.length === 0) {
+      const note = document.createElement('div');
+      note.style.cssText = 'padding: 12px; color: var(--gray-400); font-style: italic;';
+      note.textContent = 'Nessun risultato con i filtri applicati.';
+      container.appendChild(note);
+    }
+
+    // Filtri: applica al cambio (invio o uscita dal campo)
+    tableDiv.querySelectorAll('.col-filter').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const col = inp.dataset.col;
+        const val = inp.value.trim();
+        if (val) currentFilters[col] = val; else delete currentFilters[col];
+        loadTableData(tableName);
+      });
+    });
+
+    // Azioni riga
+    tableDiv.querySelectorAll('.btn-edit').forEach(btn => btn.addEventListener('click', () => editRecord(tableName, btn.closest('tr').dataset.rowId)));
+    tableDiv.querySelectorAll('.btn-duplicate').forEach(btn => btn.addEventListener('click', () => duplicateRecord(tableName, btn.closest('tr').dataset.rowId)));
+    tableDiv.querySelectorAll('.btn-delete').forEach(btn => btn.addEventListener('click', () => deleteRecord(tableName, btn.closest('tr').dataset.rowId)));
+
   } catch (error) {
     console.error('Error loading table data:', error);
-    const buttons = tableContent.querySelector('.table-action-buttons');
-    tableContent.innerHTML = '';
-    if (buttons) {
-      tableContent.appendChild(buttons);
-    }
-    const errorDiv = document.createElement('div');
-    errorDiv.className = 'empty-state';
-    errorDiv.innerHTML = '<p>Connection error</p>';
-    tableContent.appendChild(errorDiv);
+    restore('<p>Connection error</p>');
   }
 }
 
@@ -283,6 +433,8 @@ async function deleteTable(tableId) {
 
 // Load table_structures table directly
 async function loadTableStructuresTable() {
+  currentFilters = {};   // reset filtri
+  currentColumns = [];
   // Update header
   document.getElementById('selectedTableName').textContent = 'Table Structures';
   document.getElementById('selectedTableDesc').textContent = 'Manage database tables metadata';
@@ -297,6 +449,7 @@ async function loadTableStructuresTable() {
   buttonsDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 20px;';
   buttonsDiv.innerHTML = `
     <button onclick="newRecord('table_structures')" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
+    <button onclick="importCsv('table_structures')" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Import CSV</button>
   `;
   tableData.insertBefore(buttonsDiv, tableData.firstChild);
 
@@ -310,8 +463,11 @@ let currentModalRecordId = null;
 let currentModalColumns = [];
 
 // Create form field (handles foreign keys, boolean fields, and password fields)
-async function createFormField(columnName, value) {
+async function createFormField(columnName, value, fkInfo, contextRecord) {
   const safeColumn = escapeHtml(columnName);
+  // fkInfo può essere una stringa (vecchio formato) o { table, column }.
+  const fkTable = fkInfo && typeof fkInfo === 'object' ? fkInfo.table : fkInfo;
+  const fkColumn = (fkInfo && typeof fkInfo === 'object' && fkInfo.column) ? fkInfo.column : 'id';
 
   // Check if this is a password field
   if (columnName === 'password' || columnName === 'password_hash') {
@@ -324,34 +480,109 @@ async function createFormField(columnName, value) {
     return `<div style="margin-bottom: 1rem;"><label style="display: flex; align-items: center; gap: 12px; font-weight: 500; cursor: pointer;"><input type="hidden" name="${safeColumn}" value="false"><input type="checkbox" name="${safeColumn}" value="true" ${isChecked ? 'checked' : ''} style="width: 20px; height: 20px; cursor: pointer; accent-color: #10B981;"><span>${safeColumn}</span></label></div>`;
   }
 
-  // Check if this is a foreign key field (ends with _id)
-  if (columnName.endsWith('_id')) {
-    let relatedTableName = columnName.slice(0, -3); // Remove "_id"
-
-    // Pluralize table name (simple rules)
-    if (!relatedTableName.endsWith('s')) {
-      relatedTableName = relatedTableName + 's';
-    }
-
+  // client_id -> menu a discesa dalla vista ele_clienti, filtrata per tenant_id/user_id
+  // del CONTESTO (login corrente), non della riga in modifica.
+  if (columnName === 'client_id') {
     try {
-      const response = await fetch(`${API_URL}/data/${relatedTableName}`, {
-        headers: { 'Authorization': `Bearer ${getToken()}` }
-      });
+      const res = await fetch(`${API_URL}/lookup/clients`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+      if (res.ok) {
+        const rows = await res.json();
+        const optionsHtml = rows.map(r => `<option value="${escapeHtml(r.id)}" ${String(r.id) == String(value) ? 'selected' : ''}>${escapeHtml(r.name || ('Item ' + r.id))}</option>`).join('');
+        return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><select name="${safeColumn}" id="ff_client_id" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"><option value="">-- Seleziona --</option>${optionsHtml}</select></div>`;
+      }
+    } catch (e) { console.error('Error loading ele_clienti:', e); }
+  }
 
-      if (response.ok) {
-        const relatedData = await response.json();
-        const options = relatedData.map(row => ({
-          id: row.id,
-          display: escapeHtml(row.name || row.display_name || row.description || row.title || `Item ${row.id}`)
-        }));
+  // project_id -> menu a discesa dalla vista ele_progetti, filtrata per tenant_id/user_id
+  // del contesto e client_id della riga (se presente).
+  if (columnName === 'project_id') {
+    try {
+      const clientId = (contextRecord && contextRecord.client_id) || '';
+      const qs = clientId ? `?clientId=${encodeURIComponent(clientId)}` : '';
+      const res = await fetch(`${API_URL}/lookup/projects${qs}`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+      if (res.ok) {
+        const rows = await res.json();
+        const optionsHtml = rows.map(r => `<option value="${escapeHtml(r.id)}" ${String(r.id) == String(value) ? 'selected' : ''}>${escapeHtml(r.name || ('Item ' + r.id))}</option>`).join('');
+        return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><select name="${safeColumn}" id="ff_project_id" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"><option value="">-- Seleziona --</option>${optionsHtml}</select></div>`;
+      }
+    } catch (e) { console.error('Error loading ele_progetti:', e); }
+  }
 
-        const optionsHtml = options.map(opt => `<option value="${escapeHtml(opt.id)}" ${opt.id == value ? 'selected' : ''}>${opt.display}</option>`).join('');
+  // Foreign key -> dropdown dalla tabella referenziata.
+  // Priorità alla FK reale (da metadati); in fallback l'euristica "colonna che finisce in _id".
+  let relatedTableName = fkTable || null;
+  if (!relatedTableName && columnName.endsWith('_id')) {
+    relatedTableName = columnName.slice(0, -3);
+    if (!relatedTableName.endsWith('s')) relatedTableName = relatedTableName + 's';
+  }
+  if (relatedTableName) {
+    try {
+      let options = null;
+      if (relatedTableName === 'clients') {
+        // clients è EAV: usa l'elenco dei nomi (righe identità) invece di tutte le righe
+        const response = await fetch(`${API_URL}/clients/names`, {
+          headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          options = data.map(c => ({ val: c[fkColumn] != null ? c[fkColumn] : c.id, display: escapeHtml(c.name || `Item ${c.id}`) }));
+        }
+      } else {
+        const response = await fetch(`${API_URL}/data/${relatedTableName}`, {
+          headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        if (response.ok) {
+          const relatedData = await response.json();
+          const rawOptions = relatedData.map(row => {
+            // Priorità alle colonne "desc_*" (es. proj_worker_cost.desc_worker), come nelle
+            // altre risoluzioni FK dell'app; altrimenti i soliti fallback per nome leggibile.
+            const descKey = Object.keys(row).find(k => /^desc_/i.test(k));
+            const display = descKey && row[descKey] != null && row[descKey] !== ''
+              ? row[descKey]
+              : (row.nominativo || row.name || row.display_name || row.description || row.title || row.valore2 || `Item ${row.id}`);
+            return {
+              // Valore inviato = colonna referenziata dalla FK (es. roles.id_roles), non row.id.
+              val: row[fkColumn] != null ? row[fkColumn] : row.id,
+              display: escapeHtml(display)
+            };
+          });
+          // DISTINCT per testo visualizzato: più righe possono condividere la stessa
+          // descrizione (es. più tariffe con lo stesso desc_worker) e nel menu deve
+          // comparire una sola voce per ciascun testo. Se tra i duplicati c'è il valore
+          // attualmente selezionato, si preferisce quello per non perdere la selezione.
+          const byDisplay = new Map();
+          rawOptions.forEach(opt => {
+            const key = opt.display;
+            const existing = byDisplay.get(key);
+            if (!existing || String(opt.val) == String(value)) byDisplay.set(key, opt);
+          });
+          options = [...byDisplay.values()];
+        }
+      }
 
+      if (options) {
+        const optionsHtml = options.map(opt => `<option value="${escapeHtml(opt.val)}" ${opt.val == value ? 'selected' : ''}>${opt.display}</option>`).join('');
         return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><select name="${safeColumn}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"><option value="">-- Seleziona --</option>${optionsHtml}</select></div>`;
       }
     } catch (error) {
       console.error('Error loading related data:', error);
     }
+  }
+
+  // Campi data: usa un selettore data (input type="date") così il valore è sempre
+  // nel formato AAAA-MM-GG accettato dal database. Riconosce nomi tipo "data_*",
+  // "scadenza", "*_data"/"*_date".
+  if (columnName === 'scadenza' || /^data(_|$)/i.test(columnName) || /(^|_)(data|date)(_|$)/i.test(columnName)) {
+    let dateVal = '';
+    if (value) {
+      const d = new Date(value);
+      if (!isNaN(d.getTime())) {
+        dateVal = d.toISOString().slice(0, 10);
+      } else if (/^\d{4}-\d{2}-\d{2}/.test(String(value))) {
+        dateVal = String(value).slice(0, 10);
+      }
+    }
+    return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><input type="date" name="${safeColumn}" value="${escapeHtml(dateVal)}" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"></div>`;
   }
 
   // Default: text input
@@ -361,32 +592,50 @@ async function createFormField(columnName, value) {
 
 // Open modal for editing a record
 async function editRecord(tableName, recordId) {
-  const response = await fetch(`${API_URL}/data/${tableName}`, {
+  // Se la riga non ha un id (tabella con PK diversa da "id" o composita) non possiamo
+  // identificarla: avvisa invece di fallire in silenzio.
+  if (recordId === undefined || recordId === null || recordId === '' || recordId === 'undefined') {
+    alert(`Impossibile modificare: la tabella "${tableName}" non ha una colonna "id" per identificare la riga.`);
+    return;
+  }
+
+  // Recupero mirato per id: la tabella può avere >100 righe (LIMIT lato server),
+  // quindi NON scarico tutta la tabella ma filtro sull'id della riga cliccata.
+  const response = await fetch(`${API_URL}/data/${tableName}?id=${encodeURIComponent(recordId)}`, {
     headers: { 'Authorization': `Bearer ${getToken()}` }
   });
 
-  if (!response.ok) return;
+  if (!response.ok) {
+    alert(`Errore nel caricamento dei dati (${response.status}).`);
+    return;
+  }
 
   const data = await response.json();
   // recordId arriva da dataset.rowId (stringa); r.id può essere numerico.
   // Confronto per stringa per evitare il mismatch "5" === 5 → false.
   const record = data.find(r => String(r.id) === String(recordId));
-  if (!record) return;
+  if (!record) {
+    alert(`Record con id "${recordId}" non trovato nella tabella "${tableName}".`);
+    return;
+  }
 
   currentModalTable = tableName;
   currentModalRecordId = recordId;
 
-  // Get all columns except system ones
+  // Colonne del record, escluse le sistema e le generate (non modificabili).
   const hiddenColumns = ['id', 'created_by', 'created_at', 'updated_at'];
-  currentModalColumns = Object.keys(record).filter(col => !hiddenColumns.includes(col));
+  const meta = await fetchColumnsMeta(tableName);
+  const generated = new Set((meta || []).filter(c => c.generated).map(c => c.name));
+  const fkMap = fkMapFromMeta(meta);
+  currentModalColumns = Object.keys(record).filter(col => !hiddenColumns.includes(col) && !generated.has(col));
 
   document.getElementById('modalTitle').textContent = 'Edit Record';
 
   const formFields = document.getElementById('formFields');
-  let htmlContent = '';
+  let htmlContent = await renderTenantFieldHtml();
 
   for (const col of currentModalColumns) {
-    htmlContent += await createFormField(col, record[col] || '');
+    htmlContent += await createFormField(col, record[col] || '', fkMap[col], record);
   }
 
   formFields.innerHTML = htmlContent;
@@ -423,27 +672,118 @@ async function editRecord(tableName, recordId) {
   }
 }
 
+// Apri la modale pre-compilata con i valori della riga, ma salvando come NUOVO record.
+async function duplicateRecord(tableName, recordId) {
+  // Recupero mirato per id (vedi editRecord): evita il LIMIT su tabelle grandi.
+  const response = await fetch(`${API_URL}/data/${tableName}?id=${encodeURIComponent(recordId)}`, {
+    headers: { 'Authorization': `Bearer ${getToken()}` }
+  });
+
+  if (!response.ok) return;
+
+  const data = await response.json();
+  const record = data.find(r => String(r.id) === String(recordId));
+  if (!record) return;
+
+  currentModalTable = tableName;
+  currentModalRecordId = null; // null => al salvataggio esegue POST (crea un nuovo record)
+
+  // Stesse colonne dell'edit, escluse quelle di sistema e le generate
+  const hiddenColumns = ['id', 'created_by', 'created_at', 'updated_at'];
+  const meta = await fetchColumnsMeta(tableName);
+  const generated = new Set((meta || []).filter(c => c.generated).map(c => c.name));
+  const fkMap = fkMapFromMeta(meta);
+  currentModalColumns = Object.keys(record).filter(col => !hiddenColumns.includes(col) && !generated.has(col));
+
+  document.getElementById('modalTitle').textContent = 'Duplica Record';
+
+  const formFields = document.getElementById('formFields');
+  let htmlContent = await renderTenantFieldHtml();
+
+  for (const col of currentModalColumns) {
+    htmlContent += await createFormField(col, record[col] || '', fkMap[col], record);
+  }
+
+  formFields.innerHTML = htmlContent;
+  document.getElementById('recordModal').style.display = 'flex';
+
+  // Auto-popola id_roles quando cambia role_id (come nelle altre modali)
+  const roleSelect = document.querySelector('select[name="role_id"]');
+  const idRolesInput = document.querySelector('input[name="id_roles"]');
+
+  if (roleSelect && idRolesInput) {
+    roleSelect.addEventListener('change', async (e) => {
+      const selectedRoleId = e.target.value;
+      if (!selectedRoleId) {
+        idRolesInput.value = '';
+        return;
+      }
+
+      try {
+        const r = await fetch(`${API_URL}/data/roles`, {
+          headers: { 'Authorization': `Bearer ${getToken()}` }
+        });
+        if (r.ok) {
+          const roles = await r.json();
+          const selectedRole = roles.find(x => x.id == selectedRoleId);
+          if (selectedRole && selectedRole.id_roles) {
+            idRolesInput.value = selectedRole.id_roles;
+          }
+        }
+      } catch (error) {
+        console.error('Error loading role details:', error);
+      }
+    });
+  }
+}
+
 // Open modal for creating a new record
+// Metadati colonne dal backend: [{ name, generated }]. Funziona anche a tabella vuota.
+async function fetchColumnsMeta(tableName) {
+  try {
+    const res = await fetch(`${API_URL}/data/${tableName}/columns`, {
+      headers: { 'Authorization': `Bearer ${getToken()}` }
+    });
+    if (res.ok) return await res.json();
+  } catch (e) { /* fallback gestito dal chiamante */ }
+  return null;
+}
+
+// Mappa colonna -> tabella referenziata (foreign key), dai metadati.
+function fkMapFromMeta(meta) {
+  const m = {};
+  // Per ogni FK memorizza tabella e colonna referenziata (es. id_roles -> roles.id_roles).
+  (meta || []).forEach(c => { if (c.references) m[c.name] = { table: c.references, column: c.referencesColumn || 'id' }; });
+  return m;
+}
+
 async function newRecord(tableName) {
   currentModalTable = tableName;
   currentModalRecordId = null;
 
-  // Extract columns from the table header (works for any table)
-  const tableHeaders = Array.from(document.querySelectorAll('table thead th'));
-  if (tableHeaders.length > 0) {
-    // Remove last column (Azioni)
-    currentModalColumns = tableHeaders.slice(0, -1).map(th => th.textContent.trim());
+  const hiddenColumns = ['id', 'created_by', 'created_at', 'updated_at'];
+  // Colonne dal backend (valido anche con tabella vuota); escludi sistema e generate.
+  const meta = await fetchColumnsMeta(tableName);
+  const fkMap = fkMapFromMeta(meta);
+  if (meta) {
+    currentModalColumns = meta
+      .filter(c => !hiddenColumns.includes(c.name) && !c.generated)
+      .map(c => c.name);
   } else {
-    currentModalColumns = [];
+    // Fallback: prima riga di intestazione (la seconda è la riga dei filtri), senza "Azioni"
+    const tableHeaders = Array.from(document.querySelectorAll('table thead tr:first-child th'));
+    currentModalColumns = tableHeaders.length > 0
+      ? tableHeaders.slice(0, -1).map(th => th.textContent.trim())
+      : [];
   }
 
   document.getElementById('modalTitle').textContent = 'New Record';
 
   const formFields = document.getElementById('formFields');
-  let htmlContent = '';
+  let htmlContent = await renderTenantFieldHtml();
 
   for (const col of currentModalColumns) {
-    htmlContent += await createFormField(col, '');
+    htmlContent += await createFormField(col, '', fkMap[col], null);
   }
 
   formFields.innerHTML = htmlContent;
@@ -490,6 +830,12 @@ async function saveRecord(event) {
   // Save table name before closeModal() resets it
   const tableName = currentModalTable;
   const recordId = currentModalRecordId;
+
+  // Admin: chiede se applicare la modifica solo al tenant corrente o a TUTTI i tenant.
+  if (isAdminViewer()) {
+    const applyAll = confirm('Applicare questa modifica a TUTTI i tenant?\n\nOK = tutti i tenant\nAnnulla = solo il tenant corrente');
+    data.__scope = applyAll ? 'all-tenants' : 'this-tenant';
+  }
 
   const method = recordId ? 'PUT' : 'POST';
   const url = recordId
@@ -550,7 +896,9 @@ async function deleteRecord(tableName, recordId) {
       const table = currentTable || { table_name: tableName };
       await loadTableData(table.table_name || tableName);
     } else {
-      alert('Error deleting record');
+      // Mostra il messaggio del server (es. 409: record collegato ad altri dati).
+      const err = await response.json().catch(() => ({}));
+      alert(err.error || 'Error deleting record');
     }
   } catch (error) {
     console.error('Error deleting record:', error);

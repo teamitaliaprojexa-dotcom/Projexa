@@ -82,12 +82,10 @@
 
         .login-form-section {
             flex: 1;
-            padding: 4rem 3rem;
+            padding: 2rem 3rem;
             display: flex;
             flex-direction: column;
             justify-content: center;
-            overflow-y: auto;
-            max-height: 600px;
         }
 
         .form-container {
@@ -97,7 +95,7 @@
         }
 
         .form-header {
-            margin-bottom: 2rem;
+            margin-bottom: 1.25rem;
         }
 
         .form-header h2 {
@@ -112,7 +110,7 @@
         }
 
         .form-group {
-            margin-bottom: 1.5rem;
+            margin-bottom: 1rem;
         }
 
         .form-group label {
@@ -155,7 +153,7 @@
             display: flex;
             align-items: center;
             cursor: pointer;
-            margin-bottom: 2rem;
+            margin-bottom: 1rem;
         }
 
         .checkbox-group input {
@@ -201,7 +199,7 @@
 
         .divider {
             position: relative;
-            margin-bottom: 2rem;
+            margin-bottom: 1.25rem;
         }
 
         .divider::before {
@@ -227,12 +225,12 @@
         .oauth-buttons {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 1rem;
-            margin-bottom: 2rem;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
         }
 
         .oauth-btn {
-            padding: 0.75rem;
+            padding: 0.55rem;
             border: 1px solid #E5E7EB;
             background: white;
             border-radius: 8px;
@@ -364,6 +362,7 @@
                     </div>
 
                     <div class="error-message" id="errorMessage"></div>
+                    <div id="successMessage" style="display:none; background:#ECFDF5; color:#065F46; border:1px solid #A7F3D0; border-radius:8px; padding:0.6rem 0.8rem; font-size:0.9rem; margin-bottom:0.75rem;"></div>
 
                     <form id="emailForm" onsubmit="handleEmailLogin(event)">
                         <div class="form-group">
@@ -401,6 +400,22 @@
                             <span>Microsoft</span>
                         </button>
                     </div>
+
+                    <!-- Metodi di accesso alternativi (solo UI, logica da implementare) -->
+                    <div class="oauth-buttons" style="grid-template-columns: 1fr; gap: 0.75rem;">
+                        <button type="button" class="oauth-btn" title="Accedi con Magic link">
+                            <i class="fas fa-wand-magic-sparkles"></i>
+                            <span>Magic link</span>
+                        </button>
+                        <button type="button" class="oauth-btn" title="Accedi con Passkey">
+                            <i class="fas fa-fingerprint"></i>
+                            <span>Passkey</span>
+                        </button>
+                        <button type="button" class="oauth-btn" title="Accedi con app Authenticator">
+                            <i class="fas fa-shield-halved"></i>
+                            <span>Authenticator</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -418,15 +433,16 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 
     <script>
-        // URL auto-rilevati dall'origine corrente: in locale (backend Node su
-        // http://localhost:3001) puntano al locale; su Render puntano a Render.
-        // Nota: per il login Microsoft/Google in locale, il redirect_uri diventa
+        // In locale (localhost) usa l'origine corrente (backend Node che serve anche
+        // il sito); in produzione il frontend è su GitHub Pages, quindi punta al
+        // backend Render. Nota: per OAuth in locale il redirect_uri diventa
         // http://localhost:3001/... e va registrato nell'app registration (Azure/Google).
-        const API_URL = window.location.origin + '/api';
+        const IS_LOCAL_HOST = (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+        const API_URL = (IS_LOCAL_HOST ? location.origin : 'https://projexa-4mix.onrender.com') + '/api';
         const GOOGLE_CLIENT_ID = '128379880931-guh70j47lsvplo9m1intpj9tt7escdn8.apps.googleusercontent.com';
         const MICROSOFT_CLIENT_ID = '9f2bbd57-07ad-4368-83ed-14dd373e86e8';
         const MICROSOFT_TENANT_ID = '1977b365-a1d3-4119-9f29-e676094eb845';
-        const BACKEND_URL = window.location.origin;
+        const BACKEND_URL = IS_LOCAL_HOST ? location.origin : 'https://projexa-4mix.onrender.com';
         
         let selectedTenant = null;
         let loginData = null;
@@ -469,6 +485,9 @@
                 } else if (response.status === 300) {
                     loginData = { email, password };
                     showTenantModal(data.tenants);
+                } else if (response.status === 404) {
+                    // Email non censita: vai alla pagina "Prova gratuita" con l'email precompilata.
+                    window.location.href = `./prova-gratuita.html?email=${encodeURIComponent(email)}`;
                 } else {
                     errorDiv.textContent = data.error || 'Errore durante l\'accesso';
                     errorDiv.style.display = 'block';
@@ -601,6 +620,21 @@
         }
 
         window.addEventListener('load', initializeGoogleSignIn);
+
+        // Messaggi dopo registrazione / conferma iscrizione (Prova gratuita).
+        window.addEventListener('load', () => {
+            const p = new URLSearchParams(location.search);
+            const s = document.getElementById('successMessage');
+            if (!s) return;
+            if (p.get('confirmed') === '1') {
+                s.textContent = 'Iscrizione confermata! Prova gratuita di 1 mese attivata. Ora puoi accedere.';
+                s.style.display = 'block';
+            } else if (p.get('registered') === '1') {
+                s.textContent = 'Registrazione completata! Ti abbiamo inviato un\'email: clicca su "Conferma iscrizione" per attivare la prova gratuita.';
+                s.style.display = 'block';
+            }
+        });
     </script>
+    <script src="js/privacy.js"></script>
 </body>
 </html>

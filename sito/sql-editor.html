@@ -231,6 +231,14 @@
         <header>
             <h1><i class="fas fa-database"></i> SQL Editor</h1>
             <div class="header-actions">
+                <label style="font-size: 0.9rem; margin-right: 1rem;">Ambiente:
+                    <select id="dbSelect" style="padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-left: 4px;">
+                        <option value="main">Projexa</option>
+                        <option value="auth">Projexa-Auth</option>
+                        <option value="lic">Projexa-Lic</option>
+                        <option value="notif">Projexa-Notif</option>
+                    </select>
+                </label>
                 <button class="btn btn-primary" onclick="goBack()">
                     <i class="fas fa-arrow-left"></i> Indietro
                 </button>
@@ -285,8 +293,38 @@
     </div>
 
     <script>
-        // URL auto-rilevato dall'origine (locale o Render), senza modifiche da rifare.
-        const API_URL = window.location.origin + '/api';
+        // Selezione ambiente Neon (Projexa vs Projexa-Auth): inietta X-Target-DB sulle chiamate /api/.
+        window.__TARGET_DB = sessionStorage.getItem('targetDb') || 'main';
+        (function () {
+            const orig = window.fetch.bind(window);
+            window.fetch = (input, init) => {
+                init = init || {};
+                try {
+                    if (window.__TARGET_DB && window.__TARGET_DB !== 'main') {
+                        const url = (typeof input === 'string') ? input : (input && input.url) || '';
+                        if (url.indexOf('/api/') !== -1) {
+                            const h = new Headers(init.headers || {});
+                            h.set('X-Target-DB', window.__TARGET_DB);
+                            init = { ...init, headers: h };
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+                return orig(input, init);
+            };
+        })();
+        document.addEventListener('DOMContentLoaded', () => {
+            const sel = document.getElementById('dbSelect');
+            if (sel) {
+                sel.value = window.__TARGET_DB;
+                sel.addEventListener('change', () => { sessionStorage.setItem('targetDb', sel.value); location.reload(); });
+            }
+        });
+
+        // In locale (localhost) usa l'origine corrente; in produzione il frontend è
+        // su GitHub Pages, quindi punta al backend Render. Stesso codice ovunque.
+        const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+          ? location.origin
+          : 'https://projexa-4mix.onrender.com') + '/api';
         let editor;
         let transactionActive = false;
         let lastQueryResults = null;

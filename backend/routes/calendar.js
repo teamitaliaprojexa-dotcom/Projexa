@@ -6,7 +6,12 @@ const router = express.Router();
 // Frontend chiama questo endpoint, che fa da proxy per Microsoft Graph API
 router.get('/microsoft-events', async (req, res) => {
   try {
-    const { token, startDateTime, endDateTime } = req.query;
+    const { startDateTime, endDateTime } = req.query;
+
+    // Il token si legge dall'header Authorization (preferito, non finisce nei log).
+    // Fallback alla query string solo per retrocompatibilità.
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : req.query.token;
 
     // Validazione
     if (!token) {
@@ -74,7 +79,10 @@ router.get('/microsoft-events', async (req, res) => {
 // === GOOGLE CALENDAR PROXY (opzionale, per coerenza) ===
 router.get('/google-events', async (req, res) => {
   try {
-    const { token, timeMin, timeMax } = req.query;
+    const { timeMin, timeMax } = req.query;
+
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : req.query.token;
 
     if (!token) {
       return res.status(400).json({ error: 'Google access token required' });

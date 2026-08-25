@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prova gratuita 1 mese — Projexa</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+        }
+        .card { background: #fff; width: 100%; max-width: 480px; border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,0.2); padding: 2rem; }
+        .logo { font-size: 1.6rem; font-weight: 700; color: #059669; text-align: center; margin-bottom: 0.25rem; }
+        .trial { background: #ECFDF5; border: 1px solid #A7F3D0; color: #065F46; border-radius: 10px; padding: 0.75rem 1rem; text-align: center; font-size: 0.9rem; margin: 1rem 0 1.25rem; }
+        .trial strong { display: block; font-size: 1rem; }
+        label { display: block; font-size: 0.8rem; font-weight: 600; color: #374151; margin: 0.75rem 0 0.25rem; }
+        input[type=text], input[type=email], input[type=password] {
+            width: 100%; padding: 0.6rem 0.75rem; border: 1px solid #D1D5DB; border-radius: 8px; font-size: 0.95rem; font-family: inherit;
+        }
+        input:focus { outline: none; border-color: #10B981; box-shadow: 0 0 0 3px rgba(16,185,129,0.15); }
+        .row { display: flex; gap: 0.75rem; }
+        .row > div { flex: 1; }
+        .methods { display: flex; gap: 0.5rem; margin-top: 0.35rem; }
+        .method { flex: 1; border: 1px solid #D1D5DB; border-radius: 8px; padding: 0.55rem; text-align: center; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: #374151; background: #fff; }
+        .method.active { border-color: #10B981; background: #ECFDF5; color: #065F46; }
+        .hint { font-size: 0.75rem; color: #6B7280; margin-top: 0.2rem; }
+        #saveBtn { display: none; width: 100%; margin-top: 1.25rem; padding: 0.8rem; background: #10B981; color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 700; cursor: pointer; }
+        #saveBtn:hover { background: #059669; }
+        .msg { margin-top: 0.9rem; font-size: 0.85rem; padding: 0.6rem 0.8rem; border-radius: 8px; display: none; }
+        .msg.err { background: #FEF2F2; color: #991B1B; border: 1px solid #FCA5A5; }
+        .msg.ok { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
+        .backlink { display: block; text-align: center; margin-top: 1rem; font-size: 0.85rem; color: #059669; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo">Projexa</div>
+        <div class="trial">
+            <strong>Prova gratuita di 1 mese</strong>
+            Nessun costo. Attiva subito il tuo spazio di lavoro.
+        </div>
+
+        <form id="trialForm" autocomplete="off">
+            <label for="email">Email *</label>
+            <input type="email" id="email" required placeholder="nome@dominio.it">
+
+            <label for="tenant">Nome del workspace *</label>
+            <input type="text" id="tenant" required placeholder="Il mio Workspace">
+            <div class="hint">Puoi lasciare quello proposto o scriverne uno tuo.</div>
+
+            <div class="row">
+                <div>
+                    <label for="nome">Nome *</label>
+                    <input type="text" id="nome" required placeholder="Nome">
+                </div>
+                <div>
+                    <label for="cognome">Cognome *</label>
+                    <input type="text" id="cognome" required placeholder="Cognome">
+                </div>
+            </div>
+
+            <label>Come vuoi accedere?</label>
+            <div class="methods">
+                <div class="method active" data-method="password">Password</div>
+                <div class="method" data-method="google">Google</div>
+                <div class="method" data-method="microsoft">Microsoft</div>
+            </div>
+
+            <div id="pwWrap">
+                <label for="password">Password *</label>
+                <input type="password" id="password" placeholder="Almeno 8 caratteri">
+                <label for="confirm">Conferma password *</label>
+                <input type="password" id="confirm" placeholder="Ripeti la password">
+            </div>
+            <div class="hint" id="oauthHint" style="display:none;">Con Google/Microsoft non serve la password: accederai tramite il provider.</div>
+
+            <button type="submit" id="saveBtn">Salva e attiva la prova gratuita</button>
+            <button type="button" id="confirmBtn" style="display:none; width:100%; margin-top:1.25rem; padding:0.8rem; background:#10B981; color:#fff; border:none; border-radius:8px; font-size:1rem; font-weight:700; cursor:pointer;">Conferma iscrizione</button>
+        </form>
+
+        <div class="msg err" id="errMsg"></div>
+        <div class="msg ok" id="okMsg"></div>
+        <a class="backlink" href="./login.html">← Torna al login</a>
+    </div>
+
+    <script>
+        const IS_LOCAL_HOST = ['localhost', '127.0.0.1'].includes(location.hostname);
+        const BACKEND_URL = IS_LOCAL_HOST ? location.origin : 'https://projexa-4mix.onrender.com';
+        const API_URL = BACKEND_URL + '/api';
+
+        const el = (id) => document.getElementById(id);
+        let method = 'password';
+        let tenantEdited = false;
+
+        // Nome workspace di default: [email] + "'" + spazio + "Workspace"
+        function defaultTenant(email) {
+            return email ? `${email}' Workspace` : '';
+        }
+
+        // Precompila email da query string e imposta il workspace di default
+        const params = new URLSearchParams(location.search);
+        const confirmToken = (params.get('token') || '').trim();  // presente = modalità conferma
+        let confirmMode = !!confirmToken;
+        const initialEmail = (params.get('email') || '').trim();
+        if (initialEmail) el('email').value = initialEmail;
+        el('tenant').value = defaultTenant(el('email').value);
+
+        // Se arrivi da un login OAuth (nuovo utente), precompila nome e metodo.
+        const initialName = (params.get('name') || '').trim();
+        if (initialName) {
+            const parts = initialName.split(/\s+/);
+            el('nome').value = parts.shift() || '';
+            el('cognome').value = parts.join(' ') || '';
+        }
+        const initialMethod = (params.get('method') || '').trim();
+        if (initialMethod === 'google' || initialMethod === 'microsoft') {
+            const m = document.querySelector(`.method[data-method="${initialMethod}"]`);
+            if (m) {
+                document.querySelectorAll('.method').forEach(x => x.classList.remove('active'));
+                m.classList.add('active');
+                method = initialMethod;
+                el('pwWrap').style.display = 'none';
+                el('oauthHint').style.display = 'block';
+                el('email').readOnly = true; // email verificata dal provider
+            }
+        }
+
+        el('email').addEventListener('input', () => {
+            if (!tenantEdited) el('tenant').value = defaultTenant(el('email').value.trim());
+            validate();
+        });
+        el('tenant').addEventListener('input', () => { tenantEdited = true; validate(); });
+        ['nome', 'cognome', 'password', 'confirm'].forEach(id => el(id).addEventListener('input', validate));
+
+        // Scelta del metodo di accesso
+        document.querySelectorAll('.method').forEach(m => {
+            m.addEventListener('click', () => {
+                document.querySelectorAll('.method').forEach(x => x.classList.remove('active'));
+                m.classList.add('active');
+                method = m.dataset.method;
+                const isPw = (method === 'password');
+                el('pwWrap').style.display = isPw ? 'block' : 'none';
+                el('oauthHint').style.display = isPw ? 'none' : 'block';
+                validate();
+            });
+        });
+
+        // Mostra "Salva" solo quando i campi obbligatori sono compilati
+        function validate() {
+            if (confirmMode) { el('saveBtn').style.display = 'none'; return false; } // in conferma non si registra
+            const email = el('email').value.trim();
+            const tenant = el('tenant').value.trim();
+            const nome = el('nome').value.trim();
+            const cognome = el('cognome').value.trim();
+            let ok = email && tenant && nome && cognome && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+            if (method === 'password') {
+                const pw = el('password').value, cf = el('confirm').value;
+                ok = ok && pw.length >= 8 && pw === cf;
+            }
+            el('saveBtn').style.display = ok ? 'block' : 'none';
+            return ok;
+        }
+
+        function showErr(t) { const e = el('errMsg'); e.textContent = t; e.style.display = 'block'; el('okMsg').style.display = 'none'; }
+        function showOk(t) { const o = el('okMsg'); o.textContent = t; o.style.display = 'block'; el('errMsg').style.display = 'none'; }
+
+        el('trialForm').addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            if (!validate()) return;
+            const btn = el('saveBtn'); btn.disabled = true;
+            const body = {
+                email: el('email').value.trim(),
+                tenantName: el('tenant').value.trim(),
+                nome: el('nome').value.trim(),
+                cognome: el('cognome').value.trim(),
+                method
+            };
+            if (method === 'password') { body.password = el('password').value; body.confirmPassword = el('confirm').value; }
+            try {
+                const res = await fetch(`${API_URL}/auth/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    if (data.emailSent) {
+                        showOk('Account creato! Ti abbiamo inviato un\'email: clicca su "Conferma iscrizione" per attivare la prova gratuita di 1 mese.');
+                    } else {
+                        showOk('Account creato. Non è stato possibile inviare l\'email di conferma: contatta il supporto per completare l\'attivazione.');
+                    }
+                    setTimeout(() => { location.href = './login.html?registered=1'; }, 2800);
+                } else {
+                    showErr(data.error || 'Errore durante la registrazione.');
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                showErr('Errore di connessione al server.');
+                btn.disabled = false;
+            }
+        });
+
+        // === Modalità CONFERMA ISCRIZIONE (link dall'email): campi non editabili + pulsante ===
+        async function enterConfirmMode(token) {
+            document.querySelector('.trial').innerHTML =
+                '<strong>Conferma la tua iscrizione</strong>Verifica i dati e conferma per attivare la prova gratuita di 1 mese.';
+            el('saveBtn').style.display = 'none';
+            document.querySelector('.methods').style.display = 'none';
+            document.querySelector('label[for="password"]') && (el('pwWrap').style.display = 'none');
+            el('pwWrap').style.display = 'none';
+            el('oauthHint').style.display = 'none';
+            // Tutti i campi in sola lettura (non modificabili in alcun modo)
+            ['email', 'tenant', 'nome', 'cognome'].forEach(id => {
+                el(id).readOnly = true;
+                el(id).style.background = '#F3F4F6';
+                el(id).tabIndex = -1;
+            });
+            try {
+                const res = await fetch(`${API_URL}/auth/confirm-info?token=${encodeURIComponent(token)}`);
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) { showErr(data.error || 'Link non valido o scaduto.'); return; }
+                el('email').value = data.email || '';
+                el('tenant').value = data.tenantName || '';
+                el('nome').value = data.nome || '';
+                el('cognome').value = data.cognome || '';
+                if (data.alreadyConfirmed) {
+                    showOk('Iscrizione già confermata. Puoi accedere.');
+                    el('confirmBtn').style.display = 'none';
+                    return;
+                }
+                el('confirmBtn').style.display = 'block';
+            } catch (e) {
+                showErr('Errore di connessione al server.');
+            }
+        }
+
+        el('confirmBtn').addEventListener('click', async () => {
+            const btn = el('confirmBtn'); btn.disabled = true;
+            try {
+                const res = await fetch(`${API_URL}/auth/confirm`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: confirmToken })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    showOk((data.message || 'Iscrizione confermata!') + ' Ti reindirizziamo al login…');
+                    setTimeout(() => { location.href = './login.html?confirmed=1'; }, 1600);
+                } else {
+                    showErr(data.error || 'Conferma non riuscita.');
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                showErr('Errore di connessione al server.');
+                btn.disabled = false;
+            }
+        });
+
+        if (confirmMode) enterConfirmMode(confirmToken);
+        validate();
+    </script>
+</body>
+</html>
