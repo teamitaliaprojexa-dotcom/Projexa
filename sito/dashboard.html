@@ -587,6 +587,31 @@
             background: transparent;
             overflow: hidden;
         }
+        /* Barra del nome campo (tipo 11): azzurra, larga quanto il flyout, con freccia
+           su/giù per aprire/chiudere verticalmente la griglia sottostante. */
+        .type11-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            box-sizing: border-box;
+            background: #CFE8FB;
+            color: #111827;
+            font-weight: 700;
+            font-size: 0.95rem;
+            padding: 0.55rem 0.9rem;
+            border-radius: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .type11-bar .type11-arrow {
+            flex: 0 0 auto;
+            color: #111827;
+            transition: transform 0.2s ease;
+        }
+        .settings-detail-row.type11-grid-row.collapsed .type11-grid-widget {
+            display: none;
+        }
         .type11-grid-scroll {
             width: 100%;
             max-height: 320px;
@@ -1647,6 +1672,8 @@
                         </div>
                         <!-- Form aggiunta argomento (stile flyout 2): nome + tipo + ruolo -->
                         <div id="settingsNewArgForm" style="display: none; margin-bottom: 0.75rem;">
+                            <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Tenant</label>
+                            <input id="settingsNewArgTenant" type="text" disabled value="…" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem; background: #f3f4f6; color: #6b7280;">
                             <input id="settingsNewArgName" type="text" placeholder="Nome dell'argomento" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;">
                             <select id="settingsNewArgType" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;"></select>
                             <div id="settingsNewArgTabellaWrap" style="display: none; margin-bottom: 0.5rem;">
@@ -2536,20 +2563,20 @@
             let forecasts = [];
 
             if (selectedClient === '') {
-                // Tutti i clienti presenti nel filtro clienti.
-                clients = dashboardClients.map(client => client.name);
+                // Tutti i clienti presenti nel filtro clienti, ma solo quelli che hanno
+                // almeno un valore (fatturato o forecast) diverso da zero per l'anno
+                // selezionato: i clienti senza dati non vengono mostrati nel grafico.
+                const withData = dashboardClients
+                    .map(client => {
+                        const clientId = client?.id == null ? null : String(client.id);
+                        const totals = getKpiClientYearTotals(clientId, year_num);
+                        return { name: client.name, totale: totals.totale, forecast: totals.forecast };
+                    })
+                    .filter(c => (Number(c.totale) || 0) !== 0 || (Number(c.forecast) || 0) !== 0);
 
-                revenues = clients.map(clientName => {
-                    const client = dashboardClients.find(c => c.name === clientName);
-                    const clientId = client?.id == null ? null : String(client.id);
-                    return getKpiClientYearTotals(clientId, year_num).totale;
-                });
-
-                forecasts = clients.map(clientName => {
-                    const client = dashboardClients.find(c => c.name === clientName);
-                    const clientId = client?.id == null ? null : String(client.id);
-                    return getKpiClientYearTotals(clientId, year_num).forecast;
-                });
+                clients = withData.map(c => c.name);
+                revenues = withData.map(c => c.totale);
+                forecasts = withData.map(c => c.forecast);
             } else {
                 const client = dashboardClients.find(c => c.name === selectedClient);
                 const clientId = client?.id == null ? null : String(client.id);
@@ -4014,6 +4041,15 @@
                 } catch (e) { /* ignore */ }
             }
             updateArgFieldExtras();
+            // Tenant del contesto (sola lettura)
+            const tenantInp = document.getElementById('settingsNewArgTenant');
+            if (tenantInp) {
+                tenantInp.value = '…';
+                try {
+                    const tr = await fetch(`${API_URL}/tenant/current`, { headers: getAuthHeaders() });
+                    if (tr.ok) { const t = await tr.json(); tenantInp.value = t.name || t.id || '—'; }
+                } catch (e) { tenantInp.value = '—'; }
+            }
             if (form) form.style.display = 'block';
             if (nameInp) nameInp.focus();
         }
@@ -5028,13 +5064,21 @@
             const hidden = ['id', 'id_cliente', 'ordinamento', 'tenant_id', 'user_id', 'created_by', 'created_at', 'updated_at'];
             const editable = cols.filter(c => !hidden.includes(c.name) && !c.generated);
 
+            // Tenant del contesto (sola lettura), in cima al form.
+            let tenantHtml = '';
+            try {
+                const tr = await fetch(`${API_URL}/tenant/current`, { headers: getAuthHeaders() });
+                const t = tr.ok ? await tr.json() : {};
+                tenantHtml = `<div class="settings-detail-row"><span class="campo-label">Tenant</span><input type="text" value="${escapeHtml(t.name || t.id || '—')}" disabled style="flex: 1 1 0; min-width: 0; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; background: #f3f4f6; color: #6b7280;"></div>`;
+            } catch (e) { /* ignore */ }
+
             // I campi FK (references) diventano menu a discesa dalla tabella referenziata.
             let fieldsHtml = '';
             for (const c of editable) {
                 fieldsHtml += await renderLinkedFieldHtml(c, '');
             }
             const barHtml = `<div style="display: flex; gap: 0.5rem; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;"><button id="linkedNewSave" style="flex: 1; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button><button id="linkedNewCancel" style="flex: 0 0 auto; padding: 0.6rem 0.9rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button></div>`;
-            listEl.innerHTML = fieldsHtml + barHtml;
+            listEl.innerHTML = tenantHtml + fieldsHtml + barHtml;
 
             document.getElementById('linkedNewSave').addEventListener('click', () => saveLinkedNewRow(desc));
             document.getElementById('linkedNewCancel').addEventListener('click', goBackDetail);
@@ -5289,6 +5333,19 @@
                 }
                 // Il contenitore del tipo 11 è ora nel DOM: carica le griglie presenti.
                 hydrateType11Grids(listEl);
+                // Barra tipo 11: click apre/chiude la griglia sottostante (freccia su/giù).
+                listEl.querySelectorAll('.type11-bar').forEach(bar => {
+                    bar.addEventListener('click', () => {
+                        const row = bar.closest('.type11-grid-row');
+                        if (!row) return;
+                        row.classList.toggle('collapsed');
+                        const icon = bar.querySelector('.type11-arrow i');
+                        if (icon) {
+                            icon.classList.toggle('fa-chevron-down', row.classList.contains('collapsed'));
+                            icon.classList.toggle('fa-chevron-up', !row.classList.contains('collapsed'));
+                        }
+                    });
+                });
                 // Ad ogni modifica: segna il campo come "da salvare" e mostra il pulsante Salva.
                 listEl.querySelectorAll('[data-setting-id]').forEach(inp => {
                     const onEdit = () => {
@@ -5705,7 +5762,17 @@
             } else if (tipo === 11) {
                 // Griglia: tabella e colonne arrivano dalla riga del contesto corrente
                 // (settings, clients o projects). Il caricamento avviene dopo il render.
-                input = `<div class="type11-grid-widget" data-grid-source="${escapeHtml(currentDetailSource)}" data-grid-field-id="${id}" data-grid-table="${escapeHtml(row.tabella == null ? '' : row.tabella)}" data-grid-columns="${escapeHtml(row.colonna == null ? '' : row.colonna)}" data-grid-tenant-id="${escapeHtml(row.tenant_id == null ? '' : row.tenant_id)}" data-grid-user-id="${escapeHtml(row.user_id == null ? '' : row.user_id)}" data-grid-client-id="${escapeHtml(row.client_id == null ? '' : row.client_id)}"><div class="type11-grid-state">Caricamento griglia…</div></div>`;
+                // Stato iniziale aperto/chiuso: valore1 = true -> chiusa di default,
+                // qualsiasi altro valore -> aperta di default.
+                const isTrueVal = (row.valore1 === true || row.valore1 === 'true' || row.valore1 === 't');
+                const startCollapsed = isTrueVal;
+                return `<div class="settings-detail-row type11-grid-row${startCollapsed ? ' collapsed' : ''}" data-row-id="${id}" data-campo="${campo}">
+                    <div class="type11-bar" data-type11-toggle="1">
+                        <span>${campoLabelHtml(row.campo)}</span>
+                        <span class="type11-arrow"><i class="fas fa-chevron-${startCollapsed ? 'down' : 'up'}"></i></span>
+                    </div>
+                    <div class="type11-grid-widget" data-grid-source="${escapeHtml(currentDetailSource)}" data-grid-field-id="${id}" data-grid-table="${escapeHtml(row.tabella == null ? '' : row.tabella)}" data-grid-columns="${escapeHtml(row.colonna == null ? '' : row.colonna)}" data-grid-tenant-id="${escapeHtml(row.tenant_id == null ? '' : row.tenant_id)}" data-grid-user-id="${escapeHtml(row.user_id == null ? '' : row.user_id)}" data-grid-client-id="${escapeHtml(row.client_id == null ? '' : row.client_id)}"><div class="type11-grid-state">Caricamento griglia…</div></div>
+                </div>`;
             } else if (tipo === 8) {
                 // Percentuale (numerico intero) -> valore3. In modifica: input numerico + "%";
                 // in vista: mostra "X%".
@@ -6128,6 +6195,7 @@
                     <span>${mode === 'add' ? 'Nuovo campo' : 'Modifica campo'}</span>
                     <button id="tvfClose" type="button" style="border:none; background:transparent; cursor:pointer; color:var(--text-muted); font-size:1rem;">✕</button>
                 </div>
+                <div style="margin-bottom:.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Tenant</label><input id="tvfTenant" type="text" disabled value="…" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px; background:#f3f4f6; color:#6b7280;"></div>
                 ${mode === 'add' ? `<div style="margin-bottom:.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Nome campo</label><input id="tvfName" placeholder="Nome del campo" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;"></div>` : ''}
                 <div style="margin-bottom:.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Tipo valore</label>
                 <select id="tvfType" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;" ${mode === 'edit' ? 'disabled' : ''}></select></div>
@@ -6143,6 +6211,15 @@
             box.querySelector('#tvfClose').addEventListener('click', close);
             box.querySelector('#tvfCancel').addEventListener('click', close);
 
+            // Tenant del contesto (sola lettura): evita l'errore di inserimento per tenant mancante.
+            (async () => {
+                const tenantInp = box.querySelector('#tvfTenant');
+                try {
+                    const tr = await fetch(`${API_URL}/tenant/current`, { headers: getAuthHeaders() });
+                    if (tr.ok) { const t = await tr.json(); if (tenantInp) tenantInp.value = t.name || t.id || '—'; }
+                } catch (e) { if (tenantInp) tenantInp.value = '—'; }
+            })();
+
             const typeSel = box.querySelector('#tvfType');
             try {
                 const tres = await fetch(`${API_URL}/tipo-valore`, { headers: getAuthHeaders() });
@@ -6153,24 +6230,53 @@
             } catch (e) { /* ignore */ }
             if (mode === 'edit' && existingTipoValore != null) typeSel.value = String(existingTipoValore);
 
+            // Interpreta set_var_layout.valori nel formato "codice:etichetta;codice:etichetta"
+            // -> [{ code, label }, ...]. Ritorna [] se non configurato o non parsabile.
+            function parseTvfValori(raw) {
+                const s = String(raw == null ? '' : raw).trim();
+                if (!s) return [];
+                return s.split(';').map(part => part.trim()).filter(Boolean).map(part => {
+                    const idx = part.indexOf(':');
+                    return idx === -1 ? { code: part, label: part } : { code: part.slice(0, idx).trim(), label: part.slice(idx + 1).trim() };
+                }).filter(o => o.code !== '');
+            }
+
             async function renderFieldsForType() {
                 const fieldsEl = box.querySelector('#tvfFields');
                 fieldsEl.innerHTML = '<div style="color:var(--text-muted); font-size:0.85rem;">Caricamento…</div>';
-                let columns = [];
+                let fields = [];
                 try {
                     const r = await fetch(`${API_URL}/set-var-layout?tipo_valore=${encodeURIComponent(typeSel.value)}&source=${encodeURIComponent(source)}`, { headers: getAuthHeaders() });
-                    if (r.ok) columns = (await r.json()).columns || [];
+                    if (r.ok) {
+                        const payload = await r.json();
+                        fields = Array.isArray(payload.fields) && payload.fields.length
+                            ? payload.fields
+                            : (payload.columns || []).map(c => ({ colonna: c, valori: null }));
+                    }
                 } catch (e) { /* ignore */ }
-                if (columns.length === 0) {
+                if (fields.length === 0) {
                     fieldsEl.innerHTML = '<div style="color:var(--text-muted); font-size:0.85rem;">Nessun campo configurato per questo tipo_valore</div>';
                     return;
                 }
-                fieldsEl.innerHTML = columns.map(c => {
+                fieldsEl.innerHTML = fields.map(f => {
+                    const c = f.colonna;
                     const existingVal = (mode === 'edit' && existingRow && Object.prototype.hasOwnProperty.call(existingRow, c))
                         ? existingRow[c] : '';
+                    const current = existingVal == null ? '' : String(existingVal);
+                    const opts = parseTvfValori(f.valori);
+                    if (opts.length > 0) {
+                        // Elenco configurato (set_var_layout.valori): menu a discesa, scrive il codice.
+                        const optionsHtml = ['<option value=""></option>'].concat(
+                            opts.map(o => `<option value="${escapeHtml(o.code)}" ${o.code === current ? 'selected' : ''}>${escapeHtml(o.label)}</option>`)
+                        ).join('');
+                        return `<div style="margin-bottom:.5rem;">
+                            <label style="display:block; font-size:.8rem; font-weight:600; margin-bottom:.2rem;">${escapeHtml(c)}</label>
+                            <select class="tvf-col" data-col="${escapeHtml(c)}" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">${optionsHtml}</select>
+                        </div>`;
+                    }
                     return `<div style="margin-bottom:.5rem;">
                         <label style="display:block; font-size:.8rem; font-weight:600; margin-bottom:.2rem;">${escapeHtml(c)}</label>
-                        <input class="tvf-col" data-col="${escapeHtml(c)}" value="${escapeHtml(existingVal == null ? '' : existingVal)}" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">
+                        <input class="tvf-col" data-col="${escapeHtml(c)}" value="${escapeHtml(current)}" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">
                     </div>`;
                 }).join('');
             }
@@ -6194,6 +6300,11 @@
                 } else {
                     url = `${API_URL}/data/${encodeURIComponent(source)}/${encodeURIComponent(rowId)}`;
                     method = 'PUT';
+                }
+                // Admin: chiede se applicare la modifica solo al tenant corrente o a TUTTI i tenant.
+                if (Number(decodeJwtPayload().id_roles) === 1) {
+                    const applyAll = confirm('Applicare questa modifica a TUTTI i tenant?\n\nOK = tutti i tenant\nAnnulla = solo il tenant corrente');
+                    values.__scope = applyAll ? 'all-tenants' : 'this-tenant';
                 }
                 try {
                     const res = await fetch(url, {

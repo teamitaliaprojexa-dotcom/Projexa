@@ -8,6 +8,41 @@ function getToken() {
   return localStorage.getItem('authToken');
 }
 
+// Decodifica il payload del JWT (authToken) per leggere i claim (ruolo, tenant, ecc.).
+function decodeJwtPayload() {
+  const token = getToken();
+  if (!token) return {};
+  try {
+    const part = token.split('.')[1];
+    const json = decodeURIComponent(escape(atob(part.replace(/-/g, '+').replace(/_/g, '/'))));
+    return JSON.parse(json);
+  } catch (e) {
+    return {};
+  }
+}
+
+function isAdminViewer() {
+  return Number(decodeJwtPayload().id_roles) === 1;
+}
+
+// Tenant del contesto (sola lettura), usato in cima ai form Aggiungi/Modifica.
+let cachedCurrentTenant = null;
+async function getCurrentTenant() {
+  if (cachedCurrentTenant) return cachedCurrentTenant;
+  try {
+    const res = await fetch(`${API_URL}/tenant/current`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+    if (res.ok) cachedCurrentTenant = await res.json();
+  } catch (e) { /* ignore */ }
+  return cachedCurrentTenant || { id: '', name: '' };
+}
+
+// Campo "Tenant" non editabile, mostrato in cima a tutti i form Aggiungi/Modifica.
+async function renderTenantFieldHtml() {
+  const t = await getCurrentTenant();
+  const label = t.name || t.id || '—';
+  return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Tenant</label><input type="text" value="${escapeHtml(label)}" disabled style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; background: #f3f4f6; color: #6b7280;"></div>`;
+}
+
 // Escaping HTML per evitare XSS: i dati del DB non sono fidati e vengono inseriti in innerHTML.
 function escapeHtml(value) {
   if (value === null || value === undefined) return '';
@@ -428,7 +463,7 @@ let currentModalRecordId = null;
 let currentModalColumns = [];
 
 // Create form field (handles foreign keys, boolean fields, and password fields)
-async function createFormField(columnName, value, fkInfo) {
+async function createFormField(columnName, value, fkInfo, contextRecord) {
   const safeColumn = escapeHtml(columnName);
   // fkInfo può essere una stringa (vecchio formato) o { table, column }.
   const fkTable = fkInfo && typeof fkInfo === 'object' ? fkInfo.table : fkInfo;
@@ -443,6 +478,34 @@ async function createFormField(columnName, value, fkInfo) {
   if (columnName.startsWith('is_') || columnName.startsWith('has_')) {
     const isChecked = value === true || value === 'true' || value === 1 || value === '1';
     return `<div style="margin-bottom: 1rem;"><label style="display: flex; align-items: center; gap: 12px; font-weight: 500; cursor: pointer;"><input type="hidden" name="${safeColumn}" value="false"><input type="checkbox" name="${safeColumn}" value="true" ${isChecked ? 'checked' : ''} style="width: 20px; height: 20px; cursor: pointer; accent-color: #10B981;"><span>${safeColumn}</span></label></div>`;
+  }
+
+  // client_id -> menu a discesa dalla vista ele_clienti, filtrata per tenant_id/user_id
+  // del CONTESTO (login corrente), non della riga in modifica.
+  if (columnName === 'client_id') {
+    try {
+      const res = await fetch(`${API_URL}/lookup/clients`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+      if (res.ok) {
+        const rows = await res.json();
+        const optionsHtml = rows.map(r => `<option value="${escapeHtml(r.id)}" ${String(r.id) == String(value) ? 'selected' : ''}>${escapeHtml(r.name || ('Item ' + r.id))}</option>`).join('');
+        return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><select name="${safeColumn}" id="ff_client_id" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"><option value="">-- Seleziona --</option>${optionsHtml}</select></div>`;
+      }
+    } catch (e) { console.error('Error loading ele_clienti:', e); }
+  }
+
+  // project_id -> menu a discesa dalla vista ele_progetti, filtrata per tenant_id/user_id
+  // del contesto e client_id della riga (se presente).
+  if (columnName === 'project_id') {
+    try {
+      const clientId = (contextRecord && contextRecord.client_id) || '';
+      const qs = clientId ? `?clientId=${encodeURIComponent(clientId)}` : '';
+      const res = await fetch(`${API_URL}/lookup/projects${qs}`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+      if (res.ok) {
+        const rows = await res.json();
+        const optionsHtml = rows.map(r => `<option value="${escapeHtml(r.id)}" ${String(r.id) == String(value) ? 'selected' : ''}>${escapeHtml(r.name || ('Item ' + r.id))}</option>`).join('');
+        return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><select name="${safeColumn}" id="ff_project_id" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"><option value="">-- Seleziona --</option>${optionsHtml}</select></div>`;
+      }
+    } catch (e) { console.error('Error loading ele_progetti:', e); }
   }
 
   // Foreign key -> dropdown dalla tabella referenziata.
@@ -569,10 +632,10 @@ async function editRecord(tableName, recordId) {
   document.getElementById('modalTitle').textContent = 'Edit Record';
 
   const formFields = document.getElementById('formFields');
-  let htmlContent = '';
+  let htmlContent = await renderTenantFieldHtml();
 
   for (const col of currentModalColumns) {
-    htmlContent += await createFormField(col, record[col] || '', fkMap[col]);
+    htmlContent += await createFormField(col, record[col] || '', fkMap[col], record);
   }
 
   formFields.innerHTML = htmlContent;
@@ -635,10 +698,10 @@ async function duplicateRecord(tableName, recordId) {
   document.getElementById('modalTitle').textContent = 'Duplica Record';
 
   const formFields = document.getElementById('formFields');
-  let htmlContent = '';
+  let htmlContent = await renderTenantFieldHtml();
 
   for (const col of currentModalColumns) {
-    htmlContent += await createFormField(col, record[col] || '', fkMap[col]);
+    htmlContent += await createFormField(col, record[col] || '', fkMap[col], record);
   }
 
   formFields.innerHTML = htmlContent;
@@ -717,10 +780,10 @@ async function newRecord(tableName) {
   document.getElementById('modalTitle').textContent = 'New Record';
 
   const formFields = document.getElementById('formFields');
-  let htmlContent = '';
+  let htmlContent = await renderTenantFieldHtml();
 
   for (const col of currentModalColumns) {
-    htmlContent += await createFormField(col, '', fkMap[col]);
+    htmlContent += await createFormField(col, '', fkMap[col], null);
   }
 
   formFields.innerHTML = htmlContent;
@@ -767,6 +830,12 @@ async function saveRecord(event) {
   // Save table name before closeModal() resets it
   const tableName = currentModalTable;
   const recordId = currentModalRecordId;
+
+  // Admin: chiede se applicare la modifica solo al tenant corrente o a TUTTI i tenant.
+  if (isAdminViewer()) {
+    const applyAll = confirm('Applicare questa modifica a TUTTI i tenant?\n\nOK = tutti i tenant\nAnnulla = solo il tenant corrente');
+    data.__scope = applyAll ? 'all-tenants' : 'this-tenant';
+  }
 
   const method = recordId ? 'PUT' : 'POST';
   const url = recordId

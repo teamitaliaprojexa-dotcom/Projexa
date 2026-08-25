@@ -1036,6 +1036,15 @@ app.get('/api/data/:table/columns', requireAuth, async (req, res) => {
     const fkMap = {};
     const fkColMap = {};
     for (const r of fk.rows) { fkMap[r.column_name] = r.foreign_table; fkColMap[r.column_name] = r.foreign_column; }
+    // id_roles / id_roles_write non hanno un vincolo FK reale (sono smallint), ma vanno
+    // sempre risolti come riferimento a roles.id_roles (codice) -> roles.name (etichetta),
+    // così il form li mostra come menu a discesa dei ruoli.
+    for (const r of result.rows) {
+      if (r.column_name === 'id_roles' || r.column_name === 'id_roles_write') {
+        fkMap[r.column_name] = 'roles';
+        fkColMap[r.column_name] = 'id_roles';
+      }
+    }
     res.json(result.rows.map((r) => ({
       name: r.column_name,
       generated: r.is_generated === 'ALWAYS',
@@ -1054,6 +1063,10 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
     const pool = pickDb(req), dbKey = pickDbKey(req);
     const tableName = assertValidIdentifier(req.params.table);
     let data = { ...req.body };
+    // Ambito scelto dall'admin al salvataggio (this-tenant | all-tenants); non è una
+    // colonna della tabella, va rimosso prima dell'INSERT.
+    const scope = data.__scope;
+    delete data.__scope;
 
     // Le stringhe vuote diventano NULL: colonne numeriche/date/boolean non accettano ''.
     for (const k of Object.keys(data)) {
@@ -1088,6 +1101,24 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
     if (columns.length === 0) {
       return res.status(400).json({ error: 'Nessun dato da inserire' });
     }
+
+    // Admin + ambito "tutti i tenant": inserisce la stessa riga per ciascun tenant esistente
+    // (solo se la tabella ha tenant_id). Altrimenti comportamento invariato (singolo insert).
+    if (isAdminUser(req) && scope === 'all-tenants' && tableColumns.has('tenant_id')) {
+      const tenantsRes = await pool.query('SELECT id FROM tenants');
+      const insertedRows = [];
+      for (const t of tenantsRes.rows) {
+        const rowData = { ...data, tenant_id: t.id };
+        const cols = Object.keys(rowData).map(assertValidIdentifier);
+        const vals = cols.map((c) => rowData[c]);
+        const ph = cols.map((_, i) => `$${i + 1}`).join(', ');
+        const qc = cols.map((c) => `"${c}"`).join(', ');
+        const r = await pool.query(`INSERT INTO "${tableName}" (${qc}) VALUES (${ph}) RETURNING *`, vals);
+        if (r.rows[0]) insertedRows.push(r.rows[0]);
+      }
+      return res.status(201).json(stripSensitive(insertedRows.length ? [insertedRows[0]] : [])[0] || { inserted: insertedRows.length });
+    }
+
     const values = columns.map((col) => data[col]);
     const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
     const quotedColumns = columns.map((c) => `"${c}"`).join(', ');
@@ -1108,6 +1139,9 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
     const tableName = assertValidIdentifier(req.params.table);
     const id = req.params.id;
     let data = { ...req.body };
+    // Ambito scelto dall'admin al salvataggio; non è una colonna della tabella.
+    const scope = data.__scope;
+    delete data.__scope;
 
     // Le stringhe vuote diventano NULL: colonne numeriche/date/boolean non accettano ''.
     for (const k of Object.keys(data)) {
@@ -1167,6 +1201,43 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Record not found' });
+    }
+
+    const savedRow = result.rows[0];
+
+    // Admin + ambito "tutti i tenant": propaga gli stessi valori modificati a tutte le
+    // righe gemelle (stesso argument/campo) di TUTTI i tenant, per le tabelle EAV
+    // (settings/clients/projects) dove questo pattern ha senso.
+    if (admin && scope === 'all-tenants' && ['settings', 'clients', 'projects'].includes(tableName)
+        && savedRow.argument != null && savedRow.campo != null) {
+      try {
+        const propagateCols = columns.filter(c => !['tenant_id', 'user_id', 'argument', 'campo'].includes(c));
+        if (propagateCols.length > 0) {
+          const setClause = propagateCols.map((c, i) => `"${c}" = $${i + 1}`).join(', ');
+          const pParams = propagateCols.map(c => data[c]);
+          pParams.push(savedRow.argument, savedRow.campo, savedRow.id);
+          await pool.query(
+            `UPDATE "${tableName}" SET ${setClause} WHERE argument = $${propagateCols.length + 1} AND campo = $${propagateCols.length + 2} AND id <> $${propagateCols.length + 3}`,
+            pParams
+          );
+        }
+      } catch (e) { /* la propagazione non deve far fallire il salvataggio principale */ }
+    }
+
+    // Fattore di scala schermo (tipo_valore=30, valore2='schermo'): esiste una riga
+    // "settings" per ciascun utente del tenant (seed via user_tenants), quindi salvare
+    // valore3 sulla propria riga aggiornerebbe la scala solo per sé stessi. Propaga lo
+    // stesso valore a tutte le righe gemelle del tenant (stesso argument/campo) così il
+    // ridimensionamento si applica a TUTTI gli utenti, incluso durante l'impersonificazione.
+    if (tableName === 'settings' && Object.prototype.hasOwnProperty.call(data, 'valore3')
+        && String(savedRow.tipo_valore) === '30' && savedRow.valore2 === 'schermo') {
+      try {
+        await pool.query(
+          `UPDATE settings SET valore3 = $1
+           WHERE tenant_id = $2 AND argument = $3 AND campo = $4 AND id <> $5`,
+          [savedRow.valore3, savedRow.tenant_id, savedRow.argument, savedRow.campo, savedRow.id]
+        );
+      } catch (e) { /* la propagazione non deve far fallire il salvataggio principale */ }
     }
 
     res.json(stripSensitive(result.rows)[0]);
@@ -2112,17 +2183,76 @@ app.get('/api/set-var-layout', requireAuth, async (req, res) => {
     if (!tabella || !['settings', 'clients', 'projects'].includes(tabella)) {
       return res.status(400).json({ error: 'source richiesto (settings, clients o projects)' });
     }
-    let r = await db.query(
-      `SELECT colonna FROM set_var_layout WHERE tenant_id = $1 AND tipo_valore = $2 AND tabella = $3 ORDER BY ordinamento NULLS LAST, colonna`,
-      [req.user.tenant_id, tipoValore, tabella]
-    );
-    if (r.rows.length === 0) {
+    // "valori" (opzionale): se configurato, es. "1:Aperto;2:Chiuso", il campo va mostrato
+    // come menu a discesa nel form Aggiungi/Modifica (scrive il codice, mostra l'etichetta).
+    let r;
+    try {
       r = await db.query(
-        `SELECT colonna FROM set_var_layout WHERE tenant_id IS NULL AND tipo_valore = $1 AND tabella = $2 ORDER BY ordinamento NULLS LAST, colonna`,
-        [tipoValore, tabella]
+        `SELECT colonna, valori FROM set_var_layout WHERE tenant_id = $1 AND tipo_valore = $2 AND tabella = $3 ORDER BY ordinamento NULLS LAST, colonna`,
+        [req.user.tenant_id, tipoValore, tabella]
       );
+      if (r.rows.length === 0) {
+        r = await db.query(
+          `SELECT colonna, valori FROM set_var_layout WHERE tenant_id IS NULL AND tipo_valore = $1 AND tabella = $2 ORDER BY ordinamento NULLS LAST, colonna`,
+          [tipoValore, tabella]
+        );
+      }
+    } catch (e) {
+      // Fallback per compatibilità se la colonna "valori" non esiste ancora sul DB.
+      r = await db.query(
+        `SELECT colonna FROM set_var_layout WHERE tenant_id = $1 AND tipo_valore = $2 AND tabella = $3 ORDER BY ordinamento NULLS LAST, colonna`,
+        [req.user.tenant_id, tipoValore, tabella]
+      );
+      if (r.rows.length === 0) {
+        r = await db.query(
+          `SELECT colonna FROM set_var_layout WHERE tenant_id IS NULL AND tipo_valore = $1 AND tabella = $2 ORDER BY ordinamento NULLS LAST, colonna`,
+          [tipoValore, tabella]
+        );
+      }
     }
-    res.json({ columns: r.rows.map(x => x.colonna).filter(Boolean) });
+    const columns = r.rows.map(x => x.colonna).filter(Boolean);
+    const fields = r.rows.filter(x => x.colonna).map(x => ({ colonna: x.colonna, valori: x.valori || null }));
+    res.json({ columns, fields });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Restituisce il tenant del contesto autenticato (sola lettura), da mostrare nei form
+// Aggiungi/Modifica di tutti i flyout (evita l'errore di inserimento per tenant mancante).
+app.get('/api/tenant/current', requireAuth, async (req, res) => {
+  try {
+    const r = await db.query('SELECT id, name FROM tenants WHERE id = $1', [req.user.tenant_id]);
+    res.json(r.rows[0] || { id: req.user.tenant_id, name: '' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Elenco clienti per i menu a discesa dei campi client_id: usa la vista ele_clienti,
+// filtrata per tenant_id e user_id del CONTESTO (login corrente).
+app.get('/api/lookup/clients', requireAuth, async (req, res) => {
+  try {
+    const r = await db.query(
+      'SELECT id, valore2 AS name FROM ele_clienti WHERE tenant_id = $1 AND user_id = $2 ORDER BY valore2',
+      [req.user.tenant_id, req.user.user_id]
+    );
+    res.json(r.rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Elenco progetti per i menu a discesa dei campi project_id: usa la vista ele_progetti,
+// filtrata per tenant_id, user_id (contesto) e client_id (se indicato).
+app.get('/api/lookup/projects', requireAuth, async (req, res) => {
+  try {
+    const clientId = ((req.query && req.query.clientId) || '').trim();
+    const params = [req.user.tenant_id, req.user.user_id];
+    let where = 'tenant_id = $1 AND user_id = $2';
+    if (clientId) { params.push(clientId); where += ` AND client_id = $${params.length}`; }
+    const r = await db.query(`SELECT id, valore2 AS name FROM ele_progetti WHERE ${where} ORDER BY valore2`, params);
+    res.json(r.rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -2187,16 +2317,30 @@ app.get('/api/settings/preference', requireAuth, async (req, res) => {
 });
 
 // Fattore di scala dello schermo: valore3 del campo settings con tipo_valore=30 e
-// valore2='schermo' (per tenant/utente). 100 = normale; es. 70 = interfaccia al 70%.
+// valore2='schermo'. 100 = normale; es. 70 = interfaccia al 70%.
+// Cascata di ricerca: prima l'eventuale valore personale dell'utente del login (così
+// resta possibile una preferenza individuale); se assente, qualunque valore configurato
+// per il tenant, in modo che la scala si applichi a TUTTI gli utenti del tenant e non solo
+// a chi l'ha impostata. tenant_id/user_id derivano sempre dal token corrente, quindi la
+// stessa logica vale automaticamente anche durante l'impersonificazione.
 app.get('/api/settings/screen-scale', requireAuth, async (req, res) => {
   try {
-    const result = await db.query(
+    let result = await db.query(
       `SELECT valore3 FROM settings
        WHERE tenant_id = $1 AND user_id = $2 AND tipo_valore = '30' AND valore2 = 'schermo'
          AND valore3 IS NOT NULL
        ORDER BY valore3 LIMIT 1`,
       [req.user.tenant_id, req.user.user_id]
     );
+    if (result.rows.length === 0) {
+      result = await db.query(
+        `SELECT valore3 FROM settings
+         WHERE tenant_id = $1 AND tipo_valore = '30' AND valore2 = 'schermo'
+           AND valore3 IS NOT NULL
+         ORDER BY valore3 LIMIT 1`,
+        [req.user.tenant_id]
+      );
+    }
     const n = result.rows.length ? Number(result.rows[0].valore3) : 100;
     res.json({ value: (Number.isFinite(n) && n > 0) ? n : 100 });
   } catch (error) {
