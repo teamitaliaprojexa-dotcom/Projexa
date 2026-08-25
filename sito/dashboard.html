@@ -677,6 +677,39 @@
             color: var(--text-muted);
             font-size: 0.8rem;
         }
+        .type11-grid-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            padding: 0.55rem 0;
+        }
+        .type11-grid-toolbar button {
+            border: 1px solid #D1D5DB;
+            border-radius: 6px;
+            padding: 0.4rem 0.75rem;
+            background: white;
+            cursor: pointer;
+            font: inherit;
+            font-size: 0.8rem;
+        }
+        .type11-grid-toolbar button.primary { background: #10B981; color: white; border-color: #10B981; }
+        .type11-grid-toolbar button.danger { color: #B91C1C; border-color: #FCA5A5; }
+        .type11-grid-toolbar button:disabled { opacity: 0.45; cursor: default; }
+        .type11-grid-table.type11-editable tbody tr { cursor: pointer; }
+        .type11-grid-table tbody tr.type11-selected td { outline: 2px solid #10B981; outline-offset: -2px; }
+        .type11-grid-editor {
+            margin-top: 0.65rem;
+            padding: 0.8rem;
+            border: 1px solid #D1D5DB;
+            border-radius: 10px;
+            background: white;
+        }
+        .type11-grid-editor-title { font-weight: 700; margin-bottom: 0.6rem; }
+        .type11-grid-editor-actions { display:flex; gap:0.5rem; margin-top:0.75rem; }
+        .type11-grid-editor-actions button {
+            flex: 1; border: none; border-radius: 6px; padding: 0.55rem 0.8rem; cursor: pointer;
+        }
 
         /* Interruttore a levetta (toggle) per i campi booleani e per "Abilita modifica" */
         .toggle-switch {
@@ -5621,21 +5654,123 @@
             return { tenantId: String(tenantId), userId: String(userId), clientId: String(clientId) };
         }
 
-        function type11RecordMatchesContext(record, context) {
-            if (!record || typeof record !== 'object') return false;
-            const matches = (field, expected) => {
-                // Se il backend non restituisce le colonne di contesto, la WHERE è già
-                // demandata all'endpoint; se le restituisce, verifichiamo anche nel browser.
-                if (!Object.prototype.hasOwnProperty.call(record, field)) return true;
-                return String(record[field]) === String(expected);
-            };
-            return matches('tenant_id', context.tenantId)
-                && matches('user_id', context.userId)
-                && matches('client_id', context.clientId);
+        async function type11GridColumns(widget) {
+            const tableName = String(widget.dataset.gridTable || '').trim();
+            if (!tableName) return [];
+            try {
+                const r = await fetch(`${API_URL}/data/${encodeURIComponent(tableName)}/columns`, { headers: getAuthHeaders() });
+                if (!r.ok) return [];
+                return await r.json();
+            } catch (e) {
+                return [];
+            }
         }
 
-        // Legge la tabella indicata dalla riga del contesto corrente (settings,
-        // clients o projects) e mostra esclusivamente le colonne configurate.
+        function type11GridRawValue(record, column) {
+            if (record && Object.prototype.hasOwnProperty.call(record, `__raw_${column}`)) {
+                return record[`__raw_${column}`];
+            }
+            return type11CellValue(record, column);
+        }
+
+        function type11GridInputHtml(col, value, disabled) {
+            const val = value == null ? '' : String(value);
+            const dis = disabled ? 'disabled' : '';
+            const type = String(col.type || '').toLowerCase();
+            if (type === 'boolean') {
+                const checked = value === true || value === 'true' || value === 't' || value === 1 ? 'checked' : '';
+                return `<label class="toggle-switch"><input class="type11-editor-field" data-col="${escapeHtml(col.name)}" type="checkbox" ${checked} ${dis}><span class="toggle-slider"></span></label>`;
+            }
+            if (type === 'date') {
+                return `<input class="type11-editor-field" data-col="${escapeHtml(col.name)}" type="date" value="${escapeHtml(val.slice(0,10))}" ${dis}>`;
+            }
+            if (['smallint','integer','bigint','numeric','decimal','real','double precision'].includes(type)) {
+                return `<input class="type11-editor-field" data-col="${escapeHtml(col.name)}" type="number" step="any" value="${escapeHtml(val)}" ${dis}>`;
+            }
+            return `<input class="type11-editor-field" data-col="${escapeHtml(col.name)}" type="text" value="${escapeHtml(val)}" ${dis}>`;
+        }
+
+        async function type11OpenEditor(widget, row, isNew) {
+            const editor = widget.querySelector('.type11-grid-editor');
+            if (!editor) return;
+            const columns = await type11GridColumns(widget);
+            const hidden = new Set(['id','tenant_id','user_id','client_id','project_id','data_inizio','scadenza','id_roles','id_roles_write']);
+            const visible = columns.filter(c => !hidden.has(c.name));
+            if (!visible.length) {
+                editor.innerHTML = '<div class="type11-grid-state">Nessun campo modificabile.</div>';
+                editor.style.display = 'block';
+                return;
+            }
+            const title = isNew ? 'Nuova riga' : 'Modifica riga';
+            const fields = visible.map(col => {
+                const value = isNew ? '' : type11GridRawValue(row, col.name);
+                const readonly = !!col.generated;
+                return `<div class="settings-detail-row"><span class="campo-label">${escapeHtml(col.name)}</span>${type11GridInputHtml(col, value, readonly)}</div>`;
+            }).join('');
+            editor.innerHTML = `<div class="type11-grid-editor-title">${title}</div>${fields}
+                <div class="type11-grid-editor-actions">
+                    <button type="button" class="type11-grid-cancel">Annulla</button>
+                    <button type="button" class="type11-grid-save primary">Salva</button>
+                </div>`;
+            editor.style.display = 'block';
+            editor.querySelector('.type11-grid-cancel')?.addEventListener('click', () => {
+                editor.style.display = 'none';
+            });
+            editor.querySelector('.type11-grid-save')?.addEventListener('click', async () => {
+                const values = {};
+                editor.querySelectorAll('.type11-editor-field').forEach(input => {
+                    if (input.disabled) return;
+                    values[input.dataset.col] = input.type === 'checkbox' ? input.checked : input.value;
+                });
+                const payload = { fieldId: widget.dataset.gridFieldId, values };
+                if (!isNew) payload.rowId = row && row.id ? row.id : '';
+                const source = encodeURIComponent(widget.dataset.gridSource || currentDetailSource);
+                const url = `${API_URL}/${source}/grid-widget/row`;
+                try {
+                    const response = await fetch(url, {
+                        method: isNew ? 'POST' : 'PUT',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        showNotification('Errore: ' + (data.error || response.status), 'info');
+                        return;
+                    }
+                    editor.style.display = 'none';
+                    await loadType11Grid(widget);
+                    showNotification('Salvato', 'success');
+                } catch (e) {
+                    showNotification('Errore di connessione', 'info');
+                }
+            });
+        }
+
+        async function type11DeleteSelected(widget, row) {
+            if (!row || !row.id) return;
+            if (!confirm('Eliminare la riga selezionata?')) return;
+            const source = encodeURIComponent(widget.dataset.gridSource || currentDetailSource);
+            const query = new URLSearchParams({
+                fieldId: widget.dataset.gridFieldId || '',
+                rowId: row.id
+            });
+            try {
+                const response = await fetch(`${API_URL}/${source}/grid-widget/row?${query.toString()}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    showNotification('Errore: ' + (data.error || response.status), 'info');
+                    return;
+                }
+                await loadType11Grid(widget);
+                showNotification('Riga eliminata', 'success');
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
+        }
+
         async function loadType11Grid(widget) {
             const tableName = String(widget.dataset.gridTable || '').trim();
             const columns = parseType11Columns(widget.dataset.gridColumns);
@@ -5646,18 +5781,14 @@
                 widget.innerHTML = '<div class="type11-grid-state">Tabella non configurata</div>';
                 return;
             }
-            if (columns.length === 0) {
-                widget.innerHTML = '<div class="type11-grid-state">Colonne non configurate</div>';
-                return;
-            }
-            if (!source || !fieldId || !context.clientId) {
+            if (!source || !fieldId) {
                 widget.innerHTML = '<div class="type11-grid-state">Contesto della griglia non disponibile</div>';
                 return;
             }
 
             widget.innerHTML = '<div class="type11-grid-state">Caricamento griglia…</div>';
             try {
-                const query = new URLSearchParams({ fieldId, clientId: context.clientId });
+                const query = new URLSearchParams({ fieldId, clientId: context.clientId || '' });
                 const res = await fetch(`${API_URL}/${encodeURIComponent(source)}/grid-widget?${query.toString()}`, { headers: getAuthHeaders() });
                 if (!res.ok) {
                     const error = await res.json().catch(() => ({}));
@@ -5665,31 +5796,57 @@
                     return;
                 }
                 const payload = await res.json();
-                const visibleColumns = !Array.isArray(payload) && Array.isArray(payload.columns)
-                    ? parseType11Columns(payload.columns)
+                const visibleColumns = Array.isArray(payload.columns) && payload.columns.length
+                    ? payload.columns
                     : columns;
-                if (visibleColumns.length === 0) {
-                    widget.innerHTML = '<div class="type11-grid-state">Nessuna colonna da visualizzare</div>';
-                    return;
-                }
-                const allRecords = Array.isArray(payload)
-                    ? payload
-                    : (Array.isArray(payload.rows) ? payload.rows : (Array.isArray(payload.items) ? payload.items : []));
-                const records = allRecords;
-                if (records.length === 0) {
-                    widget.innerHTML = '<div class="type11-grid-state">Nessun dato</div>';
-                    return;
-                }
+                const records = Array.isArray(payload.rows) ? payload.rows : (Array.isArray(payload) ? payload : []);
+                const editing = clientDetailMode === 'edit';
 
                 const head = visibleColumns.map(column => `<th scope="col" title="${escapeHtml(column)}">${escapeHtml(type11ColumnLabel(column))}</th>`).join('');
-                const body = records.map(record => '<tr>' + visibleColumns.map(column =>
-                    `<td>${escapeHtml(formatType11Cell(type11CellValue(record, column), column))}</td>`
-                ).join('') + '</tr>').join('');
-                widget.innerHTML = `<div class="type11-grid-scroll"><table class="type11-grid-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+                const body = records.map((record, index) => {
+                    const selected = '';
+                    return `<tr data-type11-index="${index}"${selected}>` + visibleColumns.map(column =>
+                        `<td>${escapeHtml(formatType11Cell(type11CellValue(record, column), column))}</td>`
+                    ).join('') + '</tr>';
+                }).join('');
+
+                const toolbar = editing ? `<div class="type11-grid-toolbar">
+                    <span class="type11-grid-selection" style="color:var(--text-muted); font-size:0.8rem; flex:1;">Seleziona una riga</span>
+                    <button type="button" class="type11-grid-add primary">+ Nuova riga</button>
+                    <button type="button" class="type11-grid-edit" disabled>Modifica</button>
+                    <button type="button" class="type11-grid-delete danger" disabled>Elimina</button>
+                </div>` : '';
+
+                const empty = records.length ? '' : '<div class="type11-grid-state">Nessun dato</div>';
+                widget.innerHTML = `${toolbar}${records.length ? `<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` : empty}
+                    <div class="type11-grid-editor" style="display:none;"></div>`;
+
+                let selectedRow = null;
+                const tableRows = [...widget.querySelectorAll('.type11-grid-table tbody tr')];
+                const selectionLabel = widget.querySelector('.type11-grid-selection');
+                const editBtn = widget.querySelector('.type11-grid-edit');
+                const deleteBtn = widget.querySelector('.type11-grid-delete');
+
+                if (editing) {
+                    tableRows.forEach(rowEl => {
+                        rowEl.addEventListener('click', () => {
+                            tableRows.forEach(r => r.classList.remove('type11-selected'));
+                            rowEl.classList.add('type11-selected');
+                            selectedRow = records[Number(rowEl.dataset.type11Index)];
+                            if (selectionLabel) selectionLabel.textContent = 'Riga selezionata';
+                            if (editBtn) editBtn.disabled = !selectedRow;
+                            if (deleteBtn) deleteBtn.disabled = !selectedRow;
+                        });
+                    });
+                    widget.querySelector('.type11-grid-add')?.addEventListener('click', () => type11OpenEditor(widget, {}, true));
+                    editBtn?.addEventListener('click', () => { if (selectedRow) type11OpenEditor(widget, selectedRow, false); });
+                    deleteBtn?.addEventListener('click', () => type11DeleteSelected(widget, selectedRow));
+                }
             } catch (e) {
                 widget.innerHTML = '<div class="type11-grid-state">Errore di connessione</div>';
             }
         }
+
 
         function hydrateType11Grids(root) {
             if (!root) return;
