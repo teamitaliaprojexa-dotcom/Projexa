@@ -4174,6 +4174,28 @@
                     return;
                 }
                 if (p.op === 'rename-field') { await performRenameFields(scope); return; }
+                if (p.op === 'edit-field') {
+                    const pending = window.__tvfPendingSave;
+                    window.__tvfPendingSave = null;
+                    if (!pending) return;
+                    try {
+                        const values = { ...(pending.values || {}), __scope: scope };
+                        const res = await fetch(pending.url, {
+                            method: pending.method || 'PUT',
+                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                            body: JSON.stringify(values)
+                        });
+                        if (res.ok) {
+                            showNotification('Modifica salvata', 'success');
+                            clientDetailMode = 'view';
+                            await openDetailFlyout('settings', currentDetailArgument, currentDetailLabel, true);
+                        } else {
+                            const err = await res.json().catch(() => ({}));
+                            showNotification('Errore: ' + (err.error || res.status), 'info');
+                        }
+                    } catch (e) { showNotification('Errore di connessione', 'info'); }
+                    return;
+                }
                 if (p.op === 'delete-field') {
                     // Elimina i campi selezionati sull'argomento, con ambito tenant scelto
                     const res = await fetch(`${API_URL}/settings/delete-fields`, {
@@ -6337,7 +6359,7 @@
             window.addEventListener('mouseup', onUp);
         }
 
-        // Apre il form trascinabile per Aggiungere un nuovo campo o Modificare un campo esistente.
+        // Apre il form trascinabile per Aggiungere un nuovo campo o Modificare un campo esistente.\n        // In entrambi i casi il nome campo è visibile e modificabile.
         // mode: 'add' (nuovo campo su settings/clients/projects) | 'edit' (modifica i valori di
         // una riga già esistente). Le colonne mostrate dipendono dal tipo_valore scelto e vengono
         // lette da set_var_layout (fallback: tenant del contesto -> tenant NULL = configurazione standard).
@@ -6353,7 +6375,10 @@
                     <button id="tvfClose" type="button" style="border:none; background:transparent; cursor:pointer; color:var(--text-muted); font-size:1rem;">✕</button>
                 </div>
                 <div style="margin-bottom:.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Tenant</label><input id="tvfTenant" type="text" disabled value="…" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px; background:#f3f4f6; color:#6b7280;"></div>
-                ${mode === 'add' ? `<div style="margin-bottom:.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Nome campo</label><input id="tvfName" placeholder="Nome del campo" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;"></div>` : ''}
+                <div style="margin-bottom:.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">user_id</label><input id="tvfUserId" type="text" disabled value="…" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px; background:#f3f4f6; color:#6b7280;"></div>
+                ${source === 'clients' || source === 'projects' ? `<div style="margin-bottom:.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">client_id</label><input id="tvfClientId" type="text" disabled value="…" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px; background:#f3f4f6; color:#6b7280;"></div>` : ''}
+                ${source === 'projects' ? `<div style="margin-bottom:.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">project_id</label><input id="tvfProjectId" type="text" disabled value="…" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px; background:#f3f4f6; color:#6b7280;"></div>` : ''}
+                <div style="margin-bottom:.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Nome campo</label><input id="tvfName" placeholder="Nome del campo" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;"></div>
                 <div style="margin-bottom:.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Tipo valore</label>
                 <select id="tvfType" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;" ${mode === 'edit' ? 'disabled' : ''}></select></div>
                 <div id="tvfFields"></div>
@@ -6368,13 +6393,57 @@
             box.querySelector('#tvfClose').addEventListener('click', close);
             box.querySelector('#tvfCancel').addEventListener('click', close);
 
-            // Tenant del contesto (sola lettura): evita l'errore di inserimento per tenant mancante.
+            // Contesto del form (sola lettura): mostra le descrizioni leggibili di tenant,
+            // utente e cliente, mentre gli ID reali restano nel contesto/autenticazione e
+            // vengono usati solo per il salvataggio.
             (async () => {
                 const tenantInp = box.querySelector('#tvfTenant');
+                const userInp = box.querySelector('#tvfUserId');
+                const clientInp = box.querySelector('#tvfClientId');
+                const projectInp = box.querySelector('#tvfProjectId');
+                const claims = decodeJwtPayload();
+                const storedUser = (() => { try { return JSON.parse(localStorage.getItem('user') || '{}'); } catch (e) { return {}; } })();
+                const fallbackUserId = claims.user_id || claims.userId || claims.sub || storedUser.user_id || storedUser.userId || storedUser.id || '';
+                const fallbackTenantId = claims.tenant_id || claims.tenantId || storedUser.tenant_id || storedUser.tenantId || '';
+                let context = null;
                 try {
-                    const tr = await fetch(`${API_URL}/tenant/current`, { headers: getAuthHeaders() });
-                    if (tr.ok) { const t = await tr.json(); if (tenantInp) tenantInp.value = t.name || t.id || '—'; }
-                } catch (e) { if (tenantInp) tenantInp.value = '—'; }
+                    let contextClientId = '';
+                    let contextProjectId = '';
+                    if (source === 'projects') {
+                        contextClientId = existingRow?.client_id || projectClientId || '';
+                        contextProjectId = existingRow?.argument || currentDetailArgument || '';
+                    } else if (source === 'clients') {
+                        contextClientId = currentClientId || currentDetailArgument || '';
+                    }
+                    const qs = new URLSearchParams({ source });
+                    if (contextClientId) qs.set('clientId', contextClientId);
+                    if (contextProjectId) qs.set('projectId', contextProjectId);
+                    const cr = await fetch(`${API_URL}/flyout/context?${qs.toString()}`, { headers: getAuthHeaders() });
+                    if (cr.ok) context = await cr.json();
+                } catch (e) { /* usa i fallback locali */ }
+
+                const tenant = context?.tenant || {};
+                const user = context?.user || {};
+                const client = context?.client || {};
+                if (tenantInp) {
+                    tenantInp.dataset.id = tenant.id || fallbackTenantId || '';
+                    tenantInp.value = tenant.name || tenant.id || fallbackTenantId || '—';
+                }
+                if (userInp) {
+                    userInp.dataset.id = user.id || fallbackUserId || '';
+                    userInp.value = user.name || user.id || fallbackUserId || '—';
+                }
+                if (clientInp) {
+                    const fallbackClientId = existingRow?.client_id || (source === 'clients' ? (currentClientId || currentDetailArgument || '') : (projectClientId || ''));
+                    clientInp.dataset.id = client.id || fallbackClientId || '';
+                    clientInp.value = client.name || client.id || fallbackClientId || '—';
+                }
+                if (projectInp) {
+                    const project = context?.project || {};
+                    const fallbackProjectId = existingRow?.argument || currentDetailArgument || '';
+                    projectInp.dataset.id = project.id || fallbackProjectId || '';
+                    projectInp.value = project.name || project.id || fallbackProjectId || '—';
+                }
             })();
 
             const typeSel = box.querySelector('#tvfType');
@@ -6386,6 +6455,10 @@
                 }
             } catch (e) { /* ignore */ }
             if (mode === 'edit' && existingTipoValore != null) typeSel.value = String(existingTipoValore);
+            if (mode === 'edit') {
+                const nameInp = box.querySelector('#tvfName');
+                if (nameInp) nameInp.value = String(existingRow?.campo || '');
+            }
 
             // Interpreta set_var_layout.valori nel formato "codice:etichetta;codice:etichetta"
             // -> [{ code, label }, ...]. Ritorna [] se non configurato o non parsabile.
@@ -6444,24 +6517,52 @@
                 const values = {};
                 box.querySelectorAll('.tvf-col').forEach(inp => { values[inp.dataset.col] = inp.value; });
                 values.tipo_valore = typeSel.value;
+                // I valori Tenant/user_id/client_id mostrati in alto sono descrittivi
+                // e non vengono inviati in modifica. Tenant e user_id vengono sempre
+                // determinati dal server; client_id viene inviato solo quando si crea
+                // un progetto, perché projects possiede realmente quella colonna.
                 let url, method;
+                const nameInp = box.querySelector('#tvfName');
+                let campo = nameInp ? nameInp.value.trim() : '';
+                if (!campo) { if (nameInp) nameInp.focus(); return; }
+                // Per i ruoli diversi da 1 il nome del campo è sempre custom:
+                // il prefisso viene applicato già nel payload, oltre al controllo server.
+                const currentRoleLevel = Number(decodeJwtPayload().id_roles);
+                if (currentRoleLevel !== 1) {
+                    campo = '(*) ' + campo.replace(/^\(\*\)\s*/, '');
+                    if (nameInp) nameInp.value = campo;
+                }
+
                 if (mode === 'add') {
-                    const nameInp = box.querySelector('#tvfName');
-                    const campo = nameInp ? nameInp.value.trim() : '';
-                    if (!campo) { if (nameInp) nameInp.focus(); return; }
                     values.campo = campo;
                     values.argument = currentDetailArgument;
-                    if (source === 'projects' && projectClientId) values.client_id = projectClientId;
+                    if (source === 'projects') {
+                        values.project_id = existingRow?.argument || currentDetailArgument || '';
+                        if (projectClientId) values.client_id = projectClientId;
+                    }
                     url = `${API_URL}/data/${encodeURIComponent(source)}`;
                     method = 'POST';
                 } else {
+                    // In modifica il nome campo è editabile come gli altri valori.
+                    // Viene inviato solo come vera colonna "campo" della tabella.
+                    values.campo = campo;
                     url = `${API_URL}/data/${encodeURIComponent(source)}/${encodeURIComponent(rowId)}`;
                     method = 'PUT';
                 }
-                // Admin: chiede se applicare la modifica solo al tenant corrente o a TUTTI i tenant.
-                if (Number(decodeJwtPayload().id_roles) === 1) {
-                    const applyAll = confirm('Applicare questa modifica a TUTTI i tenant?\n\nOK = tutti i tenant\nAnnulla = solo il tenant corrente');
-                    values.__scope = applyAll ? 'all-tenants' : 'this-tenant';
+                // Per Clienti/Progetti la stessa scelta di ambito usata da Elimina: tutti i
+                // contenitori del tenant oppure solo quello selezionato. Per Settings resta
+                // la scelta tenant già gestita dal relativo popup.
+                if (mode === 'edit' && (source === 'clients' || source === 'projects')) {
+                    window.__tvfPendingSave = { values, url, method, close };
+                    close();
+                    openClientScopeModal('edit');
+                    return;
+                }
+                if (mode === 'edit' && source === 'settings') {
+                    window.__tvfPendingSave = { values, url, method, close };
+                    close();
+                    openSettingsTenantScope({ op: 'edit-field', values });
+                    return;
                 }
                 try {
                     const res = await fetch(url, {
@@ -6578,9 +6679,10 @@
                     openSettingsTenantScope({ op: 'add-field' });
                     return;
                 }
-                // Clienti: id_roles <= 20 -> chiede se standard o custom; altrimenti sempre custom.
+                // Solo l'admin (id_roles=1) può creare un campo standard. Tutti gli altri ruoli
+                // creano sempre un campo custom, con prefisso '(*)'.
                 const roleLevel = Number(decodeJwtPayload().id_roles);
-                if (Number.isFinite(roleLevel) && roleLevel <= 20) {
+                if (roleLevel === 1) {
                     const kindModal = document.getElementById('clientKindModal');
                     if (kindModal) kindModal.style.display = 'flex';
                 } else {
@@ -6825,6 +6927,9 @@
             if (action === 'rename') {
                 t = 'Rinomina campi custom';
                 p = 'La rinomina deve avvenire su tutti i clienti o solo su quello selezionato?';
+            } else if (action === 'edit') {
+                t = 'Modifica campo';
+                p = 'Applicare la modifica a tutti i clienti del tenant o solo al cliente selezionato?';
             } else if (action === 'add') {
                 t = 'Aggiungi campo custom';
                 p = 'Il nuovo campo deve essere aggiunto a tutti i clienti o solo a quello selezionato?';
@@ -6841,6 +6946,7 @@
         function dispatchClientScope(scope) {
             if (clientScopeAction === 'rename') performRenameFields(scope);
             else if (clientScopeAction === 'add') performAddField(scope);
+            else if (clientScopeAction === 'edit') performEditField(scope);
             else performDeleteFields(scope);
         }
 
@@ -6895,6 +7001,34 @@
                 if (newName && newName !== oldName) renames.push({ old: oldName, new: newName });
             });
             return renames;
+        }
+
+        // Salva la modifica di un campo dopo la scelta dell'ambito. Usa la stessa logica
+        // di Elimina: 'all' = tutti i contenitori del tenant, 'this' = solo quello selezionato.
+        async function performEditField(scope) {
+            const modal = document.getElementById('clientDeleteScopeModal');
+            if (modal) modal.style.display = 'none';
+            const pending = window.__tvfPendingSave;
+            window.__tvfPendingSave = null;
+            if (!pending) return;
+            try {
+                const values = { ...(pending.values || {}), __scope: scope };
+                const res = await fetch(pending.url, {
+                    method: pending.method || 'PUT',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify(values)
+                });
+                if (res.ok) {
+                    showNotification('Modifica salvata', 'success');
+                    clientDetailMode = 'view';
+                    await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
         }
 
         // Elimina i campi custom selezionati; scope = 'all' (tutti i clienti) | 'this' (solo questo).

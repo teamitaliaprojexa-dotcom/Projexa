@@ -725,92 +725,6 @@ app.put('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
   }
 });
 
-
-const TYPE11_HIDDEN_COLUMNS = new Set([
-  'id', 'tenant_id', 'user_id', 'client_id', 'project_id',
-  'data_inizio', 'scadenza', 'id_roles', 'id_roles_write'
-]);
-
-function type11ParseConfiguredColumns(raw) {
-  let selected = [];
-  const value = String(raw || '').trim();
-  if (value.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) selected = parsed;
-    } catch (e) {}
-  }
-  if (!selected.length) selected = value.split(/[;,]/);
-  return [...new Set(selected.map(c => String(c).trim()).filter(Boolean))];
-}
-
-async function getType11Context(source, fieldId, req) {
-  const clientColumn = source === 'projects' ? 'client_id' : 'NULL::uuid AS client_id';
-  const configResult = await db.query(
-    `SELECT id, argument, tabella, colonna, tenant_id, user_id, ${clientColumn},
-            data_inizio, scadenza, id_roles, id_roles_write
-     FROM "${source}"
-     WHERE id = $1 AND tenant_id = $2 AND tipo_valore::text = '11'
-     LIMIT 1`,
-    [fieldId, req.user.tenant_id]
-  );
-  if (configResult.rows.length === 0) {
-    const err = new Error('Configurazione griglia non trovata'); err.statusCode = 404; throw err;
-  }
-  const config = configResult.rows[0];
-  let effectiveUserId = req.user.user_id;
-  if (source === 'clients') {
-    const access = await clientAccessByArgument(config.argument, req, false);
-    if (!access || String(config.user_id) !== String(access.ownerUserId)) {
-      const err = new Error('Non autorizzato'); err.statusCode = 403; throw err;
-    }
-    effectiveUserId = access.ownerUserId;
-  } else if (String(config.user_id) !== String(req.user.user_id)) {
-    const err = new Error('Non autorizzato'); err.statusCode = 403; throw err;
-  }
-
-  const tableName = assertValidIdentifier(String(config.tabella || '').trim());
-  if (!(await isManagedTable(tableName))) {
-    const err = new Error('Tabella griglia non gestita'); err.statusCode = 404; throw err;
-  }
-  const tableColumns = await getTableColumns(tableName);
-  if (!tableColumns.has('id')) {
-    const err = new Error(`La tabella ${tableName} non contiene id`); err.statusCode = 400; throw err;
-  }
-
-  let clientId = String((source === 'projects' ? config.client_id : (req.query.clientId || '')) || '').trim();
-  if (!clientId && source === 'clients') {
-    const root = await resolveClientRoot(config.argument, req.user.tenant_id);
-    clientId = root ? String(root.clientId) : '';
-  }
-
-  const context = {
-    tenant_id: req.user.tenant_id,
-    user_id: effectiveUserId,
-    client_id: clientId || null,
-    project_id: source === 'projects' ? String(config.argument || '') : null,
-    data_inizio: config.data_inizio ?? null,
-    scadenza: config.scadenza ?? null,
-    id_roles: config.id_roles ?? null,
-    id_roles_write: config.id_roles_write ?? null
-  };
-  return { config, tableName, tableColumns, context, effectiveUserId };
-}
-
-async function type11RowWhere(tableColumns, context, rowId) {
-  const params = [rowId];
-  const conditions = ['id = $1'];
-  for (const key of ['tenant_id', 'user_id', 'client_id', 'project_id']) {
-    if (tableColumns.has(key)) {
-      const value = context[key];
-      if (value == null || value === '') return { conditions: ['1=0'], params };
-      params.push(value);
-      conditions.push(`"${key}" = $${params.length}`);
-    }
-  }
-  return { conditions, params };
-}
-
 // Widget griglia (tipo_valore = 11). La configurazione della tabella e delle
 // colonne viene letta dalla riga EAV del contesto corrente; tenant e utente non
 // vengono accettati dal browser ma ricavati dall'autenticazione.
@@ -820,156 +734,183 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     const fieldId = String(req.query.fieldId || '').trim();
     if (!fieldId) return res.status(400).json({ error: 'Parametro fieldId richiesto' });
 
-    const { config, tableName, tableColumns, context } = await getType11Context(source, fieldId, req);
-    const visibleColumns = [...tableColumns].filter(column => !TYPE11_HIDDEN_COLUMNS.has(column));
+    const clientColumn = source === 'projects' ? 'client_id' : 'NULL::uuid AS client_id';
+    const configResult = await db.query(
+      `SELECT id, argument, tabella, colonna, tenant_id, user_id, ${clientColumn}
+       FROM "${source}"
+       WHERE id = $1 AND tenant_id = $2 AND tipo_valore::text = '11'
+       LIMIT 1`,
+      [fieldId, req.user.tenant_id]
+    );
+    if (configResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Configurazione griglia non trovata' });
+    }
+    const config = configResult.rows[0];
 
-    // Per il widget operativo la griglia mostra tutti i campi reali della tabella,
-    // non solo quelli configurati nella colonna EAV.
+    // Per i clienti condivisi il contesto dati è quello del proprietario; negli
+    // altri contesti la riga deve appartenere all'utente autenticato.
+    let effectiveUserId = req.user.user_id;
+    if (source === 'clients') {
+      const access = await clientAccessByArgument(config.argument, req, false);
+      if (!access) return res.status(403).json({ error: 'Non autorizzato' });
+      effectiveUserId = access.ownerUserId;
+      if (String(config.user_id) !== String(effectiveUserId)) {
+        return res.status(403).json({ error: 'Non autorizzato' });
+      }
+    } else if (String(config.user_id) !== String(req.user.user_id)) {
+      return res.status(403).json({ error: 'Non autorizzato' });
+    }
+
+    const tableName = assertValidIdentifier(String(config.tabella || '').trim());
+    let selectedColumns = [];
+    const rawColumns = String(config.colonna || '').trim();
+    if (rawColumns.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(rawColumns);
+        if (Array.isArray(parsed)) selectedColumns = parsed;
+      } catch (e) { /* usa il formato separato */ }
+    }
+    if (selectedColumns.length === 0) selectedColumns = rawColumns.split(/[;,]/);
+    selectedColumns = [...new Set(selectedColumns.map(c => String(c).trim()).filter(Boolean))];
+    if (selectedColumns.length === 0) {
+      return res.status(400).json({ error: 'Nessuna colonna configurata' });
+    }
+
+    // La struttura delle tabelle può cambiare durante la configurazione del progetto.
+    // Non usare una fotografia precedente della cache per il widget dinamico.
+    tableColumnsCache.delete('main:' + tableName);
+    const tableColumns = await getTableColumns(tableName);
+    if (tableColumns.size === 0) return res.status(404).json({ error: 'Tabella non trovata' });
+    for (const column of selectedColumns) {
+      assertValidIdentifier(column);
+      if (!tableColumns.has(column)) {
+        return res.status(400).json({ error: `Colonna ${column} non trovata nella tabella ${tableName}` });
+      }
+    }
+    for (const required of ['tenant_id', 'user_id', 'client_id']) {
+      if (!tableColumns.has(required)) {
+        return res.status(400).json({ error: `La tabella ${tableName} non contiene ${required}` });
+      }
+    }
+
+    let clientId = String(req.query.clientId || config.client_id || '').trim();
+    if (!clientId && source === 'clients') {
+      const root = await resolveClientRoot(config.argument, req.user.tenant_id);
+      clientId = root ? String(root.clientId) : '';
+    }
+    if (!clientId) return res.status(400).json({ error: 'Contesto client_id non disponibile' });
+
+    // Nei progetti, la modalità di gestione determina quale unità di misura
+    // mostrare nella griglia. La riga di controllo appartiene allo stesso
+    // tenant, utente, cliente e progetto della configurazione corrente.
+    if (source === 'projects') {
+      const managementResult = await db.query(
+        `SELECT valore1
+         FROM projects
+         WHERE tenant_id = $1
+           AND user_id = $2
+           AND client_id = $3
+           AND campo = 'Gestione a HH'
+           AND argument = $4
+         LIMIT 1`,
+        [req.user.tenant_id, req.user.user_id, clientId, config.argument]
+      );
+      const managementValue = managementResult.rows[0]?.valore1;
+      const manageByHours = managementValue === true
+        || managementValue === 'true'
+        || managementValue === 't'
+        || managementValue === 1;
+      const hiddenSuffix = manageByHours ? '_gg' : '_hh';
+      selectedColumns = selectedColumns.filter(column =>
+        !String(column).toLowerCase().endsWith(hiddenSuffix)
+      );
+
+      if (selectedColumns.length === 0) {
+        return res.json({ rows: [], columns: [] });
+      }
+    }
+
+    // Cerca le foreign key delle colonne richieste. Se la tabella referenziata
+    // contiene una colonna descrittiva, mostra quella al posto dell'UUID ma
+    // mantiene come chiave JSON il nome originale (es. worker_cost_id).
     const fkResult = await db.query(
-      `SELECT kcu.column_name, ccu.table_name AS foreign_table, ccu.column_name AS foreign_column
+      `SELECT kcu.column_name,
+              ccu.table_name AS foreign_table,
+              ccu.column_name AS foreign_column
        FROM information_schema.table_constraints tc
        JOIN information_schema.key_column_usage kcu
-         ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+         ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
        JOIN information_schema.constraint_column_usage ccu
-         ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
-       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' AND tc.table_name = $1`,
+         ON ccu.constraint_name = tc.constraint_name
+        AND ccu.table_schema = tc.table_schema
+       WHERE tc.constraint_type = 'FOREIGN KEY'
+         AND tc.table_schema = 'public'
+         AND tc.table_name = $1`,
       [tableName]
     );
     const fkByColumn = new Map(fkResult.rows.map(fk => [fk.column_name, fk]));
-
-    const selectExpressions = ['src.id AS "id"'];
+    const selectExpressions = [];
     const joins = [];
     let joinIndex = 0;
-    for (const column of visibleColumns) {
+
+    for (const column of selectedColumns) {
       const fk = fkByColumn.get(column);
       if (!fk) {
-        selectExpressions.push(`src."${assertValidIdentifier(column)}"`);
+        selectExpressions.push(`src."${column}"`);
         continue;
       }
-      const foreignTable = assertValidIdentifier(fk.foreign_table);
-      const foreignColumn = assertValidIdentifier(fk.foreign_column);
-      const foreignColumns = await getTableColumns(foreignTable);
-      const preferred = ['description', 'descrizione', 'name', 'nome', 'title', 'label', 'valore2'];
-      const display = [...foreignColumns].find(n => /^desc_/i.test(n))
-        || preferred.find(n => foreignColumns.has(n));
-      if (!display) {
-        selectExpressions.push(`src."${assertValidIdentifier(column)}"`);
+
+      assertValidIdentifier(fk.foreign_table);
+      assertValidIdentifier(fk.foreign_column);
+      // Rilegge le colonne della tabella esterna per riconoscere anche modifiche
+      // appena effettuate allo schema.
+      tableColumnsCache.delete('main:' + fk.foreign_table);
+      const foreignColumns = await getTableColumns(fk.foreign_table);
+      const foreignNames = [...foreignColumns];
+      const preferredNames = ['description', 'descrizione', 'name', 'nome', 'title', 'label', 'valore2'];
+      const displayColumn = foreignNames.find(name => /^desc_/i.test(name))
+        || preferredNames.find(name => foreignColumns.has(name))
+        || null;
+
+      if (!displayColumn) {
+        selectExpressions.push(`src."${column}"`);
         continue;
       }
-      const alias = `type11_fk_${joinIndex++}`;
-      joins.push(`LEFT JOIN "${foreignTable}" ${alias} ON ${alias}."${foreignColumn}" = src."${assertValidIdentifier(column)}"`);
-      selectExpressions.push(`src."${assertValidIdentifier(column)}" AS "__raw_${assertValidIdentifier(column)}"`);
-      selectExpressions.push(`COALESCE(${alias}."${assertValidIdentifier(display)}"::text, src."${assertValidIdentifier(column)}"::text) AS "${assertValidIdentifier(column)}"`);
+      assertValidIdentifier(displayColumn);
+      const alias = `fk_${joinIndex++}`;
+      joins.push(`LEFT JOIN "${fk.foreign_table}" ${alias} ON ${alias}."${fk.foreign_column}" = src."${column}"`);
+      selectExpressions.push(`COALESCE(${alias}."${displayColumn}"::text, src."${column}"::text) AS "${column}"`);
     }
 
-    const whereParts = ['src.tenant_id = $1', 'src.user_id = $2'];
-    const params = [context.tenant_id, context.user_id];
-    if (tableColumns.has('client_id')) {
-      if (!context.client_id) return res.json({ rows: [], columns: visibleColumns });
-      params.push(context.client_id); whereParts.push(`src.client_id = $${params.length}`);
-    }
+    const selectList = selectExpressions.join(', ');
+    const joinClause = joins.length ? '\n       ' + joins.join('\n       ') : '';
+    const orderBy = tableColumns.has('id') ? ' ORDER BY src.id' : '';
+
+    // Tabelle con colonna project_id (es. proj_anno_fatt, proj_componenti) vanno SEMPRE
+    // filtrate anche per progetto, non solo tenant/utente/cliente. Nel contesto "projects"
+    // l'id del progetto corrente è l'argument della riga di configurazione del widget
+    // (la riga del campo tipo_valore=11 vive sotto il progetto stesso).
+    const queryParams = [req.user.tenant_id, effectiveUserId, clientId];
+    let projectFilter = '';
     if (source === 'projects' && tableColumns.has('project_id')) {
-      params.push(context.project_id); whereParts.push(`src.project_id = $${params.length}`);
+      queryParams.push(config.argument);
+      projectFilter = ` AND src.project_id = $${queryParams.length}`;
     }
 
     const result = await db.query(
-      `SELECT ${selectExpressions.join(', ')}
-       FROM "${tableName}" src
-       ${joins.join('\n')}
-       WHERE ${whereParts.join(' AND ')}
-       ORDER BY ${tableColumns.has('id') ? 'src.id' : visibleColumns.map(c => `src."${c}"`).join(', ')}
-       LIMIT 500`,
-      params
+      `SELECT ${selectList}
+       FROM "${tableName}" src${joinClause}
+       WHERE src.tenant_id = $1 AND src.user_id = $2 AND src.client_id = $3${projectFilter}${orderBy}
+       LIMIT 100`,
+      queryParams
     );
-    res.json({ rows: stripSensitive(result.rows), columns: visibleColumns });
+    // Per i progetti restituisce anche le colonne effettivamente visibili,
+    // dopo il filtro HH/GG; gli altri contesti mantengono il formato storico.
+    res.json(source === 'projects'
+      ? { rows: result.rows, columns: selectedColumns }
+      : result.rows);
   } catch (error) {
-    console.error('[TYPE11 GRID]', error);
-    res.status(error.statusCode || 500).json({ error: error.message });
-  }
-});
-
-// CRUD delle righe della griglia tipo_valore=11.
-// I campi di contesto (tenant/user/client/project/date/ruoli) non sono mai accettati dal browser.
-app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, async (req, res) => {
-  try {
-    const source = req.params.source;
-    const fieldId = String(req.body?.fieldId || '').trim();
-    if (!fieldId) return res.status(400).json({ error: 'Parametro fieldId richiesto' });
-    const { tableName, tableColumns, context } = await getType11Context(source, fieldId, req);
-    const generated = await getGeneratedColumns(tableName);
-    const values = (req.body?.values && typeof req.body.values === 'object') ? req.body.values : {};
-    const data = {};
-    for (const [column, raw] of Object.entries(values)) {
-      if (!tableColumns.has(column) || TYPE11_HIDDEN_COLUMNS.has(column) || generated.has(column)) continue;
-      data[column] = raw === '' ? null : raw;
-    }
-    for (const key of ['tenant_id','user_id','client_id','project_id','data_inizio','scadenza','id_roles','id_roles_write']) {
-      if (tableColumns.has(key) && context[key] != null && context[key] !== '') data[key] = context[key];
-    }
-    const columns = Object.keys(data).map(assertValidIdentifier);
-    if (!columns.length) return res.status(400).json({ error: 'Nessun dato da inserire' });
-    const params = columns.map(c => data[c]);
-    const result = await db.query(
-      `INSERT INTO "${tableName}" (${columns.map(c => `"${c}"`).join(', ')})
-       VALUES (${columns.map((_,i) => `$${i+1}`).join(', ')}) RETURNING *`,
-      params
-    );
-    res.status(201).json(stripSensitive(result.rows)[0]);
-  } catch (error) {
-    console.error('[TYPE11 GRID CREATE]', error);
-    res.status(error.statusCode || 500).json({ error: error.message });
-  }
-});
-
-app.put('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, async (req, res) => {
-  try {
-    const source = req.params.source;
-    const fieldId = String(req.body?.fieldId || '').trim();
-    const rowId = String(req.body?.rowId || '').trim();
-    if (!fieldId || !rowId) return res.status(400).json({ error: 'fieldId e rowId richiesti' });
-    const { tableName, tableColumns, context } = await getType11Context(source, fieldId, req);
-    const generated = await getGeneratedColumns(tableName);
-    const values = (req.body?.values && typeof req.body.values === 'object') ? req.body.values : {};
-    const data = {};
-    for (const [column, raw] of Object.entries(values)) {
-      if (!tableColumns.has(column) || TYPE11_HIDDEN_COLUMNS.has(column) || generated.has(column)) continue;
-      data[column] = raw === '' ? null : raw;
-    }
-    const columns = Object.keys(data).map(assertValidIdentifier);
-    if (!columns.length) return res.status(400).json({ error: 'Nessun dato da aggiornare' });
-    const where = await type11RowWhere(tableColumns, context, rowId);
-    const params = [...columns.map(c => data[c]), ...where.params];
-    const shiftedWhere = where.conditions.map(c => c.replace(/\$(\d+)/g, (_, n) => `$${columns.length + Number(n)}`));
-    const result = await db.query(
-      `UPDATE "${tableName}" SET ${columns.map((c,i) => `"${c}" = $${i+1}`).join(', ')}
-       WHERE ${shiftedWhere.join(' AND ')}
-       RETURNING *`,
-      params
-    );
-    if (!result.rows.length) return res.status(404).json({ error: 'Riga non trovata' });
-    res.json(stripSensitive(result.rows)[0]);
-  } catch (error) {
-    console.error('[TYPE11 GRID UPDATE]', error);
-    res.status(error.statusCode || 500).json({ error: error.message });
-  }
-});
-
-app.delete('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, async (req, res) => {
-  try {
-    const source = req.params.source;
-    const fieldId = String(req.query.fieldId || '').trim();
-    const rowId = String(req.query.rowId || '').trim();
-    if (!fieldId || !rowId) return res.status(400).json({ error: 'fieldId e rowId richiesti' });
-    const { tableName, tableColumns, context } = await getType11Context(source, fieldId, req);
-    const where = await type11RowWhere(tableColumns, context, rowId);
-    const result = await db.query(
-      `DELETE FROM "${tableName}" WHERE ${where.conditions.join(' AND ')} RETURNING id`,
-      where.params
-    );
-    if (!result.rows.length) return res.status(404).json({ error: 'Riga non trovata' });
-    res.json({ deleted: result.rowCount });
-  } catch (error) {
-    console.error('[TYPE11 GRID DELETE]', error);
     res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
@@ -1148,8 +1089,51 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
     // del login, ignorando quello inviato dal client. Gli admin possono invece
     // scegliere liberamente il tenant (mantengono il valore del form).
     const tableColumns = await getTableColumns(tableName, pool, dbKey);
-    if (tableColumns.has('tenant_id') && !isAdminUser(req)) {
-      data.tenant_id = req.user.tenant_id;
+    // I campi di contesto non sono mai lasciati al browser: il server li determina
+    // dal login e, per i progetti, dal progetto/cliente corrente. Questo evita in
+    // particolare il NOT NULL su user_id nelle INSERT di clients/settings.
+    if (tableColumns.has('tenant_id')) data.tenant_id = req.user.tenant_id;
+    if (tableColumns.has('user_id')) data.user_id = req.user.user_id;
+
+    // Quando un utente non admin crea un record-struttura (settings/clients/projects),
+    // se il form contiene il campo `campo` il nome deve essere sempre marcato come custom.
+    // Questa normalizzazione è necessaria anche per il POST generico /api/data/:table,
+    // usato dal form Aggiungi, non solo per l'endpoint specializzato /field.
+    if (['settings', 'clients', 'projects'].includes(tableName)
+        && Object.prototype.hasOwnProperty.call(data, 'campo')
+        && !isAdminUser(req)) {
+      const rawCampo = String(data.campo || '').trim().replace(/^\(\*\)\s*/, '');
+      if (!rawCampo) return res.status(400).json({ error: 'nome campo richiesto' });
+      data.campo = '(*) ' + rawCampo;
+    }
+
+    if (tableName === 'clients') {
+      // clients non possiede client_id: se arrivasse dal form viene scartato.
+      delete data.client_id;
+      delete data.project_id;
+    } else if (tableName === 'projects') {
+      // Nel form il project_id è il contesto leggibile del progetto corrente.
+      // Nel DB EAV il contenitore è rappresentato da argument = projects.id.
+      // Se l'installazione dispone anche di una vera colonna project_id, la valorizziamo;
+      // altrimenti la convertiamo in argument e non la mandiamo mai come colonna inesistente.
+      const projectId = String(data.project_id || data.argument || '').trim();
+      if (!projectId) {
+        return res.status(400).json({ error: 'project_id richiesto per un campo del progetto' });
+      }
+      const projectContext = await pool.query(
+        `SELECT id, client_id FROM projects
+         WHERE id = $1 AND tenant_id = $2 AND user_id = $3
+           AND argument = 'Progetto' AND campo = 'Progetto'
+         LIMIT 1`,
+        [projectId, req.user.tenant_id, req.user.user_id]
+      );
+      if (projectContext.rows.length === 0) {
+        return res.status(403).json({ error: "Progetto non disponibile per l'utente corrente" });
+      }
+      data.argument = projectId;
+      if (tableColumns.has('client_id')) data.client_id = projectContext.rows[0].client_id;
+      if (tableColumns.has('project_id')) data.project_id = projectId;
+      else delete data.project_id;
     }
 
     // Le colonne generate non sono scrivibili: rimuovile dai dati in ingresso.
@@ -1219,13 +1203,46 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       delete data.password; // Remove plain password
     }
 
-    // Gli utenti non-admin non possono riassegnare il tenant_id di un record;
-    // gli admin sì (mantengono il valore inviato dal form).
+    // I campi di contesto del flyout sono sempre in sola lettura.
+    // In modifica non devono mai essere aggiornati dal browser: tenant_id e
+    // user_id restano quelli della riga autenticata; client_id è valido solo
+    // nelle tabelle che lo possiedono (es. projects). In particolare la tabella
+    // clients NON ha client_id, quindi va sempre escluso dalla UPDATE.
     const tableColumns = await getTableColumns(tableName, pool, dbKey);
     const admin = isAdminUser(req);
-    if (!admin) {
-      delete data.tenant_id;
+
+    // Quando la PUT proviene dal form Aggiungi/Modifica campo, gli utenti non admin
+    // possono creare/modificare solo campi custom: il prefisso '(*) ' viene imposto
+    // dal server e non può essere rimosso dal browser.
+    if (['settings', 'clients', 'projects'].includes(tableName) && Object.prototype.hasOwnProperty.call(data, 'campo') && !admin) {
+      const rawCampo = String(data.campo || '').trim().replace(/^\(\*\)\s*/, '');
+      if (!rawCampo) return res.status(400).json({ error: 'nome campo richiesto' });
+      data.campo = '(*) ' + rawCampo;
     }
+
+    // Per la propagazione 'all' serve il nome originale del campo prima della PUT.
+    // Deve essere letto nel perimetro dell'utente/tenant autenticato.
+    let originalFieldRow = null;
+    if (['settings', 'clients', 'projects'].includes(tableName)) {
+      const where = [];
+      const params = [id];
+      where.push(`id = $1`);
+      if (tableColumns.has('tenant_id') && !admin) { params.push(req.user.tenant_id); where.push(`tenant_id = $${params.length}`); }
+      if (tableColumns.has('user_id') && !admin) { params.push(req.user.user_id); where.push(`user_id = $${params.length}`); }
+      const original = await pool.query(`SELECT id, argument, campo, tenant_id, user_id FROM "${tableName}" WHERE ${where.join(' AND ')} LIMIT 1`, params);
+      originalFieldRow = original.rows[0] || null;
+    }
+
+    delete data.tenant_id;
+    delete data.user_id;
+    delete data.client_id;
+
+    // Difesa ulteriore: accetta soltanto colonne realmente presenti nella tabella.
+    // Così eventuali campi aggiunti dal frontend non possono diventare identificatori
+    // SQL e provocare errori come "column client_id of relation clients does not exist".
+    data = Object.fromEntries(
+      Object.entries(data).filter(([column]) => tableColumns.has(column))
+    );
 
     // Isolamento clienti (ACL): un non-admin può modificare una riga di "clients" solo se
     // proprietario del cliente o con condivisione in scrittura. Enforce del permesso 'read'.
@@ -1264,21 +1281,37 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
 
     const savedRow = result.rows[0];
 
-    // Admin + ambito "tutti i tenant": propaga gli stessi valori modificati a tutte le
-    // righe gemelle (stesso argument/campo) di TUTTI i tenant, per le tabelle EAV
-    // (settings/clients/projects) dove questo pattern ha senso.
-    if (admin && scope === 'all-tenants' && ['settings', 'clients', 'projects'].includes(tableName)
-        && savedRow.argument != null && savedRow.campo != null) {
+    // Propagazione della modifica del campo.
+    // - Clienti/Progetti: scope='all' = tutti i contenitori del tenant/utente,
+    //   scope='this' = solo il contenitore selezionato. È la stessa semantica di Elimina.
+    // - Settings: scope='all-tenants' resta riservato all'admin e propaga a tutti i tenant;
+    //   scope='this-tenant' limita al tenant corrente.
+    const shouldPropagateField = ['clients', 'projects'].includes(tableName)
+      ? scope === 'all'
+      : tableName === 'settings' && scope === 'all-tenants' && admin;
+    if (shouldPropagateField && originalFieldRow && originalFieldRow.campo != null) {
       try {
-        const propagateCols = columns.filter(c => !['tenant_id', 'user_id', 'argument', 'campo'].includes(c));
+        // Propaghiamo anche 'campo' (rinomina) e tutti gli altri valori editati,
+        // ma mai le chiavi di contesto o l'argument del singolo contenitore.
+        const propagateCols = columns.filter(c => !['id', 'tenant_id', 'user_id', 'argument'].includes(c));
         if (propagateCols.length > 0) {
           const setClause = propagateCols.map((c, i) => `"${c}" = $${i + 1}`).join(', ');
           const pParams = propagateCols.map(c => data[c]);
-          pParams.push(savedRow.argument, savedRow.campo, savedRow.id);
-          await pool.query(
-            `UPDATE "${tableName}" SET ${setClause} WHERE argument = $${propagateCols.length + 1} AND campo = $${propagateCols.length + 2} AND id <> $${propagateCols.length + 3}`,
-            pParams
-          );
+          let where = `campo = $${propagateCols.length + 1} AND id <> $${propagateCols.length + 2}`;
+          pParams.push(originalFieldRow.campo, savedRow.id);
+          if (tableColumns.has('tenant_id')) {
+            pParams.push(req.user.tenant_id);
+            where += ` AND tenant_id = $${pParams.length}`;
+          }
+          if (tableColumns.has('user_id')) {
+            pParams.push(req.user.user_id);
+            where += ` AND user_id = $${pParams.length}`;
+          }
+          if (tableName === 'settings' && originalFieldRow.argument != null) {
+            pParams.push(originalFieldRow.argument);
+            where += ` AND argument = $${pParams.length}`;
+          }
+          await pool.query(`UPDATE "${tableName}" SET ${setClause} WHERE ${where}`, pParams);
         }
       } catch (e) { /* la propagazione non deve far fallire il salvataggio principale */ }
     }
@@ -2277,6 +2310,103 @@ app.get('/api/set-var-layout', requireAuth, async (req, res) => {
   }
 });
 
+// Contesto leggibile dei form Aggiungi/Modifica dei flyout.
+// Gli ID reali restano nel contesto autenticato/server; il client riceve solo
+// le descrizioni da mostrare in sola lettura. Per clients il client_id è l'id
+// del cliente corrente, mentre per projects è il client_id del progetto corrente.
+app.get('/api/flyout/context', requireAuth, async (req, res) => {
+  try {
+    const source = String(req.query?.source || '').trim();
+    if (!['settings', 'clients', 'projects'].includes(source)) {
+      return res.status(400).json({ error: 'source richiesto (settings, clients o projects)' });
+    }
+
+    const tenantResult = await db.query(
+      'SELECT id, name FROM tenants WHERE id = $1 LIMIT 1',
+      [req.user.tenant_id]
+    );
+
+    const userResult = await db.query(
+      `SELECT id, COALESCE(NULLIF(TRIM(CONCAT_WS(' ', cognome, name)), ''), id::text) AS name
+       FROM users WHERE id = $1 LIMIT 1`,
+      [req.user.user_id]
+    );
+
+    let clientId = String(req.query?.clientId || '').trim();
+    let projectId = String(req.query?.projectId || '').trim();
+    if (source === 'clients') {
+      clientId = clientId || '';
+      if (clientId) {
+        const root = await resolveClientRoot(clientId, req.user.tenant_id);
+        if (root) clientId = String(root.clientId);
+        else clientId = '';
+      }
+    } else if (source === 'projects') {
+      // Nel flyout Progetti il project_id è l'id della riga identità del progetto
+      // (projects.id / ele_progetti.project_id). Ricaviamo sempre da quello il client_id,
+      // così il form non può perdere il contesto del progetto corrente.
+      if (projectId) {
+        const project = await db.query(
+          `SELECT id, client_id, valore2 AS name
+           FROM projects
+           WHERE id = $1 AND tenant_id = $2 AND user_id = $3
+             AND argument = 'Progetto' AND campo = 'Progetto'
+           LIMIT 1`,
+          [projectId, req.user.tenant_id, req.user.user_id]
+        );
+        if (project.rows.length > 0) {
+          clientId = String(project.rows[0].client_id || clientId || '');
+        } else {
+          projectId = '';
+        }
+      }
+      if (clientId) {
+        const client = await db.query(
+          `SELECT id FROM clients WHERE id = $1 AND tenant_id = $2 AND argument = 'Cliente' AND campo = 'Cliente' LIMIT 1`,
+          [clientId, req.user.tenant_id]
+        );
+        if (client.rows.length === 0) clientId = '';
+      }
+    } else {
+      clientId = '';
+      projectId = '';
+    }
+
+    let clientResult = { rows: [] };
+    if (clientId) {
+      clientResult = await db.query(
+        `SELECT id, valore2 AS name
+         FROM clients
+         WHERE id = $1 AND tenant_id = $2 AND argument = 'Cliente' AND campo = 'Cliente'
+         LIMIT 1`,
+        [clientId, req.user.tenant_id]
+      );
+    }
+
+    let projectResult = { rows: [] };
+    if (source === 'projects' && projectId) {
+      projectResult = await db.query(
+        `SELECT id, valore2 AS name, client_id
+         FROM projects
+         WHERE id = $1 AND tenant_id = $2 AND user_id = $3
+           AND argument = 'Progetto' AND campo = 'Progetto'
+         LIMIT 1`,
+        [projectId, req.user.tenant_id, req.user.user_id]
+      );
+    }
+
+    res.json({
+      tenant: tenantResult.rows[0] || { id: req.user.tenant_id, name: '' },
+      user: userResult.rows[0] || { id: req.user.user_id, name: '' },
+      client: clientResult.rows[0] || (clientId ? { id: clientId, name: '' } : null),
+      project: projectResult.rows[0] || (projectId ? { id: projectId, name: '' } : null)
+    });
+  } catch (error) {
+    console.error('[FLYOUT CONTEXT]', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Restituisce il tenant del contesto autenticato (sola lettura), da mostrare nei form
 // Aggiungi/Modifica di tutti i flyout (evita l'errore di inserimento per tenant mancante).
 app.get('/api/tenant/current', requireAuth, async (req, res) => {
@@ -2439,7 +2569,7 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
 
     // 'standard' consentito solo a id_roles <= 20; altrimenti campo custom.
     const roleLevel = Number(req.user.id_roles);
-    const isStandard = (kind === 'standard') && Number.isFinite(roleLevel) && roleLevel <= 20;
+    const isStandard = (kind === 'standard') && roleLevel === 1;
     // Standard: nessun prefisso, ordinamento tra i campi NON custom (parte da 1, resta < 200).
     // Custom: prefisso "(*)", ordinamento tra i campi >= 200 (parte da 200). In entrambi i casi
     // il nuovo ordinamento è MAX della fascia + 1, senza accatastarsi.
@@ -2606,8 +2736,16 @@ app.post('/api/:source(settings|clients|projects)/rename-fields', requireAuth, a
       let newName = ((rn && rn.new) || '').trim();
       // Solo i campi custom mantengono il prefisso "(*)": se il campo originale era custom
       // e il prefisso è stato tolto, reinseriscilo. I campi standard restano senza prefisso.
-      const wasCustom = oldName.startsWith('(*)');
-      if (wasCustom && newName && !newName.startsWith('(*)')) newName = '(*) ' + newName;
+      // Per gli utenti non admin una rinomina/modifica deve sempre produrre un
+      // campo custom riconoscibile. Il prefisso viene quindi imposto anche quando
+      // il campo originale era standard (non solo quando era già custom).
+      if (!isAdmin) {
+        newName = newName.replace(/^\(\*\)\s*/, '');
+        if (newName) newName = '(*) ' + newName;
+      } else {
+        const wasCustom = oldName.startsWith('(*)');
+        if (wasCustom && newName && !newName.startsWith('(*)')) newName = '(*) ' + newName;
+      }
       if (!oldName || !newName || oldName === newName) continue;
       let query, params;
       if (source === 'settings') {
