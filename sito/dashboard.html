@@ -5107,12 +5107,26 @@
                     const r = await fetch(`${API_URL}/data/${encodeURIComponent(refTable)}`, { headers: getAuthHeaders() });
                     if (r.ok) {
                         const d = await r.json();
-                        options = d.map(row => ({ id: row.id, display: row.nominativo || row.name || row.display_name || row.description || row.title || row.valore2 || ('Item ' + row.id) }));
+                        // Stessa priorità usata lato server per le colonne FK: prima una colonna
+                        // "desc_*" (es. desc_worker), poi i nomi leggibili più comuni, altrimenti l'id.
+                        let descCol = null;
+                        try {
+                            const cr = await fetch(`${API_URL}/data/${encodeURIComponent(refTable)}/columns`, { headers: getAuthHeaders() });
+                            if (cr.ok) {
+                                const cols = await cr.json();
+                                descCol = (cols || []).map(c => c.name).find(name => /^desc_/i.test(name)) || null;
+                            }
+                        } catch (e) { /* ignore */ }
+                        options = d.map(row => ({
+                            id: row.id,
+                            display: (descCol ? row[descCol] : null) || row.nominativo || row.name || row.display_name || row.description || row.title || row.valore2 || ('Item ' + row.id)
+                        }));
                     }
                 }
             } catch (e) { /* ignore */ }
             return options;
         }
+
 
         // HTML di un campo del form collegato: select se FK (col.references), altrimenti text.
         // disabled = sola lettura (usato quando la modifica non è abilitata o la colonna è generata).
@@ -5755,10 +5769,17 @@
             return type11CellValue(record, column);
         }
 
-        function type11GridInputHtml(col, value, disabled) {
+        async function type11GridInputHtml(col, value, disabled) {
             const val = value == null ? '' : String(value);
             const dis = disabled ? 'disabled' : '';
             const type = String(col.type || '').toLowerCase();
+            if (col.references) {
+                // Colonna FK (es. team_id -> teams.id): menu a discesa con i valori leggibili
+                // della tabella referenziata, selezionando l'id grezzo corrente (non l'etichetta).
+                const opts = await linkedFkOptions(col.references);
+                const optionsHtml = opts.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
+                return `<select class="type11-editor-field" data-col="${escapeHtml(col.name)}" ${dis}><option value="">-- Seleziona --</option>${optionsHtml}</select>`;
+            }
             if (type === 'boolean') {
                 const checked = value === true || value === 'true' || value === 't' || value === 1 ? 'checked' : '';
                 return `<label class="toggle-switch"><input class="type11-editor-field" data-col="${escapeHtml(col.name)}" type="checkbox" ${checked} ${dis}><span class="toggle-slider"></span></label>`;
@@ -5784,11 +5805,14 @@
                 return;
             }
             const title = isNew ? 'Nuova riga' : 'Modifica riga';
-            const fields = visible.map(col => {
+            let fields = '';
+            for (const col of visible) {
+                // Per le colonne FK il valore grezzo (id reale) arriva in "__raw_<colonna>":
+                // usarlo evita di riscrivere l'etichetta leggibile in una colonna uuid.
                 const value = isNew ? '' : type11GridRawValue(row, col.name);
                 const readonly = !!col.generated;
-                return `<div class="settings-detail-row"><span class="campo-label">${escapeHtml(col.name)}</span>${type11GridInputHtml(col, value, readonly)}</div>`;
-            }).join('');
+                fields += `<div class="settings-detail-row"><span class="campo-label">${escapeHtml(col.name)}</span>${await type11GridInputHtml(col, value, readonly)}</div>`;
+            }
             editor.innerHTML = `<div class="type11-grid-editor-title">${title}</div>${fields}
                 <div class="type11-grid-editor-actions">
                     <button type="button" class="type11-grid-cancel">Annulla</button>

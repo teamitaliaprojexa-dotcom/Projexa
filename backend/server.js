@@ -854,6 +854,13 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     const joins = [];
     let joinIndex = 0;
 
+    // L'id della riga serve sempre al frontend (Modifica/Elimina), anche se non è tra le
+    // colonne configurate per la visualizzazione: viene aggiunto separatamente e non è
+    // incluso nell'elenco "columns" restituito, quindi non compare come colonna in griglia.
+    if (tableColumns.has('id') && !selectedColumns.includes('id')) {
+      selectExpressions.push('src.id AS id');
+    }
+
     for (const column of selectedColumns) {
       const fk = fkByColumn.get(column);
       if (!fk) {
@@ -880,6 +887,10 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       assertValidIdentifier(displayColumn);
       const alias = `fk_${joinIndex++}`;
       joins.push(`LEFT JOIN "${fk.foreign_table}" ${alias} ON ${alias}."${fk.foreign_column}" = src."${column}"`);
+      // Conserva anche il valore grezzo (uuid) sotto "__raw_<colonna>": la colonna
+      // visibile mostra l'etichetta leggibile, ma il salvataggio deve scrivere l'id reale,
+      // non il testo mostrato (altrimenti "invalid input syntax for type uuid").
+      selectExpressions.push(`src."${column}" AS "__raw_${column}"`);
       selectExpressions.push(`COALESCE(${alias}."${displayColumn}"::text, src."${column}"::text) AS "${column}"`);
     }
 
@@ -910,6 +921,170 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     res.json(source === 'projects'
       ? { rows: result.rows, columns: selectedColumns }
       : result.rows);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Risolve la configurazione di una griglia (tipo_valore = 11) e verifica che l'utente
+// corrente possa operare su di essa. Restituisce { config, tableName, tableColumns,
+// generatedColumns, effectiveUserId, clientId } oppure lancia un errore con statusCode.
+async function resolveGridWidgetContext(source, fieldId, req, needWrite) {
+  if (!fieldId) {
+    throw Object.assign(new Error('Parametro fieldId richiesto'), { statusCode: 400 });
+  }
+  const clientColumn = source === 'projects' ? 'client_id' : 'NULL::uuid AS client_id';
+  const configResult = await db.query(
+    `SELECT id, argument, tabella, colonna, tenant_id, user_id, ${clientColumn}
+     FROM "${source}"
+     WHERE id = $1 AND tenant_id = $2 AND tipo_valore::text = '11'
+     LIMIT 1`,
+    [fieldId, req.user.tenant_id]
+  );
+  if (configResult.rows.length === 0) {
+    throw Object.assign(new Error('Configurazione griglia non trovata'), { statusCode: 404 });
+  }
+  const config = configResult.rows[0];
+
+  let effectiveUserId = req.user.user_id;
+  if (source === 'clients') {
+    const access = await clientAccessByArgument(config.argument, req, needWrite);
+    if (!access) throw Object.assign(new Error('Non autorizzato'), { statusCode: 403 });
+    effectiveUserId = access.ownerUserId;
+    if (String(config.user_id) !== String(effectiveUserId)) {
+      throw Object.assign(new Error('Non autorizzato'), { statusCode: 403 });
+    }
+  } else if (String(config.user_id) !== String(req.user.user_id)) {
+    throw Object.assign(new Error('Non autorizzato'), { statusCode: 403 });
+  }
+
+  const tableName = assertValidIdentifier(String(config.tabella || '').trim());
+  if (!tableName) {
+    throw Object.assign(new Error('Tabella non configurata'), { statusCode: 400 });
+  }
+  tableColumnsCache.delete('main:' + tableName);
+  const tableColumns = await getTableColumns(tableName);
+  if (tableColumns.size === 0) {
+    throw Object.assign(new Error('Tabella non trovata'), { statusCode: 404 });
+  }
+  const generatedColumns = await getGeneratedColumns(tableName);
+
+  let clientId = String(config.client_id || '').trim();
+  if (!clientId && source === 'clients') {
+    const root = await resolveClientRoot(config.argument, req.user.tenant_id);
+    clientId = root ? String(root.clientId) : '';
+  }
+
+  return { config, tableName, tableColumns, generatedColumns, effectiveUserId, clientId };
+}
+
+// Inserisce una nuova riga nella griglia (tipo_valore = 11). tenant_id/user_id/client_id
+// (e project_id per i progetti) vengono sempre forzati dal contesto, non dal browser.
+app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const fieldId = ((req.body && req.body.fieldId) || '').trim();
+    const values = (req.body && req.body.values) || {};
+
+    const ctx = await resolveGridWidgetContext(source, fieldId, req, true);
+    const { config, tableName, tableColumns, generatedColumns, effectiveUserId, clientId } = ctx;
+    if (!clientId) return res.status(400).json({ error: 'Contesto client_id non disponibile' });
+
+    const data = {};
+    for (const [k, v] of Object.entries(values)) {
+      if (tableColumns.has(k) && !generatedColumns.has(k)
+          && !['id', 'tenant_id', 'user_id', 'client_id', 'project_id'].includes(k)) {
+        data[k] = v === '' ? null : v;
+      }
+    }
+    if (tableColumns.has('tenant_id')) data.tenant_id = req.user.tenant_id;
+    if (tableColumns.has('user_id')) data.user_id = effectiveUserId;
+    if (tableColumns.has('client_id')) data.client_id = clientId;
+    if (tableColumns.has('project_id') && source === 'projects') data.project_id = config.argument;
+
+    const columns = Object.keys(data).map(assertValidIdentifier);
+    if (columns.length === 0) return res.status(400).json({ error: 'Nessun dato da inserire' });
+    const paramsArr = columns.map((c) => data[c]);
+    const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+    const quoted = columns.map((c) => `"${c}"`).join(', ');
+    const result = await db.query(
+      `INSERT INTO "${tableName}" (${quoted}) VALUES (${placeholders}) RETURNING *`,
+      paramsArr
+    );
+    res.status(201).json(stripSensitive(result.rows)[0]);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Modifica una riga esistente della griglia (tipo_valore = 11), filtrando sempre per il
+// contesto (tenant/utente/cliente/progetto), mai per valori inviati dal browser.
+app.put('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const fieldId = ((req.body && req.body.fieldId) || '').trim();
+    const rowId = ((req.body && req.body.rowId) || '').trim();
+    const values = (req.body && req.body.values) || {};
+    if (!rowId) return res.status(400).json({ error: 'rowId richiesto' });
+
+    const ctx = await resolveGridWidgetContext(source, fieldId, req, true);
+    const { config, tableName, tableColumns, generatedColumns, effectiveUserId, clientId } = ctx;
+
+    const data = {};
+    for (const [k, v] of Object.entries(values)) {
+      if (tableColumns.has(k) && !generatedColumns.has(k)
+          && !['id', 'tenant_id', 'user_id', 'client_id', 'project_id'].includes(k)) {
+        data[k] = v === '' ? null : v;
+      }
+    }
+    const columns = Object.keys(data).map(assertValidIdentifier);
+    if (columns.length === 0) return res.status(400).json({ error: 'Nessun dato da aggiornare' });
+
+    const setClause = columns.map((c, i) => `"${c}" = $${i + 1}`).join(', ');
+    const paramsArr = columns.map((c) => data[c]);
+    paramsArr.push(rowId);
+    const conditions = [`id = $${paramsArr.length}`];
+    if (tableColumns.has('tenant_id')) { paramsArr.push(req.user.tenant_id); conditions.push(`tenant_id = $${paramsArr.length}`); }
+    if (tableColumns.has('user_id')) { paramsArr.push(effectiveUserId); conditions.push(`user_id = $${paramsArr.length}`); }
+    if (tableColumns.has('client_id') && clientId) { paramsArr.push(clientId); conditions.push(`client_id = $${paramsArr.length}`); }
+    if (tableColumns.has('project_id') && source === 'projects') { paramsArr.push(config.argument); conditions.push(`project_id = $${paramsArr.length}`); }
+
+    const updatedAtClause = tableColumns.has('updated_at') ? ', updated_at = CURRENT_TIMESTAMP' : '';
+    const result = await db.query(
+      `UPDATE "${tableName}" SET ${setClause}${updatedAtClause} WHERE ${conditions.join(' AND ')} RETURNING *`,
+      paramsArr
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
+    res.json(stripSensitive(result.rows)[0]);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Elimina una riga della griglia (tipo_valore = 11), filtrando sempre per il contesto.
+app.delete('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const fieldId = ((req.query && req.query.fieldId) || '').trim();
+    const rowId = ((req.query && req.query.rowId) || '').trim();
+    if (!rowId) return res.status(400).json({ error: 'rowId richiesto' });
+
+    const ctx = await resolveGridWidgetContext(source, fieldId, req, true);
+    const { config, tableName, tableColumns, effectiveUserId, clientId } = ctx;
+
+    const conditions = ['id = $1'];
+    const paramsArr = [rowId];
+    if (tableColumns.has('tenant_id')) { paramsArr.push(req.user.tenant_id); conditions.push(`tenant_id = $${paramsArr.length}`); }
+    if (tableColumns.has('user_id')) { paramsArr.push(effectiveUserId); conditions.push(`user_id = $${paramsArr.length}`); }
+    if (tableColumns.has('client_id') && clientId) { paramsArr.push(clientId); conditions.push(`client_id = $${paramsArr.length}`); }
+    if (tableColumns.has('project_id') && source === 'projects') { paramsArr.push(config.argument); conditions.push(`project_id = $${paramsArr.length}`); }
+
+    const result = await db.query(
+      `DELETE FROM "${tableName}" WHERE ${conditions.join(' AND ')} RETURNING id`,
+      paramsArr
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
+    res.json({ deleted: result.rowCount });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }

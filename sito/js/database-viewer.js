@@ -831,11 +831,9 @@ async function saveRecord(event) {
   const tableName = currentModalTable;
   const recordId = currentModalRecordId;
 
-  // Admin: chiede se applicare la modifica solo al tenant corrente o a TUTTI i tenant.
-  if (isAdminViewer()) {
-    const applyAll = confirm('Applicare questa modifica a TUTTI i tenant?\n\nOK = tutti i tenant\nAnnulla = solo il tenant corrente');
-    data.__scope = applyAll ? 'all-tenants' : 'this-tenant';
-  }
+  // Il database-viewer applica sempre la modifica solo al record selezionato:
+  // a differenza della dashboard, qui non ha senso chiedere se propagare a
+  // tutti i tenant, quindi non impostiamo alcuno scope speciale.
 
   const method = recordId ? 'PUT' : 'POST';
   const url = recordId
