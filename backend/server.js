@@ -1184,7 +1184,9 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
     let data = { ...req.body };
     // Ambito scelto dall'admin al salvataggio; non è una colonna della tabella.
     const scope = data.__scope;
+    const tenantScope = data.__tenantScope || 'this-tenant';
     delete data.__scope;
+    delete data.__tenantScope;
 
     // Le stringhe vuote diventano NULL: colonne numeriche/date/boolean non accettano ''.
     for (const k of Object.keys(data)) {
@@ -1210,6 +1212,9 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
     // clients NON ha client_id, quindi va sempre escluso dalla UPDATE.
     const tableColumns = await getTableColumns(tableName, pool, dbKey);
     const admin = isAdminUser(req);
+    if (tenantScope === 'all-tenants' && !admin) {
+      return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
+    }
 
     // Quando la PUT proviene dal form Aggiungi/Modifica campo, gli utenti non admin
     // possono creare/modificare solo campi custom: il prefisso '(*) ' viene imposto
@@ -1229,8 +1234,13 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       where.push(`id = $1`);
       if (tableColumns.has('tenant_id') && !admin) { params.push(req.user.tenant_id); where.push(`tenant_id = $${params.length}`); }
       if (tableColumns.has('user_id') && !admin) { params.push(req.user.user_id); where.push(`user_id = $${params.length}`); }
-      const original = await pool.query(`SELECT id, argument, campo, tenant_id, user_id FROM "${tableName}" WHERE ${where.join(' AND ')} LIMIT 1`, params);
+      const original = await pool.query(`SELECT id, argument, campo, valore2, tenant_id, user_id FROM "${tableName}" WHERE ${where.join(' AND ')} LIMIT 1`, params);
       originalFieldRow = original.rows[0] || null;
+      if (originalFieldRow && ['clients', 'projects'].includes(tableName) && originalFieldRow.argument) {
+        const container = await pool.query(`SELECT campo, valore2 FROM "${tableName}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [originalFieldRow.argument, originalFieldRow.tenant_id]);
+        originalFieldRow.containerCampo = container.rows[0]?.campo || null;
+        originalFieldRow.containerValue = container.rows[0]?.valore2 ?? null;
+      }
     }
 
     delete data.tenant_id;
@@ -1287,7 +1297,7 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
     // - Settings: scope='all-tenants' resta riservato all'admin e propaga a tutti i tenant;
     //   scope='this-tenant' limita al tenant corrente.
     const shouldPropagateField = ['clients', 'projects'].includes(tableName)
-      ? scope === 'all'
+      ? (scope === 'all' || tenantScope === 'all-tenants')
       : tableName === 'settings' && scope === 'all-tenants' && admin;
     if (shouldPropagateField && originalFieldRow && originalFieldRow.campo != null) {
       try {
@@ -1299,13 +1309,24 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
           const pParams = propagateCols.map(c => data[c]);
           let where = `campo = $${propagateCols.length + 1} AND id <> $${propagateCols.length + 2}`;
           pParams.push(originalFieldRow.campo, savedRow.id);
-          if (tableColumns.has('tenant_id')) {
-            pParams.push(req.user.tenant_id);
-            where += ` AND tenant_id = $${pParams.length}`;
-          }
-          if (tableColumns.has('user_id')) {
-            pParams.push(req.user.user_id);
-            where += ` AND user_id = $${pParams.length}`;
+          if (tenantScope === 'all-tenants' && admin && ['clients','projects'].includes(tableName)) {
+            // Per all-tenants il contenitore viene individuato logicamente tramite
+            // la riga identità (campo Cliente/Progetto + valore2), non tramite UUID.
+            if (scope === 'this' && originalFieldRow.containerValue != null) {
+              pParams.push(originalFieldRow.containerCampo || (tableName === 'projects' ? 'Progetto' : 'Cliente'));
+              where += ` AND argument IN (SELECT id::text FROM "${tableName}" roots WHERE roots.campo = $${pParams.length} AND roots.valore2 = $${pParams.length + 1})`;
+              pParams.push(originalFieldRow.containerValue);
+            }
+            // scope='all' non aggiunge filtro tenant/user: tutti i tenant.
+          } else {
+            if (tableColumns.has('tenant_id')) {
+              pParams.push(req.user.tenant_id);
+              where += ` AND tenant_id = $${pParams.length}`;
+            }
+            if (tableColumns.has('user_id')) {
+              pParams.push(req.user.user_id);
+              where += ` AND user_id = $${pParams.length}`;
+            }
           }
           if (tableName === 'settings' && originalFieldRow.argument != null) {
             pParams.push(originalFieldRow.argument);
@@ -2554,6 +2575,11 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
     const variabDb = ((req.body && req.body.VariabDB) || '').trim() || null; // colonna "VariabDB"
     const valore2 = ((req.body && req.body.valore2) || '').trim() || null;   // valore iniziale (es. tipo 30)
     const scope = (req.body && req.body.scope) || 'this';
+    const tenantScope = (req.body && req.body.tenantScope) || 'this-tenant';
+    const isAdminTenantScope = Number(req.user.id_roles) === 1;
+    if (tenantScope === 'all-tenants' && !isAdminTenantScope) {
+      return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
+    }
     const kind = (req.body && req.body.kind) || 'custom';
     // Contenitore dello scope 'all': 'Cliente' al top-level, oppure il campo del Nodo Padre.
     const containerCampo = ((req.body && req.body.containerCampo) || 'Cliente').trim() || 'Cliente';
@@ -2608,6 +2634,36 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
       return res.status(201).json({ inserted: result.rowCount });
     }
 
+    if (tenantScope === 'all-tenants' && isAdminTenantScope) {
+      // Admin: la scelta Tenant è indipendente dalla scelta Cliente/Progetto.
+      // 'all' = tutti i contenitori di tutti i tenant; 'this' = il contenitore
+      // logicamente corrispondente in tutti i tenant, usando la sua etichetta valore2.
+      let containerValue = null;
+      if (scope === 'this' && clientId) {
+        const currentContainer = await db.query(
+          `SELECT valore2 FROM "${source}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          [clientId, req.user.tenant_id]
+        );
+        containerValue = currentContainer.rows[0]?.valore2 ?? null;
+      }
+      const rootCampo = source === 'projects' ? 'Progetto' : containerCampo;
+      const whereValue = (scope === 'this' && containerValue != null)
+        ? ' AND c.valore2 = $10' : '';
+      // Progetti: la tabella richiede sempre client_id. Nel contenitore sorgente (c)
+      // il client_id è già presente: lo trasciniamo nella nuova riga.
+      const clientIdCol = source === 'projects' ? ', client_id' : '';
+      const clientIdSel = source === 'projects' ? ', c.client_id' : '';
+      const q = `INSERT INTO "${source}" (argument, campo, tipo_valore, tabella, colonna, "VariabDB", valore2, tenant_id, user_id, ordinamento, id_roles${clientIdCol})
+        SELECT c.id::text, $1, $2, $3, $4, $5, $6, c.tenant_id, c.user_id,
+               COALESCE((SELECT MAX(x.ordinamento) + 1 FROM "${source}" x WHERE x.tenant_id = c.tenant_id AND x.campo NOT LIKE '(*)%'), $7), $8::smallint${clientIdSel}
+        FROM "${source}" c
+        WHERE c.campo = $9${whereValue}`;
+      const params = [campo, tipoValore, tabella, colonna, variabDb, valore2, bandBase, idRoles, rootCampo];
+      if (scope === 'this' && containerValue != null) params.push(containerValue);
+      const result = await db.query(q, params);
+      return res.status(201).json({ inserted: result.rowCount });
+    }
+
     if (scope === 'all') {
       // Ordinamento coerente su tutti i contenitori (max della fascia nel tenant/utente, +1)
       const ord = await db.query(
@@ -2620,9 +2676,14 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
       // Una riga del campo sotto ogni contenitore col campo indicato:
       // 'Cliente' = righe identità (top-level); altrimenti i Nodo Padre con quel campo.
       // argument = id del contenitore (così i figli si legano al contenitore giusto).
+      // Progetti: la tabella richiede sempre client_id, altrimenti l'INSERT fallisce
+      // (o la riga perde il collegamento al cliente/progetto). Lo prendiamo dal
+      // contenitore sorgente (c.client_id), che lo possiede già.
+      const clientIdCol = source === 'projects' ? ', client_id' : '';
+      const clientIdSel = source === 'projects' ? ', c.client_id' : '';
       const result = await db.query(
-        `INSERT INTO "${source}" (argument, campo, tipo_valore, tabella, colonna, "VariabDB", valore2, tenant_id, user_id, ordinamento, id_roles)
-         SELECT c.id::text, $1, $2, $3, $4, $10, $11, $5, $6, $7, $9::smallint
+        `INSERT INTO "${source}" (argument, campo, tipo_valore, tabella, colonna, "VariabDB", valore2, tenant_id, user_id, ordinamento, id_roles${clientIdCol})
+         SELECT c.id::text, $1, $2, $3, $4, $10, $11, $5, $6, $7, $9::smallint${clientIdSel}
          FROM "${source}" c
          WHERE c.campo = $8 AND c.tenant_id = $5 AND c.user_id = $6`,
         [campo, tipoValore, tabella, colonna, req.user.tenant_id, req.user.user_id, newOrd, containerCampo, idRoles, variabDb, valore2]
@@ -2668,6 +2729,7 @@ app.post('/api/:source(settings|clients|projects)/delete-fields', requireAuth, a
     const source = req.params.source;
     const campos = (req.body && req.body.campos) || [];
     const scope = (req.body && req.body.scope) || 'this';
+    const tenantScope = (req.body && req.body.tenantScope) || 'this-tenant';
     const clientId = ((req.body && req.body.clientId) || '').trim();
     if (!Array.isArray(campos) || campos.length === 0) {
       return res.status(400).json({ error: 'Nessun campo selezionato' });
@@ -2689,6 +2751,21 @@ app.post('/api/:source(settings|clients|projects)/delete-fields', requireAuth, a
       } else {
         query = `DELETE FROM settings WHERE campo = ANY($1::text[]) AND argument = $2 AND tenant_id = $3 ${ordGuard}`;
         params = [campos, clientId, req.user.tenant_id];
+      }
+    } else if (tenantScope === 'all-tenants' && isAdmin) {
+      if (scope === 'this' && !clientId) return res.status(400).json({ error: 'clientId richiesto' });
+      if (scope === 'this') {
+        const root = await db.query(`SELECT valore2 FROM "${source}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [clientId, req.user.tenant_id]);
+        const logicalValue = root.rows[0]?.valore2 ?? null;
+        if (logicalValue != null) {
+          query = `DELETE FROM "${source}" f USING "${source}" c WHERE f.campo = ANY($1::text[]) AND c.id::text = f.argument AND c.campo = $2 AND c.valore2 = $3 ${ordGuard}`;
+          params = [campos, source === 'projects' ? 'Progetto' : 'Cliente', logicalValue];
+        } else {
+          return res.status(400).json({ error: 'Impossibile determinare il contenitore corrispondente negli altri tenant' });
+        }
+      } else {
+        query = `DELETE FROM "${source}" WHERE campo = ANY($1::text[]) ${ordGuard}`;
+        params = [campos];
       }
     } else if (scope === 'all') {
       query = `DELETE FROM "${source}"
@@ -2714,11 +2791,15 @@ app.post('/api/:source(settings|clients|projects)/rename-fields', requireAuth, a
     const source = req.params.source;
     const renames = (req.body && req.body.renames) || [];
     const scope = (req.body && req.body.scope) || 'all';
+    const tenantScope = (req.body && req.body.tenantScope) || 'this-tenant';
     const clientId = ((req.body && req.body.clientId) || '').trim();
     if (!Array.isArray(renames) || renames.length === 0) {
       return res.status(400).json({ error: 'Nessuna rinomina' });
     }
     const isAdmin = Number(req.user.id_roles) === 1;
+    if (tenantScope === 'all-tenants' && !isAdmin) {
+      return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
+    }
     if (source === 'settings') {
       if (!clientId) return res.status(400).json({ error: 'argomento richiesto' });
       if (scope === 'all-tenants' && !isAdmin) {
@@ -2756,6 +2837,21 @@ app.post('/api/:source(settings|clients|projects)/rename-fields', requireAuth, a
         } else {
           query = `UPDATE settings SET campo = $1 WHERE campo = $2 AND argument = $3 AND tenant_id = $4${custGuard}`;
           params = [newName, oldName, clientId, req.user.tenant_id];
+        }
+      } else if (tenantScope === 'all-tenants' && isAdmin) {
+        if (scope === 'this') {
+          const root = await db.query(`SELECT valore2 FROM "${source}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [clientId, req.user.tenant_id]);
+          const logicalValue = root.rows[0]?.valore2 ?? null;
+          if (logicalValue != null) {
+            query = `UPDATE "${source}" f SET campo = $1 FROM "${source}" c
+                     WHERE c.id::text = f.argument AND c.campo = $2 AND c.valore2 = $3 AND f.campo = $4${custGuard}`;
+            params = [newName, source === 'projects' ? 'Progetto' : 'Cliente', logicalValue, oldName];
+          } else {
+            return res.status(400).json({ error: 'Impossibile determinare il contenitore corrispondente negli altri tenant' });
+          }
+        } else {
+          query = `UPDATE "${source}" SET campo = $1 WHERE campo = $2${custGuard}`;
+          params = [newName, oldName];
         }
       } else if (scope === 'this') {
         query = `UPDATE "${source}" SET campo = $1

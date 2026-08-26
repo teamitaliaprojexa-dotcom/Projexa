@@ -4126,6 +4126,33 @@
         // pending = { op: 'add'|'delete'|'delete-field', name, campos? }
         function openSettingsTenantScope(pending) {
             pendingSettingsArg = pending;
+
+            // Primo livello della scelta per Clienti/Progetti.
+            if (pending && pending.op === 'field-tenant-scope') {
+                if (Number(decodeJwtPayload().id_roles) !== 1) {
+                    window.__fieldTenantScope = 'this-tenant';
+                    const next = window.__fieldTenantPending;
+                    window.__fieldTenantPending = null;
+                    if (next) openClientScopeModal(next.action);
+                    return;
+                }
+                const modal = document.getElementById('settingsTenantScopeModal');
+                const title = document.getElementById('settingsTenantScopeTitle');
+                const text = document.getElementById('settingsTenantScopeText');
+                const allBtn = document.getElementById('settingsScopeAllTenants');
+                if (title) title.textContent = 'Ambito modifica';
+                if (text) text.textContent = 'La modifica deve essere applicata su questo tenant o su tutti i tenant?';
+                if (allBtn) allBtn.style.display = 'block';
+                if (modal) modal.style.display = 'flex';
+                return;
+            }
+
+            // Il popup di scelta ambito (tenant) è riservato agli admin (id_roles = 1):
+            // gli altri ruoli applicano direttamente la modifica sul proprio tenant, senza chiederlo.
+            if (Number(decodeJwtPayload().id_roles) !== 1) {
+                performSettingsArgScope('this-tenant');
+                return;
+            }
             const modal = document.getElementById('settingsTenantScopeModal');
             const title = document.getElementById('settingsTenantScopeTitle');
             const text = document.getElementById('settingsTenantScopeText');
@@ -4148,6 +4175,9 @@
             } else if (pending.op === 'reorder') {
                 t = 'Sposta campo';
                 p = 'Applicare lo spostamento dei campi su questo tenant o su tutti i tenant?';
+            } else if (pending.op === 'save-values') {
+                t = 'Salva modifiche';
+                p = 'Applicare le modifiche su questo tenant o su tutti i tenant?';
             } else {
                 t = 'Elimina argomento';
                 p = `Eliminare l'argomento "${pending.name}" su questo tenant o su tutti i tenant?`;
@@ -4167,6 +4197,18 @@
             const p = pendingSettingsArg;
             if (!p) return;
             try {
+                if (p.op === 'field-tenant-scope') {
+                    window.__fieldTenantScope = scope;
+                    const next = window.__fieldTenantPending;
+                    window.__fieldTenantPending = null;
+                    pendingSettingsArg = null;
+                    if (next) openClientScopeModal(next.action);
+                    return;
+                }
+                if (p.op === 'save-values') {
+                    await performSaveDetailChanges(scope);
+                    return;
+                }
                 if (p.op === 'add-field') {
                     // Impostazioni: "questo tenant" = custom "(*)"; "tutti i tenant" = standard
                     pendingFieldKind = (scope === 'all-tenants') ? 'standard' : 'custom';
@@ -4179,7 +4221,7 @@
                     window.__tvfPendingSave = null;
                     if (!pending) return;
                     try {
-                        const values = { ...(pending.values || {}), __scope: scope };
+                        const values = { ...(pending.values || {}), __scope: scope, __tenantScope: window.__fieldTenantScope || 'this-tenant' };
                         const res = await fetch(pending.url, {
                             method: pending.method || 'PUT',
                             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -4325,6 +4367,11 @@
         let projectClientId = null;      // client_id del progetto attualmente aperto
         let projectDetailActive = false; // true quando il flyout progetti è aperto (persistente)
         let detailMaxCols = 3;           // colonne del flyout dettaglio (4 per i progetti)
+        // Valore corrente del campo booleano "a Consuntivo" del progetto aperto (valore1).
+        // null = non presente/non applicabile (nessun progetto aperto o campo assente).
+        // true  -> nelle griglie (tipo 11) nascondi le colonne "offerta"/"Offerta".
+        // false -> nelle griglie (tipo 11) nascondi le colonne "consuntivo"/"Consuntivo".
+        let currentProjectConsuntivoValue = null;
 
         // Livello 1: elenco clienti nel flyout della voce "Progetti clienti".
         async function loadProjectClients() {
@@ -5323,6 +5370,19 @@
                 let rows = await res.json();
                 // Nasconde le righe "segnaposto" senza campo (usate solo per far comparire l'argomento vuoto)
                 if (Array.isArray(rows)) rows = rows.filter(r => r.campo != null && String(r.campo).trim() !== '');
+                // Rileva il valore del campo booleano "a Consuntivo" del progetto corrente
+                // (usato per nascondere le colonne "offerta"/"consuntivo" nelle griglie tipo 11).
+                if (source === 'projects' && Array.isArray(rows)) {
+                    const consuntivoRow = rows.find(r => {
+                        const bareCampo = String(r.campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
+                        return bareCampo === 'a consuntivo';
+                    });
+                    currentProjectConsuntivoValue = consuntivoRow
+                        ? (consuntivoRow.valore1 === true || consuntivoRow.valore1 === 'true' || consuntivoRow.valore1 === 't')
+                        : null;
+                } else {
+                    currentProjectConsuntivoValue = null;
+                }
                 if (!Array.isArray(rows) || rows.length === 0) {
                     setDetailColumns(1);
                     listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>';
@@ -5818,9 +5878,21 @@
                     return;
                 }
                 const payload = await res.json();
-                const visibleColumns = Array.isArray(payload.columns) && payload.columns.length
+                let visibleColumns = Array.isArray(payload.columns) && payload.columns.length
                     ? payload.columns
                     : columns;
+                // Progetti: in base al campo booleano "a Consuntivo" nasconde le colonne
+                // il cui nome tecnico (o etichetta) è "consuntivo"/"Consuntivo" (quando è false)
+                // oppure "offerta"/"Offerta" (quando è true). Match case-insensitive.
+                const gridSourceName = String(widget.dataset.gridSource || source || '').trim();
+                if (gridSourceName === 'projects' && currentProjectConsuntivoValue !== null) {
+                    const hiddenName = currentProjectConsuntivoValue ? 'offerta' : 'consuntivo';
+                    visibleColumns = visibleColumns.filter(column => {
+                        const technical = String(column || '').trim().toLowerCase();
+                        const label = String(type11ColumnLabel(column) || '').trim().toLowerCase();
+                        return !technical.startsWith(hiddenName) && !label.startsWith(hiddenName);
+                    });
+                }
                 const records = Array.isArray(payload.rows) ? payload.rows : (Array.isArray(payload) ? payload : []);
                 const editing = clientDetailMode === 'edit';
 
@@ -5887,6 +5959,15 @@
             let input;
             let extraRow = ''; // eventuale riga aggiuntiva (es. valore2 per il tipo 30)
 
+            // Calcolati qui (prima dei rami per tipo) così sono disponibili anche per i
+            // tipi che fanno "return" anticipato (es. tipo 11, la griglia): altrimenti
+            // quei campi non mostravano mai la checkbox di eliminazione.
+            const isAdminUser = Number(decodeJwtPayload().id_roles) === 1;
+            // Nei progetti (dati personali) il proprietario può eliminare/rinominare qualsiasi campo.
+            const isProjectsDetail = (currentDetailSource === 'projects');
+            const canDelete = isClientCustom || isAdminUser || isProjectsDetail;
+            const canRename = isClientCustom || isAdminUser || isProjectsDetail;
+
             if (tipo === 0) {
                 // Nodo padre: riga cliccabile con freccia, apre un nuovo flyout
                 return `<div class="settings-detail-parent drag-handle" data-row-id="${id}" data-campo="${campo}" data-parent-id="${id}" data-parent-campo="${campo}"${drag}><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
@@ -5945,9 +6026,16 @@
                 // qualsiasi altro valore -> aperta di default.
                 const isTrueVal = (row.valore1 === true || row.valore1 === 'true' || row.valore1 === 't');
                 const startCollapsed = isTrueVal;
+                // In modalità 'delete' mostra anche sui campi griglia (tipo 11) la checkbox
+                // di selezione, come per gli altri tipi di campo.
+                const checkbox11 = (mode === 'delete' && canDelete)
+                    ? `<input type="checkbox" class="field-del-check" data-campo="${campo}" onclick="event.stopPropagation();" style="margin-right: 8px; cursor: pointer; flex: 0 0 auto;">`
+                    : '';
+                // La barra del nome campo funge anche da maniglia di trascinamento quando il
+                // riordino è attivo, così la griglia (tipo 11) si può spostare come gli altri campi.
                 return `<div class="settings-detail-row type11-grid-row${startCollapsed ? ' collapsed' : ''}" data-row-id="${id}" data-campo="${campo}">
-                    <div class="type11-bar" data-type11-toggle="1">
-                        <span>${campoLabelHtml(row.campo)}</span>
+                    <div class="type11-bar${detailReorderMode ? ' drag-handle' : ''}" data-type11-toggle="1"${drag}>
+                        <span style="display:flex; align-items:center; min-width:0;">${checkbox11}${campoLabelHtml(row.campo)}</span>
                         <span class="type11-arrow"><i class="fas fa-chevron-${startCollapsed ? 'down' : 'up'}"></i></span>
                     </div>
                     <div class="type11-grid-widget" data-grid-source="${escapeHtml(currentDetailSource)}" data-grid-field-id="${id}" data-grid-table="${escapeHtml(row.tabella == null ? '' : row.tabella)}" data-grid-columns="${escapeHtml(row.colonna == null ? '' : row.colonna)}" data-grid-tenant-id="${escapeHtml(row.tenant_id == null ? '' : row.tenant_id)}" data-grid-user-id="${escapeHtml(row.user_id == null ? '' : row.user_id)}" data-grid-client-id="${escapeHtml(row.client_id == null ? '' : row.client_id)}"><div class="type11-grid-state">Caricamento griglia…</div></div>
@@ -5995,16 +6083,12 @@
 
             // In modalità 'delete' i campi custom mostrano una checkbox di selezione.
             // Eliminazione: checkbox sui campi custom; gli admin (id_roles=1) la vedono su TUTTI i campi.
-            const isAdminUser = Number(decodeJwtPayload().id_roles) === 1;
-            // Nei progetti (dati personali) il proprietario può eliminare/rinominare qualsiasi campo.
-            const isProjectsDetail = (currentDetailSource === 'projects');
-            const canDelete = isClientCustom || isAdminUser || isProjectsDetail;
+            // (isAdminUser/isProjectsDetail/canDelete/canRename sono calcolati in cima alla funzione)
             const checkbox = (mode === 'delete' && canDelete)
                 ? `<input type="checkbox" class="field-del-check" data-campo="${campo}" style="margin-right: 8px; flex: 0 0 auto;">`
                 : '';
             // In modalità 'rename' l'etichetta diventa modificabile. Per gli utenti normali
             // solo i campi custom "(*)"; per l'admin (id_roles=1) TUTTI i campi.
-            const canRename = isClientCustom || isAdminUser || isProjectsDetail;
             const label = (mode === 'rename' && canRename)
                 ? `<input type="text" class="field-rename" data-oldcampo="${campo}" value="${campo}" style="width: 140px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem;">`
                 : `<span class="campo-label${detailReorderMode ? ' drag-handle' : ''}"${detailReorderMode ? ' draggable="true"' : ''}>${campoLabelHtml(row.campo)}</span>`;
@@ -6021,9 +6105,39 @@
             return `<div class="settings-detail-row${type11Class}" data-row-id="${id}" data-campo="${campo}" data-span="${span}"${spanStyle}>${checkbox}${label}${input}${spanSel}</div>${extraRow}`;
         }
 
-        // Salva i campi di tipo 4 modificati: il backend controlla l'unicità del valore
-        // nella tabella/colonna di riferimento prima di scriverlo.
-        async function saveDetailChanges() {
+        // Punto di ingresso del pulsante "Salva" nel flyout di dettaglio: se l'utente è admin
+        // (id_roles = 1) e ci sono modifiche da salvare (valori e/o disposizione dei campi),
+        // chiede prima l'ambito (questo tenant / tutti i tenant); altrimenti salva direttamente
+        // (comportamento invariato per i ruoli non admin e per i Progetti, dati personali).
+        function saveDetailChanges() {
+            const listEl = document.getElementById('settingsDetailList');
+            if (!listEl) return;
+            const dirty = listEl.querySelectorAll('[data-setting-id][data-dirty="1"]');
+            const isAdmin = Number(decodeJwtPayload().id_roles) === 1;
+            const hasChanges = dirty.length > 0 || detailLayoutDirty;
+
+            if (isAdmin && hasChanges) {
+                if (currentDetailSource === 'settings') {
+                    openSettingsTenantScope({ op: 'save-values' });
+                } else {
+                    // Clienti/Progetti: chiede l'ambito cliente/progetto (tutti / solo questo).
+                    openClientScopeModal('save-values');
+                }
+                return;
+            }
+            performSaveDetailChanges(null);
+        }
+
+        // Salva i campi modificati (e l'eventuale disposizione dei campi). Se "scope" è valorizzato
+        // ('this-tenant' | 'all-tenants', scelto dall'admin), viene incluso nelle richieste al backend.
+        async function performSaveDetailChanges(scope) {
+            // Chiude eventuali popup di scelta ambito ancora aperti (tenant e/o
+            // clienti/progetti): senza questo, dopo aver scelto "Tutti i progetti" /
+            // "Solo questo progetto" il popup restava visibile sopra la pagina aggiornata.
+            const scopeModal = document.getElementById('clientDeleteScopeModal');
+            if (scopeModal) scopeModal.style.display = 'none';
+            const tenantModal = document.getElementById('settingsTenantScopeModal');
+            if (tenantModal) tenantModal.style.display = 'none';
             const listEl = document.getElementById('settingsDetailList');
             const saveBar = document.getElementById('settingsDetailSaveBar');
             if (!listEl) return;
@@ -6038,7 +6152,7 @@
                         const res = await fetch(`${API_URL}/${currentDetailSource}/${id}/reference-value`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                            body: JSON.stringify({ value: inp.value })
+                            body: JSON.stringify({ value: inp.value, ...(scope ? { __scope: scope } : {}), ...(window.__fieldTenantScope ? { __tenantScope: window.__fieldTenantScope } : {}) })
                         });
                         if (res.status === 409) {
                             allOk = false;
@@ -6063,7 +6177,7 @@
                         const res = await fetch(`${API_URL}/data/${currentDetailSource}/${id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                            body: JSON.stringify({ [field]: value })
+                            body: JSON.stringify({ [field]: value, ...(scope ? { __scope: scope } : {}), ...(window.__fieldTenantScope ? { __tenantScope: window.__fieldTenantScope } : {}) })
                         });
                         if (!res.ok) {
                             allOk = false;
@@ -6110,28 +6224,41 @@
                         });
                     });
                 }
-                const isAdmin = Number(decodeJwtPayload().id_roles) === 1;
-                if (isAdmin && !isProjects) {
-                    // Admin (clienti/impostazioni): chiede l'ambito tenant. I PROGETTI invece salvano
-                    // sempre riga per riga (dati personali), così includono anche layout_span.
+                if (scope) {
+                    // L'ambito è già stato scelto (admin, non Progetti): un'unica chiamata bulk
+                    // applica lo spostamento a "questo tenant" o a "tutti i tenant".
                     if (saveBar) saveBar.style.display = 'none';
-                    openSettingsTenantScope({ op: 'reorder', source: currentDetailSource, argument: currentDetailArgument, items });
-                    return;
-                }
-                // Salvataggio riga per riga (solo il proprio tenant/utente).
-                for (const it of items) {
                     try {
-                        const body = { ordinamento: it.ordinamento, layout_col: it.layout_col };
-                        if (isProjects) body.layout_span = it.layout_span;
-                        const res = await fetch(`${API_URL}/data/${currentDetailSource}/${it.rowId}`, {
-                            method: 'PUT',
+                        const res = await fetch(`${API_URL}/${currentDetailSource}/reorder-fields`, {
+                            method: 'POST',
                             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                            body: JSON.stringify(body)
+                            body: JSON.stringify({ argument: currentDetailArgument, scope, tenantScope: window.__fieldTenantScope || 'this-tenant', items })
                         });
-                        if (!res.ok) { allOk = false; showNotification('Errore nel salvataggio della disposizione', 'info'); }
+                        if (res.ok) {
+                            detailLayoutDirty = false;
+                        } else {
+                            allOk = false;
+                            const err = await res.json().catch(() => ({}));
+                            showNotification('Errore: ' + (err.error || res.status), 'info');
+                        }
                     } catch (e) { allOk = false; showNotification('Errore di connessione', 'info'); }
+                } else {
+                    // Nessuno scope richiesto (utente non admin, oppure Progetti/dati personali):
+                    // salvataggio riga per riga sul proprio tenant/utente.
+                    for (const it of items) {
+                        try {
+                            const body = { ordinamento: it.ordinamento, layout_col: it.layout_col };
+                            if (isProjects) body.layout_span = it.layout_span;
+                            const res = await fetch(`${API_URL}/data/${currentDetailSource}/${it.rowId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                                body: JSON.stringify(body)
+                            });
+                            if (!res.ok) { allOk = false; showNotification('Errore nel salvataggio della disposizione', 'info'); }
+                        } catch (e) { allOk = false; showNotification('Errore di connessione', 'info'); }
+                    }
+                    if (allOk) detailLayoutDirty = false;
                 }
-                if (allOk) detailLayoutDirty = false;
             }
 
             if (allOk) {
@@ -6144,6 +6271,7 @@
                 try { loadSettingsArguments(); } catch (e) {}
                 // Dopo il salvataggio (valori e/o spostamento label) "Abilita modifica" torna spento.
                 clientDetailMode = 'view';
+                window.__fieldTenantScope = null; // evita che resti valorizzato per il prossimo salvataggio
                 await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
             }
         }
@@ -6225,6 +6353,11 @@
             if (stCancel) stCancel.addEventListener('click', () => {
                 const m = document.getElementById('settingsTenantScopeModal');
                 if (m) m.style.display = 'none';
+                if (pendingSettingsArg && pendingSettingsArg.op === 'field-tenant-scope') {
+                    window.__fieldTenantScope = null;
+                    window.__fieldTenantPending = null;
+                    pendingSettingsArg = null;
+                }
             });
 
             // Apre al passaggio del mouse; se era attivo il flyout Clienti lo chiude col suo dettaglio.
@@ -6260,6 +6393,7 @@
                 projectDetailActive = false;
                 detailMaxCols = 3;
                 projectClientId = null;
+                currentProjectConsuntivoValue = null;
                 document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar');
                 document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
                 closeBtn.style.display = 'none';
@@ -6564,6 +6698,28 @@
                     openSettingsTenantScope({ op: 'edit-field', values });
                     return;
                 }
+                // Admin: anche per l'AGGIUNTA di un campo chiede sempre l'ambito (questo
+                // tenant/cliente/progetto oppure tutti), riusando i popup già presenti,
+                // invece di salvare subito senza chiedere nulla.
+                if (mode === 'add' && Number(decodeJwtPayload().id_roles) === 1) {
+                    window.__tvfAddPending = {
+                        source,
+                        campo,
+                        tipo_valore: values.tipo_valore,
+                        tabella: values.tabella || '',
+                        colonna: values.colonna || '',
+                        VariabDB: values.VariabDB || '',
+                        valore2: values.valore2 || '',
+                        id_roles: values.id_roles || null
+                    };
+                    close();
+                    if (source === 'settings') {
+                        openSettingsTenantScope({ op: 'add-field' });
+                    } else {
+                        openClientScopeModal('add');
+                    }
+                    return;
+                }
                 try {
                     const res = await fetch(url, {
                         method,
@@ -6665,9 +6821,9 @@
             });
             cancelBtn.addEventListener('click', () => { form.style.display = 'none'; });
 
-            // Clienti: ambito clienti (tutti/questo). Impostazioni: ambito tenant (questo/tutti).
+            // Clienti/Progetti: ambito clienti/progetti (tutti/questo). Impostazioni: ambito tenant (questo/tutti).
             const proceedAdd = () => {
-                if (currentDetailSource === 'clients') openClientScopeModal('add');
+                if (currentDetailSource === 'clients' || currentDetailSource === 'projects') openClientScopeModal('add');
                 else openSettingsTenantScope({ op: 'add-field' });
             };
 
@@ -6887,8 +7043,7 @@
             const delCancel = document.getElementById('clientDeleteCancel');
             if (delConfirm) delConfirm.addEventListener('click', () => {
                 if (delConfirm.disabled) return;
-                if (currentDetailSource === 'clients') { openClientScopeModal('delete'); return; }
-                if (currentDetailSource === 'projects') { performDeleteFields('this'); return; } // progetto singolo
+                if (currentDetailSource === 'clients' || currentDetailSource === 'projects') { openClientScopeModal('delete'); return; }
                 // Impostazioni: chiede l'ambito tenant (questo tenant / tutti i tenant)
                 const listEl = document.getElementById('settingsDetailList');
                 const campos = Array.from(listEl.querySelectorAll('.field-del-check:checked')).map(c => c.dataset.campo);
@@ -6902,8 +7057,7 @@
             const renCancel = document.getElementById('clientRenameCancel');
             if (renConfirm) renConfirm.addEventListener('click', () => {
                 if (collectRenames().length === 0) { clientDetailMode = 'edit'; rerender(); return; }
-                if (currentDetailSource === 'clients') openClientScopeModal('rename');
-                else if (currentDetailSource === 'projects') performRenameFields('this'); // progetto singolo
+                if (currentDetailSource === 'clients' || currentDetailSource === 'projects') openClientScopeModal('rename');
                 else openSettingsTenantScope({ op: 'rename-field' });
             });
             if (renCancel) renCancel.addEventListener('click', () => { clientDetailMode = 'edit'; rerender(); });
@@ -6914,31 +7068,62 @@
             const scopeCancel = document.getElementById('clientDeleteScopeCancel');
             if (scopeAll) scopeAll.addEventListener('click', () => dispatchClientScope('all'));
             if (scopeThis) scopeThis.addEventListener('click', () => dispatchClientScope('this'));
-            if (scopeCancel) scopeCancel.addEventListener('click', () => { if (scopeModal) scopeModal.style.display = 'none'; });
+            if (scopeCancel) scopeCancel.addEventListener('click', () => {
+                if (scopeModal) scopeModal.style.display = 'none';
+                window.__fieldTenantScope = null;
+                window.__fieldTenantPending = null;
+            });
         }
 
-        // Popup scelta ambito (tutti i clienti / solo questo) — condiviso da aggiungi/elimina/rinomina.
+        // Popup scelta ambito (tutti i clienti/progetti / solo questo) — condiviso da
+        // aggiungi/elimina/rinomina/salva modifiche, per i source 'clients' e 'projects'.
         function openClientScopeModal(action) {
             clientScopeAction = action;
+
+            // Admin: prima scelta dell'ambito Tenant; solo dopo viene chiesto
+            // l'ambito Cliente/Progetto.
+            if (Number(decodeJwtPayload().id_roles) === 1 && !window.__fieldTenantScope) {
+                window.__fieldTenantPending = { source: currentDetailSource, action };
+                openSettingsTenantScope({
+                    op: 'field-tenant-scope',
+                    source: currentDetailSource,
+                    action
+                });
+                return;
+            }
+
+            // I ruoli diversi da 1 non vedono la scelta Tenant né quella globale
+            // Cliente/Progetto.
+            if (Number(decodeJwtPayload().id_roles) !== 1) {
+                dispatchClientScope('this');
+                return;
+            }
             const modal = document.getElementById('clientDeleteScopeModal');
             const title = document.getElementById('clientScopeTitle');
             const text = document.getElementById('clientScopeText');
+            const allBtn = document.getElementById('clientDeleteScopeAll');
+            const thisBtn = document.getElementById('clientDeleteScopeThis');
+            const isProjects = (currentDetailSource === 'projects');
+            const plural = isProjects ? 'tutti i progetti' : 'tutti i clienti';
+            const singular = isProjects ? 'il progetto selezionato' : 'il cliente selezionato';
             let t, p;
             if (action === 'rename') {
-                t = 'Rinomina campi custom';
-                p = 'La rinomina deve avvenire su tutti i clienti o solo su quello selezionato?';
-            } else if (action === 'edit') {
-                t = 'Modifica campo';
-                p = 'Applicare la modifica a tutti i clienti del tenant o solo al cliente selezionato?';
+                t = 'Rinomina campi';
+                p = `La rinomina deve avvenire su ${plural} o solo su ${singular}?`;
+            } else if (action === 'edit' || action === 'save-values') {
+                t = 'Salva modifiche';
+                p = `Applicare le modifiche a ${plural} o solo a ${singular}?`;
             } else if (action === 'add') {
-                t = 'Aggiungi campo custom';
-                p = 'Il nuovo campo deve essere aggiunto a tutti i clienti o solo a quello selezionato?';
+                t = 'Aggiungi campo';
+                p = `Il nuovo campo deve essere aggiunto a ${plural} o solo a ${singular}?`;
             } else {
-                t = 'Elimina campi custom';
-                p = "L'eliminazione deve avvenire su tutti i clienti o solo su quello selezionato?";
+                t = 'Elimina campi';
+                p = `L'eliminazione deve avvenire su ${plural} o solo su ${singular}?`;
             }
             if (title) title.textContent = t;
             if (text) text.textContent = p;
+            if (allBtn) allBtn.textContent = isProjects ? 'Tutti i progetti' : 'Tutti i clienti';
+            if (thisBtn) thisBtn.textContent = isProjects ? 'Solo questo progetto' : 'Solo questo cliente';
             if (modal) modal.style.display = 'flex';
         }
 
@@ -6947,34 +7132,64 @@
             if (clientScopeAction === 'rename') performRenameFields(scope);
             else if (clientScopeAction === 'add') performAddField(scope);
             else if (clientScopeAction === 'edit') performEditField(scope);
+            else if (clientScopeAction === 'save-values') performSaveDetailChanges(scope);
             else performDeleteFields(scope);
         }
 
-        // Crea il nuovo campo custom leggendo i valori dal form; scope = 'all' | 'this'.
+        // Crea il nuovo campo custom; scope = 'all' | 'this' (clienti/progetti) oppure
+        // 'this-tenant' | 'all-tenants' (impostazioni). Se il campo è stato preparato dal
+        // form mobile (openTipoValoreForm -> window.__tvfAddPending) usa quei valori;
+        // altrimenti ricade sul vecchio form fisso (compatibilità).
         async function performAddField(scope) {
             const modal = document.getElementById('clientDeleteScopeModal');
             if (modal) modal.style.display = 'none';
-            const nameInp = document.getElementById('clientNewFieldName');
-            const typeSel = document.getElementById('clientNewFieldType');
-            const tabInp = document.getElementById('clientNewFieldTabella');
-            const colInp = document.getElementById('clientNewFieldColonna');
+
+            const pending = window.__tvfAddPending;
+            window.__tvfAddPending = null;
+
+            let source, campo, tipo_valore, tabella, colonna, VariabDB, valore2, id_roles;
             const form = document.getElementById('clientNewFieldForm');
-            const campo = nameInp ? nameInp.value.trim() : '';
-            if (!campo) return;
-            const tipo_valore = typeSel ? (typeSel.value || null) : null;
-            const tabella = tabInp ? tabInp.value.trim() : '';
-            const colonna = colInp ? colInp.value.trim() : '';
-            const varInp = document.getElementById('clientNewFieldVariabDB');
-            const VariabDB = varInp ? varInp.value.trim() : '';
-            const val2Inp = document.getElementById('clientNewFieldValore2');
-            const valore2 = val2Inp ? val2Inp.value.trim() : '';
-            const rolesSel = document.getElementById('clientNewFieldRoles');
-            const id_roles = (rolesSel && rolesSel.value !== '') ? rolesSel.value : null;
+
+            if (pending) {
+                source = pending.source;
+                campo = pending.campo;
+                tipo_valore = pending.tipo_valore || null;
+                tabella = pending.tabella || '';
+                colonna = pending.colonna || '';
+                VariabDB = pending.VariabDB || '';
+                valore2 = pending.valore2 || '';
+                id_roles = pending.id_roles || null;
+                if (source !== 'settings') {
+                    // Clienti/Progetti: l'admin digita il nome del campo così com'è
+                    // (nessun prefisso "(*)" forzato).
+                    pendingFieldKind = 'standard';
+                }
+                // Per "settings" pendingFieldKind è già stato impostato da
+                // performSettingsArgScope in base all'ambito scelto.
+            } else {
+                source = currentDetailSource;
+                const nameInp = document.getElementById('clientNewFieldName');
+                const typeSel = document.getElementById('clientNewFieldType');
+                const tabInp = document.getElementById('clientNewFieldTabella');
+                const colInp = document.getElementById('clientNewFieldColonna');
+                campo = nameInp ? nameInp.value.trim() : '';
+                if (!campo) return;
+                tipo_valore = typeSel ? (typeSel.value || null) : null;
+                tabella = tabInp ? tabInp.value.trim() : '';
+                colonna = colInp ? colInp.value.trim() : '';
+                const varInp = document.getElementById('clientNewFieldVariabDB');
+                VariabDB = varInp ? varInp.value.trim() : '';
+                const val2Inp = document.getElementById('clientNewFieldValore2');
+                valore2 = val2Inp ? val2Inp.value.trim() : '';
+                const rolesSel = document.getElementById('clientNewFieldRoles');
+                id_roles = (rolesSel && rolesSel.value !== '') ? rolesSel.value : null;
+            }
+
             try {
-                const res = await fetch(`${API_URL}/${currentDetailSource}/field`, {
+                const res = await fetch(`${API_URL}/${source}/field`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ clientId: currentDetailArgument, projClientId: (currentDetailSource === 'projects' ? projectClientId : undefined), campo, tipo_valore, tabella, colonna, VariabDB, valore2, scope, containerCampo: currentContainerCampo, kind: pendingFieldKind, id_roles })
+                    body: JSON.stringify({ clientId: currentDetailArgument, projClientId: (source === 'projects' ? projectClientId : undefined), campo, tipo_valore, tabella, colonna, VariabDB, valore2, scope, tenantScope: window.__fieldTenantScope || 'this-tenant', containerCampo: currentContainerCampo, kind: pendingFieldKind, id_roles })
                 });
                 if (res.ok) {
                     showNotification('Campo aggiunto', 'success');
@@ -7021,6 +7236,7 @@
                 if (res.ok) {
                     showNotification('Modifica salvata', 'success');
                     clientDetailMode = 'view';
+                    window.__fieldTenantScope = null;
                     await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
                 } else {
                     const err = await res.json().catch(() => ({}));
@@ -7043,12 +7259,13 @@
                 const res = await fetch(`${API_URL}/${currentDetailSource}/delete-fields`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ campos, scope, clientId: currentDetailArgument })
+                    body: JSON.stringify({ campos, scope, tenantScope: window.__fieldTenantScope || 'this-tenant', clientId: currentDetailArgument })
                 });
                 if (res.ok) {
                     const data = await res.json().catch(() => ({}));
                     showNotification(`Eliminati ${data.deleted ?? 0} campi`, 'success');
                     clientDetailMode = 'edit';
+                    window.__fieldTenantScope = null;
                     await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
                 } else {
                     const err = await res.json().catch(() => ({}));
@@ -7073,12 +7290,13 @@
                 const res = await fetch(`${API_URL}/${currentDetailSource}/rename-fields`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ renames, scope, clientId: currentDetailArgument })
+                    body: JSON.stringify({ renames, scope, tenantScope: window.__fieldTenantScope || 'this-tenant', clientId: currentDetailArgument })
                 });
                 if (res.ok) {
                     const data = await res.json().catch(() => ({}));
                     showNotification(`Rinominati ${data.updated ?? 0} campi`, 'success');
                     clientDetailMode = 'view'; // dopo il salvataggio "Abilita modifica" torna spento
+                    window.__fieldTenantScope = null;
                     await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
                 } else {
                     const err = await res.json().catch(() => ({}));
