@@ -197,15 +197,20 @@ function requireAdmin(req, res, next) {
 }
 
 // Chiavi di filtro per identificare la riga "del login" in una tabella di riferimento
-// (usata dai campi settings di tipo 4). Usa le colonne user_id/tenant_id se presenti,
-// altrimenti la PK id per le tabelle users (= utente del login) e tenants (= tenant del login).
-async function referenceKeys(tabella, user) {
+// (usata dai campi settings/clients/projects di tipo 4). Usa le colonne user_id/tenant_id
+// se presenti, altrimenti la PK id per le tabelle users (= utente del login) e tenants
+// (= tenant del login). Il parametro "context" aggiunge filtri ulteriori quando il campo
+// tipo 4 vive dentro "clients" (client_id) o dentro "projects" (client_id + project_id),
+// ma solo se la tabella di riferimento possiede effettivamente quelle colonne.
+async function referenceKeys(tabella, user, context = {}) {
   const cols = await getTableColumns(tabella);
   const keys = [];
   if (cols.has('user_id')) keys.push({ col: 'user_id', val: user.user_id });
   else if (tabella === 'users') keys.push({ col: 'id', val: user.user_id });
   if (cols.has('tenant_id')) keys.push({ col: 'tenant_id', val: user.tenant_id });
   else if (tabella === 'tenants') keys.push({ col: 'id', val: user.tenant_id });
+  if (context.clientId && cols.has('client_id')) keys.push({ col: 'client_id', val: context.clientId });
+  if (context.projectId && cols.has('project_id')) keys.push({ col: 'project_id', val: context.projectId });
   return keys;
 }
 
@@ -3553,17 +3558,24 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
     // proprietario, quindi il filtro user_id usa l'id del proprietario del cliente accessibile.
     // La visibilità dei campi resta filtrata sul RUOLO del destinatario (come richiesto).
     let effectiveUserId = req.user.user_id;
+    // Contesto aggiuntivo usato dalla risoluzione dei campi tipo 4 (vedi sotto):
+    // clientContextId = client_id del cliente/progetto corrente; projectContextId = id del
+    // progetto corrente (per i progetti, l'id del progetto è il suo stesso "argument").
+    let clientContextId = null;
+    let projectContextId = null;
     if (table === 'clients') {
       const acc = await clientAccessByArgument(argument, req, false);
       if (!acc) return res.status(403).json({ error: 'Non autorizzato' });
       effectiveUserId = acc.ownerUserId;
+      clientContextId = acc.clientId;
     }
     // Progetti: filtro aggiuntivo per client_id (accesso a parità di tenant+user+client).
     const params = [argument, req.user.tenant_id, effectiveUserId, roleLevel];
     let projClause = '';
     if (table === 'projects') {
       const projClientId = ((req.query && req.query.clientId) || '').trim();
-      if (projClientId) { params.push(projClientId); projClause = ` AND client_id = $${params.length}`; }
+      if (projClientId) { params.push(projClientId); projClause = ` AND client_id = $${params.length}`; clientContextId = projClientId; }
+      projectContextId = argument;
     }
     const result = await db.query(
       `SELECT * FROM "${table}"
@@ -3577,16 +3589,31 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
 
     // Per i campi di tipo 4 risolve il valore leggendolo dalla tabella/colonna di
     // riferimento, sulla riga del login (WHERE su user_id/tenant_id o PK id).
+    // Se il campo vive dentro "clients" il filtro include anche client_id; se vive
+    // dentro "projects" include anche client_id e project_id (solo sulle colonne
+    // effettivamente presenti nella tabella di riferimento).
+    // In più, se sulla riga è impostata la colonna "VariabDB" (condizione SQL configurata
+    // da un utente privilegiato, non input dell'utente finale), viene aggiunta in AND dopo
+    // i filtri di contesto — utile quando la tabella di riferimento ha altre dimensioni
+    // (es. anno, cod_billing, ecc.) oltre a tenant/user/client/project.
     const rows = result.rows;
     for (const row of rows) {
       if (Number(row.tipo_valore) === 4 && row.tabella && row.colonna) {
         try {
           assertValidIdentifier(row.tabella);
           assertValidIdentifier(row.colonna);
-          const keys = await referenceKeys(row.tabella, req.user);
-          const where = keys.length
+          const keys = await referenceKeys(row.tabella, req.user, { clientId: clientContextId, projectId: projectContextId });
+          let where = keys.length
             ? 'WHERE ' + keys.map((k, i) => `"${k.col}" = $${i + 1}`).join(' AND ')
             : '';
+          // VariabDB contiene sempre l'operatore iniziale (AND/OR); se non ci sono filtri
+          // di contesto precedenti, l'operatore iniziale viene rimosso per evitare "WHERE AND ...".
+          const variab = (row.VariabDB || '').trim();
+          if (variab) {
+            where = where
+              ? `${where} ${variab}`
+              : 'WHERE ' + variab.replace(/^\s*(and|or)\s+/i, '');
+          }
           const ref = await db.query(
             `SELECT "${row.colonna}" AS v FROM "${row.tabella}" ${where} LIMIT 1`,
             keys.map(k => k.val)
@@ -3618,25 +3645,28 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
   }
 });
 
-// Salvataggio di un campo di tipo 4 (riferimento a un'altra tabella) per settings o clients.
+// Salvataggio di un campo di tipo 4 (riferimento a un'altra tabella) per settings, clients o projects.
 // Prima di scrivere il valore nella tabella di riferimento, verifica che non esista già
-// nella colonna <colonna> della tabella <tabella> indicate nella riga (settings/clients).
-app.put('/api/:source(settings|clients)/:id/reference-value', requireAuth, async (req, res) => {
+// nella colonna <colonna> della tabella <tabella> indicate nella riga (per lo stesso contesto:
+// tenant/user, +client_id se "clients", +client_id/project_id se "projects", + eventuale VariabDB).
+app.put('/api/:source(settings|clients|projects)/:id/reference-value', requireAuth, async (req, res) => {
   try {
     const table = req.params.source;
     const { id } = req.params;
     const { value } = req.body;
 
-    // Carica la riga (settings/clients) dell'utente per leggere tabella/colonna
+    // Carica la riga (settings/clients/projects) dell'utente per leggere tabella/colonna/
+    // argument/VariabDB (e client_id, presente solo sulle righe di "projects").
     const s = await db.query(
-      `SELECT tabella, colonna FROM "${table}" WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+      `SELECT * FROM "${table}" WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
       [id, req.user.tenant_id, req.user.user_id]
     );
     if (s.rows.length === 0) {
       return res.status(404).json({ error: 'Impostazione non trovata' });
     }
 
-    const { tabella, colonna } = s.rows[0];
+    const row = s.rows[0];
+    const { tabella, colonna } = row;
     if (!tabella || !colonna) {
       return res.status(400).json({ error: 'Tabella o colonna non definite per questa impostazione' });
     }
@@ -3645,19 +3675,42 @@ app.put('/api/:source(settings|clients)/:id/reference-value', requireAuth, async
     assertValidIdentifier(tabella);
     assertValidIdentifier(colonna);
 
-    // Individua la riga del login nella tabella di riferimento
-    const keys = await referenceKeys(tabella, req.user);
+    // Contesto aggiuntivo: per "clients" risale alla riga identità (Cliente) partendo
+    // dall'argument del campo; per "projects" il client_id è già in colonna sulla riga
+    // stessa e il project_id corrisponde all'argument (il progetto è il contenitore diretto).
+    let clientContextId = null;
+    let projectContextId = null;
+    if (table === 'clients') {
+      const root = await resolveClientRoot(row.argument, req.user.tenant_id);
+      if (root) clientContextId = root.clientId;
+    } else if (table === 'projects') {
+      clientContextId = row.client_id || null;
+      projectContextId = row.argument || null;
+    }
+
+    // Individua la riga del login (+ client/project di contesto) nella tabella di riferimento
+    const keys = await referenceKeys(tabella, req.user, { clientId: clientContextId, projectId: projectContextId });
     if (keys.length === 0) {
       return res.status(400).json({ error: 'Impossibile identificare la riga di riferimento (mancano user_id/tenant_id)' });
     }
-    const whereConds = keys.map((k, i) => `"${k.col}" = $${i + 2}`).join(' AND ');
+    let identityWhere = keys.map((k, i) => `"${k.col}" = $${i + 2}`).join(' AND ');
     const keyValues = keys.map(k => k.val);
 
+    // VariabDB: condizione SQL aggiuntiva configurata sul campo (facoltativa, non input
+    // dell'utente finale), aggiunta in AND ai filtri di contesto sopra — utile quando la
+    // tabella di riferimento ha altre dimensioni (es. anno, cod_billing, ecc.).
+    const variab = (row.VariabDB || '').trim();
+    if (variab) {
+      identityWhere = identityWhere
+        ? `${identityWhere} ${variab}`
+        : variab.replace(/^\s*(and|or)\s+/i, '');
+    }
+
     // Controllo di unicità: il valore non deve già esistere in un'ALTRA riga di
-    // tabella.colonna (la riga corrente del login è esclusa dal controllo).
+    // tabella.colonna (la riga corrente del login/contesto è esclusa dal controllo).
     if (value !== null && value !== undefined && value !== '') {
       const dup = await db.query(
-        `SELECT 1 FROM "${tabella}" WHERE "${colonna}" = $1 AND NOT (${whereConds}) LIMIT 1`,
+        `SELECT 1 FROM "${tabella}" WHERE "${colonna}" = $1 AND NOT (${identityWhere}) LIMIT 1`,
         [value, ...keyValues]
       );
       if (dup.rows.length > 0) {
@@ -3665,9 +3718,9 @@ app.put('/api/:source(settings|clients)/:id/reference-value', requireAuth, async
       }
     }
 
-    // Scrive il valore nella tabella di riferimento, sulla riga del login
+    // Scrive il valore nella tabella di riferimento, sulla riga del login/contesto
     const upd = await db.query(
-      `UPDATE "${tabella}" SET "${colonna}" = $1 WHERE ${whereConds} RETURNING "${colonna}" AS v`,
+      `UPDATE "${tabella}" SET "${colonna}" = $1 WHERE ${identityWhere} RETURNING "${colonna}" AS v`,
       [value === '' ? null : value, ...keyValues]
     );
     if (upd.rows.length === 0) {
