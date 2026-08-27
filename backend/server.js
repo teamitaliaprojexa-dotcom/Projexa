@@ -798,6 +798,15 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       }
     }
 
+    // Le view sono di sola lettura: il frontend usa questo flag per nascondere i
+    // pulsanti Nuova riga / Modifica / Elimina, che qui non avrebbero senso.
+    const tableTypeResult = await db.query(
+      `SELECT table_type FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = $1 LIMIT 1`,
+      [tableName]
+    );
+    const isView = tableTypeResult.rows[0]?.table_type === 'VIEW';
+
     let clientId = String(req.query.clientId || config.client_id || '').trim();
     if (!clientId && source === 'clients') {
       const root = await resolveClientRoot(config.argument, req.user.tenant_id);
@@ -921,11 +930,10 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
        LIMIT 100`,
       queryParams
     );
-    // Per i progetti restituisce anche le colonne effettivamente visibili,
-    // dopo il filtro HH/GG; gli altri contesti mantengono il formato storico.
-    res.json(source === 'projects'
-      ? { rows: result.rows, columns: selectedColumns }
-      : result.rows);
+    // Formato oggetto uniforme per tutte le sorgenti: righe, colonne effettivamente
+    // visibili (dopo l'eventuale filtro HH/GG per i progetti) e se la tabella è una view
+    // (sola lettura, il frontend nasconde Nuova riga/Modifica/Elimina in quel caso).
+    res.json({ rows: result.rows, columns: selectedColumns, isView });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -982,6 +990,126 @@ async function resolveGridWidgetContext(source, fieldId, req, needWrite) {
 
   return { config, tableName, tableColumns, generatedColumns, effectiveUserId, clientId };
 }
+
+// Metadati delle colonne per il widget griglia (tipo_valore = 11): nome, se generata,
+// tipo Postgres e foreign key (per i menu a discesa). A differenza di
+// /api/data/:table/columns, questo endpoint NON richiede che la tabella sia registrata
+// in table_structures: la fiducia deriva dalla configurazione del campo (settings.tabella),
+// impostata da un utente privilegiato, esattamente come per la lettura/scrittura delle righe.
+app.get('/api/:source(settings|clients|projects)/grid-widget/columns', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const fieldId = ((req.query && req.query.fieldId) || '').trim();
+    const { tableName } = await resolveGridWidgetContext(source, fieldId, req, false);
+
+    const result = await db.query(
+      `SELECT column_name, is_generated, data_type FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = $1
+       ORDER BY ordinal_position`,
+      [tableName]
+    );
+    const fk = await db.query(
+      `SELECT kcu.column_name, ccu.table_name AS foreign_table, ccu.column_name AS foreign_column
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu
+         ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+       JOIN information_schema.constraint_column_usage ccu
+         ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' AND tc.table_name = $1`,
+      [tableName]
+    );
+    const fkMap = {};
+    const fkColMap = {};
+    for (const r of fk.rows) { fkMap[r.column_name] = r.foreign_table; fkColMap[r.column_name] = r.foreign_column; }
+    for (const r of result.rows) {
+      if (r.column_name === 'id_roles' || r.column_name === 'id_roles_write') {
+        fkMap[r.column_name] = 'roles';
+        fkColMap[r.column_name] = 'id_roles';
+      }
+    }
+    res.json(result.rows.map((r) => ({
+      name: r.column_name,
+      generated: r.is_generated === 'ALWAYS',
+      type: r.data_type,
+      references: fkMap[r.column_name] || null,
+      referencesColumn: fkColMap[r.column_name] || null
+    })));
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Opzioni per un campo FK della griglia (tipo_valore = 11), usate dal menu a discesa dei
+// form "Nuova riga"/"Modifica". A differenza di GET /api/data/:table (generico, usato altrove),
+// qui il filtro su tenant_id, user_id, client_id e project_id viene SEMPRE ricavato dal
+// contesto della griglia (autenticazione + configurazione), mai da valori inviati dal browser:
+// così l'elenco mostra solo le righe pertinenti al progetto/cliente aperto, non l'intero database.
+app.get('/api/:source(settings|clients|projects)/grid-widget/fk-options', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const fieldId = ((req.query && req.query.fieldId) || '').trim();
+    const column = assertValidIdentifier(((req.query && req.query.column) || '').trim());
+    if (!column) return res.status(400).json({ error: 'Parametro column richiesto' });
+
+    const ctx = await resolveGridWidgetContext(source, fieldId, req, false);
+    const { config, tableName, tableColumns, effectiveUserId, clientId } = ctx;
+    if (!tableColumns.has(column)) {
+      return res.status(400).json({ error: `Colonna ${column} non trovata nella tabella ${tableName}` });
+    }
+
+    const fkResult = await db.query(
+      `SELECT ccu.table_name AS foreign_table, ccu.column_name AS foreign_column
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu
+         ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+       JOIN information_schema.constraint_column_usage ccu
+         ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+         AND tc.table_name = $1 AND kcu.column_name = $2
+       LIMIT 1`,
+      [tableName, column]
+    );
+    if (fkResult.rows.length === 0) {
+      return res.status(400).json({ error: `La colonna ${column} non ha una foreign key` });
+    }
+    const foreignTable = assertValidIdentifier(fkResult.rows[0].foreign_table);
+    const foreignColumn = assertValidIdentifier(fkResult.rows[0].foreign_column);
+    if (!(await isManagedTable(foreignTable))) {
+      return res.status(404).json({ error: 'Tabella referenziata non gestita' });
+    }
+
+    // Rilegge le colonne della tabella referenziata per riconoscere anche modifiche
+    // appena effettuate allo schema (stessa cautela usata per la griglia principale).
+    tableColumnsCache.delete('main:' + foreignTable);
+    const foreignColumns = await getTableColumns(foreignTable);
+    const preferredNames = ['description', 'descrizione', 'name', 'nome', 'title', 'label', 'valore2'];
+    const displayColumn = [...foreignColumns].find(name => /^desc_/i.test(name))
+      || preferredNames.find(name => foreignColumns.has(name))
+      || foreignColumn;
+    assertValidIdentifier(displayColumn);
+
+    // Filtro SEMPRE dal contesto server-side (mai da query string): tenant, utente,
+    // cliente e, nei progetti, il progetto corrente.
+    const conds = [];
+    const params = [];
+    if (foreignColumns.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
+    if (foreignColumns.has('user_id')) { params.push(effectiveUserId); conds.push(`user_id = $${params.length}`); }
+    if (foreignColumns.has('client_id') && clientId) { params.push(clientId); conds.push(`client_id = $${params.length}`); }
+    if (foreignColumns.has('project_id') && source === 'projects') { params.push(config.argument); conds.push(`project_id = $${params.length}`); }
+    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+
+    const result = await db.query(
+      `SELECT "${foreignColumn}" AS id, "${displayColumn}" AS display
+       FROM "${foreignTable}" ${where}
+       ORDER BY "${displayColumn}" NULLS LAST
+       LIMIT 200`,
+      params
+    );
+    res.json(stripSensitive(result.rows));
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
 
 // Inserisce una nuova riga nella griglia (tipo_valore = 11). tenant_id/user_id/client_id
 // (e project_id per i progetti) vengono sempre forzati dal contesto, non dal browser.

@@ -698,6 +698,18 @@
         .type11-grid-toolbar button:disabled { opacity: 0.45; cursor: default; }
         .type11-grid-table.type11-editable tbody tr { cursor: pointer; }
         .type11-grid-table tbody tr.type11-selected td { outline: 2px solid #10B981; outline-offset: -2px; }
+        /* Riga in modifica/inserimento inline: input direttamente nelle celle della griglia */
+        .type11-grid-table tbody tr.type11-editing-row { cursor: default; }
+        .type11-grid-table tbody tr.type11-editing-row td { background: #FFFBEB; }
+        .type11-grid-table tbody tr.type11-editing-row .type11-editor-field {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 4px 6px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font: inherit;
+            font-size: 0.82rem;
+        }
         .type11-grid-editor {
             margin-top: 0.65rem;
             padding: 0.8rem;
@@ -4372,6 +4384,10 @@
         // true  -> nelle griglie (tipo 11) nascondi le colonne "offerta"/"Offerta".
         // false -> nelle griglie (tipo 11) nascondi le colonne "consuntivo"/"Consuntivo".
         let currentProjectConsuntivoValue = null;
+        // Valore corrente del campo booleano "Gestione a HH" del progetto aperto (valore1).
+        // null = non presente/non applicabile. true -> nascondi i campi "_gg" (e nelle
+        // griglie tipo 11 le colonne "_gg"); false -> nascondi i campi "_hh" (e "_hh" in griglia).
+        let currentProjectManageByHoursValue = null;
 
         // Livello 1: elenco clienti nel flyout della voce "Progetti clienti".
         async function loadProjectClients() {
@@ -5097,14 +5113,18 @@
         }
 
         // Opzioni per un campo FK (id + testo), con caso speciale per clients (nomi identità).
-        async function linkedFkOptions(refTable) {
+        // projectId, se presente, filtra le opzioni al solo contesto del progetto corrente
+        // (la tabella referenziata usa il filtro generico per colonna già supportato da
+        // GET /api/data/:table; viene ignorato se la tabella non ha una colonna project_id).
+        async function linkedFkOptions(refTable, projectId) {
             let options = [];
             try {
                 if (refTable === 'clients') {
                     const r = await fetch(`${API_URL}/clients/names`, { headers: getAuthHeaders() });
                     if (r.ok) { const d = await r.json(); options = d.map(c => ({ id: c.id, display: c.name || ('Item ' + c.id) })); }
                 } else {
-                    const r = await fetch(`${API_URL}/data/${encodeURIComponent(refTable)}`, { headers: getAuthHeaders() });
+                    const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+                    const r = await fetch(`${API_URL}/data/${encodeURIComponent(refTable)}${query}`, { headers: getAuthHeaders() });
                     if (r.ok) {
                         const d = await r.json();
                         // Stessa priorità usata lato server per le colonne FK: prima una colonna
@@ -5397,6 +5417,29 @@
                 } else {
                     currentProjectConsuntivoValue = null;
                 }
+                // Rileva il valore del campo booleano "Gestione a HH": stessa regola già usata
+                // per le griglie (tipo 11), applicata ora anche ai singoli campi la cui label
+                // (nome tecnico "campo") termina con "_gg" o "_hh". Se attivo (true/t) nasconde
+                // i campi "_gg"; se spento (false/f) nasconde i campi "_hh". I campi rimasti
+                // vengono mostrati senza il suffisso nell'etichetta (vedi campoLabelHtml).
+                if (source === 'projects' && Array.isArray(rows)) {
+                    const hhRow = rows.find(r => {
+                        const bareCampo = String(r.campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
+                        return bareCampo === 'gestione a hh';
+                    });
+                    currentProjectManageByHoursValue = hhRow
+                        ? (hhRow.valore1 === true || hhRow.valore1 === 'true' || hhRow.valore1 === 't')
+                        : null;
+                } else {
+                    currentProjectManageByHoursValue = null;
+                }
+                if (Array.isArray(rows) && currentProjectManageByHoursValue !== null) {
+                    const hiddenSuffix = currentProjectManageByHoursValue ? '_gg' : '_hh';
+                    rows = rows.filter(r => {
+                        const bareCampo = String(r.campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
+                        return !bareCampo.endsWith(hiddenSuffix);
+                    });
+                }
                 if (!Array.isArray(rows) || rows.length === 0) {
                     setDetailColumns(1);
                     listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>';
@@ -5592,12 +5635,18 @@
         }
 
         // Etichetta del campo: se custom (inizia con "(*)") mostra un pallino verde al posto di "(*)".
+        // Se il nome tecnico termina con "_gg" o "_hh" (convenzione Gestione a HH), il suffisso
+        // viene tolto dall'etichetta mostrata: la scelta di quale variante mostrare/nascondere
+        // avviene a monte (vedi currentProjectManageByHoursValue), qui si toglie solo il suffisso.
+        function stripGgHhSuffix(text) {
+            return String(text || '').replace(/_(gg|hh)$/i, '');
+        }
         function campoLabelHtml(rawCampo) {
             const s = String(rawCampo || '');
             if (s.startsWith('(*)')) {
-                return `<span class="custom-dot" title="Campo custom"></span>${escapeHtml(s.replace(/^\(\*\)\s*/, ''))}`;
+                return `<span class="custom-dot" title="Campo custom"></span>${escapeHtml(stripGgHhSuffix(s.replace(/^\(\*\)\s*/, '')))}`;
             }
-            return escapeHtml(s);
+            return escapeHtml(stripGgHhSuffix(s));
         }
 
         // Colora la barra (tipo 30): blu fino al valore, grigio per il resto.
@@ -5747,14 +5796,19 @@
             if (!clientId && source === 'projects') clientId = projectClientId || '';
             if (!clientId && source === 'clients') clientId = currentClientId || currentDetailArgument || '';
             if (!clientId) clientId = claims.client_id || claims.clientId || storedUser.client_id || storedUser.clientId || '';
-            return { tenantId: String(tenantId), userId: String(userId), clientId: String(clientId) };
+            // Progetto corrente: usato per filtrare i menu a discesa delle FK (es. Team) al
+            // solo contesto del progetto aperto, invece di mostrare l'intero elenco.
+            let projectId = widget.dataset.gridProjectId || '';
+            if (!projectId && source === 'projects') projectId = currentDetailArgument || '';
+            return { tenantId: String(tenantId), userId: String(userId), clientId: String(clientId), projectId: String(projectId) };
         }
 
         async function type11GridColumns(widget) {
-            const tableName = String(widget.dataset.gridTable || '').trim();
-            if (!tableName) return [];
+            const fieldId = String(widget.dataset.gridFieldId || '').trim();
+            const source = String(widget.dataset.gridSource || currentDetailSource || '').trim();
+            if (!fieldId || !source) return [];
             try {
-                const r = await fetch(`${API_URL}/data/${encodeURIComponent(tableName)}/columns`, { headers: getAuthHeaders() });
+                const r = await fetch(`${API_URL}/${encodeURIComponent(source)}/grid-widget/columns?fieldId=${encodeURIComponent(fieldId)}`, { headers: getAuthHeaders() });
                 if (!r.ok) return [];
                 return await r.json();
             } catch (e) {
@@ -5769,14 +5823,29 @@
             return type11CellValue(record, column);
         }
 
-        async function type11GridInputHtml(col, value, disabled) {
+        // Opzioni per un campo FK della griglia: SEMPRE filtrate server-side per tenant,
+        // utente, cliente e progetto del contesto corrente (vedi GET .../grid-widget/fk-options),
+        // non solo per progetto come in precedenza — evita di mostrare l'intero elenco del DB.
+        async function type11FkOptions(source, fieldId, column) {
+            try {
+                const query = new URLSearchParams({ fieldId: fieldId || '', column: column || '' });
+                const r = await fetch(`${API_URL}/${encodeURIComponent(source)}/grid-widget/fk-options?${query.toString()}`, { headers: getAuthHeaders() });
+                if (!r.ok) return [];
+                return await r.json();
+            } catch (e) {
+                return [];
+            }
+        }
+
+        async function type11GridInputHtml(col, value, disabled, source, fieldId) {
             const val = value == null ? '' : String(value);
             const dis = disabled ? 'disabled' : '';
             const type = String(col.type || '').toLowerCase();
             if (col.references) {
                 // Colonna FK (es. team_id -> teams.id): menu a discesa con i valori leggibili
                 // della tabella referenziata, selezionando l'id grezzo corrente (non l'etichetta).
-                const opts = await linkedFkOptions(col.references);
+                // Filtrata dal server per tenant/utente/cliente/progetto del contesto corrente.
+                const opts = await type11FkOptions(source, fieldId, col.name);
                 const optionsHtml = opts.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
                 return `<select class="type11-editor-field" data-col="${escapeHtml(col.name)}" ${dis}><option value="">-- Seleziona --</option>${optionsHtml}</select>`;
             }
@@ -5793,63 +5862,31 @@
             return `<input class="type11-editor-field" data-col="${escapeHtml(col.name)}" type="text" value="${escapeHtml(val)}" ${dis}>`;
         }
 
-        async function type11OpenEditor(widget, row, isNew) {
-            const editor = widget.querySelector('.type11-grid-editor');
-            if (!editor) return;
+        // Colonne effettivamente censite per la griglia (stesso ordine e filtro già usato
+        // per la creazione/lettura), con i metadati (tipo, FK, generata) per costruire gli
+        // input inline nella tabella. visibleColumnNames = elenco nomi già filtrato (gg/hh,
+        // a-consuntivo, ecc.) così l'editor mostra ESATTAMENTE le colonne visibili in griglia.
+        async function type11VisibleColumnsMeta(widget, visibleColumnNames) {
             const columns = await type11GridColumns(widget);
             const hidden = new Set(['id','tenant_id','user_id','client_id','project_id','data_inizio','scadenza','id_roles','id_roles_write']);
-            const visible = columns.filter(c => !hidden.has(c.name));
-            if (!visible.length) {
-                editor.innerHTML = '<div class="type11-grid-state">Nessun campo modificabile.</div>';
-                editor.style.display = 'block';
-                return;
-            }
-            const title = isNew ? 'Nuova riga' : 'Modifica riga';
-            let fields = '';
-            for (const col of visible) {
+            const metaByName = new Map(columns.map(c => [c.name, c]));
+            return visibleColumnNames
+                .map(name => metaByName.get(name))
+                .filter(c => c && !hidden.has(c.name));
+        }
+
+        // Costruisce le celle <td> con gli input per una riga in modifica/inserimento inline,
+        // nello stesso ordine delle colonne mostrate in visualizzazione.
+        async function type11BuildInlineRowCellsHtml(orderedMeta, record, isNew, source, fieldId) {
+            let html = '';
+            for (const col of orderedMeta) {
                 // Per le colonne FK il valore grezzo (id reale) arriva in "__raw_<colonna>":
                 // usarlo evita di riscrivere l'etichetta leggibile in una colonna uuid.
-                const value = isNew ? '' : type11GridRawValue(row, col.name);
+                const value = isNew ? '' : type11GridRawValue(record, col.name);
                 const readonly = !!col.generated;
-                fields += `<div class="settings-detail-row"><span class="campo-label">${escapeHtml(col.name)}</span>${await type11GridInputHtml(col, value, readonly)}</div>`;
+                html += `<td>${await type11GridInputHtml(col, value, readonly, source, fieldId)}</td>`;
             }
-            editor.innerHTML = `<div class="type11-grid-editor-title">${title}</div>${fields}
-                <div class="type11-grid-editor-actions">
-                    <button type="button" class="type11-grid-cancel">Annulla</button>
-                    <button type="button" class="type11-grid-save primary">Salva</button>
-                </div>`;
-            editor.style.display = 'block';
-            editor.querySelector('.type11-grid-cancel')?.addEventListener('click', () => {
-                editor.style.display = 'none';
-            });
-            editor.querySelector('.type11-grid-save')?.addEventListener('click', async () => {
-                const values = {};
-                editor.querySelectorAll('.type11-editor-field').forEach(input => {
-                    if (input.disabled) return;
-                    values[input.dataset.col] = input.type === 'checkbox' ? input.checked : input.value;
-                });
-                const payload = { fieldId: widget.dataset.gridFieldId, values };
-                if (!isNew) payload.rowId = row && row.id ? row.id : '';
-                const source = encodeURIComponent(widget.dataset.gridSource || currentDetailSource);
-                const url = `${API_URL}/${source}/grid-widget/row`;
-                try {
-                    const response = await fetch(url, {
-                        method: isNew ? 'POST' : 'PUT',
-                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                        body: JSON.stringify(payload)
-                    });
-                    const data = await response.json().catch(() => ({}));
-                    if (!response.ok) {
-                        showNotification('Errore: ' + (data.error || response.status), 'info');
-                        return;
-                    }
-                    editor.style.display = 'none';
-                    await loadType11Grid(widget);
-                    showNotification('Salvato', 'success');
-                } catch (e) {
-                    showNotification('Errore di connessione', 'info');
-                }
-            });
+            return html;
         }
 
         async function type11DeleteSelected(widget, row) {
@@ -5918,7 +5955,10 @@
                     });
                 }
                 const records = Array.isArray(payload.rows) ? payload.rows : (Array.isArray(payload) ? payload : []);
-                const editing = clientDetailMode === 'edit';
+                // Le view sono di sola lettura: niente Nuova riga/Modifica/Elimina anche se
+                // il flyout è in modalità "Abilita modifica".
+                const isView = !!payload.isView;
+                const editing = clientDetailMode === 'edit' && !isView;
 
                 const head = visibleColumns.map(column => `<th scope="col" title="${escapeHtml(column)}">${escapeHtml(type11ColumnLabel(column))}</th>`).join('');
                 const body = records.map((record, index) => {
@@ -5933,11 +5973,12 @@
                     <button type="button" class="type11-grid-add primary">+ Nuova riga</button>
                     <button type="button" class="type11-grid-edit" disabled>Modifica</button>
                     <button type="button" class="type11-grid-delete danger" disabled>Elimina</button>
+                    <button type="button" class="type11-grid-save-inline primary" style="display:none;">Salva</button>
+                    <button type="button" class="type11-grid-cancel-inline" style="display:none;">Annulla</button>
                 </div>` : '';
 
                 const empty = records.length ? '' : '<div class="type11-grid-state">Nessun dato</div>';
-                widget.innerHTML = `${toolbar}${records.length ? `<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` : empty}
-                    <div class="type11-grid-editor" style="display:none;"></div>`;
+                widget.innerHTML = `${toolbar}${records.length ? `<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` : empty}`;
 
                 let selectedRow = null;
                 const tableRows = [...widget.querySelectorAll('.type11-grid-table tbody tr')];
@@ -5946,8 +5987,27 @@
                 const deleteBtn = widget.querySelector('.type11-grid-delete');
 
                 if (editing) {
+                    // Colonne/metadati con cui costruire gli input inline: esattamente le stesse
+                    // colonne (e lo stesso ordine) già mostrate in visualizzazione nella griglia.
+                    const orderedMeta = await type11VisibleColumnsMeta(widget, visibleColumns);
+                    const addBtn = widget.querySelector('.type11-grid-add');
+                    const saveBtn = widget.querySelector('.type11-grid-save-inline');
+                    const cancelBtn = widget.querySelector('.type11-grid-cancel-inline');
+                    let editingRowEl = null;   // <tr> attualmente in modifica/inserimento inline
+                    let editingIsNew = false;
+
+                    const setToolbarEditingState = (isEditingNow) => {
+                        if (selectionLabel) selectionLabel.style.display = isEditingNow ? 'none' : '';
+                        if (addBtn) addBtn.style.display = isEditingNow ? 'none' : '';
+                        if (editBtn) editBtn.style.display = isEditingNow ? 'none' : '';
+                        if (deleteBtn) deleteBtn.style.display = isEditingNow ? 'none' : '';
+                        if (saveBtn) saveBtn.style.display = isEditingNow ? '' : 'none';
+                        if (cancelBtn) cancelBtn.style.display = isEditingNow ? '' : 'none';
+                    };
+
                     tableRows.forEach(rowEl => {
                         rowEl.addEventListener('click', () => {
+                            if (editingRowEl) return; // durante modifica/inserimento inline la selezione è bloccata
                             tableRows.forEach(r => r.classList.remove('type11-selected'));
                             rowEl.classList.add('type11-selected');
                             selectedRow = records[Number(rowEl.dataset.type11Index)];
@@ -5956,9 +6016,68 @@
                             if (deleteBtn) deleteBtn.disabled = !selectedRow;
                         });
                     });
-                    widget.querySelector('.type11-grid-add')?.addEventListener('click', () => type11OpenEditor(widget, {}, true));
-                    editBtn?.addEventListener('click', () => { if (selectedRow) type11OpenEditor(widget, selectedRow, false); });
-                    deleteBtn?.addEventListener('click', () => type11DeleteSelected(widget, selectedRow));
+
+                    // "+ Nuova riga": aggiunge una riga vuota direttamente in cima alla griglia,
+                    // con le stesse colonne visibili, pronta per l'inserimento inline.
+                    addBtn?.addEventListener('click', async () => {
+                        if (editingRowEl || !orderedMeta.length) return;
+                        const tbody = widget.querySelector('.type11-grid-table tbody');
+                        if (!tbody) return;
+                        const tr = document.createElement('tr');
+                        tr.className = 'type11-editing-row';
+                        tr.innerHTML = await type11BuildInlineRowCellsHtml(orderedMeta, {}, true, source, fieldId);
+                        tbody.insertBefore(tr, tbody.firstChild);
+                        editingRowEl = tr;
+                        editingIsNew = true;
+                        setToolbarEditingState(true);
+                    });
+
+                    // "Modifica": trasforma direttamente le celle della riga selezionata in
+                    // input modificabili, senza aprire alcun elenco separato dei campi.
+                    editBtn?.addEventListener('click', async () => {
+                        if (editingRowEl || !selectedRow || !orderedMeta.length) return;
+                        const rowEl = widget.querySelector('.type11-grid-table tbody tr.type11-selected');
+                        if (!rowEl) return;
+                        rowEl.innerHTML = await type11BuildInlineRowCellsHtml(orderedMeta, selectedRow, false, source, fieldId);
+                        editingRowEl = rowEl;
+                        editingIsNew = false;
+                        setToolbarEditingState(true);
+                    });
+
+                    cancelBtn?.addEventListener('click', () => {
+                        loadType11Grid(widget); // ricarica la griglia, scartando le modifiche in corso
+                    });
+
+                    saveBtn?.addEventListener('click', async () => {
+                        if (!editingRowEl) return;
+                        const values = {};
+                        editingRowEl.querySelectorAll('.type11-editor-field').forEach(input => {
+                            if (input.disabled) return;
+                            values[input.dataset.col] = input.type === 'checkbox' ? input.checked : input.value;
+                        });
+                        const payload = { fieldId: widget.dataset.gridFieldId, values };
+                        if (!editingIsNew) payload.rowId = selectedRow && selectedRow.id ? selectedRow.id : '';
+                        const gridSource = encodeURIComponent(widget.dataset.gridSource || currentDetailSource);
+                        const url = `${API_URL}/${gridSource}/grid-widget/row`;
+                        try {
+                            const response = await fetch(url, {
+                                method: editingIsNew ? 'POST' : 'PUT',
+                                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                                body: JSON.stringify(payload)
+                            });
+                            const data = await response.json().catch(() => ({}));
+                            if (!response.ok) {
+                                showNotification('Errore: ' + (data.error || response.status), 'info');
+                                return;
+                            }
+                            await loadType11Grid(widget);
+                            showNotification('Salvato', 'success');
+                        } catch (e) {
+                            showNotification('Errore di connessione', 'info');
+                        }
+                    });
+
+                    deleteBtn?.addEventListener('click', () => { if (!editingRowEl) type11DeleteSelected(widget, selectedRow); });
                 }
             } catch (e) {
                 widget.innerHTML = '<div class="type11-grid-state">Errore di connessione</div>';
@@ -6418,6 +6537,7 @@
                 detailMaxCols = 3;
                 projectClientId = null;
                 currentProjectConsuntivoValue = null;
+                currentProjectManageByHoursValue = null;
                 document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar');
                 document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
                 closeBtn.style.display = 'none';
