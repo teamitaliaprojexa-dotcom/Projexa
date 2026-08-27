@@ -6205,6 +6205,18 @@
                 } else {
                     input = `<span>${escapeHtml(selected.join(', '))}</span>`;
                 }
+            } else if (tipo === 12) {
+                // Link costruito dal backend tramite VariabDB. In vista è un pulsante giallo;
+                // in modifica non si modifica il percorso: l'unica modifica ammessa è la
+                // rinomina del campo tramite la funzione Rinomina già presente nel flyout.
+                const url = String(row.resolved_value == null ? '' : row.resolved_value).trim();
+                const label = campoLabelHtml(row.campo);
+                if (!url) {
+                    input = `<span style="color: var(--text-muted);" title="VariabDB non risolto">—</span>`;
+                } else {
+                    const href = escapeHtml(url);
+                    input = `<a class="type12-link-button" href="${href}" target="_blank" rel="noopener noreferrer" title="Apri collegamento"><i class="fas fa-folder-open"></i><span>${label}</span></a>`;
+                }
             } else if (tipo === 15) {
                 // Riga cliccabile: apre un nuovo flyout con l'elenco derivato dalla query
                 // (tabella.colonna + VariabDB). Riusa lo stile verde di settings-detail-link.

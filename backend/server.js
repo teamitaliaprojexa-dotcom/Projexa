@@ -3669,6 +3669,106 @@ app.delete('/api/:source(settings|clients)/linked-row', requireAuth, async (req,
   }
 });
 
+// Risolve l'espressione del tipo_valore=12 configurata in VariabDB.
+// Sintassi supportata:
+//   clients.valore2 with campo='Repository Cliente' and tenant_id=[tenant_id] and user_id=[user_id] and argument=[client_id]
+//   + settings.valore2 with campo='cartella Progetti' and tenant_id=[tenant_id] and user_id=[user_id]
+//   + '/' + projects.valore2 with campo='Progetto' and argument='Progetto' and tenant_id=[tenant_id] and user_id=[user_id] and client_id=[client_id]
+// Ogni blocco tabella.colonna viene letto dalla tabella indicata; i blocchi letterali tra apici
+// vengono semplicemente concatenati. I placeholder tra [] sono valori del contesto corrente.
+function splitType12Expression(expr) {
+  const parts = [];
+  let cur = '';
+  let quote = null;
+  for (const ch of String(expr || '')) {
+    if ((ch === "'" || ch === '"') && (quote === null || quote === ch)) {
+      quote = quote === null ? ch : null;
+      cur += ch;
+    } else if (ch === '+' && quote === null) {
+      parts.push(cur.trim());
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur.trim()) parts.push(cur.trim());
+  return parts;
+}
+
+function type12Unquote(value) {
+  const v = String(value ?? '').trim();
+  if ((v.startsWith("'") && v.endsWith("'")) || (v.startsWith('"') && v.endsWith('"'))) {
+    return v.slice(1, -1).replace(/''/g, "'").replace(/""/g, '"');
+  }
+  return v;
+}
+
+async function resolveType12Expression(expression, req, context = {}) {
+  const pieces = splitType12Expression(expression);
+  const out = [];
+  const ctx = {
+    tenant_id: req.user.tenant_id,
+    user_id: req.user.user_id,
+    client_id: context.clientId || null,
+    project_id: context.projectId || null,
+    argument: context.argument || null
+  };
+
+  for (const piece of pieces) {
+    if (!piece) continue;
+    // Stringa letterale: '/' oppure qualsiasi testo racchiuso tra apici.
+    if ((piece.startsWith("'") && piece.endsWith("'")) || (piece.startsWith('"') && piece.endsWith('"'))) {
+      out.push(type12Unquote(piece));
+      continue;
+    }
+
+    const m = piece.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\s+with\s+(.+)$/i);
+    if (!m) throw new Error(`Sintassi VariabDB tipo 12 non valida: ${piece}`);
+    const table = m[1].toLowerCase();
+    const column = m[2];
+    const whereText = m[3].trim();
+    if (!['settings', 'clients', 'projects'].includes(table)) {
+      throw new Error(`Tabella non consentita nel tipo 12: ${table}`);
+    }
+    assertValidIdentifier(column);
+
+    const conditions = whereText.split(/\s+and\s+/i).map(x => x.trim()).filter(Boolean);
+    const where = [];
+    const params = [];
+    for (const condition of conditions) {
+      const cm = condition.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$/);
+      if (!cm) throw new Error(`Condizione VariabDB tipo 12 non valida: ${condition}`);
+      const field = cm[1];
+      assertValidIdentifier(field);
+      let raw = cm[2].trim();
+      let value;
+      const ph = raw.match(/^\[([a-zA-Z_][a-zA-Z0-9_]*)\]$/);
+      if (ph) {
+        const key = ph[1].toLowerCase();
+        if (!Object.prototype.hasOwnProperty.call(ctx, key)) {
+          throw new Error(`Placeholder non supportato nel tipo 12: [${ph[1]}]`);
+        }
+        value = ctx[key];
+      } else {
+        value = type12Unquote(raw);
+      }
+      params.push(value);
+      where.push(`"${field}" = $${params.length}`);
+    }
+
+    const cols = await getTableColumns(table);
+    if (!cols.has(column)) throw new Error(`Colonna non trovata: ${table}.${column}`);
+    // Aggiunge solo le condizioni esplicitamente configurate in VariabDB. La sicurezza
+    // dei dati resta garantita dal filtro tenant/user richiesto nella configurazione.
+    const result = await db.query(
+      `SELECT "${column}" AS v FROM "${table}" WHERE ${where.join(' AND ')} LIMIT 1`,
+      params
+    );
+    out.push(result.rows.length && result.rows[0].v != null ? String(result.rows[0].v) : '');
+  }
+  return out.join('');
+}
+
 // Dettaglio delle righe (settings o clients) per un dato "argument", filtrate per
 // tenant e utente del token. Il :source è vincolato a settings|clients dalla route.
 app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (req, res) => {
@@ -3751,6 +3851,21 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
           row.resolved_value = null;
         }
       }
+      // Tipo 12: VariabDB contiene una piccola espressione di concatenazione. Il backend
+      // la risolve nel contesto della riga corrente e restituisce il risultato al dashboard.
+      if (Number(row.tipo_valore) === 12 && row.VariabDB) {
+        try {
+          row.resolved_value = await resolveType12Expression(row.VariabDB, req, {
+            clientId: clientContextId,
+            projectId: projectContextId,
+            argument: row.argument || argument
+          });
+        } catch (e) {
+          row.resolved_value = '';
+          console.error('[TIPO 12] Errore risoluzione VariabDB:', e.message);
+        }
+      }
+
       // Tipi 9 (multi-selezione) e 10 (elenco): le opzioni arrivano da lookup_values, non da "colonna".
       // Match per (tenant, user, tipo_valore, nome_campo=campo), filtrate per ruolo e date attive.
       const t = Number(row.tipo_valore);
