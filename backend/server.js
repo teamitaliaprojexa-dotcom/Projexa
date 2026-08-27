@@ -3764,7 +3764,16 @@ async function resolveType12Expression(expression, req, context = {}) {
       `SELECT "${column}" AS v FROM "${table}" WHERE ${where.join(' AND ')} LIMIT 1`,
       params
     );
-    out.push(result.rows.length && result.rows[0].v != null ? String(result.rows[0].v) : '');
+    let v = result.rows.length && result.rows[0].v != null ? result.rows[0].v : '';
+    // valore3 e' una colonna numerica con decimali (es. 2026.00): nel tipo 12 va mostrata
+    // come intero, senza parte decimale (es. 2026).
+    if (column === 'valore3' && v !== '') {
+      const n = Number(v);
+      v = Number.isFinite(n) ? String(Math.trunc(n)) : String(v);
+    } else {
+      v = String(v);
+    }
+    out.push(v);
   }
   return out.join('');
 }
