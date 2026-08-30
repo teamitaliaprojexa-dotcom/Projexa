@@ -24,7 +24,6 @@
             --border: #E5E7EB;
             --text-muted: #6B7280;
             --radius: 8px;
-            --sidebar-w: 250px;   /* larghezza corrente della sidebar (250px aperta, 70px minimizzata) */
         }
 
         body {
@@ -197,7 +196,7 @@
         /* Pannello a comparsa delle Impostazioni (apertura fluida da sinistra a destra) */
         .settings-flyout {
             position: fixed;
-            left: var(--sidebar-w);            /* bordo destro della sidebar (aperta o minimizzata) */
+            left: 250px;            /* bordo destro della sidebar */
             top: 0;                 /* parte dall'alto come la sidebar */
             height: 100vh;
             width: 0;
@@ -286,7 +285,7 @@
         /* Secondo flyout: dettaglio dei campi dell'argomento selezionato */
         .settings-detail-flyout {
             position: fixed;
-            left: calc(var(--sidebar-w) + 300px);    /* subito a destra del primo flyout (che è largo 300px di default) */
+            left: 550px;            /* subito a destra del primo flyout (250 + 300) */
             top: 0;
             height: 100vh;
             width: 0;
@@ -296,23 +295,15 @@
             pointer-events: none;
         }
 
-        /* Il secondo flyout è sempre largo quanto lo spazio rimanente della pagina
-           (dal proprio bordo sinistro fino al bordo destro dello schermo). La larghezza
-           di default è calcolata dinamicamente (100vw meno lo spazio occupato a sinistra),
-           così l'animazione di apertura resta fluida. Se l'utente ridimensiona trascinando
-           la maniglia, --detail-w viene impostata in px dallo script e prende il sopravvento. */
+        /* La larghezza usa --detail-w (impostata dall'utente col trascinamento);
+           in mancanza si usa il default della modalità corrente. Chiuso = width 0. */
         .settings-detail-flyout.open {
-            width: var(--detail-w, calc(100vw - var(--sidebar-w) - 300px));
+            width: var(--detail-w, 468px);
             pointer-events: auto;
         }
 
-        /* Dettaglio progetto: attaccato alla sidebar, largo fino al bordo destro della pagina */
-        .settings-detail-flyout.near-sidebar.open {
-            width: var(--detail-w, calc(100vw - var(--sidebar-w)));
-        }
-
         .settings-detail-flyout-inner {
-            width: 100%;
+            width: var(--detail-w, 468px);
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -323,8 +314,20 @@
             padding: 1.5rem 1.25rem;
         }
 
+        /* Flyout dei Contatti: +25% in larghezza (468 -> 585px) */
+        .settings-detail-flyout.contacts-wide.open { width: var(--detail-w, 585px); }
+        .settings-detail-flyout.contacts-wide .settings-detail-flyout-inner { width: var(--detail-w, 585px); }
+        /* Layout a più colonne del dettaglio (campo layout_col) */
+        .settings-detail-flyout.cols-2.open { width: var(--detail-w, 780px); }
+        .settings-detail-flyout.cols-3.open { width: var(--detail-w, 1080px); }
+        .settings-detail-flyout.cols-4.open { width: var(--detail-w, 1360px); }
+        .settings-detail-flyout.cols-5.open { width: var(--detail-w, 1650px); }
+        .settings-detail-flyout.cols-2 .settings-detail-flyout-inner { width: var(--detail-w, 780px); }
+        .settings-detail-flyout.cols-3 .settings-detail-flyout-inner { width: var(--detail-w, 1080px); }
+        .settings-detail-flyout.cols-4 .settings-detail-flyout-inner { width: var(--detail-w, 1360px); }
+        .settings-detail-flyout.cols-5 .settings-detail-flyout-inner { width: var(--detail-w, 1650px); }
         /* Dettaglio progetto: attaccato alla sidebar (il primo flyout è chiuso) */
-        .settings-detail-flyout.near-sidebar { left: var(--sidebar-w); }
+        .settings-detail-flyout.near-sidebar { left: 250px; }
 
         /* Maniglia di ridimensionamento (bordo destro dei flyout) */
         .flyout-resizer { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: ew-resize; z-index: 350; }
@@ -945,101 +948,6 @@
         .stat-label {
             color: var(--text-muted);
             font-size: 0.75rem;
-        }
-
-        .kpi-card {
-            cursor: pointer;
-            transition: box-shadow 0.2s, transform 0.2s;
-        }
-
-        .kpi-card:hover {
-            box-shadow: 0 4px 14px rgba(0,0,0,0.08);
-            transform: translateY(-1px);
-        }
-
-        .stat-breakdown {
-            margin-top: 0.35rem;
-            font-size: 0.72rem;
-            color: var(--text-muted);
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.4rem;
-        }
-
-        .stat-breakdown span {
-            background: var(--light);
-            border-radius: 6px;
-            padding: 0.1rem 0.4rem;
-        }
-
-        /* KPI DETAIL MODAL */
-        .kpi-modal-card {
-            background: white;
-            border-radius: 10px;
-            width: 520px;
-            max-width: 92vw;
-            max-height: 80vh;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.25);
-        }
-
-        .kpi-modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 1.25rem 1.5rem 0.75rem;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .kpi-modal-body {
-            padding: 1rem 1.5rem;
-            overflow-y: auto;
-        }
-
-        .kpi-modal-group-title {
-            font-weight: 600;
-            font-size: 0.85rem;
-            color: var(--text-muted);
-            margin: 0.75rem 0 0.4rem;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-        }
-
-        .kpi-modal-item {
-            padding: 0.6rem 0.75rem;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            margin-bottom: 0.5rem;
-        }
-
-        .kpi-modal-item .kpi-item-client {
-            font-weight: 600;
-            color: var(--dark);
-            font-size: 0.9rem;
-        }
-
-        .kpi-modal-item .kpi-item-description {
-            color: var(--text-muted);
-            font-size: 0.85rem;
-            margin-top: 0.15rem;
-            white-space: pre-wrap;
-        }
-
-        .kpi-modal-item-clickable {
-            cursor: pointer;
-            transition: background 0.15s, border-color 0.15s;
-        }
-
-        .kpi-modal-item-clickable:hover {
-            background: var(--light);
-            border-color: var(--primary);
-        }
-
-        .kpi-modal-empty {
-            text-align: center;
-            color: var(--text-muted);
-            padding: 2rem 0;
         }
 
         /* TODO LIST */
@@ -1722,10 +1630,6 @@
 
         /* RESPONSIVE */
         @media (max-width: 768px) {
-            :root {
-                --sidebar-w: 70px !important;   /* sotto i 768px la sidebar è sempre ridotta (vince anche sullo style inline impostato via JS) */
-            }
-
             .sidebar {
                 width: 70px;
             }
@@ -2039,27 +1943,33 @@
         <div class="container">
             <!-- STATS -->
             <div class="stats-grid">
-                <div class="stat-card kpi-card" id="kpiCardAttivi" data-kpi="attivi" role="button" tabindex="0">
+                <div class="stat-card">
                     <div class="stat-icon" style="color: var(--primary);">
                         <i class="fas fa-folder"></i>
                     </div>
-                    <div class="stat-value" id="kpiValueAttivi">—</div>
+                    <div class="stat-value">5</div>
                     <div class="stat-label">Progetti attivi</div>
                 </div>
-                <div class="stat-card kpi-card" id="kpiCardCompletati" data-kpi="completati" role="button" tabindex="0">
+                <div class="stat-card">
                     <div class="stat-icon" style="color: var(--secondary);">
                         <i class="fas fa-check-circle"></i>
                     </div>
-                    <div class="stat-value" id="kpiValueCompletati">—</div>
+                    <div class="stat-value">12</div>
                     <div class="stat-label">Progetti completati</div>
                 </div>
-                <div class="stat-card kpi-card" id="kpiCardRischi" data-kpi="rischi" role="button" tabindex="0">
+                <div class="stat-card">
                     <div class="stat-icon" style="color: var(--warning);">
                         <i class="fas fa-exclamation-triangle"></i>
                     </div>
-                    <div class="stat-value" id="kpiValueRischi">—</div>
+                    <div class="stat-value">3</div>
                     <div class="stat-label">Rischi aperti</div>
-                    <div class="stat-breakdown" id="kpiBreakdownRischi"></div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="color: var(--danger);">
+                        <i class="fas fa-hourglass-end"></i>
+                    </div>
+                    <div class="stat-value">2</div>
+                    <div class="stat-label">In ritardo</div>
                 </div>
             </div>
 
@@ -2596,171 +2506,6 @@
         `;
         document.head.appendChild(style);
 
-        // === KPI DASHBOARD (Progetti attivi / completati / rischi aperti) ===
-        // Dati grezzi dell'ultima risposta di ciascun KPI, tenuti in memoria per aprire
-        // la finestra di dettaglio senza rifare la chiamata quando si clicca la card.
-        let kpiProgettiData = { attivi: null, completati: null, rischi: null };
-
-        const KPI_ENDPOINTS = {
-            attivi: 'progetti-attivi',
-            completati: 'progetti-completati',
-            rischi: 'rischi-aperti'
-        };
-
-        const KPI_TITLES = {
-            attivi: 'Progetti attivi',
-            completati: 'Progetti completati',
-            rischi: 'Rischi aperti'
-        };
-
-        // Cliente attualmente selezionato nella tendina in alto, sotto forma di id
-        // (la tendina lavora per nome, come già fatto per il KPI Fatturato).
-        function getSelectedClientId() {
-            const clientSelector = document.getElementById('clientSelector');
-            const selectedClientName = clientSelector ? clientSelector.value : '';
-            const client = dashboardClients.find(c => c.name === selectedClientName);
-            return client && client.id != null ? client.id : '';
-        }
-
-        async function fetchKpiProgetti(kpi) {
-            const params = new URLSearchParams();
-            const clientId = getSelectedClientId();
-            if (clientId) params.set('clientId', clientId);
-            const response = await fetch(`${API_URL}/dashboard/kpi/${KPI_ENDPOINTS[kpi]}?${params.toString()}`, {
-                headers: getAuthHeaders()
-            });
-            if (!response.ok) {
-                const error = await response.json().catch(() => ({}));
-                throw new Error(error.error || `Errore HTTP ${response.status}`);
-            }
-            return response.json();
-        }
-
-        // Carica i tre KPI progetti dal server e aggiorna le card in dashboard.
-        async function loadDashboardKpis() {
-            const results = await Promise.all(
-                Object.keys(KPI_ENDPOINTS).map(async (kpi) => {
-                    try {
-                        return [kpi, await fetchKpiProgetti(kpi)];
-                    } catch (error) {
-                        console.warn('[KPI DASHBOARD]', kpi, error.message);
-                        return [kpi, null];
-                    }
-                })
-            );
-
-            for (const [kpi, data] of results) {
-                kpiProgettiData[kpi] = data;
-            }
-
-            const attiviEl = document.getElementById('kpiValueAttivi');
-            if (attiviEl) attiviEl.textContent = kpiProgettiData.attivi ? kpiProgettiData.attivi.total : '—';
-
-            const completatiEl = document.getElementById('kpiValueCompletati');
-            if (completatiEl) completatiEl.textContent = kpiProgettiData.completati ? kpiProgettiData.completati.total : '—';
-
-            const rischiEl = document.getElementById('kpiValueRischi');
-            if (rischiEl) rischiEl.textContent = kpiProgettiData.rischi ? kpiProgettiData.rischi.total : '—';
-
-            const breakdownEl = document.getElementById('kpiBreakdownRischi');
-            if (breakdownEl) {
-                const breakdown = (kpiProgettiData.rischi && kpiProgettiData.rischi.breakdown) || [];
-                breakdownEl.innerHTML = breakdown
-                    .map(b => `<span>${escapeHtml(b.rischio)} ${b.count}</span>`)
-                    .join('');
-            }
-        }
-
-        // Apre la finestra di dettaglio del KPI cliccato, mostrando per ogni progetto la
-        // descrizione del cliente (non l'id) e la descrizione del progetto.
-        function openKpiModal(kpi) {
-            const data = kpiProgettiData[kpi];
-            const modal = document.getElementById('kpiModal');
-            const title = document.getElementById('kpiModalTitle');
-            const body = document.getElementById('kpiModalBody');
-            if (!modal || !title || !body) return;
-
-            title.textContent = KPI_TITLES[kpi] || 'Dettaglio KPI';
-
-            if (!data || !data.items || data.items.length === 0) {
-                body.innerHTML = '<div class="kpi-modal-empty">Nessun progetto trovato.</div>';
-            } else if (kpi === 'rischi') {
-                // Raggruppa per livello di rischio, così il conteggio per valore è visibile
-                // anche nella finestra di dettaglio (Medio, Alto, Critico, ...).
-                const groups = new Map();
-                for (const item of data.items) {
-                    const key = item.rischio || 'Non specificato';
-                    if (!groups.has(key)) groups.set(key, []);
-                    groups.get(key).push(item);
-                }
-                body.innerHTML = [...groups.entries()].map(([rischio, items]) => `
-                    <div class="kpi-modal-group-title">${escapeHtml(rischio)} (${items.length})</div>
-                    ${items.map(renderKpiModalItem).join('')}
-                `).join('');
-            } else {
-                body.innerHTML = data.items.map(renderKpiModalItem).join('');
-            }
-
-            bindKpiModalItemClicks();
-            modal.style.display = 'flex';
-        }
-
-        function renderKpiModalItem(item) {
-            const client = item.client ? escapeHtml(item.client) : 'Cliente non specificato';
-            const description = item.description ? escapeHtml(item.description) : '—';
-            const clickable = item.project_id != null && item.client_id != null;
-            const attrs = clickable
-                ? ` class="kpi-modal-item kpi-modal-item-clickable" data-project-id="${escapeHtml(item.project_id)}" data-client-id="${escapeHtml(item.client_id)}" data-project-name="${escapeHtml(item.name || item.description || '')}" role="button" tabindex="0"`
-                : ' class="kpi-modal-item"';
-            return `
-                <div${attrs}>
-                    <div class="kpi-item-client">${client}</div>
-                    <div class="kpi-item-description">${description}</div>
-                </div>
-            `;
-        }
-
-        // Apre il flyout di dettaglio del progetto cliccato nella finestra KPI, riusando la
-        // stessa funzione della sidebar "Progetti clienti": tenant_id/user_id arrivano dal
-        // token di login (server-side), client_id e project_id dalla riga del KPI cliccata.
-        function bindKpiModalItemClicks() {
-            const body = document.getElementById('kpiModalBody');
-            if (!body) return;
-            body.querySelectorAll('.kpi-modal-item-clickable').forEach((el) => {
-                const open = () => {
-                    const projectId = el.dataset.projectId;
-                    const clientId = el.dataset.clientId;
-                    const name = el.dataset.projectName || '';
-                    if (!projectId || !clientId) return;
-                    closeKpiModal();
-                    openProjectDetail(projectId, name, clientId);
-                };
-                el.addEventListener('click', open);
-                el.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
-                });
-            });
-        }
-
-        function closeKpiModal() {
-            const modal = document.getElementById('kpiModal');
-            if (modal) modal.style.display = 'none';
-        }
-
-        function initKpiCards() {
-            document.querySelectorAll('.kpi-card').forEach((card) => {
-                const kpi = card.getAttribute('data-kpi');
-                card.addEventListener('click', () => openKpiModal(kpi));
-                card.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openKpiModal(kpi); }
-                });
-            });
-            const closeBtn = document.getElementById('kpiModalClose');
-            const modal = document.getElementById('kpiModal');
-            if (closeBtn) closeBtn.addEventListener('click', closeKpiModal);
-            if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) closeKpiModal(); });
-        }
-
         // === KPI FATTURATO CHART ===
         let revenueChart = null;
         let kpiFatturazioneData = [];
@@ -2780,7 +2525,7 @@
                 const client = dashboardClients.find(c => c.name === selectedClientName);
 
                 const params = new URLSearchParams();
-                if (yearSelector && yearSelector.value && yearSelector.value !== 'all') params.set('anno', yearSelector.value);
+                if (yearSelector && yearSelector.value) params.set('anno', yearSelector.value);
                 if (client && client.id != null) params.set('clientId', client.id);
 
                 const response = await fetch(`${API_URL}/kpi-fatturazione?${params.toString()}`, {
@@ -2818,7 +2563,7 @@
                 ? currentYear
                 : (years.length ? Math.max(...years) : currentYear);
 
-            yearSelector.innerHTML = '<option value="all">Tutto</option>' + (years.length ? years : [currentYear]).map(year =>
+            yearSelector.innerHTML = (years.length ? years : [currentYear]).map(year =>
                 `<option value="${year}">${year}</option>`
             ).join('');
             yearSelector.value = String(selectedYear);
@@ -2853,20 +2598,7 @@
             }, { totale: 0, forecast: 0 });
         }
 
-        // Somma totale/forecast di un cliente su TUTTI gli anni presenti nei dati caricati
-        // (usata quando in tendina è selezionato "Tutto").
-        function getKpiClientAllYearsTotals(clientId) {
-            const rows = kpiFatturazioneData.filter(item => String(item.client_id) === String(clientId));
-
-            return rows.reduce((totals, item) => {
-                totals.totale += Number(item.totale) || 0;
-                totals.forecast += Number(item.forecast) || 0;
-                return totals;
-            }, { totale: 0, forecast: 0 });
-        }
-
         function updateRevenueChart(year) {
-            const isAllYears = year === 'all';
             const year_num = parseInt(year, 10);
             const clientSelector = document.getElementById('clientSelector');
             const selectedClient = clientSelector ? clientSelector.value : '';
@@ -2875,19 +2607,14 @@
             let revenues = [];
             let forecasts = [];
 
-            const getTotals = (clientId) => isAllYears
-                ? getKpiClientAllYearsTotals(clientId)
-                : getKpiClientYearTotals(clientId, year_num);
-
             if (selectedClient === '') {
                 // Tutti i clienti presenti nel filtro clienti, ma solo quelli che hanno
                 // almeno un valore (fatturato o forecast) diverso da zero per l'anno
-                // selezionato (o su tutti gli anni, se "Tutto" è selezionato): i clienti
-                // senza dati non vengono mostrati nel grafico.
+                // selezionato: i clienti senza dati non vengono mostrati nel grafico.
                 const withData = dashboardClients
                     .map(client => {
                         const clientId = client?.id == null ? null : String(client.id);
-                        const totals = getTotals(clientId);
+                        const totals = getKpiClientYearTotals(clientId, year_num);
                         return { name: client.name, totale: totals.totale, forecast: totals.forecast };
                     })
                     .filter(c => (Number(c.totale) || 0) !== 0 || (Number(c.forecast) || 0) !== 0);
@@ -2898,7 +2625,7 @@
             } else {
                 const client = dashboardClients.find(c => c.name === selectedClient);
                 const clientId = client?.id == null ? null : String(client.id);
-                const totals = getTotals(clientId);
+                const totals = getKpiClientYearTotals(clientId, year_num);
 
                 clients = [selectedClient];
                 revenues = [totals.totale];
@@ -2909,8 +2636,7 @@
             const totalForecast = forecasts.reduce((a, b) => a + b, 0);
             const totalClients = clients.length;
 
-            const yearLabel = isAllYears ? 'Tutti' : year;
-            document.getElementById('selectedYear').textContent = yearLabel;
+            document.getElementById('selectedYear').textContent = year;
             document.getElementById('totalRevenue').innerHTML = `
                 <div style="font-size: 2rem; font-weight: bold; color: var(--primary);">€${totalRevenue.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                 <div style="font-size: 1rem; color: #10B981; margin-top: 0.5rem; font-weight: 600;">+ €${totalForecast.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} forecast</div>
@@ -2927,7 +2653,6 @@
                 chartContainer.style.height = chartHeight + 'px';
             }
 
-            const datasetYearLabel = isAllYears ? 'Totale' : year;
             const ctx = document.getElementById('revenueChart');
             revenueChart = new Chart(ctx, {
                 type: 'bar',
@@ -2935,7 +2660,7 @@
                     labels: clients,
                     datasets: [
                         {
-                            label: `Fatturato ${datasetYearLabel}`,
+                            label: `Fatturato ${year}`,
                             data: revenues,
                             backgroundColor: 'rgba(59, 130, 246, 0.7)',
                             borderColor: 'rgb(59, 130, 246)',
@@ -2944,7 +2669,7 @@
                             hoverBackgroundColor: 'rgba(59, 130, 246, 0.9)',
                         },
                         {
-                            label: `Forecast ${datasetYearLabel}`,
+                            label: `Forecast ${year}`,
                             data: forecasts,
                             backgroundColor: 'rgba(16, 185, 129, 0.7)',
                             borderColor: 'rgb(16, 185, 129)',
@@ -3047,7 +2772,6 @@
                 const yearSelector = document.getElementById('yearSelector');
                 await loadKpiFatturazione();
                 updateRevenueChart(yearSelector.value);
-                await loadDashboardKpis();
             });
         }
 
@@ -3617,12 +3341,6 @@
         }
 
         // === SIDEBAR TOGGLE ===
-        // Aggiorna la variabile CSS --sidebar-w (usata per posizionare i flyout subito
-        // dopo la sidebar) in base allo stato aperto/minimizzato della sidebar stessa.
-        function syncSidebarWidthVar(isMinimized) {
-            document.documentElement.style.setProperty('--sidebar-w', isMinimized ? '70px' : '250px');
-        }
-
         function initSidebarToggle() {
             const toggleBtn = document.getElementById('sidebarToggle');
             const sidebar = document.querySelector('.sidebar');
@@ -3636,7 +3354,6 @@
                     // Salva lo stato nel localStorage
                     const isMinimized = sidebar.classList.contains('minimized');
                     localStorage.setItem('sidebarMinimized', isMinimized);
-                    syncSidebarWidthVar(isMinimized);
                 });
 
                 // Ripristina lo stato dal localStorage
@@ -3645,7 +3362,6 @@
                     sidebar.classList.add('minimized');
                     main.classList.add('minimized');
                 }
-                syncSidebarWidthVar(wasMinimized);
             }
         }
 
@@ -4704,13 +4420,9 @@
             projectDetailActive = true;  // flyout persistente (si chiude solo con la X)
             detailMaxCols = 3;
             setDetailColumns(1);
-            flyout.classList.remove('contacts-wide');
-            // Attaccato alla sidebar (come il dettaglio progetto): parte subito dopo la
-            // barra laterale, a prescindere che il flyout clienti (livello 1) sia aperto o
-            // meno (es. tornando indietro da un progetto con "‹" il livello 1 può risultare
-            // chiuso, e prima il pannello restava "staccato" lasciando un vuoto).
-            flyout.classList.add('near-sidebar', 'open');
-            document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
+            flyout.classList.remove('contacts-wide', 'near-sidebar');
+            flyout.classList.add('open');
+            document.querySelector('.nav-projects')?.classList.add('detail-open');
             titleEl.textContent = clientName || 'Progetti';
             hideDetailManagement();
             updateBackButton();
@@ -5666,19 +5378,19 @@
             // Descrittore della vista corrente (per la navigazione avanti/indietro)
             currentView = { kind: 'detail', source, argument, label, containerCampo: currentContainerCampo };
             updateBackButton();
-            flyout.classList.add('open', 'near-sidebar');
+            flyout.classList.add('open');
             flyout.classList.remove('contacts-wide'); // la vista standard non è allargata
             setDetailColumns(1); // default; il conteggio reale viene impostato dopo il caricamento
-            // Il dettaglio è sempre attaccato alla sidebar: chiude il primo flyout da cui si è
-            // aperto (Impostazioni, Clienti o Progetti), così resta visibile solo il pannello
-            // di dettaglio, subito dopo la sidebar (aperta o minimizzata che sia).
-            document.querySelector('.nav-settings')?.classList.remove('open', 'detail-open');
-            document.querySelector('.nav-clients')?.classList.remove('open', 'detail-open');
+            // Il primo flyout attivo (Impostazioni o Clienti) diventa grigio chiaro
+            document.querySelector('.nav-settings')?.classList.toggle('detail-open', source === 'settings');
+            document.querySelector('.nav-clients')?.classList.toggle('detail-open', source === 'clients');
+            // Dettaglio progetto: chiudi il pannello hover di "Progetti clienti" (elenco clienti),
+            // così resta visibile SOLO il flyout del progetto.
             document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
-            // Progetti: flyout persistente (si chiude solo con la X); gli altri si richiudono
-            // da soli (mouseleave/click altrove) come già avveniva prima.
+            // Progetti: flyout persistente (X per chiudere), 5 colonne, attaccato alla sidebar.
             projectDetailActive = (source === 'projects');
             if (source !== 'projects') detailMaxCols = 3;
+            flyout.classList.toggle('near-sidebar', source === 'projects');
             const closeBtn = document.getElementById('detailCloseBtn');
             if (closeBtn) closeBtn.style.display = (source === 'projects') ? 'inline-flex' : 'none';
 
@@ -7969,8 +7681,6 @@
             initTodoList();
             await initRevenueChart(); // carica anni disponibili + dati kpi_fatturazione filtrati
             initClientFilter();
-            initKpiCards();
-            await loadDashboardKpis(); // carica i KPI progetti attivi/completati/rischi aperti
             initMeetings(); // Carica le riunioni da Google Calendar
         });
     </script>
@@ -8000,18 +7710,6 @@
                 <a href="privacy.html" target="_blank" rel="noopener" style="text-align: center; font-size: 0.85rem; color: var(--primary);">Leggi l'informativa privacy e cookie</a>
                 <button id="pmClose" type="button" style="padding: 0.5rem 1rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Chiudi</button>
             </div>
-        </div>
-    </div>
-    <!-- Modale di dettaglio KPI (Progetti attivi / completati / Rischi aperti) -->
-    <div id="kpiModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
-        <div class="kpi-modal-card">
-            <div class="kpi-modal-header">
-                <h3 id="kpiModalTitle" style="margin: 0; color: var(--dark);">Dettaglio KPI</h3>
-                <button id="kpiModalClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <div class="kpi-modal-body" id="kpiModalBody"></div>
         </div>
     </div>
     <script src="js/privacy.js"></script>
