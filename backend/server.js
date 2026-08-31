@@ -3686,6 +3686,84 @@ app.post('/api/:source(settings|clients)/execute-function', requireAuth, async (
   }
 });
 
+// Pulsante "Chiudi Progetto" nel dettaglio progetto: esegue l'istruzione configurata in
+// function_db (cod_istruzione=3, istruzione='update', funzione='Chiudi Progetto') sul
+// project_id/client_id correnti. Stessa logica/riuso del motore già usato per tipo_valore=15
+// (fun_tabella/fun_colonna = UPDATE fun_colonna = ieri), estesa con fun_project (colonna su
+// cui filtrare il project_id) e con il filtro client_id (colonna "client_id" se presente).
+// Selezione della riga function_db: prima quella con tenant_id = tenant del login; se non
+// esiste, quella di default con tenant_id IS NULL.
+app.post('/api/projects/close', requireAuth, async (req, res) => {
+  const projectId = ((req.body && req.body.projectId) || '').trim();
+  const clientId = ((req.body && req.body.clientId) || '').trim();
+  if (!projectId) return res.status(400).json({ error: 'projectId richiesto' });
+  try {
+    const codIstruzione = 3;
+    const funzione = 'Chiudi Progetto';
+
+    let fdb = await db.query(
+      `SELECT * FROM function_db WHERE cod_istruzione = $1 AND lower(istruzione) = 'update' AND funzione = $2 AND tenant_id = $3`,
+      [codIstruzione, funzione, req.user.tenant_id]
+    );
+    if (fdb.rows.length === 0) {
+      fdb = await db.query(
+        `SELECT * FROM function_db WHERE cod_istruzione = $1 AND lower(istruzione) = 'update' AND funzione = $2 AND tenant_id IS NULL`,
+        [codIstruzione, funzione]
+      );
+    }
+    if (fdb.rows.length === 0) return res.json({ updated: 0, executed: 0 });
+
+    const client = await db.connect();
+    let updated = 0, executed = 0;
+    try {
+      await client.query('BEGIN');
+      for (const r of fdb.rows) {
+        const tab = r.fun_tabella, col = r.fun_colonna;
+        if (!tab || !col) continue;
+        assertValidIdentifier(tab);
+        assertValidIdentifier(col);
+        const tcols = await getTableColumns(tab);
+        if (tcols.size === 0) throw Object.assign(new Error('Tabella inesistente: ' + tab), { statusCode: 400 });
+        if (!tcols.has(col)) throw Object.assign(new Error('Colonna inesistente: ' + col), { statusCode: 400 });
+
+        // Colonna su cui filtrare il project_id: da fun_project, altrimenti 'project_id' se presente.
+        let projCol = (r.fun_project || '').trim();
+        if (!projCol && tcols.has('project_id')) projCol = 'project_id';
+        if (!projCol) throw Object.assign(new Error('Colonna project_id non configurata (fun_project) per ' + tab), { statusCode: 400 });
+        assertValidIdentifier(projCol);
+
+        let tenCol = (r.fun_tenant || '').trim();
+        if (!tenCol && tcols.has('tenant_id')) tenCol = 'tenant_id';
+        let usrCol = (r.fun_user || '').trim();
+        if (!usrCol && tcols.has('user_id')) usrCol = 'user_id';
+        const cliCol = tcols.has('client_id') ? 'client_id' : '';
+
+        const parts = [`"${projCol}" = $1`];
+        const p = [projectId];
+        if (tenCol) { assertValidIdentifier(tenCol); p.push(req.user.tenant_id); parts.push(`"${tenCol}" = $${p.length}`); }
+        if (usrCol) { assertValidIdentifier(usrCol); p.push(req.user.user_id); parts.push(`"${usrCol}" = $${p.length}`); }
+        if (cliCol && clientId) { p.push(clientId); parts.push(`"${cliCol}" = $${p.length}`); }
+
+        const rr = await client.query(
+          `UPDATE "${tab}" SET "${col}" = CURRENT_DATE - INTERVAL '1 day' WHERE ${parts.join(' AND ')}`,
+          p
+        );
+        updated += rr.rowCount;
+        executed++;
+      }
+      await client.query('COMMIT');
+      res.json({ updated, executed });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      res.status(e.statusCode || 500).json({ error: e.message });
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 // tipo_valore = 20: elenco valori da una tabella esterna. Il campo (fieldId) contiene
 // tabella (clients.tabella) e colonna (clients.colonna). Restituisce { id, value } per
 // ogni riga, filtrando per tenant_id, user_id e id_cliente (se presenti nella tabella).

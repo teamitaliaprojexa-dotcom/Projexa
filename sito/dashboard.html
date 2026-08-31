@@ -1880,6 +1880,7 @@
                     <div class="settings-flyout-title" id="settingsDetailTitle" style="margin-bottom: 0;">Dettaglio</div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 0.5rem; flex: 0 0 auto;">
+                    <button id="closeProjectBtn" type="button" style="display: none; flex: 0 0 auto; padding: 0.35rem 0.75rem; background: var(--warning); color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">Chiudi Progetto</button>
                     <label id="clientEditToggleWrap" style="display: none; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">
                         <span>Abilita modifica</span>
                         <span class="toggle-switch"><input type="checkbox" id="clientEditToggle"><span class="toggle-slider"></span></span>
@@ -5980,6 +5981,12 @@
             const toggle = document.getElementById('clientEditToggle');
             if (toggle) toggle.checked = (mode !== 'view');
 
+            // "Chiudi Progetto": solo nel dettaglio progetto, e solo con modifica abilitata.
+            const closeProjectBtn = document.getElementById('closeProjectBtn');
+            if (closeProjectBtn) {
+                closeProjectBtn.style.display = (currentDetailSource === 'projects' && mode !== 'view') ? 'inline-flex' : 'none';
+            }
+
             // Pulsanti +/Elimina/Rinomina: visibili con modifica abilitata
             const editButtons = document.getElementById('clientEditButtons');
             if (editButtons) editButtons.style.display = (mode !== 'view') ? 'flex' : 'none';
@@ -7441,6 +7448,44 @@
             if (toggle) toggle.addEventListener('change', () => {
                 clientDetailMode = toggle.checked ? 'edit' : 'view';
                 rerender();
+            });
+
+            // "Chiudi Progetto": chiede conferma, poi esegue l'istruzione configurata in
+            // function_db (cod_istruzione=3, istruzione='update', funzione='Chiudi Progetto')
+            // per il project_id/client_id correnti.
+            const closeProjectBtn = document.getElementById('closeProjectBtn');
+            if (closeProjectBtn) closeProjectBtn.addEventListener('click', async () => {
+                if (currentDetailSource !== 'projects' || !currentDetailArgument) return;
+                if (!confirm('Confermi al chiusura del progetto?')) return;
+                closeProjectBtn.disabled = true;
+                try {
+                    const response = await fetch(`${API_URL}/projects/close`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ projectId: currentDetailArgument, clientId: projectClientId })
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        showNotification('Errore: ' + (data.error || response.status), 'info');
+                        return;
+                    }
+                    showNotification('Progetto chiuso', 'success');
+                    // Il progetto chiuso non fa più parte dell'elenco: chiude il flyout
+                    // persistente e torna alla vista precedente (stesso comportamento della X).
+                    projectDetailActive = false;
+                    detailMaxCols = 3;
+                    projectClientId = null;
+                    currentProjectConsuntivoValue = null;
+                    currentProjectManageByHoursValue = null;
+                    document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar');
+                    document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
+                    const detailCloseBtn = document.getElementById('detailCloseBtn');
+                    if (detailCloseBtn) detailCloseBtn.style.display = 'none';
+                } catch (e) {
+                    showNotification('Errore di connessione', 'info');
+                } finally {
+                    closeProjectBtn.disabled = false;
+                }
             });
 
             // Elimina / Rinomina: entrano nella rispettiva modalità
