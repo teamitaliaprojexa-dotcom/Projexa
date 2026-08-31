@@ -1280,6 +1280,20 @@ async function resolveClientDescriptions(clientIds, tenantId) {
   return map;
 }
 
+// Risolve in blocco { projectId -> descrizione } per l'elenco di project_id indicato,
+// usando la stessa vista (ele_progetti) già utilizzata per i menu a discesa dei progetti.
+async function resolveProjectDescriptions(projectIds, tenantId) {
+  const map = new Map();
+  const ids = [...new Set(projectIds.filter((v) => v != null))];
+  if (!ids.length) return map;
+  const pr = await db.query(
+    `SELECT id, valore2 FROM ele_progetti WHERE id = ANY($1) AND tenant_id = $2`,
+    [ids, tenantId]
+  );
+  for (const r of pr.rows) map.set(String(r.id), r.valore2);
+  return map;
+}
+
 // Costruisce le condizioni base comuni a tutti i KPI progetti: tenant/user del login,
 // client_id opzionale, e scadenza > oggi (progetto non ancora scaduto).
 function buildKpiProgettiConditions(req) {
@@ -1358,6 +1372,84 @@ app.get('/api/dashboard/kpi/rischi-aperti', requireAuth, async (req, res) => {
     res.json({ total: items.length, breakdown, items });
   } catch (error) {
     console.error('[KPI rischi-aperti]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// KPI 4: Task aperti -> select da task_app, filtrata per tenant/user del login (+ client_id
+// opzionale) e scadenza > oggi (task non ancora scaduti). "breakdown" espone il conteggio per
+// singolo "tipo" (stesso schema del breakdown per rischio del KPI 3).
+app.get('/api/dashboard/kpi/task-aperti', requireAuth, async (req, res) => {
+  try {
+    const clientId = ((req.query && req.query.clientId) || '').trim();
+    const conditions = ['tenant_id = $1', 'user_id = $2', 'scadenza IS NOT NULL', 'scadenza > CURRENT_DATE'];
+    const params = [req.user.tenant_id, req.user.user_id];
+    if (clientId) { params.push(clientId); conditions.push(`client_id = $${params.length}`); }
+    const result = await db.query(
+      `SELECT client_id, project_id, tipo, cod_task FROM task_app WHERE ${conditions.join(' AND ')} ORDER BY tipo, client_id`,
+      params
+    );
+    console.log(`[KPI task-aperti] righe trovate: ${result.rows.length}`);
+    // Le descrizioni cliente/progetto sono un arricchimento "best effort": se la
+    // decodifica fallisce (es. tipo di project_id/client_id incompatibile con
+    // ele_progetti/clients), il conteggio va comunque restituito.
+    let clientMap = new Map();
+    try { clientMap = await resolveClientDescriptions(result.rows.map((r) => r.client_id), req.user.tenant_id); }
+    catch (e) { console.error('[KPI task-aperti] resolveClientDescriptions:', e.message); }
+    let projectMap = new Map();
+    try { projectMap = await resolveProjectDescriptions(result.rows.map((r) => r.project_id), req.user.tenant_id); }
+    catch (e) { console.error('[KPI task-aperti] resolveProjectDescriptions:', e.message); }
+    const items = result.rows.map((r) => ({
+      client_id: r.client_id,
+      client: clientMap.get(String(r.client_id)) || null,
+      project_id: r.project_id,
+      project: r.project_id != null ? (projectMap.get(String(r.project_id)) || null) : null,
+      tipo: r.tipo ?? null,
+      cod_task: r.cod_task ?? null
+    }));
+    const breakdownMap = new Map();
+    for (const it of items) {
+      const key = it.tipo || 'Non specificato';
+      breakdownMap.set(key, (breakdownMap.get(key) || 0) + 1);
+    }
+    const breakdown = [...breakdownMap.entries()].map(([tipo, count]) => ({ tipo, count }));
+    res.json({ total: items.length, breakdown, items });
+  } catch (error) {
+    console.error('[KPI task-aperti]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// KPI 5: Quotazioni -> select da cl_quotazioni, filtrata per tenant/user del login
+// (+ client_id opzionale) e scadenza > oggi.
+app.get('/api/dashboard/kpi/quotazioni', requireAuth, async (req, res) => {
+  try {
+    const clientId = ((req.query && req.query.clientId) || '').trim();
+    const conditions = ['tenant_id = $1', 'user_id = $2', 'scadenza IS NOT NULL', 'scadenza > CURRENT_DATE'];
+    const params = [req.user.tenant_id, req.user.user_id];
+    if (clientId) { params.push(clientId); conditions.push(`client_id = $${params.length}`); }
+    const result = await db.query(
+      `SELECT client_id, project_id, codice, stato FROM cl_quotazioni WHERE ${conditions.join(' AND ')} ORDER BY client_id`,
+      params
+    );
+    console.log(`[KPI quotazioni] righe trovate: ${result.rows.length}`);
+    let clientMap = new Map();
+    try { clientMap = await resolveClientDescriptions(result.rows.map((r) => r.client_id), req.user.tenant_id); }
+    catch (e) { console.error('[KPI quotazioni] resolveClientDescriptions:', e.message); }
+    let projectMap = new Map();
+    try { projectMap = await resolveProjectDescriptions(result.rows.map((r) => r.project_id), req.user.tenant_id); }
+    catch (e) { console.error('[KPI quotazioni] resolveProjectDescriptions:', e.message); }
+    const items = result.rows.map((r) => ({
+      client_id: r.client_id,
+      client: clientMap.get(String(r.client_id)) || null,
+      project_id: r.project_id,
+      project: r.project_id != null ? (projectMap.get(String(r.project_id)) || null) : null,
+      codice: r.codice ?? null,
+      stato: r.stato ?? null
+    }));
+    res.json({ total: items.length, items });
+  } catch (error) {
+    console.error('[KPI quotazioni]', error.message);
     res.status(500).json({ error: error.message });
   }
 });
