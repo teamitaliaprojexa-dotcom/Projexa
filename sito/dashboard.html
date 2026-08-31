@@ -6377,11 +6377,17 @@
                     <button type="button" class="type11-grid-cancel-inline" style="display:none;">Annulla</button>
                 </div>` : '';
 
-                const empty = records.length ? '' : '<div class="type11-grid-state">Nessun dato</div>';
-                widget.innerHTML = `${toolbar}${records.length ? `<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` : empty}`;
+                // Anche senza righe la tabella (con <tbody>) va sempre renderizzata: altrimenti
+                // "+ Nuova riga" non trova il tbody in cui inserire la riga di inserimento
+                // inline e il click non fa nulla. Lo stato vuoto diventa una riga placeholder
+                // dentro il tbody, rimossa automaticamente al primo inserimento.
+                const emptyRow = records.length
+                    ? ''
+                    : `<tr class="type11-empty-row"><td colspan="${Math.max(visibleColumns.length, 1)}" class="type11-grid-state">Nessun dato</td></tr>`;
+                widget.innerHTML = `${toolbar}<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}"><thead><tr>${head}</tr></thead><tbody>${body}${emptyRow}</tbody></table></div>`;
 
                 let selectedRow = null;
-                const tableRows = [...widget.querySelectorAll('.type11-grid-table tbody tr')];
+                const tableRows = [...widget.querySelectorAll('.type11-grid-table tbody tr')].filter(r => !r.classList.contains('type11-empty-row'));
                 const selectionLabel = widget.querySelector('.type11-grid-selection');
                 const editBtn = widget.querySelector('.type11-grid-edit');
                 const deleteBtn = widget.querySelector('.type11-grid-delete');
@@ -6423,6 +6429,7 @@
                         if (editingRowEl || !orderedMeta.length) return;
                         const tbody = widget.querySelector('.type11-grid-table tbody');
                         if (!tbody) return;
+                        tbody.querySelector('.type11-empty-row')?.remove(); // via il placeholder "Nessun dato"
                         const tr = document.createElement('tr');
                         tr.className = 'type11-editing-row';
                         tr.innerHTML = await type11BuildInlineRowCellsHtml(orderedMeta, {}, true, source, fieldId);
