@@ -93,6 +93,7 @@
 
         /* Intestazione colonne argomento + timeline */
         .board-head { display: flex; height: 52px; align-items: flex-end; }
+        /* Intestazione colonna: rinominabile con un clic (salvata in name_arg1..4) */
         .board-head .col-head {
             flex: 0 0 var(--col-w);
             width: var(--col-w);
@@ -101,7 +102,23 @@
             color: var(--text-muted);
             padding: 0 8px 6px;
             text-transform: uppercase;
+            cursor: text;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
         }
+        .board-head .col-head .col-head-text { outline: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .board-head .col-head .col-head-text[contenteditable="true"] {
+            background: white;
+            border: 1px solid var(--primary);
+            border-radius: 4px;
+            padding: 1px 4px;
+            text-transform: none;
+            white-space: normal;
+        }
+        .board-head .col-head .col-head-pen { opacity: 0; font-size: 0.7rem; transition: opacity 0.15s; }
+        .board-head .col-head:hover .col-head-pen { opacity: 0.6; }
         .timeline-head { position: relative; height: 52px; flex: 0 0 auto; }
         .timeline-head .month { position: absolute; top: 4px; font-size: 0.72rem; font-weight: 700; color: var(--text-muted); white-space: nowrap; border-left: 1px solid var(--border); padding-left: 4px; height: 16px; }
         .timeline-head .day { position: absolute; top: 26px; width: var(--day-w); text-align: center; font-size: 0.66rem; color: var(--text-muted); }
@@ -206,6 +223,8 @@
         .flyout-body textarea { resize: vertical; font-family: inherit; }
         .flyout-body .row2 { display: flex; gap: 10px; }
         .flyout-body .row2 > div { flex: 1; min-width: 0; }
+        .flyout-body .cfg-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .flyout-body .cfg-hint { font-size: 0.72rem; color: var(--text-muted); line-height: 1.3; }
         .flyout-body input[type=color] { width: 54px; height: 32px; padding: 2px; border: 1px solid #D1D5DB; border-radius: 6px; background: white; cursor: pointer; }
         .flyout-foot { padding: 1rem 1.2rem; border-top: 1px solid var(--border); display: flex; gap: 0.5rem; flex-wrap: wrap; }
         .dep-current { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
@@ -322,6 +341,13 @@
                 <label for="cfgNote">Note interne</label>
                 <textarea id="cfgNote" rows="3"></textarea>
             </div>
+            <div class="cfg-toggle-row">
+                <div>
+                    <label for="cfgMostraCliente" style="margin-bottom:2px;">Mostra al cliente</label>
+                    <div class="cfg-hint">Se disattivo l'attività non compare in «Mostra gantt»</div>
+                </div>
+                <label class="toggle-switch"><input type="checkbox" id="cfgMostraCliente"><span class="toggle-slider"></span></label>
+            </div>
             <div>
                 <label>Dipendenza</label>
                 <div class="dep-current">
@@ -335,6 +361,7 @@
             </div>
         </div>
         <div class="flyout-foot">
+            <button class="btn blue" id="cfgDuplicate" title="Duplica questo argomento con tutti quelli sottostanti"><i class="fas fa-copy"></i> Duplica argomento</button>
             <button class="btn danger" id="cfgDelete"><i class="fas fa-trash"></i> Cancella pulsante</button>
         </div>
     </div>
@@ -427,11 +454,16 @@
             'argomento3', 'ordinamento3', 'argomento4', 'ordinamento4',
             'data_inizio', 'data_fine', 'dipendenza', 'colore',
             'nr_mesi', 'nr_giorni', 'stato', 'avanzamento', 'rischio',
-            'owner', 'nominativo', 'note_interne'];
+            'owner', 'nominativo', 'note_interne', 'mostra_cliente',
+            'name_arg1', 'name_arg2', 'name_arg3', 'name_arg4'];
         // Colonne aggiuntive della tabella, modificabili dal flyout Configurazione.
         const GANTT_EXTRA_COLS = ['nr_mesi', 'nr_giorni', 'stato', 'avanzamento',
             'rischio', 'owner', 'nominativo', 'note_interne'];
         const DEFAULT_COLOR = '#3B82F6';
+        const DEFAULT_COL_LABELS = ['Argomento 1', 'Argomento 2', 'Argomento 3', 'Argomento 4'];
+        // Etichette delle 4 colonne: valgono per l'intero progetto e vengono scritte in
+        // name_arg1..4 su TUTTE le righe, così restano anche cancellando una riga.
+        let colLabels = DEFAULT_COL_LABELS.slice();
 
         let tree = [];                 // nodi di livello 1 (children annidati)
         let deletedIds = new Set();    // id reali eliminati, in attesa di salvataggio
@@ -473,11 +505,30 @@
             return ids;
         }
 
+        // Etichette delle colonne: primo valore non vuoto trovato in name_arg1..4 fra le
+        // righe del progetto; in mancanza (progetto ancora vuoto) l'ultima rinomina fatta
+        // su questo campo, altrimenti l'etichetta predefinita.
+        function loadColLabels(rows) {
+            let stored = [];
+            try { stored = JSON.parse(localStorage.getItem('ganttColLabels:' + fieldId) || '[]'); } catch (e) { /* ignore */ }
+            colLabels = DEFAULT_COL_LABELS.map((def, i) => {
+                const fromDb = (rows || [])
+                    .map(r => r['name_arg' + (i + 1)])
+                    .find(v => v != null && String(v).trim() !== '');
+                return String(fromDb || stored[i] || def);
+            });
+        }
+
+        function saveColLabelsLocally() {
+            try { localStorage.setItem('ganttColLabels:' + fieldId, JSON.stringify(colLabels)); } catch (e) { /* ignore */ }
+        }
+
         // Costruisce l'albero dalle righe già ordinate (ordinamento1..4).
         // Il livello di una riga è l'argomentoN più profondo valorizzato; il padre
         // è l'ultimo nodo incontrato al livello precedente.
         function buildTree(rows) {
             tree = [];
+            loadColLabels(rows);
             const lastAtLevel = [null, null, null, null];
             for (const row of rows) {
                 let level = 0;
@@ -499,6 +550,8 @@
                     ord: []
                 };
                 GANTT_EXTRA_COLS.forEach(col => { node[col] = row[col] ?? null; });
+                // Colonna aggiunta dopo: le righe preesistenti possono avere NULL -> visibile.
+                node.mostra_cliente = !(row.mostra_cliente === false || row.mostra_cliente === 'f' || row.mostra_cliente === 'false');
                 const parent = level > 1 ? lastAtLevel[level - 2] : null;
                 if (parent) { node.parent = parent; parent.children.push(node); }
                 else tree.push(node);
@@ -531,6 +584,9 @@
             v.dipendenza = node.dipendenza || null;
             v.colore = level === 1 ? (node.colore || null) : null;
             GANTT_EXTRA_COLS.forEach(col => { v[col] = node[col] ?? null; });
+            v.mostra_cliente = node.mostra_cliente !== false;
+            // Le etichette delle colonne sono di progetto: replicate su ogni riga.
+            colLabels.forEach((label, i) => { v['name_arg' + (i + 1)] = label; });
             return v;
         }
 
@@ -606,6 +662,13 @@
                     n.saved = vals;
                 });
                 pending.deletes.forEach(id => deletedIds.delete(id));
+                // Allinea il DOM ai nuovi id: senza questo i pulsanti appena creati
+                // (aggiunti o duplicati) resterebbero legati all'id temporaneo e non
+                // sarebbero più selezionabili fino al ricaricamento della pagina.
+                Object.entries(idMap).forEach(([tempId, realId]) => {
+                    board.querySelectorAll(`[data-node-id="${CSS.escape(tempId)}"]`)
+                        .forEach(el => { el.dataset.nodeId = realId; });
+                });
                 showToast('Salvato');
             } catch (e) {
                 showToast('Errore nel salvataggio: ' + e.message);
@@ -685,7 +748,9 @@
             const ganttW = range ? range.days * DAY_W : 0;
 
             let html = '<div class="board-head">';
-            for (let i = 1; i <= modelCols; i++) html += `<div class="col-head">Argomento ${i}</div>`;
+            for (let i = 1; i <= modelCols; i++) {
+                html += `<div class="col-head" data-col-index="${i}" title="Clicca per rinominare la colonna"><span class="col-head-text">${escapeHtml(colLabels[i - 1])}</span><i class="fas fa-pen col-head-pen"></i></div>`;
+            }
             if (range) {
                 html += `<div class="timeline-head" style="width:${ganttW}px;">`;
                 // etichette mese + numeri giorno
@@ -707,6 +772,8 @@
             for (const node of nodes) {
                 const level = nodeLevel(node);
                 if (level > modelCols) continue; // oltre il modello scelto: nascosto
+                // "Mostra gantt": le attività con "Mostra al cliente" disattivo restano fuori
+                if (ganttVisible && node.mostra_cliente === false) continue;
                 const color = displayColor(node);
                 html += `<div class="wbs-row" data-node-id="${escapeHtml(node.id)}">`;
                 for (let i = 1; i <= modelCols; i++) {
@@ -765,14 +832,19 @@
             let defs = `<defs><marker id="depArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
                 <path d="M0,0 L8,4 L0,8 z" fill="#8B5CF6"></path></marker></defs>`;
             let paths = '';
+            const GAP = 16; // distanza dei tratti verticali dal bordo dei pulsanti/barre
             forEachNode(n => {
                 if (!n.dipendenza) return;
-                const from = anchorOf(n.dipendenza, 'right'); // dal pulsante da cui si dipende...
-                const to = anchorOf(n.id, 'left');            // ...verso quello con la dipendenza
+                // La linea PARTE dal lato sinistro del pulsante da cui si dipende e
+                // ARRIVA sul lato sinistro di quello che ha la dipendenza (punta rivolta
+                // a destra): il tratto verticale scorre a sinistra di entrambi, così la
+                // freccia non attraversa mai i due elementi collegati.
+                const from = anchorOf(n.dipendenza, 'left');
+                const to = anchorOf(n.id, 'left');
                 if (!from || !to) return;
-                const midX = from.x + Math.max(14, (to.x - from.x) / 2);
-                // Solo segmenti orizzontali/verticali (mai obliqui)
-                const d = `M ${from.x} ${from.y} H ${midX} V ${to.y} H ${to.x - 2}`;
+                const elbowX = Math.max(2, Math.min(from.x, to.x) - GAP);
+                // Solo tratti orizzontali/verticali (mai obliqui)
+                const d = `M ${from.x} ${from.y} H ${elbowX} V ${to.y} H ${to.x - 2}`;
                 paths += `<path d="${d}" fill="none" stroke="#8B5CF6" stroke-width="2" marker-end="url(#depArrow)"></path>`;
             });
             svg.innerHTML = defs + paths;
@@ -782,11 +854,43 @@
         let draggedNodeId = null;
 
         function wireBoardEvents() {
+            // Rinomina delle colonne: il testo dell'intestazione diventa modificabile e
+            // finisce in name_arg1..4 di tutte le righe del progetto.
+            board.querySelectorAll('.col-head').forEach(head => {
+                head.addEventListener('click', () => {
+                    const idx = Number(head.dataset.colIndex) - 1;
+                    const span = head.querySelector('.col-head-text');
+                    if (!span || span.getAttribute('contenteditable') === 'true') return;
+                    span.setAttribute('contenteditable', 'true');
+                    span.textContent = colLabels[idx];
+                    span.focus();
+                    document.getSelection()?.selectAllChildren(span);
+                    const commit = () => {
+                        span.removeAttribute('contenteditable');
+                        const text = span.textContent.trim() || DEFAULT_COL_LABELS[idx];
+                        if (text !== colLabels[idx]) {
+                            colLabels[idx] = text;
+                            saveColLabelsLocally();
+                            scheduleSave();
+                        }
+                        render();
+                    };
+                    span.addEventListener('blur', commit, { once: true });
+                    span.addEventListener('keydown', (ev) => {
+                        if (ev.key === 'Enter') { ev.preventDefault(); span.blur(); }
+                        if (ev.key === 'Escape') { span.textContent = colLabels[idx]; span.blur(); }
+                    });
+                });
+            });
+
             board.querySelectorAll('.node-btn').forEach(btn => {
-                const nodeId = btn.dataset.nodeId;
+                // L'id viene letto al momento dell'evento (e non memorizzato qui): dopo il
+                // salvataggio gli id temporanei delle righe nuove diventano uuid reali, e
+                // un id "congelato" renderebbe non più selezionabili i pulsanti appena creati.
+                const nodeId = () => btn.dataset.nodeId;
 
                 btn.addEventListener('click', () => {
-                    const node = findNode(nodeId);
+                    const node = findNode(nodeId());
                     if (!node) return;
                     if (depPickMode) { pickDependency(node); return; }
                     openFlyout(node);
@@ -795,7 +899,7 @@
                 // Doppio click: modifica del testo direttamente dentro il pulsante
                 btn.addEventListener('dblclick', (e) => {
                     e.stopPropagation();
-                    const node = findNode(nodeId);
+                    const node = findNode(nodeId());
                     if (!node || depPickMode) return;
                     const span = btn.querySelector('.node-text');
                     span.setAttribute('contenteditable', 'true');
@@ -823,7 +927,7 @@
                 // argomento1 si spostano anche 2/3/4, e così via ai livelli inferiori).
                 btn.addEventListener('dragstart', (e) => {
                     if (depPickMode) { e.preventDefault(); return; }
-                    draggedNodeId = nodeId;
+                    draggedNodeId = nodeId();
                     btn.classList.add('dragging');
                     e.dataTransfer.effectAllowed = 'move';
                 });
@@ -833,9 +937,9 @@
                     btn.classList.remove('dragging');
                 });
                 btn.addEventListener('dragover', (e) => {
-                    if (!draggedNodeId || draggedNodeId === nodeId) return;
+                    if (!draggedNodeId || draggedNodeId === nodeId()) return;
                     const dragged = findNode(draggedNodeId);
-                    const target = findNode(nodeId);
+                    const target = findNode(nodeId());
                     if (!dragged || !target) return;
                     if (nodeLevel(dragged) !== nodeLevel(target)) return;     // solo tra pari livello
                     if (subtreeIds(dragged).includes(target.id)) return;       // non dentro se stesso
@@ -846,8 +950,8 @@
                 btn.addEventListener('drop', (e) => {
                     e.preventDefault();
                     btn.classList.remove('drop-target');
-                    if (!draggedNodeId || draggedNodeId === nodeId) return;
-                    moveNodeBefore(draggedNodeId, nodeId);
+                    if (!draggedNodeId || draggedNodeId === nodeId()) return;
+                    moveNodeBefore(draggedNodeId, nodeId());
                 });
             });
 
@@ -907,6 +1011,7 @@
             EXTRA_FIELD_INPUTS.forEach(([inputId, col]) => {
                 document.getElementById(inputId).value = node[col] == null ? '' : node[col];
             });
+            document.getElementById('cfgMostraCliente').checked = node.mostra_cliente !== false;
             const dep = node.dipendenza ? findNode(node.dipendenza) : null;
             document.getElementById('cfgDepName').textContent = dep ? (dep.name || '(senza nome)') : 'Nessuna';
             document.getElementById('cfgAddChild').style.display = level < modelCols ? '' : 'none';
@@ -959,6 +1064,15 @@
             });
         });
 
+        // "Mostra al cliente": se disattivo l'attività sparisce dalla vista "Mostra gantt"
+        // (resta invece sempre visibile e modificabile nella vista di lavoro).
+        document.getElementById('cfgMostraCliente').addEventListener('change', () => {
+            if (!selectedNode) return;
+            selectedNode.mostra_cliente = document.getElementById('cfgMostraCliente').checked;
+            scheduleSave();
+            if (ganttVisible) { render(); closeFlyout(); } // la riga esce dalla vista gantt
+        });
+
         // Scelta della dipendenza: si clicca sul pulsante da cui questa attività dipende.
         document.getElementById('cfgDepPick').addEventListener('click', () => {
             if (!selectedNode) return;
@@ -995,6 +1109,47 @@
             openFlyout(child);
         });
 
+        // "Duplica argomento": copia il pulsante scelto con TUTTO il ramo sottostante
+        // (da argomento1 si duplicano 1+2+3+4, da argomento2 il 2+3+4, e così via fino
+        // ad argomento4 che non ha figli). La copia è inserita subito sotto l'originale.
+        function duplicateNode(src) {
+            const idMap = new Map();
+            const clone = (node, parent) => {
+                const copy = makeNode(node.name, parent);
+                copy.colore = node.colore;
+                copy.data_inizio = node.data_inizio;
+                copy.data_fine = node.data_fine;
+                copy.dipendenza = node.dipendenza || null;
+                copy.mostra_cliente = node.mostra_cliente !== false;
+                GANTT_EXTRA_COLS.forEach(c => { copy[c] = node[c] ?? null; });
+                idMap.set(node.id, copy.id);
+                copy.children = node.children.map(child => clone(child, copy));
+                return copy;
+            };
+            const copyRoot = clone(src, src.parent);
+            // Le dipendenze interne al ramo copiato puntano alla copia corrispondente;
+            // quelle verso attività esterne restano invariate.
+            const remapDeps = (node) => {
+                if (node.dipendenza && idMap.has(node.dipendenza)) node.dipendenza = idMap.get(node.dipendenza);
+                node.children.forEach(remapDeps);
+            };
+            remapDeps(copyRoot);
+            const list = src.parent ? src.parent.children : tree;
+            list.splice(list.indexOf(src) + 1, 0, copyRoot);
+            renumber();
+            scheduleSave();
+            render();
+            return copyRoot;
+        }
+
+        document.getElementById('cfgDuplicate').addEventListener('click', () => {
+            if (!selectedNode) return;
+            const count = subtreeIds(selectedNode).length;
+            const copy = duplicateNode(selectedNode);
+            showToast(count > 1 ? `Duplicate ${count} attività` : 'Attività duplicata');
+            openFlyout(copy); // il flyout passa alla copia, pronta per essere rinominata
+        });
+
         document.getElementById('cfgDelete').addEventListener('click', () => {
             if (!selectedNode) return;
             const count = subtreeIds(selectedNode).length;
@@ -1014,6 +1169,7 @@
             };
             GANTT_EXTRA_COLS.forEach(col => { node[col] = null; });
             node.avanzamento = 0;
+            node.mostra_cliente = true;
             return node;
         }
 

@@ -730,6 +730,31 @@ app.put('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Divide il contenuto di "VariabDB" (frammento SQL configurato da un utente
+// privilegiato in fase di definizione del campo, non input dell'utente finale) nella
+// parte di condizione e nell'eventuale ORDER BY finale. Sono ammesse tutte e tre le
+// forme: solo condizioni ("AND stato = 'X'"), condizioni + ordinamento, solo
+// ordinamento ("ORDER BY data_inizio"). L'ORDER BY viene cercato solo al livello
+// esterno, così un eventuale ORDER BY dentro una sottoquery non spezza il frammento.
+function splitVariabDbClause(raw) {
+  const text = String(raw || '').trim().replace(/;+\s*$/, '');
+  if (!text) return { condition: '', orderBy: '' };
+  let depth = 0, quote = null, cut = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) { if (ch === quote) quote = null; continue; }
+    if (ch === "'" || ch === '"') { quote = ch; continue; }
+    if (ch === '(') { depth++; continue; }
+    if (ch === ')') { depth--; continue; }
+    if (depth === 0 && (i === 0 || /\s/.test(text[i - 1])) && /^order\s+by\b/i.test(text.slice(i))) {
+      cut = i;
+      break;
+    }
+  }
+  if (cut < 0) return { condition: text, orderBy: '' };
+  return { condition: text.slice(0, cut).trim(), orderBy: text.slice(cut).trim() };
+}
+
 // Widget griglia (tipo_valore = 11 e 13: il 13 è identico in visualizzazione,
 // cambia solo la modalità di modifica, che avviene nella pagina gantt.html).
 // La configurazione della tabella e delle colonne viene letta dalla riga EAV del
@@ -743,7 +768,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
 
     const clientColumn = source === 'projects' ? 'client_id' : 'NULL::uuid AS client_id';
     const configResult = await db.query(
-      `SELECT id, argument, tabella, colonna, tenant_id, user_id, ${clientColumn}
+      `SELECT id, argument, tabella, colonna, "VariabDB" AS variabdb, tenant_id, user_id, ${clientColumn}
        FROM "${source}"
        WHERE id = $1 AND tenant_id = $2 AND tipo_valore::text IN ('11', '13')
        LIMIT 1`,
@@ -912,7 +937,22 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
 
     const selectList = selectExpressions.join(', ');
     const joinClause = joins.length ? '\n       ' + joins.join('\n       ') : '';
-    const orderBy = tableColumns.has('id') ? ' ORDER BY src.id' : '';
+
+    // VariabDB del campo: condizioni aggiuntive e/o ORDER BY personalizzato. Le
+    // condizioni si sommano SEMPRE ai filtri di visibilità (tenant/utente/cliente/
+    // progetto), che restano obbligatori; l'ORDER BY, se presente, sostituisce quello
+    // predefinito su id. Nel frammento le colonne possono essere scritte così come
+    // sono o qualificate con "src." (alias della tabella della griglia).
+    const variab = splitVariabDbClause(config.variabdb);
+    let extraCondition = '';
+    if (variab.condition) {
+      extraCondition = /^\s*(and|or)\b/i.test(variab.condition)
+        ? ` ${variab.condition}`
+        : ` AND ${variab.condition}`;
+    }
+    const orderBy = variab.orderBy
+      ? ` ${variab.orderBy}`
+      : (tableColumns.has('id') ? ' ORDER BY src.id' : '');
 
     // Tabelle con colonna project_id (es. proj_anno_fatt, proj_componenti) vanno SEMPRE
     // filtrate anche per progetto, non solo tenant/utente/cliente. Nel contesto "projects"
@@ -928,7 +968,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     const result = await db.query(
       `SELECT ${selectList}
        FROM "${tableName}" src${joinClause}
-       WHERE src.tenant_id = $1 AND src.user_id = $2 AND src.client_id = $3${projectFilter}${orderBy}
+       WHERE src.tenant_id = $1 AND src.user_id = $2 AND src.client_id = $3${projectFilter}${extraCondition}${orderBy}
        LIMIT 100`,
       queryParams
     );
@@ -1237,7 +1277,8 @@ const GANTT_COLUMNS = ['argomento1', 'ordinamento1', 'argomento2', 'ordinamento2
   'argomento3', 'ordinamento3', 'argomento4', 'ordinamento4',
   'data_inizio', 'data_fine', 'dipendenza', 'colore',
   'nr_mesi', 'nr_giorni', 'stato', 'avanzamento', 'rischio',
-  'owner', 'nominativo', 'note_interne'];
+  'owner', 'nominativo', 'note_interne', 'mostra_cliente',
+  'name_arg1', 'name_arg2', 'name_arg3', 'name_arg4'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function resolveGanttContext(fieldId, req, needWrite) {
