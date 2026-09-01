@@ -730,9 +730,11 @@ app.put('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
   }
 });
 
-// Widget griglia (tipo_valore = 11). La configurazione della tabella e delle
-// colonne viene letta dalla riga EAV del contesto corrente; tenant e utente non
-// vengono accettati dal browser ma ricavati dall'autenticazione.
+// Widget griglia (tipo_valore = 11 e 13: il 13 è identico in visualizzazione,
+// cambia solo la modalità di modifica, che avviene nella pagina gantt.html).
+// La configurazione della tabella e delle colonne viene letta dalla riga EAV del
+// contesto corrente; tenant e utente non vengono accettati dal browser ma
+// ricavati dall'autenticazione.
 app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, async (req, res) => {
   try {
     const source = req.params.source;
@@ -743,7 +745,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     const configResult = await db.query(
       `SELECT id, argument, tabella, colonna, tenant_id, user_id, ${clientColumn}
        FROM "${source}"
-       WHERE id = $1 AND tenant_id = $2 AND tipo_valore::text = '11'
+       WHERE id = $1 AND tenant_id = $2 AND tipo_valore::text IN ('11', '13')
        LIMIT 1`,
       [fieldId, req.user.tenant_id]
     );
@@ -939,18 +941,19 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
   }
 });
 
-// Risolve la configurazione di una griglia (tipo_valore = 11) e verifica che l'utente
-// corrente possa operare su di essa. Restituisce { config, tableName, tableColumns,
-// generatedColumns, effectiveUserId, clientId } oppure lancia un errore con statusCode.
+// Risolve la configurazione di una griglia (tipo_valore = 11 o 13) e verifica che
+// l'utente corrente possa operare su di essa. Restituisce { config, tableName,
+// tableColumns, generatedColumns, effectiveUserId, clientId } oppure lancia un
+// errore con statusCode.
 async function resolveGridWidgetContext(source, fieldId, req, needWrite) {
   if (!fieldId) {
     throw Object.assign(new Error('Parametro fieldId richiesto'), { statusCode: 400 });
   }
   const clientColumn = source === 'projects' ? 'client_id' : 'NULL::uuid AS client_id';
   const configResult = await db.query(
-    `SELECT id, argument, tabella, colonna, tenant_id, user_id, ${clientColumn}
+    `SELECT id, argument, tabella, colonna, tipo_valore, tenant_id, user_id, ${clientColumn}
      FROM "${source}"
-     WHERE id = $1 AND tenant_id = $2 AND tipo_valore::text = '11'
+     WHERE id = $1 AND tenant_id = $2 AND tipo_valore::text IN ('11', '13')
      LIMIT 1`,
     [fieldId, req.user.tenant_id]
   );
@@ -1218,6 +1221,234 @@ app.delete('/api/:source(settings|clients|projects)/grid-widget/row', requireAut
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
     res.json({ deleted: result.rowCount });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// ============================================================================
+// GANTT (tipo_valore = 13): la pagina gantt.html si appoggia SEMPRE alla tabella
+// proj_activity. Il contesto (tenant/utente/cliente/progetto) e l'autorizzazione
+// derivano dal campo tipo 13 (fieldId) esattamente come per la griglia tipo 11;
+// la tabella però è fissa e non viene mai letta dal browser.
+// ============================================================================
+const GANTT_TABLE = 'proj_activity';
+const GANTT_COLUMNS = ['argomento1', 'ordinamento1', 'argomento2', 'ordinamento2',
+  'argomento3', 'ordinamento3', 'argomento4', 'ordinamento4',
+  'data_inizio', 'data_fine', 'dipendenza', 'colore',
+  'nr_mesi', 'nr_giorni', 'stato', 'avanzamento', 'rischio',
+  'owner', 'nominativo', 'note_interne'];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function resolveGanttContext(fieldId, req, needWrite) {
+  const ctx = await resolveGridWidgetContext('projects', fieldId, req, needWrite);
+  if (String(ctx.config.tipo_valore) !== '13') {
+    throw Object.assign(new Error('Il campo non è di tipo 13 (Gantt)'), { statusCode: 400 });
+  }
+  if (!ctx.clientId) {
+    throw Object.assign(new Error('Contesto client_id non disponibile'), { statusCode: 400 });
+  }
+  return {
+    tenantId: req.user.tenant_id,
+    userId: ctx.effectiveUserId,
+    clientId: ctx.clientId,
+    projectId: ctx.config.argument
+  };
+}
+
+// Filtra i valori ricevuti dal browser sulle sole colonne del Gantt ('' -> NULL).
+function ganttCleanValues(values) {
+  const data = {};
+  for (const [k, v] of Object.entries(values || {})) {
+    if (GANTT_COLUMNS.includes(k)) data[k] = (v === '' || v === undefined) ? null : v;
+  }
+  return data;
+}
+
+// Lettura delle attività del progetto corrente, in ordine gerarchico
+// (ordinamento1..4: i NULLS FIRST fanno comparire il padre prima dei figli).
+app.get('/api/projects/gantt-activity', requireAuth, async (req, res) => {
+  try {
+    const fieldId = String(req.query.fieldId || '').trim();
+    const ctx = await resolveGanttContext(fieldId, req, false);
+    const result = await db.query(
+      `SELECT id, ${GANTT_COLUMNS.map(c => `"${c}"`).join(', ')}
+       FROM ${GANTT_TABLE}
+       WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3 AND project_id = $4
+       ORDER BY ordinamento1 NULLS LAST, ordinamento2 NULLS FIRST,
+                ordinamento3 NULLS FIRST, ordinamento4 NULLS FIRST, created_at`,
+      [ctx.tenantId, ctx.userId, ctx.clientId, ctx.projectId]
+    );
+    res.json({ rows: result.rows, context: { clientId: ctx.clientId, projectId: ctx.projectId } });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Salvataggio (usato sia dal salvataggio automatico sia dal pulsante Salva):
+// un'unica transazione con eliminazioni, inserimenti e modifiche. Gli inserimenti
+// possono usare id temporanei ("tmp-..."); le dipendenze che puntano a un id
+// temporaneo vengono risolte qui e la mappa tempId -> id reale torna al browser.
+app.post('/api/projects/gantt-activity/batch', requireAuth, async (req, res) => {
+  try {
+    const fieldId = String((req.body && req.body.fieldId) || '').trim();
+    const inserts = Array.isArray(req.body?.inserts) ? req.body.inserts : [];
+    const updates = Array.isArray(req.body?.updates) ? req.body.updates : [];
+    const deletes = Array.isArray(req.body?.deletes) ? req.body.deletes : [];
+    const ctx = await resolveGanttContext(fieldId, req, true);
+
+    for (const id of deletes) {
+      if (!UUID_RE.test(String(id))) return res.status(400).json({ error: 'Id da eliminare non valido' });
+    }
+
+    const idMap = {};
+    // Dipendenza verso una riga nuova: se l'id temporaneo non è ancora stato
+    // inserito, la dipendenza viene applicata in un secondo passaggio.
+    const pendingDeps = []; // { rowId, depTempId }
+    const resolveDep = (value, ownerTempIdOrId) => {
+      const v = String(value || '').trim();
+      if (!v) return null;
+      if (UUID_RE.test(v)) return v;
+      if (idMap[v]) return idMap[v];
+      pendingDeps.push({ owner: ownerTempIdOrId, depTempId: v });
+      return null;
+    };
+
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+
+      if (deletes.length) {
+        await client.query(
+          `DELETE FROM ${GANTT_TABLE}
+           WHERE id = ANY($1::uuid[]) AND tenant_id = $2 AND user_id = $3
+             AND client_id = $4 AND project_id = $5`,
+          [deletes, ctx.tenantId, ctx.userId, ctx.clientId, ctx.projectId]
+        );
+      }
+
+      for (const ins of inserts) {
+        const tempId = String(ins?.tempId || '').trim();
+        const data = ganttCleanValues(ins?.values);
+        if (Object.prototype.hasOwnProperty.call(data, 'dipendenza')) {
+          data.dipendenza = resolveDep(data.dipendenza, tempId);
+        }
+        data.tenant_id = ctx.tenantId;
+        data.user_id = ctx.userId;
+        data.client_id = ctx.clientId;
+        data.project_id = ctx.projectId;
+        const columns = Object.keys(data);
+        const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+        const quoted = columns.map(c => `"${assertValidIdentifier(c)}"`).join(', ');
+        const result = await client.query(
+          `INSERT INTO ${GANTT_TABLE} (${quoted}) VALUES (${placeholders}) RETURNING id`,
+          columns.map(c => data[c])
+        );
+        if (tempId) idMap[tempId] = result.rows[0].id;
+      }
+
+      for (const upd of updates) {
+        const rawId = String(upd?.id || '').trim();
+        const rowId = UUID_RE.test(rawId) ? rawId : idMap[rawId];
+        if (!rowId) {
+          throw Object.assign(new Error('Id da aggiornare non valido'), { statusCode: 400 });
+        }
+        const data = ganttCleanValues(upd?.values);
+        if (Object.prototype.hasOwnProperty.call(data, 'dipendenza')) {
+          data.dipendenza = resolveDep(data.dipendenza, rowId);
+        }
+        const columns = Object.keys(data);
+        if (columns.length === 0) continue;
+        const setClause = columns.map((c, i) => `"${assertValidIdentifier(c)}" = $${i + 1}`).join(', ');
+        const params = columns.map(c => data[c]);
+        params.push(rowId, ctx.tenantId, ctx.userId, ctx.clientId, ctx.projectId);
+        await client.query(
+          `UPDATE ${GANTT_TABLE} SET ${setClause}, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $${columns.length + 1} AND tenant_id = $${columns.length + 2}
+             AND user_id = $${columns.length + 3} AND client_id = $${columns.length + 4}
+             AND project_id = $${columns.length + 5}`,
+          params
+        );
+      }
+
+      // Secondo passaggio: dipendenze che puntavano a righe inserite dopo.
+      for (const dep of pendingDeps) {
+        const rowId = UUID_RE.test(String(dep.owner)) ? dep.owner : idMap[dep.owner];
+        const depId = idMap[dep.depTempId];
+        if (!rowId || !depId) continue;
+        await client.query(
+          `UPDATE ${GANTT_TABLE} SET dipendenza = $1, updated_at = CURRENT_TIMESTAMP
+           WHERE id = $2 AND tenant_id = $3 AND user_id = $4 AND client_id = $5 AND project_id = $6`,
+          [depId, rowId, ctx.tenantId, ctx.userId, ctx.clientId, ctx.projectId]
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+    res.json({ ok: true, idMap });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Elenco cliente/progetto da cui è possibile copiare (progetti dello stesso
+// tenant+utente che hanno già attività in proj_activity, escluso quello corrente).
+app.get('/api/projects/gantt-activity/copy-sources', requireAuth, async (req, res) => {
+  try {
+    const fieldId = String(req.query.fieldId || '').trim();
+    const ctx = await resolveGanttContext(fieldId, req, false);
+    const result = await db.query(
+      `SELECT DISTINCT pa.client_id AS "clientId", pa.project_id AS "projectId",
+              c.valore2 AS "clientName", p.valore2 AS "projectName"
+       FROM ${GANTT_TABLE} pa
+       LEFT JOIN clients c ON c.id = pa.client_id
+       LEFT JOIN projects p ON p.id = pa.project_id
+       WHERE pa.tenant_id = $1 AND pa.user_id = $2 AND pa.project_id <> $3
+       ORDER BY "clientName" NULLS LAST, "projectName" NULLS LAST`,
+      [ctx.tenantId, ctx.userId, ctx.projectId]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// "Copia progetto da": copia nel progetto corrente (che deve essere vuoto) SOLO
+// argomento1..4 e ordinamento1..4 del progetto sorgente (stesso tenant+utente).
+app.post('/api/projects/gantt-activity/copy', requireAuth, async (req, res) => {
+  try {
+    const fieldId = String((req.body && req.body.fieldId) || '').trim();
+    const sourceProjectId = String((req.body && req.body.sourceProjectId) || '').trim();
+    if (!UUID_RE.test(sourceProjectId)) {
+      return res.status(400).json({ error: 'Progetto sorgente non valido' });
+    }
+    const ctx = await resolveGanttContext(fieldId, req, true);
+    const existing = await db.query(
+      `SELECT 1 FROM ${GANTT_TABLE}
+       WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3 AND project_id = $4 LIMIT 1`,
+      [ctx.tenantId, ctx.userId, ctx.clientId, ctx.projectId]
+    );
+    if (existing.rows.length) {
+      return res.status(409).json({ error: 'Il progetto contiene già delle attività' });
+    }
+    const result = await db.query(
+      `INSERT INTO ${GANTT_TABLE} (tenant_id, user_id, client_id, project_id,
+         argomento1, ordinamento1, argomento2, ordinamento2,
+         argomento3, ordinamento3, argomento4, ordinamento4)
+       SELECT $1, $2, $3, $4,
+         argomento1, ordinamento1, argomento2, ordinamento2,
+         argomento3, ordinamento3, argomento4, ordinamento4
+       FROM ${GANTT_TABLE}
+       WHERE tenant_id = $1 AND user_id = $2 AND project_id = $5
+       RETURNING id`,
+      [ctx.tenantId, ctx.userId, ctx.clientId, ctx.projectId, sourceProjectId]
+    );
+    res.json({ copied: result.rows.length });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }

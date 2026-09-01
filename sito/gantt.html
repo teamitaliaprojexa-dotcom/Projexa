@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - Gantt</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Stessa palette della dashboard */
+        :root {
+            --primary: #3B82F6;
+            --primary-dark: #1E40AF;
+            --secondary: #10B981;
+            --danger: #EF4444;
+            --warning: #F59E0B;
+            --dark: #1F2937;
+            --light: #F9FAFB;
+            --border: #E5E7EB;
+            --text-muted: #6B7280;
+            --radius: 8px;
+            --dep-color: #8B5CF6; /* viola delle frecce di dipendenza */
+            --col-w: 200px;       /* larghezza di ogni colonna argomento */
+            --row-h: 44px;        /* altezza di ogni riga */
+            --day-w: 26px;        /* larghezza di un giorno nel gantt */
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            color: var(--dark);
+            background: var(--light);
+        }
+
+        /* ===== Barra superiore ===== */
+        .topbar {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            padding: 0.7rem 1.2rem;
+            background: white;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 30;
+        }
+        .topbar .title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            margin-right: 0.5rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 320px;
+        }
+        .topbar .spacer { flex: 1; }
+        button, select, input {
+            font: inherit;
+        }
+        .btn {
+            border: 1px solid #D1D5DB;
+            border-radius: 6px;
+            padding: 0.45rem 0.85rem;
+            background: white;
+            cursor: pointer;
+            font-size: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn:hover { background: #F3F4F6; }
+        .btn.primary { background: var(--secondary); color: white; border-color: var(--secondary); }
+        .btn.primary:hover { background: #0ea371; }
+        .btn.blue { background: var(--primary); color: white; border-color: var(--primary); }
+        .btn.blue:hover { background: #2563EB; }
+        .btn.danger { color: #B91C1C; border-color: #FCA5A5; }
+        .btn.active { background: #DBEAFE; border-color: var(--primary); color: var(--primary-dark); }
+        .btn:disabled { opacity: 0.45; cursor: default; }
+        select.model-sel { padding: 0.4rem 0.5rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.85rem; }
+
+        /* Interruttore a levetta (identico alla dashboard) */
+        .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; flex: 0 0 auto; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; margin: 0; }
+        .toggle-slider { position: absolute; inset: 0; cursor: pointer; background: #ccc; border-radius: 24px; transition: background 0.25s; }
+        .toggle-slider::before { content: ""; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: transform 0.25s; }
+        .toggle-switch input:checked + .toggle-slider { background: #10B981; }
+        .toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+        .autosave-wrap { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+
+        /* ===== Area principale ===== */
+        .main-scroll { overflow: auto; height: calc(100vh - 60px); }
+        .board { position: relative; min-width: max-content; padding: 0.8rem 1.2rem 3rem; }
+
+        /* Intestazione colonne argomento + timeline */
+        .board-head { display: flex; height: 52px; align-items: flex-end; }
+        .board-head .col-head {
+            flex: 0 0 var(--col-w);
+            width: var(--col-w);
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            padding: 0 8px 6px;
+            text-transform: uppercase;
+        }
+        .timeline-head { position: relative; height: 52px; flex: 0 0 auto; }
+        .timeline-head .month { position: absolute; top: 4px; font-size: 0.72rem; font-weight: 700; color: var(--text-muted); white-space: nowrap; border-left: 1px solid var(--border); padding-left: 4px; height: 16px; }
+        .timeline-head .day { position: absolute; top: 26px; width: var(--day-w); text-align: center; font-size: 0.66rem; color: var(--text-muted); }
+
+        .wbs-row { display: flex; align-items: center; height: var(--row-h); position: relative; }
+        .wbs-row .cell { flex: 0 0 var(--col-w); width: var(--col-w); padding: 0 8px; }
+        .node-btn {
+            display: inline-flex;
+            align-items: center;
+            max-width: 100%;
+            min-width: 90px;
+            padding: 0.35rem 0.7rem;
+            border-radius: 8px;
+            border: 2px solid var(--primary);
+            background: transparent;
+            cursor: pointer;
+            font-size: 0.82rem;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            user-select: none;
+        }
+        .node-btn .node-text { overflow: hidden; text-overflow: ellipsis; outline: none; min-width: 30px; }
+        .node-btn.dragging { opacity: 0.4; }
+        .node-btn.drop-target { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.4); }
+        .node-btn.dep-pickable { box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.45); }
+        .node-btn.selected { box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.45); }
+
+        /* Area gantt (per riga) */
+        .gantt-cell { position: relative; height: 100%; flex: 0 0 auto; }
+        .gantt-grid-line { position: absolute; top: 0; bottom: 0; width: 1px; background: #EEF1F5; }
+        .gantt-bar {
+            position: absolute;
+            top: 10px;
+            height: calc(var(--row-h) - 20px);
+            border-radius: 6px;
+            font-size: 0.68rem;
+            color: white;
+            display: flex;
+            align-items: center;
+            padding: 0 6px;
+            overflow: hidden;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        /* Frecce di dipendenza (overlay SVG) */
+        #depSvg { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+
+        /* Banner della modalità "scegli dipendenza" */
+        .dep-banner {
+            display: none;
+            position: fixed;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--dep-color);
+            color: white;
+            font-size: 0.85rem;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            z-index: 60;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+        }
+
+        /* ===== Stato vuoto ===== */
+        .empty-state {
+            display: none;
+            margin: 3rem auto;
+            max-width: 460px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+        }
+        .empty-state p { color: var(--text-muted); font-size: 0.9rem; }
+
+        /* ===== Flyout Configurazione ===== */
+        .flyout {
+            position: fixed;
+            top: 60px; /* sotto la barra superiore: toggle e Salva restano cliccabili */
+            right: -380px;
+            width: 360px;
+            height: calc(100vh - 60px);
+            background: white;
+            border-left: 1px solid var(--border);
+            box-shadow: -8px 0 24px rgba(0,0,0,0.08);
+            transition: right 0.25s ease;
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+        }
+        .flyout.open { right: 0; }
+        .flyout-head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.2rem; border-bottom: 1px solid var(--border); font-weight: 700; }
+        .flyout-body { flex: 1; overflow: auto; padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: 0.9rem; }
+        .flyout-body label { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px; }
+        .flyout-body input[type=text], .flyout-body input[type=date], .flyout-body input[type=number], .flyout-body textarea {
+            width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.85rem;
+        }
+        .flyout-body textarea { resize: vertical; font-family: inherit; }
+        .flyout-body .row2 { display: flex; gap: 10px; }
+        .flyout-body .row2 > div { flex: 1; min-width: 0; }
+        .flyout-body input[type=color] { width: 54px; height: 32px; padding: 2px; border: 1px solid #D1D5DB; border-radius: 6px; background: white; cursor: pointer; }
+        .flyout-foot { padding: 1rem 1.2rem; border-top: 1px solid var(--border); display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .dep-current { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+        .dep-current .dep-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dark); }
+
+        /* ===== Modale "Copia progetto da" ===== */
+        .modal-mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 70; align-items: center; justify-content: center; }
+        .modal-mask.open { display: flex; }
+        .modal { background: white; border-radius: 12px; width: 420px; max-width: 92vw; padding: 1.4rem; }
+        .modal h3 { margin: 0 0 1rem; font-size: 1rem; }
+        .modal .field { margin-bottom: 0.9rem; }
+        .modal select { width: 100%; padding: 0.5rem; border: 1px solid #D1D5DB; border-radius: 6px; }
+        .modal .actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+
+        /* Notifica */
+        .toast {
+            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+            background: var(--dark); color: white; padding: 0.6rem 1.1rem; border-radius: 8px;
+            font-size: 0.85rem; z-index: 90; opacity: 0; transition: opacity 0.25s; pointer-events: none;
+        }
+        .toast.show { opacity: 1; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <button class="btn" id="backBtn" title="Torna al progetto di partenza"><i class="fas fa-arrow-left"></i> Torna al Progetto</button>
+        <span class="title" id="pageTitle">Gantt</span>
+        <select class="model-sel" id="modelSel" title="Modello (numero di colonne)">
+            <option value="2">2 colonne</option>
+            <option value="3">3 colonne</option>
+            <option value="4">4 colonne</option>
+        </select>
+        <button class="btn blue" id="addBtn"><i class="fas fa-plus"></i> Aggiungi</button>
+        <button class="btn" id="ganttToggleBtn"><i class="fas fa-chart-gantt"></i> Mostra gantt</button>
+        <button class="btn" id="copyBtn" style="display:none;"><i class="fas fa-copy"></i> Copia progetto da</button>
+        <span class="spacer"></span>
+        <span class="autosave-wrap">
+            <span>Salvataggio automatico</span>
+            <label class="toggle-switch"><input type="checkbox" id="autosaveToggle" checked><span class="toggle-slider"></span></label>
+        </span>
+        <button class="btn primary" id="saveBtn" style="display:none;" disabled><i class="fas fa-floppy-disk"></i> Salva</button>
+    </div>
+
+    <div class="main-scroll" id="mainScroll">
+        <div class="empty-state" id="emptyState">
+            <h3>Nessuna attività in questo progetto</h3>
+            <p>Puoi copiare la struttura (argomenti e ordinamento) da un altro progetto, oppure creare le attività da zero scegliendo il modello in alto e usando il pulsante <b>Aggiungi</b>.</p>
+            <button class="btn blue" id="copyBtnEmpty"><i class="fas fa-copy"></i> Copia progetto da</button>
+        </div>
+        <div class="board" id="board"></div>
+    </div>
+
+    <div class="dep-banner" id="depBanner"><i class="fas fa-arrow-pointer"></i> Clicca sul pulsante da cui dipende questa attività (Esc per annullare)</div>
+
+    <!-- Flyout Configurazione -->
+    <div class="flyout" id="flyout">
+        <div class="flyout-head">
+            <span>Configurazione</span>
+            <button class="btn" id="flyoutClose" title="Chiudi"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="flyout-body">
+            <div>
+                <label for="cfgName">Nome</label>
+                <input type="text" id="cfgName">
+            </div>
+            <div>
+                <label for="cfgColor">Colore di riempimento (solo Argomento 1)</label>
+                <input type="color" id="cfgColor" value="#3B82F6">
+                <span id="cfgColorHint" style="font-size:0.75rem; color:var(--text-muted); margin-left:8px;"></span>
+            </div>
+            <div>
+                <label for="cfgStart">Data inizio</label>
+                <input type="date" id="cfgStart">
+            </div>
+            <div>
+                <label for="cfgEnd">Data fine</label>
+                <input type="date" id="cfgEnd">
+            </div>
+            <div class="row2">
+                <div>
+                    <label for="cfgNrMesi">Nr. mesi</label>
+                    <input type="text" id="cfgNrMesi">
+                </div>
+                <div>
+                    <label for="cfgNrGiorni">Nr. giorni</label>
+                    <input type="text" id="cfgNrGiorni">
+                </div>
+            </div>
+            <div class="row2">
+                <div>
+                    <label for="cfgStato">Stato</label>
+                    <input type="text" id="cfgStato">
+                </div>
+                <div>
+                    <label for="cfgAvanzamento">Avanzamento %</label>
+                    <input type="number" id="cfgAvanzamento" min="0" max="100" step="1">
+                </div>
+            </div>
+            <div>
+                <label for="cfgRischio">Rischio</label>
+                <input type="text" id="cfgRischio">
+            </div>
+            <div class="row2">
+                <div>
+                    <label for="cfgOwner">Owner</label>
+                    <input type="text" id="cfgOwner">
+                </div>
+                <div>
+                    <label for="cfgNominativo">Nominativo</label>
+                    <input type="text" id="cfgNominativo">
+                </div>
+            </div>
+            <div>
+                <label for="cfgNote">Note interne</label>
+                <textarea id="cfgNote" rows="3"></textarea>
+            </div>
+            <div>
+                <label>Dipendenza</label>
+                <div class="dep-current">
+                    <span class="dep-name" id="cfgDepName">Nessuna</span>
+                    <button class="btn" id="cfgDepPick" title="Scegli cliccando su un pulsante"><i class="fas fa-crosshairs"></i> Scegli</button>
+                    <button class="btn" id="cfgDepClear" title="Rimuovi dipendenza"><i class="fas fa-xmark"></i></button>
+                </div>
+            </div>
+            <div>
+                <button class="btn" id="cfgAddChild"><i class="fas fa-plus"></i> Aggiungi sotto-attività</button>
+            </div>
+        </div>
+        <div class="flyout-foot">
+            <button class="btn danger" id="cfgDelete"><i class="fas fa-trash"></i> Cancella pulsante</button>
+        </div>
+    </div>
+
+    <!-- Modale "Copia progetto da" -->
+    <div class="modal-mask" id="copyModal">
+        <div class="modal">
+            <h3>Copia progetto da</h3>
+            <div class="field">
+                <label>Cliente</label>
+                <select id="copyClientSel"><option value="">-- Seleziona cliente --</option></select>
+            </div>
+            <div class="field">
+                <label>Progetto</label>
+                <select id="copyProjectSel" disabled><option value="">-- Seleziona progetto --</option></select>
+            </div>
+            <div class="actions">
+                <button class="btn" id="copyCancel">Annulla</button>
+                <button class="btn primary" id="copyConfirm" disabled>Salva</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        'use strict';
+
+        // ===== Contesto pagina =====
+        const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+            ? location.origin
+            : 'https://projexa-4mix.onrender.com') + '/api';
+        const urlParams = new URLSearchParams(location.search);
+        const fieldId = urlParams.get('fieldId') || '';
+        const pageLabel = urlParams.get('label') || 'Gantt';
+
+        function getAuthHeaders() {
+            const token = localStorage.getItem('authToken');
+            return token ? { 'Authorization': `Bearer ${token}` } : {};
+        }
+        if (!localStorage.getItem('authToken')) location.href = 'login.html';
+        if (!fieldId) document.addEventListener('DOMContentLoaded', () => showToast('Parametro fieldId mancante'));
+
+        document.getElementById('pageTitle').textContent = pageLabel;
+
+        // "Torna al Progetto": riapre nella dashboard il progetto da cui si è arrivati
+        // (elenco progetti del cliente + dettaglio), non la dashboard vuota.
+        document.getElementById('backBtn').addEventListener('click', () => {
+            const back = new URLSearchParams();
+            const projectId = urlParams.get('projectId') || '';
+            if (projectId) {
+                back.set('openProject', projectId);
+                back.set('clientId', urlParams.get('clientId') || '');
+                back.set('projectName', urlParams.get('projectName') || '');
+                back.set('clientName', urlParams.get('clientName') || '');
+            }
+            location.href = back.toString() ? `dashboard.html?${back.toString()}` : 'dashboard.html';
+        });
+
+        function escapeHtml(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        let toastTimer = null;
+        function showToast(msg) {
+            const el = document.getElementById('toast');
+            el.textContent = msg;
+            el.classList.add('show');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+        }
+
+        async function api(path, options = {}) {
+            const res = await fetch(`${API_URL}${path}`, {
+                ...options,
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders(), ...(options.headers || {}) }
+            });
+            if (res.status === 401) { location.href = 'login.html'; throw new Error('Non autenticato'); }
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+            return data;
+        }
+
+        // ===== Modello dati =====
+        // Ogni riga di proj_activity è un nodo: il livello è dato dall'argomentoN
+        // valorizzato; ordinamento1..N ne definiscono la posizione gerarchica.
+        const GANTT_VALUE_COLS = ['argomento1', 'ordinamento1', 'argomento2', 'ordinamento2',
+            'argomento3', 'ordinamento3', 'argomento4', 'ordinamento4',
+            'data_inizio', 'data_fine', 'dipendenza', 'colore',
+            'nr_mesi', 'nr_giorni', 'stato', 'avanzamento', 'rischio',
+            'owner', 'nominativo', 'note_interne'];
+        // Colonne aggiuntive della tabella, modificabili dal flyout Configurazione.
+        const GANTT_EXTRA_COLS = ['nr_mesi', 'nr_giorni', 'stato', 'avanzamento',
+            'rischio', 'owner', 'nominativo', 'note_interne'];
+        const DEFAULT_COLOR = '#3B82F6';
+
+        let tree = [];                 // nodi di livello 1 (children annidati)
+        let deletedIds = new Set();    // id reali eliminati, in attesa di salvataggio
+        let tempCounter = 0;
+        let modelCols = 2;             // 2, 3 o 4 colonne
+        let ganttVisible = false;
+        let selectedNode = null;       // nodo aperto nel flyout
+        let depPickMode = false;       // true mentre si sceglie la dipendenza col click
+
+        function newTempId() { return `tmp-${Date.now()}-${++tempCounter}`; }
+
+        function forEachNode(fn, nodes = tree, parent = null) {
+            for (const n of nodes) {
+                fn(n, parent);
+                forEachNode(fn, n.children, n);
+            }
+        }
+        function findNode(id, nodes = tree) {
+            for (const n of nodes) {
+                if (n.id === id) return n;
+                const found = findNode(id, n.children);
+                if (found) return found;
+            }
+            return null;
+        }
+        function flatNodes() {
+            const out = [];
+            forEachNode(n => out.push(n));
+            return out;
+        }
+        function nodeLevel(node) {
+            let level = 0, cur = node;
+            while (cur) { level++; cur = cur.parent; }
+            return level;
+        }
+        function subtreeIds(node) {
+            const ids = [node.id];
+            node.children.forEach(c => ids.push(...subtreeIds(c)));
+            return ids;
+        }
+
+        // Costruisce l'albero dalle righe già ordinate (ordinamento1..4).
+        // Il livello di una riga è l'argomentoN più profondo valorizzato; il padre
+        // è l'ultimo nodo incontrato al livello precedente.
+        function buildTree(rows) {
+            tree = [];
+            const lastAtLevel = [null, null, null, null];
+            for (const row of rows) {
+                let level = 0;
+                for (let i = 4; i >= 1; i--) {
+                    if (row['argomento' + i] != null && String(row['argomento' + i]).trim() !== '') { level = i; break; }
+                }
+                if (level === 0) level = 1;
+                const node = {
+                    id: row.id,
+                    name: String(row['argomento' + level] ?? ''),
+                    colore: row.colore || null,
+                    data_inizio: row.data_inizio || null,
+                    data_fine: row.data_fine || null,
+                    dipendenza: row.dipendenza || null,
+                    isNew: false,
+                    saved: null,
+                    children: [],
+                    parent: null,
+                    ord: []
+                };
+                GANTT_EXTRA_COLS.forEach(col => { node[col] = row[col] ?? null; });
+                const parent = level > 1 ? lastAtLevel[level - 2] : null;
+                if (parent) { node.parent = parent; parent.children.push(node); }
+                else tree.push(node);
+                lastAtLevel[level - 1] = node;
+                for (let i = level; i < 4; i++) lastAtLevel[i] = null;
+                node.saved = null; // impostato dopo la rinumerazione
+            }
+            renumber();
+            forEachNode(n => { n.saved = nodeToValues(n); });
+        }
+
+        // Riassegna ordinamento1..4 dall'ordine corrente dell'albero.
+        function renumber() {
+            const walk = (nodes, prefix) => nodes.forEach((n, i) => {
+                n.ord = [...prefix, i + 1];
+                walk(n.children, n.ord);
+            });
+            walk(tree, []);
+        }
+
+        // Valori riga (proj_activity) corrispondenti allo stato corrente del nodo.
+        function nodeToValues(node) {
+            const level = nodeLevel(node);
+            const v = {};
+            for (let i = 1; i <= 4; i++) { v['argomento' + i] = null; v['ordinamento' + i] = null; }
+            v['argomento' + level] = node.name || '';
+            node.ord.forEach((o, idx) => { v['ordinamento' + (idx + 1)] = o; });
+            v.data_inizio = node.data_inizio || null;
+            v.data_fine = node.data_fine || null;
+            v.dipendenza = node.dipendenza || null;
+            v.colore = level === 1 ? (node.colore || null) : null;
+            GANTT_EXTRA_COLS.forEach(col => { v[col] = node[col] ?? null; });
+            return v;
+        }
+
+        // ===== Salvataggio (automatico o manuale) =====
+        let saveTimer = null;
+        let flushing = false;
+        let flushAgain = false;
+
+        function computePending() {
+            const inserts = [], updates = [];
+            forEachNode(n => {
+                const vals = nodeToValues(n);
+                if (n.isNew) { inserts.push({ tempId: n.id, values: vals }); return; }
+                const changed = {};
+                for (const k of GANTT_VALUE_COLS) {
+                    const oldV = n.saved ? (n.saved[k] ?? null) : null;
+                    const newV = vals[k] ?? null;
+                    if (String(oldV ?? '') !== String(newV ?? '')) changed[k] = newV;
+                }
+                if (Object.keys(changed).length) updates.push({ id: n.id, values: changed });
+            });
+            return { inserts, updates, deletes: [...deletedIds] };
+        }
+
+        function hasPending() {
+            const p = computePending();
+            return p.inserts.length > 0 || p.updates.length > 0 || p.deletes.length > 0;
+        }
+
+        function updateSaveUi() {
+            const auto = document.getElementById('autosaveToggle').checked;
+            const saveBtn = document.getElementById('saveBtn');
+            saveBtn.style.display = auto ? 'none' : '';
+            saveBtn.disabled = !hasPending();
+        }
+
+        // Chiamata dopo OGNI modifica: con salvataggio automatico attivo scrive
+        // subito (con un piccolo debounce per raggruppare le modifiche rapide),
+        // altrimenti abilita il pulsante Salva.
+        function scheduleSave() {
+            updateSaveUi();
+            if (!document.getElementById('autosaveToggle').checked) return;
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(() => { flush(); }, 400);
+        }
+
+        async function flush() {
+            if (flushing) { flushAgain = true; return; }
+            const pending = computePending();
+            if (!pending.inserts.length && !pending.updates.length && !pending.deletes.length) { updateSaveUi(); return; }
+            flushing = true;
+            // Fotografia dei valori inviati: se l'utente modifica qualcosa mentre la
+            // richiesta è in volo, lo stato "salvato" diventa quello inviato (non quello
+            // corrente), così la modifica successiva resta da salvare.
+            const sentValues = new Map();
+            forEachNode(n => sentValues.set(n, nodeToValues(n)));
+            try {
+                const result = await api('/projects/gantt-activity/batch', {
+                    method: 'POST',
+                    body: JSON.stringify({ fieldId, ...pending })
+                });
+                const idMap = result.idMap || {};
+                forEachNode(n => {
+                    if (n.isNew && idMap[n.id]) { n.id = idMap[n.id]; n.isNew = false; }
+                });
+                forEachNode(n => {
+                    if (n.dipendenza && idMap[n.dipendenza]) n.dipendenza = idMap[n.dipendenza];
+                });
+                forEachNode(n => {
+                    if (!sentValues.has(n)) return;
+                    const vals = sentValues.get(n);
+                    if (vals.dipendenza && idMap[vals.dipendenza]) vals.dipendenza = idMap[vals.dipendenza];
+                    n.saved = vals;
+                });
+                pending.deletes.forEach(id => deletedIds.delete(id));
+                showToast('Salvato');
+            } catch (e) {
+                showToast('Errore nel salvataggio: ' + e.message);
+            } finally {
+                flushing = false;
+                updateSaveUi();
+                if (flushAgain) { flushAgain = false; flush(); }
+            }
+        }
+
+        document.getElementById('saveBtn').addEventListener('click', () => flush());
+        document.getElementById('autosaveToggle').addEventListener('change', () => {
+            // Riattivando il salvataggio automatico, le modifiche in sospeso vengono scritte.
+            if (document.getElementById('autosaveToggle').checked) flush();
+            updateSaveUi();
+        });
+        window.addEventListener('beforeunload', (e) => {
+            if (hasPending()) { e.preventDefault(); e.returnValue = ''; }
+        });
+
+        // ===== Colori =====
+        // Colore base del ramo = colore del nodo di livello 1; i livelli inferiori
+        // usano lo stesso colore schiarito progressivamente.
+        function rootColor(node) {
+            let cur = node;
+            while (cur.parent) cur = cur.parent;
+            return cur.colore || DEFAULT_COLOR;
+        }
+        function tint(hex, factor) {
+            const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+            if (!m) return hex;
+            const num = parseInt(m[1], 16);
+            const r = (num >> 16) & 255, g = (num >> 8) & 255, b = num & 255;
+            const mix = (c) => Math.round(c + (255 - c) * factor);
+            return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+        }
+        function displayColor(node) {
+            return tint(rootColor(node), (nodeLevel(node) - 1) * 0.28);
+        }
+
+        // ===== Date / timeline =====
+        const DAY_MS = 86400000;
+        function parseDate(s) {
+            if (!s) return null;
+            const d = new Date(String(s).slice(0, 10) + 'T00:00:00');
+            return isNaN(d.getTime()) ? null : d;
+        }
+        function timelineRange() {
+            let min = null, max = null;
+            forEachNode(n => {
+                const a = parseDate(n.data_inizio), b = parseDate(n.data_fine);
+                if (a && (!min || a < min)) min = a;
+                if (b && (!max || b > max)) max = b;
+                if (a && (!max || a > max)) max = a;
+                if (b && (!min || b < min)) min = b;
+            });
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            if (!min) min = today;
+            if (!max) max = new Date(today.getTime() + 30 * DAY_MS);
+            // margine di qualche giorno per respirare
+            min = new Date(min.getTime() - 2 * DAY_MS);
+            max = new Date(max.getTime() + 5 * DAY_MS);
+            return { min, max, days: Math.max(7, Math.round((max - min) / DAY_MS) + 1) };
+        }
+
+        // ===== Render =====
+        const board = document.getElementById('board');
+        const DAY_W = 26, COL_W = 200, ROW_H = 44;
+
+        function render() {
+            const nodes = flatNodes();
+            document.getElementById('emptyState').style.display = nodes.length ? 'none' : 'block';
+            document.getElementById('copyBtn').style.display = nodes.length ? 'none' : '';
+            document.getElementById('copyBtnEmpty').style.display = '';
+
+            const range = ganttVisible ? timelineRange() : null;
+            const ganttW = range ? range.days * DAY_W : 0;
+
+            let html = '<div class="board-head">';
+            for (let i = 1; i <= modelCols; i++) html += `<div class="col-head">Argomento ${i}</div>`;
+            if (range) {
+                html += `<div class="timeline-head" style="width:${ganttW}px;">`;
+                // etichette mese + numeri giorno
+                let cursor = new Date(range.min);
+                for (let d = 0; d < range.days; d++) {
+                    const x = d * DAY_W;
+                    if (cursor.getDate() === 1 || d === 0) {
+                        html += `<div class="month" style="left:${x}px;">${cursor.toLocaleDateString('it-IT', { month: 'short', year: '2-digit' })}</div>`;
+                    }
+                    if (DAY_W >= 18 || cursor.getDate() % 5 === 1) {
+                        html += `<div class="day" style="left:${x}px;">${cursor.getDate()}</div>`;
+                    }
+                    cursor = new Date(cursor.getTime() + DAY_MS);
+                }
+                html += '</div>';
+            }
+            html += '</div>';
+
+            for (const node of nodes) {
+                const level = nodeLevel(node);
+                if (level > modelCols) continue; // oltre il modello scelto: nascosto
+                const color = displayColor(node);
+                html += `<div class="wbs-row" data-node-id="${escapeHtml(node.id)}">`;
+                for (let i = 1; i <= modelCols; i++) {
+                    if (i === level) {
+                        html += `<div class="cell"><button type="button" class="node-btn" draggable="true" data-node-id="${escapeHtml(node.id)}" data-level="${level}"
+                            style="border-color:${color}; color:${color}; background:${tint(rootColor(node), 0.9)};">
+                            <span class="node-text">${escapeHtml(node.name || '(senza nome)')}</span>
+                        </button></div>`;
+                    } else {
+                        html += '<div class="cell"></div>';
+                    }
+                }
+                if (range) {
+                    html += `<div class="gantt-cell" style="width:${ganttW}px;" data-gantt-cell="1">`;
+                    for (let d = 0; d < range.days; d += 7) {
+                        html += `<div class="gantt-grid-line" style="left:${d * DAY_W}px;"></div>`;
+                    }
+                    const a = parseDate(node.data_inizio), b = parseDate(node.data_fine);
+                    if (a || b) {
+                        const start = a || b, end = b || a;
+                        const x = Math.round((start - range.min) / DAY_MS) * DAY_W;
+                        const w = Math.max(DAY_W, (Math.round((end - start) / DAY_MS) + 1) * DAY_W);
+                        html += `<div class="gantt-bar" data-node-id="${escapeHtml(node.id)}" style="left:${x}px; width:${w}px; background:${color};">${escapeHtml(node.name || '')}</div>`;
+                    }
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+            html += '<svg id="depSvg"></svg>';
+            board.innerHTML = html;
+
+            wireBoardEvents();
+            drawDependencies();
+        }
+
+        // ===== Frecce di dipendenza (linee ortogonali viola) =====
+        function drawDependencies() {
+            const svg = document.getElementById('depSvg');
+            if (!svg) return;
+            svg.setAttribute('width', board.scrollWidth);
+            svg.setAttribute('height', board.scrollHeight);
+            svg.style.width = board.scrollWidth + 'px';
+            svg.style.height = board.scrollHeight + 'px';
+            const boardRect = board.getBoundingClientRect();
+            const anchorOf = (nodeId, side) => {
+                // Con il gantt visibile la freccia collega le barre; altrimenti i pulsanti.
+                let el = ganttVisible ? board.querySelector(`.gantt-bar[data-node-id="${CSS.escape(nodeId)}"]`) : null;
+                if (!el) el = board.querySelector(`.node-btn[data-node-id="${CSS.escape(nodeId)}"]`);
+                if (!el) return null;
+                const r = el.getBoundingClientRect();
+                return {
+                    x: (side === 'right' ? r.right : r.left) - boardRect.left,
+                    y: r.top + r.height / 2 - boardRect.top
+                };
+            };
+            let defs = `<defs><marker id="depArrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                <path d="M0,0 L8,4 L0,8 z" fill="#8B5CF6"></path></marker></defs>`;
+            let paths = '';
+            forEachNode(n => {
+                if (!n.dipendenza) return;
+                const from = anchorOf(n.dipendenza, 'right'); // dal pulsante da cui si dipende...
+                const to = anchorOf(n.id, 'left');            // ...verso quello con la dipendenza
+                if (!from || !to) return;
+                const midX = from.x + Math.max(14, (to.x - from.x) / 2);
+                // Solo segmenti orizzontali/verticali (mai obliqui)
+                const d = `M ${from.x} ${from.y} H ${midX} V ${to.y} H ${to.x - 2}`;
+                paths += `<path d="${d}" fill="none" stroke="#8B5CF6" stroke-width="2" marker-end="url(#depArrow)"></path>`;
+            });
+            svg.innerHTML = defs + paths;
+        }
+
+        // ===== Eventi sui pulsanti =====
+        let draggedNodeId = null;
+
+        function wireBoardEvents() {
+            board.querySelectorAll('.node-btn').forEach(btn => {
+                const nodeId = btn.dataset.nodeId;
+
+                btn.addEventListener('click', () => {
+                    const node = findNode(nodeId);
+                    if (!node) return;
+                    if (depPickMode) { pickDependency(node); return; }
+                    openFlyout(node);
+                });
+
+                // Doppio click: modifica del testo direttamente dentro il pulsante
+                btn.addEventListener('dblclick', (e) => {
+                    e.stopPropagation();
+                    const node = findNode(nodeId);
+                    if (!node || depPickMode) return;
+                    const span = btn.querySelector('.node-text');
+                    span.setAttribute('contenteditable', 'true');
+                    span.textContent = node.name;
+                    span.focus();
+                    document.getSelection()?.selectAllChildren(span);
+                    const commit = () => {
+                        span.removeAttribute('contenteditable');
+                        const text = span.textContent.trim();
+                        if (text !== node.name) {
+                            node.name = text;
+                            scheduleSave();
+                        }
+                        render();
+                        if (selectedNode === node) fillFlyout(node);
+                    };
+                    span.addEventListener('blur', commit, { once: true });
+                    span.addEventListener('keydown', (ev) => {
+                        if (ev.key === 'Enter') { ev.preventDefault(); span.blur(); }
+                        if (ev.key === 'Escape') { span.textContent = node.name; span.blur(); }
+                    });
+                });
+
+                // Drag & drop: sposta il pulsante (con l'intero sotto-albero: spostando
+                // argomento1 si spostano anche 2/3/4, e così via ai livelli inferiori).
+                btn.addEventListener('dragstart', (e) => {
+                    if (depPickMode) { e.preventDefault(); return; }
+                    draggedNodeId = nodeId;
+                    btn.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+                btn.addEventListener('dragend', () => {
+                    draggedNodeId = null;
+                    board.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+                    btn.classList.remove('dragging');
+                });
+                btn.addEventListener('dragover', (e) => {
+                    if (!draggedNodeId || draggedNodeId === nodeId) return;
+                    const dragged = findNode(draggedNodeId);
+                    const target = findNode(nodeId);
+                    if (!dragged || !target) return;
+                    if (nodeLevel(dragged) !== nodeLevel(target)) return;     // solo tra pari livello
+                    if (subtreeIds(dragged).includes(target.id)) return;       // non dentro se stesso
+                    e.preventDefault();
+                    btn.classList.add('drop-target');
+                });
+                btn.addEventListener('dragleave', () => btn.classList.remove('drop-target'));
+                btn.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    btn.classList.remove('drop-target');
+                    if (!draggedNodeId || draggedNodeId === nodeId) return;
+                    moveNodeBefore(draggedNodeId, nodeId);
+                });
+            });
+
+            board.querySelectorAll('.gantt-bar').forEach(bar => {
+                bar.addEventListener('click', () => {
+                    const node = findNode(bar.dataset.nodeId);
+                    if (!node) return;
+                    if (depPickMode) { pickDependency(node); return; }
+                    openFlyout(node);
+                });
+            });
+        }
+
+        // Sposta "draggedId" (con il suo sotto-albero) prima di "targetId", adottando
+        // il padre del target. Poi rinumera tutti gli ordinamenti e salva le differenze.
+        function moveNodeBefore(draggedId, targetId) {
+            const dragged = findNode(draggedId);
+            const target = findNode(targetId);
+            if (!dragged || !target || nodeLevel(dragged) !== nodeLevel(target)) return;
+            const oldList = dragged.parent ? dragged.parent.children : tree;
+            oldList.splice(oldList.indexOf(dragged), 1);
+            dragged.parent = target.parent;
+            const newList = target.parent ? target.parent.children : tree;
+            newList.splice(newList.indexOf(target), 0, dragged);
+            renumber();
+            scheduleSave();
+            render();
+        }
+
+        // ===== Flyout Configurazione =====
+        const flyout = document.getElementById('flyout');
+
+        function openFlyout(node) {
+            selectedNode = node;
+            fillFlyout(node);
+            flyout.classList.add('open');
+            board.querySelectorAll('.node-btn.selected').forEach(el => el.classList.remove('selected'));
+            board.querySelector(`.node-btn[data-node-id="${CSS.escape(node.id)}"]`)?.classList.add('selected');
+        }
+        function closeFlyout() {
+            selectedNode = null;
+            flyout.classList.remove('open');
+            board.querySelectorAll('.node-btn.selected').forEach(el => el.classList.remove('selected'));
+        }
+        document.getElementById('flyoutClose').addEventListener('click', closeFlyout);
+
+        function fillFlyout(node) {
+            const level = nodeLevel(node);
+            document.getElementById('cfgName').value = node.name || '';
+            const colorInput = document.getElementById('cfgColor');
+            colorInput.disabled = level !== 1;
+            colorInput.value = level === 1 ? (node.colore || DEFAULT_COLOR) : rootColor(node);
+            document.getElementById('cfgColorHint').textContent = level === 1
+                ? '' : `Ereditato da Argomento 1 (tonalità livello ${level})`;
+            document.getElementById('cfgStart').value = node.data_inizio ? String(node.data_inizio).slice(0, 10) : '';
+            document.getElementById('cfgEnd').value = node.data_fine ? String(node.data_fine).slice(0, 10) : '';
+            EXTRA_FIELD_INPUTS.forEach(([inputId, col]) => {
+                document.getElementById(inputId).value = node[col] == null ? '' : node[col];
+            });
+            const dep = node.dipendenza ? findNode(node.dipendenza) : null;
+            document.getElementById('cfgDepName').textContent = dep ? (dep.name || '(senza nome)') : 'Nessuna';
+            document.getElementById('cfgAddChild').style.display = level < modelCols ? '' : 'none';
+        }
+
+        document.getElementById('cfgName').addEventListener('change', () => {
+            if (!selectedNode) return;
+            selectedNode.name = document.getElementById('cfgName').value.trim();
+            scheduleSave(); render(); fillFlyout(selectedNode);
+        });
+        document.getElementById('cfgColor').addEventListener('change', () => {
+            if (!selectedNode || nodeLevel(selectedNode) !== 1) return;
+            selectedNode.colore = document.getElementById('cfgColor').value;
+            scheduleSave(); render();
+        });
+        document.getElementById('cfgStart').addEventListener('change', () => {
+            if (!selectedNode) return;
+            selectedNode.data_inizio = document.getElementById('cfgStart').value || null;
+            scheduleSave(); render();
+        });
+        document.getElementById('cfgEnd').addEventListener('change', () => {
+            if (!selectedNode) return;
+            selectedNode.data_fine = document.getElementById('cfgEnd').value || null;
+            scheduleSave(); render();
+        });
+
+        // Altre colonne della tabella (nr_mesi, nr_giorni, stato, avanzamento,
+        // rischio, owner, nominativo, note_interne): input del flyout <-> nodo.
+        const EXTRA_FIELD_INPUTS = [
+            ['cfgNrMesi', 'nr_mesi'],
+            ['cfgNrGiorni', 'nr_giorni'],
+            ['cfgStato', 'stato'],
+            ['cfgAvanzamento', 'avanzamento'],
+            ['cfgRischio', 'rischio'],
+            ['cfgOwner', 'owner'],
+            ['cfgNominativo', 'nominativo'],
+            ['cfgNote', 'note_interne']
+        ];
+        EXTRA_FIELD_INPUTS.forEach(([inputId, col]) => {
+            document.getElementById(inputId).addEventListener('change', () => {
+                if (!selectedNode) return;
+                let value = document.getElementById(inputId).value;
+                if (col === 'avanzamento') {
+                    value = value === '' ? null : Math.max(0, Math.min(100, parseInt(value, 10) || 0));
+                } else {
+                    value = String(value).trim() || null;
+                }
+                selectedNode[col] = value;
+                scheduleSave();
+            });
+        });
+
+        // Scelta della dipendenza: si clicca sul pulsante da cui questa attività dipende.
+        document.getElementById('cfgDepPick').addEventListener('click', () => {
+            if (!selectedNode) return;
+            depPickMode = true;
+            document.getElementById('depBanner').style.display = 'block';
+            board.querySelectorAll('.node-btn').forEach(el => {
+                if (el.dataset.nodeId !== selectedNode.id) el.classList.add('dep-pickable');
+            });
+        });
+        function endDepPick() {
+            depPickMode = false;
+            document.getElementById('depBanner').style.display = 'none';
+            board.querySelectorAll('.dep-pickable').forEach(el => el.classList.remove('dep-pickable'));
+        }
+        function pickDependency(targetNode) {
+            if (!selectedNode || targetNode.id === selectedNode.id) { endDepPick(); return; }
+            selectedNode.dipendenza = targetNode.id;
+            endDepPick();
+            scheduleSave(); render(); fillFlyout(selectedNode);
+        }
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && depPickMode) endDepPick(); });
+        document.getElementById('cfgDepClear').addEventListener('click', () => {
+            if (!selectedNode) return;
+            selectedNode.dipendenza = null;
+            scheduleSave(); render(); fillFlyout(selectedNode);
+        });
+
+        document.getElementById('cfgAddChild').addEventListener('click', () => {
+            if (!selectedNode || nodeLevel(selectedNode) >= modelCols) return;
+            const child = makeNode('Nuova attività', selectedNode);
+            selectedNode.children.push(child);
+            renumber();
+            scheduleSave(); render();
+            openFlyout(child);
+        });
+
+        document.getElementById('cfgDelete').addEventListener('click', () => {
+            if (!selectedNode) return;
+            const count = subtreeIds(selectedNode).length;
+            const msg = count > 1
+                ? `Cancellare questo pulsante e le ${count - 1} sotto-attività collegate?`
+                : 'Cancellare questo pulsante?';
+            if (!confirm(msg)) return;
+            deleteNode(selectedNode);
+            closeFlyout();
+        });
+
+        function makeNode(name, parent) {
+            const node = {
+                id: newTempId(), name, colore: null,
+                data_inizio: null, data_fine: null, dipendenza: null,
+                isNew: true, saved: null, children: [], parent: parent || null, ord: []
+            };
+            GANTT_EXTRA_COLS.forEach(col => { node[col] = null; });
+            node.avanzamento = 0;
+            return node;
+        }
+
+        function deleteNode(node) {
+            const ids = subtreeIds(node);
+            for (const id of ids) {
+                const n = findNode(id);
+                if (n && !n.isNew) deletedIds.add(id);
+            }
+            // Le dipendenze che puntavano ai nodi eliminati vengono azzerate
+            // (il DB fa lo stesso con ON DELETE SET NULL).
+            forEachNode(n => { if (n.dipendenza && ids.includes(n.dipendenza)) n.dipendenza = null; });
+            const list = node.parent ? node.parent.children : tree;
+            list.splice(list.indexOf(node), 1);
+            renumber();
+            scheduleSave(); render();
+        }
+
+        // ===== Barra superiore =====
+        document.getElementById('addBtn').addEventListener('click', () => {
+            const node = makeNode('Nuova attività', null);
+            tree.push(node);
+            renumber();
+            scheduleSave(); render();
+            openFlyout(node);
+        });
+
+        document.getElementById('modelSel').addEventListener('change', () => {
+            modelCols = Number(document.getElementById('modelSel').value) || 2;
+            try { localStorage.setItem('ganttModel:' + fieldId, String(modelCols)); } catch (e) { /* ignore */ }
+            render();
+            if (selectedNode) fillFlyout(selectedNode);
+        });
+
+        document.getElementById('ganttToggleBtn').addEventListener('click', () => {
+            ganttVisible = !ganttVisible;
+            const btn = document.getElementById('ganttToggleBtn');
+            btn.classList.toggle('active', ganttVisible);
+            btn.innerHTML = ganttVisible
+                ? '<i class="fas fa-chart-gantt"></i> Nascondi gantt'
+                : '<i class="fas fa-chart-gantt"></i> Mostra gantt';
+            render();
+        });
+
+        window.addEventListener('resize', drawDependencies);
+
+        // ===== "Copia progetto da" =====
+        let copySources = [];
+        async function openCopyModal() {
+            try {
+                copySources = await api(`/projects/gantt-activity/copy-sources?fieldId=${encodeURIComponent(fieldId)}`);
+            } catch (e) {
+                showToast('Errore: ' + e.message);
+                return;
+            }
+            if (!copySources.length) { showToast('Nessun progetto da cui copiare'); return; }
+            const clientSel = document.getElementById('copyClientSel');
+            const projectSel = document.getElementById('copyProjectSel');
+            const clients = new Map();
+            copySources.forEach(s => { if (!clients.has(s.clientId)) clients.set(s.clientId, s.clientName || '(senza nome)'); });
+            clientSel.innerHTML = '<option value="">-- Seleziona cliente --</option>' +
+                [...clients.entries()].map(([id, name]) => `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`).join('');
+            projectSel.innerHTML = '<option value="">-- Seleziona progetto --</option>';
+            projectSel.disabled = true;
+            document.getElementById('copyConfirm').disabled = true;
+            document.getElementById('copyModal').classList.add('open');
+        }
+        document.getElementById('copyBtn').addEventListener('click', openCopyModal);
+        document.getElementById('copyBtnEmpty').addEventListener('click', openCopyModal);
+        document.getElementById('copyCancel').addEventListener('click', () => document.getElementById('copyModal').classList.remove('open'));
+
+        document.getElementById('copyClientSel').addEventListener('change', () => {
+            const clientId = document.getElementById('copyClientSel').value;
+            const projectSel = document.getElementById('copyProjectSel');
+            const projects = copySources.filter(s => s.clientId === clientId);
+            projectSel.innerHTML = '<option value="">-- Seleziona progetto --</option>' +
+                projects.map(p => `<option value="${escapeHtml(p.projectId)}">${escapeHtml(p.projectName || '(senza nome)')}</option>`).join('');
+            projectSel.disabled = !clientId;
+            document.getElementById('copyConfirm').disabled = true;
+        });
+        document.getElementById('copyProjectSel').addEventListener('change', () => {
+            document.getElementById('copyConfirm').disabled = !document.getElementById('copyProjectSel').value;
+        });
+        document.getElementById('copyConfirm').addEventListener('click', async () => {
+            const sourceProjectId = document.getElementById('copyProjectSel').value;
+            if (!sourceProjectId) return;
+            try {
+                const result = await api('/projects/gantt-activity/copy', {
+                    method: 'POST',
+                    body: JSON.stringify({ fieldId, sourceProjectId })
+                });
+                document.getElementById('copyModal').classList.remove('open');
+                showToast(`Copiate ${result.copied} attività`);
+                await loadData();
+            } catch (e) {
+                showToast('Errore: ' + e.message);
+            }
+        });
+
+        // ===== Caricamento iniziale =====
+        async function loadData() {
+            try {
+                const payload = await api(`/projects/gantt-activity?fieldId=${encodeURIComponent(fieldId)}`);
+                buildTree(Array.isArray(payload.rows) ? payload.rows : []);
+                // Modello: preferenza salvata, altrimenti la profondità dei dati (min 2)
+                let deepest = 0;
+                forEachNode(n => { deepest = Math.max(deepest, nodeLevel(n)); });
+                const storedModel = Number(localStorage.getItem('ganttModel:' + fieldId));
+                modelCols = Math.min(4, Math.max(2, storedModel || deepest || 2, deepest));
+                document.getElementById('modelSel').value = String(modelCols);
+                deletedIds.clear();
+                closeFlyout();
+                render();
+                updateSaveUi();
+            } catch (e) {
+                board.innerHTML = `<div style="padding:2rem; color:var(--danger);">${escapeHtml(e.message)}</div>`;
+            }
+        }
+        loadData();
+    </script>
+</body>
+</html>

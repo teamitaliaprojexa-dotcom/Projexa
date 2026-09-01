@@ -4871,6 +4871,29 @@
             });
         }
 
+        // Rientro dalla pagina Gantt (gantt.html, tipo_valore = 13): l'URL porta il
+        // progetto da riaprire. Ricostruisce i due livelli (elenco progetti del cliente
+        // + dettaglio del progetto) così l'utente ritrova esattamente il punto di
+        // partenza, con il pulsante "‹" funzionante.
+        async function restoreProjectFromUrl() {
+            const params = new URLSearchParams(location.search);
+            const projectId = params.get('openProject');
+            const clientId = params.get('clientId');
+            if (!projectId || !clientId) return;
+            // Ripulisce l'URL: un refresh successivo non deve riaprire il progetto.
+            history.replaceState(null, '', location.pathname);
+            // L'elenco clienti della sidebar è caricato in parallelo all'avvio: se non è
+            // ancora pronto lo si attende, così il cliente resta evidenziato in verde.
+            const listEl = document.getElementById('projectClientsList');
+            if (!listEl || !listEl.querySelector('li[data-client-id]')) await loadProjectClients();
+            const li = document.querySelector(`#projectClientsList li[data-client-id="${CSS.escape(clientId)}"]`);
+            if (li) li.classList.add('active-client');
+            const clientName = params.get('clientName') || (li && li.dataset.clientName) || '';
+            detailNavStack = [];
+            await renderProjectList(clientId, clientName);
+            openProjectDetail(projectId, params.get('projectName') || '', clientId);
+        }
+
         // Livello 3: dettaglio del progetto (campi EAV, 4 colonne). Riusa openDetailFlyout.
         function openProjectDetail(projectId, name, clientId) {
             if (currentView) detailNavStack.push(currentView);
@@ -6172,6 +6195,12 @@
                 }
             }
 
+            if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
+                // Timestamp ISO (es. una colonna DATE letta come oggetto Date e poi
+                // serializzata in JSON): mostriamo solo la parte data, non l'orario/UTC.
+                return value.slice(0, 10);
+            }
+
             if (typeof value === 'object') {
                 try { return JSON.stringify(value); } catch (e) { return String(value); }
             }
@@ -6275,7 +6304,7 @@
         // a-consuntivo, ecc.) così l'editor mostra ESATTAMENTE le colonne visibili in griglia.
         async function type11VisibleColumnsMeta(widget, visibleColumnNames) {
             const columns = await type11GridColumns(widget);
-            const hidden = new Set(['id','tenant_id','user_id','client_id','project_id','data_inizio','scadenza','id_roles','id_roles_write']);
+            const hidden = new Set(['id','tenant_id','user_id','client_id','project_id','scadenza','id_roles','id_roles_write']);
             const metaByName = new Map(columns.map(c => [c.name, c]));
             return visibleColumnNames
                 .map(name => metaByName.get(name))
@@ -6366,6 +6395,9 @@
                 // il flyout è in modalità "Abilita modifica".
                 const isView = !!payload.isView;
                 const editing = clientDetailMode === 'edit' && !isView;
+                // Tipo 13: identico al tipo 11 in visualizzazione, ma in modifica mostra
+                // solo il pulsante "Modifica" che apre la pagina Gantt (gantt.html).
+                const isGantt13 = Number(widget.dataset.gridTipo) === 13;
 
                 const head = visibleColumns.map(column => `<th scope="col" title="${escapeHtml(column)}">${escapeHtml(type11ColumnLabel(column))}</th>`).join('');
                 const body = records.map((record, index) => {
@@ -6375,14 +6407,17 @@
                     ).join('') + '</tr>';
                 }).join('');
 
-                const toolbar = editing ? `<div class="type11-grid-toolbar">
+                const toolbar = !editing ? '' : (isGantt13 ? `<div class="type11-grid-toolbar">
+                    <span style="flex:1;"></span>
+                    <button type="button" class="type13-open-gantt primary">Modifica</button>
+                </div>` : `<div class="type11-grid-toolbar">
                     <span class="type11-grid-selection" style="color:var(--text-muted); font-size:0.8rem; flex:1;">Seleziona una riga</span>
                     <button type="button" class="type11-grid-add primary">+ Nuova riga</button>
                     <button type="button" class="type11-grid-edit" disabled>Modifica</button>
                     <button type="button" class="type11-grid-delete danger" disabled>Elimina</button>
                     <button type="button" class="type11-grid-save-inline primary" style="display:none;">Salva</button>
                     <button type="button" class="type11-grid-cancel-inline" style="display:none;">Annulla</button>
-                </div>` : '';
+                </div>`);
 
                 // Anche senza righe la tabella (con <tbody>) va sempre renderizzata: altrimenti
                 // "+ Nuova riga" non trova il tbody in cui inserire la riga di inserimento
@@ -6399,7 +6434,26 @@
                 const editBtn = widget.querySelector('.type11-grid-edit');
                 const deleteBtn = widget.querySelector('.type11-grid-delete');
 
-                if (editing) {
+                if (editing && isGantt13) {
+                    // Tipo 13: il pulsante "Modifica" apre la pagina Gantt nella stessa
+                    // scheda; il ritorno alla dashboard avviene dal pulsante della pagina.
+                    widget.querySelector('.type13-open-gantt')?.addEventListener('click', () => {
+                        const label = widget.closest('.type11-grid-row')?.dataset.campo || '';
+                        // Il pulsante "Torna al Progetto" della pagina Gantt deve riaprire
+                        // QUESTO progetto: oltre al campo servono progetto e cliente (con i
+                        // nomi, per i titoli dei flyout ricostruiti al rientro).
+                        const projList = [...detailNavStack].reverse().find(v => v && v.kind === 'projectList');
+                        const params = new URLSearchParams({
+                            fieldId,
+                            clientId: context.clientId || '',
+                            label,
+                            projectId: context.projectId || currentDetailArgument || '',
+                            projectName: currentDetailLabel || '',
+                            clientName: (projList && projList.label) || ''
+                        });
+                        window.location.href = `gantt.html?${params.toString()}`;
+                    });
+                } else if (editing) {
                     // Colonne/metadati con cui costruire gli input inline: esattamente le stesse
                     // colonne (e lo stesso ordine) già mostrate in visualizzazione nella griglia.
                     const orderedMeta = await type11VisibleColumnsMeta(widget, visibleColumns);
@@ -6576,9 +6630,12 @@
                     .concat(opts.map(o => `<option value="${escapeHtml(o)}" ${o === current ? 'selected' : ''}>${escapeHtml(o)}</option>`))
                     .join('');
                 input = `<select data-setting-id="${id}" data-field="valore2">${optionsHtml}</select>`;
-            } else if (tipo === 11) {
+            } else if (tipo === 11 || tipo === 13) {
                 // Griglia: tabella e colonne arrivano dalla riga del contesto corrente
                 // (settings, clients o projects). Il caricamento avviene dopo il render.
+                // Il tipo 13 è identico al tipo 11 in visualizzazione; con "Abilita
+                // modifica" attivo mostra però solo il pulsante "Modifica", che apre
+                // la pagina gantt.html (tabella proj_activity).
                 // Stato iniziale aperto/chiuso: valore1 = true -> chiusa di default,
                 // qualsiasi altro valore -> aperta di default.
                 const isTrueVal = (row.valore1 === true || row.valore1 === 'true' || row.valore1 === 't');
@@ -6595,7 +6652,7 @@
                         <span style="display:flex; align-items:center; min-width:0;">${checkbox11}${campoLabelHtml(row.campo)}</span>
                         <span class="type11-arrow"><i class="fas fa-chevron-${startCollapsed ? 'down' : 'up'}"></i></span>
                     </div>
-                    <div class="type11-grid-widget" data-grid-source="${escapeHtml(currentDetailSource)}" data-grid-field-id="${id}" data-grid-table="${escapeHtml(row.tabella == null ? '' : row.tabella)}" data-grid-columns="${escapeHtml(row.colonna == null ? '' : row.colonna)}" data-grid-tenant-id="${escapeHtml(row.tenant_id == null ? '' : row.tenant_id)}" data-grid-user-id="${escapeHtml(row.user_id == null ? '' : row.user_id)}" data-grid-client-id="${escapeHtml(row.client_id == null ? '' : row.client_id)}"><div class="type11-grid-state">Caricamento griglia…</div></div>
+                    <div class="type11-grid-widget" data-grid-tipo="${tipo}" data-grid-source="${escapeHtml(currentDetailSource)}" data-grid-field-id="${id}" data-grid-table="${escapeHtml(row.tabella == null ? '' : row.tabella)}" data-grid-columns="${escapeHtml(row.colonna == null ? '' : row.colonna)}" data-grid-tenant-id="${escapeHtml(row.tenant_id == null ? '' : row.tenant_id)}" data-grid-user-id="${escapeHtml(row.user_id == null ? '' : row.user_id)}" data-grid-client-id="${escapeHtml(row.client_id == null ? '' : row.client_id)}"><div class="type11-grid-state">Caricamento griglia…</div></div>
                 </div>`;
             } else if (tipo === 8) {
                 // Percentuale (numerico intero) -> valore3. In modifica: input numerico + "%";
@@ -6670,7 +6727,7 @@
                 ? `<select class="span-sel" title="Colonne occupate" style="flex:0 0 auto; width:auto; padding:2px 4px; font-size:0.72rem;">${[1, 2, 3].map(n => `<option value="${n}" ${span === n ? 'selected' : ''}>${n} col</option>`).join('')}</select>`
                 : '';
 
-            const type11Class = (tipo === 11) ? ' type11-grid-row' : '';
+            const type11Class = (tipo === 11 || tipo === 13) ? ' type11-grid-row' : '';
             return `<div class="settings-detail-row${type11Class}" data-row-id="${id}" data-campo="${campo}" data-span="${span}"${spanStyle}>${checkbox}${label}${input}${spanSel}</div>${extraRow}`;
         }
 
@@ -8126,6 +8183,7 @@
             initFlyoutResizers();
             applyScreenScale(); // adatta lo zoom dell'interfaccia alla preferenza "schermo"
             window.addEventListener('resize', adjustFixedHeightsForZoom);
+            restoreProjectFromUrl(); // rientro da gantt.html: riapre il progetto di partenza
 
             // Carica dati dalle API
             await loadDataFromAPI();
