@@ -1808,6 +1808,8 @@
             </li>
             <li><a href="#"><i class="fas fa-trash"></i> <span>Archivio</span></a></li>
             <li><a href="#"><i class="fas fa-exclamation-circle"></i> <span>Issue</span></a></li>
+            <!-- Jira: visibile solo se il flag settings (campo='Jira', valore1=true) è attivo. Gestita da js/jira.js -->
+            <li id="navJira" style="display: none;"><a href="#"><i class="fab fa-jira"></i> <span>Jira</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
             <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><i class="fas fa-database"></i> <span>Database</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
@@ -8237,6 +8239,7 @@
         </div>
     </div>
     <script src="js/privacy.js"></script>
+    <script src="js/jira.js"></script>
 <script>
 (function () {
     const colorClasses = [

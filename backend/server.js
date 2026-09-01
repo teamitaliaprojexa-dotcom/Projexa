@@ -12,6 +12,8 @@ import authRoutes from './routes/auth.js';
 import microsoftOAuthRoutes from './routes/microsoft-oauth.js';
 import tableStructuresRoutes from './routes/table-structures.js';
 import calendarRoutes from './routes/calendar.js';
+import jiraRoutes from './routes/jira.js';
+import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
 
 dotenv.config();
@@ -27,10 +29,7 @@ app.set('trust proxy', 1);
 
 // CORS ristretto: consenti le richieste same-origin (Origin assente) e solo le origini
 // in whitelist (localhost per lo sviluppo + quelle in ALLOWED_ORIGINS, es. l'URL di produzione).
-const allowedOrigins = new Set([
-  'http://localhost:3001', 'http://127.0.0.1:3001', 'http://localhost:8000',
-  ...String(process.env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean)
-]);
+// La lista sta in config/origins.js perché la usa anche il flusso OAuth di Jira.
 app.use(cors({
   origin(origin, cb) {
     if (!origin || allowedOrigins.has(origin)) return cb(null, true);
@@ -96,6 +95,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/auth', microsoftOAuthRoutes);
 app.use('/api/table-structures', requireAuth, tableStructuresRoutes);
 app.use('/api/calendar', calendarRoutes);
+app.use('/api/jira', jiraRoutes);
 
 // ==========================================
 // HELPER DI SICUREZZA PER GLI ENDPOINT DATI
