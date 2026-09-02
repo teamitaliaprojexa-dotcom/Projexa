@@ -95,6 +95,9 @@
               <option value="notif">Projexa-Notif</option>
             </select>
           </label>
+          <button onclick="openCryptoMigration()" style="background: #F59E0B; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; margin-right: 1rem;">
+            <i class="fas fa-lock"></i> Migrazione Crypto
+          </button>
           <button onclick="window.location.href='sql-editor.html'" style="background: #8B5CF6; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; margin-right: 1rem;">
             <i class="fas fa-code"></i> SQL Editor
           </button>
@@ -131,6 +134,45 @@
     </div>
   </div>
 
+  <!-- Migrazione Crypto: cifra/decifra i dati di UNA tabella alla volta.
+       Il database si sceglie qui dentro (parametro "db" nelle chiamate), quindi è
+       indipendente dall'ambiente selezionato in alto nella pagina. -->
+  <div id="cryptoModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1100; justify-content: center; align-items: center;">
+    <div style="background: white; border-radius: 8px; padding: 2rem; max-width: 640px; width: 92%; max-height: 88vh; overflow-y: auto;">
+      <h2 style="margin-top: 0;"><i class="fas fa-lock" style="color: #F59E0B;"></i> Migrazione Crypto</h2>
+      <p style="color: var(--gray-600); font-size: 0.9rem; margin-top: 0;">
+        Cifra i dati sul database (a video restano leggibili). Vengono trattate solo le
+        righe con <strong>crypto = 1</strong>, secondo la regola configurata nel backend.
+      </p>
+
+      <div style="margin-bottom: 1rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Database</label>
+        <select id="cryptoDb" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+          <option value="main">Projexa</option>
+          <option value="auth">Projexa-Auth</option>
+          <option value="lic">Projexa-Lic</option>
+          <option value="notif">Projexa-Notif</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Tabella</label>
+        <select id="cryptoTable" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+          <option value="">-- Caricamento… --</option>
+        </select>
+      </div>
+
+      <div id="cryptoInfo" style="margin-bottom: 1rem;"></div>
+      <div id="cryptoResult" style="margin-bottom: 1rem;"></div>
+
+      <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
+        <button type="button" onclick="closeCryptoMigration()" style="padding: 10px 20px; background: #e5e7eb; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Chiudi</button>
+        <button type="button" id="cryptoDecryptBtn" onclick="runCryptoMigration('decrypt')" style="display: none; padding: 10px 20px; background: #6B7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Decripta</button>
+        <button type="button" id="cryptoEncryptBtn" onclick="runCryptoMigration('encrypt')" style="display: none; padding: 10px 20px; background: #DC2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Crypta</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Selezione ambiente Neon (Projexa vs Projexa-Auth): inietta l'header X-Target-DB su tutte le chiamate /api/ -->
   <script>
     window.__TARGET_DB = sessionStorage.getItem('targetDb') || 'main';
@@ -164,5 +206,6 @@
   </script>
   <script src="js/auth.js"></script>
   <script src="js/database-viewer.js"></script>
+  <script src="js/crypto-migration.js"></script>
 </body>
 </html>

@@ -1,5 +1,6 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
+import { withDecryption } from './cryptoPool.js';
 
 dotenv.config();
 
@@ -12,9 +13,10 @@ if (!process.env.NOTIF_DATABASE_URL) {
   console.warn('⚠️  NOTIF_DATABASE_URL non impostata: le funzioni sulle notifiche falliranno finché non la configuri.');
 }
 
-const notifPool = new Pool({
+// withDecryption: i valori cifrati ("enc:v1:...") tornano in chiaro in lettura.
+const notifPool = withDecryption(new Pool({
   connectionString: process.env.NOTIF_DATABASE_URL
-});
+}));
 
 notifPool.on('error', (err) => {
   console.error('Unexpected error on idle NOTIF client', err);

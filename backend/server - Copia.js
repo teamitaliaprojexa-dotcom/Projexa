@@ -13,10 +13,8 @@ import microsoftOAuthRoutes from './routes/microsoft-oauth.js';
 import tableStructuresRoutes from './routes/table-structures.js';
 import calendarRoutes from './routes/calendar.js';
 import jiraRoutes from './routes/jira.js';
-import cryptoMigrationRoutes from './routes/crypto-migration.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
-import { encryptRowForWrite } from './config/crypto.js';
 
 dotenv.config();
 
@@ -98,8 +96,6 @@ app.use('/api/auth', microsoftOAuthRoutes);
 app.use('/api/table-structures', requireAuth, tableStructuresRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/jira', jiraRoutes);
-// Migrazione Crypto (database-viewer): riservata agli amministratori.
-app.use('/api/crypto', requireAuth, requireAdmin, cryptoMigrationRoutes);
 
 // ==========================================
 // HELPER DI SICUREZZA PER GLI ENDPOINT DATI
@@ -186,44 +182,6 @@ async function isManagedTable(tableName, pool = db) {
     [tableName]
   );
   return tableCheck.rows.length > 0;
-}
-
-// Cifratura a riposo: prima di ogni INSERT/UPDATE i valori previsti dalla regola
-// (config/crypto.js) vengono sostituiti con il testo cifrato. La lettura è già
-// gestita dal pool (config/cryptoPool.js), quindi a video il dato resta in chiaro.
-// Se la tabella non ha la colonna "crypto", o la riga ha crypto = 0, o manca
-// ENCRYPTION_KEY, i dati passano invariati.
-async function cryptoWrite(pool, dbKey, tableName, data, id = null) {
-  try {
-    const result = await encryptRowForWrite(pool, tableName, data, { id, dbKey });
-    return result.data;
-  } catch (e) {
-    console.error('⚠️  Cifratura non applicata su', tableName, '-', e.message);
-    return data;
-  }
-}
-
-// Un ORDER BY su una colonna cifrata ordinerebbe il testo cifrato (cioè a caso).
-// Gli elenchi brevi di nomi (clienti, progetti) vengono quindi riordinati qui,
-// dopo la decifratura fatta dal pool.
-function sortByName(rows) {
-  return rows.slice().sort((a, b) =>
-    String(a.name == null ? '' : a.name).localeCompare(
-      String(b.name == null ? '' : b.name), 'it', { sensitivity: 'base' })
-  );
-}
-
-// INSERT costruita dalle chiavi di un oggetto, con la cifratura già applicata.
-// Serve dove l'elenco delle colonne non è fisso: la cifratura può aggiungere la
-// colonna "crypto", che però esiste solo sulle tabelle già predisposte.
-async function insertRowEncrypted(target, dbKey, tableName, values) {
-  const data = await cryptoWrite(target, dbKey, tableName, values);
-  const cols = Object.keys(data).map(assertValidIdentifier);
-  const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
-  return target.query(
-    `INSERT INTO "${tableName}" (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${placeholders}) RETURNING *`,
-    cols.map((c) => data[c])
-  );
 }
 
 // Admin di sistema (ruolo "Admin" = id_roles 1): bypassa l'isolamento per tenant,
@@ -328,8 +286,7 @@ app.get('/api/page-labels', requireAuth, async (req, res) => {
 
 const DASHBOARD_TASK_HIDDEN_COLUMNS = new Set([
   'id', 'tenant_id', 'user_id', 'created_by', 'created_at',
-  'data_inizio', 'scadenza', 'id_roles', 'id_roles_write',
-  'appo_task_2', 'appo_task_3', 'appo_task_4'
+  'data_inizio', 'scadenza', 'id_roles', 'id_roles_write'
 ]);
 const DASHBOARD_TASK_READONLY_COLUMNS = new Set(['updated_at']);
 
@@ -720,9 +677,8 @@ app.post('/api/dashboard/tasks', requireAuth, async (req, res) => {
       data.created_by = req.user.user_id;
     }
 
-    const encrypted = await cryptoWrite(db, 'main', 'tasks', data);
-    const columns = Object.keys(encrypted);
-    const values = Object.values(encrypted);
+    const columns = Object.keys(data);
+    const values = Object.values(data);
     const quotedColumns = columns.map(column => `"${assertValidIdentifier(column)}"`).join(', ');
     const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ');
     const result = await db.query(
@@ -749,11 +705,10 @@ app.put('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Il titolo della task e\' obbligatorio' });
     }
     await validateDashboardTaskRelations(data, req);
-    const encrypted = await cryptoWrite(db, 'main', 'tasks', data, taskId);
-    const columns = Object.keys(encrypted);
+    const columns = Object.keys(data);
     if (columns.length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
 
-    const values = Object.values(encrypted);
+    const values = Object.values(data);
     const assignments = columns.map((column, index) =>
       `"${assertValidIdentifier(column)}" = $${index + 1}`
     );
@@ -1230,7 +1185,7 @@ app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth,
       return res.status(400).json({ error: 'Contesto client_id non disponibile' });
     }
 
-    let data = {};
+    const data = {};
     for (const [k, v] of Object.entries(values)) {
       if (tableColumns.has(k) && !generatedColumns.has(k)
           && !['id', 'tenant_id', 'user_id', 'client_id', 'project_id'].includes(k)) {
@@ -1241,8 +1196,6 @@ app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth,
     if (tableColumns.has('user_id')) data.user_id = effectiveUserId;
     if (tableColumns.has('client_id') && clientId) data.client_id = clientId;
     if (tableColumns.has('project_id') && source === 'projects') data.project_id = config.argument;
-
-    data = await cryptoWrite(db, 'main', tableName, data);
 
     const columns = Object.keys(data).map(assertValidIdentifier);
     if (columns.length === 0) return res.status(400).json({ error: 'Nessun dato da inserire' });
@@ -1272,15 +1225,13 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, 
     const ctx = await resolveGridWidgetContext(source, fieldId, req, true);
     const { config, tableName, tableColumns, generatedColumns, effectiveUserId, clientId } = ctx;
 
-    let data = {};
+    const data = {};
     for (const [k, v] of Object.entries(values)) {
       if (tableColumns.has(k) && !generatedColumns.has(k)
           && !['id', 'tenant_id', 'user_id', 'client_id', 'project_id'].includes(k)) {
         data[k] = v === '' ? null : v;
       }
     }
-    data = await cryptoWrite(db, 'main', tableName, data, rowId);
-
     const columns = Object.keys(data).map(assertValidIdentifier);
     if (columns.length === 0) return res.status(400).json({ error: 'Nessun dato da aggiornare' });
 
@@ -1438,7 +1389,7 @@ app.post('/api/projects/gantt-activity/batch', requireAuth, async (req, res) => 
 
       for (const ins of inserts) {
         const tempId = String(ins?.tempId || '').trim();
-        let data = ganttCleanValues(ins?.values);
+        const data = ganttCleanValues(ins?.values);
         if (Object.prototype.hasOwnProperty.call(data, 'dipendenza')) {
           data.dipendenza = resolveDep(data.dipendenza, tempId);
         }
@@ -1446,7 +1397,6 @@ app.post('/api/projects/gantt-activity/batch', requireAuth, async (req, res) => 
         data.user_id = ctx.userId;
         data.client_id = ctx.clientId;
         data.project_id = ctx.projectId;
-        data = await cryptoWrite(client, 'main', GANTT_TABLE, data);
         const columns = Object.keys(data);
         const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
         const quoted = columns.map(c => `"${assertValidIdentifier(c)}"`).join(', ');
@@ -1463,11 +1413,10 @@ app.post('/api/projects/gantt-activity/batch', requireAuth, async (req, res) => 
         if (!rowId) {
           throw Object.assign(new Error('Id da aggiornare non valido'), { statusCode: 400 });
         }
-        let data = ganttCleanValues(upd?.values);
+        const data = ganttCleanValues(upd?.values);
         if (Object.prototype.hasOwnProperty.call(data, 'dipendenza')) {
           data.dipendenza = resolveDep(data.dipendenza, rowId);
         }
-        data = await cryptoWrite(client, 'main', GANTT_TABLE, data, rowId);
         const columns = Object.keys(data);
         if (columns.length === 0) continue;
         const setClause = columns.map((c, i) => `"${assertValidIdentifier(c)}" = $${i + 1}`).join(', ');
@@ -1565,27 +1514,16 @@ app.post('/api/projects/gantt-activity/copy', requireAuth, async (req, res) => {
   }
 });
 
-// Estrae uno o più clientId dalla query string: supporta sia parametri ripetuti
-// (?clientId=a&clientId=b) sia valore singolo con lista separata da virgole
-// (?clientId=a,b). Ritorna sempre un array (vuoto = nessun filtro cliente).
-function parseClientIdsFromQuery(req) {
-  const raw = req.query && req.query.clientId;
-  if (raw === undefined || raw === null || raw === '') return [];
-  const values = Array.isArray(raw) ? raw : String(raw).split(',');
-  return [...new Set(values.map((v) => String(v).trim()).filter(Boolean))];
-}
-
 // KPI Fatturato: legge la vista kpi_fatturazione, filtrata SEMPRE per tenant_id e user_id
-// del login; anno e client_id sono filtri opzionali (client_id assente = tutti i clienti,
-// client_id può essere una lista per la selezione multipla dal filtro cliente).
+// del login; anno e client_id sono filtri opzionali (client_id assente = tutti i clienti).
 app.get('/api/kpi-fatturazione', requireAuth, async (req, res) => {
   try {
     const anno = req.query.anno ? Number(req.query.anno) : null;
-    const clientIds = parseClientIdsFromQuery(req);
+    const clientId = ((req.query && req.query.clientId) || '').trim();
     const conditions = ['tenant_id = $1', 'user_id = $2'];
     const params = [req.user.tenant_id, req.user.user_id];
     if (Number.isFinite(anno)) { params.push(anno); conditions.push(`anno = $${params.length}`); }
-    if (clientIds.length) { params.push(clientIds); conditions.push(`client_id = ANY($${params.length})`); }
+    if (clientId) { params.push(clientId); conditions.push(`client_id = $${params.length}`); }
     const result = await db.query(
       `SELECT tenant_id, client_id, user_id, anno, totale, forecast
        FROM kpi_fatturazione WHERE ${conditions.join(' AND ')}`,
@@ -1616,8 +1554,7 @@ app.get('/api/kpi-fatturazione/years', requireAuth, async (req, res) => {
 // ==========================================
 //
 // Tutti i KPI leggono dalla vista ele_progetti, filtrata SEMPRE per tenant_id
-// e user_id del login; client_id è un filtro opzionale (assente = tutti i clienti,
-// può contenere più valori per la selezione multipla dal filtro cliente).
+// e user_id del login; client_id è un filtro opzionale (assente = tutti i clienti).
 // La "descrizione" del cliente viene risolta da clients.valore2 (argument/campo = 'Cliente'),
 // come già fatto per gli altri endpoint di decodifica (vedi respondDecodedOptions).
 
@@ -1649,12 +1586,12 @@ async function resolveProjectDescriptions(projectIds, tenantId) {
 }
 
 // Costruisce le condizioni base comuni a tutti i KPI progetti: tenant/user del login,
-// client_id opzionale (uno o più valori), e scadenza > oggi (progetto non ancora scaduto).
+// client_id opzionale, e scadenza > oggi (progetto non ancora scaduto).
 function buildKpiProgettiConditions(req) {
-  const clientIds = parseClientIdsFromQuery(req);
+  const clientId = ((req.query && req.query.clientId) || '').trim();
   const conditions = ['tenant_id = $1', 'user_id = $2', 'scadenza IS NOT NULL', 'scadenza > CURRENT_DATE'];
   const params = [req.user.tenant_id, req.user.user_id];
-  if (clientIds.length) { params.push(clientIds); conditions.push(`client_id = ANY($${params.length})`); }
+  if (clientId) { params.push(clientId); conditions.push(`client_id = $${params.length}`); }
   return { conditions, params };
 }
 
@@ -1735,10 +1672,10 @@ app.get('/api/dashboard/kpi/rischi-aperti', requireAuth, async (req, res) => {
 // singolo "tipo" (stesso schema del breakdown per rischio del KPI 3).
 app.get('/api/dashboard/kpi/task-aperti', requireAuth, async (req, res) => {
   try {
-    const clientIds = parseClientIdsFromQuery(req);
+    const clientId = ((req.query && req.query.clientId) || '').trim();
     const conditions = ['tenant_id = $1', 'user_id = $2', 'scadenza IS NOT NULL', 'scadenza > CURRENT_DATE'];
     const params = [req.user.tenant_id, req.user.user_id];
-    if (clientIds.length) { params.push(clientIds); conditions.push(`client_id = ANY($${params.length})`); }
+    if (clientId) { params.push(clientId); conditions.push(`client_id = $${params.length}`); }
     const result = await db.query(
       `SELECT client_id, project_id, tipo, cod_task FROM task_app WHERE ${conditions.join(' AND ')} ORDER BY tipo, client_id`,
       params
@@ -1778,10 +1715,10 @@ app.get('/api/dashboard/kpi/task-aperti', requireAuth, async (req, res) => {
 // (+ client_id opzionale) e scadenza > oggi.
 app.get('/api/dashboard/kpi/quotazioni', requireAuth, async (req, res) => {
   try {
-    const clientIds = parseClientIdsFromQuery(req);
+    const clientId = ((req.query && req.query.clientId) || '').trim();
     const conditions = ['tenant_id = $1', 'user_id = $2', 'scadenza IS NOT NULL', 'scadenza > CURRENT_DATE'];
     const params = [req.user.tenant_id, req.user.user_id];
-    if (clientIds.length) { params.push(clientIds); conditions.push(`client_id = ANY($${params.length})`); }
+    if (clientId) { params.push(clientId); conditions.push(`client_id = $${params.length}`); }
     const result = await db.query(
       `SELECT client_id, project_id, codice, stato FROM cl_quotazioni WHERE ${conditions.join(' AND ')} ORDER BY client_id`,
       params
@@ -1998,9 +1935,6 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
     const generatedColumns = await getGeneratedColumns(tableName, pool, dbKey);
     for (const g of generatedColumns) delete data[g];
 
-    // Cifratura a riposo (dopo le normalizzazioni, prima di comporre la INSERT).
-    data = await cryptoWrite(pool, dbKey, tableName, data);
-
     const columns = Object.keys(data).map(assertValidIdentifier);
     if (columns.length === 0) {
       return res.status(400).json({ error: 'Nessun dato da inserire' });
@@ -2125,9 +2059,6 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
     // Le colonne generate non sono scrivibili: rimuovile dai dati in ingresso.
     const generatedColumns = await getGeneratedColumns(tableName, pool, dbKey);
     for (const g of generatedColumns) delete data[g];
-
-    // Cifratura a riposo: il flag crypto viene letto dalla riga che si sta aggiornando.
-    data = await cryptoWrite(pool, dbKey, tableName, data, id);
 
     const columns = Object.keys(data).map(assertValidIdentifier);
     if (columns.length === 0) {
@@ -2345,9 +2276,6 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
 
           const hasId = data.id !== undefined && data.id !== null && data.id !== '';
           if (!hasId) delete data.id;
-
-          // Cifratura a riposo, coerente con quanto scrive il resto dell'applicazione.
-          data = await cryptoWrite(client, dbKey, tableName, data, hasId ? data.id : null);
 
           const columns = Object.keys(data).map(assertValidIdentifier);
           if (columns.length === 0) {
@@ -2798,7 +2726,7 @@ app.get('/api/clients/names', requireAuth, async (req, res) => {
        ORDER BY valore2`,
       [req.user.tenant_id, req.user.user_id]
     );
-    res.json(sortByName(result.rows)); // [{ id, name, shared }, ...]
+    res.json(result.rows); // [{ id, name, shared }, ...]
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -3003,13 +2931,11 @@ app.post('/api/clients', requireAuth, async (req, res) => {
     await client.query('BEGIN');
 
     // 1) Riga identità del cliente
-    const ins = await insertRowEncrypted(client, 'main', 'clients', {
-      argument: 'Cliente',
-      campo: 'Cliente',
-      valore2: name,
-      tenant_id: req.user.tenant_id,
-      user_id: req.user.user_id
-    });
+    const ins = await client.query(
+      `INSERT INTO clients (argument, campo, valore2, tenant_id, user_id)
+       VALUES ('Cliente', 'Cliente', $1, $2, $3) RETURNING *`,
+      [name, req.user.tenant_id, req.user.user_id]
+    );
     const newClient = ins.rows[0];
 
     // 2) Deep-copy della STRUTTURA (valori vuoti) da un cliente modello, preservando la
@@ -3089,7 +3015,7 @@ app.get('/api/projects/list', requireAuth, async (req, res) => {
       `SELECT id, valore2 AS name, client_id FROM projects WHERE ${where} ORDER BY valore2`,
       params
     );
-    res.json(sortByName(r.rows));
+    res.json(r.rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -3113,14 +3039,11 @@ app.post('/api/projects', requireAuth, async (req, res) => {
   try {
     await client.query('BEGIN');
     // 1) Riga identità del progetto.
-    const ins = await insertRowEncrypted(client, 'main', 'projects', {
-      argument: 'Progetto',
-      campo: 'Progetto',
-      valore2: name,
-      tenant_id: req.user.tenant_id,
-      user_id: req.user.user_id,
-      client_id: clientId
-    });
+    const ins = await client.query(
+      `INSERT INTO projects (argument, campo, valore2, tenant_id, user_id, client_id)
+       VALUES ('Progetto', 'Progetto', $1, $2, $3, $4) RETURNING *`,
+      [name, req.user.tenant_id, req.user.user_id, clientId]
+    );
     const newProject = ins.rows[0];
 
     // 2) Sorgente struttura: progetto modello scelto (stesso tenant+utente) o master PROGETTO_COPIA.
@@ -3319,7 +3242,7 @@ app.get('/api/lookup/clients', requireAuth, async (req, res) => {
       'SELECT id, valore2 AS name FROM ele_clienti WHERE tenant_id = $1 AND user_id = $2 ORDER BY valore2',
       [req.user.tenant_id, req.user.user_id]
     );
-    res.json(sortByName(r.rows));
+    res.json(r.rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -3334,7 +3257,7 @@ app.get('/api/lookup/projects', requireAuth, async (req, res) => {
     let where = 'tenant_id = $1 AND user_id = $2';
     if (clientId) { params.push(clientId); where += ` AND client_id = $${params.length}`; }
     const r = await db.query(`SELECT id, valore2 AS name FROM ele_progetti WHERE ${where} ORDER BY valore2`, params);
-    res.json(sortByName(r.rows));
+    res.json(r.rows);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -4247,7 +4170,7 @@ app.post('/api/:source(settings|clients)/linked-row', requireAuth, async (req, r
     const cols = await getTableColumns(tabella);
     const generated = await getGeneratedColumns(tabella);
     const managedByServer = new Set(['id', 'tenant_id', 'user_id', 'id_cliente', 'created_at', 'updated_at', 'created_by']);
-    let data = {};
+    const data = {};
     for (const [k, v] of Object.entries(values)) {
       if (cols.has(k) && !generated.has(k) && !managedByServer.has(k)) {
         data[k] = v === '' ? null : v;
@@ -4257,8 +4180,6 @@ app.post('/api/:source(settings|clients)/linked-row', requireAuth, async (req, r
     if (cols.has('tenant_id')) data.tenant_id = req.user.tenant_id;
     if (cols.has('user_id')) data.user_id = req.user.user_id;
     if (cols.has('id_cliente') && clientId) data.id_cliente = clientId;
-
-    data = await cryptoWrite(db, 'main', tabella, data);
 
     const columns = Object.keys(data).map(assertValidIdentifier);
     if (columns.length === 0) return res.status(400).json({ error: 'Nessun dato da inserire' });
@@ -4614,34 +4535,10 @@ app.put('/api/:source(settings|clients|projects)/:id/reference-value', requireAu
       }
     }
 
-    // Cifratura a riposo: se la tabella di riferimento ha la colonna crypto e la riga
-    // di contesto è marcata crypto = 1, il valore viene scritto cifrato (a video resta
-    // in chiaro perché la lettura passa dal pool che decifra).
-    let valueToWrite = value === '' ? null : value;
-    if (valueToWrite !== null && valueToWrite !== undefined) {
-      // Stessa condizione di identityWhere ma con i segnaposto a partire da $1.
-      let identityWhereFrom1 = keys.map((k, i) => `"${k.col}" = $${i + 1}`).join(' AND ');
-      if (variab) {
-        identityWhereFrom1 = identityWhereFrom1
-          ? `${identityWhereFrom1} ${variab}`
-          : variab.replace(/^\s*(and|or)\s+/i, '');
-      }
-      try {
-        const cur = await db.query(
-          `SELECT crypto FROM "${tabella}" WHERE ${identityWhereFrom1} LIMIT 1`,
-          keyValues
-        );
-        if (cur.rows.length > 0) {
-          const enc = await cryptoWrite(db, 'main', tabella, { [colonna]: valueToWrite, crypto: cur.rows[0].crypto });
-          valueToWrite = enc[colonna];
-        }
-      } catch (e) { /* tabella senza colonna crypto: si scrive in chiaro */ }
-    }
-
     // Scrive il valore nella tabella di riferimento, sulla riga del login/contesto
     const upd = await db.query(
       `UPDATE "${tabella}" SET "${colonna}" = $1 WHERE ${identityWhere} RETURNING "${colonna}" AS v`,
-      [valueToWrite, ...keyValues]
+      [value === '' ? null : value, ...keyValues]
     );
     if (upd.rows.length === 0) {
       return res.status(404).json({ error: 'Riga di riferimento non trovata' });

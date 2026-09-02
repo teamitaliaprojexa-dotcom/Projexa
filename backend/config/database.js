@@ -1,5 +1,6 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
+import { withDecryption } from './cryptoPool.js';
 
 dotenv.config();
 
@@ -14,9 +15,10 @@ const { Pool } = pg;
 // la data letta dal DB resta esattamente quella salvata.
 pg.types.setTypeParser(1082, (val) => val);
 
-const pool = new Pool({
+// withDecryption: i valori cifrati ("enc:v1:...") tornano in chiaro in lettura.
+const pool = withDecryption(new Pool({
   connectionString: process.env.DATABASE_URL
-});
+}));
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);

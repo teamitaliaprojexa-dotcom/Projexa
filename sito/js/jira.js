@@ -579,6 +579,20 @@
         if (nav) nav.style.display = 'none';
     }
 
+    // Rilegge il flag in settings e mostra/nasconde la voce nella sidebar.
+    // La chiama anche la dashboard dopo il salvataggio delle Impostazioni, così
+    // attivando o disattivando Jira il pulsante compare/sparisce senza ricaricare.
+    async function refreshNav() {
+        const nav = document.getElementById('navJira');
+        if (!nav) return false;
+        const status = await fetchStatus();
+        state.status = status;
+        const enabled = !!(status && status.enabled);
+        nav.style.display = enabled ? '' : 'none';
+        if (!enabled) close();
+        return enabled;
+    }
+
     // ==========================================
     // AVVIO
     // ==========================================
@@ -595,9 +609,7 @@
         });
 
         // La voce di menu compare solo con il flag settings 'Jira' attivo.
-        const status = await fetchStatus();
-        state.status = status;
-        nav.style.display = (status && status.enabled) ? '' : 'none';
+        await refreshNav();
     }
 
     if (document.readyState === 'loading') {
@@ -606,5 +618,5 @@
         init();
     }
 
-    window.ProjexaJira = { open: open, close: close };
+    window.ProjexaJira = { open: open, close: close, refreshNav: refreshNav };
 })();

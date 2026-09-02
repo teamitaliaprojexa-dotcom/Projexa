@@ -1,5 +1,6 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
+import { withDecryption } from './cryptoPool.js';
 
 dotenv.config();
 
@@ -11,9 +12,10 @@ if (!process.env.LICEN_DATABASE_URL) {
   console.warn('⚠️  LICEN_DATABASE_URL non impostata: le funzioni sulle licenze falliranno finché non la configuri.');
 }
 
-const licensePool = new Pool({
+// withDecryption: i valori cifrati ("enc:v1:...") tornano in chiaro in lettura.
+const licensePool = withDecryption(new Pool({
   connectionString: process.env.LICEN_DATABASE_URL
-});
+}));
 
 licensePool.on('error', (err) => {
   console.error('Unexpected error on idle LICENSE client', err);

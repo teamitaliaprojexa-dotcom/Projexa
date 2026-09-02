@@ -1135,111 +1135,6 @@
             color: #10B981;
         }
 
-        /* MULTI-SELECT FILTRI TODO */
-        .todo-multiselect {
-            position: relative;
-        }
-
-        .todo-multiselect-toggle {
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-            padding: 0.5rem 0.75rem;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            font-size: 0.85rem;
-            cursor: pointer;
-            background: white;
-            color: var(--dark);
-            min-width: 150px;
-            justify-content: space-between;
-        }
-
-        .todo-multiselect-toggle:hover {
-            border-color: var(--primary);
-        }
-
-        .todo-multiselect.open .todo-multiselect-toggle {
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-        }
-
-        .todo-multiselect-toggle .chevron {
-            font-size: 0.7rem;
-            color: var(--text-muted);
-            transition: transform 0.2s;
-        }
-
-        .todo-multiselect.open .todo-multiselect-toggle .chevron {
-            transform: rotate(180deg);
-        }
-
-        .todo-multiselect-panel {
-            display: none;
-            position: absolute;
-            top: calc(100% + 6px);
-            left: 0;
-            z-index: 50;
-            min-width: 200px;
-            background: white;
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
-            padding: 0.4rem;
-        }
-
-        .todo-multiselect.open .todo-multiselect-panel {
-            display: block;
-        }
-
-        .todo-multiselect-option {
-            display: flex;
-            align-items: center;
-            gap: 0.55rem;
-            padding: 0.45rem 0.6rem;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.85rem;
-            color: var(--dark);
-            white-space: nowrap;
-        }
-
-        .todo-multiselect-option:hover {
-            background: var(--light);
-        }
-
-        .todo-multiselect-option input[type="checkbox"] {
-            width: 15px;
-            height: 15px;
-            accent-color: var(--primary);
-            cursor: pointer;
-            flex-shrink: 0;
-        }
-
-        .todo-multiselect-divider {
-            height: 1px;
-            background: var(--border);
-            margin: 0.3rem 0.2rem;
-        }
-
-        .todo-multiselect-clear {
-            display: block;
-            width: 100%;
-            text-align: left;
-            padding: 0.4rem 0.6rem;
-            border: none;
-            background: none;
-            color: var(--primary);
-            font-size: 0.8rem;
-            font-weight: 500;
-            cursor: pointer;
-            border-radius: 6px;
-        }
-
-        .todo-multiselect-clear:hover {
-            background: rgba(59, 130, 246, 0.08);
-        }
-
         .todo-section,
         #todoList,
         #todoListContainer {
@@ -2144,16 +2039,9 @@
                     </div>
                     <div style="display: flex; align-items: center; gap: 0.75rem;">
                         <i class="fas fa-building" style="color: var(--text-muted); font-size: 1rem;"></i>
-                        <div class="todo-multiselect" id="clientFilterMS">
-                            <button type="button" class="todo-multiselect-toggle" id="clientFilterToggle" style="min-width: 200px; padding: 0.75rem 1rem; font-size: 0.95rem; font-weight: 500;">
-                                <span id="clientFilterLabel">Tutti i clienti</span>
-                                <span class="chevron">▾</span>
-                            </button>
-                            <div class="todo-multiselect-panel" id="clientFilterPanel">
-                                <div class="todo-multiselect-divider"></div>
-                                <button type="button" class="todo-multiselect-clear" data-clear="client">Deseleziona tutto</button>
-                            </div>
-                        </div>
+                        <select id="clientSelector" style="padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.95rem; cursor: pointer; background: white; color: var(--dark); font-weight: 500;">
+                            <option value="">Tutti i clienti</option>
+                        </select>
                     </div>
                     <button class="btn-icon">
                         <i class="fas fa-bell"></i>
@@ -2263,55 +2151,34 @@
                 <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; align-items: center; flex-wrap: wrap;">
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
                         <label style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Priorità:</label>
-                        <div class="todo-multiselect" id="priorityFilterMS" data-filter="priority">
-                            <button type="button" class="todo-multiselect-toggle" id="priorityFilterToggle">
-                                <span id="priorityFilterLabel">Tutte</span>
-                                <span class="chevron">▾</span>
-                            </button>
-                            <div class="todo-multiselect-panel" id="priorityFilterPanel">
-                                <label class="todo-multiselect-option"><input type="checkbox" value="high"> 🔴 Alta</label>
-                                <label class="todo-multiselect-option"><input type="checkbox" value="medium"> 🟡 Media</label>
-                                <label class="todo-multiselect-option"><input type="checkbox" value="low"> 🟢 Bassa</label>
-                                <div class="todo-multiselect-divider"></div>
-                                <button type="button" class="todo-multiselect-clear" data-clear="priority">Deseleziona tutto</button>
-                            </div>
-                        </div>
+                        <select id="priorityFilter" style="padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; cursor: pointer; background: white; color: var(--dark);">
+                            <option value="">Tutte</option>
+                            <option value="high">🔴 Alta</option>
+                            <option value="medium">🟡 Media</option>
+                            <option value="low">🟢 Bassa</option>
+                        </select>
                     </div>
 
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
                         <label style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Status:</label>
-                        <div class="todo-multiselect" id="statusFilterMS" data-filter="status">
-                            <button type="button" class="todo-multiselect-toggle" id="statusFilterToggle">
-                                <span id="statusFilterLabel">Tutti</span>
-                                <span class="chevron">▾</span>
-                            </button>
-                            <div class="todo-multiselect-panel" id="statusFilterPanel">
-                                <label class="todo-multiselect-option"><input type="checkbox" value="todo"> Da fare</label>
-                                <label class="todo-multiselect-option"><input type="checkbox" value="in_progress"> In corso</label>
-                                <label class="todo-multiselect-option"><input type="checkbox" value="completed"> Completata</label>
-                                <label class="todo-multiselect-option"><input type="checkbox" value="cancelled"> Annullata</label>
-                                <div class="todo-multiselect-divider"></div>
-                                <button type="button" class="todo-multiselect-clear" data-clear="status">Deseleziona tutto</button>
-                            </div>
-                        </div>
+                        <select id="statusFilter" style="padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; cursor: pointer; background: white; color: var(--dark);">
+                            <option value="">Tutti</option>
+                            <option value="todo">Da fare</option>
+                            <option value="in_progress">In corso</option>
+                            <option value="completed">Completata</option>
+                            <option value="cancelled">Annullata</option>
+                        </select>
                     </div>
 
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
                         <label style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Scadenza:</label>
-                        <div class="todo-multiselect" id="dateFilterMS" data-filter="date">
-                            <button type="button" class="todo-multiselect-toggle" id="dateFilterToggle">
-                                <span id="dateFilterLabel">Tutte le date</span>
-                                <span class="chevron">▾</span>
-                            </button>
-                            <div class="todo-multiselect-panel" id="dateFilterPanel">
-                                <label class="todo-multiselect-option"><input type="checkbox" value="today"> Oggi</label>
-                                <label class="todo-multiselect-option"><input type="checkbox" value="week"> Questa settimana</label>
-                                <label class="todo-multiselect-option"><input type="checkbox" value="month"> Questo mese</label>
-                                <label class="todo-multiselect-option"><input type="checkbox" value="overdue"> In ritardo</label>
-                                <div class="todo-multiselect-divider"></div>
-                                <button type="button" class="todo-multiselect-clear" data-clear="date">Deseleziona tutto</button>
-                            </div>
-                        </div>
+                        <select id="dateFilter" style="padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; cursor: pointer; background: white; color: var(--dark);">
+                            <option value="">Tutte le date</option>
+                            <option value="today">Oggi</option>
+                            <option value="week">Questa settimana</option>
+                            <option value="month">Questo mese</option>
+                            <option value="overdue">In ritardo</option>
+                        </select>
                     </div>
 
                     <button id="resetFiltersBtn" style="padding: 0.5rem 0.75rem; background: rgba(107, 114, 128, 0.1); color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; transition: all 0.3s;">
@@ -2791,19 +2658,19 @@
             quotazioni: 'Nessuna quotazione trovata.'
         };
 
-        // Clienti attualmente selezionati nel filtro in alto, sotto forma di id
-        // (il filtro lavora per nome, come già fatto per il KPI Fatturato).
-        // Ritorna sempre un array: vuoto = nessun filtro (tutti i clienti).
-        function getSelectedClientIds() {
-            return currentClientFilter
-                .map(name => dashboardClients.find(c => c.name === name))
-                .filter(client => client && client.id != null)
-                .map(client => client.id);
+        // Cliente attualmente selezionato nella tendina in alto, sotto forma di id
+        // (la tendina lavora per nome, come già fatto per il KPI Fatturato).
+        function getSelectedClientId() {
+            const clientSelector = document.getElementById('clientSelector');
+            const selectedClientName = clientSelector ? clientSelector.value : '';
+            const client = dashboardClients.find(c => c.name === selectedClientName);
+            return client && client.id != null ? client.id : '';
         }
 
         async function fetchKpiProgetti(kpi) {
             const params = new URLSearchParams();
-            getSelectedClientIds().forEach(clientId => params.append('clientId', clientId));
+            const clientId = getSelectedClientId();
+            if (clientId) params.set('clientId', clientId);
             const response = await fetch(`${API_URL}/dashboard/kpi/${KPI_ENDPOINTS[kpi]}?${params.toString()}`, {
                 headers: getAuthHeaders()
             });
@@ -3023,10 +2890,13 @@
         async function loadKpiFatturazione() {
             try {
                 const yearSelector = document.getElementById('yearSelector');
+                const clientSelector = document.getElementById('clientSelector');
+                const selectedClientName = clientSelector ? clientSelector.value : '';
+                const client = dashboardClients.find(c => c.name === selectedClientName);
 
                 const params = new URLSearchParams();
                 if (yearSelector && yearSelector.value && yearSelector.value !== 'all') params.set('anno', yearSelector.value);
-                getSelectedClientIds().forEach(clientId => params.append('clientId', clientId));
+                if (client && client.id != null) params.set('clientId', client.id);
 
                 const response = await fetch(`${API_URL}/kpi-fatturazione?${params.toString()}`, {
                     headers: getAuthHeaders()
@@ -3113,7 +2983,8 @@
         function updateRevenueChart(year) {
             const isAllYears = year === 'all';
             const year_num = parseInt(year, 10);
-            const selectedClients = currentClientFilter; // array di nomi cliente
+            const clientSelector = document.getElementById('clientSelector');
+            const selectedClient = clientSelector ? clientSelector.value : '';
 
             let clients = [];
             let revenues = [];
@@ -3123,7 +2994,7 @@
                 ? getKpiClientAllYearsTotals(clientId)
                 : getKpiClientYearTotals(clientId, year_num);
 
-            if (selectedClients.length === 0) {
+            if (selectedClient === '') {
                 // Tutti i clienti presenti nel filtro clienti, ma solo quelli che hanno
                 // almeno un valore (fatturato o forecast) diverso da zero per l'anno
                 // selezionato (o su tutti gli anni, se "Tutto" è selezionato): i clienti
@@ -3140,18 +3011,13 @@
                 revenues = withData.map(c => c.totale);
                 forecasts = withData.map(c => c.forecast);
             } else {
-                // Uno o più clienti selezionati: vengono mostrati tutti (anche a zero),
-                // così come già avveniva per la selezione singola.
-                const withData = selectedClients.map(name => {
-                    const client = dashboardClients.find(c => c.name === name);
-                    const clientId = client?.id == null ? null : String(client.id);
-                    const totals = getTotals(clientId);
-                    return { name, totale: totals.totale, forecast: totals.forecast };
-                });
+                const client = dashboardClients.find(c => c.name === selectedClient);
+                const clientId = client?.id == null ? null : String(client.id);
+                const totals = getTotals(clientId);
 
-                clients = withData.map(c => c.name);
-                revenues = withData.map(c => c.totale);
-                forecasts = withData.map(c => c.forecast);
+                clients = [selectedClient];
+                revenues = [totals.totale];
+                forecasts = [totals.forecast];
             }
 
             const totalRevenue = revenues.reduce((a, b) => a + b, 0);
@@ -3259,125 +3125,61 @@
             });
         }
 
-        // === CLIENT FILTER (selezione multipla) ===
+        // === CLIENT FILTER ===
         let dashboardClients = [];
-        let multiselectOutsideClickBound = false;
 
-        // Chiude ogni dropdown a selezione multipla aperto (filtri todo + filtro cliente),
-        // eccetto eventualmente quello passato in "except".
-        function closeAllTodoMultiselects(except = null) {
-            document.querySelectorAll('.todo-multiselect.open').forEach(node => {
-                if (node !== except) node.classList.remove('open');
-            });
-        }
-
-        // Collega il comportamento di apertura/chiusura di un dropdown a selezione
-        // multipla generico (riusato sia dai filtri todo sia dal filtro cliente).
-        function initMultiselectToggle(wrapperId, toggleId) {
-            const wrapper = document.getElementById(wrapperId);
-            const toggle = document.getElementById(toggleId);
-            if (!wrapper || !toggle) return;
-            toggle.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const isOpen = wrapper.classList.contains('open');
-                closeAllTodoMultiselects();
-                wrapper.classList.toggle('open', !isOpen);
-            });
-            if (!multiselectOutsideClickBound) {
-                document.addEventListener('click', () => closeAllTodoMultiselects());
-                multiselectOutsideClickBound = true;
-            }
-        }
-
-        function updateClientFilterLabel() {
-            const label = document.getElementById('clientFilterLabel');
-            if (!label) return;
-            if (currentClientFilter.length === 0) {
-                label.textContent = 'Tutti i clienti';
-            } else if (currentClientFilter.length === 1) {
-                label.textContent = currentClientFilter[0];
-            } else {
-                label.textContent = `${currentClientFilter.length} clienti selezionati`;
-            }
-        }
-
-        // Aggancia i listener "change" a tutte le checkbox presenti nel pannello del
-        // filtro cliente (richiamata ogni volta che l'elenco clienti viene rigenerato).
-        function bindClientFilterCheckboxes() {
-            const panel = document.getElementById('clientFilterPanel');
-            if (!panel) return;
-            panel.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-                checkbox.checked = currentClientFilter.includes(checkbox.value);
-                checkbox.addEventListener('change', async () => {
-                    const current = new Set(currentClientFilter);
-                    if (checkbox.checked) current.add(checkbox.value);
-                    else current.delete(checkbox.value);
-                    currentClientFilter = [...current];
-                    await onClientFilterChanged();
-                });
-            });
-        }
-
-        // Rigenera l'elenco clienti disponibili nel pannello del filtro, mantenendo
-        // il pulsante "Deseleziona tutto" e il relativo separatore.
         function syncDashboardClientSelector(clients) {
             dashboardClients = Array.isArray(clients) ? clients : [];
-            const panel = document.getElementById('clientFilterPanel');
-            if (!panel) return;
-
-            panel.querySelectorAll('.todo-multiselect-option').forEach(node => node.remove());
-            const optionsHtml = dashboardClients.map(client =>
-                `<label class="todo-multiselect-option"><input type="checkbox" value="${escapeHtml(client.name)}"> ${escapeHtml(client.name)}</label>`
+            const selector = document.getElementById('clientSelector');
+            if (!selector) return;
+            const previousValue = selector.value;
+            selector.innerHTML = '<option value="">Tutti i clienti</option>' + dashboardClients.map(client =>
+                `<option value="${escapeHtml(client.name)}">${escapeHtml(client.name)}</option>`
             ).join('');
-            panel.insertAdjacentHTML('afterbegin', optionsHtml);
-
-            // Rimuove dalla selezione corrente eventuali clienti non più presenti
-            const validNames = new Set(dashboardClients.map(c => c.name));
-            currentClientFilter = currentClientFilter.filter(name => validNames.has(name));
-
-            bindClientFilterCheckboxes();
-            updateClientFilterLabel();
-        }
-
-        // Azioni da eseguire ogni volta che cambia la selezione del filtro cliente:
-        // aggiorna etichetta, progetti, to-do list e i dati KPI/fatturato dal server.
-        async function onClientFilterChanged() {
-            updateClientFilterLabel();
-            filterProjectsByClient(currentClientFilter);
-            currentTodoPage = 10; // Reset pagina
-            applyFiltersAndRender();
-            const yearSelector = document.getElementById('yearSelector');
-            await loadKpiFatturazione();
-            updateRevenueChart(yearSelector.value);
-            await loadDashboardKpis();
+            if (dashboardClients.some(client => client.name === previousValue)) {
+                selector.value = previousValue;
+            } else {
+                selector.value = '';
+                currentClientFilter = '';
+            }
         }
 
         function initClientFilter() {
-            initMultiselectToggle('clientFilterMS', 'clientFilterToggle');
+            const clientSelector = document.getElementById('clientSelector');
+            
+            if (!clientSelector) return;
 
-            const panel = document.getElementById('clientFilterPanel');
-            const clearBtn = panel?.querySelector('.todo-multiselect-clear');
-            clearBtn?.addEventListener('click', async () => {
-                currentClientFilter = [];
-                bindClientFilterCheckboxes();
-                await onClientFilterChanged();
+            clientSelector.addEventListener('change', async (e) => {
+                const selectedClient = e.target.value;
+                // Filtra i progetti
+                filterProjectsByClient(selectedClient);
+                // Filtra la to-do list
+                currentClientFilter = selectedClient;
+                currentTodoPage = 10; // Reset pagina
+                applyFiltersAndRender();
+                // Aggiorna il grafico KPI: ricarica dal server col nuovo filtro cliente
+                // (tenant_id/user_id restano quelli del contesto, applicati lato server).
+                const yearSelector = document.getElementById('yearSelector');
+                await loadKpiFatturazione();
+                updateRevenueChart(yearSelector.value);
+                await loadDashboardKpis();
             });
         }
 
-        function filterProjectsByClient(selectedClients) {
+        function filterProjectsByClient(client) {
             const projectCards = document.querySelectorAll('.project-card');
-
+            
             projectCards.forEach(card => {
                 const cardClient = card.getAttribute('data-client');
-
-                if (selectedClients.length === 0) {
+                
+                if (client === '') {
                     // Mostra tutti i progetti
                     card.style.display = 'block';
-                } else if (selectedClients.includes(cardClient)) {
-                    // Mostra solo i progetti dei clienti selezionati
+                } else if (cardClient === client) {
+                    // Mostra solo i progetti del cliente selezionato
                     card.style.display = 'block';
                 } else {
-                    // Nascondi i progetti degli altri clienti
+                    // Nascondi i progetti di altri clienti
                     card.style.display = 'none';
                 }
             });
@@ -3385,77 +3187,15 @@
 
         // === TO DO LIST ===
         let currentTodoPage = 10; // Mostra 10 per default
-        // I filtri Priorità, Status e Scadenza supportano selezione multipla:
-        // un array vuoto equivale a "nessun filtro" (tutte le opzioni incluse).
-        let currentPriorityFilter = [];
-        let currentStatusFilter = ['todo', 'in_progress']; // Default: Da fare, In corso
-        let currentDateFilter = [];
-        let currentClientFilter = []; // Selezione multipla: array vuoto = tutti i clienti
+        let currentPriorityFilter = '';
+        let currentStatusFilter = '';
+        let currentDateFilter = '';
+        let currentClientFilter = '';
         let todoData = [];
         let todoColumns = [];
         let todoLoadError = '';
         let editingTodoId = null;
         let descriptionWindow = null;
-
-        // Configurazione dei filtri multi-selezione della To Do List.
-        const TODO_FILTER_CONFIG = {
-            priority: { getState: () => currentPriorityFilter, setState: (v) => { currentPriorityFilter = v; }, allLabel: 'Tutte' },
-            status: { getState: () => currentStatusFilter, setState: (v) => { currentStatusFilter = v; }, allLabel: 'Tutti' },
-            date: { getState: () => currentDateFilter, setState: (v) => { currentDateFilter = v; }, allLabel: 'Tutte le date' }
-        };
-
-        function updateTodoMultiselectLabel(filterKey) {
-            const config = TODO_FILTER_CONFIG[filterKey];
-            const panel = document.getElementById(`${filterKey}FilterPanel`);
-            const label = document.getElementById(`${filterKey}FilterLabel`);
-            if (!config || !panel || !label) return;
-            const selected = config.getState();
-            const checkboxes = panel.querySelectorAll('input[type="checkbox"]');
-            checkboxes.forEach(checkbox => {
-                checkbox.checked = selected.includes(checkbox.value);
-            });
-            if (selected.length === 0) {
-                label.textContent = config.allLabel;
-            } else if (selected.length === 1) {
-                const checkedInput = panel.querySelector(`input[type="checkbox"][value="${CSS.escape(selected[0])}"]`);
-                const optionLabel = checkedInput?.closest('.todo-multiselect-option')?.textContent.trim() || selected[0];
-                label.textContent = optionLabel;
-            } else {
-                label.textContent = `${selected.length} selezionate`;
-            }
-        }
-
-        function initTodoFilterMultiselects() {
-            Object.keys(TODO_FILTER_CONFIG).forEach(filterKey => {
-                const wrapper = document.getElementById(`${filterKey}FilterMS`);
-                const panel = document.getElementById(`${filterKey}FilterPanel`);
-                const clearBtn = panel?.querySelector('.todo-multiselect-clear');
-                if (!wrapper || !panel) return;
-
-                updateTodoMultiselectLabel(filterKey);
-                initMultiselectToggle(`${filterKey}FilterMS`, `${filterKey}FilterToggle`);
-
-                panel.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-                    checkbox.addEventListener('change', () => {
-                        const config = TODO_FILTER_CONFIG[filterKey];
-                        const current = new Set(config.getState());
-                        if (checkbox.checked) current.add(checkbox.value);
-                        else current.delete(checkbox.value);
-                        config.setState([...current]);
-                        updateTodoMultiselectLabel(filterKey);
-                        currentTodoPage = 10; // Reset pagina
-                        applyFiltersAndRender();
-                    });
-                });
-
-                clearBtn?.addEventListener('click', () => {
-                    TODO_FILTER_CONFIG[filterKey].setState([]);
-                    updateTodoMultiselectLabel(filterKey);
-                    currentTodoPage = 10;
-                    applyFiltersAndRender();
-                });
-            });
-        }
 
         function initTodoList() {
             applyFiltersAndRender();
@@ -3478,17 +3218,34 @@
                 renderTodoList(filtered);
             });
 
-            // Listener filtri (multi-selezione)
-            initTodoFilterMultiselects();
+            // Listener filtri
+            document.getElementById('priorityFilter').addEventListener('change', (e) => {
+                currentPriorityFilter = e.target.value;
+                currentTodoPage = 10; // Reset pagina
+                applyFiltersAndRender();
+            });
 
-            // Listener Reset: torna ai valori di default richiesti
-            // (Priorità: Tutte, Status: Da fare/In corso, Scadenza: Tutte le date)
-            document.getElementById('resetFiltersBtn').addEventListener('click', () => {
-                currentPriorityFilter = [];
-                currentStatusFilter = ['todo', 'in_progress'];
-                currentDateFilter = [];
+            document.getElementById('statusFilter').addEventListener('change', (e) => {
+                currentStatusFilter = e.target.value;
                 currentTodoPage = 10;
-                Object.keys(TODO_FILTER_CONFIG).forEach(updateTodoMultiselectLabel);
+                applyFiltersAndRender();
+            });
+
+            document.getElementById('dateFilter').addEventListener('change', (e) => {
+                currentDateFilter = e.target.value;
+                currentTodoPage = 10; // Reset pagina
+                applyFiltersAndRender();
+            });
+
+            // Listener Reset
+            document.getElementById('resetFiltersBtn').addEventListener('click', () => {
+                currentPriorityFilter = '';
+                currentStatusFilter = '';
+                currentDateFilter = '';
+                currentTodoPage = 10;
+                document.getElementById('priorityFilter').value = '';
+                document.getElementById('statusFilter').value = '';
+                document.getElementById('dateFilter').value = '';
                 applyFiltersAndRender();
             });
         }
@@ -3497,47 +3254,43 @@
             let filtered = [...todoData];
 
             // Filtra per cliente
-            if (currentClientFilter.length > 0) {
-                filtered = filtered.filter(t => currentClientFilter.includes(String(t.client_id || '')));
+            if (currentClientFilter) {
+                filtered = filtered.filter(t => String(t.client_id || '') === currentClientFilter);
             }
 
-            // Filtra per priorità (selezione multipla; array vuoto = tutte)
-            if (currentPriorityFilter.length > 0) {
-                filtered = filtered.filter(t => currentPriorityFilter.includes(t.priority));
+            // Filtra per priorità
+            if (currentPriorityFilter) {
+                filtered = filtered.filter(t => t.priority === currentPriorityFilter);
             }
 
-            // Filtra per stato (selezione multipla; array vuoto = tutti)
-            if (currentStatusFilter.length > 0) {
-                filtered = filtered.filter(t => currentStatusFilter.includes(t.status));
+            // Filtra per stato
+            if (currentStatusFilter) {
+                filtered = filtered.filter(t => t.status === currentStatusFilter);
             }
 
-            // Filtra per data (selezione multipla; un task passa se rientra in almeno una delle scadenze selezionate)
-            if (currentDateFilter.length > 0) {
+            // Filtra per data
+            if (currentDateFilter) {
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
-
-                const matchesDateOption = (dueDate, option) => {
-                    if (option === 'today') {
-                        return dueDate.getTime() === today.getTime();
-                    } else if (option === 'week') {
-                        const weekEnd = new Date(today);
-                        weekEnd.setDate(weekEnd.getDate() + 7);
-                        return dueDate >= today && dueDate <= weekEnd;
-                    } else if (option === 'month') {
-                        const monthEnd = new Date(today);
-                        monthEnd.setMonth(monthEnd.getMonth() + 1);
-                        return dueDate >= today && dueDate <= monthEnd;
-                    } else if (option === 'overdue') {
-                        return dueDate < today;
-                    }
-                    return false;
-                };
 
                 filtered = filtered.filter(todo => {
                     if (!todo.due_date) return false;
                     const dueDate = parseTodoDate(todo.due_date);
                     dueDate.setHours(0, 0, 0, 0);
-                    return currentDateFilter.some(option => matchesDateOption(dueDate, option));
+
+                    if (currentDateFilter === 'today') {
+                        return dueDate.getTime() === today.getTime();
+                    } else if (currentDateFilter === 'week') {
+                        const weekEnd = new Date(today);
+                        weekEnd.setDate(weekEnd.getDate() + 7);
+                        return dueDate >= today && dueDate <= weekEnd;
+                    } else if (currentDateFilter === 'month') {
+                        const monthEnd = new Date(today);
+                        monthEnd.setMonth(monthEnd.getMonth() + 1);
+                        return dueDate >= today && dueDate <= monthEnd;
+                    } else if (currentDateFilter === 'overdue') {
+                        return dueDate < today;
+                    }
                 });
             }
 
@@ -3767,7 +3520,7 @@
                 : todoDefaultValue(column);
             const formValue = taskFormValue(column, currentValue);
             const required = column.name === 'titile' ? 'required' : '';
-            const wide = column.type === 'text' || ['description'].includes(column.name);
+            const wide = column.type === 'text' || ['description', 'appo_task_2', 'appo_task_4'].includes(column.name);
             let control;
 
             if (column.name === 'client_id') {

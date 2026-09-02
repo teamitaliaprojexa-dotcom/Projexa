@@ -1,5 +1,6 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
+import { withDecryption } from './cryptoPool.js';
 
 dotenv.config();
 
@@ -11,9 +12,11 @@ if (!process.env.AUTH_DATABASE_URL) {
   console.warn('⚠️  AUTH_DATABASE_URL non impostata: le funzioni di autenticazione falliranno finché non la configuri.');
 }
 
-const authPool = new Pool({
+// withDecryption: i valori cifrati ("enc:v1:...") tornano in chiaro in lettura
+// (es. integr_tok_auth.valore_alfa con i token delle integrazioni).
+const authPool = withDecryption(new Pool({
   connectionString: process.env.AUTH_DATABASE_URL
-});
+}));
 
 authPool.on('error', (err) => {
   console.error('Unexpected error on idle AUTH client', err);
