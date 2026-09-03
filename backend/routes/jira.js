@@ -492,31 +492,38 @@ router.post('/disconnect', requireAuth, async (req, res) => {
 });
 
 // Elenco dei filtri salvati DELL'UTENTE (owner = account collegato).
+// Estratta dalla route perché la usa anche la sincronizzazione delle integrazioni,
+// che deve ritrovare un filtro partendo dal suo nome (jobs/jiraSyncEngine.js).
+async function listFilters(session) {
+  const filters = [];
+
+  if (session.accountId) {
+    let startAt = 0;
+    for (let page = 0; page < 10; page++) {
+      const params = new URLSearchParams({
+        accountId: session.accountId,
+        expand: 'jql',
+        orderBy: 'name',
+        maxResults: '50',
+        startAt: String(startAt)
+      });
+      const data = await jiraApi(session, `/rest/api/3/filter/search?${params.toString()}`);
+      for (const f of data.values || []) filters.push({ id: String(f.id), name: f.name, jql: f.jql || '' });
+      if (data.isLast !== false) break;
+      startAt += (data.values || []).length || 50;
+    }
+  } else {
+    const mine = await jiraApi(session, '/rest/api/3/filter/my?expand=jql');
+    for (const f of mine || []) filters.push({ id: String(f.id), name: f.name, jql: f.jql || '' });
+  }
+
+  return filters;
+}
+
 router.get('/filters', requireAuth, requireJiraEnabled, async (req, res) => {
   try {
     const session = await getJiraSession(req.user.user_id);
-    const filters = [];
-
-    if (session.accountId) {
-      let startAt = 0;
-      for (let page = 0; page < 10; page++) {
-        const params = new URLSearchParams({
-          accountId: session.accountId,
-          expand: 'jql',
-          orderBy: 'name',
-          maxResults: '50',
-          startAt: String(startAt)
-        });
-        const data = await jiraApi(session, `/rest/api/3/filter/search?${params.toString()}`);
-        for (const f of data.values || []) filters.push({ id: String(f.id), name: f.name, jql: f.jql || '' });
-        if (data.isLast !== false) break;
-        startAt += (data.values || []).length || 50;
-      }
-    } else {
-      const mine = await jiraApi(session, '/rest/api/3/filter/my?expand=jql');
-      for (const f of mine || []) filters.push({ id: String(f.id), name: f.name, jql: f.jql || '' });
-    }
-
+    const filters = await listFilters(session);
     res.json({ filters });
   } catch (error) {
     console.error('❌ JIRA_FILTERS:', error.message);
@@ -632,3 +639,8 @@ export default router;
 
 // Esportate per poterle verificare in isolamento (composizione JQL e resa dei valori).
 export { splitOrderBy, jqlOrderField, buildJql, formatValue, issueToRow };
+
+// Esportate per la sincronizzazione delle integrazioni (backend/jobs/*): sono le
+// stesse funzioni usate dalle route, così il job vede Jira esattamente come il
+// pannello a video (stessa sessione, stessi filtri, stessa resa dei valori).
+export { getJiraSession, jiraApi, loadFilter, listFilters, isJiraEnabled, fieldsFromColumns, PAGE_SIZE };

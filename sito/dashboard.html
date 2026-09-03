@@ -707,6 +707,14 @@
             font: inherit;
             font-size: 0.82rem;
         }
+        /* Colonna configurata tra parentesi (es. '(colonna_projexa)'): visibile ma non
+           modificabile. In riga di modifica la cella resta grigia e l'input è disabilitato. */
+        .type11-grid-table tbody tr.type11-editing-row td.type11-locked-cell { background: #F3F4F6; }
+        .type11-grid-table tbody tr.type11-editing-row td.type11-locked-cell .type11-editor-field {
+            background: #F9FAFB;
+            color: var(--text-muted);
+            cursor: not-allowed;
+        }
         .type11-grid-editor {
             margin-top: 0.65rem;
             padding: 0.8rem;
@@ -2157,6 +2165,12 @@
                     </div>
                     <button class="btn-icon">
                         <i class="fas fa-bell"></i>
+                    </button>
+                    <!-- Aggiorna Integrazioni: lancia i programmi di sincronizzazione
+                         (backend/jobs/*). Compare solo con l'integrazione Jira attiva.
+                         Gestito da js/integrazioni.js -->
+                    <button class="btn btn-secondary" id="btnAggiornaIntegrazioni" type="button" style="display: none;">
+                        <i class="fas fa-rotate"></i> Aggiorna Integrazioni
                     </button>
                     <button class="btn btn-primary">
                         <i class="fas fa-plus"></i> Nuovo Progetto
@@ -4791,7 +4805,7 @@
                     window.__fieldTenantScope = 'this-tenant';
                     const next = window.__fieldTenantPending;
                     window.__fieldTenantPending = null;
-                    if (next) openClientScopeModal(next.action);
+                    if (next) openClientScopeModal(next.action, true);
                     return;
                 }
                 const modal = document.getElementById('settingsTenantScopeModal');
@@ -4860,7 +4874,7 @@
                     const next = window.__fieldTenantPending;
                     window.__fieldTenantPending = null;
                     pendingSettingsArg = null;
-                    if (next) openClientScopeModal(next.action);
+                    if (next) openClientScopeModal(next.action, true);
                     return;
                 }
                 if (p.op === 'save-values') {
@@ -4879,7 +4893,10 @@
                     window.__tvfPendingSave = null;
                     if (!pending) return;
                     try {
-                        const values = { ...(pending.values || {}), __scope: scope, __tenantScope: window.__fieldTenantScope || 'this-tenant' };
+                        // Impostazioni: l'ambito tenant è proprio "scope" (this-tenant | all-tenants),
+                        // scelto nel popup appena confermato. Va inviato in entrambi i parametri,
+                        // altrimenti il backend limita la propagazione al tenant del login.
+                        const values = { ...(pending.values || {}), __scope: scope, __tenantScope: scope };
                         const res = await fetch(pending.url, {
                             method: pending.method || 'PUT',
                             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -6404,17 +6421,26 @@
 
         // tipo_valore = 11: normalizza l'elenco configurato nel campo "colonna".
         // Sono supportati array JSON, nomi separati da virgola o da punto e virgola.
+        // Un nome racchiuso tra parentesi — es. '(colonna_projexa),colonna_jira' — resta
+        // visibile in griglia come le altre, ma non è modificabile: le parentesi sono solo
+        // un marcatore di configurazione e vengono rimosse dal nome della colonna.
         function parseType11Columns(value) {
-            if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
-            const raw = String(value == null ? '' : value).trim();
-            if (!raw) return [];
-            if (raw.startsWith('[')) {
-                try {
-                    const parsed = JSON.parse(raw);
-                    if (Array.isArray(parsed)) return parsed.map(v => String(v).trim()).filter(Boolean);
-                } catch (e) { /* usa il formato separato */ }
-            }
-            return raw.split(/[;,]/).map(v => v.trim()).filter(Boolean);
+            const tokens = Array.isArray(value)
+                ? value.map(v => String(v))
+                : (() => {
+                    const raw = String(value == null ? '' : value).trim();
+                    if (!raw) return [];
+                    if (raw.startsWith('[')) {
+                        try {
+                            const parsed = JSON.parse(raw);
+                            if (Array.isArray(parsed)) return parsed.map(v => String(v));
+                        } catch (e) { /* usa il formato separato */ }
+                    }
+                    return raw.split(/[;,]/);
+                })();
+            return tokens
+                .map(v => String(v).trim().replace(/^\((.*)\)$/, '$1').trim())
+                .filter(Boolean);
         }
 
         function type11CellValue(record, column) {
@@ -6551,13 +6577,18 @@
         // per la creazione/lettura), con i metadati (tipo, FK, generata) per costruire gli
         // input inline nella tabella. visibleColumnNames = elenco nomi già filtrato (gg/hh,
         // a-consuntivo, ecc.) così l'editor mostra ESATTAMENTE le colonne visibili in griglia.
-        async function type11VisibleColumnsMeta(widget, visibleColumnNames) {
+        // lockedColumns = nomi delle colonne configurate tra parentesi (sola lettura):
+        // il metadato arriva già dal backend, ma viene riapplicato qui perché la griglia
+        // e l'elenco colonne sono due chiamate distinte.
+        async function type11VisibleColumnsMeta(widget, visibleColumnNames, lockedColumns) {
             const columns = await type11GridColumns(widget);
             const hidden = new Set(['id','tenant_id','user_id','client_id','project_id','scadenza','id_roles','id_roles_write']);
+            const locked = lockedColumns || new Set();
             const metaByName = new Map(columns.map(c => [c.name, c]));
             return visibleColumnNames
                 .map(name => metaByName.get(name))
-                .filter(c => c && !hidden.has(c.name));
+                .filter(c => c && !hidden.has(c.name))
+                .map(c => (c.locked || locked.has(c.name)) ? { ...c, locked: true } : c);
         }
 
         // Costruisce le celle <td> con gli input per una riga in modifica/inserimento inline,
@@ -6568,8 +6599,13 @@
                 // Per le colonne FK il valore grezzo (id reale) arriva in "__raw_<colonna>":
                 // usarlo evita di riscrivere l'etichetta leggibile in una colonna uuid.
                 const value = isNew ? '' : type11GridRawValue(record, col.name);
-                const readonly = !!col.generated;
-                html += `<td>${await type11GridInputHtml(col, value, readonly, source, fieldId)}</td>`;
+                // Non modificabili: colonne generate dal DB e colonne configurate tra
+                // parentesi. Gli input disabilitati non vengono nemmeno inviati al salvataggio.
+                const readonly = !!col.generated || !!col.locked;
+                const cellAttrs = col.locked
+                    ? ' class="type11-locked-cell" title="Colonna non modificabile"'
+                    : '';
+                html += `<td${cellAttrs}>${await type11GridInputHtml(col, value, readonly, source, fieldId)}</td>`;
             }
             return html;
         }
@@ -6644,6 +6680,12 @@
                 // il flyout è in modalità "Abilita modifica".
                 const isView = !!payload.isView;
                 const editing = clientDetailMode === 'edit' && !isView;
+                // Colonne configurate tra parentesi (es. colonna = '(colonna_projexa),colonna_jira'):
+                // visibili come tutte le altre ma non modificabili. Quando ce n'è almeno una la
+                // griglia è "a sola modifica": resta il pulsante Modifica, niente Nuova riga né
+                // Elimina. Senza parentesi il comportamento è quello di sempre.
+                const lockedColumns = new Set(Array.isArray(payload.lockedColumns) ? payload.lockedColumns : []);
+                const editOnly = !!payload.editOnly;
                 // Tipo 13: identico al tipo 11 in visualizzazione, ma in modifica mostra
                 // solo il pulsante "Modifica" che apre la pagina Gantt (gantt.html).
                 const isGantt13 = Number(widget.dataset.gridTipo) === 13;
@@ -6661,9 +6703,9 @@
                     <button type="button" class="type13-open-gantt primary">Modifica</button>
                 </div>` : `<div class="type11-grid-toolbar">
                     <span class="type11-grid-selection" style="color:var(--text-muted); font-size:0.8rem; flex:1;">Seleziona una riga</span>
-                    <button type="button" class="type11-grid-add primary">+ Nuova riga</button>
-                    <button type="button" class="type11-grid-edit" disabled>Modifica</button>
-                    <button type="button" class="type11-grid-delete danger" disabled>Elimina</button>
+                    ${editOnly ? '' : '<button type="button" class="type11-grid-add primary">+ Nuova riga</button>'}
+                    <button type="button" class="type11-grid-edit${editOnly ? ' primary' : ''}" disabled>Modifica</button>
+                    ${editOnly ? '' : '<button type="button" class="type11-grid-delete danger" disabled>Elimina</button>'}
                     <button type="button" class="type11-grid-save-inline primary" style="display:none;">Salva</button>
                     <button type="button" class="type11-grid-cancel-inline" style="display:none;">Annulla</button>
                 </div>`);
@@ -6705,7 +6747,7 @@
                 } else if (editing) {
                     // Colonne/metadati con cui costruire gli input inline: esattamente le stesse
                     // colonne (e lo stesso ordine) già mostrate in visualizzazione nella griglia.
-                    const orderedMeta = await type11VisibleColumnsMeta(widget, visibleColumns);
+                    const orderedMeta = await type11VisibleColumnsMeta(widget, visibleColumns, lockedColumns);
                     const addBtn = widget.querySelector('.type11-grid-add');
                     const saveBtn = widget.querySelector('.type11-grid-save-inline');
                     const cancelBtn = widget.querySelector('.type11-grid-cancel-inline');
@@ -7018,6 +7060,15 @@
             if (!listEl) return;
             const dirty = listEl.querySelectorAll('[data-setting-id][data-dirty="1"]');
             let allOk = true;
+            // Ambito tenant da inviare al backend. Per le Impostazioni è direttamente "scope"
+            // ('this-tenant' | 'all-tenants'); per Clienti/Progetti "scope" è l'ambito
+            // contenitore ('this' | 'all') e il tenant arriva dal popup precedente.
+            const tenantScopeParam = (currentDetailSource === 'settings')
+                ? (scope || 'this-tenant')
+                : (window.__fieldTenantScope || 'this-tenant');
+            // Consumato subito: se restasse valorizzato, il salvataggio successivo non
+            // chiederebbe più l'ambito e riapplicherebbe quello di questa operazione.
+            window.__fieldTenantScope = null;
 
             for (const inp of dirty) {
                 const id = inp.dataset.settingId;
@@ -7027,7 +7078,7 @@
                         const res = await fetch(`${API_URL}/${currentDetailSource}/${id}/reference-value`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                            body: JSON.stringify({ value: inp.value, ...(scope ? { __scope: scope } : {}), ...(window.__fieldTenantScope ? { __tenantScope: window.__fieldTenantScope } : {}) })
+                            body: JSON.stringify({ value: inp.value, ...(scope ? { __scope: scope, __tenantScope: tenantScopeParam } : {}) })
                         });
                         if (res.status === 409) {
                             allOk = false;
@@ -7052,7 +7103,7 @@
                         const res = await fetch(`${API_URL}/data/${currentDetailSource}/${id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                            body: JSON.stringify({ [field]: value, ...(scope ? { __scope: scope } : {}), ...(window.__fieldTenantScope ? { __tenantScope: window.__fieldTenantScope } : {}) })
+                            body: JSON.stringify({ [field]: value, ...(scope ? { __scope: scope, __tenantScope: tenantScopeParam } : {}) })
                         });
                         if (!res.ok) {
                             allOk = false;
@@ -7107,7 +7158,7 @@
                         const res = await fetch(`${API_URL}/${currentDetailSource}/reorder-fields`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                            body: JSON.stringify({ argument: currentDetailArgument, scope, tenantScope: window.__fieldTenantScope || 'this-tenant', items })
+                            body: JSON.stringify({ argument: currentDetailArgument, scope, tenantScope: tenantScopeParam, items })
                         });
                         if (res.ok) {
                             detailLayoutDirty = false;
@@ -7148,7 +7199,6 @@
                 try { window.ProjexaJira?.refreshNav(); } catch (e) {}
                 // Dopo il salvataggio (valori e/o spostamento label) "Abilita modifica" torna spento.
                 clientDetailMode = 'view';
-                window.__fieldTenantScope = null; // evita che resti valorizzato per il prossimo salvataggio
                 await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
             }
         }
@@ -7993,24 +8043,34 @@
 
         // Popup scelta ambito (tutti i clienti/progetti / solo questo) — condiviso da
         // aggiungi/elimina/rinomina/salva modifiche, per i source 'clients' e 'projects'.
-        function openClientScopeModal(action) {
+        // tenantScopeResolved = true solo quando la chiamata arriva dal popup Tenant appena
+        // confermato (secondo passo dello stesso flusso). Senza questo flag l'ambito tenant
+        // viene SEMPRE richiesto di nuovo: prima si usava window.__fieldTenantScope, che però
+        // resta valorizzato dopo un'operazione precedente e faceva saltare il popup
+        // applicando in silenzio l'ambito scelto per un'altra operazione.
+        function openClientScopeModal(action, tenantScopeResolved) {
             clientScopeAction = action;
+            const isAdminScope = Number(decodeJwtPayload().id_roles) === 1;
 
-            // Admin: prima scelta dell'ambito Tenant; solo dopo viene chiesto
-            // l'ambito Cliente/Progetto.
-            if (Number(decodeJwtPayload().id_roles) === 1 && !window.__fieldTenantScope) {
-                window.__fieldTenantPending = { source: currentDetailSource, action };
-                openSettingsTenantScope({
-                    op: 'field-tenant-scope',
-                    source: currentDetailSource,
-                    action
-                });
-                return;
+            if (!tenantScopeResolved) {
+                window.__fieldTenantScope = null; // nuovo flusso: nessun ambito ereditato
+                // Admin: prima scelta dell'ambito Tenant; solo dopo viene chiesto
+                // l'ambito Cliente/Progetto.
+                if (isAdminScope) {
+                    window.__fieldTenantPending = { source: currentDetailSource, action };
+                    openSettingsTenantScope({
+                        op: 'field-tenant-scope',
+                        source: currentDetailSource,
+                        action
+                    });
+                    return;
+                }
+                window.__fieldTenantScope = 'this-tenant';
             }
 
             // I ruoli diversi da 1 non vedono la scelta Tenant né quella globale
             // Cliente/Progetto.
-            if (Number(decodeJwtPayload().id_roles) !== 1) {
+            if (!isAdminScope) {
                 dispatchClientScope('this');
                 return;
             }
@@ -8101,11 +8161,18 @@
                 id_roles = (rolesSel && rolesSel.value !== '') ? rolesSel.value : null;
             }
 
+            // L'ambito tenant vale solo per questa operazione: si consuma subito, così il
+            // prossimo salvataggio torna a chiederlo invece di ereditarlo in silenzio.
+            const tenantScopeParam = (source === 'settings')
+                ? (scope === 'all-tenants' ? 'all-tenants' : 'this-tenant')
+                : (window.__fieldTenantScope || 'this-tenant');
+            window.__fieldTenantScope = null;
+
             try {
                 const res = await fetch(`${API_URL}/${source}/field`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ clientId: currentDetailArgument, projClientId: (source === 'projects' ? projectClientId : undefined), campo, tipo_valore, tabella, colonna, VariabDB, valore2, scope, tenantScope: window.__fieldTenantScope || 'this-tenant', containerCampo: currentContainerCampo, kind: pendingFieldKind, id_roles })
+                    body: JSON.stringify({ clientId: currentDetailArgument, projClientId: (source === 'projects' ? projectClientId : undefined), campo, tipo_valore, tabella, colonna, VariabDB, valore2, scope, tenantScope: tenantScopeParam, containerCampo: currentContainerCampo, kind: pendingFieldKind, id_roles })
                 });
                 if (res.ok) {
                     showNotification('Campo aggiunto', 'success');
@@ -8142,8 +8209,12 @@
             const pending = window.__tvfPendingSave;
             window.__tvfPendingSave = null;
             if (!pending) return;
+            // Senza __tenantScope il backend limitava la propagazione al tenant del login,
+            // anche dopo aver scelto "Tutti i tenant" nel popup precedente.
+            const tenantScopeParam = window.__fieldTenantScope || 'this-tenant';
+            window.__fieldTenantScope = null;
             try {
-                const values = { ...(pending.values || {}), __scope: scope };
+                const values = { ...(pending.values || {}), __scope: scope, __tenantScope: tenantScopeParam };
                 const res = await fetch(pending.url, {
                     method: pending.method || 'PUT',
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -8152,7 +8223,6 @@
                 if (res.ok) {
                     showNotification('Modifica salvata', 'success');
                     clientDetailMode = 'view';
-                    window.__fieldTenantScope = null;
                     await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
                 } else {
                     const err = await res.json().catch(() => ({}));
@@ -8171,17 +8241,19 @@
             if (!listEl) return;
             const campos = Array.from(listEl.querySelectorAll('.field-del-check:checked')).map(c => c.dataset.campo);
             if (campos.length === 0) return;
+            // L'ambito tenant si consuma qui: vale solo per questa eliminazione.
+            const tenantScopeParam = window.__fieldTenantScope || 'this-tenant';
+            window.__fieldTenantScope = null;
             try {
                 const res = await fetch(`${API_URL}/${currentDetailSource}/delete-fields`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ campos, scope, tenantScope: window.__fieldTenantScope || 'this-tenant', clientId: currentDetailArgument })
+                    body: JSON.stringify({ campos, scope, tenantScope: tenantScopeParam, clientId: currentDetailArgument })
                 });
                 if (res.ok) {
                     const data = await res.json().catch(() => ({}));
                     showNotification(`Eliminati ${data.deleted ?? 0} campi`, 'success');
                     clientDetailMode = 'edit';
-                    window.__fieldTenantScope = null;
                     await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
                 } else {
                     const err = await res.json().catch(() => ({}));
@@ -8202,17 +8274,22 @@
                 await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
                 return;
             }
+            // L'ambito tenant si consuma qui: vale solo per questa rinomina.
+            // Per le Impostazioni è "scope" stesso ('this-tenant' | 'all-tenants').
+            const tenantScopeParam = (currentDetailSource === 'settings')
+                ? (scope === 'all-tenants' ? 'all-tenants' : 'this-tenant')
+                : (window.__fieldTenantScope || 'this-tenant');
+            window.__fieldTenantScope = null;
             try {
                 const res = await fetch(`${API_URL}/${currentDetailSource}/rename-fields`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ renames, scope, tenantScope: window.__fieldTenantScope || 'this-tenant', clientId: currentDetailArgument })
+                    body: JSON.stringify({ renames, scope, tenantScope: tenantScopeParam, clientId: currentDetailArgument })
                 });
                 if (res.ok) {
                     const data = await res.json().catch(() => ({}));
                     showNotification(`Rinominati ${data.updated ?? 0} campi`, 'success');
                     clientDetailMode = 'view'; // dopo il salvataggio "Abilita modifica" torna spento
-                    window.__fieldTenantScope = null;
                     await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
                 } else {
                     const err = await res.json().catch(() => ({}));
@@ -8489,6 +8566,7 @@
     </div>
     <script src="js/privacy.js"></script>
     <script src="js/jira.js"></script>
+    <script src="js/integrazioni.js"></script>
 <script>
 (function () {
     const colorClasses = [

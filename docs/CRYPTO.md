@@ -43,11 +43,32 @@ migrazione, non dopo.
      poiché la cifratura è randomizzata, cifrandole le righe non si troverebbero
      più (login compreso). L'elenco completo è in `backend/config/crypto.js`.
    - le colonne generate (`GENERATED ALWAYS`), che Postgres non permette di
-     scrivere (es. `contacts.nominativo`).
+     scrivere (es. `contacts.nominativo`) — vedi sotto.
 4. Elenco chiuso per tabella:
    - **clients** → solo `valore2` e `valore3`
    - **projects** → solo `valore2`
 5. Tutte le altre tabelle: ogni colonna testuale che supera il punto 3.
+
+### Colonne calcolate (contacts.nominativo)
+
+`contacts.nominativo` è una colonna **calcolata da Postgres**: concatena `nome` e
+`cognome`. Quando quelle due colonne sono cifrate, il database ricalcola
+`nominativo` concatenando i due testi cifrati, quindi sul DB si legge
+`enc:v1:… enc:v1:…`.
+
+L'applicazione lo mostra comunque in chiaro: in lettura ogni blocco `enc:v1:…`
+dentro la stringa viene decifrato singolarmente (`decryptEmbedded` in
+`crypto.js`), così `nominativo` torna "Mario Rossi". Vale per qualsiasi colonna
+calcolata o espressione SQL che concateni colonne cifrate.
+
+Due note pratiche:
+
+- La colonna calcolata **non** viene cifrata né decifrata dalla migrazione: è
+  Postgres a ricalcolarla da solo. Dopo "Decripta" torna leggibile anche sul DB.
+- Un valore cifrato è più lungo dell'originale (circa 50 caratteri fissi più un
+  terzo in più del testo). `nominativo` è `varchar(511)`: regge nomi + cognomi
+  fino a circa 150 caratteri ciascuno, ben oltre l'uso reale, ma se un giorno
+  quel limite venisse superato il salvataggio darebbe errore.
 
 ### clients.valore3
 

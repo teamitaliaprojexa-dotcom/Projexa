@@ -14,6 +14,7 @@ import tableStructuresRoutes from './routes/table-structures.js';
 import calendarRoutes from './routes/calendar.js';
 import jiraRoutes from './routes/jira.js';
 import cryptoMigrationRoutes from './routes/crypto-migration.js';
+import integrazioniRoutes from './routes/integrazioni.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
 import { encryptRowForWrite } from './config/crypto.js';
@@ -98,6 +99,8 @@ app.use('/api/auth', microsoftOAuthRoutes);
 app.use('/api/table-structures', requireAuth, tableStructuresRoutes);
 app.use('/api/calendar', calendarRoutes);
 app.use('/api/jira', jiraRoutes);
+// Pulsante «Aggiorna Integrazioni» della dashboard -> programmi in backend/jobs/.
+app.use('/api/integrazioni', integrazioniRoutes);
 // Migrazione Crypto (database-viewer): riservata agli amministratori.
 app.use('/api/crypto', requireAuth, requireAdmin, cryptoMigrationRoutes);
 
@@ -800,6 +803,40 @@ function splitVariabDbClause(raw) {
   return { condition: text.slice(0, cut).trim(), orderBy: text.slice(cut).trim() };
 }
 
+// Elenco colonne della griglia (tipo_valore = 11 e 13), configurato nel campo "colonna".
+// Sono supportati array JSON e nomi separati da virgola o punto e virgola.
+// Un nome racchiuso tra parentesi indica una colonna in SOLA LETTURA: resta visibile in
+// griglia esattamente come le altre, ma il suo contenuto non è modificabile (tipicamente
+// perché governato da un'origine esterna, es. una sincronizzazione).
+// Esempio: colonna = '(colonna_projexa),colonna_jira' -> entrambe visibili, solo
+// colonna_jira modificabile.
+// La presenza di almeno una colonna tra parentesi rende la griglia "a sola modifica":
+// resta il pulsante Modifica, mentre Nuova riga ed Elimina non vengono proposti (le righe
+// nascono e muoiono nell'origine dei dati, non qui). Senza parentesi nulla cambia.
+function parseGridColumnsSpec(rawColonna) {
+  const raw = String(rawColonna || '').trim();
+  let tokens = [];
+  if (raw.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) tokens = parsed.map(String);
+    } catch (e) { /* usa il formato separato */ }
+  }
+  if (tokens.length === 0) tokens = raw.split(/[;,]/);
+  const columns = [];
+  const locked = new Set();
+  for (const token of tokens) {
+    const text = String(token).trim();
+    if (!text) continue;
+    const wrapped = /^\((.*)\)$/.exec(text);
+    const name = (wrapped ? wrapped[1] : text).trim();
+    if (!name) continue;
+    if (!columns.includes(name)) columns.push(name);
+    if (wrapped) locked.add(name);
+  }
+  return { columns, locked, editOnly: locked.size > 0 };
+}
+
 // Widget griglia (tipo_valore = 11 e 13: il 13 è identico in visualizzazione,
 // cambia solo la modalità di modifica, che avviene nella pagina gantt.html).
 // La configurazione della tabella e delle colonne viene letta dalla riga EAV del
@@ -839,16 +876,9 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     }
 
     const tableName = assertValidIdentifier(String(config.tabella || '').trim());
-    let selectedColumns = [];
-    const rawColumns = String(config.colonna || '').trim();
-    if (rawColumns.startsWith('[')) {
-      try {
-        const parsed = JSON.parse(rawColumns);
-        if (Array.isArray(parsed)) selectedColumns = parsed;
-      } catch (e) { /* usa il formato separato */ }
-    }
-    if (selectedColumns.length === 0) selectedColumns = rawColumns.split(/[;,]/);
-    selectedColumns = [...new Set(selectedColumns.map(c => String(c).trim()).filter(Boolean))];
+    // Le colonne tra parentesi restano visibili ma non modificabili (vedi parseGridColumnsSpec).
+    const columnsSpec = parseGridColumnsSpec(config.colonna);
+    let selectedColumns = columnsSpec.columns;
     if (selectedColumns.length === 0) {
       return res.status(400).json({ error: 'Nessuna colonna configurata' });
     }
@@ -922,7 +952,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       );
 
       if (selectedColumns.length === 0) {
-        return res.json({ rows: [], columns: [] });
+        return res.json({ rows: [], columns: [], lockedColumns: [], editOnly: columnsSpec.editOnly });
       }
     }
 
@@ -1035,7 +1065,15 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     // Formato oggetto uniforme per tutte le sorgenti: righe, colonne effettivamente
     // visibili (dopo l'eventuale filtro HH/GG per i progetti) e se la tabella è una view
     // (sola lettura, il frontend nasconde Nuova riga/Modifica/Elimina in quel caso).
-    res.json({ rows: result.rows, columns: selectedColumns, isView });
+    // lockedColumns = colonne configurate tra parentesi: visibili ma non modificabili.
+    // editOnly = c'è almeno una colonna tra parentesi -> la griglia offre solo Modifica.
+    res.json({
+      rows: result.rows,
+      columns: selectedColumns,
+      isView,
+      lockedColumns: selectedColumns.filter(c => columnsSpec.locked.has(c)),
+      editOnly: columnsSpec.editOnly
+    });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -1091,7 +1129,16 @@ async function resolveGridWidgetContext(source, fieldId, req, needWrite) {
     clientId = root ? String(root.clientId) : '';
   }
 
-  return { config, tableName, tableColumns, generatedColumns, effectiveUserId, clientId };
+  // Colonne configurate tra parentesi: in sola lettura. Se ce n'è almeno una la griglia
+  // è "a sola modifica" (niente inserimento né eliminazione). Il vincolo è applicato qui,
+  // lato server, non solo nascondendo i pulsanti nel browser.
+  const columnsSpec = parseGridColumnsSpec(config.colonna);
+
+  return {
+    config, tableName, tableColumns, generatedColumns, effectiveUserId, clientId,
+    lockedColumns: columnsSpec.locked,
+    editOnly: columnsSpec.editOnly
+  };
 }
 
 // Metadati delle colonne per il widget griglia (tipo_valore = 11): nome, se generata,
@@ -1103,7 +1150,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget/columns', requireAu
   try {
     const source = req.params.source;
     const fieldId = ((req.query && req.query.fieldId) || '').trim();
-    const { tableName } = await resolveGridWidgetContext(source, fieldId, req, false);
+    const { tableName, lockedColumns } = await resolveGridWidgetContext(source, fieldId, req, false);
 
     const result = await db.query(
       `SELECT column_name, is_generated, data_type FROM information_schema.columns
@@ -1134,6 +1181,9 @@ app.get('/api/:source(settings|clients|projects)/grid-widget/columns', requireAu
       name: r.column_name,
       generated: r.is_generated === 'ALWAYS',
       type: r.data_type,
+      // locked = colonna configurata tra parentesi in "colonna": visibile ma non
+      // modificabile, quindi il form inline la mostra disabilitata come le generate.
+      locked: lockedColumns.has(r.column_name),
       references: fkMap[r.column_name] || null,
       referencesColumn: fkColMap[r.column_name] || null
     })));
@@ -1224,6 +1274,10 @@ app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth,
 
     const ctx = await resolveGridWidgetContext(source, fieldId, req, true);
     const { config, tableName, tableColumns, generatedColumns, effectiveUserId, clientId } = ctx;
+    // Griglia con colonne tra parentesi: solo modifica delle righe esistenti.
+    if (ctx.editOnly) {
+      return res.status(403).json({ error: 'Griglia in sola modifica: inserimento non consentito' });
+    }
     // Il cliente serve solo dove il contesto lo prevede (Clienti/Progetti) e la tabella
     // ha la colonna: una griglia sotto le Impostazioni non è legata a un cliente.
     if (tableColumns.has('client_id') && !clientId && source !== 'settings') {
@@ -1274,7 +1328,9 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, 
 
     let data = {};
     for (const [k, v] of Object.entries(values)) {
-      if (tableColumns.has(k) && !generatedColumns.has(k)
+      // Le colonne tra parentesi sono in sola lettura: scartate come le generate,
+      // anche se il browser le inviasse comunque.
+      if (tableColumns.has(k) && !generatedColumns.has(k) && !ctx.lockedColumns.has(k)
           && !['id', 'tenant_id', 'user_id', 'client_id', 'project_id'].includes(k)) {
         data[k] = v === '' ? null : v;
       }
@@ -1315,6 +1371,10 @@ app.delete('/api/:source(settings|clients|projects)/grid-widget/row', requireAut
 
     const ctx = await resolveGridWidgetContext(source, fieldId, req, true);
     const { config, tableName, tableColumns, effectiveUserId, clientId } = ctx;
+    // Griglia con colonne tra parentesi: solo modifica delle righe esistenti.
+    if (ctx.editOnly) {
+      return res.status(403).json({ error: 'Griglia in sola modifica: eliminazione non consentita' });
+    }
 
     const conditions = ['id = $1'];
     const paramsArr = [rowId];
@@ -2158,11 +2218,14 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
     // Propagazione della modifica del campo.
     // - Clienti/Progetti: scope='all' = tutti i contenitori del tenant/utente,
     //   scope='this' = solo il contenitore selezionato. È la stessa semantica di Elimina.
-    // - Settings: scope='all-tenants' resta riservato all'admin e propaga a tutti i tenant;
-    //   scope='this-tenant' limita al tenant corrente.
+    // - Settings: 'all-tenants' resta riservato all'admin e propaga a tutti i tenant,
+    //   'this-tenant' limita al tenant corrente. L'ambito arriva in due dialetti
+    //   equivalenti (__scope, usato dai popup settings, oppure __tenantScope).
+    const settingsAllTenants = tableName === 'settings' && admin
+      && (scope === 'all-tenants' || tenantScope === 'all-tenants');
     const shouldPropagateField = ['clients', 'projects'].includes(tableName)
       ? (scope === 'all' || tenantScope === 'all-tenants')
-      : tableName === 'settings' && scope === 'all-tenants' && admin;
+      : settingsAllTenants;
     if (shouldPropagateField && originalFieldRow && originalFieldRow.campo != null) {
       try {
         // Propaghiamo anche 'campo' (rinomina) e tutti gli altri valori editati,
@@ -2173,7 +2236,8 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
           const pParams = propagateCols.map(c => data[c]);
           let where = `campo = $${propagateCols.length + 1} AND id <> $${propagateCols.length + 2}`;
           pParams.push(originalFieldRow.campo, savedRow.id);
-          if (tenantScope === 'all-tenants' && admin && ['clients','projects'].includes(tableName)) {
+          const allTenants = settingsAllTenants || (tenantScope === 'all-tenants' && admin);
+          if (allTenants && ['clients', 'projects'].includes(tableName)) {
             // Per all-tenants il contenitore viene individuato logicamente tramite
             // la riga identità (campo Cliente/Progetto + valore2), non tramite UUID.
             if (scope === 'this' && originalFieldRow.containerValue != null) {
@@ -2182,6 +2246,10 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
               pParams.push(originalFieldRow.containerValue);
             }
             // scope='all' non aggiunge filtro tenant/user: tutti i tenant.
+          } else if (allTenants) {
+            // Impostazioni su tutti i tenant: nessun filtro tenant/utente. La riga
+            // resta individuata da campo + argument (il filtro argument è aggiunto
+            // subito sotto), quindi la modifica raggiunge lo stesso campo in ogni tenant.
           } else {
             if (tableColumns.has('tenant_id')) {
               pParams.push(req.user.tenant_id);
@@ -2198,7 +2266,11 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
           }
           await pool.query(`UPDATE "${tableName}" SET ${setClause} WHERE ${where}`, pParams);
         }
-      } catch (e) { /* la propagazione non deve far fallire il salvataggio principale */ }
+      } catch (e) {
+        // La propagazione non deve far fallire il salvataggio principale, ma un errore
+        // silenzioso rendeva indistinguibile "applicato a tutti" da "applicato solo qui".
+        console.error('[propagazione campo]', tableName, e.message);
+      }
     }
 
     // Fattore di scala schermo (tipo_valore=30, valore2='schermo'): esiste una riga
@@ -3743,34 +3815,87 @@ app.post('/api/:source(settings|clients|projects)/rename-fields', requireAuth, a
   }
 });
 
-// Riordino/spostamento campi (drag&drop): aggiorna ordinamento + layout_col per campo.
-// items = [{ campo, ordinamento, layout_col }, ...].
-// scope = 'this-tenant' (solo il tenant del login) | 'all-tenants' (tutti, solo admin id_roles=1).
+// Riordino/spostamento campi (drag&drop): aggiorna ordinamento + layout_col (+ layout_span
+// per i progetti) per campo. items = [{ campo, ordinamento, layout_col, layout_span }, ...].
+// Ambito, in due dialetti (come per aggiungi/elimina/rinomina campo):
+//  - Impostazioni: scope = 'this-tenant' | 'all-tenants' (solo admin id_roles=1);
+//  - Clienti/Progetti: scope = 'this' | 'all' (contenitore) + tenantScope = 'this-tenant' | 'all-tenants'.
+// Per compatibilità viene accettato 'all-tenants' su entrambi i parametri.
 app.post('/api/:source(settings|clients|projects)/reorder-fields', requireAuth, async (req, res) => {
   try {
     const source = req.params.source;
     const argument = ((req.body && req.body.argument) || '').trim();
-    const scope = (req.body && req.body.scope) || 'this-tenant';
+    const rawScope = (req.body && req.body.scope) || '';
+    const tenantScope = (req.body && req.body.tenantScope) || 'this-tenant';
+    const allTenants = (rawScope === 'all-tenants') || (tenantScope === 'all-tenants');
+    // Ambito contenitore (solo clienti/progetti): 'all' = tutti i clienti/progetti.
+    const containerScope = (rawScope === 'all') ? 'all' : 'this';
     const items = (req.body && req.body.items) || [];
     if (!argument) return res.status(400).json({ error: 'argument richiesto' });
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'Nessun elemento' });
     const isAdmin = Number(req.user.id_roles) === 1;
-    if (scope === 'all-tenants' && !isAdmin) {
+    if (allTenants && !isAdmin) {
       return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
     }
+
+    // Clienti/Progetti su tutti i tenant, ambito "solo questo contenitore": l'argument è
+    // un UUID valido soltanto nel tenant corrente, quindi il contenitore corrispondente
+    // negli altri tenant va individuato logicamente (riga identità campo + valore2).
+    let logicalValue = null;
+    if (allTenants && source !== 'settings' && containerScope === 'this') {
+      const root = await db.query(
+        `SELECT valore2 FROM "${source}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        [argument, req.user.tenant_id]
+      );
+      logicalValue = root.rows[0]?.valore2 ?? null;
+      if (logicalValue == null) {
+        return res.status(400).json({ error: 'Impossibile determinare il contenitore corrispondente negli altri tenant' });
+      }
+    }
+
+    // I progetti dispongono anche di layout_span (quante colonne occupa il campo).
+    const spanSupported = source === 'projects';
+
     let updated = 0;
     for (const it of items) {
       const campo = ((it && it.campo) || '').trim();
       if (!campo) continue;
       const ord = (it.ordinamento == null || it.ordinamento === '') ? null : parseInt(it.ordinamento, 10);
       const lay = (it.layout_col == null || it.layout_col === '') ? null : parseInt(it.layout_col, 10);
+      const span = (!spanSupported || it.layout_span == null || it.layout_span === '')
+        ? null : parseInt(it.layout_span, 10);
+      // SET comune a tutte le varianti: i primi due segnaposto sono sempre ord/lay,
+      // l'eventuale layout_span occupa il terzo.
+      const setCols = ['ordinamento = $1', 'layout_col = $2'];
+      const head = [ord, lay];
+      if (span != null) { setCols.push('layout_span = $3'); head.push(span); }
+      const set = setCols.join(', ');
+      const n = head.length; // numero di segnaposto già usati dal SET
+
       let query, params;
-      if (scope === 'all-tenants') {
-        query = `UPDATE "${source}" SET ordinamento = $1, layout_col = $2 WHERE argument = $3 AND campo = $4`;
-        params = [ord, lay, argument, campo];
+      if (source === 'settings') {
+        if (allTenants) {
+          // argument delle impostazioni è il nome dell'argomento: identico in ogni tenant.
+          query = `UPDATE settings SET ${set} WHERE argument = $${n + 1} AND campo = $${n + 2}`;
+          params = [...head, argument, campo];
+        } else {
+          query = `UPDATE settings SET ${set} WHERE argument = $${n + 1} AND campo = $${n + 2} AND tenant_id = $${n + 3}`;
+          params = [...head, argument, campo, req.user.tenant_id];
+        }
+      } else if (allTenants && containerScope === 'this') {
+        query = `UPDATE "${source}" f SET ${set} FROM "${source}" c
+                 WHERE c.id::text = f.argument AND c.campo = $${n + 1} AND c.valore2 = $${n + 2}
+                   AND f.campo = $${n + 3}`;
+        params = [...head, source === 'projects' ? 'Progetto' : 'Cliente', logicalValue, campo];
+      } else if (allTenants) {
+        query = `UPDATE "${source}" SET ${set} WHERE campo = $${n + 1}`;
+        params = [...head, campo];
+      } else if (containerScope === 'all') {
+        query = `UPDATE "${source}" SET ${set} WHERE campo = $${n + 1} AND tenant_id = $${n + 2} AND user_id = $${n + 3}`;
+        params = [...head, campo, req.user.tenant_id, req.user.user_id];
       } else {
-        query = `UPDATE "${source}" SET ordinamento = $1, layout_col = $2 WHERE argument = $3 AND campo = $4 AND tenant_id = $5`;
-        params = [ord, lay, argument, campo, req.user.tenant_id];
+        query = `UPDATE "${source}" SET ${set} WHERE argument = $${n + 1} AND campo = $${n + 2} AND tenant_id = $${n + 3}`;
+        params = [...head, argument, campo, req.user.tenant_id];
       }
       const r = await db.query(query, params);
       updated += r.rowCount;

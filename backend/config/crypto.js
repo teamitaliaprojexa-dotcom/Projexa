@@ -25,12 +25,12 @@ export const ENC_PREFIX = 'enc:v1:';
 // CHIAVI
 // ----------------------------------------------------------------------------
 
-function envKey(name) {
-  const v = process.env[name];
-  return v == null ? '' : String(v).trim();
-}
-
-let cachedSignature = null;
+// Le chiavi derivate restano in memoria per tutta la vita del processo: la
+// derivazione SHA-256 avviene UNA volta sola, non a ogni valore cifrato.
+// Qui si confrontano solo i valori grezzi delle env var (confronto fra stringhe,
+// nessuna allocazione), così un eventuale cambio a runtime viene comunque colto.
+let lastEncSource;
+let lastLegacySource;
 let cachedEncKey = null;
 let cachedDecKeys = [];
 
@@ -40,11 +40,13 @@ function derive(source) {
 }
 
 function refreshKeys() {
-  const enc = envKey('ENCRYPTION_KEY');
-  const legacy = envKey('INTEGR_ENC_KEY');
-  const signature = enc + '|' + legacy;
-  if (signature === cachedSignature) return;
-  cachedSignature = signature;
+  const rawEnc = process.env.ENCRYPTION_KEY;
+  const rawLegacy = process.env.INTEGR_ENC_KEY;
+  if (rawEnc === lastEncSource && rawLegacy === lastLegacySource) return;
+  lastEncSource = rawEnc;
+  lastLegacySource = rawLegacy;
+  const enc = rawEnc == null ? '' : String(rawEnc).trim();
+  const legacy = rawLegacy == null ? '' : String(rawLegacy).trim();
   // Si CIFRA solo con ENCRYPTION_KEY. Svuotarla disattiva completamente la
   // cifratura in scrittura: è l'interruttore per tornare a scrivere in chiaro.
   cachedEncKey = enc ? derive(enc) : null;
@@ -102,10 +104,17 @@ export function encryptValue(plain) {
 // chiaro e vengono restituiti così come sono (convivenza dati cifrati/non cifrati).
 // Se nessuna chiave riesce a decifrare, restituisce il valore grezzo: meglio un
 // dato illeggibile a video che un errore che blocca l'intera pagina.
-export function decryptValue(stored) {
+// Un valore cifrato è ESATTAMENTE "enc:v1:" + tre segmenti base64 separati da punto.
+// La verifica deve essere stretta: Buffer.from(x, 'base64') scarta in silenzio i
+// caratteri non validi, quindi senza questo controllo una stringa che CONTIENE un
+// cifrato (es. la colonna calcolata nome||' '||cognome) verrebbe "decifrata" con
+// successo restituendo solo il primo pezzo, perdendo il resto del testo.
+const STRICT_RE = /^enc:v1:[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+$/;
+
+function decryptOne(stored, quiet) {
   if (!isEncrypted(stored)) return stored;
+  if (!STRICT_RE.test(stored)) return stored;
   const [ivB64, tagB64, dataB64] = stored.slice(ENC_PREFIX.length).split('.');
-  if (!ivB64 || !tagB64 || !dataB64) return stored;
   for (const key of decryptionKeys()) {
     try {
       const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
@@ -115,14 +124,47 @@ export function decryptValue(stored) {
       // chiave sbagliata: prova la successiva
     }
   }
-  console.error('❌ Decifratura fallita (ENCRYPTION_KEY mancante o cambiata).');
+  if (!quiet) console.error('❌ Decifratura fallita (ENCRYPTION_KEY mancante o cambiata).');
   return stored;
+}
+
+export function decryptValue(stored) {
+  return decryptOne(stored, false);
+}
+
+// Alcune colonne sono CALCOLATE dal database concatenando altre colonne
+// (es. contacts.nominativo = nome || ' ' || cognome). Se le colonne di partenza
+// sono cifrate, Postgres concatena i due testi cifrati e il risultato non è più
+// un singolo valore decifrabile: qui si decifra ogni blocco "enc:v1:..." al suo
+// interno, così a video si legge "Mario Rossi" anche se sul database resta la
+// concatenazione dei due cifrati.
+//
+// Il terzo segmento è "pigro" con lookahead perché due cifrati possono risultare
+// attaccati senza separatore: ':' non è un carattere base64, quindi la sequenza
+// "enc:v1:" non può mai comparire dentro un blocco ed è un confine sicuro.
+const EMBEDDED_RE = /enc:v1:[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+?(?=enc:v1:|[^A-Za-z0-9+/=]|$)/g;
+
+export function decryptEmbedded(text) {
+  return text.replace(EMBEDDED_RE, (token) => decryptOne(token, false));
+}
+
+// Riporta in chiaro una stringa letta dal database, sia che sia un singolo valore
+// cifrato sia che contenga blocchi cifrati concatenati (colonne calcolate).
+function decryptString(value) {
+  if (value.startsWith(ENC_PREFIX)) {
+    // Primo tentativo silenzioso: se fallisce può essere una concatenazione,
+    // e in quel caso a segnalare gli errori veri è decryptEmbedded.
+    const plain = decryptOne(value, true);
+    return plain === value ? decryptEmbedded(value) : plain;
+  }
+  // Percorso raro: blocco cifrato non all'inizio (es. 'Sig. ' || cognome cifrato).
+  return value.includes(ENC_PREFIX) ? decryptEmbedded(value) : value;
 }
 
 // Decifra ricorsivamente stringhe dentro oggetti/array (righe del DB, campi JSON).
 export function decryptDeep(value, depth = 0) {
   if (depth > 6 || value === null || value === undefined) return value;
-  if (typeof value === 'string') return isEncrypted(value) ? decryptValue(value) : value;
+  if (typeof value === 'string') return decryptString(value);
   if (Array.isArray(value)) {
     let changed = false;
     const out = value.map((v) => {
