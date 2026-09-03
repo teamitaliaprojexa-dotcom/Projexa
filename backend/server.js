@@ -1337,6 +1337,30 @@ app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth,
 // Salvataggio multiplo della griglia tipo 11. Tutte le righe modificate nel browser
 // vengono validate e aggiornate nella stessa transazione; se una sola riga non appartiene
 // al contesto autorizzato, l'intera operazione viene annullata.
+async function validateGridProjectSelection(pool, projectId, reqUser, clientId) {
+  if (projectId == null || String(projectId).trim() === '') return;
+  const params = [String(projectId).trim(), reqUser.tenant_id, reqUser.user_id];
+  const conditions = [
+    'id::text = $1',
+    'tenant_id = $2',
+    'user_id = $3',
+    "argument = 'Progetto'",
+    "campo = 'Progetto'",
+    '(scadenza IS NULL OR scadenza >= CURRENT_DATE)'
+  ];
+  if (clientId) {
+    params.push(clientId);
+    conditions.push(`client_id = $${params.length}`);
+  }
+  const result = await pool.query(
+    `SELECT 1 FROM projects WHERE ${conditions.join(' AND ')} LIMIT 1`,
+    params
+  );
+  if (result.rows.length === 0) {
+    throw Object.assign(new Error('Il progetto selezionato non è valido per questo cliente'), { statusCode: 400 });
+  }
+}
+
 app.put('/api/:source(settings|clients|projects)/grid-widget/rows', requireAuth, async (req, res) => {
   let client;
   try {
@@ -1403,9 +1427,15 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/rows', requireAuth,
       let data = {};
       for (const [key, value] of Object.entries(inputValues)) {
         if (tableColumns.has(key) && !generatedColumns.has(key) && !ctx.lockedColumns.has(key)
-            && !['id', 'tenant_id', 'user_id', 'client_id', 'project_id'].includes(key)) {
+            && !['id', 'tenant_id', 'user_id', 'client_id'].includes(key)) {
           data[key] = value === '' ? null : value;
         }
+      }
+      // project_id arriva dal value della <option> (UUID), mentre il testo mostrato
+      // nel menu resta la descrizione. Prima di scriverlo verifichiamo sempre che il
+      // progetto appartenga al contesto autenticato e, quando presente, al cliente.
+      if (Object.prototype.hasOwnProperty.call(data, 'project_id')) {
+        await validateGridProjectSelection(client, data.project_id, req.user, clientId);
       }
       data = await cryptoWrite(client, 'main', tableName, data, rowId);
       const columns = Object.keys(data).map(assertValidIdentifier);
@@ -1528,9 +1558,12 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, 
       // Le colonne tra parentesi sono in sola lettura: scartate come le generate,
       // anche se il browser le inviasse comunque.
       if (tableColumns.has(k) && !generatedColumns.has(k) && !ctx.lockedColumns.has(k)
-          && !['id', 'tenant_id', 'user_id', 'client_id', 'project_id'].includes(k)) {
+          && !['id', 'tenant_id', 'user_id', 'client_id'].includes(k)) {
         data[k] = v === '' ? null : v;
       }
+    }
+    if (Object.prototype.hasOwnProperty.call(data, 'project_id')) {
+      await validateGridProjectSelection(db, data.project_id, req.user, clientId);
     }
     data = await cryptoWrite(db, 'main', tableName, data, rowId);
 

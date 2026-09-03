@@ -7398,14 +7398,16 @@
 
         // Larghezza compatta e stabile delle colonne tipo 11. La misura deriva dal
         // contenuto realmente mostrato, ma resta entro limiti che impediscono a valori,
-        // URL e select di dilatare la tabella durante la modifica inline.
+        // URL e select di dilatare la tabella durante la modifica inline. Il margine
+        // aggiuntivo tiene conto anche del padding dell'input: codici brevi come
+        // "ADFPE-328" devono restare leggibili per intero in modalità modifica.
         function type11PreferredColumnWidth(column, displayValues, compact = false, first = false) {
             if (compact) return 44;
             const lengths = [String(type11ColumnLabel(column) || '').length]
                 .concat((displayValues || []).map(value => String(value == null ? '' : value).length));
             const longest = Math.min(30, Math.max(0, ...lengths));
-            const calculated = Math.round(longest * 7.2 + 30);
-            const minimum = first ? 150 : 82;
+            const calculated = Math.round(longest * 7.2 + 46);
+            const minimum = first ? 150 : 96;
             const maximum = first ? 250 : 230;
             return Math.max(minimum, Math.min(maximum, calculated));
         }
