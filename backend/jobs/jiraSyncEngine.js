@@ -321,6 +321,10 @@ async function aggiorna(tabella, id, valori) {
  *   campoClients      clients.campo che contiene il nome del cliente su Jira
  *   confrontoCliente  'exact' (uguaglianza) | 'contains' (nome contenuto nel testo)
  *   colonneUrl        colonne di destinazione da valorizzare con il link all'issue
+ *   valoriInserimento valori fissi scritti solo alla creazione della riga (es.
+ *                     { tipo: 'Jira' }): marcano l'origine del dato e NON vengono
+ *                     riscritti negli aggiornamenti successivi, così una eventuale
+ *                     modifica manuale resta
  * @param {object} ctx  { tenantId, userId, dryRun }
  *   dryRun = true: elabora tutto e produce il report SENZA scrivere sul database.
  *   Serve a verificare mappatura e abbinamenti prima di far girare il programma
@@ -445,6 +449,18 @@ export async function runJiraSync(config, ctx) {
   const esistenti = await leggiEsistenti(config.tabellaDestinazione, config.colonnaCodice, tenantId, userId);
   const haUpdatedAt = colonne.has('updated_at');
 
+  // Valori fissi della creazione (es. tipo = 'Jira'): solo colonne che esistono
+  // davvero e che non sono già valorizzate dalla mappatura.
+  const valoriInserimento = {};
+  for (const [colonna, valore] of Object.entries(config.valoriInserimento || {})) {
+    if (!colonne.has(colonna)) {
+      report.colonneIgnorate.push(`${colonna} (valore fisso: non esiste in ${config.tabellaDestinazione})`);
+      continue;
+    }
+    if (piano.some((p) => p.colonna === colonna)) continue; // vince la mappatura
+    valoriInserimento[colonna] = valore;
+  }
+
   // --- 5) Elaborazione riga per riga ---------------------------------------
   const leggi = (issue, campo) => (campo === 'issuekey' ? issue.key : (issue.fields || {})[campo]);
 
@@ -472,6 +488,7 @@ export async function runJiraSync(config, ctx) {
           _clienteAbbinato: cliente.nome,
           _clientId: cliente.clientId,
           [config.colonnaCodice]: codice,
+          ...valoriInserimento,
           ...valori
         };
       }
@@ -484,6 +501,7 @@ export async function runJiraSync(config, ctx) {
             tenant_id: tenantId,
             user_id: userId,
             client_id: cliente.clientId,
+            ...valoriInserimento,
             ...valori
           });
         }

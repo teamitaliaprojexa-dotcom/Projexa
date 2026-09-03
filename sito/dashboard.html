@@ -335,16 +335,37 @@
         /* Modalità modifica: colonne come drop-zone per il riordino drag&drop */
         .detail-columns.editing .detail-column { border: 1px dashed #CBD5E1; border-radius: 8px; padding: 6px; min-height: 90px; }
         .col-placeholder { color: #9CA3AF; font-size: 0.8rem; text-align: center; padding: 24px 4px; }
-        /* Progetti: 4 colonne sempre visibili (anche vuote) */
+        /* Flyout di dettaglio: 5 colonne sempre visibili (anche vuote) */
         .detail-columns.fixed-cols .detail-column { min-height: 120px; border: 1px solid #EEF2F7; border-radius: 8px; padding: 6px; }
-        /* Progetti (vista): layout a righe responsive — in ogni riga i campi si dividono la larghezza */
+        /* Flyout di dettaglio: layout a righe responsive — fino a 5 campi per riga */
         .detail-rows { display: flex; flex-direction: column; gap: 0.5rem; }
-        .detail-row { display: flex; gap: 1rem; align-items: flex-start; }
-        .detail-row > * { flex: 1 1 0; min-width: 0; }
-        /* Nel layout a righe (progetti) niente linee separatrici tra i campi */
+        /* Cinque colonne REALI: i campi non si allargano in base a quanti elementi
+           sono presenti nella riga. Una cella occupa sempre 1/5 del flyout. */
+        .detail-row {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 1rem;
+            align-items: flex-start;
+        }
+        .detail-row > * { min-width: 0; }
+        /* Le griglie dati devono continuare a usare l'intera larghezza disponibile. */
+        .detail-row > .type11-grid-row { grid-column: 1 / -1; }
+        /* Nel layout a righe niente linee separatrici tra i campi */
         .detail-row .settings-detail-row { border-bottom: none; }
-        /* Griglia di riordino progetti: righe come drop-zone + zone "nuova riga" */
-        .reorder-grid .reorder-row { border: 1px dashed #CBD5E1; border-radius: 8px; padding: 6px; min-height: 46px; }
+        /* Griglia di riordino comune: righe come drop-zone + zone "nuova riga" */
+        .reorder-grid .reorder-row {
+            border: 1px dashed #CBD5E1;
+            border-radius: 8px;
+            padding: 6px;
+            min-height: 58px;
+            /* Guide verticali che rendono visibili le cinque celle anche quando vuote. */
+            background-image: linear-gradient(to right,
+                transparent calc(20% - 1px),
+                rgba(148, 163, 184, 0.38) calc(20% - 1px),
+                rgba(148, 163, 184, 0.38) 20%,
+                transparent 20%);
+            background-size: 20% 100%;
+        }
         .reorder-grid .reorder-row .drag-handle:hover { border-color: #16A34A; box-shadow: 0 0 0 1px #16A34A; }
         .reorder-newrow { border: 1px dashed #E5E7EB; border-radius: 8px; color: #9CA3AF; font-size: 0.75rem; text-align: center; padding: 6px; }
         .reorder-newrow:hover { border-color: #16A34A; color: #16A34A; }
@@ -447,7 +468,7 @@
         }
 
         /* Righe cliccabili con freccia: Nodo padre (tipo 0), link a tabella esterna
-           (tipo 20) e valori dell'elenco collegato. Aprono un nuovo flyout. */
+           (tipo 20) e valori dell'elenco collegato. Aprono il form centrale. */
         .settings-detail-parent,
         .settings-detail-link,
         .linked-value {
@@ -479,6 +500,9 @@
         .linked-value:hover .parent-arrow {
             color: var(--primary);
         }
+        .linked-reorder-row { cursor: grab; }
+        .linked-reorder-row:active { cursor: grabbing; }
+        .linked-reorder-row.dragging { opacity: 0.45; }
 
         /* Nodo Padre (tipo 0) e link a tabella collegata (tipo 20): evidenziati in verde
            con lo stesso stile del cliente selezionato (sfondo verde, testo bianco). */
@@ -616,8 +640,9 @@
             padding: 1px;
         }
         .type11-grid-table {
-            width: 100%;
-            min-width: max-content;
+            width: max-content;
+            min-width: 0;
+            table-layout: fixed;
             border-collapse: separate;
             border-spacing: 0 7px;
             font-size: 0.82rem;
@@ -629,6 +654,8 @@
             text-align: left;
             vertical-align: middle;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .type11-grid-table th {
             position: sticky;
@@ -669,6 +696,38 @@
         .type11-grid-table tbody tr.group-color-4 td { background: #e8f7fc; }
         .type11-grid-table tbody tr.group-color-4 td:first-child { background: #e8f7fc; color: #0f766e; }
         .type11-grid-table tbody tr:hover td { filter: brightness(0.97); }
+        /* Colonne che contengono indirizzi web (es. url, link_task): il link per
+           esteso occuperebbe mezza griglia, quindi la colonna si stringe al minimo
+           e la cella mostra solo l'icona che apre la pagina in una nuova scheda. */
+        .type11-grid-table th.type11-col-link,
+        .type11-grid-table td.type11-col-link { width: 1%; padding-left: 0.4rem; padding-right: 0.4rem; }
+        .type11-grid-table th.type11-expire-col,
+        .type11-grid-table td.type11-expire-col {
+            width: 38px;
+            min-width: 38px;
+            padding-left: 0.35rem;
+            padding-right: 0.35rem;
+            text-align: center;
+        }
+        .type11-expire-check {
+            width: 17px;
+            height: 17px;
+            margin: 0;
+            accent-color: #10B981;
+            cursor: pointer;
+        }
+        .type11-cell-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            color: #2563eb;
+            text-decoration: none;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        .type11-cell-link:hover { background: #dbeafe; color: #1d4ed8; }
         .type11-grid-state {
             padding: 0.65rem;
             color: var(--text-muted);
@@ -700,6 +759,8 @@
         .type11-grid-table tbody tr.type11-editing-row td { background: #FFFBEB; }
         .type11-grid-table tbody tr.type11-editing-row .type11-editor-field {
             width: 100%;
+            min-width: 0;
+            max-width: 100%;
             box-sizing: border-box;
             padding: 4px 6px;
             border: 1px solid #ccc;
@@ -726,6 +787,94 @@
         .type11-grid-editor-actions { display:flex; gap:0.5rem; margin-top:0.75rem; }
         .type11-grid-editor-actions button {
             flex: 1; border: none; border-radius: 6px; padding: 0.55rem 0.8rem; cursor: pointer;
+        }
+
+        /* Form centrale aperto dai campi tipo_valore=0, 15 e 20. L'origine dello zoom viene
+           impostata via JS sul punto esatto del pulsante cliccato. */
+        .parent-form-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 720;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 3vh 3vw;
+            background: rgba(15, 23, 42, 0);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: background 0.32s ease, opacity 0.32s ease;
+        }
+        .parent-form-overlay.measuring,
+        .parent-form-overlay.open { visibility: visible; }
+        .parent-form-overlay.open {
+            background: rgba(15, 23, 42, 0.46);
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .parent-form-dialog {
+            --parent-zoom-x: 50%;
+            --parent-zoom-y: 50%;
+            width: min(1180px, 94vw);
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: #fff;
+            border: 1px solid #DCE3EC;
+            border-radius: 16px;
+            box-shadow: 0 28px 80px rgba(15, 23, 42, 0.34);
+            transform-origin: var(--parent-zoom-x) var(--parent-zoom-y);
+        }
+        .parent-form-overlay.measuring .parent-form-dialog { opacity: 0; }
+        .parent-form-overlay.open .parent-form-dialog {
+            animation: parent-form-powerpoint-zoom 0.46s cubic-bezier(.18,.82,.22,1) both;
+        }
+        @keyframes parent-form-powerpoint-zoom {
+            0% { opacity: 0; transform: scale(0.04); filter: blur(2px); }
+            58% { opacity: 1; transform: scale(1.025); filter: blur(0); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        .parent-form-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1rem 1.2rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .parent-form-title-wrap { display: flex; align-items: center; gap: 0.55rem; min-width: 0; }
+        .parent-form-title { font-size: 1rem; font-weight: 700; color: var(--dark); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .parent-form-icon-btn { width: 30px; height: 30px; border: 0; border-radius: 7px; background: #E5E7EB; cursor: pointer; }
+        .parent-form-content { padding: 1.2rem; overflow: auto; min-height: 170px; }
+        .parent-form-toolbar {
+            display: none;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.7rem 1.2rem;
+            border-bottom: 1px solid var(--border);
+            background: #F8FAFC;
+        }
+        .parent-form-toolbar.visible { display: flex; }
+        .parent-form-tool {
+            width: 30px;
+            height: 30px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: 0;
+            border-radius: 7px;
+            color: #fff;
+            cursor: pointer;
+        }
+        .parent-form-tool.active { outline: 3px solid rgba(15, 118, 110, 0.28); outline-offset: 2px; }
+        .parent-form-footer { display: flex; justify-content: flex-end; gap: 0.6rem; padding: 0.9rem 1.2rem; border-top: 1px solid var(--border); }
+        .parent-form-footer button { border: 0; border-radius: 7px; padding: 0.55rem 1.1rem; font-weight: 600; cursor: pointer; }
+        .parent-form-save { background: #10B981; color: #fff; }
+        .parent-form-cancel { background: #E5E7EB; color: #374151; }
+        @media (prefers-reduced-motion: reduce) {
+            .parent-form-overlay.open .parent-form-dialog { animation-duration: 0.01ms; }
         }
 
         /* Interruttore a levetta (toggle) per i campi booleani e per "Abilita modifica" */
@@ -1907,6 +2056,7 @@
                     </div>
                 </div>
             </li>
+            <li><a href="#"><i class="fas fa-exclamation-circle"></i> <span>Issue</span></a></li>
             <li class="nav-projects" style="position: relative;">
                 <a href="#"><i class="fas fa-folder"></i> <span>Progetti clienti</span></a>
                 <div class="settings-flyout">
@@ -1920,7 +2070,6 @@
                 </div>
             </li>
             <li><a href="#"><i class="fas fa-trash"></i> <span>Archivio</span></a></li>
-            <li><a href="#"><i class="fas fa-exclamation-circle"></i> <span>Issue</span></a></li>
             <!-- Jira: visibile solo se il flag settings (campo='Jira', valore1=true) è attivo. Gestita da js/jira.js -->
             <li id="navJira" style="display: none;"><a href="#"><i class="fab fa-jira"></i> <span>Jira</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
@@ -2055,6 +2204,37 @@
             </div>
             <div id="settingsDetailSaveBar" style="display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;">
                 <button id="settingsDetailSaveBtn" style="width: 100%; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Form centrale dei campi tipo_valore = 0, 15 e 20 -->
+    <div id="parentFormOverlay" class="parent-form-overlay" role="dialog" aria-modal="true" aria-labelledby="parentFormTitle">
+        <div class="parent-form-dialog" id="parentFormDialog">
+            <div class="parent-form-header">
+                <div class="parent-form-title-wrap">
+                    <button id="parentFormBack" class="parent-form-icon-btn" type="button" title="Indietro" style="display:none;">‹</button>
+                    <div id="parentFormTitle" class="parent-form-title">Dettaglio</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:0.75rem;">
+                    <label id="parentFormEditToggleWrap" style="display:inline-flex; align-items:center; gap:6px; font-size:0.8rem; cursor:pointer; white-space:nowrap;">
+                        <span>Abilita modifica</span>
+                        <span class="toggle-switch"><input type="checkbox" id="parentFormEditToggle"><span class="toggle-slider"></span></span>
+                    </label>
+                    <button id="parentFormClose" class="parent-form-icon-btn" type="button" title="Chiudi">✕</button>
+                </div>
+            </div>
+            <div id="parentFormToolbar" class="parent-form-toolbar">
+                <button id="parentFormAddField" class="parent-form-tool" type="button" title="Inserisci nuovo campo" style="background:#3B82F6;"><i class="fas fa-plus"></i></button>
+                <button id="parentFormDeleteField" class="parent-form-tool" type="button" title="Cancella campo" style="background:#EF4444;"><i class="fas fa-trash"></i></button>
+                <button id="parentFormEditField" class="parent-form-tool" type="button" title="Modifica campo" style="background:#6B7280;"><i class="fas fa-pen"></i></button>
+                <button id="parentFormMoveField" class="parent-form-tool" type="button" title="Sposta campo" style="background:#10B981;"><i class="fas fa-up-down-left-right"></i></button>
+                <span id="parentFormActionHint" style="margin-left:0.45rem; color:var(--text-muted); font-size:0.8rem;"></span>
+            </div>
+            <div id="parentFormContent" class="parent-form-content"></div>
+            <div class="parent-form-footer">
+                <button id="parentFormCancel" class="parent-form-cancel" type="button">Annulla</button>
+                <button id="parentFormSave" class="parent-form-save" type="button" style="display:none;">Salva</button>
             </div>
         </div>
     </div>
@@ -5041,7 +5221,7 @@
         // ===== PROGETTI CLIENTI (sidebar "Progetti clienti") =====
         let projectClientId = null;      // client_id del progetto attualmente aperto
         let projectDetailActive = false; // true quando il flyout progetti è aperto (persistente)
-        let detailMaxCols = 3;           // colonne del flyout dettaglio (4 per i progetti)
+        let detailMaxCols = 5;           // tutti i flyout di dettaglio usano il layout a 5 colonne
         // Valore corrente del campo booleano "a Consuntivo" del progetto aperto (valore1).
         // null = non presente/non applicabile (nessun progetto aperto o campo assente).
         // true  -> nelle griglie (tipo 11) nascondi le colonne "offerta"/"Offerta".
@@ -5079,9 +5259,9 @@
             const flyout = document.getElementById('settingsDetailFlyout');
             const titleEl = document.getElementById('settingsDetailTitle');
             const listEl = document.getElementById('settingsDetailList');
-            if (!flyout || !listEl) return;
+            if (!titleEl || !listEl) return;
             projectDetailActive = true;  // flyout persistente (si chiude solo con la X)
-            detailMaxCols = 3;
+            detailMaxCols = 5;
             setDetailColumns(1);
             flyout.classList.remove('contacts-wide');
             // Attaccato alla sidebar (come il dettaglio progetto): parte subito dopo la
@@ -5160,7 +5340,7 @@
             openProjectDetail(projectId, params.get('projectName') || '', clientId);
         }
 
-        // Livello 3: dettaglio del progetto (campi EAV, 4 colonne). Riusa openDetailFlyout.
+        // Livello 3: dettaglio del progetto (campi EAV, 5 colonne). Riusa openDetailFlyout.
         function openProjectDetail(projectId, name, clientId) {
             if (currentView) detailNavStack.push(currentView);
             projectClientId = clientId;
@@ -5247,6 +5427,9 @@
         let linkedRowEditMode = false;
         // Modalità modifica dell'elenco collegato (aggiungi/elimina righe).
         let linkedListEditMode = false;
+        // Modalità modifica dell'elenco query (tipo 15): le azioni configurate
+        // compaiono solo dopo l'attivazione esplicita del toggle.
+        let fieldOptionsEditMode = false;
         // Modalità modifica del primo flyout Impostazioni (aggiungi/elimina argomenti).
         let settingsListEditMode = false;
         // Sotto-modo del primo flyout Impostazioni: 'delete' (✕) | 'rename' (✎) | null.
@@ -5319,20 +5502,566 @@
         // scope 'all' dell'aggiunta campo: inserisce sotto ogni contenitore con quel campo.
         let currentContainerCampo = 'Cliente';
 
+        // Stato del form centrale aperto dai campi Nodo Padre (tipo_valore=0).
+        let parentFormState = null;
+        let parentFormStack = [];
+
+        function parentFormRowsHtml(rows, reorder = false) {
+            const byRow = new Map();
+            (rows || []).forEach(row => {
+                const order = Number(row.ordinamento);
+                const key = Number.isFinite(order) ? order : 999999;
+                if (!byRow.has(key)) byRow.set(key, []);
+                byRow.get(key).push(row);
+            });
+            const renderedRows = [...byRow.keys()].sort((a, b) => a - b).map(key => {
+                const cells = byRow.get(key).slice().sort((a, b) => layoutColumnOf(a) - layoutColumnOf(b));
+                return '<div class="detail-row' + (reorder ? ' reorder-row' : '') + '">' + cells.map(renderSettingRow).join('') + '</div>';
+            });
+            if (!reorder) return renderedRows.join('');
+            return '<div class="reorder-newrow">— rilascia qui per una nuova riga —</div>' +
+                renderedRows.join('<div class="reorder-newrow">— rilascia qui per una nuova riga —</div>') +
+                '<div class="reorder-newrow">— rilascia qui per una nuova riga —</div>';
+        }
+
+        function updateParentFormToolbar() {
+            const enabled = !!parentFormState?.edit;
+            const toolbar = document.getElementById('parentFormToolbar');
+            const hint = document.getElementById('parentFormActionHint');
+            toolbar?.classList.toggle('visible', enabled);
+            const action = parentFormState?.action || 'values';
+            document.getElementById('parentFormDeleteField')?.classList.toggle('active', action === 'delete');
+            document.getElementById('parentFormEditField')?.classList.toggle('active', action === 'pick');
+            document.getElementById('parentFormMoveField')?.classList.toggle('active', action === 'move');
+            if (hint) {
+                hint.textContent = action === 'delete' ? 'Seleziona i campi da cancellare'
+                    : action === 'pick' ? 'Seleziona il campo da modificare'
+                    : action === 'move' ? 'Trascina i campi per spostarli'
+                    : '';
+            }
+        }
+
+        function initParentFormDragDrop(content) {
+            let dragged = null;
+            const afterElement = (row, x) => {
+                const fields = [...row.querySelectorAll('[data-row-id]:not(.dragging)')];
+                let closest = { offset: Number.NEGATIVE_INFINITY, element: null };
+                fields.forEach(field => {
+                    const box = field.getBoundingClientRect();
+                    const offset = x - box.left - box.width / 2;
+                    if (offset < 0 && offset > closest.offset) closest = { offset, element: field };
+                });
+                return closest.element;
+            };
+            content.ondragstart = event => {
+                const handle = event.target.closest('.drag-handle');
+                if (!handle) return;
+                dragged = handle.closest('[data-row-id]');
+                if (!dragged) return;
+                dragged.classList.add('dragging');
+                if (event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', dragged.dataset.rowId || '');
+                }
+            };
+            content.ondragover = event => {
+                if (!dragged) return;
+                const row = event.target.closest('.reorder-row');
+                if (row) {
+                    event.preventDefault();
+                    const after = afterElement(row, event.clientX);
+                    if (after) row.insertBefore(dragged, after);
+                    else row.appendChild(dragged);
+                    return;
+                }
+                if (event.target.closest('.reorder-newrow')) event.preventDefault();
+            };
+            content.ondrop = event => {
+                if (!dragged) return;
+                const zone = event.target.closest('.reorder-newrow');
+                if (!zone) return;
+                event.preventDefault();
+                const row = document.createElement('div');
+                row.className = 'detail-row reorder-row';
+                zone.after(row);
+                row.appendChild(dragged);
+                const nextZone = document.createElement('div');
+                nextZone.className = 'reorder-newrow';
+                nextZone.textContent = '— rilascia qui per una nuova riga —';
+                row.after(nextZone);
+            };
+            content.ondragend = () => {
+                if (!dragged) return;
+                dragged.classList.remove('dragging');
+                dragged = null;
+                content.querySelectorAll('.reorder-row').forEach(row => {
+                    if (!row.querySelector('[data-row-id]')) row.remove();
+                });
+                if (parentFormState) parentFormState.layoutDirty = true;
+            };
+            content.querySelectorAll('.span-sel').forEach(select => {
+                select.addEventListener('mousedown', event => event.stopPropagation());
+                select.addEventListener('change', () => {
+                    const field = select.closest('[data-row-id]');
+                    if (field) {
+                        field.dataset.span = select.value;
+                        field.style.gridColumn = 'span ' + select.value;
+                    }
+                    if (parentFormState) parentFormState.layoutDirty = true;
+                });
+            });
+        }
+
+        function positionParentFormZoom(originRect) {
+            const overlay = document.getElementById('parentFormOverlay');
+            const dialog = document.getElementById('parentFormDialog');
+            if (!overlay || !dialog) return;
+            overlay.classList.remove('open');
+            overlay.classList.add('measuring');
+            requestAnimationFrame(() => {
+                const target = dialog.getBoundingClientRect();
+                const originX = originRect ? originRect.left + originRect.width / 2 : window.innerWidth / 2;
+                const originY = originRect ? originRect.top + originRect.height / 2 : window.innerHeight / 2;
+                dialog.style.setProperty('--parent-zoom-x', (originX - target.left) + 'px');
+                dialog.style.setProperty('--parent-zoom-y', (originY - target.top) + 'px');
+                overlay.classList.remove('measuring');
+                // Forza un nuovo ciclo di animazione anche navigando tra due nodi padre.
+                void dialog.offsetWidth;
+                overlay.classList.add('open');
+            });
+        }
+
+        async function renderParentForm(animateFromRect = null) {
+            const content = document.getElementById('parentFormContent');
+            const title = document.getElementById('parentFormTitle');
+            const toggle = document.getElementById('parentFormEditToggle');
+            const toggleWrap = document.getElementById('parentFormEditToggleWrap');
+            const save = document.getElementById('parentFormSave');
+            const back = document.getElementById('parentFormBack');
+            if (!content || !parentFormState) return;
+
+            title.textContent = parentFormState.label || 'Dettaglio';
+            if (toggleWrap) toggleWrap.style.display = 'inline-flex';
+            if (toggle) toggle.checked = !!parentFormState.edit;
+            const action = parentFormState.action || 'values';
+            if (save) {
+                save.style.display = parentFormState.edit && action !== 'pick' ? 'inline-block' : 'none';
+                save.textContent = action === 'delete' ? 'Cancella selezionati'
+                    : action === 'move' ? 'Salva disposizione'
+                    : 'Salva';
+                save.style.background = action === 'delete' ? '#EF4444' : '#10B981';
+            }
+            if (back) back.style.display = parentFormStack.length ? 'inline-block' : 'none';
+            updateParentFormToolbar();
+            content.innerHTML = '<div style="color:var(--text-muted); padding:1rem;">Caricamento…</div>';
+
+            try {
+                const clientQs = parentFormState.source === 'projects' && projectClientId
+                    ? `&clientId=${encodeURIComponent(projectClientId)}` : '';
+                const response = await fetch(`${API_URL}/${parentFormState.source}/details?argument=${encodeURIComponent(parentFormState.argument)}${clientQs}`, {
+                    headers: getAuthHeaders()
+                });
+                if (!response.ok) throw new Error('Errore nel caricamento');
+                let rows = await response.json();
+                rows = (Array.isArray(rows) ? rows : []).filter(row =>
+                    row.campo != null && String(row.campo).trim() !== ''
+                );
+                parentFormState.rows = rows;
+
+                // renderSettingRow usa queste due variabili globali: le sostituiamo soltanto
+                // durante la costruzione del form e ripristiniamo subito il flyout sottostante.
+                const previousMode = clientDetailMode;
+                const previousReorder = detailReorderMode;
+                clientDetailMode = action === 'delete' ? 'delete' : (parentFormState.edit ? 'edit' : 'view');
+                detailReorderMode = action === 'move';
+                try {
+                    content.innerHTML = rows.length
+                        ? '<div class="detail-rows' + (action === 'move' ? ' reorder-grid' : '') + '">' + parentFormRowsHtml(rows, action === 'move') + '</div>'
+                        : '<div style="color:var(--text-muted); padding:1rem;">Nessun dato</div>';
+                } finally {
+                    clientDetailMode = previousMode;
+                    detailReorderMode = previousReorder;
+                }
+
+                content.querySelectorAll('input, select, textarea').forEach(control => {
+                    const actionControl = control.classList.contains('field-del-check') || control.classList.contains('span-sel');
+                    control.disabled = !parentFormState.edit || ((action === 'delete' || action === 'move' || action === 'pick') && !actionControl);
+                });
+                content.querySelectorAll('[data-setting-id]').forEach(input => {
+                    const markDirty = () => { input.dataset.dirty = '1'; };
+                    input.addEventListener('input', markDirty);
+                    input.addEventListener('change', markDirty);
+                });
+                content.querySelectorAll('.value-bar').forEach(bar => {
+                    updateValueBarFill(bar);
+                    const number = bar.parentElement?.querySelector('.value-bar-num');
+                    bar.addEventListener('input', () => {
+                        updateValueBarFill(bar);
+                        if (number) number.textContent = bar.value;
+                    });
+                });
+                content.querySelectorAll('.multi9').forEach(wrapper => {
+                    const hidden = wrapper.querySelector('input[type="hidden"][data-setting-id]');
+                    if (!hidden) return;
+                    wrapper.querySelectorAll('.multi9-check').forEach(checkbox => {
+                        checkbox.addEventListener('change', () => {
+                            hidden.value = [...wrapper.querySelectorAll('.multi9-check:checked')]
+                                .map(item => item.value).join(';');
+                            hidden.dispatchEvent(new Event('change', { bubbles: true }));
+                        });
+                    });
+                });
+                content.querySelectorAll('.type11-grid-widget').forEach(widget => {
+                    widget.dataset.gridEditMode = parentFormState.edit && action === 'values' ? 'edit' : 'view';
+                });
+                hydrateType11Grids(content);
+                content.querySelectorAll('.type11-bar').forEach(bar => {
+                    bar.addEventListener('click', event => {
+                        event.stopPropagation();
+                        const row = bar.closest('.type11-grid-row');
+                        if (!row) return;
+                        row.classList.toggle('collapsed');
+                        const icon = bar.querySelector('.type11-arrow i');
+                        if (icon) {
+                            icon.classList.toggle('fa-chevron-down', row.classList.contains('collapsed'));
+                            icon.classList.toggle('fa-chevron-up', !row.classList.contains('collapsed'));
+                        }
+                    });
+                });
+                if (action === 'move') initParentFormDragDrop(content);
+            } catch (error) {
+                content.innerHTML = '<div style="color:#EF4444; padding:1rem;">Errore nel caricamento del form</div>';
+            }
+
+            if (animateFromRect) positionParentFormZoom(animateFromRect);
+        }
+
+        async function openParentForm(argument, label, triggerElement, pushCurrent = false) {
+            const originRect = triggerElement?.getBoundingClientRect
+                ? triggerElement.getBoundingClientRect() : null;
+            if (pushCurrent && parentFormState) parentFormStack.push({ ...parentFormState, rows: undefined });
+            if (!pushCurrent) parentFormStack = [];
+            parentFormState = {
+                source: currentDetailSource,
+                argument,
+                label,
+                containerCampo: label,
+                clientId: currentDetailSource === 'projects'
+                    ? (projectClientId || '')
+                    : (currentClientId || currentDetailArgument || ''),
+                projectId: currentDetailSource === 'projects' ? (currentDetailArgument || '') : '',
+                edit: false,
+                action: 'values',
+                layoutDirty: false,
+                rows: []
+            };
+            await renderParentForm(originRect);
+        }
+
+        function closeParentForm() {
+            const overlay = document.getElementById('parentFormOverlay');
+            if (overlay) overlay.classList.remove('open', 'measuring');
+            parentFormState = null;
+            parentFormStack = [];
+            centralParentFormSnapshot = null;
+            if (centralUnderlyingView) {
+                currentView = centralUnderlyingView;
+                centralUnderlyingView = null;
+            }
+        }
+
+        async function deleteParentFormFields() {
+            const content = document.getElementById('parentFormContent');
+            const campos = [...content.querySelectorAll('.field-del-check:checked')]
+                .map(checkbox => checkbox.dataset.campo).filter(Boolean);
+            if (!campos.length) {
+                showNotification('Seleziona almeno un campo da cancellare', 'info');
+                return false;
+            }
+            if (!confirm(`Cancellare ${campos.length} camp${campos.length === 1 ? 'o' : 'i'} selezionat${campos.length === 1 ? 'o' : 'i'}?`)) return false;
+            const scope = parentFormState.source === 'settings' ? 'this-tenant' : 'this';
+            const response = await fetch(`${API_URL}/${parentFormState.source}/delete-fields`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                body: JSON.stringify({
+                    campos,
+                    scope,
+                    tenantScope: 'this-tenant',
+                    clientId: parentFormState.argument
+                })
+            });
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.error || 'Errore durante la cancellazione');
+            }
+            showNotification('Campi cancellati', 'success');
+            parentFormState.action = 'values';
+            await renderParentForm();
+            return true;
+        }
+
+        async function saveParentFormLayout() {
+            const content = document.getElementById('parentFormContent');
+            const items = [];
+            let rowIndex = 1;
+            content.querySelectorAll('.reorder-row').forEach(row => {
+                const fields = [...row.querySelectorAll('[data-row-id]')].filter(field => field.dataset.rowId);
+                if (!fields.length) return;
+                fields.forEach((field, index) => {
+                    const spanSelect = field.querySelector('.span-sel');
+                    items.push({
+                        rowId: field.dataset.rowId,
+                        campo: field.dataset.campo || '',
+                        ordinamento: rowIndex,
+                        layout_col: index + 1,
+                        layout_span: Math.max(1, Math.min(3, Number(spanSelect?.value || field.dataset.span) || 1))
+                    });
+                });
+                rowIndex++;
+            });
+            for (const item of items) {
+                const response = await fetch(`${API_URL}/data/${parentFormState.source}/${encodeURIComponent(item.rowId)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({
+                        ordinamento: item.ordinamento,
+                        layout_col: item.layout_col,
+                        layout_span: item.layout_span
+                    })
+                });
+                if (!response.ok) throw new Error('Errore durante il salvataggio della disposizione');
+            }
+            showNotification('Disposizione salvata', 'success');
+            parentFormState.action = 'values';
+            parentFormState.layoutDirty = false;
+            await renderParentForm();
+            return true;
+        }
+
+        async function saveParentForm() {
+            if (!parentFormState) return;
+            const content = document.getElementById('parentFormContent');
+            const save = document.getElementById('parentFormSave');
+            const action = parentFormState.action || 'values';
+            if (save) save.disabled = true;
+            try {
+                if (action === 'delete') {
+                    await deleteParentFormFields();
+                    return;
+                }
+                if (action === 'move') {
+                    await saveParentFormLayout();
+                    return;
+                }
+            } catch (error) {
+                showNotification(error.message || 'Errore nel salvataggio', 'info');
+                return;
+            } finally {
+                if (save) save.disabled = false;
+            }
+            const dirty = [...content.querySelectorAll('[data-setting-id][data-dirty="1"]')];
+            const hasGridSelections = !!content.querySelector('.type11-expire-check:checked');
+            if (!dirty.length && !hasGridSelections) {
+                showNotification('Nessuna modifica da salvare', 'info');
+                return;
+            }
+            if (save) save.disabled = true;
+            let allOk = true;
+
+            // Le righe tipo 11 spuntate fanno parte dello stesso salvataggio del form.
+            if (hasGridSelections) {
+                const gridResult = await saveType11ExpirySelections(content);
+                if (!gridResult.ok) {
+                    allOk = false;
+                    showNotification('Errore nell’aggiornamento delle righe selezionate', 'info');
+                }
+            }
+            for (const input of dirty) {
+                try {
+                    let response;
+                    if (input.dataset.type4 === '1') {
+                        response = await fetch(`${API_URL}/${parentFormState.source}/${input.dataset.settingId}/reference-value`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                            body: JSON.stringify({ value: input.value })
+                        });
+                    } else {
+                        let value;
+                        if (input.type === 'checkbox') value = input.checked;
+                        else if (input.tagName === 'SELECT' && input.multiple) {
+                            value = [...input.selectedOptions].map(option => option.value).join(';');
+                        } else if (input.type === 'number' || input.type === 'range') {
+                            value = input.value === '' ? null : parseInt(input.value, 10);
+                        } else value = input.value;
+                        response = await fetch(`${API_URL}/data/${parentFormState.source}/${input.dataset.settingId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                            body: JSON.stringify({ [input.dataset.field]: value })
+                        });
+                    }
+                    if (!response.ok) allOk = false;
+                } catch (error) {
+                    allOk = false;
+                }
+            }
+            if (save) save.disabled = false;
+            if (!allOk) {
+                showNotification('Errore nel salvataggio del form', 'info');
+                return;
+            }
+            showNotification('Salvato', 'success');
+            parentFormState.edit = false;
+            await renderParentForm();
+        }
+
+        async function openParentFormFieldEditor(rowElement = null) {
+            if (!parentFormState) return;
+            let rowId = rowElement?.dataset.rowId || '';
+            let existingRow = null;
+            if (rowId) {
+                try {
+                    const response = await fetch(`${API_URL}/data/${encodeURIComponent(parentFormState.source)}?id=${encodeURIComponent(rowId)}`, {
+                        headers: getAuthHeaders()
+                    });
+                    const rows = response.ok ? await response.json() : [];
+                    existingRow = Array.isArray(rows)
+                        ? rows.find(row => String(row.id) === String(rowId))
+                        : null;
+                    if (!existingRow) {
+                        showNotification('Campo non trovato', 'info');
+                        return;
+                    }
+                } catch (error) {
+                    showNotification('Errore di connessione', 'info');
+                    return;
+                }
+            }
+            await openTipoValoreForm({
+                source: parentFormState.source,
+                rowId: rowId || undefined,
+                existingRow,
+                existingTipoValore: existingRow?.tipo_valore,
+                contextArgument: parentFormState.argument,
+                contextContainerCampo: parentFormState.containerCampo,
+                contextClientId: parentFormState.clientId,
+                contextProjectId: parentFormState.projectId,
+                onSaved: async () => {
+                    if (!parentFormState) return;
+                    parentFormState.action = 'values';
+                    await renderParentForm();
+                }
+            });
+        }
+
+        function initParentFormModal() {
+            const overlay = document.getElementById('parentFormOverlay');
+            const toggle = document.getElementById('parentFormEditToggle');
+            document.getElementById('parentFormClose')?.addEventListener('click', closeParentForm);
+            document.getElementById('parentFormCancel')?.addEventListener('click', closeParentForm);
+            document.getElementById('parentFormSave')?.addEventListener('click', saveParentForm);
+            document.getElementById('parentFormAddField')?.addEventListener('click', () => openParentFormFieldEditor());
+            document.getElementById('parentFormDeleteField')?.addEventListener('click', async () => {
+                if (!parentFormState?.edit) return;
+                parentFormState.action = parentFormState.action === 'delete' ? 'values' : 'delete';
+                await renderParentForm();
+            });
+            document.getElementById('parentFormEditField')?.addEventListener('click', async () => {
+                if (!parentFormState?.edit) return;
+                parentFormState.action = parentFormState.action === 'pick' ? 'values' : 'pick';
+                await renderParentForm();
+            });
+            document.getElementById('parentFormMoveField')?.addEventListener('click', async () => {
+                if (!parentFormState?.edit) return;
+                parentFormState.action = parentFormState.action === 'move' ? 'values' : 'move';
+                await renderParentForm();
+            });
+            document.getElementById('parentFormBack')?.addEventListener('click', async () => {
+                if (currentView?.central && currentView.parentDesc) {
+                    await renderLinkedList(currentView.parentDesc);
+                    const back = document.getElementById('parentFormBack');
+                    if (back) back.style.display = centralParentFormSnapshot ? 'inline-block' : 'none';
+                    return;
+                }
+                if (currentView?.central && await restoreCentralParentForm()) {
+                    return;
+                }
+                const previous = parentFormStack.pop();
+                if (!previous) return;
+                parentFormState = previous;
+                await renderParentForm();
+            });
+            toggle?.addEventListener('change', async () => {
+                if (!parentFormState) return;
+                parentFormState.edit = toggle.checked;
+                parentFormState.action = 'values';
+                await renderParentForm();
+            });
+            overlay?.addEventListener('click', event => {
+                if (event.target === overlay) closeParentForm();
+            });
+            document.getElementById('parentFormContent')?.addEventListener('click', event => {
+                if (currentView?.central && currentView.kind === 'linkedList') {
+                    const del = event.target.closest('.linked-del');
+                    if (del) {
+                        event.preventDefault();
+                        deleteLinkedRow(del.dataset.rowId, currentView);
+                        return;
+                    }
+                    const linkedValue = event.target.closest('.linked-value');
+                    if (linkedValue) {
+                        event.preventDefault();
+                        // Durante il riordino il click serve solo al drag & drop:
+                        // non deve aprire accidentalmente il dettaglio della riga.
+                        if (currentView.reorder) return;
+                        openLinkedRow(linkedValue.dataset.rowId, linkedValue.dataset.rowLabel, currentView);
+                        return;
+                    }
+                }
+                if (parentFormState?.action === 'pick') {
+                    const field = event.target.closest('[data-row-id]');
+                    if (field?.dataset.rowId) {
+                        event.preventDefault();
+                        parentFormState.action = 'values';
+                        openParentFormFieldEditor(field);
+                    }
+                    return;
+                }
+                if (parentFormState?.action === 'delete' || parentFormState?.action === 'move') return;
+                const optionList = event.target.closest('.settings-detail-opt');
+                if (optionList) {
+                    event.preventDefault();
+                    openFieldOptionsList(optionList.dataset.optId, optionList.dataset.optLabel, optionList);
+                    return;
+                }
+                const linkedList = event.target.closest('.settings-detail-link');
+                if (linkedList) {
+                    event.preventDefault();
+                    openLinkedList(linkedList.dataset.linkId, linkedList.dataset.linkLabel, linkedList);
+                    return;
+                }
+                const parent = event.target.closest('.settings-detail-parent');
+                if (parent) {
+                    event.preventDefault();
+                    openParentForm(parent.dataset.parentId, parent.dataset.parentCampo, parent, true);
+                }
+            });
+            document.addEventListener('keydown', event => {
+                if (event.key === 'Escape' && overlay?.classList.contains('open')) closeParentForm();
+            });
+        }
+
         // Chiude tutti i flyout (primo livello e dettaglio)
         function closeAllFlyouts() {
             document.querySelector('.nav-settings')?.classList.remove('open', 'detail-open');
             document.querySelector('.nav-clients')?.classList.remove('open', 'detail-open');
             document.getElementById('settingsDetailFlyout')?.classList.remove('open');
+            closeParentForm();
         }
 
-        // Entra in un Nodo Padre: salva il livello corrente sullo stack e apre il dettaglio
-        // con argument = id della riga del Nodo Padre (i suoi campi figli).
-        // Il nuovo contenitore è il Nodo Padre stesso (campo = label).
-        function navigateToChild(argument, label) {
-            if (currentView) detailNavStack.push(currentView);
-            currentContainerCampo = label;
-            openDetailFlyout(currentDetailSource, argument, label);
+        // Un Nodo Padre non sostituisce più il flyout: apre il form centrale animato,
+        // usando come argument l'id della riga padre per caricarne i campi figli.
+        function navigateToChild(argument, label, triggerElement) {
+            openParentForm(argument, label, triggerElement);
         }
 
         // Mostra/nasconde il pulsante "Indietro" in base allo stack.
@@ -5365,30 +6094,104 @@
             }
         }
 
-        // tipo_valore = 20: apre l'elenco dei valori della tabella collegata.
-        function openLinkedList(fieldId, label) {
-            if (currentView) detailNavStack.push(currentView);
-            linkedListEditMode = false; // l'elenco si apre in sola lettura
-            renderLinkedList({ kind: 'linkedList', source: currentDetailSource, fieldId, clientId: currentClientId, label });
+        let centralUnderlyingView = null;
+        let centralParentFormSnapshot = null;
+
+        async function restoreCentralParentForm() {
+            if (!centralParentFormSnapshot) return false;
+            parentFormState = centralParentFormSnapshot;
+            centralParentFormSnapshot = null;
+            if (centralUnderlyingView) {
+                currentView = centralUnderlyingView;
+                centralUnderlyingView = null;
+            }
+            await renderParentForm();
+            return true;
         }
 
-        // tipo_valore = 15: apre un nuovo flyout con l'elenco derivato dalla query
+        function centralDetailElements(desc) {
+            if (desc?.central) {
+                return {
+                    flyout: null,
+                    titleEl: document.getElementById('parentFormTitle'),
+                    listEl: document.getElementById('parentFormContent')
+                };
+            }
+            return {
+                flyout: document.getElementById('settingsDetailFlyout'),
+                titleEl: document.getElementById('settingsDetailTitle'),
+                listEl: document.getElementById('settingsDetailList')
+            };
+        }
+
+        function prepareCentralSpecialView(desc, originRect) {
+            // Se tipo 15/20 è stato aperto dall'interno di un tipo 0, conserva il form
+            // padre completo: il pulsante Indietro deve riportare esattamente lì.
+            if (parentFormState && !parentFormState.central) {
+                centralParentFormSnapshot = { ...parentFormState, rows: undefined };
+            } else if (!document.getElementById('parentFormOverlay')?.classList.contains('open')) {
+                centralParentFormSnapshot = null;
+            }
+            parentFormState = { ...desc, edit: false, action: 'values', rows: [] };
+            const toolbar = document.getElementById('parentFormToolbar');
+            if (toolbar) toolbar.classList.remove('visible');
+            const toggleWrap = document.getElementById('parentFormEditToggleWrap');
+            if (toggleWrap) toggleWrap.style.display = 'none';
+            const save = document.getElementById('parentFormSave');
+            if (save) save.style.display = 'none';
+            const back = document.getElementById('parentFormBack');
+            if (back) back.style.display = centralParentFormSnapshot ? 'inline-block' : 'none';
+            if (originRect) positionParentFormZoom(originRect);
+        }
+
+        async function finishCentralSpecialView(desc) {
+            if (desc?.central && await restoreCentralParentForm()) return;
+            if (desc?.central) closeParentForm();
+            else goBackDetail();
+        }
+
+        // tipo_valore = 20: apre nel form centrale l'elenco della tabella collegata.
+        function openLinkedList(fieldId, label, triggerElement) {
+            const originRect = triggerElement?.getBoundingClientRect ? triggerElement.getBoundingClientRect() : null;
+            centralUnderlyingView = currentView;
+            linkedListEditMode = false; // l'elenco si apre in sola lettura
+            const desc = {
+                kind: 'linkedList',
+                central: true,
+                source: currentDetailSource,
+                fieldId,
+                clientId: currentDetailSource === 'projects' ? (projectClientId || '') : (currentClientId || ''),
+                label,
+                reorder: false
+            };
+            prepareCentralSpecialView(desc);
+            renderLinkedList(desc).then(() => positionParentFormZoom(originRect));
+        }
+
+        // tipo_valore = 15: apre nel form centrale l'elenco derivato dalla query
         // (tabella.colonna + condizione VariabDB), filtrato per tenant/utente.
-        function openFieldOptionsList(fieldId, label) {
-            if (currentView) detailNavStack.push(currentView);
-            renderFieldOptionsList({ kind: 'fieldOptions', source: currentDetailSource, fieldId, label });
+        function openFieldOptionsList(fieldId, label, triggerElement) {
+            const originRect = triggerElement?.getBoundingClientRect ? triggerElement.getBoundingClientRect() : null;
+            centralUnderlyingView = currentView;
+            fieldOptionsEditMode = false;
+            const desc = { kind: 'fieldOptions', central: true, source: currentDetailSource, fieldId, label };
+            prepareCentralSpecialView(desc);
+            renderFieldOptionsList(desc).then(() => positionParentFormZoom(originRect));
         }
 
         async function renderFieldOptionsList(desc) {
             currentView = desc;
-            const flyout = document.getElementById('settingsDetailFlyout');
-            const titleEl = document.getElementById('settingsDetailTitle');
-            const listEl = document.getElementById('settingsDetailList');
-            if (!flyout || !listEl) return;
-            flyout.classList.add('open');
+            const { flyout, titleEl, listEl } = centralDetailElements(desc);
+            if (!titleEl || !listEl) return;
+            if (flyout) flyout.classList.add('open');
             titleEl.textContent = desc.label || 'Elenco';
-            hideDetailManagement();
-            updateBackButton();
+            if (!desc.central) {
+                hideDetailManagement();
+                updateBackButton();
+            } else {
+                const back = document.getElementById('parentFormBack');
+                if (back) back.style.display = centralParentFormSnapshot ? 'inline-block' : 'none';
+            }
             listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
             try {
                 const res = await fetch(`${API_URL}/${desc.source}/field-options?fieldId=${encodeURIComponent(desc.fieldId)}`, { headers: getAuthHeaders() });
@@ -5398,14 +6201,22 @@
                 desc.tabella = data.tabella;
                 desc.colonna = data.colonna;
                 const mode = Number(data.mode);      // valore3: 1=elimina, 2=rinomina, 3=disattiva, 5=condividi
-                const canRename = (mode === 2);
+                const editEnabled = !desc.central || fieldOptionsEditMode;
+                const canRename = editEnabled && (mode === 2);
                 // Elimina: solo se function_db conferma la funzione (cod_istruzione=1, delete, funzione=campo).
-                const canDelete = (mode === 1) && (data.deleteEnabled === true);
+                const canDelete = editEnabled && (mode === 1) && (data.deleteEnabled === true);
                 // Disattiva (update): solo se function_db conferma (cod_istruzione=3, update, funzione=campo).
-                const canUpdate = (mode === 3) && (data.updateEnabled === true);
-                const canShare = (mode === 5);
+                const canUpdate = editEnabled && (mode === 3) && (data.updateEnabled === true);
+                const canShare = editEnabled && (mode === 5);
+                const toggleHtml = desc.central
+                    ? `<div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:.5rem; font-size:.8rem;"><label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><span>Abilita modifica</span><span class="toggle-switch"><input type="checkbox" id="fieldOptionsEditToggle" ${fieldOptionsEditMode ? 'checked' : ''}><span class="toggle-slider"></span></span></label></div>`
+                    : '';
                 if (items.length === 0) {
-                    listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>';
+                    listEl.innerHTML = toggleHtml + '<div style="color: var(--text-muted);">Nessun dato</div>';
+                    document.getElementById('fieldOptionsEditToggle')?.addEventListener('change', event => {
+                        fieldOptionsEditMode = event.target.checked;
+                        renderFieldOptionsList(desc);
+                    });
                     return;
                 }
                 const rowsHtml = items.map(it => {
@@ -5413,7 +6224,8 @@
                     const editHtml = canRename
                         ? `<input type="text" class="opt-edit" value="${escapeHtml(val)}" style="display:none; flex:1 1 0; min-width:0; padding:4px 6px; border:1px solid #ccc; border-radius:4px; font-size:0.85rem;">`
                         : '';
-                    return `<div class="settings-detail-row opt-row" data-id="${escapeHtml(it.id)}" data-value="${escapeHtml(val)}" style="justify-content: flex-start; gap: 8px;"><input type="checkbox" class="opt-check" style="flex: 0 0 auto; cursor: pointer;"><span class="opt-text" style="flex:1 1 0; min-width:0;">${escapeHtml(val)}</span>${editHtml}</div>`;
+                    const checkHtml = editEnabled ? '<input type="checkbox" class="opt-check" style="flex:0 0 auto; cursor:pointer;">' : '';
+                    return `<div class="settings-detail-row opt-row" data-id="${escapeHtml(it.id)}" data-value="${escapeHtml(val)}" style="justify-content: flex-start; gap: 8px;">${checkHtml}<span class="opt-text" style="flex:1 1 0; min-width:0;">${escapeHtml(val)}</span>${editHtml}</div>`;
                 }).join('');
                 // Pulsante azione in fondo: Elimina (rosso), Disattiva (arancione) o Salva (verde).
                 const actionBtn = canDelete ? { bg: '#EF4444', label: 'Elimina' }
@@ -5426,7 +6238,12 @@
                 const shareAreaHtml = canShare
                     ? `<div id="shareArea" style="display:none; padding-top:0.75rem; border-top:1px solid var(--border); margin-top:0.75rem;"><div style="font-size:0.85rem; font-weight:600; margin-bottom:0.5rem;">Condividi con:</div><div id="shareUsers" style="color: var(--text-muted); font-size:0.85rem;"></div><div id="shareBtnWrap" style="display:none; margin-top:0.75rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Permesso</label><select id="sharePermission" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px; margin-bottom:0.5rem;"><option value="write">Scrittura (può modificare)</option><option value="read">Lettura (sola visualizzazione)</option></select><button id="shareBtn" type="button" style="width:100%; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Condividi</button></div></div>`
                     : '';
-                listEl.innerHTML = rowsHtml + saveBarHtml + shareAreaHtml;
+                listEl.innerHTML = toggleHtml + rowsHtml + saveBarHtml + shareAreaHtml;
+
+                document.getElementById('fieldOptionsEditToggle')?.addEventListener('change', event => {
+                    fieldOptionsEditMode = event.target.checked;
+                    renderFieldOptionsList(desc);
+                });
 
                 const checks = listEl.querySelectorAll('.opt-check');
                 const saveBar = document.getElementById('optSaveBar');
@@ -5488,7 +6305,7 @@
         // Salva la rinomina del valore selezionato (tipo 15, valore3=2): UPDATE della riga
         // nella tabella target, colonna indicata dal campo.
         async function saveFieldOptionRename(desc) {
-            const listEl = document.getElementById('settingsDetailList');
+            const listEl = centralDetailElements(desc).listEl;
             if (!listEl || !desc.tabella || !desc.colonna) return;
             const chk = listEl.querySelector('.opt-check:checked');
             if (!chk) return;
@@ -5521,7 +6338,7 @@
         // Elimina il valore selezionato (tipo 15, valore3=1): esegue l'istruzione di function_db.
         // Richiede una conferma esplicita (operazione irreversibile).
         async function deleteFieldOption(desc) {
-            const listEl = document.getElementById('settingsDetailList');
+            const listEl = centralDetailElements(desc).listEl;
             if (!listEl) return;
             const chk = listEl.querySelector('.opt-check:checked');
             if (!chk) return;
@@ -5560,7 +6377,7 @@
         // Disattiva il record selezionato (tipo 15, valore3=3): esegue l'update di function_db
         // che imposta la colonna indicata (fun_colonna) alla data di ieri. Richiede conferma.
         async function updateFieldOption(desc) {
-            const listEl = document.getElementById('settingsDetailList');
+            const listEl = centralDetailElements(desc).listEl;
             if (!listEl) return;
             const chk = listEl.querySelector('.opt-check:checked');
             if (!chk) return;
@@ -5582,7 +6399,7 @@
                     // Aggiorna gli elenchi (la scadenza appena impostata può nascondere l'elemento).
                     try { loadClientsNames(); } catch (e) {}
                     try { loadSettingsArguments(); } catch (e) {}
-                    goBackDetail(); // chiude e torna alla vista precedente
+                    finishCentralSpecialView(desc);
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showNotification('Errore: ' + (err.error || res.status), 'info');
@@ -5639,7 +6456,7 @@
                 });
                 if (res.ok) {
                     showNotification('Cliente condiviso', 'success');
-                    goBackDetail();
+                    finishCentralSpecialView(desc);
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showNotification('Errore: ' + (err.error || res.status), 'info');
@@ -5656,11 +6473,12 @@
         }
 
         // Click su un valore dell'elenco collegato: apre il dettaglio di quella riga.
-        function openLinkedRow(rowId, label) {
-            const cv = currentView;
-            if (cv) detailNavStack.push(cv);
+        function openLinkedRow(rowId, label, fromDesc = currentView) {
+            const cv = fromDesc;
+            if (!cv) return;
+            if (!cv.central) detailNavStack.push(cv);
             linkedRowEditMode = false; // ogni nuova riga si apre in sola lettura
-            renderLinkedRow({ kind: 'linkedRow', source: cv.source, fieldId: cv.fieldId, clientId: cv.clientId, rowId, label, tabella: cv.tabella });
+            renderLinkedRow({ kind: 'linkedRow', central: !!cv.central, parentDesc: cv, source: cv.source, fieldId: cv.fieldId, clientId: cv.clientId, rowId, label, tabella: cv.tabella });
         }
 
         // Iniziali (prima + ultima parola) del nominativo, per il cerchietto del nodo.
@@ -5746,14 +6564,17 @@
         // Rende l'elenco dei valori (colonna) della tabella collegata (tipo 20).
         async function renderLinkedList(desc) {
             currentView = desc;
-            const flyout = document.getElementById('settingsDetailFlyout');
-            const titleEl = document.getElementById('settingsDetailTitle');
-            const listEl = document.getElementById('settingsDetailList');
-            if (!flyout || !listEl) return;
-            flyout.classList.add('open');
+            const { flyout, titleEl, listEl } = centralDetailElements(desc);
+            if (!titleEl || !listEl) return;
+            if (flyout) flyout.classList.add('open');
             titleEl.textContent = desc.label || 'Elenco';
-            hideDetailManagement();
-            updateBackButton();
+            if (!desc.central) {
+                hideDetailManagement();
+                updateBackButton();
+            } else {
+                const back = document.getElementById('parentFormBack');
+                if (back) back.style.display = centralParentFormSnapshot ? 'inline-block' : 'none';
+            }
             listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
             try {
                 // L'organigramma è vincolato alla preferenza settings (Preferenze /
@@ -5764,14 +6585,20 @@
                 if (!res.ok) { listEl.innerHTML = '<div style="color: var(--text-muted);">Errore nel caricamento</div>'; return; }
                 const data = await res.json();
                 desc.tabella = data.tabella; // serve al dettaglio riga per la modifica/salvataggio
-                flyout.classList.toggle('contacts-wide', data.tabella === 'contacts'); // +25% per i Contatti
+                if (flyout) flyout.classList.toggle('contacts-wide', data.tabella === 'contacts'); // +25% per i Contatti
                 const items = data.items || [];
                 // Albero disponibile solo se abilitato e la tabella ha "responsabile".
                 const orgView = orgEnabled && data.tree;
                 const edit = linkedListEditMode; // "Abilita modifica" attivo anche in organigramma
 
                 const toggleHtml = `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;"><label style="display: flex; align-items: center; gap: 6px; cursor: pointer;"><span>Abilita modifica</span><span class="toggle-switch"><input type="checkbox" id="linkedListEditToggle" ${edit ? 'checked' : ''}><span class="toggle-slider"></span></span></label></div>`;
-                const addHtml = edit ? `<div style="margin-bottom: 0.75rem;"><button id="linkedAddBtn" type="button" style="padding: 0 0.7rem; height: 28px; background: #3B82F6; color: white; border: none; border-radius: 5px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">+ Aggiungi</button></div>` : '';
+                const addHtml = edit ? `<div style="display:flex; gap:0.4rem; margin-bottom:0.75rem;">
+                    <button id="linkedAddBtn" type="button" title="Inserisci nuovo record" style="width:30px; height:30px; background:#3B82F6; color:white; border:none; border-radius:6px; cursor:pointer;"><i class="fas fa-plus"></i></button>
+                    <button id="linkedEditHintBtn" type="button" title="Modifica record" style="width:30px; height:30px; background:#6B7280; color:white; border:none; border-radius:6px; cursor:pointer;"><i class="fas fa-pen"></i></button>
+                    <button id="linkedDeleteHintBtn" type="button" title="Elimina record" style="width:30px; height:30px; background:#EF4444; color:white; border:none; border-radius:6px; cursor:pointer;"><i class="fas fa-trash"></i></button>
+                    ${orgView ? '' : `<button id="linkedMoveBtn" type="button" title="Sposta record" style="width:30px; height:30px; background:#10B981; color:white; border:none; border-radius:6px; cursor:pointer;${desc.reorder ? ' outline:3px solid rgba(16,185,129,.3);' : ''}"><i class="fas fa-up-down-left-right"></i></button>`}
+                    <span style="align-self:center; color:var(--text-muted); font-size:.8rem;">${desc.reorder ? 'Trascina i record e salva la disposizione' : 'Clicca un record per modificarlo; usa ✕ per eliminarlo'}</span>
+                </div>` : '';
                 let itemsHtml;
                 if (items.length === 0) {
                     itemsHtml = '<div style="color: var(--text-muted);">Nessun dato</div>';
@@ -5780,26 +6607,67 @@
                 } else {
                     itemsHtml = items.map(it => {
                         const val = it.value == null ? '' : String(it.value);
-                        const del = edit ? `<span class="linked-del" data-row-id="${escapeHtml(it.id)}" title="Elimina" style="flex: 0 0 auto; color: #EF4444; font-weight: 700; cursor: pointer; padding: 0 6px;">✕</span>` : '';
-                        return `<div class="linked-value" data-row-id="${escapeHtml(it.id)}" data-row-label="${escapeHtml(val)}"><span style="flex: 1 1 0; min-width: 0;">${escapeHtml(val)}</span>${del}<span class="parent-arrow">›</span></div>`;
+                        const del = edit && !desc.reorder ? `<span class="linked-del" data-row-id="${escapeHtml(it.id)}" title="Elimina" style="flex: 0 0 auto; color: #EF4444; font-weight: 700; cursor: pointer; padding: 0 6px;">✕</span>` : '';
+                        return `<div class="linked-value${desc.reorder ? ' linked-reorder-row' : ''}" data-row-id="${escapeHtml(it.id)}" data-row-label="${escapeHtml(val)}" ${desc.reorder ? 'draggable="true"' : ''}><span style="flex: 1 1 0; min-width: 0;">${escapeHtml(val)}</span>${del}${desc.reorder ? '' : '<span class="parent-arrow">›</span>'}</div>`;
                     }).join('');
                 }
-                listEl.innerHTML = toggleHtml + addHtml + itemsHtml;
+                const orderSaveHtml = edit && desc.reorder
+                    ? '<button id="linkedOrderSave" type="button" style="width:100%; margin-top:.75rem; padding:.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva disposizione</button>'
+                    : '';
+                listEl.innerHTML = toggleHtml + addHtml + itemsHtml + orderSaveHtml;
 
                 const tg = document.getElementById('linkedListEditToggle');
                 if (tg) tg.addEventListener('change', () => { linkedListEditMode = tg.checked; renderLinkedList(desc); });
                 const addBtn = document.getElementById('linkedAddBtn');
-                if (addBtn) addBtn.addEventListener('click', () => openLinkedNewRow());
+                if (addBtn) addBtn.addEventListener('click', () => openLinkedNewRow(desc));
+                document.getElementById('linkedEditHintBtn')?.addEventListener('click', () => showNotification('Seleziona il record da modificare', 'info'));
+                document.getElementById('linkedDeleteHintBtn')?.addEventListener('click', () => showNotification('Usa la ✕ del record da eliminare', 'info'));
+                document.getElementById('linkedMoveBtn')?.addEventListener('click', () => {
+                    desc.reorder = !desc.reorder;
+                    renderLinkedList(desc);
+                });
+                if (desc.reorder) {
+                    let dragged = null;
+                    listEl.querySelectorAll('.linked-reorder-row').forEach(row => {
+                        row.addEventListener('dragstart', () => { dragged = row; row.classList.add('dragging'); });
+                        row.addEventListener('dragover', event => {
+                            event.preventDefault();
+                            if (!dragged || dragged === row) return;
+                            const box = row.getBoundingClientRect();
+                            row.parentNode.insertBefore(dragged, event.clientY < box.top + box.height / 2 ? row : row.nextSibling);
+                        });
+                        row.addEventListener('dragend', () => { row.classList.remove('dragging'); dragged = null; });
+                    });
+                    document.getElementById('linkedOrderSave')?.addEventListener('click', async () => {
+                        const ordered = [...listEl.querySelectorAll('.linked-reorder-row')];
+                        try {
+                            for (let index = 0; index < ordered.length; index++) {
+                                const response = await fetch(`${API_URL}/data/${encodeURIComponent(desc.tabella)}/${encodeURIComponent(ordered[index].dataset.rowId)}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                                    body: JSON.stringify({ ordinamento: index + 1 })
+                                });
+                                if (!response.ok) throw new Error('Errore nel salvataggio della disposizione');
+                            }
+                            showNotification('Disposizione salvata', 'success');
+                            desc.reorder = false;
+                            renderLinkedList(desc);
+                        } catch (error) {
+                            showNotification(error.message, 'info');
+                        }
+                    });
+                }
             } catch (e) {
                 listEl.innerHTML = '<div style="color: var(--text-muted);">Errore di connessione</div>';
             }
         }
 
         // Apre il form per aggiungere una nuova riga alla tabella collegata.
-        function openLinkedNewRow() {
-            const cv = currentView;
-            if (cv) detailNavStack.push(cv);
-            renderLinkedNewRow({ kind: 'linkedNew', source: cv.source, fieldId: cv.fieldId, clientId: cv.clientId, tabella: cv.tabella, label: 'Nuovo' });
+        function openLinkedNewRow(fromDesc = currentView) {
+            const cv = fromDesc;
+            if (!cv) return;
+            if (!cv.central) detailNavStack.push(cv);
+            renderLinkedNewRow({ kind: 'linkedNew', central: !!cv.central, parentDesc: cv, source: cv.source, fieldId: cv.fieldId, clientId: cv.clientId, tabella: cv.tabella, label: 'Nuovo' });
         }
 
         // Opzioni per un campo FK (id + testo), con caso speciale per clients (nomi identità).
@@ -5871,15 +6739,20 @@
         // Rende il form di inserimento di una nuova riga (campi editabili, escluse generate/sistema).
         async function renderLinkedNewRow(desc) {
             currentView = desc;
-            const flyout = document.getElementById('settingsDetailFlyout');
-            const titleEl = document.getElementById('settingsDetailTitle');
-            const listEl = document.getElementById('settingsDetailList');
-            if (!flyout || !listEl) return;
-            flyout.classList.add('open');
-            flyout.classList.toggle('contacts-wide', desc.tabella === 'contacts');
+            const { flyout, titleEl, listEl } = centralDetailElements(desc);
+            if (!titleEl || !listEl) return;
+            if (flyout) {
+                flyout.classList.add('open');
+                flyout.classList.toggle('contacts-wide', desc.tabella === 'contacts');
+            }
             titleEl.textContent = desc.label || 'Nuovo';
-            hideDetailManagement();
-            updateBackButton();
+            if (!desc.central) {
+                hideDetailManagement();
+                updateBackButton();
+            } else {
+                const back = document.getElementById('parentFormBack');
+                if (back) back.style.display = 'inline-block';
+            }
             listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
 
             let cols = [];
@@ -5907,12 +6780,15 @@
             listEl.innerHTML = tenantHtml + fieldsHtml + barHtml;
 
             document.getElementById('linkedNewSave').addEventListener('click', () => saveLinkedNewRow(desc));
-            document.getElementById('linkedNewCancel').addEventListener('click', goBackDetail);
+            document.getElementById('linkedNewCancel').addEventListener('click', () => {
+                if (desc.central) renderLinkedList(desc.parentDesc);
+                else goBackDetail();
+            });
         }
 
         // Salva la nuova riga (POST con scoping automatico tenant/user/cliente lato server).
         async function saveLinkedNewRow(desc) {
-            const listEl = document.getElementById('settingsDetailList');
+            const listEl = centralDetailElements(desc).listEl;
             if (!listEl) return;
             const values = {};
             listEl.querySelectorAll('.linked-new-field').forEach(inp => { values[inp.dataset.col] = inp.value; });
@@ -5924,7 +6800,8 @@
                 });
                 if (res.ok) {
                     showNotification('Aggiunto', 'success');
-                    goBackDetail(); // torna all'elenco (che si ricarica)
+                    if (desc.central) renderLinkedList(desc.parentDesc);
+                    else goBackDetail();
                 } else {
                     const err = await res.json().catch(() => ({}));
                     showNotification('Errore: ' + (err.error || res.status), 'info');
@@ -5935,8 +6812,8 @@
         }
 
         // Elimina una riga dall'elenco collegato.
-        async function deleteLinkedRow(rowId) {
-            const cv = currentView;
+        async function deleteLinkedRow(rowId, fromDesc = currentView) {
+            const cv = fromDesc;
             if (!cv || cv.kind !== 'linkedList') return;
             if (!confirm('Eliminare questa riga?')) return;
             try {
@@ -5960,15 +6837,20 @@
         // con toggle "Abilita modifica" e salvataggio delle modifiche.
         async function renderLinkedRow(desc) {
             currentView = desc;
-            const flyout = document.getElementById('settingsDetailFlyout');
-            const titleEl = document.getElementById('settingsDetailTitle');
-            const listEl = document.getElementById('settingsDetailList');
-            if (!flyout || !listEl) return;
-            flyout.classList.add('open');
-            flyout.classList.toggle('contacts-wide', desc.tabella === 'contacts');
+            const { flyout, titleEl, listEl } = centralDetailElements(desc);
+            if (!titleEl || !listEl) return;
+            if (flyout) {
+                flyout.classList.add('open');
+                flyout.classList.toggle('contacts-wide', desc.tabella === 'contacts');
+            }
             titleEl.textContent = desc.label || 'Dettaglio';
-            hideDetailManagement();
-            updateBackButton();
+            if (!desc.central) {
+                hideDetailManagement();
+                updateBackButton();
+            } else {
+                const back = document.getElementById('parentFormBack');
+                if (back) back.style.display = 'inline-block';
+            }
             listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
             try {
                 const res = await fetch(`${API_URL}/${desc.source}/linked-row?fieldId=${encodeURIComponent(desc.fieldId)}&clientId=${encodeURIComponent(desc.clientId || '')}&rowId=${encodeURIComponent(desc.rowId)}`, { headers: getAuthHeaders() });
@@ -6020,7 +6902,7 @@
 
         // Salva le modifiche della riga collegata (PUT generico sulla tabella target).
         async function saveLinkedRow(desc) {
-            const listEl = document.getElementById('settingsDetailList');
+            const listEl = centralDetailElements(desc).listEl;
             if (!listEl || !desc.tabella) return;
             const dirty = listEl.querySelectorAll('.linked-field[data-dirty="1"]');
             if (dirty.length === 0) return;
@@ -6080,7 +6962,9 @@
             // Progetti: flyout persistente (si chiude solo con la X); gli altri si richiudono
             // da soli (mouseleave/click altrove) come già avveniva prima.
             projectDetailActive = (source === 'projects');
-            if (source !== 'projects') detailMaxCols = 3;
+            // Tutti i flyout di dettaglio hanno le stesse dimensioni e lo stesso
+            // numero massimo di colonne del dettaglio progetto.
+            detailMaxCols = 5;
             const closeBtn = document.getElementById('detailCloseBtn');
             if (closeBtn) closeBtn.style.display = (source === 'projects') ? 'inline-flex' : 'none';
 
@@ -6136,62 +7020,61 @@
                     applyDetailMode();
                     return;
                 }
-                // Suddivide i campi nelle colonne del flyout in base a layout_col (1/2/3),
-                // mantenendo l'ordinamento all'interno di ciascuna colonna. In modifica
-                // mostra tutte e 3 le colonne (drop zone per il riordino drag&drop).
-                const byCol = {};
-                const allCols = [];
-                for (let i = 1; i <= detailMaxCols; i++) { byCol[i] = []; allCols.push(i); }
-                rows.forEach(r => { const c = Math.min(Math.max(layoutColumnOf(r), 1), detailMaxCols); byCol[c].push(r); });
-                // Le drop-zone e tutte le colonne compaiono solo in modalità riordino (pulsante "sposta").
                 const editing = detailReorderMode;
-                // Progetti (detailMaxCols>=4): mostra SEMPRE tutte e 4 le colonne, anche vuote.
-                const fixedCols = (detailMaxCols >= 4);
-                let showCols = (editing || fixedCols) ? allCols : allCols.filter(n => byCol[n].length);
-                if (showCols.length === 0) showCols = [1];
-                setDetailColumns((editing || fixedCols) ? detailMaxCols : showCols.length);
+                setDetailColumns(detailMaxCols);
                 detailLayoutDirty = false;
-                if (source === 'projects') {
-                    // Widget avanzamento (donut % + timeline Start->End) in cima al flyout.
-                    const progressHtml = renderProjectProgress(rows);
-                    // PROGETTI: ordinamento = RIGA, layout_col = COLONNA (posizione nella riga).
-                    // Raggruppa per ordinamento; in ogni riga ordina per layout_col.
-                    const byRow = new Map();
-                    rows.forEach(r => {
-                        const o = Number(r.ordinamento);
-                        const k = Number.isFinite(o) ? o : 999999;
-                        if (!byRow.has(k)) byRow.set(k, []);
-                        byRow.get(k).push(r);
-                    });
-                    const keys = [...byRow.keys()].sort((a, b) => a - b);
-                    if (!editing) {
-                        // Vista: righe responsive (le celle piene si dividono la larghezza).
-                        const rowsHtml = keys.map(k => {
-                            const cells = byRow.get(k).slice().sort((a, b) => layoutColumnOf(a) - layoutColumnOf(b));
-                            return '<div class="detail-row">' + cells.map(renderSettingRow).join('') + '</div>';
-                        });
-                        listEl.innerHTML = progressHtml + '<div class="detail-rows">' + (rowsHtml.join('') || '<div style="color: var(--text-muted);">Nessun dato</div>') + '</div>';
-                    } else {
-                        // Riordino: griglia con righe trascinabili + zone "nuova riga" per posizionare
-                        // il campo sulla riga voluta (drop nella riga = quella riga; drop nella zona = nuova riga).
-                        let html = progressHtml + '<div class="detail-rows reorder-grid">';
-                        html += '<div class="reorder-newrow">— rilascia qui per una nuova riga —</div>';
-                        keys.forEach(k => {
-                            const cells = byRow.get(k).slice().sort((a, b) => layoutColumnOf(a) - layoutColumnOf(b));
-                            html += '<div class="detail-row reorder-row">' + cells.map(renderSettingRow).join('') + '</div>';
-                            html += '<div class="reorder-newrow">— rilascia qui per una nuova riga —</div>';
-                        });
-                        html += '</div>';
-                        listEl.innerHTML = html;
+                // Tutti i dettagli (Settings, Clients e Projects) usano la stessa griglia
+                // del progetto: ordinamento = riga, layout_col = posizione (1..5) nella riga.
+                // I dati salvati col precedente layout verticale vengono ricomposti per
+                // posizione, così all'apertura risultano subito disposti su cinque colonne.
+                const progressHtml = source === 'projects' ? renderProjectProgress(rows) : '';
+                const byRow = new Map();
+                const orderCounts = new Map();
+                rows.forEach(r => {
+                    const order = Number(r.ordinamento);
+                    const key = Number.isFinite(order) ? order : 999999;
+                    orderCounts.set(key, (orderCounts.get(key) || 0) + 1);
+                });
+                const alreadyRowBased = [...orderCounts.values()].some(count => count > 1);
+                if (source !== 'projects' && !alreadyRowBased) {
+                    // Compatibilità col vecchio layout: la prima voce di ciascuna colonna
+                    // forma la prima riga, la seconda voce forma la seconda riga, ecc.
+                    const legacyColumns = [];
+                    for (let col = 1; col <= detailMaxCols; col++) {
+                        legacyColumns.push(rows
+                            .filter(r => layoutColumnOf(r) === col)
+                            .sort((a, b) => (Number(a.ordinamento) || 0) - (Number(b.ordinamento) || 0)));
+                    }
+                    const legacyRowCount = Math.max(0, ...legacyColumns.map(columnRows => columnRows.length));
+                    for (let rowIndex = 0; rowIndex < legacyRowCount; rowIndex++) {
+                        const cells = legacyColumns.map(columnRows => columnRows[rowIndex]).filter(Boolean);
+                        if (cells.length) byRow.set(rowIndex + 1, cells);
                     }
                 } else {
-                    listEl.innerHTML = '<div class="detail-columns' + (editing ? ' editing' : '') + (fixedCols ? ' fixed-cols' : '') + '">' +
-                        showCols.map(n => {
-                            const inner = byCol[n].map(renderSettingRow).join('') ||
-                                (editing ? '<div class="col-placeholder">Trascina qui</div>' : '');
-                            return '<div class="detail-column" data-col="' + n + '">' + inner + '</div>';
-                        }).join('') +
-                        '</div>';
+                    rows.forEach(r => {
+                        const order = Number(r.ordinamento);
+                        const key = Number.isFinite(order) ? order : 999999;
+                        if (!byRow.has(key)) byRow.set(key, []);
+                        byRow.get(key).push(r);
+                    });
+                }
+                const keys = [...byRow.keys()].sort((a, b) => a - b);
+                if (!editing) {
+                    const rowsHtml = keys.map(k => {
+                        const cells = byRow.get(k).slice().sort((a, b) => layoutColumnOf(a) - layoutColumnOf(b));
+                        return '<div class="detail-row">' + cells.map(renderSettingRow).join('') + '</div>';
+                    });
+                    listEl.innerHTML = progressHtml + '<div class="detail-rows">' + (rowsHtml.join('') || '<div style="color: var(--text-muted);">Nessun dato</div>') + '</div>';
+                } else {
+                    let html = progressHtml + '<div class="detail-rows reorder-grid">';
+                    html += '<div class="reorder-newrow">— rilascia qui per una nuova riga —</div>';
+                    keys.forEach(k => {
+                        const cells = byRow.get(k).slice().sort((a, b) => layoutColumnOf(a) - layoutColumnOf(b));
+                        html += '<div class="detail-row reorder-row">' + cells.map(renderSettingRow).join('') + '</div>';
+                        html += '<div class="reorder-newrow">— rilascia qui per una nuova riga —</div>';
+                    });
+                    html += '</div>';
+                    listEl.innerHTML = html;
                 }
                 // Il contenitore del tipo 11 è ora nel DOM: carica le griglie presenti.
                 hydrateType11Grids(listEl);
@@ -6240,7 +7123,10 @@
                     sel.addEventListener('mousedown', e => e.stopPropagation());
                     sel.addEventListener('change', () => {
                         const rowEl = sel.closest('.settings-detail-row');
-                        if (rowEl) { rowEl.dataset.span = sel.value; rowEl.style.flex = sel.value + ' 1 0'; }
+                        if (rowEl) {
+                            rowEl.dataset.span = sel.value;
+                            rowEl.style.gridColumn = 'span ' + sel.value;
+                        }
                         detailLayoutDirty = true;
                         const sb = document.getElementById('settingsDetailSaveBar'); if (sb) sb.style.display = 'block';
                     });
@@ -6486,6 +7372,51 @@
             return String(column);
         }
 
+        // === COLONNE CON INDIRIZZI WEB (es. cl_quotazioni.url, task_app.link_task) ===
+        // In griglia il link per esteso occuperebbe mezza tabella: si mostra solo una
+        // piccola icona che apre la pagina in una nuova scheda. Il riconoscimento è sul
+        // VALORE, non sul nome della colonna, così vale per qualsiasi colonna di link
+        // presente o futura. In modifica la cella torna a essere un normale campo di
+        // testo con l'indirizzo completo.
+        function type11UrlValue(value) {
+            if (typeof value !== 'string') return '';
+            const text = value.trim();
+            if (!/^https?:\/\/\S+$/i.test(text)) return '';
+            return safeUrl(text);
+        }
+
+        // Colonne in cui almeno una riga contiene un indirizzo web.
+        function type11LinkColumns(records, columns) {
+            const linkColumns = new Set();
+            for (const column of columns) {
+                if (records.some(record => type11UrlValue(type11CellValue(record, column)))) {
+                    linkColumns.add(column);
+                }
+            }
+            return linkColumns;
+        }
+
+        // Larghezza compatta e stabile delle colonne tipo 11. La misura deriva dal
+        // contenuto realmente mostrato, ma resta entro limiti che impediscono a valori,
+        // URL e select di dilatare la tabella durante la modifica inline.
+        function type11PreferredColumnWidth(column, displayValues, compact = false, first = false) {
+            if (compact) return 44;
+            const lengths = [String(type11ColumnLabel(column) || '').length]
+                .concat((displayValues || []).map(value => String(value == null ? '' : value).length));
+            const longest = Math.min(30, Math.max(0, ...lengths));
+            const calculated = Math.round(longest * 7.2 + 30);
+            const minimum = first ? 150 : 82;
+            const maximum = first ? 250 : 230;
+            return Math.max(minimum, Math.min(maximum, calculated));
+        }
+
+        // Contenuto HTML (già messo in sicurezza) di una cella in visualizzazione.
+        function type11CellHtml(value, column) {
+            const url = type11UrlValue(value);
+            if (!url) return escapeHtml(formatType11Cell(value, column));
+            return `<a class="type11-cell-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(url)}"><i class="fas fa-globe"></i></a>`;
+        }
+
         function isType11CurrencyColumn(column) {
             const technicalName = String(column || '').trim().toLowerCase();
             return technicalName.startsWith('costo')
@@ -6548,15 +7479,54 @@
             }
         }
 
-        async function type11GridInputHtml(col, value, disabled, source, fieldId) {
+        // Elenco progetti usato dalla colonna tecnica project_id nelle griglie tipo 11.
+        // L'option conserva come value l'UUID, mentre a video mostra il nome/descrizione.
+        async function type11ProjectOptions(clientId) {
+            if (!clientId) return [];
+            try {
+                const r = await fetch(`${API_URL}/projects/list?clientId=${encodeURIComponent(clientId)}`, { headers: getAuthHeaders() });
+                if (!r.ok) return [];
+                const projects = await r.json();
+                return (Array.isArray(projects) ? projects : []).map(project => ({
+                    id: project.id,
+                    display: project.name || project.description || project.descrizione || 'Progetto senza descrizione'
+                })).filter(project => project.id);
+            } catch (e) {
+                return [];
+            }
+        }
+
+        async function type11CachedOptions(cache, key, loader) {
+            if (!cache) return loader();
+            if (cache.has(key)) return cache.get(key);
+            const options = await loader();
+            cache.set(key, options);
+            return options;
+        }
+
+        async function type11GridInputHtml(col, value, disabled, source, fieldId, context, optionsCache = null) {
             const val = value == null ? '' : String(value);
             const dis = disabled ? 'disabled' : '';
             const type = String(col.type || '').toLowerCase();
+            if (String(col.name || '').toLowerCase() === 'project_id') {
+                const projectClient = context?.clientId || '';
+                const opts = await type11CachedOptions(
+                    optionsCache,
+                    `project:${projectClient}`,
+                    () => type11ProjectOptions(projectClient)
+                );
+                const optionsHtml = opts.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
+                return `<select class="type11-editor-field" data-col="${escapeHtml(col.name)}" ${dis}><option value="">-- Seleziona progetto --</option>${optionsHtml}</select>`;
+            }
             if (col.references) {
                 // Colonna FK (es. team_id -> teams.id): menu a discesa con i valori leggibili
                 // della tabella referenziata, selezionando l'id grezzo corrente (non l'etichetta).
                 // Filtrata dal server per tenant/utente/cliente/progetto del contesto corrente.
-                const opts = await type11FkOptions(source, fieldId, col.name);
+                const opts = await type11CachedOptions(
+                    optionsCache,
+                    `fk:${source}:${fieldId}:${col.name}`,
+                    () => type11FkOptions(source, fieldId, col.name)
+                );
                 const optionsHtml = opts.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
                 return `<select class="type11-editor-field" data-col="${escapeHtml(col.name)}" ${dis}><option value="">-- Seleziona --</option>${optionsHtml}</select>`;
             }
@@ -6582,7 +7552,7 @@
         // e l'elenco colonne sono due chiamate distinte.
         async function type11VisibleColumnsMeta(widget, visibleColumnNames, lockedColumns) {
             const columns = await type11GridColumns(widget);
-            const hidden = new Set(['id','tenant_id','user_id','client_id','project_id','scadenza','id_roles','id_roles_write']);
+            const hidden = new Set(['id','tenant_id','user_id','client_id','scadenza','id_roles','id_roles_write']);
             const locked = lockedColumns || new Set();
             const metaByName = new Map(columns.map(c => [c.name, c]));
             return visibleColumnNames
@@ -6593,7 +7563,7 @@
 
         // Costruisce le celle <td> con gli input per una riga in modifica/inserimento inline,
         // nello stesso ordine delle colonne mostrate in visualizzazione.
-        async function type11BuildInlineRowCellsHtml(orderedMeta, record, isNew, source, fieldId) {
+        async function type11BuildInlineRowCellsHtml(orderedMeta, record, isNew, source, fieldId, context, optionsCache = null) {
             let html = '';
             for (const col of orderedMeta) {
                 // Per le colonne FK il valore grezzo (id reale) arriva in "__raw_<colonna>":
@@ -6605,7 +7575,7 @@
                 const cellAttrs = col.locked
                     ? ' class="type11-locked-cell" title="Colonna non modificabile"'
                     : '';
-                html += `<td${cellAttrs}>${await type11GridInputHtml(col, value, readonly, source, fieldId)}</td>`;
+                html += `<td${cellAttrs}>${await type11GridInputHtml(col, value, readonly, source, fieldId, context, optionsCache)}</td>`;
             }
             return html;
         }
@@ -6633,6 +7603,64 @@
             } catch (e) {
                 showNotification('Errore di connessione', 'info');
             }
+        }
+
+        // Imposta scadenza a ieri sulle sole righe spuntate nella griglia tipo 11.
+        // La data è calcolata dal database (CURRENT_DATE - 1), non dal browser.
+        async function type11ExpireSelected(widget, rowIds, options = {}) {
+            const selectedIds = [...new Set((rowIds || []).map(id => String(id || '').trim()).filter(Boolean))];
+            if (!selectedIds.length) {
+                if (options.notify !== false) showNotification('Seleziona almeno una riga', 'info');
+                return { ok: false, updated: 0 };
+            }
+            if (options.confirm !== false
+                && !confirm(`Impostare la scadenza a ieri per ${selectedIds.length} rig${selectedIds.length === 1 ? 'a' : 'he'}?`)) {
+                return { ok: false, updated: 0, cancelled: true };
+            }
+            const source = encodeURIComponent(widget.dataset.gridSource || currentDetailSource);
+            try {
+                const response = await fetch(`${API_URL}/${source}/grid-widget/expire`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({
+                        fieldId: widget.dataset.gridFieldId || '',
+                        rowIds: selectedIds
+                    })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    if (options.notify !== false) showNotification('Errore: ' + (data.error || response.status), 'info');
+                    return { ok: false, updated: 0 };
+                }
+                if (options.reload !== false) await loadType11Grid(widget);
+                const updated = Number(data.updated ?? selectedIds.length);
+                if (options.notify !== false) {
+                    showNotification(`${updated} rig${updated === 1 ? 'a aggiornata' : 'he aggiornate'}`, 'success');
+                }
+                return { ok: true, updated };
+            } catch (e) {
+                if (options.notify !== false) showNotification('Errore di connessione', 'info');
+                return { ok: false, updated: 0 };
+            }
+        }
+
+        // Salva tutte le selezioni tipo 11 presenti nel contenitore del form/flyout.
+        async function saveType11ExpirySelections(root) {
+            if (!root) return { ok: true, updated: 0 };
+            let updated = 0;
+            for (const widget of root.querySelectorAll('.type11-grid-widget')) {
+                const rowIds = [...widget.querySelectorAll('.type11-expire-check:checked')]
+                    .map(check => check.dataset.rowId).filter(Boolean);
+                if (!rowIds.length) continue;
+                const result = await type11ExpireSelected(widget, rowIds, {
+                    confirm: false,
+                    reload: false,
+                    notify: false
+                });
+                if (!result.ok) return { ok: false, updated };
+                updated += result.updated;
+            }
+            return { ok: true, updated };
         }
 
         async function loadType11Grid(widget) {
@@ -6676,10 +7704,14 @@
                     });
                 }
                 const records = Array.isArray(payload.rows) ? payload.rows : (Array.isArray(payload) ? payload : []);
+                const hasProjectIdColumn = visibleColumns.some(column => String(column).toLowerCase() === 'project_id');
+                const projectOptions = hasProjectIdColumn ? await type11ProjectOptions(context.clientId) : [];
+                const projectLabels = new Map(projectOptions.map(project => [String(project.id), project.display]));
                 // Le view sono di sola lettura: niente Nuova riga/Modifica/Elimina anche se
                 // il flyout è in modalità "Abilita modifica".
                 const isView = !!payload.isView;
-                const editing = clientDetailMode === 'edit' && !isView;
+                const effectiveEditMode = widget.dataset.gridEditMode || clientDetailMode;
+                const editing = effectiveEditMode === 'edit' && !isView;
                 // Colonne configurate tra parentesi (es. colonna = '(colonna_projexa),colonna_jira'):
                 // visibili come tutte le altre ma non modificabili. Quando ce n'è almeno una la
                 // griglia è "a sola modifica": resta il pulsante Modifica, niente Nuova riga né
@@ -6689,22 +7721,60 @@
                 // Tipo 13: identico al tipo 11 in visualizzazione, ma in modifica mostra
                 // solo il pulsante "Modifica" che apre la pagina Gantt (gantt.html).
                 const isGantt13 = Number(widget.dataset.gridTipo) === 13;
+                // Selezione multipla per chiudere le righe: disponibile esclusivamente
+                // sul tipo 11, in modifica, per tabelle reali con id e scadenza.
+                const canExpire = editing && !isGantt13 && payload.canExpire === true;
 
-                const head = visibleColumns.map(column => `<th scope="col" title="${escapeHtml(column)}">${escapeHtml(type11ColumnLabel(column))}</th>`).join('');
+                // Colonne di soli indirizzi web: si stringono al minimo e mostrano
+                // l'icona al posto del link per esteso (vedi type11CellHtml).
+                const linkColumns = type11LinkColumns(records, visibleColumns);
+                const linkClass = column => (linkColumns.has(column) ? ' class="type11-col-link"' : '');
+
+                const projectDisplayValue = (record, column) => {
+                    const rawProjectId = type11GridRawValue(record, column);
+                    const currentDisplay = type11CellValue(record, column);
+                    return projectLabels.get(String(rawProjectId))
+                        || (String(currentDisplay || '') !== String(rawProjectId || '') ? currentDisplay : '')
+                        || 'Progetto non disponibile';
+                };
+                const displayedValue = (record, column) => String(column).toLowerCase() === 'project_id'
+                    ? projectDisplayValue(record, column)
+                    : formatType11Cell(type11CellValue(record, column), column);
+                const columnWidths = visibleColumns.map((column, index) => type11PreferredColumnWidth(
+                    column,
+                    records.map(record => displayedValue(record, column)),
+                    linkColumns.has(column),
+                    index === 0
+                ));
+                const colgroup = '<colgroup>'
+                    + columnWidths.map(width => `<col style="width:${width}px; min-width:${width}px; max-width:${width}px;">`).join('')
+                    + (canExpire ? '<col style="width:44px; min-width:44px; max-width:44px;">' : '')
+                    + '</colgroup>';
+                const tableWidth = Math.max(1, columnWidths.reduce((total, width) => total + width, 0) + (canExpire ? 44 : 0));
+
+                const head = visibleColumns.map(column => `<th scope="col"${linkClass(column)} title="${escapeHtml(column)}">${escapeHtml(type11ColumnLabel(column))}</th>`).join('')
+                    + (canExpire ? '<th scope="col" class="type11-expire-col" title="Seleziona le righe da chiudere"><i class="fas fa-check-square" aria-hidden="true"></i></th>' : '');
                 const body = records.map((record, index) => {
                     const selected = '';
-                    return `<tr data-type11-index="${index}"${selected}>` + visibleColumns.map(column =>
-                        `<td>${escapeHtml(formatType11Cell(type11CellValue(record, column), column))}</td>`
-                    ).join('') + '</tr>';
+                    return `<tr data-type11-index="${index}"${selected}>` + visibleColumns.map(column => {
+                        if (String(column).toLowerCase() === 'project_id') {
+                            const projectDescription = projectDisplayValue(record, column);
+                            return `<td${linkClass(column)} title="${escapeHtml(projectDescription)}">${escapeHtml(projectDescription)}</td>`;
+                        }
+                        const displayText = displayedValue(record, column);
+                        return `<td${linkClass(column)} title="${escapeHtml(displayText)}">${type11CellHtml(type11CellValue(record, column), column)}</td>`;
+                    }).join('') + (canExpire
+                        ? `<td class="type11-expire-col"><input type="checkbox" class="type11-expire-check" data-row-id="${escapeHtml(record.id || '')}" aria-label="Seleziona riga" ${record.id ? '' : 'disabled'}></td>`
+                        : '') + '</tr>';
                 }).join('');
 
                 const toolbar = !editing ? '' : (isGantt13 ? `<div class="type11-grid-toolbar">
                     <span style="flex:1;"></span>
                     <button type="button" class="type13-open-gantt primary">Modifica</button>
                 </div>` : `<div class="type11-grid-toolbar">
-                    <span class="type11-grid-selection" style="color:var(--text-muted); font-size:0.8rem; flex:1;">Seleziona una riga</span>
+                    <span class="type11-grid-selection" style="color:var(--text-muted); font-size:0.8rem; flex:1;">${editOnly ? 'Modifica contemporaneamente tutte le righe' : 'Seleziona una riga per eliminarla oppure modifica tutte'}</span>
                     ${editOnly ? '' : '<button type="button" class="type11-grid-add primary">+ Nuova riga</button>'}
-                    <button type="button" class="type11-grid-edit${editOnly ? ' primary' : ''}" disabled>Modifica</button>
+                    <button type="button" class="type11-grid-edit${editOnly ? ' primary' : ''}"${records.length ? '' : ' disabled'}>Modifica tutte</button>
                     ${editOnly ? '' : '<button type="button" class="type11-grid-delete danger" disabled>Elimina</button>'}
                     <button type="button" class="type11-grid-save-inline primary" style="display:none;">Salva</button>
                     <button type="button" class="type11-grid-cancel-inline" style="display:none;">Annulla</button>
@@ -6716,14 +7786,38 @@
                 // dentro il tbody, rimossa automaticamente al primo inserimento.
                 const emptyRow = records.length
                     ? ''
-                    : `<tr class="type11-empty-row"><td colspan="${Math.max(visibleColumns.length, 1)}" class="type11-grid-state">Nessun dato</td></tr>`;
-                widget.innerHTML = `${toolbar}<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}"><thead><tr>${head}</tr></thead><tbody>${body}${emptyRow}</tbody></table></div>`;
+                    : `<tr class="type11-empty-row"><td colspan="${Math.max(visibleColumns.length + (canExpire ? 1 : 0), 1)}" class="type11-grid-state">Nessun dato</td></tr>`;
+                widget.innerHTML = `${toolbar}<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}" style="width:${tableWidth}px;">${colgroup}<thead><tr>${head}</tr></thead><tbody>${body}${emptyRow}</tbody></table></div>`;
+
+                // Il click sull'icona apre solo il link: non deve anche selezionare la riga.
+                widget.querySelectorAll('.type11-cell-link').forEach(link =>
+                    link.addEventListener('click', event => event.stopPropagation())
+                );
 
                 let selectedRow = null;
                 const tableRows = [...widget.querySelectorAll('.type11-grid-table tbody tr')].filter(r => !r.classList.contains('type11-empty-row'));
                 const selectionLabel = widget.querySelector('.type11-grid-selection');
                 const editBtn = widget.querySelector('.type11-grid-edit');
                 const deleteBtn = widget.querySelector('.type11-grid-delete');
+
+                // La checkbox è indipendente dalla selezione singola usata da Modifica/Elimina.
+                // Il click non deve quindi attivare anche la riga sottostante.
+                const expireChecks = [...widget.querySelectorAll('.type11-expire-check')];
+                const updateExpireSaveState = () => {
+                    // Nel flyout standard il Salva globale è normalmente nascosto finché
+                    // non cambia un campo; la selezione della griglia deve mostrarlo.
+                    const detailRoot = widget.closest('#settingsDetailList');
+                    if (detailRoot) {
+                        const anyGridSelection = !!detailRoot.querySelector('.type11-expire-check:checked');
+                        const anyDirtyValue = !!detailRoot.querySelector('[data-setting-id][data-dirty="1"]');
+                        const saveBar = document.getElementById('settingsDetailSaveBar');
+                        if (saveBar) saveBar.style.display = (anyGridSelection || anyDirtyValue || detailLayoutDirty) ? 'block' : 'none';
+                    }
+                };
+                expireChecks.forEach(check => {
+                    check.addEventListener('click', event => event.stopPropagation());
+                    check.addEventListener('change', updateExpireSaveState);
+                });
 
                 if (editing && isGantt13) {
                     // Tipo 13: il pulsante "Modifica" apre la pagina Gantt nella stessa
@@ -6751,7 +7845,8 @@
                     const addBtn = widget.querySelector('.type11-grid-add');
                     const saveBtn = widget.querySelector('.type11-grid-save-inline');
                     const cancelBtn = widget.querySelector('.type11-grid-cancel-inline');
-                    let editingRowEl = null;   // <tr> attualmente in modifica/inserimento inline
+                    const editOptionsCache = new Map();
+                    let editingRows = [];      // tutte le <tr> attualmente modificabili
                     let editingIsNew = false;
 
                     const setToolbarEditingState = (isEditingNow) => {
@@ -6765,12 +7860,11 @@
 
                     tableRows.forEach(rowEl => {
                         rowEl.addEventListener('click', () => {
-                            if (editingRowEl) return; // durante modifica/inserimento inline la selezione è bloccata
+                            if (editingRows.length) return; // durante modifica/inserimento inline la selezione è bloccata
                             tableRows.forEach(r => r.classList.remove('type11-selected'));
                             rowEl.classList.add('type11-selected');
                             selectedRow = records[Number(rowEl.dataset.type11Index)];
                             if (selectionLabel) selectionLabel.textContent = 'Riga selezionata';
-                            if (editBtn) editBtn.disabled = !selectedRow;
                             if (deleteBtn) deleteBtn.disabled = !selectedRow;
                         });
                     });
@@ -6778,27 +7872,49 @@
                     // "+ Nuova riga": aggiunge una riga vuota direttamente in cima alla griglia,
                     // con le stesse colonne visibili, pronta per l'inserimento inline.
                     addBtn?.addEventListener('click', async () => {
-                        if (editingRowEl || !orderedMeta.length) return;
+                        if (editingRows.length || !orderedMeta.length) return;
                         const tbody = widget.querySelector('.type11-grid-table tbody');
                         if (!tbody) return;
                         tbody.querySelector('.type11-empty-row')?.remove(); // via il placeholder "Nessun dato"
                         const tr = document.createElement('tr');
                         tr.className = 'type11-editing-row';
-                        tr.innerHTML = await type11BuildInlineRowCellsHtml(orderedMeta, {}, true, source, fieldId);
+                        tr.innerHTML = await type11BuildInlineRowCellsHtml(orderedMeta, {}, true, source, fieldId, context, editOptionsCache)
+                            + (canExpire ? '<td class="type11-expire-col"></td>' : '');
                         tbody.insertBefore(tr, tbody.firstChild);
-                        editingRowEl = tr;
+                        editingRows = [tr];
                         editingIsNew = true;
                         setToolbarEditingState(true);
                     });
 
-                    // "Modifica": trasforma direttamente le celle della riga selezionata in
-                    // input modificabili, senza aprire alcun elenco separato dei campi.
+                    // "Modifica tutte": rende contemporaneamente editabili tutte le righe
+                    // visibili. L'eventuale checkbox scadenza in fondo resta disponibile.
                     editBtn?.addEventListener('click', async () => {
-                        if (editingRowEl || !selectedRow || !orderedMeta.length) return;
-                        const rowEl = widget.querySelector('.type11-grid-table tbody tr.type11-selected');
-                        if (!rowEl) return;
-                        rowEl.innerHTML = await type11BuildInlineRowCellsHtml(orderedMeta, selectedRow, false, source, fieldId);
-                        editingRowEl = rowEl;
+                        if (editingRows.length || !records.length || !orderedMeta.length) return;
+                        for (const rowEl of tableRows) {
+                            const record = records[Number(rowEl.dataset.type11Index)];
+                            if (!record) continue;
+                            const temporaryRow = document.createElement('tr');
+                            temporaryRow.innerHTML = await type11BuildInlineRowCellsHtml(
+                                orderedMeta, record, false, source, fieldId, context, editOptionsCache
+                            );
+                            const replacementCells = [...temporaryRow.children];
+                            const currentCells = [...rowEl.children].slice(0, orderedMeta.length);
+                            currentCells.forEach((cell, index) => {
+                                if (replacementCells[index]) cell.replaceWith(replacementCells[index]);
+                            });
+                            rowEl.classList.remove('type11-selected');
+                            rowEl.classList.add('type11-editing-row');
+                            rowEl.dataset.type11Dirty = '0';
+                            rowEl.querySelectorAll('.type11-editor-field').forEach(input => {
+                                const markDirty = () => {
+                                    input.dataset.dirty = '1';
+                                    rowEl.dataset.type11Dirty = '1';
+                                };
+                                input.addEventListener('input', markDirty);
+                                input.addEventListener('change', markDirty);
+                            });
+                            editingRows.push(rowEl);
+                        }
                         editingIsNew = false;
                         setToolbarEditingState(true);
                     });
@@ -6808,22 +7924,47 @@
                     });
 
                     saveBtn?.addEventListener('click', async () => {
-                        if (!editingRowEl) return;
-                        const values = {};
-                        editingRowEl.querySelectorAll('.type11-editor-field').forEach(input => {
-                            if (input.disabled) return;
-                            values[input.dataset.col] = input.type === 'checkbox' ? input.checked : input.value;
-                        });
-                        const payload = { fieldId: widget.dataset.gridFieldId, values };
-                        if (!editingIsNew) payload.rowId = selectedRow && selectedRow.id ? selectedRow.id : '';
+                        if (!editingRows.length) return;
                         const gridSource = encodeURIComponent(widget.dataset.gridSource || currentDetailSource);
-                        const url = `${API_URL}/${gridSource}/grid-widget/row`;
                         try {
-                            const response = await fetch(url, {
-                                method: editingIsNew ? 'POST' : 'PUT',
-                                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                                body: JSON.stringify(payload)
-                            });
+                            let response;
+                            if (editingIsNew) {
+                                const values = {};
+                                editingRows[0].querySelectorAll('.type11-editor-field').forEach(input => {
+                                    if (input.disabled) return;
+                                    values[input.dataset.col] = input.type === 'checkbox' ? input.checked : input.value;
+                                });
+                                response = await fetch(`${API_URL}/${gridSource}/grid-widget/row`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                                    body: JSON.stringify({ fieldId: widget.dataset.gridFieldId, values })
+                                });
+                            } else {
+                                const changedRows = editingRows.filter(row => row.dataset.type11Dirty === '1').map(row => {
+                                    const values = {};
+                                    row.querySelectorAll('.type11-editor-field[data-dirty="1"]').forEach(input => {
+                                        if (input.disabled) return;
+                                        values[input.dataset.col] = input.type === 'checkbox' ? input.checked : input.value;
+                                    });
+                                    const record = records[Number(row.dataset.type11Index)];
+                                    return { rowId: record && record.id ? record.id : '', values };
+                                }).filter(change => change.rowId && Object.keys(change.values).length);
+                                const expireRowIds = [...widget.querySelectorAll('.type11-expire-check:checked')]
+                                    .map(check => check.dataset.rowId).filter(Boolean);
+                                if (!changedRows.length && !expireRowIds.length) {
+                                    showNotification('Nessuna modifica da salvare', 'info');
+                                    return;
+                                }
+                                response = await fetch(`${API_URL}/${gridSource}/grid-widget/rows`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                                    body: JSON.stringify({
+                                        fieldId: widget.dataset.gridFieldId,
+                                        rows: changedRows,
+                                        expireRowIds
+                                    })
+                                });
+                            }
                             const data = await response.json().catch(() => ({}));
                             if (!response.ok) {
                                 showNotification('Errore: ' + (data.error || response.status), 'info');
@@ -6836,7 +7977,7 @@
                         }
                     });
 
-                    deleteBtn?.addEventListener('click', () => { if (!editingRowEl) type11DeleteSelected(widget, selectedRow); });
+                    deleteBtn?.addEventListener('click', () => { if (!editingRows.length) type11DeleteSelected(widget, selectedRow); });
                 }
             } catch (e) {
                 widget.innerHTML = '<div class="type11-grid-state">Errore di connessione</div>';
@@ -6869,13 +8010,16 @@
             const isProjectsDetail = (currentDetailSource === 'projects');
             const canDelete = isClientCustom || isAdminUser || isProjectsDetail;
             const canRename = isClientCustom || isAdminUser || isProjectsDetail;
+            const earlyDeleteCheckbox = (mode === 'delete' && canDelete)
+                ? `<input type="checkbox" class="field-del-check" data-campo="${campo}" onclick="event.stopPropagation();" style="margin-right:8px; cursor:pointer; flex:0 0 auto;">`
+                : '';
 
             if (tipo === 0) {
-                // Nodo padre: riga cliccabile con freccia, apre un nuovo flyout
-                return `<div class="settings-detail-parent drag-handle" data-row-id="${id}" data-campo="${campo}" data-parent-id="${id}" data-parent-campo="${campo}"${drag}><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+                // Nodo padre: riga cliccabile con freccia, apre il form centrale.
+                return `<div class="settings-detail-parent drag-handle" data-row-id="${id}" data-campo="${campo}" data-parent-id="${id}" data-parent-campo="${campo}"${drag}><span style="display:flex; align-items:center; min-width:0;">${earlyDeleteCheckbox}${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
             } else if (tipo === 20) {
                 // Collegamento a tabella esterna: riga cliccabile con freccia (settings e clients).
-                return `<div class="settings-detail-link drag-handle" data-row-id="${id}" data-campo="${campo}" data-link-id="${id}" data-link-label="${campo}"${drag}><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+                return `<div class="settings-detail-link drag-handle" data-row-id="${id}" data-campo="${campo}" data-link-id="${id}" data-link-label="${campo}"${drag}><span style="display:flex; align-items:center; min-width:0;">${earlyDeleteCheckbox}${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
             } else if (tipo === 1) {
                 // Booleano -> valore1, interruttore a levetta (toggle)
                 const checked = (row.valore1 === true || row.valore1 === 'true' || row.valore1 === 't') ? 'checked' : '';
@@ -6980,12 +8124,12 @@
                     input = `<a class="type12-link-button" href="${href}" target="_blank" rel="noopener noreferrer" title="Apri collegamento"><i class="fas fa-folder-open"></i><span>${label}</span></a>`;
                 }
             } else if (tipo === 15) {
-                // Riga cliccabile: apre un nuovo flyout con l'elenco derivato dalla query
+                // Riga cliccabile: apre il form centrale con l'elenco derivato dalla query
                 // (tabella.colonna + VariabDB). Riusa lo stile verde di settings-detail-link.
-                return `<div class="settings-detail-link settings-detail-opt drag-handle" data-row-id="${id}" data-campo="${campo}" data-opt-id="${id}" data-opt-label="${campo}"${drag}><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+                return `<div class="settings-detail-link settings-detail-opt drag-handle" data-row-id="${id}" data-campo="${campo}" data-opt-id="${id}" data-opt-label="${campo}"${drag}><span style="display:flex; align-items:center; min-width:0;">${earlyDeleteCheckbox}${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
             } else if (tipo === 16) {
                 // Riga cliccabile: apre il flyout di creazione nuovo cliente (ex pulsante "+ Nuovo cliente").
-                return `<div class="settings-detail-link settings-detail-newclient drag-handle" data-row-id="${id}" data-campo="${campo}" data-nc-label="${campo}"${drag}><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+                return `<div class="settings-detail-link settings-detail-newclient drag-handle" data-row-id="${id}" data-campo="${campo}" data-nc-label="${campo}"${drag}><span style="display:flex; align-items:center; min-width:0;">${earlyDeleteCheckbox}${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
             } else if (tipo === 30) {
                 // Barra (slider) -> valore3: min 35, max 150, default 100.
                 const v = (row.valore3 == null || row.valore3 === '') ? 100 : parseInt(row.valore3, 10);
@@ -6993,7 +8137,7 @@
             } else if (tipo === 50) {
                 // Routine custom: riga verde cliccabile. L'azione dipende da valore2
                 // (es. valore2='Nuovo_utente' apre il flyout di creazione utente).
-                return `<div class="settings-detail-link settings-detail-routine drag-handle" data-row-id="${id}" data-campo="${campo}" data-routine="${escapeHtml(row.valore2 == null ? '' : row.valore2)}"${drag}><span>${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+                return `<div class="settings-detail-link settings-detail-routine drag-handle" data-row-id="${id}" data-campo="${campo}" data-routine="${escapeHtml(row.valore2 == null ? '' : row.valore2)}"${drag}><span style="display:flex; align-items:center; min-width:0;">${earlyDeleteCheckbox}${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
             } else {
                 input = `<span style="color: var(--text-muted);">—</span>`;
             }
@@ -7010,11 +8154,11 @@
                 ? `<input type="text" class="field-rename" data-oldcampo="${campo}" value="${campo}" style="width: 140px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem;">`
                 : `<span class="campo-label${detailReorderMode ? ' drag-handle' : ''}"${detailReorderMode ? ' draggable="true"' : ''}>${campoLabelHtml(row.campo)}</span>`;
 
-            // Progetti: un campo può occupare 1, 2 o 3 colonne (layout_span) -> peso flex nella riga.
-            const span = isProjectsDetail ? Math.max(1, Math.min(3, Number(row.layout_span) || 1)) : 1;
-            const spanStyle = ` style="flex: ${span} 1 0;"`;
-            // In riordino (progetti) mostra un selettore per impostare quante colonne occupa.
-            const spanSel = (detailReorderMode && isProjectsDetail)
+            // In ogni flyout un campo può occupare 1, 2 o 3 colonne (layout_span).
+            const span = Math.max(1, Math.min(3, Number(row.layout_span) || 1));
+            const spanStyle = ` style="grid-column: span ${span};"`;
+            // In riordino mostra il selettore per impostare quante colonne occupa.
+            const spanSel = detailReorderMode
                 ? `<select class="span-sel" title="Colonne occupate" style="flex:0 0 auto; width:auto; padding:2px 4px; font-size:0.72rem;">${[1, 2, 3].map(n => `<option value="${n}" ${span === n ? 'selected' : ''}>${n} col</option>`).join('')}</select>`
                 : '';
 
@@ -7030,10 +8174,18 @@
             const listEl = document.getElementById('settingsDetailList');
             if (!listEl) return;
             const dirty = listEl.querySelectorAll('[data-setting-id][data-dirty="1"]');
+            const hasGridSelections = !!listEl.querySelector('.type11-expire-check:checked');
             const isAdmin = Number(decodeJwtPayload().id_roles) === 1;
-            const hasChanges = dirty.length > 0 || detailLayoutDirty;
+            const hasScopedChanges = dirty.length > 0 || detailLayoutDirty;
 
-            if (isAdmin && hasChanges) {
+            if (!hasScopedChanges && !hasGridSelections) {
+                showNotification('Nessuna modifica da salvare', 'info');
+                return;
+            }
+
+            // Le selezioni della griglia riguardano id precisi e non devono chiedere
+            // l'ambito globale tenant/cliente; il popup resta solo per valori/layout.
+            if (isAdmin && hasScopedChanges) {
                 if (currentDetailSource === 'settings') {
                     openSettingsTenantScope({ op: 'save-values' });
                 } else {
@@ -7118,38 +8270,34 @@
                 }
             }
 
+            // Il normale pulsante Salva elabora anche tutte le checkbox delle griglie tipo 11.
+            if (allOk && listEl.querySelector('.type11-expire-check:checked')) {
+                const gridResult = await saveType11ExpirySelections(listEl);
+                if (!gridResult.ok) {
+                    allOk = false;
+                    showNotification('Errore nell’aggiornamento delle righe selezionate', 'info');
+                }
+            }
+
             // Persistenza del layout (ordinamento + colonna) se l'utente ha
             // riordinato le label via drag&drop con "Abilita modifica" attivo.
             if (allOk && detailLayoutDirty) {
-                const isProjects = (currentDetailSource === 'projects');
                 const items = [];
-                if (isProjects) {
-                    // PROGETTI: griglia a righe. ordinamento = indice riga, layout_col = posizione nella riga.
-                    let rowIdx = 1;
-                    listEl.querySelectorAll('.reorder-row').forEach(rowEl => {
-                        const fields = [...rowEl.querySelectorAll('[data-row-id]')].filter(r => r.dataset.rowId);
-                        if (!fields.length) return;
-                        let colIdx = 1;
-                        fields.forEach(r => {
-                            const spanEl = r.querySelector('.span-sel');
-                            const layout_span = Math.max(1, Math.min(3, Number(spanEl ? spanEl.value : r.dataset.span) || 1));
-                            items.push({ rowId: r.dataset.rowId, campo: r.dataset.campo || '', ordinamento: rowIdx, layout_col: colIdx, layout_span });
-                            colIdx++;
-                        });
-                        rowIdx++;
+                // Griglia a righe comune: ordinamento = indice riga,
+                // layout_col = posizione nella riga, layout_span = larghezza del campo.
+                let rowIdx = 1;
+                listEl.querySelectorAll('.reorder-row').forEach(rowEl => {
+                    const fields = [...rowEl.querySelectorAll('[data-row-id]')].filter(r => r.dataset.rowId);
+                    if (!fields.length) return;
+                    let colIdx = 1;
+                    fields.forEach(r => {
+                        const spanEl = r.querySelector('.span-sel');
+                        const layout_span = Math.max(1, Math.min(3, Number(spanEl ? spanEl.value : r.dataset.span) || 1));
+                        items.push({ rowId: r.dataset.rowId, campo: r.dataset.campo || '', ordinamento: rowIdx, layout_col: colIdx, layout_span });
+                        colIdx++;
                     });
-                } else {
-                    // Clienti/Impostazioni: colonne verticali, ordinamento sequenziale globale.
-                    let ord = 1;
-                    listEl.querySelectorAll('.detail-column[data-col]').forEach(col => {
-                        const colNum = Number(col.dataset.col) || 1;
-                        col.querySelectorAll('[data-row-id]').forEach(r => {
-                            if (!r.dataset.rowId) return;
-                            items.push({ rowId: r.dataset.rowId, campo: r.dataset.campo || '', ordinamento: ord, layout_col: colNum });
-                            ord++;
-                        });
-                    });
-                }
+                    rowIdx++;
+                });
                 if (scope) {
                     // L'ambito è già stato scelto (admin, non Progetti): un'unica chiamata bulk
                     // applica lo spostamento a "questo tenant" o a "tutti i tenant".
@@ -7173,8 +8321,7 @@
                     // salvataggio riga per riga sul proprio tenant/utente.
                     for (const it of items) {
                         try {
-                            const body = { ordinamento: it.ordinamento, layout_col: it.layout_col };
-                            if (isProjects) body.layout_span = it.layout_span;
+                            const body = { ordinamento: it.ordinamento, layout_col: it.layout_col, layout_span: it.layout_span };
                             const res = await fetch(`${API_URL}/data/${currentDetailSource}/${it.rowId}`, {
                                 method: 'PUT',
                                 headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
@@ -7318,7 +8465,7 @@
             const closeBtn = document.getElementById('detailCloseBtn');
             if (closeBtn) closeBtn.addEventListener('click', () => {
                 projectDetailActive = false;
-                detailMaxCols = 3;
+                detailMaxCols = 5;
                 projectClientId = null;
                 currentProjectConsuntivoValue = null;
                 currentProjectManageByHoursValue = null;
@@ -7425,7 +8572,17 @@
         // mode: 'add' (nuovo campo su settings/clients/projects) | 'edit' (modifica i valori di
         // una riga già esistente). Le colonne mostrate dipendono dal tipo_valore scelto e vengono
         // lette da set_var_layout (fallback: tenant del contesto -> tenant NULL = configurazione standard).
-        async function openTipoValoreForm({ source, rowId, existingRow, existingTipoValore }) {
+        async function openTipoValoreForm({
+            source,
+            rowId,
+            existingRow,
+            existingTipoValore,
+            contextArgument = currentDetailArgument,
+            contextContainerCampo = currentContainerCampo,
+            contextClientId: formClientId = null,
+            contextProjectId: formProjectId = null,
+            onSaved = null
+        }) {
             const mode = rowId ? 'edit' : 'add';
             const overlay = document.createElement('div');
             overlay.style.cssText = 'position:fixed; inset:0; z-index:900; background:transparent;';
@@ -7472,10 +8629,10 @@
                     let contextClientId = '';
                     let contextProjectId = '';
                     if (source === 'projects') {
-                        contextClientId = existingRow?.client_id || projectClientId || '';
-                        contextProjectId = existingRow?.argument || currentDetailArgument || '';
+                        contextClientId = existingRow?.client_id || formClientId || projectClientId || '';
+                        contextProjectId = formProjectId || currentDetailArgument || '';
                     } else if (source === 'clients') {
-                        contextClientId = currentClientId || currentDetailArgument || '';
+                        contextClientId = formClientId || currentClientId || currentDetailArgument || '';
                     }
                     const qs = new URLSearchParams({ source });
                     if (contextClientId) qs.set('clientId', contextClientId);
@@ -7496,13 +8653,13 @@
                     userInp.value = user.name || user.id || fallbackUserId || '—';
                 }
                 if (clientInp) {
-                    const fallbackClientId = existingRow?.client_id || (source === 'clients' ? (currentClientId || currentDetailArgument || '') : (projectClientId || ''));
+                    const fallbackClientId = existingRow?.client_id || formClientId || (source === 'clients' ? (currentClientId || currentDetailArgument || '') : (projectClientId || ''));
                     clientInp.dataset.id = client.id || fallbackClientId || '';
                     clientInp.value = client.name || client.id || fallbackClientId || '—';
                 }
                 if (projectInp) {
                     const project = context?.project || {};
-                    const fallbackProjectId = existingRow?.argument || currentDetailArgument || '';
+                    const fallbackProjectId = formProjectId || currentDetailArgument || '';
                     projectInp.dataset.id = project.id || fallbackProjectId || '';
                     projectInp.value = project.name || project.id || fallbackProjectId || '—';
                 }
@@ -7597,10 +8754,10 @@
 
                 if (mode === 'add') {
                     values.campo = campo;
-                    values.argument = currentDetailArgument;
+                    values.argument = contextArgument;
                     if (source === 'projects') {
-                        values.project_id = existingRow?.argument || currentDetailArgument || '';
-                        if (projectClientId) values.client_id = projectClientId;
+                        values.project_id = formProjectId || currentDetailArgument || '';
+                        if (formClientId || projectClientId) values.client_id = formClientId || projectClientId;
                     }
                     url = `${API_URL}/data/${encodeURIComponent(source)}`;
                     method = 'POST';
@@ -7610,6 +8767,28 @@
                     values.campo = campo;
                     url = `${API_URL}/data/${encodeURIComponent(source)}/${encodeURIComponent(rowId)}`;
                     method = 'PUT';
+                }
+                // Nel form centrale del Nodo Padre l'operazione riguarda sempre quel
+                // contenitore specifico: salva direttamente e ricarica il form centrale.
+                if (onSaved) {
+                    try {
+                        const res = await fetch(url, {
+                            method,
+                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                            body: JSON.stringify(values)
+                        });
+                        if (!res.ok) {
+                            const err = await res.json().catch(() => ({}));
+                            showNotification('Errore: ' + (err.error || res.status), 'info');
+                            return;
+                        }
+                        showNotification('Salvato', 'success');
+                        close();
+                        await onSaved();
+                    } catch (e) {
+                        showNotification('Errore di connessione', 'info');
+                    }
+                    return;
                 }
                 // Per Clienti/Progetti la stessa scelta di ambito usata da Elimina: tutti i
                 // contenitori del tenant oppure solo quello selezionato. Per Settings resta
@@ -7831,7 +9010,7 @@
                     // Il progetto chiuso non fa più parte dell'elenco: chiude il flyout
                     // persistente e torna alla vista precedente (stesso comportamento della X).
                     projectDetailActive = false;
-                    detailMaxCols = 3;
+                    detailMaxCols = 5;
                     projectClientId = null;
                     currentProjectConsuntivoValue = null;
                     currentProjectManageByHoursValue = null;
@@ -7900,7 +9079,7 @@
                 if (linkedVal) { openLinkedRow(linkedVal.dataset.rowId, linkedVal.dataset.rowLabel); return; }
                 // tipo 15: elenco da query (VariabDB) — deve avere priorità sul link tipo 20.
                 const opt = e.target.closest('.settings-detail-opt');
-                if (opt) { openFieldOptionsList(opt.dataset.optId, opt.dataset.optLabel); return; }
+                if (opt) { openFieldOptionsList(opt.dataset.optId, opt.dataset.optLabel, opt); return; }
                 // tipo 16: apre il flyout di creazione nuovo cliente.
                 const nc = e.target.closest('.settings-detail-newclient');
                 if (nc) { openNewClientView(nc.dataset.ncLabel); return; }
@@ -7908,9 +9087,9 @@
                 const routine = e.target.closest('.settings-detail-routine');
                 if (routine) { openRoutineFlyout(routine.dataset.routine); return; }
                 const link = e.target.closest('.settings-detail-link');
-                if (link) { openLinkedList(link.dataset.linkId, link.dataset.linkLabel); return; }
+                if (link) { openLinkedList(link.dataset.linkId, link.dataset.linkLabel, link); return; }
                 const parent = e.target.closest('.settings-detail-parent');
-                if (parent) navigateToChild(parent.dataset.parentId, parent.dataset.parentCampo);
+                if (parent) navigateToChild(parent.dataset.parentId, parent.dataset.parentCampo, parent);
             });
 
             // Drag & drop per riordinare/spostare i campi (solo in modalità 'edit').
@@ -7925,7 +9104,7 @@
                 }
                 return closest.el;
             };
-            // Versione orizzontale (per la griglia a righe dei progetti): posizione lungo X.
+            // Versione orizzontale per la griglia a righe: posizione lungo X.
             const getDragAfterElX = (rowEl, x) => {
                 const els = [...rowEl.querySelectorAll('[data-row-id]:not(.dragging)')];
                 let closest = { offset: Number.NEGATIVE_INFINITY, el: null };
@@ -7948,7 +9127,7 @@
                 });
                 listEl.addEventListener('dragover', (e) => {
                     if (!draggedRow) return;
-                    // Griglia progetti: inserimento orizzontale in una riga.
+                    // Griglia comune: inserimento orizzontale in una riga.
                     const rrow = e.target.closest('.reorder-row');
                     if (rrow) {
                         e.preventDefault();
@@ -7959,7 +9138,7 @@
                     }
                     // Zona "nuova riga": consenti il drop (la riga viene creata al drop).
                     if (e.target.closest('.reorder-newrow')) { e.preventDefault(); return; }
-                    // Clienti/Impostazioni: colonne verticali.
+                    // Compatibilità con eventuali viste verticali residue.
                     const col = e.target.closest('.detail-column');
                     if (!col) return;
                     e.preventDefault();
@@ -7990,7 +9169,7 @@
                     if (!draggedRow) return;
                     draggedRow.classList.remove('dragging');
                     draggedRow = null;
-                    // Rimuovi le righe rimaste vuote (nella griglia progetti).
+                    // Rimuovi le righe rimaste vuote.
                     listEl.querySelectorAll('.reorder-row').forEach(r => { if (!r.querySelector('[data-row-id]')) r.remove(); });
                     detailLayoutDirty = true;
                     const sb = document.getElementById('settingsDetailSaveBar');
@@ -8503,6 +9682,7 @@
             initSettingsFlyout();
             initClientsFlyout();
             initProjectsFlyout();
+            initParentFormModal();
             initClientNewField();
             initClientFieldManagement();
             initImpersonate();

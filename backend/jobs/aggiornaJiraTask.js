@@ -38,7 +38,10 @@ const CONFIG = {
   // Abbinamento "contenuto in": il nome configurato è una porzione del testo Jira.
   confrontoCliente: 'contains',
   // link_task è mappato sulla chiave dell'issue ma deve contenere il link completo.
-  colonneUrl: ['link_task']
+  colonneUrl: ['link_task'],
+  // Scritto solo alla creazione della riga: marca l'origine del task. Negli
+  // aggiornamenti non viene toccato, così un "tipo" corretto a mano resta.
+  valoriInserimento: { tipo: 'Jira' }
 };
 
 export function aggiornaJiraTask(ctx) {

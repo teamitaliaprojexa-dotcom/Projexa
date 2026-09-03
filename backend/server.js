@@ -850,7 +850,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
 
     const clientColumn = source === 'projects' ? 'client_id' : 'NULL::uuid AS client_id';
     const configResult = await db.query(
-      `SELECT id, argument, tabella, colonna, "VariabDB" AS variabdb, tenant_id, user_id, ${clientColumn}
+      `SELECT id, argument, tabella, colonna, tipo_valore, "VariabDB" AS variabdb, tenant_id, user_id, ${clientColumn}
        FROM "${source}"
        WHERE id = $1 AND tenant_id = $2 AND tipo_valore::text IN ('11', '13')
        LIMIT 1`,
@@ -952,7 +952,14 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       );
 
       if (selectedColumns.length === 0) {
-        return res.json({ rows: [], columns: [], lockedColumns: [], editOnly: columnsSpec.editOnly });
+        return res.json({
+          rows: [],
+          columns: [],
+          lockedColumns: [],
+          editOnly: columnsSpec.editOnly,
+          canExpire: !isView && String(config.tipo_valore) === '11'
+            && tableColumns.has('id') && tableColumns.has('scadenza')
+        });
       }
     }
 
@@ -1031,9 +1038,13 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     const variab = splitVariabDbClause(config.variabdb);
     let extraCondition = '';
     if (variab.condition) {
-      extraCondition = /^\s*(and|or)\b/i.test(variab.condition)
-        ? ` ${variab.condition}`
-        : ` AND ${variab.condition}`;
+      // VariabDB deve restringere i risultati, mai poter aggirare i filtri obbligatori
+      // (tenant/utente/cliente/progetto/scadenza). Rimuove un eventuale AND/OR iniziale
+      // e racchiude l'intera espressione: anche "AND A OR B" diventa AND (A OR B).
+      const normalizedCondition = variab.condition
+        .replace(/^\s*(and|or)\b/i, '')
+        .trim();
+      if (normalizedCondition) extraCondition = ` AND (${normalizedCondition})`;
     }
     const orderBy = variab.orderBy
       ? ` ${variab.orderBy}`
@@ -1054,11 +1065,17 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       queryParams.push(config.argument);
       projectFilter = ` AND src.project_id = $${queryParams.length}`;
     }
+    // Le griglie tipo 11 mostrano soltanto record non scaduti. Se la tabella
+    // espone la colonna scadenza, NULL e date precedenti a oggi restano escluse.
+    // Il tipo 13 mantiene invece il proprio comportamento Gantt invariato.
+    const expiryFilter = String(config.tipo_valore) === '11' && tableColumns.has('scadenza')
+      ? ' AND src.scadenza >= CURRENT_DATE'
+      : '';
 
     const result = await db.query(
       `SELECT ${selectList}
        FROM "${tableName}" src${joinClause}
-       WHERE src.tenant_id = $1 AND src.user_id = $2${clientFilter}${projectFilter}${extraCondition}${orderBy}
+       WHERE src.tenant_id = $1 AND src.user_id = $2${clientFilter}${projectFilter}${expiryFilter}${extraCondition}${orderBy}
        LIMIT 100`,
       queryParams
     );
@@ -1072,7 +1089,11 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       columns: selectedColumns,
       isView,
       lockedColumns: selectedColumns.filter(c => columnsSpec.locked.has(c)),
-      editOnly: columnsSpec.editOnly
+      editOnly: columnsSpec.editOnly,
+      // Il frontend mostra la selezione multipla soltanto quando l'operazione
+      // richiesta è realmente applicabile alla tabella della griglia tipo 11.
+      canExpire: !isView && String(config.tipo_valore) === '11'
+        && tableColumns.has('id') && tableColumns.has('scadenza')
     });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
@@ -1308,6 +1329,182 @@ app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth,
       paramsArr
     );
     res.status(201).json(stripSensitive(result.rows)[0]);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Salvataggio multiplo della griglia tipo 11. Tutte le righe modificate nel browser
+// vengono validate e aggiornate nella stessa transazione; se una sola riga non appartiene
+// al contesto autorizzato, l'intera operazione viene annullata.
+app.put('/api/:source(settings|clients|projects)/grid-widget/rows', requireAuth, async (req, res) => {
+  let client;
+  try {
+    const source = req.params.source;
+    const fieldId = String((req.body && req.body.fieldId) || '').trim();
+    const changes = Array.isArray(req.body && req.body.rows) ? req.body.rows : [];
+    const expireRowIds = [...new Set(
+      (Array.isArray(req.body && req.body.expireRowIds) ? req.body.expireRowIds : [])
+        .map(id => String(id || '').trim()).filter(Boolean)
+    )];
+    if (changes.length > 100 || expireRowIds.length > 100) {
+      return res.status(400).json({ error: 'È possibile aggiornare al massimo 100 righe per volta' });
+    }
+    if (changes.length === 0 && expireRowIds.length === 0) {
+      return res.status(400).json({ error: 'Nessuna modifica da salvare' });
+    }
+
+    const ctx = await resolveGridWidgetContext(source, fieldId, req, true);
+    const { config, tableName, tableColumns, generatedColumns, effectiveUserId, clientId } = ctx;
+    if (String(config.tipo_valore) !== '11') {
+      return res.status(400).json({ error: 'Operazione disponibile solo per le griglie tipo 11' });
+    }
+    if (!tableColumns.has('id')) {
+      return res.status(400).json({ error: `La tabella ${tableName} non contiene la colonna id` });
+    }
+    if (expireRowIds.length && !tableColumns.has('scadenza')) {
+      return res.status(400).json({ error: `La tabella ${tableName} non contiene la colonna scadenza` });
+    }
+
+    const contextConditions = (paramsArr) => {
+      const conditions = [];
+      if (tableColumns.has('tenant_id')) {
+        paramsArr.push(req.user.tenant_id);
+        conditions.push(`tenant_id = $${paramsArr.length}`);
+      }
+      if (tableColumns.has('user_id')) {
+        paramsArr.push(effectiveUserId);
+        conditions.push(`user_id = $${paramsArr.length}`);
+      }
+      if (tableColumns.has('client_id') && clientId) {
+        paramsArr.push(clientId);
+        conditions.push(`client_id = $${paramsArr.length}`);
+      }
+      if (tableColumns.has('project_id') && source === 'projects') {
+        paramsArr.push(config.argument);
+        conditions.push(`project_id = $${paramsArr.length}`);
+      }
+      return conditions;
+    };
+
+    client = await db.connect();
+    await client.query('BEGIN');
+    let updated = 0;
+    const seenRowIds = new Set();
+
+    for (const change of changes) {
+      const rowId = String((change && change.rowId) || '').trim();
+      if (!rowId || seenRowIds.has(rowId)) {
+        throw Object.assign(new Error('Identificativo riga mancante o duplicato'), { statusCode: 400 });
+      }
+      seenRowIds.add(rowId);
+      const inputValues = change && typeof change.values === 'object' && !Array.isArray(change.values)
+        ? change.values : {};
+      let data = {};
+      for (const [key, value] of Object.entries(inputValues)) {
+        if (tableColumns.has(key) && !generatedColumns.has(key) && !ctx.lockedColumns.has(key)
+            && !['id', 'tenant_id', 'user_id', 'client_id', 'project_id'].includes(key)) {
+          data[key] = value === '' ? null : value;
+        }
+      }
+      data = await cryptoWrite(client, 'main', tableName, data, rowId);
+      const columns = Object.keys(data).map(assertValidIdentifier);
+      if (!columns.length) continue;
+
+      const paramsArr = columns.map(column => data[column]);
+      paramsArr.push(rowId);
+      const conditions = [`id::text = $${paramsArr.length}`].concat(contextConditions(paramsArr));
+      const setClause = columns.map((column, index) => `"${column}" = $${index + 1}`).join(', ');
+      const updatedAtClause = tableColumns.has('updated_at') ? ', updated_at = CURRENT_TIMESTAMP' : '';
+      const result = await client.query(
+        `UPDATE "${tableName}" SET ${setClause}${updatedAtClause}
+         WHERE ${conditions.join(' AND ')} RETURNING id`,
+        paramsArr
+      );
+      if (result.rowCount !== 1) {
+        throw Object.assign(new Error('Riga non trovata o non autorizzata'), { statusCode: 404 });
+      }
+      updated += 1;
+    }
+
+    let expired = 0;
+    if (expireRowIds.length) {
+      const paramsArr = [expireRowIds];
+      const conditions = ['id::text = ANY($1::text[])'].concat(contextConditions(paramsArr));
+      const updatedAtClause = tableColumns.has('updated_at') ? ', updated_at = CURRENT_TIMESTAMP' : '';
+      const result = await client.query(
+        `UPDATE "${tableName}" SET scadenza = CURRENT_DATE - 1${updatedAtClause}
+         WHERE ${conditions.join(' AND ')} RETURNING id`,
+        paramsArr
+      );
+      if (result.rowCount !== expireRowIds.length) {
+        throw Object.assign(new Error('Una o più righe da chiudere non sono state trovate'), { statusCode: 404 });
+      }
+      expired = result.rowCount;
+    }
+
+    await client.query('COMMIT');
+    res.json({ updated, expired });
+  } catch (error) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (rollbackError) { /* ignore */ }
+    }
+    res.status(error.statusCode || 500).json({ error: error.message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// Chiusura multipla delle righe di una griglia tipo_valore=11: imposta scadenza
+// a ieri usando la data del database. Gli id ricevuti vengono sempre limitati al
+// contesto autorizzato della griglia (tenant, utente, cliente e progetto).
+app.put('/api/:source(settings|clients|projects)/grid-widget/expire', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const fieldId = String((req.body && req.body.fieldId) || '').trim();
+    const rawRowIds = Array.isArray(req.body && req.body.rowIds) ? req.body.rowIds : [];
+    const rowIds = [...new Set(rawRowIds.map(id => String(id || '').trim()).filter(Boolean))];
+
+    if (rowIds.length === 0) return res.status(400).json({ error: 'Selezionare almeno una riga' });
+    if (rowIds.length > 100) return res.status(400).json({ error: 'È possibile aggiornare al massimo 100 righe per volta' });
+
+    const ctx = await resolveGridWidgetContext(source, fieldId, req, true);
+    const { config, tableName, tableColumns, effectiveUserId, clientId } = ctx;
+    if (String(config.tipo_valore) !== '11') {
+      return res.status(400).json({ error: 'Operazione disponibile solo per le griglie tipo 11' });
+    }
+    if (!tableColumns.has('id') || !tableColumns.has('scadenza')) {
+      return res.status(400).json({ error: `La tabella ${tableName} deve contenere le colonne id e scadenza` });
+    }
+
+    const paramsArr = [rowIds];
+    const conditions = ['id::text = ANY($1::text[])'];
+    if (tableColumns.has('tenant_id')) {
+      paramsArr.push(req.user.tenant_id);
+      conditions.push(`tenant_id = $${paramsArr.length}`);
+    }
+    if (tableColumns.has('user_id')) {
+      paramsArr.push(effectiveUserId);
+      conditions.push(`user_id = $${paramsArr.length}`);
+    }
+    if (tableColumns.has('client_id') && clientId) {
+      paramsArr.push(clientId);
+      conditions.push(`client_id = $${paramsArr.length}`);
+    }
+    if (tableColumns.has('project_id') && source === 'projects') {
+      paramsArr.push(config.argument);
+      conditions.push(`project_id = $${paramsArr.length}`);
+    }
+
+    const updatedAtClause = tableColumns.has('updated_at') ? ', updated_at = CURRENT_TIMESTAMP' : '';
+    const result = await db.query(
+      `UPDATE "${tableName}"
+       SET scadenza = CURRENT_DATE - 1${updatedAtClause}
+       WHERE ${conditions.join(' AND ')}
+       RETURNING id`,
+      paramsArr
+    );
+    res.json({ updated: result.rowCount });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
