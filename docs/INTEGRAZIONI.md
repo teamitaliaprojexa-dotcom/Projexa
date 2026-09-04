@@ -111,6 +111,14 @@ testo): il **nome del filtro Jira** va scritto nella casella di testo.
   righe del filtro. Misura reale su `aggiornaJiraTask`: 2.381 righe del filtro
   principale + 32.215 del filtro aggiuntivo = **circa 170 secondi**. Tenerne conto
   prima di allargare un filtro: il pulsante resta in attesa per tutta la durata.
+- **Limite di frequenza (429)**: Jira limita il numero di chiamate ravvicinate. Un
+  429 non è più un errore fatale: `jiraApi` (in `routes/jira.js`) attende — il tempo
+  indicato da Jira nell'header `Retry-After`, altrimenti 2s, 6s, 18s, 54s — e
+  riprova fino a 4 volte, come fa anche per il 503 e per gli errori di rete. Se il
+  limite persiste il programma si ferma con un messaggio chiaro. Attenzione: una
+  singola chiamata fortemente limitata può quindi restare in attesa fino a ~4 minuti.
+  Leggere decine di migliaia di righe più volte di seguito **fa scattare il limite**:
+  conviene non lanciare la sincronizzazione a ripetizione.
 - **Un programma che fallisce non blocca gli altri**: l'errore finisce nel suo
   riquadro del riepilogo. Anche un singolo record che va in errore non interrompe
   l'elaborazione delle altre righe.

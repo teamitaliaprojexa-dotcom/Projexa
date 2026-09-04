@@ -90,6 +90,10 @@ export function isEncrypted(value) {
 export function encryptValue(plain) {
   if (plain === null || plain === undefined) return plain;
   const text = String(plain);
+  // La stringa vuota non si cifra: non c'è nulla da proteggere e il risultato
+  // avrebbe il terzo segmento vuoto ("enc:v1:<iv>.<tag>."), una forma che è già
+  // costata un valore illeggibile (jira_account_id inviato cifrato alle API).
+  if (text === '') return text;
   if (isEncrypted(text)) return text; // già cifrato: non cifrare due volte
   const key = encryptionKey();
   if (!key) return text;
@@ -109,7 +113,12 @@ export function encryptValue(plain) {
 // caratteri non validi, quindi senza questo controllo una stringa che CONTIENE un
 // cifrato (es. la colonna calcolata nome||' '||cognome) verrebbe "decifrata" con
 // successo restituendo solo il primo pezzo, perdendo il resto del testo.
-const STRICT_RE = /^enc:v1:[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+$/;
+//
+// Il TERZO segmento può essere vuoto: è il caso della stringa vuota cifrata dalle
+// versioni precedenti ("enc:v1:<iv>.<tag>."). Va accettato, altrimenti quei valori
+// restano illeggibili per sempre e vengono restituiti come testo "enc:v1:...".
+// Da oggi encryptValue non produce più questa forma, ma i dati già scritti sì.
+const STRICT_RE = /^enc:v1:[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]*$/;
 
 function decryptOne(stored, quiet) {
   if (!isEncrypted(stored)) return stored;

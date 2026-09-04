@@ -144,35 +144,104 @@ async function getJiraSession(userId) {
     console.log(`[JIRA] Access token rinnovato per l'utente ${userId}`);
   }
 
-  return {
+  const session = {
     accessToken: el.jira_access_token,
     cloudId: el.jira_cloud_id,
     siteUrl: el.jira_site_url || '',
     accountId: el.jira_account_id || ''
   };
+
+  // Se al momento del collegamento /myself non aveva risposto, l'accountId è rimasto
+  // vuoto e l'elenco dei filtri ripiega su /filter/my (solo quelli di proprietà).
+  // Si recupera qui, una volta sola, e si salva: al giro dopo è già a posto.
+  if (!session.accountId) {
+    try {
+      const me = await jiraApi(session, '/rest/api/3/myself');
+      if (me && me.accountId) {
+        session.accountId = me.accountId;
+        await updateIntegrationElements(userId, PROVIDER, TIPO_INTEGRAZIONE, {
+          jira_account_id: me.accountId,
+          ...(me.displayName ? { jira_display_name: me.displayName } : {})
+        });
+        console.log(`[JIRA] accountId recuperato per l'utente ${userId}`);
+      }
+    } catch (e) {
+      console.warn('[JIRA] accountId non recuperabile:', e.message);
+    }
+  }
+
+  return session;
+}
+
+const pausa = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Quanto attendere prima di riprovare dopo un 429/503. Jira indica l'attesa con
+// l'header Retry-After (secondi); se manca si usa un ritardo crescente. Il tetto
+// evita che una richiesta resti appesa troppo a lungo.
+const MAX_ATTESA_MS = 60000;
+
+function attesaPrimaDiRiprovare(response, tentativo) {
+  const header = Number(response.headers.get('retry-after'));
+  if (Number.isFinite(header) && header > 0) return Math.min(header * 1000, MAX_ATTESA_MS);
+  return Math.min(2000 * Math.pow(3, tentativo), MAX_ATTESA_MS); // 2s, 6s, 18s, 54s
 }
 
 // Chiamata alle API di Jira Cloud. Sono usati solo endpoint di lettura: il POST
 // serve unicamente per /search/jql e /search/approximate-count, che sono ricerche.
-async function jiraApi(session, path, { method = 'GET', body } = {}) {
-  const response = await fetch(`${API_BASE}/ex/jira/${session.cloudId}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${session.accessToken}`,
-      Accept: 'application/json',
-      ...(body ? { 'Content-Type': 'application/json' } : {})
-    },
-    ...(body ? { body: JSON.stringify(body) } : {})
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    const err = new Error(`Jira API ${response.status} su ${path}: ${text.slice(0, 300)}`);
+//
+// Jira applica un limite di frequenza: con molte chiamate ravvicinate (la
+// sincronizzazione ne fa centinaia) risponde 429. In quel caso non si fallisce
+// subito, si aspetta e si riprova: un 429 è una richiesta di rallentare, non un
+// errore vero. Stesso trattamento per il 503 (servizio momentaneamente occupato).
+async function jiraApi(session, path, { method = 'GET', body, tentativiMax = 4 } = {}) {
+  for (let tentativo = 0; ; tentativo++) {
+    let response;
+    try {
+      response = await fetch(`${API_BASE}/ex/jira/${session.cloudId}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`,
+          Accept: 'application/json',
+          ...(body ? { 'Content-Type': 'application/json' } : {})
+        },
+        ...(body ? { body: JSON.stringify(body) } : {})
+      });
+    } catch (e) {
+      // La chiamata non è nemmeno partita (connessione caduta, DNS, timeout di rete):
+      // fetch lancia invece di rispondere. Capita durante le attese lunghe imposte
+      // da un 429, quindi va ritentata come gli altri errori temporanei.
+      if (tentativo >= tentativiMax) {
+        const err = new Error(`Jira non raggiungibile su ${path}: ${e.message}`);
+        err.status = 503;
+        throw err;
+      }
+      const attesa = Math.min(2000 * Math.pow(3, tentativo), MAX_ATTESA_MS);
+      console.warn(`[JIRA] rete non disponibile su ${path} (${e.message}): attendo ${Math.round(attesa / 1000)}s e riprovo (${tentativo + 1}/${tentativiMax})`);
+      await pausa(attesa);
+      continue;
+    }
+
+    if (response.ok) {
+      const text = await response.text();
+      return text ? JSON.parse(text) : {};
+    }
+
+    if ((response.status === 429 || response.status === 503) && tentativo < tentativiMax) {
+      const attesa = attesaPrimaDiRiprovare(response, tentativo);
+      console.warn(`[JIRA] ${response.status} su ${path}: attendo ${Math.round(attesa / 1000)}s e riprovo (${tentativo + 1}/${tentativiMax})`);
+      await pausa(attesa);
+      continue;
+    }
+
+    const text = await response.text();
+    const err = new Error(response.status === 429
+      ? `Jira ha limitato le richieste (429) su ${path} anche dopo ${tentativiMax} tentativi: riprova fra qualche minuto.`
+      : `Jira API ${response.status} su ${path}: ${text.slice(0, 300)}`);
     err.status = response.status === 401 ? 428 : response.status;
     err.jiraStatus = response.status;
     err.body = text;
     throw err;
   }
-  return text ? JSON.parse(text) : {};
 }
 
 // ==========================================
@@ -513,7 +582,10 @@ async function listFilters(session) {
       startAt += (data.values || []).length || 50;
     }
   } else {
-    const mine = await jiraApi(session, '/rest/api/3/filter/my?expand=jql');
+    // Ripiego (accountId non disponibile): oltre ai filtri di proprietà si prendono
+    // anche quelli preferiti, altrimenti un filtro condiviso da un collega non
+    // comparirebbe e la sincronizzazione non lo troverebbe.
+    const mine = await jiraApi(session, '/rest/api/3/filter/my?expand=jql&includeFavourites=true');
     for (const f of mine || []) filters.push({ id: String(f.id), name: f.name, jql: f.jql || '' });
   }
 
