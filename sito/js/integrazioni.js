@@ -119,17 +119,17 @@
     }
 
     // Secondo filtro Jira, configurato in Impostazioni -> Integrazioni: aggiorna
-    // soltanto righe già presenti, non ne crea di nuove. Compare solo se configurato.
+    // soltanto righe già presenti, a parità di codice Jira e SENZA guardare il
+    // cliente. Non crea righe nuove. Compare solo se configurato.
     function renderPassaggioAggiuntivo(p) {
         if (!p) return '';
         return `<div class="integr-extra">
-            <div class="integr-extra-head">Filtro aggiuntivo (solo aggiornamento):
+            <div class="integr-extra-head">Filtro aggiuntivo (solo aggiornamento, per codice Jira):
                 <strong>${esc(p.filtro)}</strong></div>
             <div class="integr-nums">
                 ${numero(p.righeJira, 'righe lette da Jira')}
                 ${numero(p.aggiornate, 'aggiornate')}
                 ${numero(p.ignorateNonTrovate, 'non presenti')}
-                ${numero(p.ignorateSenzaCliente, 'senza cliente')}
                 ${numero(p.ignorateScadute, 'già scadute')}
             </div>
         </div>`;
