@@ -1075,7 +1075,7 @@
         /* STATS GRID */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            grid-template-columns: repeat(5, minmax(0, 1fr));
             gap: 1.5rem;
             margin-bottom: 2rem;
         }
@@ -1113,6 +1113,11 @@
             box-shadow: 0 4px 14px rgba(0,0,0,0.08);
             transform: translateY(-1px);
         }
+
+        .kpi-dynamic-icon { color: var(--primary); }
+        .kpi-card:nth-child(5n + 2) .kpi-dynamic-icon { color: var(--secondary); }
+        .kpi-card:nth-child(5n + 3) .kpi-dynamic-icon { color: var(--warning); }
+        .kpi-card:nth-child(5n + 4) .kpi-dynamic-icon { color: var(--danger); }
 
         .stat-breakdown {
             margin-top: 0.35rem;
@@ -2028,6 +2033,11 @@
             .stats-grid {
                 grid-template-columns: repeat(2, 1fr);
             }
+
+            .stats-grid .kpi-card {
+                grid-row: auto !important;
+                grid-column: auto !important;
+            }
         }
     </style>
 </head>
@@ -2361,45 +2371,7 @@
 
         <div class="container">
             <!-- STATS -->
-            <div class="stats-grid">
-                <div class="stat-card kpi-card" id="kpiCardAttivi" data-kpi="attivi" role="button" tabindex="0">
-                    <div class="stat-icon" style="color: var(--primary);">
-                        <i class="fas fa-folder"></i>
-                    </div>
-                    <div class="stat-value" id="kpiValueAttivi">—</div>
-                    <div class="stat-label">Progetti attivi</div>
-                </div>
-                <div class="stat-card kpi-card" id="kpiCardCompletati" data-kpi="completati" role="button" tabindex="0">
-                    <div class="stat-icon" style="color: var(--secondary);">
-                        <i class="fas fa-check-circle"></i>
-                    </div>
-                    <div class="stat-value" id="kpiValueCompletati">—</div>
-                    <div class="stat-label">Progetti completati</div>
-                </div>
-                <div class="stat-card kpi-card" id="kpiCardRischi" data-kpi="rischi" role="button" tabindex="0">
-                    <div class="stat-icon" style="color: var(--warning);">
-                        <i class="fas fa-exclamation-triangle"></i>
-                    </div>
-                    <div class="stat-value" id="kpiValueRischi">—</div>
-                    <div class="stat-label">Rischi aperti</div>
-                    <div class="stat-breakdown" id="kpiBreakdownRischi"></div>
-                </div>
-                <div class="stat-card kpi-card" id="kpiCardTask" data-kpi="task" role="button" tabindex="0">
-                    <div class="stat-icon" style="color: var(--danger);">
-                        <i class="fas fa-list-check"></i>
-                    </div>
-                    <div class="stat-value" id="kpiValueTask">—</div>
-                    <div class="stat-label">Task aperti</div>
-                    <div class="stat-breakdown" id="kpiBreakdownTask"></div>
-                </div>
-                <div class="stat-card kpi-card" id="kpiCardQuotazioni" data-kpi="quotazioni" role="button" tabindex="0">
-                    <div class="stat-icon" style="color: var(--secondary);">
-                        <i class="fas fa-file-invoice"></i>
-                    </div>
-                    <div class="stat-value" id="kpiValueQuotazioni">—</div>
-                    <div class="stat-label">Quotazioni</div>
-                </div>
-            </div>
+            <div class="stats-grid" id="dashboardKpiGrid"></div>
 
             <!-- RIUNIONI DI OGGI - GOOGLE CALENDAR -->
             <div style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
@@ -2955,35 +2927,8 @@
         `;
         document.head.appendChild(style);
 
-        // === KPI DASHBOARD (Progetti attivi / completati / rischi aperti / task aperti / quotazioni) ===
-        // Dati grezzi dell'ultima risposta di ciascun KPI, tenuti in memoria per aprire
-        // la finestra di dettaglio senza rifare la chiamata quando si clicca la card.
-        let kpiProgettiData = { attivi: null, completati: null, rischi: null, task: null, quotazioni: null };
-
-        const KPI_ENDPOINTS = {
-            attivi: 'progetti-attivi',
-            completati: 'progetti-completati',
-            rischi: 'rischi-aperti',
-            task: 'task-aperti',
-            quotazioni: 'quotazioni'
-        };
-
-        const KPI_TITLES = {
-            attivi: 'Progetti attivi',
-            completati: 'Progetti completati',
-            rischi: 'Rischi aperti',
-            task: 'Task aperti',
-            quotazioni: 'Quotazioni'
-        };
-
-        // Testo mostrato nella finestra di dettaglio quando il KPI non ha elementi.
-        const KPI_EMPTY_TEXT = {
-            attivi: 'Nessun progetto trovato.',
-            completati: 'Nessun progetto trovato.',
-            rischi: 'Nessun progetto trovato.',
-            task: 'Nessun task trovato.',
-            quotazioni: 'Nessuna quotazione trovata.'
-        };
+        // === KPI DASHBOARD DINAMICI (kpi_tab) ===
+        let dashboardKpis = [];
 
         // Clienti attualmente selezionati nel filtro in alto, sotto forma di id
         // (il filtro lavora per nome, come già fatto per il KPI Fatturato).
@@ -2995,136 +2940,95 @@
                 .map(client => client.id);
         }
 
-        async function fetchKpiProgetti(kpi) {
+        function buildKpiQueryString() {
             const params = new URLSearchParams();
             getSelectedClientIds().forEach(clientId => params.append('clientId', clientId));
-            const response = await fetch(`${API_URL}/dashboard/kpi/${KPI_ENDPOINTS[kpi]}?${params.toString()}`, {
-                headers: getAuthHeaders()
-            });
-            if (!response.ok) {
-                const error = await response.json().catch(() => ({}));
-                throw new Error(error.error || `Errore HTTP ${response.status}`);
-            }
-            return response.json();
+            return params.toString();
         }
 
-        // Carica i tre KPI progetti dal server e aggiorna le card in dashboard.
+        // Il caricamento iniziale esegue esclusivamente i conteggi configurati.
         async function loadDashboardKpis() {
-            const results = await Promise.all(
-                Object.keys(KPI_ENDPOINTS).map(async (kpi) => {
-                    try {
-                        return [kpi, await fetchKpiProgetti(kpi)];
-                    } catch (error) {
-                        console.warn('[KPI DASHBOARD]', kpi, error.message);
-                        return [kpi, null];
-                    }
-                })
-            );
-
-            for (const [kpi, data] of results) {
-                kpiProgettiData[kpi] = data;
+            const grid = document.getElementById('dashboardKpiGrid');
+            if (!grid) return;
+            try {
+                const queryString = buildKpiQueryString();
+                const response = await fetch(`${API_URL}/dashboard/kpis${queryString ? `?${queryString}` : ''}`, {
+                    headers: getAuthHeaders()
+                });
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.error || `Errore HTTP ${response.status}`);
+                }
+                dashboardKpis = await response.json();
+                grid.innerHTML = dashboardKpis.map((kpi, index) => `
+                    <div class="stat-card kpi-card" data-kpi-id="${escapeHtml(kpi.id)}"
+                         role="button" tabindex="0"
+                         style="grid-row: ${Number(kpi.riga) || 1}; grid-column: ${Number(kpi.colonna) || 1};">
+                        <div class="stat-icon kpi-dynamic-icon"><i class="fas ${getDynamicKpiIcon(index)}"></i></div>
+                        <div class="stat-value">${Number(kpi.total) || 0}</div>
+                        <div class="stat-label">${escapeHtml(kpi.title || 'KPI')}</div>
+                    </div>
+                `).join('');
+                bindDynamicKpiCards();
+            } catch (error) {
+                dashboardKpis = [];
+                grid.innerHTML = '';
+                console.warn('[KPI DASHBOARD]', error.message);
+                showNotification('Impossibile caricare i KPI della dashboard', 'info');
             }
-
-            const attiviEl = document.getElementById('kpiValueAttivi');
-            if (attiviEl) attiviEl.textContent = kpiProgettiData.attivi ? kpiProgettiData.attivi.total : '—';
-
-            const completatiEl = document.getElementById('kpiValueCompletati');
-            if (completatiEl) completatiEl.textContent = kpiProgettiData.completati ? kpiProgettiData.completati.total : '—';
-
-            const rischiEl = document.getElementById('kpiValueRischi');
-            if (rischiEl) rischiEl.textContent = kpiProgettiData.rischi ? kpiProgettiData.rischi.total : '—';
-
-            const breakdownEl = document.getElementById('kpiBreakdownRischi');
-            if (breakdownEl) {
-                const breakdown = (kpiProgettiData.rischi && kpiProgettiData.rischi.breakdown) || [];
-                breakdownEl.innerHTML = breakdown
-                    .map(b => `<span>${escapeHtml(b.rischio)} ${b.count}</span>`)
-                    .join('');
-            }
-
-            const taskEl = document.getElementById('kpiValueTask');
-            if (taskEl) taskEl.textContent = kpiProgettiData.task ? kpiProgettiData.task.total : '—';
-
-            const taskBreakdownEl = document.getElementById('kpiBreakdownTask');
-            if (taskBreakdownEl) {
-                const breakdown = (kpiProgettiData.task && kpiProgettiData.task.breakdown) || [];
-                taskBreakdownEl.innerHTML = breakdown
-                    .map(b => `<span>${escapeHtml(b.tipo)} ${b.count}</span>`)
-                    .join('');
-            }
-
-            const quotazioniEl = document.getElementById('kpiValueQuotazioni');
-            if (quotazioniEl) quotazioniEl.textContent = kpiProgettiData.quotazioni ? kpiProgettiData.quotazioni.total : '—';
         }
 
-        // Apre la finestra di dettaglio del KPI cliccato, mostrando per ogni riga la
-        // descrizione del cliente (non l'id) e, quando esiste, la descrizione del progetto.
-        function openKpiModal(kpi) {
-            const data = kpiProgettiData[kpi];
+        function getDynamicKpiIcon(index) {
+            return ['fa-folder', 'fa-check-circle', 'fa-exclamation-triangle', 'fa-list-check', 'fa-file-invoice'][index % 5];
+        }
+
+        function bindDynamicKpiCards() {
+            document.querySelectorAll('#dashboardKpiGrid .kpi-card').forEach((card) => {
+                const open = () => openKpiModal(card.dataset.kpiId);
+                card.addEventListener('click', open);
+                card.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        open();
+                    }
+                });
+            });
+        }
+
+        // Solo al click interroga kpi_tab.dettaglio e mostra cliente/progetto decodificati.
+        async function openKpiModal(kpiId) {
             const modal = document.getElementById('kpiModal');
             const title = document.getElementById('kpiModalTitle');
             const body = document.getElementById('kpiModalBody');
             if (!modal || !title || !body) return;
-
-            title.textContent = KPI_TITLES[kpi] || 'Dettaglio KPI';
-
-            if (!data || !data.items || data.items.length === 0) {
-                body.innerHTML = `<div class="kpi-modal-empty">${escapeHtml(KPI_EMPTY_TEXT[kpi] || 'Nessun elemento trovato.')}</div>`;
-            } else if (kpi === 'rischi') {
-                // Raggruppa per livello di rischio, così il conteggio per valore è visibile
-                // anche nella finestra di dettaglio (Medio, Alto, Critico, ...).
-                const groups = new Map();
-                for (const item of data.items) {
-                    const key = item.rischio || 'Non specificato';
-                    if (!groups.has(key)) groups.set(key, []);
-                    groups.get(key).push(item);
-                }
-                body.innerHTML = [...groups.entries()].map(([rischio, items]) => `
-                    <div class="kpi-modal-group-title">${escapeHtml(rischio)} (${items.length})</div>
-                    ${items.map(renderKpiModalItem).join('')}
-                `).join('');
-            } else if (kpi === 'task') {
-                // Raggruppa per "tipo" (stesso schema del breakdown per rischio).
-                const groups = new Map();
-                for (const item of data.items) {
-                    const key = item.tipo || 'Non specificato';
-                    if (!groups.has(key)) groups.set(key, []);
-                    groups.get(key).push(item);
-                }
-                body.innerHTML = [...groups.entries()].map(([tipo, items]) => `
-                    <div class="kpi-modal-group-title">${escapeHtml(tipo)} (${items.length})</div>
-                    ${items.map(renderTaskModalItem).join('')}
-                `).join('');
-            } else if (kpi === 'quotazioni') {
-                body.innerHTML = data.items.map(renderQuotazioneModalItem).join('');
-            } else {
-                body.innerHTML = data.items.map(renderKpiModalItem).join('');
-            }
-
-            bindKpiModalItemClicks();
             modal.style.display = 'flex';
+            const config = dashboardKpis.find(kpi => String(kpi.id) === String(kpiId));
+            title.textContent = config?.title || 'Dettaglio KPI';
+            body.innerHTML = '<div class="kpi-modal-empty">Caricamento...</div>';
+
+            try {
+                const queryString = buildKpiQueryString();
+                const response = await fetch(`${API_URL}/dashboard/kpis/${encodeURIComponent(kpiId)}/detail${queryString ? `?${queryString}` : ''}`, {
+                    headers: getAuthHeaders()
+                });
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.error || `Errore HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                title.textContent = data.title || config?.title || 'Dettaglio KPI';
+                body.innerHTML = Array.isArray(data.items) && data.items.length
+                    ? data.items.map(renderKpiModalItem).join('')
+                    : '<div class="kpi-modal-empty">Nessun elemento trovato.</div>';
+                bindKpiModalItemClicks();
+            } catch (error) {
+                body.innerHTML = `<div class="kpi-modal-empty">${escapeHtml(error.message)}</div>`;
+            }
         }
 
         function renderKpiModalItem(item) {
             const client = item.client ? escapeHtml(item.client) : 'Cliente non specificato';
-            const description = item.description ? escapeHtml(item.description) : '—';
-            const clickable = item.project_id != null && item.client_id != null;
-            const attrs = clickable
-                ? ` class="kpi-modal-item kpi-modal-item-clickable" data-project-id="${escapeHtml(item.project_id)}" data-client-id="${escapeHtml(item.client_id)}" data-project-name="${escapeHtml(item.name || item.description || '')}" role="button" tabindex="0"`
-                : ' class="kpi-modal-item"';
-            return `
-                <div${attrs}>
-                    <div class="kpi-item-client">${client}</div>
-                    <div class="kpi-item-description">${description}</div>
-                </div>
-            `;
-        }
-
-        // Riga di dettaglio per il KPI "Task aperti": cliente, progetto (se esiste), tipo e
-        // codice task. Cliccabile (apre il progetto) solo quando il task è legato a un progetto.
-        function renderTaskModalItem(item) {
-            const client = item.client ? escapeHtml(item.client) : 'Cliente non specificato';
-            const project = item.project ? escapeHtml(item.project) : '—';
+            const project = item.project ? escapeHtml(item.project) : 'Progetto non specificato';
             const clickable = item.project_id != null && item.client_id != null;
             const attrs = clickable
                 ? ` class="kpi-modal-item kpi-modal-item-clickable" data-project-id="${escapeHtml(item.project_id)}" data-client-id="${escapeHtml(item.client_id)}" data-project-name="${escapeHtml(item.project || '')}" role="button" tabindex="0"`
@@ -3133,31 +3037,6 @@
                 <div${attrs}>
                     <div class="kpi-item-client">${client}</div>
                     <div class="kpi-item-description">${project}</div>
-                    <div class="kpi-item-extra">
-                        <span><strong>Tipo:</strong> ${item.tipo ? escapeHtml(item.tipo) : '—'}</span>
-                        <span><strong>Cod. task:</strong> ${item.cod_task ? escapeHtml(item.cod_task) : '—'}</span>
-                    </div>
-                </div>
-            `;
-        }
-
-        // Riga di dettaglio per il KPI "Quotazioni": cliente, progetto (se esiste), codice e
-        // stato. Cliccabile (apre il progetto) solo quando la quotazione è legata a un progetto.
-        function renderQuotazioneModalItem(item) {
-            const client = item.client ? escapeHtml(item.client) : 'Cliente non specificato';
-            const project = item.project ? escapeHtml(item.project) : '—';
-            const clickable = item.project_id != null && item.client_id != null;
-            const attrs = clickable
-                ? ` class="kpi-modal-item kpi-modal-item-clickable" data-project-id="${escapeHtml(item.project_id)}" data-client-id="${escapeHtml(item.client_id)}" data-project-name="${escapeHtml(item.project || '')}" role="button" tabindex="0"`
-                : ' class="kpi-modal-item"';
-            return `
-                <div${attrs}>
-                    <div class="kpi-item-client">${client}</div>
-                    <div class="kpi-item-description">${project}</div>
-                    <div class="kpi-item-extra">
-                        <span><strong>Codice:</strong> ${item.codice ? escapeHtml(item.codice) : '—'}</span>
-                        <span><strong>Stato:</strong> ${item.stato ? escapeHtml(item.stato) : '—'}</span>
-                    </div>
                 </div>
             `;
         }
@@ -3190,13 +3069,6 @@
         }
 
         function initKpiCards() {
-            document.querySelectorAll('.kpi-card').forEach((card) => {
-                const kpi = card.getAttribute('data-kpi');
-                card.addEventListener('click', () => openKpiModal(kpi));
-                card.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openKpiModal(kpi); }
-                });
-            });
             const closeBtn = document.getElementById('kpiModalClose');
             const modal = document.getElementById('kpiModal');
             if (closeBtn) closeBtn.addEventListener('click', closeKpiModal);

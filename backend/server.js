@@ -1902,14 +1902,15 @@ app.get('/api/kpi-fatturazione/years', requireAuth, async (req, res) => {
 });
 
 // ==========================================
-// KPI DASHBOARD (Progetti attivi / completati / rischi aperti)
+// KPI DINAMICI DASHBOARD (configurati in kpi_tab)
 // ==========================================
 //
-// Tutti i KPI leggono dalla vista ele_progetti, filtrata SEMPRE per tenant_id
-// e user_id del login; client_id è un filtro opzionale (assente = tutti i clienti,
-// può contenere più valori per la selezione multipla dal filtro cliente).
-// La "descrizione" del cliente viene risolta da clients.valore2 (argument/campo = 'Cliente'),
-// come già fatto per gli altri endpoint di decodifica (vedi respondDecodedOptions).
+// Precedenza configurazione:
+//   1. tenant + utente del login;
+//   2. tenant del login + utente NULL;
+//   3. tenant NULL + utente NULL.
+// Si usa per intero il primo livello nel quale esiste almeno una riga. Le query
+// configurate sono sempre completate server-side con tenant_id e user_id del token.
 
 // Risolve in blocco { clientId -> descrizione } per l'elenco di client_id indicato.
 async function resolveClientDescriptions(clientIds, tenantId) {
@@ -1924,177 +1925,246 @@ async function resolveClientDescriptions(clientIds, tenantId) {
   return map;
 }
 
-// Risolve in blocco { projectId -> descrizione } per l'elenco di project_id indicato,
-// usando la stessa vista (ele_progetti) già utilizzata per i menu a discesa dei progetti.
-async function resolveProjectDescriptions(projectIds, tenantId) {
+// Risolve in blocco il progetto effettivo. Il valore ricevuto può essere sia l'id della
+// riga principale del progetto, sia l'id di una riga EAV interna (es. il campo
+// "Completamento"): in questo secondo caso projects.argument contiene l'id del progetto.
+async function resolveProjectDescriptions(projectIds, tenantId, userId) {
   const map = new Map();
   const ids = [...new Set(projectIds.filter((v) => v != null))];
   if (!ids.length) return map;
-  const pr = await db.query(
-    `SELECT id, valore2 FROM ele_progetti WHERE id = ANY($1) AND tenant_id = $2`,
-    [ids, tenantId]
+
+  const sourceRows = await db.query(
+    `SELECT id, argument
+     FROM projects
+     WHERE id = ANY($1) AND tenant_id = $2 AND user_id = $3`,
+    [ids, tenantId, userId]
   );
-  for (const r of pr.rows) map.set(String(r.id), r.valore2);
+  const sourceById = new Map(sourceRows.rows.map((row) => [String(row.id), row]));
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const candidateIds = [...new Set(ids.flatMap((id) => {
+    const source = sourceById.get(String(id));
+    const candidates = [id];
+    if (source && source.argument != null && uuidPattern.test(String(source.argument))) {
+      candidates.push(source.argument);
+    }
+    return candidates;
+  }))];
+
+  const projects = await db.query(
+    `SELECT id, valore2
+     FROM projects
+     WHERE id = ANY($1)
+       AND tenant_id = $2
+       AND user_id = $3
+       AND argument = 'Progetto'
+       AND campo = 'Progetto'`,
+    [candidateIds, tenantId, userId]
+  );
+  const projectById = new Map(projects.rows.map((row) => [String(row.id), row]));
+  for (const requestedId of ids) {
+    const source = sourceById.get(String(requestedId));
+    const resolved = projectById.get(String(requestedId))
+      || (source && source.argument != null ? projectById.get(String(source.argument)) : null);
+    if (resolved) {
+      map.set(String(requestedId), { id: resolved.id, name: resolved.valore2 });
+    }
+  }
   return map;
 }
 
-// Costruisce le condizioni base comuni a tutti i KPI progetti: tenant/user del login,
-// client_id opzionale (uno o più valori), e scadenza > oggi (progetto non ancora scaduto).
-function buildKpiProgettiConditions(req) {
-  const clientIds = parseClientIdsFromQuery(req);
-  const conditions = ['tenant_id = $1', 'user_id = $2', 'scadenza IS NOT NULL', 'scadenza > CURRENT_DATE'];
-  const params = [req.user.tenant_id, req.user.user_id];
-  if (clientIds.length) { params.push(clientIds); conditions.push(`client_id = ANY($${params.length})`); }
-  return { conditions, params };
+const KPI_SQL_FORBIDDEN = /\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|call|do|union|intersect|except|returning|into)\b/i;
+
+function assertSafeKpiFragment(value, field, mustStartWith = null) {
+  // Le query vengono spesso copiate da e-mail o pagine web, che possono inserire
+  // NBSP e altri spazi Unicode non riconosciuti dal parser SQL di PostgreSQL.
+  const fragment = String(value || '')
+    .replace(/[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/g, ' ')
+    .trim();
+  if (!fragment || fragment.length > 8000 || /;|--|\/\*|\*\//.test(fragment) || KPI_SQL_FORBIDDEN.test(fragment)) {
+    const error = new Error(`Configurazione KPI non valida nel campo ${field}`);
+    error.statusCode = 400;
+    throw error;
+  }
+  if (mustStartWith && !new RegExp(`^${mustStartWith}\\b`, 'i').test(fragment)) {
+    const error = new Error(`Il campo ${field} del KPI deve iniziare con ${mustStartWith.toUpperCase()}`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return fragment;
 }
 
-// Arricchisce le righe di ele_progetti con la descrizione del cliente decodificata
-// (client_id -> clients.valore2), pronta per essere mostrata nella finestra di dettaglio.
-async function decorateProgettiRows(rows, tenantId) {
-  const clientMap = await resolveClientDescriptions(rows.map((r) => r.client_id), tenantId);
-  return rows.map((r) => ({
-    project_id: r.project_id,
-    client_id: r.client_id,
-    client: clientMap.get(String(r.client_id)) || null,
-    name: r.name ?? null,
-    description: r.description ?? null,
-    rischio: r.rischio ?? null
-  }));
+function assertSafeKpiSelectList(fragment, kind) {
+  if (/\bselect\b/i.test(fragment)) {
+    throw Object.assign(new Error(`Il campo ${kind} del KPI non può contenere sottoquery`), { statusCode: 400 });
+  }
+  const identifier = '(?:[a-zA-Z_][a-zA-Z0-9_]*\\.)?[a-zA-Z_][a-zA-Z0-9_]*';
+  const alias = '(?:\\s+as\\s+(?:"[^"]+"|[a-zA-Z_][a-zA-Z0-9_]*))?';
+  const detailPattern = new RegExp(`^${identifier}${alias}(?:\\s*,\\s*${identifier}${alias})*$`, 'i');
+  const aggregatePattern = new RegExp(`^(?:count\\(\\s*(?:\\*|(?:distinct\\s+)?${identifier})\\s*\\)|(?:sum|avg|min|max)\\(\\s*${identifier}\\s*\\))${alias}$`, 'i');
+  const valid = kind === 'conteggio' ? aggregatePattern.test(fragment) : detailPattern.test(fragment);
+  if (!valid) {
+    throw Object.assign(new Error(`Sintassi non valida nel campo ${kind} del KPI`), { statusCode: 400 });
+  }
 }
 
-// KPI 1: Progetti attivi -> select * from ele_progetti dove scadenza > oggi.
-app.get('/api/dashboard/kpi/progetti-attivi', requireAuth, async (req, res) => {
-  try {
-    const { conditions, params } = buildKpiProgettiConditions(req);
-    const result = await db.query(
-      `SELECT project_id, client_id, description, rischio FROM ele_progetti WHERE ${conditions.join(' AND ')} ORDER BY client_id`,
-      params
-    );
-    const items = await decorateProgettiRows(result.rows, req.user.tenant_id);
-    res.json({ total: items.length, items });
-  } catch (error) {
-    console.error('[KPI progetti-attivi]', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
+function getKpiBaseTable(tabella) {
+  const match = String(tabella).match(/^\s*from\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+(?:as\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?/i);
+  if (!match) throw Object.assign(new Error('Tabella KPI non valida'), { statusCode: 400 });
+  const reserved = new Set(['where', 'join', 'left', 'right', 'inner', 'outer', 'full', 'cross', 'on']);
+  const table = assertValidIdentifier(match[1]);
+  const alias = match[2] && !reserved.has(match[2].toLowerCase()) ? assertValidIdentifier(match[2]) : table;
+  return { table, qualifier: alias };
+}
 
-// KPI 2: Progetti completati -> come sopra + completamento = 100.
-app.get('/api/dashboard/kpi/progetti-completati', requireAuth, async (req, res) => {
-  try {
-    const { conditions, params } = buildKpiProgettiConditions(req);
-    conditions.push('completamento = 100');
-    const result = await db.query(
-      `SELECT project_id, client_id, description, rischio FROM ele_progetti WHERE ${conditions.join(' AND ')} ORDER BY client_id`,
-      params
-    );
-    const items = await decorateProgettiRows(result.rows, req.user.tenant_id);
-    res.json({ total: items.length, items });
-  } catch (error) {
-    console.error('[KPI progetti-completati]', error.message);
-    res.status(500).json({ error: error.message });
+function bindKpiContextPlaceholders(tabella, params, req) {
+  const indexes = {};
+  const bind = (name, value) => {
+    if (!indexes[name]) indexes[name] = params.push(value);
+    return `$${indexes[name]}`;
+  };
+  let sql = tabella
+    .replace(/\[\s*tenant_id\s*\]/gi, () => bind('tenant_id', req.user.tenant_id))
+    .replace(/\[\s*user_id\s*\]/gi, () => bind('user_id', req.user.user_id));
+  if (/[\[\]]/.test(sql)) {
+    throw Object.assign(new Error('Segnaposto non riconosciuto nella configurazione KPI'), { statusCode: 400 });
   }
-});
+  return {
+    sql,
+    hasTenantPlaceholder: Boolean(indexes.tenant_id),
+    hasUserPlaceholder: Boolean(indexes.user_id)
+  };
+}
 
-// KPI 3: Rischi aperti -> come sopra + rischio NOT IN ('Basso'). Il totale è la somma di
-// tutti i livelli di rischio trovati; "breakdown" espone il conteggio per singolo valore
-// (es. Medio 4, Alto 2, Critico 1) da mostrare accanto al KPI.
-app.get('/api/dashboard/kpi/rischi-aperti', requireAuth, async (req, res) => {
-  try {
-    const { conditions, params } = buildKpiProgettiConditions(req);
-    conditions.push("rischio NOT IN ('Basso')");
-    const result = await db.query(
-      `SELECT project_id, client_id, description, rischio FROM ele_progetti WHERE ${conditions.join(' AND ')} ORDER BY rischio, client_id`,
-      params
-    );
-    const items = await decorateProgettiRows(result.rows, req.user.tenant_id);
-    const breakdownMap = new Map();
-    for (const it of items) {
-      const key = it.rischio || 'Non specificato';
-      breakdownMap.set(key, (breakdownMap.get(key) || 0) + 1);
+function appendKpiContext(tabella, qualifier, params, clientIds, hasClientId, boundContext) {
+  const hasWhere = /\bwhere\b/i.test(tabella);
+  const conditions = [];
+  if (!boundContext.hasTenantPlaceholder) conditions.push(`${qualifier}.tenant_id = $${params.push(boundContext.tenantId)}`);
+  if (!boundContext.hasUserPlaceholder) conditions.push(`${qualifier}.user_id = $${params.push(boundContext.userId)}`);
+  if (clientIds.length && hasClientId) conditions.push(`${qualifier}.client_id = ANY($${params.push(clientIds)})`);
+  return conditions.length ? `${tabella} ${hasWhere ? 'AND' : 'WHERE'} ${conditions.join(' AND ')}` : tabella;
+}
+
+async function getDashboardKpiRows(req, pagina = 'DASHBOARD') {
+  const roleLevel = Number.isFinite(Number(req.user.id_roles)) ? Number(req.user.id_roles) : 9999;
+  const result = await db.query(
+    `WITH scoped AS (
+       SELECT id, pagina, descrizione, conteggio, dettaglio, tabella, riga, colonna,
+              CASE
+                WHEN tenant_id = $1 AND user_id = $2 THEN 1
+                WHEN tenant_id = $1 AND user_id IS NULL THEN 2
+                WHEN tenant_id IS NULL AND user_id IS NULL THEN 3
+                ELSE 99
+              END AS scope_rank
+       FROM kpi_tab
+       WHERE UPPER(pagina) = UPPER($3)
+         AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+         AND (id_roles IS NULL OR id_roles >= $4)
+         AND ((tenant_id = $1 AND (user_id = $2 OR user_id IS NULL))
+              OR (tenant_id IS NULL AND user_id IS NULL))
+     )
+     SELECT id, pagina, descrizione, conteggio, dettaglio, tabella, riga, colonna
+     FROM scoped
+     WHERE scope_rank = (SELECT MIN(scope_rank) FROM scoped)
+     ORDER BY riga NULLS LAST, colonna NULLS LAST, id`,
+    [req.user.tenant_id, req.user.user_id, pagina, roleLevel]
+  );
+  return result.rows;
+}
+
+function deriveKpiTitle(row) {
+  const description = String(row.descrizione || '').trim();
+  return description || `KPI ${Number(row.riga) || 1}.${Number(row.colonna) || 1}`;
+}
+
+async function buildKpiQuery(row, selectFragment, req, kind) {
+  const selectPart = assertSafeKpiFragment(selectFragment, kind);
+  assertSafeKpiSelectList(selectPart, kind);
+  const fromPart = assertSafeKpiFragment(row.tabella, 'tabella', 'from');
+  if (/\bselect\b/i.test(fromPart)) throw Object.assign(new Error('La configurazione KPI non può contenere sottoquery'), { statusCode: 400 });
+  if (/\b(group\s+by|order\s+by|limit|offset|fetch)\b/i.test(fromPart)) {
+    throw Object.assign(new Error('Ordinamento, raggruppamento e limite non vanno inseriti in kpi_tab.tabella'), { statusCode: 400 });
+  }
+  const { table, qualifier } = getKpiBaseTable(fromPart);
+  const columns = await getTableColumns(table);
+  if (!columns.has('tenant_id') || !columns.has('user_id')) {
+    throw Object.assign(new Error(`La sorgente KPI ${table} deve contenere tenant_id e user_id`), { statusCode: 400 });
+  }
+  const params = [];
+  const bound = bindKpiContextPlaceholders(fromPart, params, req);
+  const scopedFrom = appendKpiContext(
+    bound.sql,
+    qualifier,
+    params,
+    parseClientIdsFromQuery(req),
+    columns.has('client_id'),
+    {
+      ...bound,
+      tenantId: req.user.tenant_id,
+      userId: req.user.user_id
     }
-    const breakdown = [...breakdownMap.entries()].map(([rischio, count]) => ({ rischio, count }));
-    res.json({ total: items.length, breakdown, items });
+  );
+  return { sql: `SELECT ${selectPart} ${scopedFrom}`, params: [...params] };
+}
+
+// Restituisce configurazione, posizione e solo il conteggio dei KPI della pagina.
+app.get('/api/dashboard/kpis', requireAuth, async (req, res) => {
+  try {
+    const rows = await getDashboardKpiRows(req, 'DASHBOARD');
+    const kpis = await Promise.all(rows.map(async (row) => {
+      const query = await buildKpiQuery(row, row.conteggio, req, 'conteggio');
+      const result = await db.query(query.sql, query.params);
+      const rawTotal = result.rows[0] ? Object.values(result.rows[0])[0] : 0;
+      return {
+        id: row.id,
+        title: deriveKpiTitle(row),
+        riga: Number(row.riga) || 1,
+        colonna: Number(row.colonna) || 1,
+        total: Number(rawTotal) || 0
+      };
+    }));
+    res.json(kpis);
   } catch (error) {
-    console.error('[KPI rischi-aperti]', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('[KPI DINAMICI]', error.message);
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
-// KPI 4: Task aperti -> select da task_app, filtrata per tenant/user del login (+ client_id
-// opzionale) e scadenza > oggi (task non ancora scaduti). "breakdown" espone il conteggio per
-// singolo "tipo" (stesso schema del breakdown per rischio del KPI 3).
-app.get('/api/dashboard/kpi/task-aperti', requireAuth, async (req, res) => {
+// Il dettaglio viene interrogato soltanto al click della card.
+app.get('/api/dashboard/kpis/:id/detail', requireAuth, async (req, res) => {
   try {
-    const clientIds = parseClientIdsFromQuery(req);
-    const conditions = ['tenant_id = $1', 'user_id = $2', 'scadenza IS NOT NULL', 'scadenza > CURRENT_DATE'];
-    const params = [req.user.tenant_id, req.user.user_id];
-    if (clientIds.length) { params.push(clientIds); conditions.push(`client_id = ANY($${params.length})`); }
-    const result = await db.query(
-      `SELECT client_id, project_id, tipo, cod_task FROM task_app WHERE ${conditions.join(' AND ')} ORDER BY tipo, client_id`,
-      params
-    );
-    console.log(`[KPI task-aperti] righe trovate: ${result.rows.length}`);
-    // Le descrizioni cliente/progetto sono un arricchimento "best effort": se la
-    // decodifica fallisce (es. tipo di project_id/client_id incompatibile con
-    // ele_progetti/clients), il conteggio va comunque restituito.
+    const rows = await getDashboardKpiRows(req, 'DASHBOARD');
+    const row = rows.find((item) => String(item.id) === String(req.params.id));
+    if (!row) return res.status(404).json({ error: 'KPI non trovato nel contesto corrente' });
+
+    const query = await buildKpiQuery(row, row.dettaglio, req, 'dettaglio');
+    const result = await db.query(query.sql, query.params);
+    const cleanRows = stripSensitive(result.rows);
     let clientMap = new Map();
-    try { clientMap = await resolveClientDescriptions(result.rows.map((r) => r.client_id), req.user.tenant_id); }
-    catch (e) { console.error('[KPI task-aperti] resolveClientDescriptions:', e.message); }
     let projectMap = new Map();
-    try { projectMap = await resolveProjectDescriptions(result.rows.map((r) => r.project_id), req.user.tenant_id); }
-    catch (e) { console.error('[KPI task-aperti] resolveProjectDescriptions:', e.message); }
-    const items = result.rows.map((r) => ({
-      client_id: r.client_id,
-      client: clientMap.get(String(r.client_id)) || null,
-      project_id: r.project_id,
-      project: r.project_id != null ? (projectMap.get(String(r.project_id)) || null) : null,
-      tipo: r.tipo ?? null,
-      cod_task: r.cod_task ?? null
-    }));
-    const breakdownMap = new Map();
-    for (const it of items) {
-      const key = it.tipo || 'Non specificato';
-      breakdownMap.set(key, (breakdownMap.get(key) || 0) + 1);
+    try { clientMap = await resolveClientDescriptions(cleanRows.map((item) => item.client_id), req.user.tenant_id); }
+    catch (error) { console.error('[KPI DINAMICI] decodifica clienti:', error.message); }
+    try {
+      projectMap = await resolveProjectDescriptions(
+        cleanRows.map((item) => item.project_id),
+        req.user.tenant_id,
+        req.user.user_id
+      );
     }
-    const breakdown = [...breakdownMap.entries()].map(([tipo, count]) => ({ tipo, count }));
-    res.json({ total: items.length, breakdown, items });
-  } catch (error) {
-    console.error('[KPI task-aperti]', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
+    catch (error) { console.error('[KPI DINAMICI] decodifica progetti:', error.message); }
 
-// KPI 5: Quotazioni -> select da cl_quotazioni, filtrata per tenant/user del login
-// (+ client_id opzionale) e scadenza > oggi.
-app.get('/api/dashboard/kpi/quotazioni', requireAuth, async (req, res) => {
-  try {
-    const clientIds = parseClientIdsFromQuery(req);
-    const conditions = ['tenant_id = $1', 'user_id = $2', 'scadenza IS NOT NULL', 'scadenza > CURRENT_DATE'];
-    const params = [req.user.tenant_id, req.user.user_id];
-    if (clientIds.length) { params.push(clientIds); conditions.push(`client_id = ANY($${params.length})`); }
-    const result = await db.query(
-      `SELECT client_id, project_id, codice, stato FROM cl_quotazioni WHERE ${conditions.join(' AND ')} ORDER BY client_id`,
-      params
-    );
-    console.log(`[KPI quotazioni] righe trovate: ${result.rows.length}`);
-    let clientMap = new Map();
-    try { clientMap = await resolveClientDescriptions(result.rows.map((r) => r.client_id), req.user.tenant_id); }
-    catch (e) { console.error('[KPI quotazioni] resolveClientDescriptions:', e.message); }
-    let projectMap = new Map();
-    try { projectMap = await resolveProjectDescriptions(result.rows.map((r) => r.project_id), req.user.tenant_id); }
-    catch (e) { console.error('[KPI quotazioni] resolveProjectDescriptions:', e.message); }
-    const items = result.rows.map((r) => ({
-      client_id: r.client_id,
-      client: clientMap.get(String(r.client_id)) || null,
-      project_id: r.project_id,
-      project: r.project_id != null ? (projectMap.get(String(r.project_id)) || null) : null,
-      codice: r.codice ?? null,
-      stato: r.stato ?? null
-    }));
-    res.json({ total: items.length, items });
+    const items = cleanRows.map((item) => {
+      const resolvedProject = item.project_id == null ? null : projectMap.get(String(item.project_id));
+      return {
+        ...item,
+        client: item.client_id == null ? null : (clientMap.get(String(item.client_id)) || null),
+        project_id: resolvedProject ? resolvedProject.id : item.project_id,
+        project: resolvedProject ? resolvedProject.name : null
+      };
+    });
+    res.json({ id: row.id, title: deriveKpiTitle(row), items });
   } catch (error) {
-    console.error('[KPI quotazioni]', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('[KPI DINAMICI DETTAGLIO]', error.message);
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
