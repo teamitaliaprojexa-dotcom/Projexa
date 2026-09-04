@@ -2385,7 +2385,7 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       where.push(`id = $1`);
       if (tableColumns.has('tenant_id') && !admin) { params.push(req.user.tenant_id); where.push(`tenant_id = $${params.length}`); }
       if (tableColumns.has('user_id') && !admin) { params.push(req.user.user_id); where.push(`user_id = $${params.length}`); }
-      const original = await pool.query(`SELECT id, argument, campo, valore2, tenant_id, user_id FROM "${tableName}" WHERE ${where.join(' AND ')} LIMIT 1`, params);
+      const original = await pool.query(`SELECT id, argument, campo, tipo_valore, valore1, valore2, tenant_id, user_id FROM "${tableName}" WHERE ${where.join(' AND ')} LIMIT 1`, params);
       originalFieldRow = original.rows[0] || null;
       if (originalFieldRow && ['clients', 'projects'].includes(tableName) && originalFieldRow.argument) {
         const container = await pool.query(`SELECT campo, valore2 FROM "${tableName}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [originalFieldRow.argument, originalFieldRow.tenant_id]);
@@ -2404,6 +2404,21 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
     data = Object.fromEntries(
       Object.entries(data).filter(([column]) => tableColumns.has(column))
     );
+
+    // tipo_valore=14: valore2 è valido soltanto quando il booleano valore1 è true.
+    // La regola è applicata anche lato server per evitare valori residui nel database
+    // in caso di chiamate API dirette o salvataggi parziali dal browser.
+    if (originalFieldRow && String(originalFieldRow.tipo_valore) === '14') {
+      const effectiveBoolean = Object.prototype.hasOwnProperty.call(data, 'valore1')
+        ? data.valore1
+        : originalFieldRow.valore1;
+      const isEnabled = effectiveBoolean === true
+        || effectiveBoolean === 'true'
+        || effectiveBoolean === 't'
+        || effectiveBoolean === 1
+        || effectiveBoolean === '1';
+      if (!isEnabled && tableColumns.has('valore2')) data.valore2 = null;
+    }
 
     // Isolamento clienti (ACL): un non-admin può modificare una riga di "clients" solo se
     // proprietario del cliente o con condivisione in scrittura. Enforce del permesso 'read'.

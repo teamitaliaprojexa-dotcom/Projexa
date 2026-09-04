@@ -41,7 +41,11 @@ const CONFIG = {
   colonneUrl: ['link_task'],
   // Scritto solo alla creazione della riga: marca l'origine del task. Negli
   // aggiornamenti non viene toccato, così un "tipo" corretto a mano resta.
-  valoriInserimento: { tipo: 'Jira' }
+  valoriInserimento: { tipo: 'Jira' },
+  // Impostazioni -> Integrazioni: secondo filtro Jira usato SOLO per aggiornare
+  // task già presenti (tipicamente quelli che il filtro principale non estrae più
+  // perché chiusi). Se il campo è vuoto, il passaggio non viene eseguito.
+  campoFiltroAggiuntivo: 'Filtro aggiuntivo Task (solo agg)'
 };
 
 export function aggiornaJiraTask(ctx) {

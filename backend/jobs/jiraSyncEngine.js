@@ -43,8 +43,14 @@ const COLONNE_DI_CONTESTO = new Set(['id', 'tenant_id', 'user_id', 'client_id', 
 const TABELLE_MAPPATURA = new Set(['jira_quotazioni', 'jira_task']);
 const TABELLE_DESTINAZIONE = new Set(['cl_quotazioni', 'task_app']);
 
-const MAX_PAGINE = 50;      // 50 x 100 = 5.000 righe per filtro
 const PAGE_SIZE = 100;
+
+// Tetto di sicurezza alla lettura di un filtro: oltre questo numero di pagine il
+// programma si ferma e lo SEGNALA nel report (meglio un avviso che credere di aver
+// letto tutto). Ogni pagina è una chiamata API, quindi il limite è anche il freno
+// alla durata del programma: 500 pagine = 50.000 righe.
+// Regolabile senza toccare il codice con la variabile d'ambiente JIRA_SYNC_MAX_PAGINE.
+const MAX_PAGINE = Math.max(1, Number(process.env.JIRA_SYNC_MAX_PAGINE) || 500);
 
 // ----------------------------------------------------------------------------
 // NORMALIZZAZIONE E CONVERSIONE DEI VALORI
@@ -187,6 +193,9 @@ async function costruisciDizionarioCampi(session, colonneFiltro) {
 // LETTURA DEL REPORT JIRA
 // ----------------------------------------------------------------------------
 
+// Restituisce { righe, troncato }: "troncato" avvisa che il filtro ha più risultati
+// del limite di sicurezza (MAX_PAGINE x PAGE_SIZE) e che quindi NON è stato letto
+// per intero. Meglio dirlo nel report che lasciar credere a una lettura completa.
 async function eseguiFiltro(session, jql, campi) {
   const issues = [];
   let token = null;
@@ -212,7 +221,7 @@ async function eseguiFiltro(session, jql, campi) {
     if (!token) break;
   }
 
-  return issues;
+  return { righe: issues, troncato: !!token };
 }
 
 // ----------------------------------------------------------------------------
@@ -280,17 +289,44 @@ function ancoraValida(scadenza) {
 }
 
 // ----------------------------------------------------------------------------
+// FILTRO AGGIUNTIVO (SOLO AGGIORNAMENTO)
+// ----------------------------------------------------------------------------
+
+// Oltre al filtro principale, l'utente può indicare in Impostazioni -> Integrazioni
+// un secondo filtro Jira da usare SOLO per aggiornare righe già presenti: serve a
+// riportare su Projexa i cambiamenti di ticket che il filtro principale non estrae
+// più (es. quelli chiusi). Il campo è di tipo 14 (interruttore + testo): il nome del
+// filtro sta in valore2 e, quando l'interruttore è spento, l'interfaccia lo svuota.
+// Qui basta quindi guardare valore2: se è vuoto, il passaggio aggiuntivo non si fa.
+async function leggiFiltroAggiuntivo(tenantId, userId, campo) {
+  if (!campo) return '';
+  const { rows } = await db.query(
+    `SELECT valore2 FROM settings
+      WHERE tenant_id = $1 AND user_id = $2 AND tipo_valore::text = '14' AND lower(campo) = lower($3)
+      LIMIT 1`,
+    [tenantId, userId, campo]
+  );
+  const valore = rows[0] ? rows[0].valore2 : null;
+  if (vuoto(valore) || norm(valore) === 'null') return '';
+  return String(valore).trim();
+}
+
+// ----------------------------------------------------------------------------
 // SCRITTURA
 // ----------------------------------------------------------------------------
 
+// Restituisce l'id della riga creata: serve a poterla aggiornare subito dopo, se
+// la stessa chiave ricompare (filtro con righe ripetute o passaggio aggiuntivo).
 async function inserisci(tabella, valori) {
   const { data } = await encryptRowForWrite(db, tabella, valori, { dbKey: 'main' });
   const cols = Object.keys(data);
-  await db.query(
+  const result = await db.query(
     `INSERT INTO "${tabella}" (${cols.map((c) => `"${c}"`).join(', ')})
-     VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')})`,
+     VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')})
+     RETURNING id`,
     cols.map((c) => data[c])
   );
+  return result.rows[0] ? result.rows[0].id : null;
 }
 
 async function aggiorna(tabella, id, valori) {
@@ -325,6 +361,10 @@ async function aggiorna(tabella, id, valori) {
  *                     { tipo: 'Jira' }): marcano l'origine del dato e NON vengono
  *                     riscritti negli aggiornamenti successivi, così una eventuale
  *                     modifica manuale resta
+ *   campoFiltroAggiuntivo
+ *                     settings.campo (tipo_valore 14) che contiene, in valore2, il
+ *                     nome di un secondo filtro Jira usato SOLO per aggiornare righe
+ *                     già presenti. Se il campo è vuoto il passaggio non viene fatto.
  * @param {object} ctx  { tenantId, userId, dryRun }
  *   dryRun = true: elabora tutto e produce il report SENZA scrivere sul database.
  *   Serve a verificare mappatura e abbinamenti prima di far girare il programma
@@ -345,9 +385,12 @@ export async function runJiraSync(config, ctx) {
     ignorateSenzaCliente: 0,
     ignorateSenzaCodice: 0,
     ignorateScadute: 0,
+    troncato: false,
     colonneIgnorate: [],
     mappatureNonRisolte: [],
-    errori: []
+    errori: [],
+    // Valorizzato solo se in Impostazioni è configurato un filtro aggiuntivo.
+    passaggioAggiuntivo: null
   };
 
   if (!tenantId || !userId) throw new Error('Contesto mancante: tenant_id / user_id');
@@ -435,8 +478,13 @@ export async function runJiraSync(config, ctx) {
   // --- 3) Esecuzione del filtro --------------------------------------------
   const campiRichiesti = [...new Set([...piano.map((p) => p.campoJira), campoJiraCliente, campoJiraCodice])]
     .filter((f) => f !== 'issuekey');
-  const issues = await eseguiFiltro(session, dettaglio.jql, campiRichiesti.length ? campiRichiesti : ['summary']);
+  const esito = await eseguiFiltro(session, dettaglio.jql, campiRichiesti.length ? campiRichiesti : ['summary']);
+  const issues = esito.righe;
   report.righeJira = issues.length;
+  report.troncato = esito.troncato;
+  if (esito.troncato) {
+    report.errori.push(`Il filtro "${filtro.name}" ha più di ${MAX_PAGINE * PAGE_SIZE} risultati: lette solo le prime ${issues.length} righe. Restringi il filtro su Jira.`);
+  }
 
   // --- 4) Clienti e righe già presenti -------------------------------------
   const clienti = await leggiClienti(tenantId, userId, config.campoClients);
@@ -464,75 +512,121 @@ export async function runJiraSync(config, ctx) {
   // --- 5) Elaborazione riga per riga ---------------------------------------
   const leggi = (issue, campo) => (campo === 'issuekey' ? issue.key : (issue.fields || {})[campo]);
 
-  for (const issue of issues) {
-    try {
-      const cliente = trovaCliente(clienti, formatValue(leggi(issue, campoJiraCliente)), config.confrontoCliente);
-      if (!cliente) { report.ignorateSenzaCliente += 1; continue; }
+  // Elabora le righe di un filtro. Con soloAggiornamento = true le righe che non
+  // esistono ancora NON vengono create: è il comportamento del filtro aggiuntivo,
+  // che serve solo a rinfrescare righe già portate dal filtro principale.
+  async function elabora(righe, conteggi, soloAggiornamento) {
+    for (const issue of righe) {
+      try {
+        const cliente = trovaCliente(clienti, formatValue(leggi(issue, campoJiraCliente)), config.confrontoCliente);
+        if (!cliente) { conteggi.ignorateSenzaCliente += 1; continue; }
 
-      const codice = formatValue(leggi(issue, campoJiraCodice));
-      if (vuoto(codice)) { report.ignorateSenzaCodice += 1; continue; }
+        const codice = formatValue(leggi(issue, campoJiraCodice));
+        if (vuoto(codice)) { conteggi.ignorateSenzaCodice += 1; continue; }
 
-      // Valori da scrivere, convertiti nel tipo della colonna di destinazione.
-      const valori = {};
-      for (const p of piano) {
-        const raw = leggi(issue, p.campoJira);
-        valori[p.colonna] = p.url
-          ? (session.siteUrl && issue.key ? `${session.siteUrl}/browse/${issue.key}` : coerce(raw, p.tipo))
-          : coerce(raw, p.tipo);
-      }
+        // Valori da scrivere, convertiti nel tipo della colonna di destinazione.
+        const valori = {};
+        for (const p of piano) {
+          const raw = leggi(issue, p.campoJira);
+          valori[p.colonna] = p.url
+            ? (session.siteUrl && issue.key ? `${session.siteUrl}/browse/${issue.key}` : coerce(raw, p.tipo))
+            : coerce(raw, p.tipo);
+        }
 
-      // In prova a vuoto si tiene da parte la prima riga elaborata: serve a
-      // controllare a colpo d'occhio che la mappatura produca i valori attesi.
-      if (dryRun && !report.esempio) {
-        report.esempio = {
-          _clienteAbbinato: cliente.nome,
-          _clientId: cliente.clientId,
-          [config.colonnaCodice]: codice,
-          ...valoriInserimento,
-          ...valori
-        };
-      }
+        // In prova a vuoto si tiene da parte la prima riga elaborata: serve a
+        // controllare a colpo d'occhio che la mappatura produca i valori attesi.
+        if (dryRun && !report.esempio) {
+          report.esempio = {
+            _clienteAbbinato: cliente.nome,
+            _clientId: cliente.clientId,
+            [config.colonnaCodice]: codice,
+            ...valoriInserimento,
+            ...valori
+          };
+        }
 
-      const esistente = esistenti.get(chiaveRiga(cliente.clientId, codice));
+        const chiave = chiaveRiga(cliente.clientId, codice);
+        const esistente = esistenti.get(chiave);
 
-      if (!esistente) {
-        if (!dryRun) {
-          await inserisci(config.tabellaDestinazione, {
+        if (!esistente) {
+          if (soloAggiornamento) { conteggi.ignorateNonTrovate += 1; continue; }
+          const nuovoId = dryRun ? null : await inserisci(config.tabellaDestinazione, {
             tenant_id: tenantId,
             user_id: userId,
             client_id: cliente.clientId,
             ...valoriInserimento,
             ...valori
           });
+          // La riga appena creata entra subito nell'indice: se la stessa chiave
+          // ricompare (filtro con righe ripetute, oppure passaggio aggiuntivo)
+          // viene aggiornata invece di essere inserita una seconda volta.
+          esistenti.set(chiave, { id: nuovoId, scadenza: null, simulata: dryRun });
+          conteggi.inserite += 1;
+          continue;
         }
-        // Evita un doppio inserimento se il filtro Jira contiene la stessa chiave
-        // su più righe (capita con i filtri che espandono i sotto-task).
-        esistenti.set(chiaveRiga(cliente.clientId, codice), { id: null, scadenza: null });
-        report.inserite += 1;
-        continue;
-      }
 
-      if (!ancoraValida(esistente.scadenza)) { report.ignorateScadute += 1; continue; }
-      if (!esistente.id) continue; // riga appena inserita in questo stesso giro
+        if (!ancoraValida(esistente.scadenza)) { conteggi.ignorateScadute += 1; continue; }
 
-      const daAggiornare = { ...valori };
-      delete daAggiornare[config.colonnaCodice]; // il codice è la chiave: non si tocca
-      if (haUpdatedAt) daAggiornare.updated_at = new Date();
-      if (!dryRun) await aggiorna(config.tabellaDestinazione, esistente.id, daAggiornare);
-      report.aggiornate += 1;
-    } catch (e) {
-      report.errori.push(`${issue.key || '?'}: ${e.message}`);
-      if (report.errori.length >= 20) {
-        report.errori.push('… ulteriori errori non elencati');
-        break;
+        const daAggiornare = { ...valori };
+        delete daAggiornare[config.colonnaCodice]; // il codice è la chiave: non si tocca
+        if (haUpdatedAt) daAggiornare.updated_at = new Date();
+        // In prova a vuoto la riga non esiste davvero: si conta l'aggiornamento
+        // che verrebbe fatto, senza toccare il database.
+        if (!dryRun && esistente.id) await aggiorna(config.tabellaDestinazione, esistente.id, daAggiornare);
+        conteggi.aggiornate += 1;
+      } catch (e) {
+        report.errori.push(`${issue.key || '?'}: ${e.message}`);
+        if (report.errori.length >= 20) {
+          report.errori.push('… ulteriori errori non elencati');
+          return;
+        }
       }
+    }
+  }
+
+  await elabora(issues, report, false);
+
+  // --- 6) Passaggio aggiuntivo (solo aggiornamento) ------------------------
+  const nomeFiltroAggiuntivo = await leggiFiltroAggiuntivo(tenantId, userId, config.campoFiltroAggiuntivo);
+  if (nomeFiltroAggiuntivo) {
+    const filtroAgg = filtri.find((f) => norm(f.name) === norm(nomeFiltroAggiuntivo));
+    if (!filtroAgg) {
+      report.errori.push(`Filtro aggiuntivo "${nomeFiltroAggiuntivo}" non trovato fra i filtri salvati: passaggio saltato`);
+    } else {
+      const conteggi = {
+        filtro: filtroAgg.name,
+        righeJira: 0,
+        inserite: 0,              // resta sempre 0: questo passaggio non crea righe
+        aggiornate: 0,
+        ignorateSenzaCliente: 0,
+        ignorateSenzaCodice: 0,
+        ignorateScadute: 0,
+        ignorateNonTrovate: 0
+      };
+      // Stessa mappatura e stessi campi del filtro principale: cambia solo la JQL.
+      const esitoAgg = await eseguiFiltro(
+        session,
+        filtroAgg.jql,
+        campiRichiesti.length ? campiRichiesti : ['summary']
+      );
+      conteggi.righeJira = esitoAgg.righe.length;
+      conteggi.troncato = esitoAgg.troncato;
+      if (esitoAgg.troncato) {
+        report.errori.push(`Il filtro aggiuntivo "${filtroAgg.name}" ha più di ${MAX_PAGINE * PAGE_SIZE} risultati: lette solo le prime ${esitoAgg.righe.length} righe. Restringi il filtro su Jira.`);
+      }
+      await elabora(esitoAgg.righe, conteggi, true);
+      report.passaggioAggiuntivo = conteggi;
     }
   }
 
   console.log(
     `[${config.nome}]${dryRun ? ' (PROVA, nessuna scrittura)' : ''} filtro "${report.filtro}": ${report.righeJira} righe Jira, ` +
     `${report.inserite} inserite, ${report.aggiornate} aggiornate, ` +
-    `${report.ignorateSenzaCliente} senza cliente, ${report.ignorateScadute} scadute`
+    `${report.ignorateSenzaCliente} senza cliente, ${report.ignorateScadute} scadute` +
+    (report.passaggioAggiuntivo
+      ? ` | aggiuntivo "${report.passaggioAggiuntivo.filtro}": ${report.passaggioAggiuntivo.righeJira} righe, ` +
+        `${report.passaggioAggiuntivo.aggiornate} aggiornate, ${report.passaggioAggiuntivo.ignorateNonTrovate} non presenti`
+      : '')
   );
 
   return report;

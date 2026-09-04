@@ -39,7 +39,11 @@ const CONFIG = {
   campoClients: 'Nome Cliente Jira Quot',
   // Abbinamento per uguaglianza: il valore Jira è esattamente il nome configurato.
   confrontoCliente: 'exact',
-  colonneUrl: ['url']
+  colonneUrl: ['url'],
+  // Impostazioni -> Integrazioni: secondo filtro Jira usato SOLO per aggiornare
+  // quotazioni già presenti (tipicamente quelle che il filtro principale non estrae
+  // più). Se il campo è vuoto, il passaggio non viene eseguito.
+  campoFiltroAggiuntivo: 'Filtro aggiuntivo Quotazioni (solo agg)'
 };
 
 export function aggiornaJiraQuotazioni(ctx) {

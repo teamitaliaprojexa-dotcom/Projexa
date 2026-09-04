@@ -61,6 +61,8 @@
         .integr-num { background: #F9FAFB; border-radius: 8px; padding: 0.45rem 0.6rem; }
         .integr-num b { display: block; font-size: 1.15rem; color: #1F2937; }
         .integr-num span { font-size: 0.74rem; color: #6B7280; }
+        .integr-extra { margin-top: 0.7rem; padding-top: 0.7rem; border-top: 1px dashed #E5E7EB; }
+        .integr-extra-head { font-size: 0.8rem; color: #6B7280; margin-bottom: 0.5rem; }
         .integr-note { margin-top: 0.6rem; font-size: 0.78rem; color: #92400E;
             background: #FEF3C7; border-radius: 6px; padding: 0.45rem 0.6rem; }
         .integr-note ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
@@ -116,6 +118,23 @@
             <ul>${voci.map(v => `<li>${esc(v)}</li>`).join('')}</ul></div>`;
     }
 
+    // Secondo filtro Jira, configurato in Impostazioni -> Integrazioni: aggiorna
+    // soltanto righe già presenti, non ne crea di nuove. Compare solo se configurato.
+    function renderPassaggioAggiuntivo(p) {
+        if (!p) return '';
+        return `<div class="integr-extra">
+            <div class="integr-extra-head">Filtro aggiuntivo (solo aggiornamento):
+                <strong>${esc(p.filtro)}</strong></div>
+            <div class="integr-nums">
+                ${numero(p.righeJira, 'righe lette da Jira')}
+                ${numero(p.aggiornate, 'aggiornate')}
+                ${numero(p.ignorateNonTrovate, 'non presenti')}
+                ${numero(p.ignorateSenzaCliente, 'senza cliente')}
+                ${numero(p.ignorateScadute, 'già scadute')}
+            </div>
+        </div>`;
+    }
+
     function renderProgramma(r) {
         const titolo = `<h4>${esc(r.etichetta || r.programma)}
             <span class="integr-esito ${r.ok ? 'integr-ok' : 'integr-ko'}">${r.ok ? 'ESEGUITO' : 'NON ESEGUITO'}</span></h4>`;
@@ -138,6 +157,7 @@
                 ${numero(r.ignorateScadute, 'già scadute')}
                 ${r.ignorateSenzaCodice ? numero(r.ignorateSenzaCodice, 'senza codice') : ''}
             </div>
+            ${renderPassaggioAggiuntivo(r.passaggioAggiuntivo)}
             ${elenco('Colonne di mappatura non utilizzate:', r.colonneIgnorate)}
             ${elenco('Colonne Jira non trovate:', r.mappatureNonRisolte)}
             ${(r.errori && r.errori.length)

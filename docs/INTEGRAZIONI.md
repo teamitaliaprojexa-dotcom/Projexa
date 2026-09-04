@@ -51,6 +51,39 @@ filtrata per `tenant_id` e `user_id` del login:
    - codice presente ma riga **scaduta** → non si tocca nulla.
 4. **Colonne** — tutte le altre righe di mappatura valorizzano la colonna Projexa
    indicata in `colonna_projexa` con la colonna Jira indicata in `colonna_jira`.
+5. **Filtro aggiuntivo (solo aggiornamento)** — se configurato, viene eseguito un
+   secondo filtro Jira che **aggiorna soltanto righe già presenti** e non ne crea
+   mai di nuove (vedi sotto).
+
+## Filtro aggiuntivo (solo aggiornamento)
+
+Serve a riportare su Projexa i cambiamenti dei ticket che il filtro principale non
+estrae più — tipicamente quelli chiusi, che escono dal filtro di lavorazione.
+
+Si configura in **Impostazioni → Integrazioni**, campo di tipo 14 (interruttore +
+testo): il **nome del filtro Jira** va scritto nella casella di testo.
+
+| Programma | `settings.campo` |
+|---|---|
+| `aggiornaJiraQuotazioni` | `Filtro aggiuntivo Quotazioni (solo agg)` |
+| `aggiornaJiraTask` | `Filtro aggiuntivo Task (solo agg)` |
+
+- Il programma legge `settings.valore2` per `tenant_id` + `user_id` del contesto.
+  **Se è vuoto il passaggio non viene eseguito** (spegnendo l'interruttore
+  l'interfaccia svuota la casella, quindi basta quello).
+- Mappatura, abbinamento del cliente e conversione dei valori sono **identici** a
+  quelli del filtro principale: cambia solo la JQL eseguita.
+- Valgono le stesse regole di aggiornamento: una riga con `scadenza <= oggi` non
+  viene toccata. Una riga Jira che non ha corrispondenza su Projexa viene contata
+  come «non presente» e ignorata (nessun inserimento).
+
+  > **Scelta voluta, non un difetto.** La routine «Chiudi» di Projexa imposta
+  > `scadenza` alla data odierna, quindi le righe chiuse risultano scadute e il
+  > passaggio aggiuntivo le salta: **una volta chiusa in Projexa, una riga non viene
+  > più modificata da Jira.** È la ragione per cui il riquadro del filtro aggiuntivo
+  > può riportare molte righe «già scadute» e zero aggiornamenti: sta funzionando
+  > come previsto.
+- Nel riepilogo compare un riquadro dedicato con i numeri di questo passaggio.
 
 ## Dettagli che è utile conoscere
 
@@ -69,6 +102,15 @@ filtrata per `tenant_id` e `user_id` del login:
   può essere cercato con una `WHERE`: il confronto avviene in memoria sulle righe
   lette dal pool (che decifra in automatico) e le scritture passano da
   `encryptRowForWrite`.
+- **Limite di lettura**: 50.000 righe per filtro (500 pagine da 100). Se il filtro ne
+  ha di più il programma legge le prime 50.000 e lo **segnala nel riepilogo**: in quel
+  caso va ristretto il filtro su Jira, altrimenti la parte esclusa non viene mai
+  sincronizzata. Si cambia con la variabile d'ambiente `JIRA_SYNC_MAX_PAGINE` (numero
+  di pagine da 100 righe), senza toccare il codice.
+- **Durata**: ogni pagina è una chiamata API, quindi il tempo cresce con il numero di
+  righe del filtro. Misura reale su `aggiornaJiraTask`: 2.381 righe del filtro
+  principale + 32.215 del filtro aggiuntivo = **circa 170 secondi**. Tenerne conto
+  prima di allargare un filtro: il pulsante resta in attesa per tutta la durata.
 - **Un programma che fallisce non blocca gli altri**: l'errore finisce nel suo
   riquadro del riepilogo. Anche un singolo record che va in errore non interrompe
   l'elaborazione delle altre righe.
