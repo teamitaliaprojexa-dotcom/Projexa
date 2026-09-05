@@ -235,6 +235,71 @@ function isAdminUser(req) {
   return Number(req.user?.id_roles) === 1;
 }
 
+// Salvataggio "grezzo" richiesto dall'editor tabelle della pagina Database: le righe
+// vengono scritte con i soli valori del form, senza forzare tenant_id/user_id/client_id
+// dal contesto di login. È una scorciatoia riservata agli admin (la pagina Database è
+// visibile solo a loro): per chiunque altro il flag viene ignorato e valgono le
+// normali regole di isolamento multi-tenant.
+function isRawColumnsRequest(req, data) {
+  const flag = data && data.__rawColumns;
+  return isAdminUser(req) && (flag === true || flag === 'true' || flag === 1 || flag === '1');
+}
+
+// ---------- Contenitori EAV (settings/clients/projects) ----------
+// In queste tabelle un campo "vive" dentro un contenitore indicato dalla colonna argument:
+// un nome (argomento delle impostazioni, 'Cliente', 'Progetto') oppure l'id di un'altra
+// riga (Nodo Padre, tipo_valore = 0). Quell'id esiste una volta per ogni coppia
+// (tenant, utente) — e per i clienti anche per ogni cliente — quindi NON può essere usato
+// per raggiungere lo stesso contenitore altrove: va ricostruito logicamente.
+const EAV_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Risale la catena dei contenitori a partire da un id: [radice, ..., contenitore indicato].
+// Ritorna null se l'id non è un contenitore o se la catena non è ricostruibile.
+async function eavContainerChain(source, containerId, tenantId, pool = db) {
+  if (!EAV_UUID_RE.test(String(containerId || ''))) return null;
+  const chain = [];
+  let cursor = containerId;
+  for (let depth = 0; depth < 10 && cursor; depth++) {
+    const r = await pool.query(
+      `SELECT id, campo, valore2, argument FROM "${source}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      [cursor, tenantId]
+    );
+    const row = r.rows[0];
+    if (!row) return null;
+    chain.unshift(row);
+    cursor = EAV_UUID_RE.test(String(row.argument || '')) ? row.argument : null;
+  }
+  return chain.length ? chain : null;
+}
+
+// Traduce la catena in FROM + condizioni SQL che ritrovano lo stesso contenitore in ogni
+// tenant/utente: gli alias sono k0..kN, l'ultimo (proprietà "alias") è il contenitore
+// finale, da cui prendere id/tenant_id/user_id.
+// startIndex = primo livello da vincolare: 0 parte dalla radice (contenitore specifico),
+// chain.length-1 vincola solo l'ultimo nodo (stesso nodo in QUALSIASI contenitore).
+// matchRootValue = riconosce la radice anche dal nome (valore2): serve ai clienti/progetti,
+// dove tutte le righe identità condividono campo e argument.
+function eavChainSql(source, chain, startIndex, params, matchRootValue) {
+  const froms = [], conds = [];
+  chain.slice(startIndex).forEach((row, i) => {
+    const alias = 'k' + i;
+    froms.push(`"${source}" ${alias}`);
+    params.push(row.campo);
+    conds.push(`${alias}.campo = $${params.length}`);
+    if (i === 0 && startIndex === 0) {
+      params.push(row.argument);
+      conds.push(`${alias}.argument IS NOT DISTINCT FROM $${params.length}`);
+      if (matchRootValue && row.valore2 != null) {
+        params.push(row.valore2);
+        conds.push(`${alias}.valore2 = $${params.length}`);
+      }
+    } else if (i > 0) {
+      conds.push(`${alias}.argument = k${i - 1}.id::text`);
+    }
+  });
+  return { froms, conds, alias: 'k' + (chain.length - startIndex - 1) };
+}
+
 // Middleware: consente solo agli amministratori (id_roles = 1).
 function requireAdmin(req, res, next) {
   if (!isAdminUser(req)) return res.status(403).json({ error: 'Riservato agli amministratori' });
@@ -2285,6 +2350,10 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
     // colonna della tabella, va rimosso prima dell'INSERT.
     const scope = data.__scope;
     delete data.__scope;
+    // Editor tabelle (pagina Database, riservata agli admin): salva esattamente i valori
+    // del form, senza imporre le chiavi di contesto del login. Ignorato per i non admin.
+    const rawColumns = isRawColumnsRequest(req, data);
+    delete data.__rawColumns;
 
     // Le stringhe vuote diventano NULL: colonne numeriche/date/boolean non accettano ''.
     for (const k of Object.keys(data)) {
@@ -2310,8 +2379,10 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
     // I campi di contesto non sono mai lasciati al browser: il server li determina
     // dal login e, per i progetti, dal progetto/cliente corrente. Questo evita in
     // particolare il NOT NULL su user_id nelle INSERT di clients/settings.
-    if (tableColumns.has('tenant_id')) data.tenant_id = req.user.tenant_id;
-    if (tableColumns.has('user_id')) data.user_id = req.user.user_id;
+    if (!rawColumns) {
+      if (tableColumns.has('tenant_id')) data.tenant_id = req.user.tenant_id;
+      if (tableColumns.has('user_id')) data.user_id = req.user.user_id;
+    }
 
     // Quando un utente non admin crea un record-struttura (settings/clients/projects),
     // se il form contiene il campo `campo` il nome deve essere sempre marcato come custom.
@@ -2325,7 +2396,11 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
       data.campo = '(*) ' + rawCampo;
     }
 
-    if (tableName === 'clients') {
+    if (rawColumns) {
+      // Editor tabelle: nessuna normalizzazione EAV di clients/projects. Le colonne
+      // inesistenti vengono comunque scartate dal filtro sulle colonne reali.
+      data = Object.fromEntries(Object.entries(data).filter(([c]) => tableColumns.has(c)));
+    } else if (tableName === 'clients') {
       // clients non possiede client_id: se arrivasse dal form viene scartato.
       delete data.client_id;
       delete data.project_id;
@@ -2408,6 +2483,10 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
     const tenantScope = data.__tenantScope || 'this-tenant';
     delete data.__scope;
     delete data.__tenantScope;
+    // Editor tabelle (pagina Database, riservata agli admin): aggiorna esattamente le
+    // colonne del form, comprese tenant_id/user_id/client_id. Ignorato per i non admin.
+    const rawColumns = isRawColumnsRequest(req, data);
+    delete data.__rawColumns;
 
     // Le stringhe vuote diventano NULL: colonne numeriche/date/boolean non accettano ''.
     for (const k of Object.keys(data)) {
@@ -2464,9 +2543,11 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       }
     }
 
-    delete data.tenant_id;
-    delete data.user_id;
-    delete data.client_id;
+    if (!rawColumns) {
+      delete data.tenant_id;
+      delete data.user_id;
+      delete data.client_id;
+    }
 
     // Difesa ulteriore: accetta soltanto colonne realmente presenti nella tabella.
     // Così eventuali campi aggiunti dal frontend non possono diventare identificatori
@@ -2867,6 +2948,10 @@ app.get('/api/settings/arguments', requireAuth, async (req, res) => {
               MAX(CASE WHEN campo IS NULL THEN valore2 END)     AS valore2
        FROM settings
        WHERE tenant_id = $1 AND user_id = $2 AND argument IS NOT NULL
+         -- I campi figli di un Nodo Padre (tipo_valore = 0) hanno argument = id della
+         -- riga padre: appartengono al form di quel nodo, non sono argomenti di primo
+         -- livello e non devono comparire come voci dell'elenco Impostazioni.
+         AND argument !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
          AND (id_roles IS NULL OR id_roles >= $3)
        GROUP BY argument
        -- Nascondi gli argomenti la cui riga segnaposto (campo IS NULL) ha scadenza < oggi.
@@ -3864,6 +3949,61 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
       : 'AND ordinamento >= 200';
     const bandBase = isStandard ? 1 : 200;
 
+    // NUOVO CAMPO DENTRO UN NODO PADRE (tipo_valore = 0), per settings/clients/projects.
+    // Il contenitore non è un nome ma una riga, e quella riga esiste una volta per ogni
+    // (tenant, utente) — e per i clienti anche per ogni cliente: inserire un'unica riga
+    // con argument = id del nodo lo renderebbe visibile solo a chi l'ha creato. Si ricostruisce
+    // quindi la catena logica del contenitore e si crea un figlio sotto ogni nodo omologo.
+    const containerChainRows = await eavContainerChain(source, clientId, req.user.tenant_id);
+    const isNodeContainer = !!containerChainRows && containerChainRows.length > 1;
+    if (containerChainRows && (source === 'settings' || isNodeContainer)) {
+      const wantsAllTenants = (scope === 'all-tenants') || (tenantScope === 'all-tenants');
+      if (wantsAllTenants && Number(req.user.id_roles) !== 1) {
+        return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
+      }
+      const params = [];
+      // 'all' (clienti/progetti) = lo stesso nodo dentro ogni contenitore: si vincola solo
+      // l'ultimo livello. Altrimenti si vincola la catena intera, cioè quel nodo lì.
+      const startIndex = (scope === 'all' && isNodeContainer) ? containerChainRows.length - 1 : 0;
+      const j = eavChainSql(source, containerChainRows, startIndex, params, source !== 'settings');
+      const conds = [...j.conds];
+      if (!wantsAllTenants) {
+        params.push(req.user.tenant_id);
+        conds.push(`${j.alias}.tenant_id = $${params.length}`);
+        // Le impostazioni hanno una riga per utente: il campo nasce per tutti gli utenti
+        // del tenant, non solo per chi lo sta creando.
+        if (source !== 'settings') {
+          params.push(req.user.user_id);
+          conds.push(`${j.alias}.user_id = $${params.length}`);
+        }
+      }
+      params.push(campo);      const pCampo = params.length;
+      params.push(tipoValore); const pTipo = params.length;
+      params.push(tabella);    const pTab = params.length;
+      params.push(colonna);    const pCol = params.length;
+      params.push(variabDb);   const pVar = params.length;
+      params.push(valore2);    const pVal2 = params.length;
+      params.push(bandBase);   const pBase = params.length;
+      params.push(idRoles);    const pRoles = params.length;
+      // Ordinamento calcolato dentro ciascun nodo di destinazione, non globalmente.
+      const bandClauseX = isStandard
+        ? "AND x.campo NOT LIKE '(*)%' AND (x.ordinamento IS NULL OR x.ordinamento < 200)"
+        : 'AND x.ordinamento >= 200';
+      // Progetti: la riga richiede client_id, che il contenitore possiede già.
+      const clientIdCol = source === 'projects' ? ', client_id' : '';
+      const clientIdSel = source === 'projects' ? `, ${j.alias}.client_id` : '';
+      const q = `INSERT INTO "${source}" (argument, campo, tipo_valore, tabella, colonna, "VariabDB", valore2, tenant_id, user_id, ordinamento, id_roles${clientIdCol})
+                 SELECT ${j.alias}.id::text, $${pCampo}, $${pTipo}, $${pTab}, $${pCol}, $${pVar}, $${pVal2},
+                        ${j.alias}.tenant_id, ${j.alias}.user_id,
+                        COALESCE((SELECT MAX(x.ordinamento) + 1 FROM "${source}" x
+                                   WHERE x.argument = ${j.alias}.id::text ${bandClauseX}), $${pBase}::integer),
+                        $${pRoles}::smallint${clientIdSel}
+                 FROM ${j.froms.join(', ')}
+                 WHERE ${conds.join(' AND ')}`;
+      const result = await db.query(q, params);
+      return res.status(201).json({ inserted: result.rowCount });
+    }
+
     // IMPOSTAZIONI: scope tenant. Inserisce il campo per ogni (tenant,utente) che possiede
     // già l'argomento/contenitore -> 'this-tenant' (solo tenant corrente) o 'all-tenants' (admin).
     if (source === 'settings') {
@@ -4153,23 +4293,20 @@ app.post('/api/:source(settings|clients|projects)/reorder-fields', requireAuth, 
       return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
     }
 
-    // Clienti/Progetti su tutti i tenant, ambito "solo questo contenitore": l'argument è
-    // un UUID valido soltanto nel tenant corrente, quindi il contenitore corrispondente
-    // negli altri tenant va individuato logicamente (riga identità campo + valore2).
-    let logicalValue = null;
-    if (allTenants && source !== 'settings' && containerScope === 'this') {
-      const root = await db.query(
-        `SELECT valore2 FROM "${source}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
-        [argument, req.user.tenant_id]
-      );
-      logicalValue = root.rows[0]?.valore2 ?? null;
-      if (logicalValue == null) {
-        return res.status(400).json({ error: 'Impossibile determinare il contenitore corrispondente negli altri tenant' });
-      }
+    // Il contenitore può essere un nome (argomento delle impostazioni) oppure l'id di una
+    // riga (Nodo Padre, o riga identità di cliente/progetto). Nel secondo caso l'id vale
+    // solo qui: per raggiungere lo stesso contenitore negli altri tenant/utenti si ricostruisce
+    // la catena logica dei "campo" fino alla radice.
+    const chain = await eavContainerChain(source, argument, req.user.tenant_id);
+    const isNodeContainer = !!chain && chain.length > 1;
+    if (!chain && EAV_UUID_RE.test(argument)) {
+      return res.status(400).json({ error: 'Contenitore non trovato' });
     }
 
-    // I progetti dispongono anche di layout_span (quante colonne occupa il campo).
-    const spanSupported = source === 'projects';
+    // layout_span (quante colonne occupa il campo) esiste su settings/clients/projects:
+    // va salvato ovunque sia presente, non solo sui progetti.
+    const sourceColumns = await getTableColumns(source);
+    const spanSupported = sourceColumns.has('layout_span');
 
     let updated = 0;
     for (const it of items) {
@@ -4188,7 +4325,34 @@ app.post('/api/:source(settings|clients|projects)/reorder-fields', requireAuth, 
       const n = head.length; // numero di segnaposto già usati dal SET
 
       let query, params;
-      if (source === 'settings') {
+      // Il contenitore è una riga (Nodo Padre o riga identità): si passa dalla catena
+      // logica, così l'aggiornamento raggiunge il contenitore omologo di ogni utente/tenant
+      // e non solo la riga con quell'id. 'all' vincola soltanto l'ultimo livello,
+      // cioè lo stesso nodo dentro qualsiasi contenitore.
+      // Restando nel proprio tenant su clienti/progetti l'id del contenitore è già preciso:
+      // la catena serve alle impostazioni (righe per utente) e agli ambiti allargati.
+      const useChain = !!chain && (
+        source === 'settings'
+        || (containerScope === 'this' && allTenants)
+        || (containerScope === 'all' && isNodeContainer)
+      );
+      if (useChain) {
+        params = [...head];
+        const startIndex = (containerScope === 'all' && isNodeContainer) ? chain.length - 1 : 0;
+        const j = eavChainSql(source, chain, startIndex, params, source !== 'settings');
+        params.push(campo);
+        let where = `${j.conds.join(' AND ')} AND f.argument = ${j.alias}.id::text AND f.campo = $${params.length}`;
+        if (!allTenants) {
+          params.push(req.user.tenant_id);
+          where += ` AND f.tenant_id = $${params.length}`;
+          // Impostazioni: le righe sono per utente, la disposizione vale per tutto il tenant.
+          if (source !== 'settings') {
+            params.push(req.user.user_id);
+            where += ` AND f.user_id = $${params.length}`;
+          }
+        }
+        query = `UPDATE "${source}" f SET ${set} FROM ${j.froms.join(', ')} WHERE ${where}`;
+      } else if (source === 'settings') {
         if (allTenants) {
           // argument delle impostazioni è il nome dell'argomento: identico in ogni tenant.
           query = `UPDATE settings SET ${set} WHERE argument = $${n + 1} AND campo = $${n + 2}`;
@@ -4197,11 +4361,6 @@ app.post('/api/:source(settings|clients|projects)/reorder-fields', requireAuth, 
           query = `UPDATE settings SET ${set} WHERE argument = $${n + 1} AND campo = $${n + 2} AND tenant_id = $${n + 3}`;
           params = [...head, argument, campo, req.user.tenant_id];
         }
-      } else if (allTenants && containerScope === 'this') {
-        query = `UPDATE "${source}" f SET ${set} FROM "${source}" c
-                 WHERE c.id::text = f.argument AND c.campo = $${n + 1} AND c.valore2 = $${n + 2}
-                   AND f.campo = $${n + 3}`;
-        params = [...head, source === 'projects' ? 'Progetto' : 'Cliente', logicalValue, campo];
       } else if (allTenants) {
         query = `UPDATE "${source}" SET ${set} WHERE campo = $${n + 1}`;
         params = [...head, campo];

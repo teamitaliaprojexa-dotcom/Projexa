@@ -835,6 +835,11 @@ async function saveRecord(event) {
   // a differenza della dashboard, qui non ha senso chiedere se propagare a
   // tutti i tenant, quindi non impostiamo alcuno scope speciale.
 
+  // Editor tabelle: si salva la riga così com'è stata compilata. Nessuna forzatura di
+  // tenant_id/user_id/client_id dal contesto di login (che invece serve alla dashboard):
+  // qui si sta modificando direttamente la tabella, i valori sono quelli del form.
+  data.__rawColumns = true;
+
   const method = recordId ? 'PUT' : 'POST';
   const url = recordId
     ? `${API_URL}/data/${tableName}/${recordId}`
@@ -859,7 +864,11 @@ async function saveRecord(event) {
       // Reload table data using saved table name
       await loadTableData(tableName);
     } else {
-      alert('Error saving record');
+      // Senza forzature sulle colonne di contesto, un vincolo NOT NULL o una FK non
+      // soddisfatta arrivano dal database: mostrare il messaggio reale invece di
+      // un generico "errore" rende evidente quale colonna va compilata.
+      const err = await response.json().catch(() => ({}));
+      alert('Errore nel salvataggio: ' + (err.error || response.status));
     }
   } catch (error) {
     console.error('Error saving record:', error);

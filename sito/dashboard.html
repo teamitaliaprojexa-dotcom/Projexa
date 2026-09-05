@@ -2250,7 +2250,9 @@
     </div>
 
     <!-- Modale: ambito tenant per aggiunta/eliminazione argomenti Impostazioni -->
-    <div id="settingsTenantScopeModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
+    <!-- z-index sopra il form centrale del Nodo Padre (.parent-form-overlay, 720): la scelta
+         dell'ambito viene chiesta anche da lì e non deve finire dietro all'overlay. -->
+    <div id="settingsTenantScopeModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 780; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: 90vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <h3 id="settingsTenantScopeTitle" style="margin: 0 0 0.5rem; color: var(--dark);">Argomento impostazioni</h3>
             <p id="settingsTenantScopeText" style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.25rem;">La modifica deve avvenire su questo tenant o su tutti i tenant?</p>
@@ -2293,7 +2295,8 @@
     </div>
 
     <!-- Modale: ambito eliminazione campi custom (tutti i clienti / solo questo) -->
-    <div id="clientDeleteScopeModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
+    <!-- Come sopra: deve restare visibile anche sopra il form centrale del Nodo Padre. -->
+    <div id="clientDeleteScopeModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 780; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: 90vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <h3 id="clientScopeTitle" style="margin: 0 0 0.5rem; color: var(--dark);">Elimina campi custom</h3>
             <p id="clientScopeText" style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.25rem;">L'eliminazione deve avvenire su tutti i clienti o solo su quello selezionato?</p>
@@ -4884,7 +4887,7 @@
             if (pending.op === 'add') {
                 t = 'Aggiungi argomento';
                 p = `Creare l'argomento "${pending.name}" su questo tenant o su tutti i tenant?`;
-            } else if (pending.op === 'add-field') {
+            } else if (pending.op === 'add-field' || pending.op === 'parent-add-field') {
                 t = 'Aggiungi campo';
                 p = 'Aggiungere il campo su questo tenant o su tutti i tenant?';
             } else if (pending.op === 'rename-field') {
@@ -4896,7 +4899,7 @@
             } else if (pending.op === 'rename') {
                 t = 'Rinomina argomento';
                 p = `Rinominare l'argomento in "${pending.newName}" su questo tenant o su tutti i tenant?`;
-            } else if (pending.op === 'reorder') {
+            } else if (pending.op === 'reorder' || pending.op === 'parent-reorder') {
                 t = 'Sposta campo';
                 p = 'Applicare lo spostamento dei campi su questo tenant o su tutti i tenant?';
             } else if (pending.op === 'save-values') {
@@ -4981,6 +4984,15 @@
                         const err = await res.json().catch(() => ({}));
                         showNotification('Errore: ' + (err.error || res.status), 'info');
                     }
+                    return;
+                }
+                if (p.op === 'parent-reorder') {
+                    // Impostazioni: l'ambito scelto è direttamente quello tenant.
+                    await performParentFormReorder(scope, scope);
+                    return;
+                }
+                if (p.op === 'parent-add-field') {
+                    await performParentFormAddField(scope, scope);
                     return;
                 }
                 if (p.op === 'reorder') {
@@ -5094,11 +5106,6 @@
         let projectClientId = null;      // client_id del progetto attualmente aperto
         let projectDetailActive = false; // true quando il flyout progetti è aperto (persistente)
         let detailMaxCols = 5;           // tutti i flyout di dettaglio usano il layout a 5 colonne
-        // Valore corrente del campo booleano "a Consuntivo" del progetto aperto (valore1).
-        // null = non presente/non applicabile (nessun progetto aperto o campo assente).
-        // true  -> nelle griglie (tipo 11) nascondi le colonne "offerta"/"Offerta".
-        // false -> nelle griglie (tipo 11) nascondi le colonne "consuntivo"/"Consuntivo".
-        let currentProjectConsuntivoValue = null;
         // Valore corrente del campo booleano "Gestione a HH" del progetto aperto (valore1).
         // null = non presente/non applicabile. true -> nascondi i campi "_gg" (e nelle
         // griglie tipo 11 le colonne "_gg"); false -> nascondi i campi "_hh" (e "_hh" in griglia).
@@ -5691,6 +5698,25 @@
                 });
                 rowIndex++;
             });
+            if (!items.length) {
+                showNotification('Nessuna disposizione da salvare', 'info');
+                return false;
+            }
+            // Admin: la disposizione (ordinamento, colonna e larghezza) può essere applicata
+            // oltre il proprio contenitore. Una sola chiamata bulk, come nel flyout di
+            // dettaglio: il salvataggio riga per riga toccherebbe solo la propria riga.
+            if (Number(decodeJwtPayload().id_roles) === 1) {
+                window.__parentFormLayoutPending = {
+                    source: parentFormState.source,
+                    argument: parentFormState.argument,
+                    items
+                };
+                // Impostazioni: solo ambito tenant. Clienti/Progetti: prima il tenant, poi
+                // "tutti i clienti/progetti" o "solo questo" (stesso flusso a due passi).
+                if (parentFormState.source === 'settings') openSettingsTenantScope({ op: 'parent-reorder' });
+                else openClientScopeModal('parent-reorder');
+                return true;
+            }
             for (const item of items) {
                 const response = await fetch(`${API_URL}/data/${parentFormState.source}/${encodeURIComponent(item.rowId)}`, {
                     method: 'PUT',
@@ -5708,6 +5734,92 @@
             parentFormState.layoutDirty = false;
             await renderParentForm();
             return true;
+        }
+
+        // Applica la disposizione preparata dal form centrale con l'ambito scelto dall'admin.
+        // scope: 'this-tenant'|'all-tenants' (Impostazioni) oppure 'this'|'all' (Clienti/Progetti);
+        // tenantScope: sempre 'this-tenant'|'all-tenants'.
+        async function performParentFormReorder(scope, tenantScope) {
+            document.getElementById('settingsTenantScopeModal')?.style.setProperty('display', 'none');
+            document.getElementById('clientDeleteScopeModal')?.style.setProperty('display', 'none');
+            const pend = window.__parentFormLayoutPending;
+            window.__parentFormLayoutPending = null;
+            if (!pend) return;
+            try {
+                const res = await fetch(`${API_URL}/${pend.source}/reorder-fields`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({
+                        argument: pend.argument,
+                        scope,
+                        tenantScope: tenantScope || 'this-tenant',
+                        items: pend.items
+                    })
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                    return;
+                }
+                const data = await res.json().catch(() => ({}));
+                showNotification(`Disposizione aggiornata (${data.updated ?? 0} campi)`, 'success');
+                if (parentFormState) {
+                    parentFormState.action = 'values';
+                    parentFormState.layoutDirty = false;
+                    await renderParentForm();
+                }
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
+        }
+
+        // Crea il campo preparato dal form centrale di un Nodo Padre con l'ambito scelto.
+        // scope: 'this-tenant'|'all-tenants' (Impostazioni) oppure 'this'|'all' (Clienti/Progetti).
+        async function performParentFormAddField(scope, tenantScope) {
+            document.getElementById('settingsTenantScopeModal')?.style.setProperty('display', 'none');
+            document.getElementById('clientDeleteScopeModal')?.style.setProperty('display', 'none');
+            const pend = window.__parentFormAddPending;
+            window.__parentFormAddPending = null;
+            if (!pend) return;
+            // Stessa regola del flyout: nelle Impostazioni "tutti i tenant" crea un campo
+            // standard, "questo tenant" un campo custom "(*)"; su Clienti/Progetti il nome
+            // dell'admin è preso così com'è (il server declassa comunque i non admin).
+            const kind = (pend.source === 'settings')
+                ? (scope === 'all-tenants' ? 'standard' : 'custom')
+                : 'standard';
+            try {
+                const res = await fetch(`${API_URL}/${pend.source}/field`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({
+                        clientId: pend.clientId,
+                        projClientId: pend.projClientId,
+                        // Il marcatore "(*)" dei campi custom lo applica il server in base a
+                        // "kind": inviarlo già presente lo raddoppierebbe.
+                        campo: String(pend.campo || '').replace(/^\(\*\)\s*/, ''),
+                        tipo_valore: pend.tipo_valore,
+                        tabella: pend.tabella,
+                        colonna: pend.colonna,
+                        VariabDB: pend.VariabDB,
+                        valore2: pend.valore2,
+                        scope,
+                        tenantScope: tenantScope || 'this-tenant',
+                        containerCampo: pend.containerCampo,
+                        kind,
+                        id_roles: pend.id_roles
+                    })
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (err.error || res.status), 'info');
+                    return;
+                }
+                const data = await res.json().catch(() => ({}));
+                showNotification(`Campo aggiunto (${data.inserted ?? 0} righe)`, 'success');
+                if (pend.onSaved) await pend.onSaved();
+            } catch (e) {
+                showNotification('Errore di connessione', 'info');
+            }
         }
 
         async function saveParentForm() {
@@ -6850,19 +6962,6 @@
                 let rows = await res.json();
                 // Nasconde le righe "segnaposto" senza campo (usate solo per far comparire l'argomento vuoto)
                 if (Array.isArray(rows)) rows = rows.filter(r => r.campo != null && String(r.campo).trim() !== '');
-                // Rileva il valore del campo booleano "a Consuntivo" del progetto corrente
-                // (usato per nascondere le colonne "offerta"/"consuntivo" nelle griglie tipo 11).
-                if (source === 'projects' && Array.isArray(rows)) {
-                    const consuntivoRow = rows.find(r => {
-                        const bareCampo = String(r.campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
-                        return bareCampo === 'a consuntivo';
-                    });
-                    currentProjectConsuntivoValue = consuntivoRow
-                        ? (consuntivoRow.valore1 === true || consuntivoRow.valore1 === 'true' || consuntivoRow.valore1 === 't')
-                        : null;
-                } else {
-                    currentProjectConsuntivoValue = null;
-                }
                 // Rileva il valore del campo booleano "Gestione a HH": stessa regola già usata
                 // per le griglie (tipo 11), applicata ora anche ai singoli campi la cui label
                 // (nome tecnico "campo") termina con "_gg" o "_hh". Se attivo (true/t) nasconde
@@ -7583,18 +7682,6 @@
                 let visibleColumns = Array.isArray(payload.columns) && payload.columns.length
                     ? payload.columns
                     : columns;
-                // Progetti: in base al campo booleano "a Consuntivo" nasconde le colonne
-                // il cui nome tecnico (o etichetta) è "consuntivo"/"Consuntivo" (quando è false)
-                // oppure "offerta"/"Offerta" (quando è true). Match case-insensitive.
-                const gridSourceName = String(widget.dataset.gridSource || source || '').trim();
-                if (gridSourceName === 'projects' && currentProjectConsuntivoValue !== null) {
-                    const hiddenName = currentProjectConsuntivoValue ? 'offerta' : 'consuntivo';
-                    visibleColumns = visibleColumns.filter(column => {
-                        const technical = String(column || '').trim().toLowerCase();
-                        const label = String(type11ColumnLabel(column) || '').trim().toLowerCase();
-                        return !technical.startsWith(hiddenName) && !label.startsWith(hiddenName);
-                    });
-                }
                 const records = Array.isArray(payload.rows) ? payload.rows : (Array.isArray(payload) ? payload : []);
                 const hasProjectIdColumn = visibleColumns.some(column => String(column).toLowerCase() === 'project_id');
                 const projectOptions = hasProjectIdColumn ? await type11ProjectOptions(context.clientId) : [];
@@ -8370,7 +8457,6 @@
                 projectDetailActive = false;
                 detailMaxCols = 5;
                 projectClientId = null;
-                currentProjectConsuntivoValue = null;
                 currentProjectManageByHoursValue = null;
                 document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar');
                 document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
@@ -8671,6 +8757,36 @@
                     url = `${API_URL}/data/${encodeURIComponent(source)}/${encodeURIComponent(rowId)}`;
                     method = 'PUT';
                 }
+                // Nuovo campo dentro il form centrale di un Nodo Padre. Il contenitore non è
+                // un nome ma una riga, e quella riga esiste una volta per ogni utente (e per
+                // ogni cliente/progetto): un INSERT diretto creerebbe il campo solo per chi lo
+                // aggiunge. Si passa quindi da /field, con l'ambito scelto dall'admin.
+                if (mode === 'add' && onSaved) {
+                    window.__parentFormAddPending = {
+                        source,
+                        campo,
+                        tipo_valore: values.tipo_valore,
+                        tabella: values.tabella || '',
+                        colonna: values.colonna || '',
+                        VariabDB: values.VariabDB || '',
+                        valore2: values.valore2 || '',
+                        id_roles: values.id_roles || null,
+                        clientId: contextArgument,
+                        containerCampo: contextContainerCampo,
+                        projClientId: source === 'projects' ? (formClientId || projectClientId || '') : undefined,
+                        onSaved
+                    };
+                    close();
+                    if (Number(decodeJwtPayload().id_roles) !== 1) {
+                        // Nessuna scelta di ambito per i ruoli non admin: resta il proprio tenant.
+                        await performParentFormAddField(source === 'settings' ? 'this-tenant' : 'this', 'this-tenant');
+                    } else if (source === 'settings') {
+                        openSettingsTenantScope({ op: 'parent-add-field' });
+                    } else {
+                        openClientScopeModal('parent-add-field');
+                    }
+                    return;
+                }
                 // Nel form centrale del Nodo Padre l'operazione riguarda sempre quel
                 // contenitore specifico: salva direttamente e ricarica il form centrale.
                 if (onSaved) {
@@ -8915,7 +9031,6 @@
                     projectDetailActive = false;
                     detailMaxCols = 5;
                     projectClientId = null;
-                    currentProjectConsuntivoValue = null;
                     currentProjectManageByHoursValue = null;
                     document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar');
                     document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
@@ -9165,7 +9280,13 @@
             const plural = isProjects ? 'tutti i progetti' : 'tutti i clienti';
             const singular = isProjects ? 'il progetto selezionato' : 'il cliente selezionato';
             let t, p;
-            if (action === 'rename') {
+            if (action === 'parent-reorder') {
+                t = 'Sposta campo';
+                p = `Applicare lo spostamento dei campi a ${plural} o solo a ${singular}?`;
+            } else if (action === 'parent-add-field') {
+                t = 'Aggiungi campo';
+                p = `Il nuovo campo deve essere aggiunto a ${plural} o solo a ${singular}?`;
+            } else if (action === 'rename') {
                 t = 'Rinomina campi';
                 p = `La rinomina deve avvenire su ${plural} o solo su ${singular}?`;
             } else if (action === 'edit' || action === 'save-values') {
@@ -9187,7 +9308,14 @@
 
         // Instrada la scelta del popup all'azione corretta.
         function dispatchClientScope(scope) {
-            if (clientScopeAction === 'rename') performRenameFields(scope);
+            if (clientScopeAction === 'parent-reorder' || clientScopeAction === 'parent-add-field') {
+                // L'ambito tenant è stato scelto al passo precedente e va consumato qui.
+                const tenantScope = window.__fieldTenantScope || 'this-tenant';
+                window.__fieldTenantScope = null;
+                if (clientScopeAction === 'parent-reorder') performParentFormReorder(scope, tenantScope);
+                else performParentFormAddField(scope, tenantScope);
+            }
+            else if (clientScopeAction === 'rename') performRenameFields(scope);
             else if (clientScopeAction === 'add') performAddField(scope);
             else if (clientScopeAction === 'edit') performEditField(scope);
             else if (clientScopeAction === 'save-values') performSaveDetailChanges(scope);

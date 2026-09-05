@@ -24,6 +24,7 @@
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^9.0.5",
+    "ntlm-client": "^0.1.1",
     "pg": "^8.8.0",
     "uuid": "^9.0.0"
   },
