@@ -49,7 +49,10 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+// Limite di default di express.json() = 100kb: troppo basso per payload come
+// l'import Qlik voucher (gruppi aggregati da file Excel di migliaia di righe)
+// o altri batch consistenti (es. import CSV). Alzato a 15mb.
+app.use(express.json({ limit: '15mb' }));
 
 // Rate-limit anti brute-force sul login: max 10 tentativi per IP ogni 15 minuti.
 const loginAttempts = new Map(); // ip -> { count, first }
@@ -2923,6 +2926,203 @@ app.post('/api/data/import/rollback', requireAuth, async (req, res) => {
     res.status(400).json({ error: error.message });
   } finally {
     client.release();
+  }
+});
+
+// ==========================================================================
+// QLIK VOUCHER — importazione ore attività da file Excel (voce sidebar "Qlik",
+// gestita dal frontend in js/Qlik_voucher.js).
+//
+// Il file Excel viene letto ed elaborato interamente nel browser: qui arriva
+// solo il riepilogo già raggruppato per (Codice Commessa, Email Dipendente),
+// con il totale ore di ciascun gruppo. L'endpoint:
+//  1) risolve ogni Codice Commessa nel project_id corrispondente, leggendo
+//     ele_commesse (stesso tenant_id/user_id del login);
+//  2) per ciascun gruppo risolto, aggiorna la riga di proj_componenti con la
+//     stessa email e lo stesso project_id:
+//       time_spent_hh = totale ore del gruppo (sovrascrive il valore precedente)
+//       time_spent_gg = time_spent_hh / 8
+// Tutto in un'unica transazione: se il salvataggio di una riga fallisce per un
+// errore imprevisto, nessuna modifica del blocco viene applicata.
+// ==========================================================================
+app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
+  try {
+    const groupsIn = Array.isArray(req.body?.groups) ? req.body.groups : [];
+    if (groupsIn.length === 0) {
+      return res.status(400).json({ error: 'Nessun dato da importare' });
+    }
+    if (groupsIn.length > 5000) {
+      return res.status(400).json({ error: 'Troppi gruppi in una sola richiesta (massimo 5000): suddividere l\'invio' });
+    }
+
+    // Normalizza e valida ogni gruppo ricevuto dal browser.
+    const groups = [];
+    for (const g of groupsIn) {
+      const cod = String((g && g.codiceCommessa) || '').trim();
+      const email = String((g && g.email) || '').trim().toLowerCase();
+      const ore = Number(g && g.oreTotali);
+      if (!cod || !email || !Number.isFinite(ore)) continue;
+      groups.push({ cod, email, ore });
+    }
+    if (groups.length === 0) {
+      return res.status(400).json({ error: 'Nessuna riga valida da importare (Codice Commessa / Email / Ore mancanti)' });
+    }
+
+    // Verifica la struttura minima delle due tabelle coinvolte, con un errore
+    // esplicito se non sono ancora predisposte come richiesto.
+    let commesseCols, componentiCols;
+    try {
+      commesseCols = await getTableColumns('ele_commesse');
+      componentiCols = await getTableColumns('proj_componenti');
+    } catch (schemaErr) {
+      console.error('[QLIK VOUCHER IMPORT] lettura schema fallita', schemaErr);
+      return res.status(500).json({ error: 'Impossibile leggere la struttura di ele_commesse/proj_componenti: ' + schemaErr.message });
+    }
+    if (commesseCols.size === 0) {
+      return res.status(400).json({ error: 'Tabella ele_commesse non trovata' });
+    }
+    if (!['tenant_id', 'user_id', 'cod_commessa', 'project_id'].every((c) => commesseCols.has(c))) {
+      return res.status(400).json({ error: 'La tabella ele_commesse deve contenere tenant_id, user_id, cod_commessa e project_id' });
+    }
+    if (componentiCols.size === 0) {
+      return res.status(400).json({ error: 'Tabella proj_componenti non trovata' });
+    }
+    if (!['tenant_id', 'user_id', 'email', 'project_id', 'time_spent_hh', 'time_spent_gg'].every((c) => componentiCols.has(c))) {
+      return res.status(400).json({ error: 'La tabella proj_componenti deve contenere email, project_id, time_spent_hh e time_spent_gg' });
+    }
+    const hasUpdatedAt = componentiCols.has('updated_at');
+
+    // 1) Risolve tutti i codici commessa coinvolti in un'unica query.
+    const codes = [...new Set(groups.map((g) => g.cod))];
+    const commesseResult = await db.query(
+      `SELECT cod_commessa, project_id FROM ele_commesse
+       WHERE tenant_id = $1 AND user_id = $2 AND cod_commessa = ANY($3::text[])`,
+      [req.user.tenant_id, req.user.user_id, codes]
+    );
+    const projectByCode = new Map(commesseResult.rows.map((r) => [String(r.cod_commessa), r.project_id]));
+
+    // 1b) Risolve l'id di proj_componenti per (project_id, email) leggendo le righe
+    // (così passano dal pool che decifra in lettura) e confrontando l'email in
+    // JavaScript, MAI in una WHERE SQL: se la colonna è cifrata a riposo, un confronto
+    // diretto in SQL tra il valore in chiaro del file e il ciphertext in colonna non
+    // potrà mai corrispondere. L'aggiornamento successivo avviene sempre per id.
+    const projectIds = [...new Set([...projectByCode.values()].filter(Boolean).map(String))];
+    const componentIdByKey = new Map(); // "projectId\u0001email" -> id
+    if (projectIds.length) {
+      const componentiResult = await db.query(
+        `SELECT id, project_id, email FROM proj_componenti
+         WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = ANY($3::text[])`,
+        [req.user.tenant_id, req.user.user_id, projectIds]
+      );
+      for (const row of componentiResult.rows) {
+        const key = String(row.project_id) + '\u0001' + String(row.email || '').trim().toLowerCase();
+        componentIdByKey.set(key, row.id);
+      }
+    }
+
+    // 2) Aggiorna, per ciascun gruppo risolto, la riga proj_componenti corrispondente
+    // (per id, mai per email in WHERE: vedi nota sulla cifratura sopra).
+    let updated = 0;
+    let workerUpdated = 0;
+    const notFoundCommessa = [];
+    const notFoundComponente = [];
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      for (const g of groups) {
+        const projectId = projectByCode.get(g.cod);
+        if (!projectId) {
+          notFoundCommessa.push(g.cod);
+          continue;
+        }
+        const componentId = componentIdByKey.get(String(projectId) + '\u0001' + g.email);
+        if (!componentId) {
+          notFoundComponente.push({ codiceCommessa: g.cod, email: g.email });
+          continue;
+        }
+        const updatedAtClause = hasUpdatedAt ? ', updated_at = CURRENT_TIMESTAMP' : '';
+        // Cast esplicito a numeric: se time_spent_hh/time_spent_gg non sono già di
+        // tipo numerico (es. varchar, o una precisione che non accetta il valore
+        // grezzo) Postgres rifiuta l'operazione con un errore di tipo/operatore,
+        // che senza il cast si presentava come 500 generico all'importazione.
+        let result;
+        try {
+          result = await client.query(
+            `UPDATE proj_componenti
+             SET time_spent_hh = $1::numeric,
+                 time_spent_gg = ($1::numeric) / 8.0${updatedAtClause}
+             WHERE id = $2 AND tenant_id = $3 AND user_id = $4
+             RETURNING id`,
+            [g.ore, componentId, req.user.tenant_id, req.user.user_id]
+          );
+        } catch (rowErr) {
+          // Non interrompe l'intera importazione per una singola riga con dati
+          // incompatibili (es. valore fuori dalla precisione della colonna):
+          // la si segnala come "non trovata/non aggiornata" e si prosegue.
+          console.error('[QLIK VOUCHER IMPORT] riga non aggiornata', g.cod, g.email, rowErr.message);
+          notFoundComponente.push({ codiceCommessa: g.cod, email: g.email, error: rowErr.message });
+          continue;
+        }
+        if (result.rowCount > 0) updated += result.rowCount;
+        else notFoundComponente.push({ codiceCommessa: g.cod, email: g.email });
+      }
+
+      // 3) Propagazione a proj_worker: per ciascun progetto toccato dall'import,
+      // ricalcola il totale ore per (project_id, team_pro) sommando TUTTE le righe
+      // di proj_componenti di quel progetto (non solo quelle appena importate, come
+      // richiesto) e aggiorna la riga di proj_worker corrispondente, individuata da
+      // worker_cost_id = team_pro. Stessa transazione dell'update sopra: se qualcosa
+      // fallisce qui, viene annullato anche l'aggiornamento di proj_componenti.
+      const componentiHasTeamPro = componentiCols.has('team_pro');
+      if (projectIds.length && !componentiHasTeamPro) {
+        console.error('[QLIK VOUCHER IMPORT] Colonna proj_componenti.team_pro non trovata: aggiornamento proj_worker saltato');
+      } else if (projectIds.length) {
+        const projWorkerCols = await getTableColumns('proj_worker');
+        if (projWorkerCols.size === 0) {
+          console.error('[QLIK VOUCHER IMPORT] Tabella proj_worker non trovata: aggiornamento proj_worker saltato');
+        } else if (!['tenant_id', 'user_id', 'project_id', 'worker_cost_id', 'time_spent_hh', 'time_spent_gg'].every((c) => projWorkerCols.has(c))) {
+          console.error('[QLIK VOUCHER IMPORT] La tabella proj_worker deve contenere project_id, worker_cost_id, time_spent_hh e time_spent_gg: aggiornamento saltato');
+        } else {
+          const workerUpdatedAtClause = projWorkerCols.has('updated_at') ? ', updated_at = CURRENT_TIMESTAMP' : '';
+          const aggResult = await client.query(
+            `UPDATE proj_worker pw
+             SET time_spent_hh = agg.total_hh,
+                 time_spent_gg = agg.total_hh / 8.0${workerUpdatedAtClause}
+             FROM (
+               SELECT project_id, team_pro, SUM(time_spent_hh) AS total_hh
+               FROM proj_componenti
+               WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = ANY($3::text[])
+                 AND team_pro IS NOT NULL
+               GROUP BY project_id, team_pro
+             ) agg
+             WHERE pw.tenant_id = $1 AND pw.user_id = $2
+               AND pw.project_id::text = agg.project_id::text
+               AND pw.worker_cost_id::text = agg.team_pro::text
+             RETURNING pw.id`,
+            [req.user.tenant_id, req.user.user_id, projectIds]
+          );
+          workerUpdated = aggResult.rowCount;
+        }
+      }
+
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    res.json({
+      updated,
+      workerUpdated,
+      totalGroups: groups.length,
+      notFoundCommessa: [...new Set(notFoundCommessa)],
+      notFoundComponente
+    });
+  } catch (error) {
+    console.error('[QLIK VOUCHER IMPORT]', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
