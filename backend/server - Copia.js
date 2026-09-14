@@ -4585,13 +4585,7 @@ app.post('/api/:source(settings|clients)/execute-function', requireAuth, async (
     conds.push('(funzione IS NULL OR funzione = $' + (params.push(campo)) + ')');
     if (cod === 1) conds.push("istruzione = 'delete'"); // guardia di sicurezza
     if (cod === 3) conds.push("istruzione = 'update'"); // guardia di sicurezza
-    // Le istruzioni vanno eseguite nell'ordine indicato da function_db.ordinamento
-    // (dal numero più basso al più alto); le righe senza ordinamento vengono eseguite
-    // per ultime, mantenendo comunque l'operazione deterministica.
-    const fdb = await db.query(
-      `SELECT * FROM function_db WHERE ${conds.join(' AND ')} ORDER BY ordinamento ASC NULLS LAST, id`,
-      params
-    );
+    const fdb = await db.query(`SELECT * FROM function_db WHERE ${conds.join(' AND ')}`, params);
     if (fdb.rows.length === 0) return res.json({ deleted: 0, updated: 0, executed: 0 });
 
     // 3) Esecuzione in transazione (tutte o nessuna)
