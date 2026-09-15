@@ -434,7 +434,7 @@
 
     <script>
         // Usa sempre lo stesso origin della pagina corrente.
-        // In questo modo funziona in locale, su Render e su Azure senza URL hardcoded.
+        // Funziona in locale, su Render e su Azure senza URL hardcoded.
         const IS_LOCAL_HOST = (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
         const BACKEND_URL = location.origin;
         const API_URL = `${BACKEND_URL}/api`;
