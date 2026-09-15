@@ -5324,6 +5324,41 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
         }
       }
 
+      // Tipo 17 (scelta singola) e 18 (multi-selezione): le opzioni sono lette da
+      // tabella.colonna (settings/clients/projects.tabella / .colonna), filtrate per
+      // tenant_id/user_id e, quando la tabella li possiede, client_id/project_id del
+      // contesto corrente (stessa risoluzione già usata per il tipo 4, vedi
+      // referenceKeys). VariabDB è una condizione SQL aggiuntiva configurata da un
+      // utente privilegiato (non input dell'utente finale) ed è sempre aggiunta in AND
+      // dopo i filtri di contesto. Il valore selezionato è salvato su valore2 (tipo 17:
+      // il valore così com'è; tipo 18: più valori uniti da ", "), nessun endpoint di
+      // scrittura dedicato: usa la normale PUT /api/data/:table/:id.
+      if ((Number(row.tipo_valore) === 17 || Number(row.tipo_valore) === 18) && row.tabella && row.colonna) {
+        const optionsProp = Number(row.tipo_valore) === 18 ? 'tipo18_options' : 'tipo17_options';
+        try {
+          assertValidIdentifier(row.tabella);
+          assertValidIdentifier(row.colonna);
+          const keys = await referenceKeys(row.tabella, req.user, { clientId: clientContextId, projectId: projectContextId });
+          const params = keys.map(k => k.val);
+          const conds = keys.map((k, i) => `"${k.col}" = $${i + 1}`);
+          let where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+          const variab = (row.VariabDB || '').trim();
+          if (variab) {
+            where = where
+              ? `${where} ${variab}`
+              : 'WHERE ' + variab.replace(/^\s*(and|or)\s+/i, '');
+          }
+          const opts = await db.query(
+            `SELECT DISTINCT "${row.colonna}" AS v FROM "${row.tabella}" ${where} ORDER BY "${row.colonna}" NULLS LAST LIMIT 500`,
+            params
+          );
+          row[optionsProp] = opts.rows.map(r => r.v).filter(v => v !== null && v !== undefined && String(v).trim() !== '');
+        } catch (e) {
+          row[optionsProp] = [];
+          console.error(`[TIPO ${row.tipo_valore}] Errore risoluzione opzioni:`, e.message);
+        }
+      }
+
       // Tipi 9 (multi-selezione) e 10 (elenco): le opzioni arrivano da lookup_values, non da "colonna".
       // Match per (tenant, user, tipo_valore, nome_campo=campo), filtrate per ruolo e date attive.
       const t = Number(row.tipo_valore);

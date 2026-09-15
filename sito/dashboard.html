@@ -4758,11 +4758,11 @@
             const colWrap = document.getElementById('settingsNewArgColonnaWrap');
             const colLabel = document.getElementById('settingsNewArgColonnaLabel');
             const varWrap = document.getElementById('settingsNewArgVariabDBWrap');
-            if (v === '4' || v === '15') {
+            if (v === '4' || v === '15' || v === '17' || v === '18') {
                 if (tabWrap) tabWrap.style.display = 'block';
                 if (colWrap) colWrap.style.display = 'block';
                 if (colLabel) colLabel.textContent = 'Colonna';
-                if (varWrap) varWrap.style.display = (v === '15') ? 'block' : 'none';
+                if (varWrap) varWrap.style.display = (v === '15' || v === '17' || v === '18') ? 'block' : 'none';
             } else {
                 if (tabWrap) tabWrap.style.display = 'none';
                 if (colWrap) colWrap.style.display = 'none';
@@ -5587,10 +5587,11 @@
                 content.querySelectorAll('.multi9').forEach(wrapper => {
                     const hidden = wrapper.querySelector('input[type="hidden"][data-setting-id]');
                     if (!hidden) return;
+                    const sep = hidden.dataset.multiSep || ';';
                     wrapper.querySelectorAll('.multi9-check').forEach(checkbox => {
                         checkbox.addEventListener('change', () => {
                             hidden.value = [...wrapper.querySelectorAll('.multi9-check:checked')]
-                                .map(item => item.value).join(';');
+                                .map(item => item.value).join(sep);
                             hidden.dispatchEvent(new Event('change', { bubbles: true }));
                         });
                     });
@@ -7102,14 +7103,16 @@
                     const numEl = bar.parentElement ? bar.parentElement.querySelector('.value-bar-num') : null;
                     bar.addEventListener('input', () => { updateValueBarFill(bar); if (numEl) numEl.textContent = bar.value; });
                 });
-                // Multi-selezione (tipo 9): i checkbox aggiornano l'input nascosto (valore2 = selezionati uniti da ;).
+                // Multi-selezione (tipo 9 e 18): i checkbox aggiornano l'input nascosto
+                // (valore2 = selezionati uniti dal separatore del campo: ";" per il tipo 9, ", " per il tipo 18).
                 listEl.querySelectorAll('.multi9').forEach(wrap => {
                     const hidden = wrap.querySelector('input[type="hidden"][data-setting-id]');
                     if (!hidden) return;
+                    const sep = hidden.dataset.multiSep || ';';
                     wrap.querySelectorAll('.multi9-check').forEach(chk => {
                         chk.addEventListener('change', () => {
                             const vals = Array.from(wrap.querySelectorAll('.multi9-check:checked')).map(c => c.value);
-                            hidden.value = vals.join(';');
+                            hidden.value = vals.join(sep);
                             hidden.dispatchEvent(new Event('change', { bubbles: true }));
                         });
                     });
@@ -8060,6 +8063,30 @@
                     .concat(opts.map(o => `<option value="${escapeHtml(o)}" ${o === current ? 'selected' : ''}>${escapeHtml(o)}</option>`))
                     .join('');
                 input = `<select data-setting-id="${id}" data-field="valore2">${optionsHtml}</select>`;
+            } else if (tipo === 17) {
+                // Elenco a scelta singola -> menu a discesa; opzioni lette dal backend da
+                // tabella.colonna (+ VariabDB), filtrate per tenant/utente/cliente/progetto
+                // (row.tipo17_options). Il valore selezionato è salvato in valore2.
+                const current = row.valore2 == null ? '' : String(row.valore2);
+                const opts = Array.isArray(row.tipo17_options) ? row.tipo17_options.slice() : [];
+                if (current && !opts.some(o => String(o) === current)) opts.unshift(current); // mantieni il valore attuale
+                const optionsHtml = ['<option value=""></option>']
+                    .concat(opts.map(o => `<option value="${escapeHtml(o)}" ${String(o) === current ? 'selected' : ''}>${escapeHtml(o)}</option>`))
+                    .join('');
+                input = `<select data-setting-id="${id}" data-field="valore2">${optionsHtml}</select>`;
+            } else if (tipo === 18) {
+                // Multi-selezione da tabella esterna (tabella.colonna + VariabDB, row.tipo18_options),
+                // stessa UI a checkbox del tipo 9 ma i selezionati sono uniti da ", " (non ";").
+                const selected = String(row.valore2 == null ? '' : row.valore2).split(',').map(s => s.trim()).filter(s => s !== '');
+                const opts = Array.isArray(row.tipo18_options) ? row.tipo18_options.slice() : [];
+                selected.forEach(s => { if (!opts.some(o => String(o) === s)) opts.push(s); }); // non perdere i selezionati fuori elenco
+                if (mode === 'edit') {
+                    const boxes = opts.map(o => `<label class="multi9-opt"><input type="checkbox" class="multi9-check" value="${escapeHtml(o)}" ${selected.includes(String(o)) ? 'checked' : ''}><span>${escapeHtml(o)}</span></label>`).join('');
+                    // input nascosto (data-field=valore2) tiene i selezionati uniti da ", "; aggiornato al cambio dei checkbox.
+                    input = `<span class="multi9" style="flex:1 1 0; min-width:0;"><input type="hidden" data-setting-id="${id}" data-field="valore2" data-multi-sep=", " value="${escapeHtml(selected.join(', '))}"><span class="multi9-opts">${boxes}</span></span>`;
+                } else {
+                    input = `<span>${escapeHtml(selected.join(', '))}</span>`;
+                }
             } else if (tipo === 11 || tipo === 13) {
                 // Griglia: tabella e colonne arrivano dalla riga del contesto corrente
                 // (settings, clients o projects). Il caricamento avviene dopo il render.
@@ -8903,11 +8930,11 @@
             //  - Routine (50)  -> valore2
             function updateFieldExtras() {
                 const v = typeSel.value;
-                if (v === '4' || v === '15') {
+                if (v === '4' || v === '15' || v === '17' || v === '18') {
                     if (tabWrap) tabWrap.style.display = 'block';
                     if (colWrap) colWrap.style.display = 'block';
                     if (colLabel) colLabel.textContent = 'Colonna';
-                    if (varWrap) varWrap.style.display = (v === '15') ? 'block' : 'none';
+                    if (varWrap) varWrap.style.display = (v === '15' || v === '17' || v === '18') ? 'block' : 'none';
                     if (val2Wrap) val2Wrap.style.display = 'none';
                 } else if (v === '30' || v === '50') {
                     if (tabWrap) tabWrap.style.display = 'none';
