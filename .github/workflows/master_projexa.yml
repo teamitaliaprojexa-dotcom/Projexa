@@ -36,8 +36,7 @@ jobs:
         run: |
           mkdir deploy
           cp -R backend/. deploy/
-          mkdir -p deploy/sito
-          cp -R sito/. deploy/sito/
+          cp -R sito/. deploy/
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
