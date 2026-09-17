@@ -107,23 +107,50 @@
 
         .dashboard-content {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
+            grid-template-columns: 1fr 3fr;
+            gap: 0.5rem;
             min-height: 100px;
         }
 
         .dashboard-left {
             border-right: 1px solid var(--border);
-            padding-right: 1rem;
+            padding-right: 0.5rem;
+        }
+
+        .issue-client-logo-box {
+            width: 176px;
+            height: 99px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--light);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            color: var(--text-muted);
+        }
+
+        .issue-client-logo-box img {
+            display: none;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            object-position: center;
+        }
+
+        .issue-client-logo-placeholder {
+            padding: 0.4rem;
+            text-align: center;
+            font-size: 0.65rem;
         }
 
         .dashboard-right {
-            padding-left: 1rem;
+            padding-left: 0.5rem;
         }
 
         .kpi-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(8, minmax(90px, 1fr));
             gap: 0.5rem;
         }
 
@@ -228,6 +255,7 @@
 
         table {
             width: 100%;
+            min-width: 2200px;
             border-collapse: collapse;
             background: white;
         }
@@ -243,6 +271,7 @@
             font-weight: 600;
             font-size: 0.9rem;
             color: var(--dark);
+            white-space: nowrap;
         }
 
         td {
@@ -306,6 +335,91 @@
         .editable select,
         .editable textarea {
             width: 100%;
+        }
+
+        .note-cell {
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .note-flag {
+            color: var(--secondary);
+            margin-right: 0.4rem;
+        }
+
+        .note-view-btn {
+            width: 28px;
+            height: 28px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: white;
+            color: var(--primary);
+            cursor: pointer;
+        }
+
+        .note-view-btn:hover {
+            background: rgba(59, 130, 246, 0.08);
+            border-color: var(--primary);
+        }
+
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            background: rgba(17, 24, 39, 0.55);
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal-card {
+            width: min(700px, 100%);
+            max-height: 85vh;
+            padding: 1rem;
+            overflow: auto;
+            background: white;
+            border-radius: var(--radius);
+            box-shadow: 0 20px 45px rgba(17, 24, 39, 0.25);
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .modal-header h3 {
+            font-size: 1rem;
+        }
+
+        .modal-close {
+            border: 0;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1.1rem;
+        }
+
+        #noteModalTextarea {
+            min-height: 240px;
+        }
+
+        #noteModalTextarea[readonly] {
+            background: var(--light);
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.75rem;
+            margin-top: 0.75rem;
         }
 
         .error-message {
@@ -391,12 +505,9 @@
             <div class="dashboard-title">Dashboard e KPI</div>
             <div class="dashboard-content">
                 <div class="dashboard-left">
-                    <div style="width: 100px; height: 75px; background: var(--light); border: 2px dashed var(--border); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; color: var(--text-muted);">
-                        <div style="text-align: center;">
-                            <i class="fas fa-image" style="font-size: 1rem; margin-bottom: 0.25rem;"></i>
-                            <div style="font-size: 0.6rem;">Logo cliente</div>
-                            <div style="font-size: 0.55rem; color: #999;">(da aggiungere)</div>
-                        </div>
+                    <div class="issue-client-logo-box">
+                        <span id="issueClientLogoPlaceholder" class="issue-client-logo-placeholder">Logo non disponibile</span>
+                        <img id="issueClientLogo" alt="Logo del cliente selezionato">
                     </div>
                 </div>
                 <div class="dashboard-right">
@@ -478,6 +589,23 @@
                     <i class="fas fa-inbox"></i>
                     <p>Nessuna issue trovata</p>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="noteModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="noteModalTitle">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="noteModalTitle">Note</h3>
+                <button type="button" class="modal-close" id="noteModalClose" title="Chiudi" aria-label="Chiudi finestra note">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <textarea id="noteModalTextarea" aria-label="Testo completo della nota"></textarea>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="noteModalSave">
+                    <i class="fas fa-save"></i> Conferma nota
+                </button>
             </div>
         </div>
     </div>

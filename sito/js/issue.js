@@ -18,6 +18,12 @@ class IssueManager {
         this.userRole = null;
         this.contextUserId = null;
         this.contextTenantId = null;
+        this.projectOptions = [];
+        this.moduleOptions = [];
+        this.requesterOptions = [];
+        this.noteModalIndex = null;
+        this.noteModalCell = null;
+        this.clientLogoUrl = null;
         
         this.initializeElements();
         this.attachEventListeners();
@@ -32,6 +38,8 @@ class IssueManager {
         this.toolbar = document.getElementById('toolbar');
         this.gridSection = document.getElementById('gridSection');
         this.dashboardSection = document.getElementById('dashboardSection');
+        this.clientLogoImage = document.getElementById('issueClientLogo');
+        this.clientLogoPlaceholder = document.getElementById('issueClientLogoPlaceholder');
         this.issueTable = document.getElementById('issueTable');
         this.issueTableBody = document.getElementById('issueTableBody');
         this.loadingSpinner = document.getElementById('loadingSpinner');
@@ -49,6 +57,12 @@ class IssueManager {
         // Messaggi
         this.errorMessage = document.getElementById('errorMessage');
         this.successMessage = document.getElementById('successMessage');
+
+        // Finestra note
+        this.noteModal = document.getElementById('noteModal');
+        this.noteModalTextarea = document.getElementById('noteModalTextarea');
+        this.noteModalSave = document.getElementById('noteModalSave');
+        this.noteModalClose = document.getElementById('noteModalClose');
         
         // KPI
         this.kpiAperti = document.getElementById('kpiAperti');
@@ -68,6 +82,16 @@ class IssueManager {
         this.saveBtn.addEventListener('click', () => this.onSaveClick());
         this.cancelBtn.addEventListener('click', () => this.onCancelClick());
         this.selectAllCheckbox.addEventListener('change', (e) => this.onSelectAllChange(e));
+        this.noteModalSave.addEventListener('click', () => this.saveNoteFromModal());
+        this.noteModalClose.addEventListener('click', () => this.closeNoteModal());
+        this.noteModal.addEventListener('click', (event) => {
+            if (event.target === this.noteModal) this.closeNoteModal();
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && this.noteModal.classList.contains('show')) {
+                this.closeNoteModal();
+            }
+        });
     }
 
     async loadContext() {
@@ -116,6 +140,7 @@ class IssueManager {
         this.selectedClientId = this.clientSelect.value;
         
         if (!this.selectedClientId) {
+            this.clearClientLogo();
             this.hideGrid();
             this.hideDashboard();
             return;
@@ -133,9 +158,89 @@ class IssueManager {
         this.showGrid();
         this.isEditMode = false;
         this.modifiedRows.clear();
-        await this.loadIssues();
+        await Promise.all([
+            this.loadClientLogo(),
+            this.loadIssueOptions(),
+            this.loadIssues()
+        ]);
         this.updateKPIs();
         this.updateToolbarButtons();
+    }
+
+    clearClientLogo(message = 'Logo non disponibile') {
+        if (this.clientLogoUrl) URL.revokeObjectURL(this.clientLogoUrl);
+        this.clientLogoUrl = null;
+        if (this.clientLogoImage) {
+            this.clientLogoImage.removeAttribute('src');
+            this.clientLogoImage.style.display = 'none';
+        }
+        if (this.clientLogoPlaceholder) {
+            this.clientLogoPlaceholder.textContent = message;
+            this.clientLogoPlaceholder.style.display = '';
+        }
+    }
+
+    async loadClientLogo() {
+        const clientId = this.selectedClientId;
+        if (!clientId) {
+            this.clearClientLogo();
+            return;
+        }
+        this.clearClientLogo('Caricamento logo…');
+        try {
+            const response = await fetch(`/api/client-logos/${encodeURIComponent(clientId)}`, {
+                headers: getAuthHeaders()
+            });
+            if (clientId !== this.selectedClientId) return;
+            if (response.status === 404) {
+                this.clearClientLogo();
+                return;
+            }
+            if (!response.ok) throw new Error(`Errore HTTP ${response.status}`);
+            const blob = await response.blob();
+            if (clientId !== this.selectedClientId) return;
+            this.clearClientLogo();
+            this.clientLogoUrl = URL.createObjectURL(blob);
+            if (this.clientLogoImage) {
+                this.clientLogoImage.src = this.clientLogoUrl;
+                this.clientLogoImage.style.display = 'block';
+            }
+            if (this.clientLogoPlaceholder) this.clientLogoPlaceholder.style.display = 'none';
+        } catch (error) {
+            if (clientId === this.selectedClientId) this.clearClientLogo('Logo non disponibile');
+            console.warn('[LOGO CLIENTE ISSUE]', error.message);
+        }
+    }
+
+    async loadIssueOptions() {
+        try {
+            const requestOptions = {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }
+            };
+            const [response, projectsResponse] = await Promise.all([
+                fetch(`/api/issue/options?client_id=${encodeURIComponent(this.selectedClientId)}`, requestOptions),
+                fetch(`/api/projects/list?clientId=${encodeURIComponent(this.selectedClientId)}`, requestOptions)
+            ]);
+            if (!response.ok || !projectsResponse.ok) {
+                throw new Error('Errore nel caricamento degli elenchi');
+            }
+
+            const [data, projects] = await Promise.all([
+                response.json(),
+                projectsResponse.json()
+            ]);
+            this.projectOptions = Array.isArray(projects)
+                ? projects.map(project => ({ value: String(project.id), label: project.name }))
+                : [];
+            this.moduleOptions = Array.isArray(data.moduli) ? data.moduli : [];
+            this.requesterOptions = Array.isArray(data.richiedenti) ? data.richiedenti : [];
+        } catch (err) {
+            this.projectOptions = [];
+            this.moduleOptions = [];
+            this.requesterOptions = [];
+            this.showError('Errore nel caricamento di progetti, moduli e richiedenti: ' + err.message);
+        }
     }
 
     async loadIssues() {
@@ -146,7 +251,15 @@ class IssueManager {
                 headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }
             });
             if (!response.ok) throw new Error('Errore nel caricamento delle issue');
-            this.issues = await response.json();
+            const issues = await response.json();
+            this.issues = issues.map(issue => ({
+                ...issue,
+                // Converte anche l'eventuale valore storico "Privata" nella
+                // nuova scelta prevista dalla griglia.
+                visibilita: String(issue.visibilita || '').toLowerCase() === 'cliente'
+                    ? 'Cliente'
+                    : 'Interna'
+            }));
             this.renderTable();
         } catch (err) {
             this.showError('Errore nel caricamento delle issue: ' + err.message);
@@ -178,7 +291,12 @@ class IssueManager {
 
     createTableHeaders() {
         const headerRow = document.getElementById('headerRow');
-        const colonne = ['data_segnalazione', 'categoria', 'stato', 'priorita', 'descrizione', 'owner', 'deadline', 'note', 'data_chiusura'];
+        const colonne = [
+            'data_segnalazione', 'project_id', 'visibilita', 'modulo',
+            'richiedente', 'categoria', 'stato', 'priorita', 'descrizione',
+            'mysupport', 'tkt_jira', 'owner', 'deadline', 'note',
+            'data_chiusura'
+        ];
         
         colonne.forEach(col => {
             const th = document.createElement('th');
@@ -191,6 +309,12 @@ class IssueManager {
     formatColumnName(col) {
         const names = {
             'data_segnalazione': 'Data Segnalazione',
+            'project_id': 'Project ID',
+            'visibilita': 'Visibilità',
+            'modulo': 'Modulo',
+            'richiedente': 'Richiedente',
+            'mysupport': 'MySupport',
+            'tkt_jira': 'Ticket Jira',
             'categoria': 'Categoria',
             'stato': 'Stato',
             'priorita': 'Priorità',
@@ -219,11 +343,22 @@ class IssueManager {
         row.appendChild(checkboxTd);
 
         // Colonne dati
-        const colonne = ['data_segnalazione', 'categoria', 'stato', 'priorita', 'descrizione', 'owner', 'deadline', 'note', 'data_chiusura'];
+        const colonne = [
+            'data_segnalazione', 'project_id', 'visibilita', 'modulo',
+            'richiedente', 'categoria', 'stato', 'priorita', 'descrizione',
+            'mysupport', 'tkt_jira', 'owner', 'deadline', 'note',
+            'data_chiusura'
+        ];
         colonne.forEach(col => {
             const td = document.createElement('td');
             td.dataset.column = col;
-            td.textContent = this.formatCellValue(issue[col], col);
+            if (col === 'project_id') {
+                td.textContent = this.getProjectLabel(issue[col]);
+            } else if (col === 'note') {
+                this.renderNoteCell(td, issue[col], index, false);
+            } else {
+                td.textContent = this.formatCellValue(issue[col], col);
+            }
             row.appendChild(td);
         });
 
@@ -253,6 +388,12 @@ class IssueManager {
             user_id: this.contextUserId,
             client_id: this.selectedClientId,
             data_segnalazione: new Date().toISOString().split('T')[0],
+            project_id: '',
+            visibilita: 'Interna',
+            modulo: '',
+            richiedente: '',
+            mysupport: '',
+            tkt_jira: '',
             categoria: '',
             stato: 'Aperto',
             priorita: 'Media',
@@ -454,13 +595,55 @@ class IssueManager {
         const issue = this.issues[index];
 
         const cellsToEdit = row.querySelectorAll('td:not(:first-child)');
-        const colonne = ['data_segnalazione', 'categoria', 'stato', 'priorita', 'descrizione', 'owner', 'deadline', 'note', 'data_chiusura'];
+        const colonne = [
+            'data_segnalazione', 'project_id', 'visibilita', 'modulo',
+            'richiedente', 'categoria', 'stato', 'priorita', 'descrizione',
+            'mysupport', 'tkt_jira', 'owner', 'deadline', 'note',
+            'data_chiusura'
+        ];
 
         cellsToEdit.forEach((td, colIndex) => {
             const col = colonne[colIndex];
             const currentValue = issue[col] || '';
 
-            if (col === 'categoria') {
+            if (col === 'project_id') {
+                td.innerHTML = '';
+                td.appendChild(this.createLookupSelect(
+                    this.projectOptions,
+                    currentValue,
+                    '-- Seleziona progetto --',
+                    value => this.onCellEdit(index, col, value),
+                    false
+                ));
+            } else if (col === 'visibilita') {
+                const select = document.createElement('select');
+                ['Interna', 'Cliente'].forEach(visibilita => {
+                    const opt = document.createElement('option');
+                    opt.value = visibilita;
+                    opt.textContent = visibilita;
+                    if (visibilita === currentValue) opt.selected = true;
+                    select.appendChild(opt);
+                });
+                select.addEventListener('change', () => this.onCellEdit(index, col, select.value));
+                td.innerHTML = '';
+                td.appendChild(select);
+            } else if (col === 'modulo') {
+                td.innerHTML = '';
+                td.appendChild(this.createLookupSelect(
+                    this.moduleOptions,
+                    currentValue,
+                    '-- Seleziona modulo --',
+                    value => this.onCellEdit(index, col, value)
+                ));
+            } else if (col === 'richiedente') {
+                td.innerHTML = '';
+                td.appendChild(this.createLookupSelect(
+                    this.requesterOptions,
+                    currentValue,
+                    '-- Seleziona richiedente --',
+                    value => this.onCellEdit(index, col, value)
+                ));
+            } else if (col === 'categoria') {
                 const select = document.createElement('select');
                 ['Bug', 'Richiesta', 'Configurazione', 'Report', 'Altro'].forEach(cat => {
                     const opt = document.createElement('option');
@@ -503,6 +686,8 @@ class IssueManager {
                 input.addEventListener('change', () => this.onCellEdit(index, col, input.value));
                 td.innerHTML = '';
                 td.appendChild(input);
+            } else if (col === 'note') {
+                this.renderNoteCell(td, currentValue, index, true);
             } else if (col === 'descrizione') {
                 const textarea = document.createElement('textarea');
                 textarea.value = currentValue;
@@ -522,12 +707,122 @@ class IssueManager {
 
     renderRowCells(row, issue) {
         const cellsToEdit = row.querySelectorAll('td:not(:first-child)');
-        const colonne = ['data_segnalazione', 'categoria', 'stato', 'priorita', 'descrizione', 'owner', 'deadline', 'note', 'data_chiusura'];
+        const colonne = [
+            'data_segnalazione', 'project_id', 'visibilita', 'modulo',
+            'richiedente', 'categoria', 'stato', 'priorita', 'descrizione',
+            'mysupport', 'tkt_jira', 'owner', 'deadline', 'note',
+            'data_chiusura'
+        ];
 
         cellsToEdit.forEach((td, colIndex) => {
             const col = colonne[colIndex];
-            td.textContent = this.formatCellValue(issue[col], col);
+            if (col === 'project_id') {
+                td.textContent = this.getProjectLabel(issue[col]);
+            } else if (col === 'note') {
+                this.renderNoteCell(td, issue[col], Number(row.dataset.index), false);
+            } else {
+                td.textContent = this.formatCellValue(issue[col], col);
+            }
         });
+    }
+
+    getProjectLabel(projectId) {
+        if (!projectId) return '';
+        const selected = this.projectOptions.find(option => option.value === String(projectId));
+        return selected ? selected.label : 'Progetto non disponibile';
+    }
+
+    createLookupSelect(options, currentValue, placeholder, onChange, preserveCurrent = true) {
+        const select = document.createElement('select');
+        const values = options.map(option => {
+            if (option && typeof option === 'object') {
+                return {
+                    value: String(option.value ?? option.id ?? ''),
+                    label: String(option.label ?? option.name ?? option.value ?? '')
+                };
+            }
+            return { value: String(option), label: String(option) };
+        });
+        const selectedValue = String(currentValue || '');
+
+        // Mantiene selezionabile un eventuale valore storico non più presente
+        // nella tabella di origine.
+        if (preserveCurrent && selectedValue && !values.some(option => option.value === selectedValue)) {
+            values.unshift({ value: selectedValue, label: selectedValue });
+        }
+
+        const emptyOption = document.createElement('option');
+        emptyOption.value = '';
+        emptyOption.textContent = placeholder;
+        select.appendChild(emptyOption);
+
+        values.forEach(item => {
+            const option = document.createElement('option');
+            option.value = item.value;
+            option.textContent = item.label;
+            option.selected = item.value === selectedValue;
+            select.appendChild(option);
+        });
+
+        select.addEventListener('change', () => onChange(select.value));
+        return select;
+    }
+
+    renderNoteCell(td, note, index, editable) {
+        td.innerHTML = '';
+        td.classList.add('note-cell');
+
+        const hasNote = Boolean(String(note || '').trim());
+        if (hasNote) {
+            const flag = document.createElement('i');
+            flag.className = 'fas fa-flag note-flag';
+            flag.title = 'Nota presente';
+            flag.setAttribute('aria-label', 'Nota presente');
+            td.appendChild(flag);
+        }
+
+        if (hasNote || editable) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'note-view-btn';
+            button.title = editable ? 'Apri e modifica la nota' : 'Visualizza la nota completa';
+            button.setAttribute('aria-label', button.title);
+            button.innerHTML = '<i class="fas fa-search"></i>';
+            button.addEventListener('click', event => {
+                event.stopPropagation();
+                this.openNoteModal(index, editable, td);
+            });
+            td.appendChild(button);
+        }
+    }
+
+    openNoteModal(index, editable, cell) {
+        this.noteModalIndex = index;
+        this.noteModalCell = cell;
+        this.noteModalTextarea.value = this.issues[index].note || '';
+        this.noteModalTextarea.readOnly = !editable;
+        this.noteModalSave.style.display = editable ? 'inline-flex' : 'none';
+        this.noteModal.classList.add('show');
+        this.noteModal.setAttribute('aria-hidden', 'false');
+        if (editable) this.noteModalTextarea.focus();
+    }
+
+    closeNoteModal() {
+        this.noteModal.classList.remove('show');
+        this.noteModal.setAttribute('aria-hidden', 'true');
+        this.noteModalIndex = null;
+        this.noteModalCell = null;
+    }
+
+    saveNoteFromModal() {
+        if (this.noteModalIndex === null) return;
+
+        const index = this.noteModalIndex;
+        const cell = this.noteModalCell;
+        const value = this.noteModalTextarea.value;
+        this.onCellEdit(index, 'note', value);
+        this.renderNoteCell(cell, value, index, true);
+        this.closeNoteModal();
     }
 
     onCellEdit(index, column, value) {

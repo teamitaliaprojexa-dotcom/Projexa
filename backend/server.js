@@ -3476,6 +3476,164 @@ app.get('/api/clients/names', requireAuth, async (req, res) => {
   }
 });
 
+// Logo cliente: il tenant e l'utente non arrivano mai dal browser, ma dal token.
+// Un solo logo per (tenant_id, user_id, client_id), come previsto dal vincolo UNIQUE.
+const CLIENT_LOGO_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const clientLogoBody = express.raw({
+  type: ['image/png', 'image/jpeg', 'image/webp'],
+  limit: '1mb'
+});
+
+function detectClientLogoMime(buffer) {
+  if (!Buffer.isBuffer(buffer)) return null;
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    return 'image/png';
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+    return 'image/jpeg';
+  }
+  if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
+    return 'image/webp';
+  }
+  return null;
+}
+
+async function assertOwnedClientLogoContext(clientId, req) {
+  if (!UUID_RE.test(String(clientId || ''))) {
+    const error = new Error('Cliente non valido');
+    error.statusCode = 400;
+    throw error;
+  }
+  const result = await db.query(
+    `SELECT 1 FROM clients
+     WHERE id = $1 AND tenant_id = $2 AND user_id = $3
+       AND argument = 'Cliente' AND campo = 'Cliente'
+     LIMIT 1`,
+    [clientId, req.user.tenant_id, req.user.user_id]
+  );
+  if (result.rows.length === 0) {
+    const error = new Error('Cliente non accessibile nel contesto corrente');
+    error.statusCode = 403;
+    throw error;
+  }
+}
+
+app.get('/api/client-logos/:clientId', requireAuth, async (req, res) => {
+  try {
+    const clientId = req.params.clientId;
+    await assertOwnedClientLogoContext(clientId, req);
+    const result = await db.query(
+      `SELECT logo, mime_type, filename
+       FROM client_logos
+       WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
+       LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, clientId]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Logo non presente' });
+    const row = result.rows[0];
+    res.set('Content-Type', row.mime_type);
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Logo-Filename', encodeURIComponent(row.filename || 'logo'));
+    return res.send(row.logo);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.put('/api/client-logos/:clientId', requireAuth, clientLogoBody, async (req, res) => {
+  try {
+    const clientId = req.params.clientId;
+    await assertOwnedClientLogoContext(clientId, req);
+    const mimeType = String(req.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!CLIENT_LOGO_MIME_TYPES.has(mimeType)) {
+      return res.status(415).json({ error: 'Formato non supportato. Usa PNG, JPEG o WebP.' });
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: 'File immagine mancante' });
+    }
+    if (req.body.length > 1024 * 1024) {
+      return res.status(413).json({ error: 'Il logo non può superare 1 MB' });
+    }
+    if (detectClientLogoMime(req.body) !== mimeType) {
+      return res.status(415).json({ error: 'Il contenuto del file non corrisponde a un’immagine valida.' });
+    }
+    let filename = 'logo';
+    try { filename = decodeURIComponent(String(req.get('x-file-name') || 'logo')); } catch (e) { /* usa fallback */ }
+    filename = path.basename(filename).replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 255) || 'logo';
+
+    const result = await db.query(
+      `INSERT INTO client_logos (tenant_id, user_id, client_id, logo, mime_type, filename)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (tenant_id, user_id, client_id)
+       DO UPDATE SET logo = EXCLUDED.logo,
+                     mime_type = EXCLUDED.mime_type,
+                     filename = EXCLUDED.filename
+       RETURNING id, client_id, mime_type, filename`,
+      [req.user.tenant_id, req.user.user_id, clientId, req.body, mimeType, filename]
+    );
+    return res.json({ ...result.rows[0], size: req.body.length });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Logo dell'organizzazione: una sola riga per tenant. Tutti gli utenti del tenant
+// possono leggerlo; soltanto gli amministratori possono caricarlo o sostituirlo.
+app.get('/api/tenant-logo', requireAuth, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT logo, mime_type, filename
+       FROM tenant_logos
+       WHERE tenant_id = $1
+       LIMIT 1`,
+      [req.user.tenant_id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Logo organizzazione non presente' });
+    const row = result.rows[0];
+    res.set('Content-Type', row.mime_type);
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Logo-Filename', encodeURIComponent(row.filename || 'logo'));
+    return res.send(row.logo);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.put('/api/tenant-logo', requireAuth, requireAdmin, clientLogoBody, async (req, res) => {
+  try {
+    const mimeType = String(req.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!CLIENT_LOGO_MIME_TYPES.has(mimeType)) {
+      return res.status(415).json({ error: 'Formato non supportato. Usa PNG, JPEG o WebP.' });
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      return res.status(400).json({ error: 'File immagine mancante' });
+    }
+    if (req.body.length > 1024 * 1024) {
+      return res.status(413).json({ error: 'Il logo non può superare 1 MB' });
+    }
+    if (detectClientLogoMime(req.body) !== mimeType) {
+      return res.status(415).json({ error: 'Il contenuto del file non corrisponde a un’immagine valida.' });
+    }
+    let filename = 'logo';
+    try { filename = decodeURIComponent(String(req.get('x-file-name') || 'logo')); } catch (e) { /* usa fallback */ }
+    filename = path.basename(filename).replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 255) || 'logo';
+
+    const result = await db.query(
+      `INSERT INTO tenant_logos (tenant_id, logo, mime_type, filename)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (tenant_id)
+       DO UPDATE SET logo = EXCLUDED.logo,
+                     mime_type = EXCLUDED.mime_type,
+                     filename = EXCLUDED.filename
+       RETURNING tenant_id, mime_type, filename`,
+      [req.user.tenant_id, req.body, mimeType, filename]
+    );
+    return res.json({ ...result.rows[0], size: req.body.length });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 // Copia ricorsivamente la STRUTTURA dei campi di un contenitore (cliente o Nodo Padre)
 // sotto un nuovo contenitore, azzerando i valori. Preserva la gerarchia: per ogni Nodo
 // Padre (tipo_valore=0) copiato, copia anche i suoi figli (argument = id del nodo sorgente).
@@ -5727,6 +5885,45 @@ app.get('/api/issue/clients', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/issue/options - Elenchi contestuali per modulo e richiedente
+app.get('/api/issue/options', requireAuth, async (req, res) => {
+  try {
+    const pool = pickDb(req);
+    const { tenant_id, user_id } = req.user;
+    const { client_id } = req.query;
+
+    if (!client_id) {
+      return res.status(400).json({ error: 'client_id richiesto' });
+    }
+
+    const [modulesResult, requestersResult] = await Promise.all([
+      pool.query(
+        `SELECT DISTINCT TRIM(description::text) AS value
+         FROM public.licenze_app
+         WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
+           AND NULLIF(TRIM(description::text), '') IS NOT NULL
+         ORDER BY value`,
+        [tenant_id, user_id, client_id]
+      ),
+      pool.query(
+        `SELECT DISTINCT TRIM(nominativo::text) AS value
+         FROM public.contacts
+         WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
+           AND NULLIF(TRIM(nominativo::text), '') IS NOT NULL
+         ORDER BY value`,
+        [tenant_id, user_id, client_id]
+      )
+    ]);
+
+    res.json({
+      moduli: modulesResult.rows.map(row => row.value),
+      richiedenti: requestersResult.rows.map(row => row.value)
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 // GET /api/issue - Ottieni le issue filtrate per cliente
 app.get('/api/issue', requireAuth, async (req, res) => {
   try {
@@ -5788,7 +5985,7 @@ app.post('/api/issue', requireAuth, async (req, res) => {
     // Imposta i valori di default
     if (!data.id_roles_write) data.id_roles_write = id_roles;
     if (!data.id_roles) data.id_roles = 70; // default role
-    if (!data.visibilita) data.visibilita = 'Privata';
+    if (!data.visibilita) data.visibilita = 'Interna';
     if (!data.categoria) data.categoria = 'Richiesta';
     if (!data.stato) data.stato = 'Aperto';
     if (!data.priorita) data.priorita = 'Media';
@@ -5799,6 +5996,10 @@ app.post('/api/issue', requireAuth, async (req, res) => {
     for (const k of Object.keys(data)) {
       if (data[k] === '') data[k] = null;
     }
+
+    // Cifra esclusivamente i campi previsti dalla policy della tabella issue
+    // quando la riga ha crypto = 1 (richiedente, descrizione, owner e note).
+    data = await cryptoWrite(pool, pickDbKey(req), 'issue', data);
     
     const columns = Object.keys(data).map(assertValidIdentifier);
     const values = columns.map(col => data[col]);
@@ -5849,6 +6050,9 @@ app.put('/api/issue/:id', requireAuth, async (req, res) => {
     for (const k of Object.keys(data)) {
       if (data[k] === '') data[k] = null;
     }
+
+    // Mantiene cifrati anche i valori modificati dopo la migrazione iniziale.
+    data = await cryptoWrite(pool, pickDbKey(req), 'issue', data, issueId);
     
     const updates = [];
     const values = [];

@@ -34,12 +34,14 @@
             color: var(--dark);
             line-height: 1.6;
             background: var(--light);
+            overflow-x: hidden;
         }
 
         .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 0 1.5rem;
+            width: 100%;
+            max-width: none;
+            margin: 0;
+            padding: 0 1.25rem;
         }
 
         /* SIDEBAR */
@@ -136,7 +138,8 @@
             display: none;
         }
 
-        .sidebar.minimized .sidebar-menu i {
+        .sidebar.minimized .sidebar-menu i,
+        .sidebar.minimized .sidebar-menu .sidebar-icon {
             width: auto;
             font-size: 1.3rem;
         }
@@ -173,17 +176,41 @@
             transition: all 0.3s;
         }
 
-        .sidebar-menu a:hover,
-        .sidebar-menu a.active {
-            color: var(--primary);
-            background: rgba(59, 130, 246, 0.05);
-            border-left: 3px solid var(--primary);
+        .sidebar-menu a:hover {
+            color: #047857;
+            background: #D1FAE5;
+            border-left: 3px solid var(--secondary);
             padding-left: calc(1.5rem - 3px);
         }
 
-        .sidebar-menu i {
+        .sidebar-menu a.active,
+        .sidebar-menu li.open > a,
+        .sidebar-menu li.flyout-active > a {
+            color: #065F46;
+            background: #A7F3D0;
+            border-left: 3px solid var(--secondary);
+            padding-left: calc(1.5rem - 3px);
+            font-weight: 600;
+        }
+
+        .sidebar.minimized .sidebar-menu a:hover,
+        .sidebar.minimized .sidebar-menu a.active,
+        .sidebar.minimized .sidebar-menu li.open > a,
+        .sidebar.minimized .sidebar-menu li.flyout-active > a {
+            padding-left: 0;
+        }
+
+        .sidebar-menu i,
+        .sidebar-menu .sidebar-icon {
             font-size: 1.1rem;
             width: 20px;
+            height: 20px;
+            flex: 0 0 20px;
+        }
+
+        .sidebar-menu .sidebar-icon {
+            display: block;
+            fill: currentColor;
         }
 
         .sidebar-footer {
@@ -961,11 +988,29 @@
             font-size: 0.85rem;
         }
 
+        .tenant-header-logo {
+            display: none;
+            width: 135px;
+            height: 76px;
+            object-fit: contain;
+            object-position: center;
+            flex: 0 0 135px;
+        }
+
         /* MAIN CONTENT */
         .main {
-            margin-left: 250px;
+            width: calc(100% - var(--sidebar-w));
+            margin-left: var(--sidebar-w);
             padding: 2rem 0;
             min-height: 100vh;
+            min-width: 0;
+            transition: width 0.3s ease, margin-left 0.3s ease;
+        }
+
+        .main > .container > * {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
         }
 
         .header {
@@ -1077,25 +1122,43 @@
         /* STATS GRID */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
-            gap: 1.5rem;
+            grid-template-columns: repeat(10, minmax(0, 1fr));
+            gap: 0.6rem;
             margin-bottom: 2rem;
         }
 
         .stat-card {
             background: white;
-            padding: 0.75rem;
-            border-radius: 12px;
+            min-width: 0;
+            padding: 0.6rem 0.5rem;
+            border-radius: 10px;
             border: 1px solid var(--border);
+            overflow: hidden;
         }
 
         .stat-icon {
-            font-size: 1.2rem;
-            margin-bottom: 0.35rem;
+            font-size: 1rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .kpi-icon-svg {
+            display: block;
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
+        }
+
+        .section-icon-svg {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            margin-right: 0.35rem;
+            fill: currentColor;
+            vertical-align: -3px;
         }
 
         .stat-value {
-            font-size: 1.2rem;
+            font-size: 1.05rem;
             font-weight: bold;
             color: var(--dark);
             margin-bottom: 0.1rem;
@@ -1103,7 +1166,9 @@
 
         .stat-label {
             color: var(--text-muted);
-            font-size: 0.75rem;
+            font-size: 0.68rem;
+            line-height: 1.25;
+            overflow-wrap: anywhere;
         }
 
         .kpi-card {
@@ -1114,6 +1179,26 @@
         .kpi-card:hover {
             box-shadow: 0 4px 14px rgba(0,0,0,0.08);
             transform: translateY(-1px);
+        }
+
+        .kpi-main-row {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.5rem;
+            width: 100%;
+            margin-bottom: 0.1rem;
+        }
+
+        .kpi-main-row .stat-icon,
+        .kpi-main-row .stat-value {
+            margin-bottom: 0;
+        }
+
+        .kpi-card .stat-value {
+            font-size: 1.21rem;
+            line-height: 1;
+            text-align: right;
         }
 
         .kpi-dynamic-icon { color: var(--primary); }
@@ -1536,11 +1621,28 @@
         }
 
         .description-window-close {
-            border: none;
-            background: transparent;
-            color: var(--text-muted);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 28px;
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            border: 1px solid #FCA5A5;
+            border-radius: 50%;
+            background: #FEE2E2;
+            color: #DC2626;
             cursor: pointer;
-            font-size: 1rem;
+            font-family: Arial, sans-serif;
+            font-size: 1.35rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .description-window-close:hover {
+            border-color: #DC2626;
+            background: #DC2626;
+            color: white;
         }
 
         .description-window-content {
@@ -1565,6 +1667,109 @@
         }
 
         .task-modal.open { display: flex; }
+
+        .client-logo-action {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 0.9rem;
+            padding: 0.8rem 0.9rem;
+            border: 1px solid #A7F3D0;
+            border-radius: 9px;
+            background: #ECFDF5;
+        }
+
+        .client-logo-flyout-preview {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 135px;
+            width: 135px;
+            height: 76px;
+            overflow: hidden;
+            border: 1px solid #A7F3D0;
+            border-radius: 9px;
+            background: white;
+            color: #059669;
+        }
+
+        .client-logo-flyout-preview img {
+            display: none;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            object-position: center;
+        }
+
+        .client-logo-action-info {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .client-logo-action:not(.editing) {
+            width: fit-content;
+            padding: 0;
+            border: none;
+            background: transparent;
+        }
+
+        .client-logo-action:not(.editing) .client-logo-action-info,
+        .client-logo-action:not(.editing) > button {
+            display: none;
+        }
+
+        .client-logo-action button {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.5rem 0.8rem;
+            border: none;
+            border-radius: 7px;
+            background: #10B981;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .client-logo-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 820;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            background: rgba(15, 23, 42, 0.5);
+        }
+
+        .client-logo-modal.open { display: flex; }
+
+        .client-logo-card {
+            width: min(520px, 96vw);
+            border-radius: 12px;
+            background: white;
+            box-shadow: 0 18px 50px rgba(15, 23, 42, 0.28);
+            overflow: hidden;
+        }
+
+        .client-logo-preview {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 180px;
+            margin-top: 1rem;
+            border: 1px dashed #CBD5E1;
+            border-radius: 9px;
+            background: #F8FAFC;
+            color: var(--text-muted);
+        }
+
+        .client-logo-preview img {
+            display: none;
+            max-width: 100%;
+            max-height: 220px;
+            object-fit: contain;
+        }
 
         .task-modal-card {
             width: min(900px, 96vw);
@@ -2055,9 +2260,9 @@
         </div>
 
         <ul class="sidebar-menu">
-            <li><a href="#" class="active"><i class="fas fa-home"></i> <span>Dashboard</span></a></li>
+            <li><a href="#" class="active"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 11h2.25v9h5.5v-5.5h3.5V20h5.5v-9h2.25L12 3Z"/></svg> <span>Dashboard</span></a></li>
             <li class="nav-clients" style="position: relative;">
-                <a href="#"><i class="fas fa-users"></i> <span>Clienti</span></a>
+                <a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm6.5-1a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20v-2.5C2 14.5 5.1 12 9 12s7 2.5 7 5.5V20H2Zm15.5 0v-2.5c0-1.7-.7-3.2-1.9-4.4 3.3.1 6.4 1.8 6.4 4.4V20h-4.5Z"/></svg> <span>Clienti</span></a>
                 <div class="settings-flyout">
                     <div class="flyout-resizer"></div>
                     <div class="settings-flyout-inner">
@@ -2068,9 +2273,9 @@
                     </div>
                 </div>
             </li>
-            <li><a href="issue.html"><i class="fas fa-exclamation-circle"></i> <span>Issue</span></a></li>
+            <li><a href="issue.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1.1 15.5h-2.2v-2.2h2.2v2.2Zm0-4.2h-2.2V6.5h2.2v6.8Z"/></svg> <span>Issue</span></a></li>
             <li class="nav-projects" style="position: relative;">
-                <a href="#"><i class="fas fa-folder"></i> <span>Progetti clienti</span></a>
+                <a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5.5C2 4.7 2.7 4 3.5 4h6l2 2h9c.8 0 1.5.7 1.5 1.5v11c0 .8-.7 1.5-1.5 1.5h-17C2.7 20 2 19.3 2 18.5v-13Z"/></svg> <span>Progetti clienti</span></a>
                 <div class="settings-flyout">
                     <div class="flyout-resizer"></div>
                     <div class="settings-flyout-inner">
@@ -2081,16 +2286,16 @@
                     </div>
                 </div>
             </li>
-            <li><a href="#"><i class="fas fa-trash"></i> <span>Archivio</span></a></li>
+            <li><a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-3 6h14l-1 12H6L5 9Zm4 2v7h2v-7H9Zm4 0v7h2v-7h-2Z"/></svg> <span>Archivio</span></a></li>
             <!-- Jira: visibile solo se il flag settings (campo='Jira', valore1=true) è attivo. Gestita da js/jira.js -->
             <li id="navJira" style="display: none;"><a href="#"><i class="fab fa-jira"></i> <span>Jira</span></a></li>
             <!-- Qlik: visibile solo se il flag settings (valore2='Qlik', valore1=true) è attivo per il
                  tenant_id/user_id del login. Gestita da js/Qlik_voucher.js (import voucher da Excel). -->
-            <li id="navQlik" style="display: none;"><a href="#" id="navQlikLink"><i class="fas fa-chart-line"></i> <span>Qlik</span></a></li>
+            <li id="navQlik" style="display: none;"><a href="#" id="navQlikLink"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19h18v2H1V3h2v16Zm2-3.4 4.2-4.2 3 3L18.6 8H16V6h6v6h-2V9.4l-7.8 7.8-3-3L6.4 17 5 15.6Z"/></svg> <span>Qlik</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
-            <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><i class="fas fa-database"></i> <span>Database</span></a></li>
+            <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 3 3.8 3 6v12c0 2.2 3.5 4 9 4s9-1.8 9-4V6c0-2.2-3.5-4-9-4Zm0 2c4.6 0 7 1.4 7 2s-2.4 2-7 2-7-1.4-7-2 2.4-2 7-2Zm0 16c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V18c0 .6-2.4 2-7 2Zm0-5c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V13c0 .6-2.4 2-7 2Z"/></svg> <span>Database</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
-                <a href="#"><i class="fas fa-cog"></i> <span>Impostazioni</span></a>
+                <a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m19.4 13 .1-1-.1-1 2.1-1.6-2-3.5-2.6 1a8 8 0 0 0-1.7-1L14.8 3h-4l-.4 2.9a8 8 0 0 0-1.7 1l-2.6-1-2 3.5L6.2 11l-.1 1 .1 1-2.1 1.6 2 3.5 2.6-1a8 8 0 0 0 1.7 1l.4 2.9h4l.4-2.9a8 8 0 0 0 1.7-1l2.6 1 2-3.5L19.4 13ZM12.8 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"/></svg> <span>Impostazioni</span></a>
                 <div class="settings-flyout">
                     <div class="flyout-resizer"></div>
                     <div class="settings-flyout-inner">
@@ -2509,7 +2714,7 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
                     <div>
                         <div class="section-title" style="margin: 0;">
-                            <i class="fas fa-chart-bar" style="color: var(--primary);"></i>
+                            <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--primary);"><path d="M3 21V9h4v12H3Zm7 0V3h4v18h-4Zm7 0v-8h4v8h-4Z"/></svg>
                             KPI Fatturato
                         </div>
                     </div>
@@ -2838,18 +3043,38 @@
 
                 const textBlock = `<span style="display: block;">Welcome, ${escapeHtml(userName)}</span>${subLines}`;
 
-                // Se c'è una foto (con URL sicuro), la metto a fianco del blocco di testo.
+                // Foto utente opzionale + testo + logo dell'organizzazione del tenant.
                 const safePicture = safeUrl(picture);
-                if (safePicture) {
-                    greetingEl.innerHTML = `
-                        <div style="display: flex; align-items: center; gap: 1.5rem;">
-                            <img src="${escapeHtml(safePicture)}" alt="${escapeHtml(userName)}" style="width: 60px; height: 60px; border-radius: 50%; object-fit: cover;">
-                            <div>${textBlock}</div>
-                        </div>
-                    `;
-                } else {
-                    greetingEl.innerHTML = textBlock;
-                }
+                const pictureHtml = safePicture
+                    ? `<img src="${escapeHtml(safePicture)}" alt="${escapeHtml(userName)}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;flex:0 0 60px;">`
+                    : '';
+                greetingEl.innerHTML = `
+                    <div style="display:flex; align-items:center; gap:1.5rem;">
+                        <img id="tenantHeaderLogo" class="tenant-header-logo" alt="Logo organizzazione">
+                        ${pictureHtml}
+                        <div>${textBlock}</div>
+                    </div>`;
+            }
+        }
+
+        let tenantHeaderLogoUrl = null;
+
+        async function loadTenantHeaderLogo() {
+            const image = document.getElementById('tenantHeaderLogo');
+            if (!image) return;
+            if (tenantHeaderLogoUrl) URL.revokeObjectURL(tenantHeaderLogoUrl);
+            tenantHeaderLogoUrl = null;
+            image.removeAttribute('src');
+            image.style.display = 'none';
+            try {
+                const response = await fetch(`${API_URL}/tenant-logo`, { headers: getAuthHeaders() });
+                if (response.status === 404) return;
+                if (!response.ok) throw new Error(`Errore HTTP ${response.status}`);
+                tenantHeaderLogoUrl = URL.createObjectURL(await response.blob());
+                image.src = tenantHeaderLogoUrl;
+                image.style.display = 'block';
+            } catch (error) {
+                console.warn('[LOGO ORGANIZZAZIONE]', error.message);
             }
         }
 
@@ -2972,8 +3197,10 @@
                     <div class="stat-card kpi-card" data-kpi-id="${escapeHtml(kpi.id)}"
                          role="button" tabindex="0"
                          style="grid-row: ${Number(kpi.riga) || 1}; grid-column: ${Number(kpi.colonna) || 1};">
-                        <div class="stat-icon kpi-dynamic-icon"><i class="fas ${getDynamicKpiIcon(index)}"></i></div>
-                        <div class="stat-value">${Number(kpi.total) || 0}</div>
+                        <div class="kpi-main-row">
+                            <div class="stat-icon kpi-dynamic-icon">${getDynamicKpiIcon(index)}</div>
+                            <div class="stat-value">${Number(kpi.total) || 0}</div>
+                        </div>
                         <div class="stat-label">${escapeHtml(kpi.title || 'KPI')}</div>
                     </div>
                 `).join('');
@@ -2987,7 +3214,14 @@
         }
 
         function getDynamicKpiIcon(index) {
-            return ['fa-folder', 'fa-check-circle', 'fa-exclamation-triangle', 'fa-list-check', 'fa-file-invoice'][index % 5];
+            const paths = [
+                '<path d="M2 5.5C2 4.7 2.7 4 3.5 4h6l2 2h9c.8 0 1.5.7 1.5 1.5v11c0 .8-.7 1.5-1.5 1.5h-17C2.7 20 2 19.3 2 18.5v-13Z"/>',
+                '<path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1.2 14.5-4.3-4.3 1.7-1.7 2.6 2.6 5.4-5.4 1.7 1.7-7.1 7.1Z"/>',
+                '<path d="M12 2 1 21h22L12 2Zm1.1 15.5h-2.2v-2.2h2.2v2.2Zm0-4.2h-2.2V8h2.2v5.3Z"/>',
+                '<path d="m3 5 1.5-1.5L6 5l3-3 1.5 1.5L6 8 3 5Zm9-1h9v2h-9V4ZM3 12l1.5-1.5L6 12l3-3 1.5 1.5L6 15l-3-3Zm9-1h9v2h-9v-2Zm-9 8 1.5-1.5L6 19l3-3 1.5 1.5L6 22l-3-3Zm9-1h9v2h-9v-2Z"/>',
+                '<path d="M6 2h9l5 5v15H6V2Zm8 2v4h4l-4-4ZM9 12h8v-2H9v2Zm0 4h8v-2H9v2Zm0 4h6v-2H9v2Z"/>'
+            ];
+            return `<svg class="kpi-icon-svg" viewBox="0 0 24 24" aria-hidden="true">${paths[index % paths.length]}</svg>`;
         }
 
         function bindDynamicKpiCards() {
@@ -3471,6 +3705,64 @@
         let editingTodoId = null;
         let descriptionWindow = null;
 
+        // Colonne nascoste solo nella griglia e solo nel form. La normalizzazione
+        // supporta sia i nomi italiani sia quelli tecnici usati nel database.
+        const TODO_GRID_HIDDEN_COLUMNS = new Set([
+            'generato', 'generated', 'tipotask', 'aggiornatoda', 'updatedby', 'updatedat', 'cripto', 'crypto'
+        ]);
+        const TODO_FORM_HIDDEN_COLUMNS = new Set(['cripto', 'crypto']);
+
+        function todoColumnKey(name) {
+            return String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        }
+
+        function isTodoUpdatedByColumn(name) {
+            const key = todoColumnKey(name);
+            const refersToUpdate = key.includes('aggiorna') || key.includes('update') || key.includes('modif');
+            const refersToAuthor = key.endsWith('da') || key.endsWith('by') || key.includes('byuser');
+            return refersToUpdate && refersToAuthor;
+        }
+
+        function todoGridColumns() {
+            return todoColumns.filter(column => {
+                const name = column?.name ?? column?.column_name ?? column?.field ?? column?.key ?? column;
+                const key = todoColumnKey(name);
+                const labelKey = todoColumnKey(todoColumnLabel(name));
+                return !TODO_GRID_HIDDEN_COLUMNS.has(key)
+                    && !TODO_GRID_HIDDEN_COLUMNS.has(labelKey)
+                    && !isTodoUpdatedByColumn(name)
+                    && !isTodoUpdatedByColumn(todoColumnLabel(name));
+            });
+        }
+
+        // Seconda protezione applicata alla tabella già renderizzata. Interviene solo
+        // sulla griglia: i campi restano quindi disponibili nella finestra di modifica.
+        function removeHiddenTodoGridColumns(table) {
+            if (!table) return;
+            const hiddenIndexes = Array.from(table.querySelectorAll('thead th'))
+                .map((cell, index) => ({
+                    index,
+                    name: cell.getAttribute('data-column-name') || '',
+                    label: cell.textContent || ''
+                }))
+                .filter(item => {
+                    const nameKey = todoColumnKey(item.name);
+                    const labelKey = todoColumnKey(item.label);
+                    return TODO_GRID_HIDDEN_COLUMNS.has(nameKey)
+                        || TODO_GRID_HIDDEN_COLUMNS.has(labelKey)
+                        || isTodoUpdatedByColumn(item.name)
+                        || isTodoUpdatedByColumn(item.label);
+                })
+                .map(item => item.index)
+                .sort((a, b) => b - a);
+
+            hiddenIndexes.forEach(index => {
+                table.querySelectorAll('tr').forEach(row => {
+                    if (row.cells[index]) row.deleteCell(index);
+                });
+            });
+        }
+
         // Configurazione dei filtri multi-selezione della To Do List.
         const TODO_FILTER_CONFIG = {
             priority: { getState: () => currentPriorityFilter, setState: (v) => { currentPriorityFilter = v; }, allLabel: 'Tutte' },
@@ -3646,12 +3938,13 @@
             } else if (displayedTodos.length === 0) {
                 todoList.innerHTML = '<div class="todo-empty">Nessuna task trovata</div>';
             } else {
-                const header = todoColumns.map(column =>
-                    `<th title="${escapeHtml(column.name)}">${escapeHtml(todoColumnLabel(column.name))}</th>`
+                const gridColumns = todoGridColumns();
+                const header = gridColumns.map(column =>
+                    `<th data-column-name="${escapeHtml(column.name)}" title="${escapeHtml(column.name)}">${escapeHtml(todoColumnLabel(column.name))}</th>`
                 ).join('');
                 const body = displayedTodos.map(todo => `
                     <tr>
-                    ${todoColumns.map((column, columnIndex) => {
+                    ${gridColumns.map((column, columnIndex) => {
                         const editButton = columnIndex === 0
                             ? `<button type="button" class="todo-edit-btn" data-task-id="${escapeHtml(todo.__task_id)}" title="Modifica task"><i class="fas fa-pen"></i></button>`
                             : '';
@@ -3670,6 +3963,7 @@
                             <tbody>${body}</tbody>
                         </table>
                     </div>`;
+                removeHiddenTodoGridColumns(todoList.querySelector('.todo-table'));
                 todoList.querySelectorAll('.todo-edit-btn').forEach(button => {
                     button.addEventListener('click', () => {
                         const task = todoData.find(row => String(row.__task_id) === button.dataset.taskId);
@@ -3698,7 +3992,15 @@
         }
 
         function todoColumnLabel(name) {
-            return String(name);
+            const labels = {
+                updated_by: 'Aggiornato da',
+                updatedby: 'Aggiornato da',
+                generated: 'Generato',
+                generato: 'Generato',
+                crypto: 'Crypto',
+                cripto: 'Crypto'
+            };
+            return labels[name] || labels[todoColumnKey(name)] || String(name);
         }
 
         function parseTodoDate(value) {
@@ -3751,8 +4053,8 @@
             panel.style.height = `${panelHeight}px`;
             panel.innerHTML = `
                 <div class="description-window-header">
-                    <span><i class="fas fa-align-left"></i> Description</span>
-                    <button type="button" class="description-window-close" aria-label="Chiudi"><i class="fas fa-times"></i></button>
+                    <span>Descrizione</span>
+                    <button type="button" class="description-window-close" aria-label="Chiudi" title="Chiudi">&times;</button>
                 </div>
                 <div class="description-window-content"></div>`;
             panel.querySelector('.description-window-content').textContent = text;
@@ -3834,7 +4136,7 @@
         }
 
         function renderTaskFormField(column, task) {
-            if (column.editable === false) return '';
+            if (column.editable === false || TODO_FORM_HIDDEN_COLUMNS.has(todoColumnKey(column.name))) return '';
             const rawKey = `__raw_${column.name}`;
             const currentValue = task
                 ? (Object.prototype.hasOwnProperty.call(task, rawKey) ? task[rawKey] : task[column.name])
@@ -5154,6 +5456,7 @@
             // chiuso, e prima il pannello restava "staccato" lasciando un vuoto).
             flyout.classList.add('near-sidebar', 'open');
             document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
+            document.querySelector('.nav-projects')?.classList.add('flyout-active');
             titleEl.textContent = clientName || 'Progetti';
             hideDetailManagement();
             updateBackButton();
@@ -6042,9 +6345,16 @@
 
         // Chiude tutti i flyout (primo livello e dettaglio)
         function closeAllFlyouts() {
-            document.querySelector('.nav-settings')?.classList.remove('open', 'detail-open');
-            document.querySelector('.nav-clients')?.classList.remove('open', 'detail-open');
-            document.getElementById('settingsDetailFlyout')?.classList.remove('open');
+            document.querySelector('.nav-settings')?.classList.remove('open', 'detail-open', 'flyout-active');
+            document.querySelector('.nav-clients')?.classList.remove('open', 'detail-open', 'flyout-active');
+            document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open', 'flyout-active');
+            document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar', 'contacts-wide');
+            projectDetailActive = false;
+            projectClientId = null;
+            currentProjectManageByHoursValue = null;
+            detailMaxCols = 5;
+            const detailCloseBtn = document.getElementById('detailCloseBtn');
+            if (detailCloseBtn) detailCloseBtn.style.display = 'none';
             closeParentForm();
         }
 
@@ -6917,9 +7227,387 @@
             }
         }
 
+        let activeClientLogoId = null;
+        let activeClientLogoName = '';
+        let clientLogoPreviewUrl = null;
+        let clientLogoFlyoutUrl = null;
+
+        function clearClientLogoPreviewUrl() {
+            if (clientLogoPreviewUrl) URL.revokeObjectURL(clientLogoPreviewUrl);
+            clientLogoPreviewUrl = null;
+        }
+
+        function clearClientLogoFlyoutUrl() {
+            if (clientLogoFlyoutUrl) URL.revokeObjectURL(clientLogoFlyoutUrl);
+            clientLogoFlyoutUrl = null;
+        }
+
+        async function loadClientLogoInFlyout(clientId, action) {
+            if (!action || !clientId) return;
+            const image = action.querySelector('.client-logo-flyout-image');
+            const placeholder = action.querySelector('.client-logo-flyout-placeholder');
+            if (!image || !placeholder) return;
+            clearClientLogoFlyoutUrl();
+            image.style.display = 'none';
+            placeholder.style.display = '';
+            try {
+                const response = await fetch(`${API_URL}/client-logos/${encodeURIComponent(clientId)}`, {
+                    headers: getAuthHeaders()
+                });
+                if (response.status === 404) return;
+                if (!response.ok) throw new Error(`Errore HTTP ${response.status}`);
+                clientLogoFlyoutUrl = URL.createObjectURL(await response.blob());
+                image.src = clientLogoFlyoutUrl;
+                image.style.display = 'block';
+                placeholder.style.display = 'none';
+            } catch (error) {
+                console.warn('[LOGO CLIENTE]', error.message);
+            }
+        }
+
+        function setClientLogoPreview(blob = null, message = 'Nessun logo caricato') {
+            const image = document.getElementById('clientLogoImage');
+            const placeholder = document.getElementById('clientLogoPlaceholder');
+            if (!image || !placeholder) return;
+            clearClientLogoPreviewUrl();
+            if (blob) {
+                clientLogoPreviewUrl = URL.createObjectURL(blob);
+                image.src = clientLogoPreviewUrl;
+                image.style.display = 'block';
+                placeholder.style.display = 'none';
+            } else {
+                image.removeAttribute('src');
+                image.style.display = 'none';
+                placeholder.textContent = message;
+                placeholder.style.display = '';
+            }
+        }
+
+        async function loadClientLogoPreview(clientId) {
+            const status = document.getElementById('clientLogoStatus');
+            setClientLogoPreview(null, 'Caricamento…');
+            if (status) status.textContent = '';
+            try {
+                const response = await fetch(`${API_URL}/client-logos/${encodeURIComponent(clientId)}`, {
+                    headers: getAuthHeaders()
+                });
+                if (response.status === 404) {
+                    setClientLogoPreview(null, 'Nessun logo caricato');
+                    return;
+                }
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.error || `Errore HTTP ${response.status}`);
+                }
+                setClientLogoPreview(await response.blob());
+            } catch (error) {
+                setClientLogoPreview(null, 'Anteprima non disponibile');
+                if (status) {
+                    status.style.color = '#DC2626';
+                    status.textContent = error.message;
+                }
+            }
+        }
+
+        async function openClientLogoModal(clientId, clientName) {
+            activeClientLogoId = clientId;
+            activeClientLogoName = clientName || 'Cliente';
+            const modal = document.getElementById('clientLogoModal');
+            const nameEl = document.getElementById('clientLogoClientName');
+            const fileInput = document.getElementById('clientLogoFile');
+            const status = document.getElementById('clientLogoStatus');
+            if (!modal || !clientId) return;
+            if (nameEl) nameEl.textContent = activeClientLogoName;
+            if (fileInput) fileInput.value = '';
+            if (status) status.textContent = '';
+            modal.classList.add('open');
+            await loadClientLogoPreview(clientId);
+        }
+
+        function closeClientLogoModal() {
+            document.getElementById('clientLogoModal')?.classList.remove('open');
+            activeClientLogoId = null;
+            activeClientLogoName = '';
+            clearClientLogoPreviewUrl();
+        }
+
+        function injectClientLogoAction(listEl, source, clientId, clientName) {
+            if (!listEl || source !== 'clients' || !clientId) return;
+            clearClientLogoFlyoutUrl();
+            const action = document.createElement('div');
+            action.className = 'client-logo-action';
+            action.dataset.clientId = clientId;
+            action.innerHTML = `
+                <div class="client-logo-flyout-preview">
+                    <svg class="client-logo-flyout-placeholder" viewBox="0 0 24 24" aria-hidden="true" style="width:28px;height:28px;fill:currentColor;"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2Zm0 14h16l-5-6-4 5-3-3-4 4Zm3.5-7A2.5 2.5 0 1 0 7.5 6a2.5 2.5 0 0 0 0 5Z"/></svg>
+                    <img class="client-logo-flyout-image" alt="Logo ${escapeHtml(clientName || 'cliente')}">
+                </div>
+                <div class="client-logo-action-info">
+                    <div style="font-weight:600; color:var(--dark);">Logo</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Carica o sostituisci il logo del cliente</div>
+                </div>
+                <button type="button" title="Gestisci logo">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px;fill:currentColor;"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2Zm0 14h16l-5-6-4 5-3-3-4 4Zm3.5-7A2.5 2.5 0 1 0 7.5 6a2.5 2.5 0 0 0 0 5Z"/></svg>
+                    Logo
+                </button>`;
+            action.querySelector('button')?.addEventListener('click', () => openClientLogoModal(clientId, clientName));
+            listEl.prepend(action);
+            loadClientLogoInFlyout(clientId, action);
+        }
+
+        function initClientLogoModal() {
+            const modal = document.getElementById('clientLogoModal');
+            const fileInput = document.getElementById('clientLogoFile');
+            const uploadBtn = document.getElementById('clientLogoUpload');
+            const status = document.getElementById('clientLogoStatus');
+            if (!modal || !fileInput || !uploadBtn) return;
+
+            document.getElementById('clientLogoClose')?.addEventListener('click', closeClientLogoModal);
+            document.getElementById('clientLogoCancel')?.addEventListener('click', closeClientLogoModal);
+            modal.addEventListener('click', event => { if (event.target === modal) closeClientLogoModal(); });
+
+            fileInput.addEventListener('change', () => {
+                const file = fileInput.files?.[0];
+                if (!file) return;
+                if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+                    fileInput.value = '';
+                    setClientLogoPreview(null, 'Formato non supportato');
+                    if (status) { status.style.color = '#DC2626'; status.textContent = 'Usa un file PNG, JPEG o WebP.'; }
+                    return;
+                }
+                if (file.size > 1024 * 1024) {
+                    fileInput.value = '';
+                    setClientLogoPreview(null, 'File troppo grande');
+                    if (status) { status.style.color = '#DC2626'; status.textContent = 'Il logo non può superare 1 MB.'; }
+                    return;
+                }
+                setClientLogoPreview(file);
+                if (status) { status.style.color = 'var(--text-muted)'; status.textContent = file.name; }
+            });
+
+            uploadBtn.addEventListener('click', async () => {
+                const file = fileInput.files?.[0];
+                if (!activeClientLogoId || !file) {
+                    if (status) { status.style.color = '#DC2626'; status.textContent = 'Seleziona prima un file immagine.'; }
+                    return;
+                }
+                uploadBtn.disabled = true;
+                if (status) { status.style.color = 'var(--text-muted)'; status.textContent = 'Caricamento in corso…'; }
+                try {
+                    const response = await fetch(`${API_URL}/client-logos/${encodeURIComponent(activeClientLogoId)}`, {
+                        method: 'PUT',
+                        headers: {
+                            ...getAuthHeaders(),
+                            'Content-Type': file.type,
+                            'X-File-Name': encodeURIComponent(file.name)
+                        },
+                        body: file
+                    });
+                    const result = await response.json().catch(() => ({}));
+                    if (!response.ok) throw new Error(result.error || `Errore HTTP ${response.status}`);
+                    fileInput.value = '';
+                    await loadClientLogoPreview(activeClientLogoId);
+                    const action = Array.from(document.querySelectorAll('.client-logo-action'))
+                        .find(item => item.dataset.clientId === activeClientLogoId);
+                    if (action) await loadClientLogoInFlyout(activeClientLogoId, action);
+                    if (status) { status.style.color = '#059669'; status.textContent = 'Logo caricato correttamente.'; }
+                    showNotification('Logo cliente salvato', 'success');
+                } catch (error) {
+                    if (status) { status.style.color = '#DC2626'; status.textContent = error.message; }
+                } finally {
+                    uploadBtn.disabled = false;
+                }
+            });
+        }
+
+        let tenantLogoModalUrl = null;
+        let tenantLogoFlyoutUrl = null;
+
+        function clearTenantLogoUrl(kind) {
+            const key = kind === 'modal' ? 'modal' : 'flyout';
+            const current = key === 'modal' ? tenantLogoModalUrl : tenantLogoFlyoutUrl;
+            if (current) URL.revokeObjectURL(current);
+            if (key === 'modal') tenantLogoModalUrl = null;
+            else tenantLogoFlyoutUrl = null;
+        }
+
+        async function fetchTenantLogoBlob() {
+            const response = await fetch(`${API_URL}/tenant-logo`, { headers: getAuthHeaders() });
+            if (response.status === 404) return null;
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.error || `Errore HTTP ${response.status}`);
+            }
+            return response.blob();
+        }
+
+        function setTenantLogoModalPreview(blob = null, message = 'Nessun logo caricato') {
+            const image = document.getElementById('tenantLogoImage');
+            const placeholder = document.getElementById('tenantLogoPlaceholder');
+            if (!image || !placeholder) return;
+            clearTenantLogoUrl('modal');
+            if (blob) {
+                tenantLogoModalUrl = URL.createObjectURL(blob);
+                image.src = tenantLogoModalUrl;
+                image.style.display = 'block';
+                placeholder.style.display = 'none';
+            } else {
+                image.removeAttribute('src');
+                image.style.display = 'none';
+                placeholder.textContent = message;
+                placeholder.style.display = '';
+            }
+        }
+
+        async function loadTenantLogoModalPreview() {
+            const status = document.getElementById('tenantLogoStatus');
+            setTenantLogoModalPreview(null, 'Caricamento…');
+            if (status) status.textContent = '';
+            try {
+                const blob = await fetchTenantLogoBlob();
+                setTenantLogoModalPreview(blob, 'Nessun logo caricato');
+            } catch (error) {
+                setTenantLogoModalPreview(null, 'Anteprima non disponibile');
+                if (status) { status.style.color = '#DC2626'; status.textContent = error.message; }
+            }
+        }
+
+        function tenantDisplayName() {
+            try {
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                return user.tenant_name || decodeJwtPayload().tenant_name || 'Organizzazione';
+            } catch (error) {
+                return decodeJwtPayload().tenant_name || 'Organizzazione';
+            }
+        }
+
+        async function openTenantLogoModal() {
+            const modal = document.getElementById('tenantLogoModal');
+            const nameEl = document.getElementById('tenantLogoTenantName');
+            const fileInput = document.getElementById('tenantLogoFile');
+            const status = document.getElementById('tenantLogoStatus');
+            if (!modal || Number(decodeJwtPayload().id_roles) !== 1) return;
+            if (nameEl) nameEl.textContent = tenantDisplayName();
+            if (fileInput) fileInput.value = '';
+            if (status) status.textContent = '';
+            modal.classList.add('open');
+            await loadTenantLogoModalPreview();
+        }
+
+        function closeTenantLogoModal() {
+            document.getElementById('tenantLogoModal')?.classList.remove('open');
+            clearTenantLogoUrl('modal');
+        }
+
+        async function loadTenantLogoInFlyout(action) {
+            if (!action) return;
+            const image = action.querySelector('.client-logo-flyout-image');
+            const placeholder = action.querySelector('.client-logo-flyout-placeholder');
+            if (!image || !placeholder) return;
+            clearTenantLogoUrl('flyout');
+            image.style.display = 'none';
+            placeholder.style.display = '';
+            try {
+                const blob = await fetchTenantLogoBlob();
+                if (!blob) return;
+                tenantLogoFlyoutUrl = URL.createObjectURL(blob);
+                image.src = tenantLogoFlyoutUrl;
+                image.style.display = 'block';
+                placeholder.style.display = 'none';
+            } catch (error) {
+                console.warn('[LOGO ORGANIZZAZIONE]', error.message);
+            }
+        }
+
+        function injectTenantLogoAction(listEl, source, argument, label) {
+            const profileName = String(label || argument || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
+            if (!listEl || source !== 'settings' || profileName !== 'profilo' || Number(decodeJwtPayload().id_roles) !== 1) return;
+            clearTenantLogoUrl('flyout');
+            const action = document.createElement('div');
+            action.className = 'client-logo-action tenant-logo-action';
+            action.innerHTML = `
+                <div class="client-logo-flyout-preview">
+                    <svg class="client-logo-flyout-placeholder" viewBox="0 0 24 24" aria-hidden="true" style="width:28px;height:28px;fill:currentColor;"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2Zm0 14h16l-5-6-4 5-3-3-4 4Zm3.5-7A2.5 2.5 0 1 0 7.5 6a2.5 2.5 0 0 0 0 5Z"/></svg>
+                    <img class="client-logo-flyout-image" alt="Logo organizzazione">
+                </div>
+                <div class="client-logo-action-info">
+                    <div style="font-weight:600; color:var(--dark);">Logo organizzazione</div>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">Visibile a tutti gli utenti del tenant</div>
+                </div>
+                <button type="button" title="Gestisci logo organizzazione">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" style="width:18px;height:18px;fill:currentColor;"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2Zm0 14h16l-5-6-4 5-3-3-4 4Zm3.5-7A2.5 2.5 0 1 0 7.5 6a2.5 2.5 0 0 0 0 5Z"/></svg>
+                    Logo
+                </button>`;
+            action.querySelector('button')?.addEventListener('click', openTenantLogoModal);
+            listEl.prepend(action);
+            loadTenantLogoInFlyout(action);
+        }
+
+        function initTenantLogoModal() {
+            const modal = document.getElementById('tenantLogoModal');
+            const fileInput = document.getElementById('tenantLogoFile');
+            const uploadBtn = document.getElementById('tenantLogoUpload');
+            const status = document.getElementById('tenantLogoStatus');
+            if (!modal || !fileInput || !uploadBtn) return;
+            document.getElementById('tenantLogoClose')?.addEventListener('click', closeTenantLogoModal);
+            document.getElementById('tenantLogoCancel')?.addEventListener('click', closeTenantLogoModal);
+            modal.addEventListener('click', event => { if (event.target === modal) closeTenantLogoModal(); });
+
+            fileInput.addEventListener('change', () => {
+                const file = fileInput.files?.[0];
+                if (!file) return;
+                if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+                    fileInput.value = '';
+                    setTenantLogoModalPreview(null, 'Formato non supportato');
+                    if (status) { status.style.color = '#DC2626'; status.textContent = 'Usa un file PNG, JPEG o WebP.'; }
+                    return;
+                }
+                if (file.size > 1024 * 1024) {
+                    fileInput.value = '';
+                    setTenantLogoModalPreview(null, 'File troppo grande');
+                    if (status) { status.style.color = '#DC2626'; status.textContent = 'Il logo non può superare 1 MB.'; }
+                    return;
+                }
+                setTenantLogoModalPreview(file);
+                if (status) { status.style.color = 'var(--text-muted)'; status.textContent = file.name; }
+            });
+
+            uploadBtn.addEventListener('click', async () => {
+                const file = fileInput.files?.[0];
+                if (!file) {
+                    if (status) { status.style.color = '#DC2626'; status.textContent = 'Seleziona prima un file immagine.'; }
+                    return;
+                }
+                uploadBtn.disabled = true;
+                if (status) { status.style.color = 'var(--text-muted)'; status.textContent = 'Caricamento in corso…'; }
+                try {
+                    const response = await fetch(`${API_URL}/tenant-logo`, {
+                        method: 'PUT',
+                        headers: { ...getAuthHeaders(), 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) },
+                        body: file
+                    });
+                    const result = await response.json().catch(() => ({}));
+                    if (!response.ok) throw new Error(result.error || `Errore HTTP ${response.status}`);
+                    fileInput.value = '';
+                    await loadTenantLogoModalPreview();
+                    const action = document.querySelector('.tenant-logo-action');
+                    if (action) await loadTenantLogoInFlyout(action);
+                    await loadTenantHeaderLogo();
+                    if (status) { status.style.color = '#059669'; status.textContent = 'Logo organizzazione caricato correttamente.'; }
+                    showNotification('Logo organizzazione salvato', 'success');
+                } catch (error) {
+                    if (status) { status.style.color = '#DC2626'; status.textContent = error.message; }
+                } finally {
+                    uploadBtn.disabled = false;
+                }
+            });
+        }
+
         // Apre il flyout di dettaglio per la sorgente indicata (settings o clients),
         // filtrando per l'argument/cliente selezionato.
         async function openDetailFlyout(source, argument, label, keepMode = false) {
+            if (source !== 'clients') clearClientLogoFlyoutUrl();
+            clearTenantLogoUrl('flyout');
             currentDetailSource = source;
             currentDetailArgument = argument;
             currentDetailLabel = label;
@@ -6949,6 +7637,9 @@
             document.querySelector('.nav-settings')?.classList.remove('open', 'detail-open');
             document.querySelector('.nav-clients')?.classList.remove('open', 'detail-open');
             document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
+            document.querySelectorAll('.nav-settings, .nav-clients, .nav-projects').forEach(nav => {
+                nav.classList.toggle('flyout-active', nav.classList.contains(`nav-${source}`));
+            });
             // Progetti: flyout persistente (si chiude solo con la X); gli altri si richiudono
             // da soli (mouseleave/click altrove) come già avveniva prima.
             projectDetailActive = (source === 'projects');
@@ -6994,6 +7685,8 @@
                 if (!Array.isArray(rows) || rows.length === 0) {
                     setDetailColumns(1);
                     listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>';
+                    injectClientLogoAction(listEl, source, argument, label || argument);
+                    injectTenantLogoAction(listEl, source, argument, label || argument);
                     applyDetailMode();
                     return;
                 }
@@ -7053,6 +7746,10 @@
                     html += '</div>';
                     listEl.innerHTML = html;
                 }
+                // La funzione Logo compare esclusivamente nel dettaglio di un cliente già scelto.
+                injectClientLogoAction(listEl, source, argument, label || argument);
+                // Il logo organizzazione compare solo in Settings > Profilo per gli amministratori.
+                injectTenantLogoAction(listEl, source, argument, label || argument);
                 // Il contenitore del tipo 11 è ora nel DOM: carica le griglie presenti.
                 hydrateType11Grids(listEl);
                 // Barra tipo 11: click apre/chiude la griglia sottostante (freccia su/giù).
@@ -7142,6 +7839,11 @@
         function applyDetailMode() {
             const mode = clientDetailMode;
             const listEl = document.getElementById('settingsDetailList');
+
+            // Il logo è sempre visibile; testo e pulsante di caricamento compaiono
+            // soltanto quando "Abilita modifica" è attivo.
+            const logoAction = listEl?.querySelector('.client-logo-action');
+            if (logoAction) logoAction.classList.toggle('editing', mode !== 'view');
 
             // Valori modificabili solo in 'edit'
             if (listEl) {
@@ -8372,26 +9074,31 @@
             }
         }
 
-        // Porta "in primo piano" un flyout di primo livello (Impostazioni/Clienti/Progetti):
-        // apre quello indicato e chiude gli altri due; chiude anche il flyout di dettaglio,
-        // tranne il dettaglio progetto persistente.
-        function focusFirstFlyout(navSel) {
-            ['.nav-settings', '.nav-clients', '.nav-projects'].forEach(sel => {
-                const n = document.querySelector(sel);
-                if (!n) return;
-                if (sel === navSel) n.classList.add('open');
-                else n.classList.remove('open', 'detail-open');
-            });
-            if (!projectDetailActive) document.getElementById('settingsDetailFlyout')?.classList.remove('open');
+        // Apre un flyout di primo livello esclusivamente al clic. Un secondo clic sullo
+        // stesso pulsante lo chiude; il clic su un altro pulsante chiude prima quello attivo.
+        function toggleFirstFlyout(navSel, source) {
+            const nav = document.querySelector(navSel);
+            const detailFlyout = document.getElementById('settingsDetailFlyout');
+            if (!nav) return;
+
+            const sameFirstFlyoutOpen = nav.classList.contains('open') || nav.classList.contains('flyout-active');
+            const sameDetailOpen = detailFlyout?.classList.contains('open') &&
+                (currentDetailSource === source || (source === 'projects' && projectDetailActive));
+
+            if (sameFirstFlyoutOpen || sameDetailOpen) {
+                closeAllFlyouts();
+                return;
+            }
+
+            closeAllFlyouts();
+            nav.classList.add('open', 'flyout-active');
         }
 
-        // Gestione del settings-flyout: si apre al passaggio del mouse e resta aperto
-        // (non si richiude all'uscita del mouse); si chiude solo quando si clicca
-        // un'altra voce della sidebar diversa da "Impostazioni".
+        // Gestione del settings-flyout: apertura e chiusura solo tramite clic.
         function initSettingsFlyout() {
             const navSettings = document.querySelector('.nav-settings');
-            const sidebarMenu = document.querySelector('.sidebar-menu');
-            if (!navSettings || !sidebarMenu) return;
+            const sidebar = document.querySelector('.sidebar');
+            if (!navSettings || !sidebar) return;
 
             const saveBtn = document.getElementById('settingsDetailSaveBtn');
             if (saveBtn) saveBtn.addEventListener('click', saveDetailChanges);
@@ -8456,32 +9163,47 @@
                 }
             });
 
-            // Apre al passaggio del mouse; se era attivo il flyout Clienti lo chiude col suo dettaglio.
-            // Il flyout Progetti è persistente: non viene chiuso qui (solo con la sua X).
-            navSettings.addEventListener('mouseenter', () => focusFirstFlyout('.nav-settings'));
+            const settingsTrigger = navSettings.querySelector(':scope > a');
+            settingsTrigger?.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleFirstFlyout('.nav-settings', 'settings');
+            });
 
-            // Click su una voce della sidebar fuori dai flyout -> chiude tutto (tranne Progetti, persistente).
-            sidebarMenu.addEventListener('click', (e) => {
-                if (!e.target.closest('.nav-settings') && !e.target.closest('.nav-clients') && !e.target.closest('.nav-projects')) {
-                    if (!projectDetailActive) closeAllFlyouts();
-                }
+            // Un pulsante normale o uno spazio vuoto della sidebar chiude ogni flyout.
+            sidebar.addEventListener('click', event => {
+                if (event.target.closest('.settings-flyout')) return;
+                if (event.target.closest('.nav-settings > a, .nav-clients > a, .nav-projects > a')) return;
+                if (event.target.closest('#sidebarToggle')) return;
+
+                const regularSidebarButton = event.target.closest('.sidebar-menu a');
+                const clickedEmptySpace = !event.target.closest('a, button, input, select, textarea, label');
+                if (regularSidebarButton || clickedEmptySpace) closeAllFlyouts();
             });
         }
 
-        // Flyout Clienti: si apre al passaggio del mouse; se era attivo Impostazioni lo chiude col dettaglio.
+        // Flyout Clienti: apertura e chiusura solo tramite clic.
         function initClientsFlyout() {
             const navClients = document.querySelector('.nav-clients');
             if (!navClients) return;
-            navClients.addEventListener('mouseenter', () => focusFirstFlyout('.nav-clients'));
-
+            const clientsTrigger = navClients.querySelector(':scope > a');
+            clientsTrigger?.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleFirstFlyout('.nav-clients', 'clients');
+            });
         }
 
-        // Flyout "Progetti clienti": apre l'elenco clienti al passaggio del mouse; il dettaglio
-        // progetto è persistente (si chiude solo con la X). Gestisce anche il pulsante X.
+        // Flyout "Progetti clienti": apertura e chiusura tramite clic; la X resta disponibile.
         function initProjectsFlyout() {
             const navProjects = document.querySelector('.nav-projects');
             if (navProjects) {
-                navProjects.addEventListener('mouseenter', () => focusFirstFlyout('.nav-projects'));
+                const projectsTrigger = navProjects.querySelector(':scope > a');
+                projectsTrigger?.addEventListener('click', event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    toggleFirstFlyout('.nav-projects', 'projects');
+                });
             }
             // X: chiude il flyout persistente dei progetti.
             const closeBtn = document.getElementById('detailCloseBtn');
@@ -8491,7 +9213,7 @@
                 projectClientId = null;
                 currentProjectManageByHoursValue = null;
                 document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar');
-                document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
+                document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open', 'flyout-active');
                 closeBtn.style.display = 'none';
             });
         }
@@ -9065,7 +9787,7 @@
                     projectClientId = null;
                     currentProjectManageByHoursValue = null;
                     document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar');
-                    document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
+                    document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open', 'flyout-active');
                     const detailCloseBtn = document.getElementById('detailCloseBtn');
                     if (detailCloseBtn) detailCloseBtn.style.display = 'none';
                 } catch (e) {
@@ -9737,6 +10459,7 @@
 
         window.addEventListener('DOMContentLoaded', async () => {
             initializeUser();
+            await loadTenantHeaderLogo();
             await loadPageLabels();
             applyRoleVisibility();
             loadSettingsArguments();
@@ -9748,6 +10471,8 @@
             initParentFormModal();
             initClientNewField();
             initClientFieldManagement();
+            initClientLogoModal();
+            initTenantLogoModal();
             initImpersonate();
             initPrivacyModal();
             initSidebarToggle();
@@ -9779,6 +10504,54 @@
             <div class="task-modal-footer">
                 <button id="taskModalCancel" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
                 <button id="taskModalSave" type="button" style="padding: 0.6rem 1rem; border: none; border-radius: 8px; background: var(--primary); color: white; font-weight: 600; cursor: pointer;">Salva task</button>
+            </div>
+        </div>
+    </div>
+    <div id="clientLogoModal" class="client-logo-modal" role="dialog" aria-modal="true" aria-labelledby="clientLogoTitle">
+        <div class="client-logo-card">
+            <div class="task-modal-header">
+                <h3 id="clientLogoTitle" style="margin: 0; color: var(--dark);">Logo cliente</h3>
+                <button id="clientLogoClose" type="button" aria-label="Chiudi" title="Chiudi" style="width: 28px; height: 28px; border: 1px solid #FCA5A5; border-radius: 50%; background: #FEE2E2; color: #DC2626; cursor: pointer; font-size: 1.3rem; font-weight: 700; line-height: 1;">&times;</button>
+            </div>
+            <div style="padding: 1.25rem;">
+                <div style="margin-bottom:0.35rem; font-weight:600;">Cliente</div>
+                <div id="clientLogoClientName" style="padding:0.6rem 0.7rem; border:1px solid var(--border); border-radius:7px; background:#F8FAFC;"></div>
+                <div id="clientLogoPreview" class="client-logo-preview">
+                    <span id="clientLogoPlaceholder">Nessun logo caricato</span>
+                    <img id="clientLogoImage" alt="Anteprima logo cliente">
+                </div>
+                <label for="clientLogoFile" style="display:block; margin:1rem 0 0.35rem; font-weight:600;">File immagine</label>
+                <input id="clientLogoFile" type="file" accept="image/png,image/jpeg,image/webp" style="width:100%;">
+                <div style="margin-top:0.4rem; color:var(--text-muted); font-size:0.8rem;">Formati ammessi: PNG, JPEG e WebP. Dimensione massima: 1 MB.</div>
+                <div id="clientLogoStatus" style="min-height:1.3rem; margin-top:0.65rem; font-size:0.85rem;"></div>
+            </div>
+            <div class="task-modal-footer">
+                <button id="clientLogoCancel" type="button" style="padding:0.6rem 1rem; border:1px solid var(--border); border-radius:8px; background:white; cursor:pointer;">Annulla</button>
+                <button id="clientLogoUpload" type="button" style="padding:0.6rem 1rem; border:none; border-radius:8px; background:#10B981; color:white; font-weight:600; cursor:pointer;">Carica logo</button>
+            </div>
+        </div>
+    </div>
+    <div id="tenantLogoModal" class="client-logo-modal" role="dialog" aria-modal="true" aria-labelledby="tenantLogoTitle">
+        <div class="client-logo-card">
+            <div class="task-modal-header">
+                <h3 id="tenantLogoTitle" style="margin: 0; color: var(--dark);">Logo organizzazione</h3>
+                <button id="tenantLogoClose" type="button" aria-label="Chiudi" title="Chiudi" style="width: 28px; height: 28px; border: 1px solid #FCA5A5; border-radius: 50%; background: #FEE2E2; color: #DC2626; cursor: pointer; font-size: 1.3rem; font-weight: 700; line-height: 1;">&times;</button>
+            </div>
+            <div style="padding: 1.25rem;">
+                <div style="margin-bottom:0.35rem; font-weight:600;">Organizzazione</div>
+                <div id="tenantLogoTenantName" style="padding:0.6rem 0.7rem; border:1px solid var(--border); border-radius:7px; background:#F8FAFC;"></div>
+                <div id="tenantLogoPreview" class="client-logo-preview">
+                    <span id="tenantLogoPlaceholder">Nessun logo caricato</span>
+                    <img id="tenantLogoImage" alt="Anteprima logo organizzazione">
+                </div>
+                <label for="tenantLogoFile" style="display:block; margin:1rem 0 0.35rem; font-weight:600;">File immagine</label>
+                <input id="tenantLogoFile" type="file" accept="image/png,image/jpeg,image/webp" style="width:100%;">
+                <div style="margin-top:0.4rem; color:var(--text-muted); font-size:0.8rem;">Formati ammessi: PNG, JPEG e WebP. Dimensione massima: 1 MB.</div>
+                <div id="tenantLogoStatus" style="min-height:1.3rem; margin-top:0.65rem; font-size:0.85rem;"></div>
+            </div>
+            <div class="task-modal-footer">
+                <button id="tenantLogoCancel" type="button" style="padding:0.6rem 1rem; border:1px solid var(--border); border-radius:8px; background:white; cursor:pointer;">Annulla</button>
+                <button id="tenantLogoUpload" type="button" style="padding:0.6rem 1rem; border:none; border-radius:8px; background:#10B981; color:white; font-weight:600; cursor:pointer;">Carica logo</button>
             </div>
         </div>
     </div>

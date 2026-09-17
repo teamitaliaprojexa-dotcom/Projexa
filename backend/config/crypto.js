@@ -208,6 +208,7 @@ export function decryptDeep(value, depth = 0) {
 //     project_id (e in generale qualsiasi colonna *_id).
 //  3) clients  -> solo valore2 e valore3
 //     projects -> solo valore2
+//     issue    -> solo richiedente, descrizione, owner e note
 //  4) Tutte le altre tabelle: tutte le colonne testuali che superano il punto 2.
 //
 // NB (punto 2, numeri): un valore cifrato è testo, quindi una colonna numerica
@@ -245,7 +246,8 @@ const NEVER_ENCRYPT_BY_TABLE = {
 // Tabelle con elenco chiuso di colonne da cifrare (regola esplicita del punto 3).
 const TABLE_COLUMN_ALLOWLIST = {
   clients: new Set(['valore2', 'valore3']),
-  projects: new Set(['valore2'])
+  projects: new Set(['valore2']),
+  issue: new Set(['richiedente', 'descrizione', 'owner', 'note'])
 };
 
 // Decide se una colonna è cifrabile e, in caso contrario, perché (serve alla UI).
