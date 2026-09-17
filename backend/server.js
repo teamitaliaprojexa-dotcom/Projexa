@@ -3908,6 +3908,53 @@ async function deepCopyProjectTree(dbClient, tenantId, userId, clientId, srcArg,
 
 // Elenco progetti. Con clientId -> i progetti di quel cliente (livello 2); senza clientId ->
 // tutti i progetti dell'utente (per la tendina "modello" alla creazione).
+app.get('/api/projects/search', requireAuth, async (req, res) => {
+  try {
+    const term = String((req.query && req.query.q) || '').trim();
+    if (!term) return res.json([]);
+
+    const rawClientIds = req.query && req.query.clientId;
+    const clientIds = (Array.isArray(rawClientIds) ? rawClientIds : rawClientIds ? [rawClientIds] : [])
+      .map(value => String(value).trim())
+      .filter(Boolean);
+
+    const params = [req.user.tenant_id, req.user.user_id];
+    let clientFilter = '';
+    if (clientIds.length > 0) {
+      params.push(clientIds);
+      clientFilter = ` AND p.client_id::text = ANY($${params.length}::text[])`;
+    }
+
+    // valore2 di projects/clients può essere cifrato a riposo: il LIKE viene quindi
+    // applicato dopo la lettura, sui valori già decifrati dal pool.
+    const result = await db.query(
+      `SELECT p.id, p.valore2 AS name, p.client_id, c.valore2 AS client_name
+       FROM projects p
+       JOIN clients c
+         ON c.id = p.client_id
+        AND c.tenant_id = p.tenant_id
+        AND c.argument = 'Cliente'
+        AND c.campo = 'Cliente'
+       WHERE p.argument = 'Progetto'
+         AND p.campo = 'Progetto'
+         AND p.tenant_id = $1
+         AND p.user_id = $2
+         AND p.valore2 IS NOT NULL
+         AND p.scadenza > CURRENT_DATE${clientFilter}
+       ORDER BY c.valore2, p.valore2`,
+      params
+    );
+
+    const needle = term.toLocaleLowerCase('it-IT');
+    const matches = result.rows
+      .filter(row => String(row.name || '').toLocaleLowerCase('it-IT').includes(needle))
+      .slice(0, 30);
+    res.json(matches);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 app.get('/api/projects/list', requireAuth, async (req, res) => {
   try {
     const clientId = ((req.query && req.query.clientId) || '').trim();
@@ -5851,6 +5898,15 @@ app.post('/api/sql/rollback', requireAuth, requireAdmin, ensureSqlEditorEnabled,
 
 // ==========================================
 // ISSUE ENDPOINTS (modulo Issue)
+// Il client visualizza anche colonne tecniche/calcolate restituite da SELECT *.
+// In modifica accettiamo esclusivamente i campi realmente editabili della griglia:
+// colonne come id, tenant_id, crypto, created_at, updated_at e "giorni"
+// (GENERATED ALWAYS) non devono mai finire nella UPDATE.
+const ISSUE_EDITABLE_COLUMNS = new Set([
+  'data_segnalazione', 'project_id', 'visibilita', 'modulo',
+  'richiedente', 'categoria', 'stato', 'priorita', 'descrizione',
+  'mysupport', 'tkt_jira', 'owner', 'deadline', 'note', 'data_chiusura'
+]);
 // ==========================================
 
 // GET /api/auth/context - Dati del contesto autenticato (usato da js/issue.js per
@@ -5898,26 +5954,27 @@ app.get('/api/issue/options', requireAuth, async (req, res) => {
 
     const [modulesResult, requestersResult] = await Promise.all([
       pool.query(
-        `SELECT DISTINCT TRIM(description::text) AS value
+        `SELECT id::text AS value, TRIM(description::text) AS label
          FROM public.licenze_app
          WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
            AND NULLIF(TRIM(description::text), '') IS NOT NULL
-         ORDER BY value`,
+         ORDER BY label, value`,
         [tenant_id, user_id, client_id]
       ),
       pool.query(
-        `SELECT DISTINCT TRIM(nominativo::text) AS value
+        `SELECT id::text AS value, TRIM(nominativo::text) AS label
          FROM public.contacts
          WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
            AND NULLIF(TRIM(nominativo::text), '') IS NOT NULL
-         ORDER BY value`,
+         ORDER BY label, value`,
         [tenant_id, user_id, client_id]
       )
     ]);
 
     res.json({
-      moduli: modulesResult.rows.map(row => row.value),
-      richiedenti: requestersResult.rows.map(row => row.value)
+      // La UI mostra la label, ma il valore salvato nella tabella issue è l'UUID.
+      moduli: modulesResult.rows.map(row => ({ value: row.value, label: row.label })),
+      richiedenti: requestersResult.rows.map(row => ({ value: row.value, label: row.label }))
     });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
@@ -6027,6 +6084,9 @@ app.put('/api/issue/:id', requireAuth, async (req, res) => {
     delete data.tenant_id;
     delete data.user_id;
     delete data.client_id;
+    data = Object.fromEntries(
+      Object.entries(data).filter(([column]) => ISSUE_EDITABLE_COLUMNS.has(column))
+    );
     
     // Recupera l'issue esistente
     const issueResult = await pool.query(

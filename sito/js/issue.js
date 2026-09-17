@@ -163,6 +163,9 @@ class IssueManager {
             this.loadIssueOptions(),
             this.loadIssues()
         ]);
+        // Gli elenchi contengono UUID come valore e descrizione/nominativo come label:
+        // ridisegna la griglia solo dopo che entrambi sono disponibili.
+        this.renderTable();
         this.updateKPIs();
         this.updateToolbarButtons();
     }
@@ -354,6 +357,10 @@ class IssueManager {
             td.dataset.column = col;
             if (col === 'project_id') {
                 td.textContent = this.getProjectLabel(issue[col]);
+            } else if (col === 'modulo') {
+                td.textContent = this.getLookupLabel(this.moduleOptions, issue[col]);
+            } else if (col === 'richiedente') {
+                td.textContent = this.getLookupLabel(this.requesterOptions, issue[col]);
             } else if (col === 'note') {
                 this.renderNoteCell(td, issue[col], index, false);
             } else {
@@ -525,7 +532,10 @@ class IssueManager {
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     body: JSON.stringify(issue)
                 });
-                if (!response.ok) throw new Error('Errore nel salvataggio della issue');
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.error || `Errore nel salvataggio della issue (HTTP ${response.status})`);
+                }
                 const saved = await response.json();
                 Object.assign(issue, saved);
             } else {
@@ -535,7 +545,10 @@ class IssueManager {
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     body: JSON.stringify(issue)
                 });
-                if (!response.ok) throw new Error('Errore nel salvataggio della issue');
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.error || `Errore nel salvataggio della issue (HTTP ${response.status})`);
+                }
             }
         }
     }
@@ -718,6 +731,10 @@ class IssueManager {
             const col = colonne[colIndex];
             if (col === 'project_id') {
                 td.textContent = this.getProjectLabel(issue[col]);
+            } else if (col === 'modulo') {
+                td.textContent = this.getLookupLabel(this.moduleOptions, issue[col]);
+            } else if (col === 'richiedente') {
+                td.textContent = this.getLookupLabel(this.requesterOptions, issue[col]);
             } else if (col === 'note') {
                 this.renderNoteCell(td, issue[col], Number(row.dataset.index), false);
             } else {
@@ -730,6 +747,20 @@ class IssueManager {
         if (!projectId) return '';
         const selected = this.projectOptions.find(option => option.value === String(projectId));
         return selected ? selected.label : 'Progetto non disponibile';
+    }
+
+    getLookupLabel(options, value) {
+        if (!value) return '';
+        const selected = options.find(option => {
+            const optionValue = option && typeof option === 'object'
+                ? option.value ?? option.id ?? ''
+                : option;
+            return String(optionValue) === String(value);
+        });
+        if (!selected) return 'Valore non disponibile';
+        return selected && typeof selected === 'object'
+            ? String(selected.label ?? selected.name ?? selected.value ?? '')
+            : String(selected);
     }
 
     createLookupSelect(options, currentValue, placeholder, onChange, preserveCurrent = true) {

@@ -1053,6 +1053,7 @@
             border-radius: var(--radius);
             flex: 1;
             max-width: 300px;
+            position: relative;
         }
 
         .search-box input {
@@ -1066,6 +1067,39 @@
         .search-box input::placeholder {
             color: var(--text-muted);
         }
+
+        .project-search-results {
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            width: min(645px, 90vw);
+            max-height: 320px;
+            overflow-y: auto;
+            padding: 0.35rem;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+            z-index: 1200;
+        }
+
+        .project-search-results.open { display: block; }
+        .project-search-item,
+        .project-search-message {
+            width: 100%;
+            padding: 0.65rem 0.75rem;
+            border: 0;
+            border-radius: 7px;
+            background: transparent;
+            color: var(--dark);
+            text-align: left;
+            font: inherit;
+        }
+        .project-search-item { cursor: pointer; }
+        .project-search-item:hover,
+        .project-search-item:focus { background: #D1FAE5; outline: none; }
+        .project-search-message { color: var(--text-muted); }
 
         .btn {
             padding: 0.75rem 1.5rem;
@@ -2549,9 +2583,10 @@
                     <h1 id="greeting">Benvenuta, Federica! 👋</h1>
                 </div>
                 <div class="header-actions">
-                    <div class="search-box">
+                    <div class="search-box" id="projectSearchBox">
                         <i class="fas fa-search" style="color: var(--text-muted);"></i>
-                        <input type="text" placeholder="Cerca un progetto...">
+                        <input id="projectSearchInput" type="text" placeholder="Cerca un progetto..." autocomplete="off" aria-controls="projectSearchResults" aria-expanded="false">
+                        <div id="projectSearchResults" class="project-search-results" role="listbox"></div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 0.75rem;">
                         <i class="fas fa-building" style="color: var(--text-muted); font-size: 1rem;"></i>
@@ -3658,6 +3693,7 @@
             await loadKpiFatturazione();
             updateRevenueChart(yearSelector.value);
             await loadDashboardKpis();
+            refreshProjectSearch();
         }
 
         function initClientFilter() {
@@ -3669,6 +3705,97 @@
                 currentClientFilter = [];
                 bindClientFilterCheckboxes();
                 await onClientFilterChanged();
+            });
+        }
+
+        // === RICERCA DINAMICA PROGETTI ===
+        let projectSearchTimer = null;
+        let projectSearchController = null;
+
+        function closeProjectSearchResults() {
+            const results = document.getElementById('projectSearchResults');
+            const input = document.getElementById('projectSearchInput');
+            results?.classList.remove('open');
+            input?.setAttribute('aria-expanded', 'false');
+        }
+
+        function refreshProjectSearch() {
+            const input = document.getElementById('projectSearchInput');
+            if (input && input.value.trim()) runProjectSearch(input.value.trim());
+            else closeProjectSearchResults();
+        }
+
+        async function runProjectSearch(term) {
+            const results = document.getElementById('projectSearchResults');
+            const input = document.getElementById('projectSearchInput');
+            if (!results || !input) return;
+            if (!term) { closeProjectSearchResults(); return; }
+
+            if (projectSearchController) projectSearchController.abort();
+            projectSearchController = new AbortController();
+            const params = new URLSearchParams({ q: term });
+            getSelectedClientIds().forEach(clientId => params.append('clientId', clientId));
+            results.innerHTML = '<div class="project-search-message">Ricerca…</div>';
+            results.classList.add('open');
+            input.setAttribute('aria-expanded', 'true');
+
+            try {
+                const response = await fetch(`${API_URL}/projects/search?${params.toString()}`, {
+                    headers: getAuthHeaders(),
+                    signal: projectSearchController.signal
+                });
+                const projects = await response.json().catch(() => ([]));
+                if (!response.ok) throw new Error(projects.error || `Errore HTTP ${response.status}`);
+                if (input.value.trim() !== term) return;
+                if (!Array.isArray(projects) || projects.length === 0) {
+                    results.innerHTML = '<div class="project-search-message">Nessun progetto trovato</div>';
+                    return;
+                }
+
+                results.innerHTML = projects.map(project => `
+                    <button type="button" class="project-search-item" role="option"
+                            data-project-id="${escapeHtml(project.id)}"
+                            data-project-name="${escapeHtml(project.name)}"
+                            data-client-id="${escapeHtml(project.client_id)}">
+                        ${escapeHtml(project.client_name || 'Cliente')} - ${escapeHtml(project.name || 'Progetto')}
+                    </button>`).join('');
+
+                results.querySelectorAll('.project-search-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        const clientId = item.dataset.clientId;
+                        const projectId = item.dataset.projectId;
+                        const projectName = item.dataset.projectName;
+                        detailNavStack = [];
+                        currentView = null;
+                        document.querySelectorAll('#projectClientsList li[data-client-id]').forEach(li => {
+                            li.classList.toggle('active-client', li.dataset.clientId === clientId);
+                        });
+                        closeProjectSearchResults();
+                        openProjectDetail(projectId, projectName, clientId);
+                    });
+                });
+            } catch (error) {
+                if (error.name === 'AbortError') return;
+                results.innerHTML = `<div class="project-search-message">${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        function initProjectSearch() {
+            const box = document.getElementById('projectSearchBox');
+            const input = document.getElementById('projectSearchInput');
+            if (!box || !input) return;
+            input.addEventListener('input', () => {
+                clearTimeout(projectSearchTimer);
+                const term = input.value.trim();
+                if (!term) { closeProjectSearchResults(); return; }
+                projectSearchTimer = setTimeout(() => runProjectSearch(term), 180);
+            });
+            input.addEventListener('focus', refreshProjectSearch);
+            input.addEventListener('keydown', event => {
+                if (event.key === 'Escape') closeProjectSearchResults();
+            });
+            document.addEventListener('click', event => {
+                if (!box.contains(event.target)) closeProjectSearchResults();
             });
         }
 
@@ -10487,6 +10614,7 @@
             initTodoList();
             await initRevenueChart(); // carica anni disponibili + dati kpi_fatturazione filtrati
             initClientFilter();
+            initProjectSearch();
             initKpiCards();
             await loadDashboardKpis(); // carica i KPI progetti attivi/completati/rischi aperti
             initMeetings(); // Carica le riunioni da Google Calendar
