@@ -4965,7 +4965,10 @@ app.get('/api/:source(settings|clients)/linked-list', requireAuth, async (req, r
     const params = [];
     if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
     if (cols.has('user_id')) { params.push(req.user.user_id); conds.push(`user_id = $${params.length}`); }
-    if (cols.has('id_cliente') && clientId) { params.push(clientId); conds.push(`id_cliente = $${params.length}`); }
+    if (clientId) {
+      const clientIdColumn = cols.has('client_id') ? 'client_id' : cols.has('id_cliente') ? 'id_cliente' : null;
+      if (clientIdColumn) { params.push(clientId); conds.push(`"${clientIdColumn}" = $${params.length}`); }
+    }
     const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
 
     // Modalità "organigramma": se richiesta e la tabella ha "responsabile",
@@ -5015,7 +5018,10 @@ app.get('/api/:source(settings|clients)/linked-row', requireAuth, async (req, re
     const params = [rowId];
     if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
     if (cols.has('user_id')) { params.push(req.user.user_id); conds.push(`user_id = $${params.length}`); }
-    if (cols.has('id_cliente') && clientId) { params.push(clientId); conds.push(`id_cliente = $${params.length}`); }
+    if (clientId) {
+      const clientIdColumn = cols.has('client_id') ? 'client_id' : cols.has('id_cliente') ? 'id_cliente' : null;
+      if (clientIdColumn) { params.push(clientId); conds.push(`"${clientIdColumn}" = $${params.length}`); }
+    }
     const result = await db.query(
       `SELECT * FROM "${tabella}" WHERE ${conds.join(' AND ')} LIMIT 1`,
       params
@@ -5051,7 +5057,7 @@ app.post('/api/:source(settings|clients)/linked-row', requireAuth, async (req, r
 
     const cols = await getTableColumns(tabella);
     const generated = await getGeneratedColumns(tabella);
-    const managedByServer = new Set(['id', 'tenant_id', 'user_id', 'id_cliente', 'created_at', 'updated_at', 'created_by']);
+    const managedByServer = new Set(['id', 'tenant_id', 'user_id', 'id_cliente', 'client_id', 'created_at', 'updated_at', 'created_by']);
     let data = {};
     for (const [k, v] of Object.entries(values)) {
       if (cols.has(k) && !generated.has(k) && !managedByServer.has(k)) {
@@ -5061,7 +5067,10 @@ app.post('/api/:source(settings|clients)/linked-row', requireAuth, async (req, r
     // Colonne di scoping impostate dal server (mai dal client)
     if (cols.has('tenant_id')) data.tenant_id = req.user.tenant_id;
     if (cols.has('user_id')) data.user_id = req.user.user_id;
-    if (cols.has('id_cliente') && clientId) data.id_cliente = clientId;
+    if (clientId) {
+      const clientIdColumn = cols.has('client_id') ? 'client_id' : cols.has('id_cliente') ? 'id_cliente' : null;
+      if (clientIdColumn) data[clientIdColumn] = clientId;
+    }
 
     data = await cryptoWrite(db, 'main', tabella, data);
 
@@ -5106,7 +5115,10 @@ app.delete('/api/:source(settings|clients)/linked-row', requireAuth, async (req,
     const params = [rowId];
     if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
     if (cols.has('user_id')) { params.push(req.user.user_id); conds.push(`user_id = $${params.length}`); }
-    if (cols.has('id_cliente') && clientId) { params.push(clientId); conds.push(`id_cliente = $${params.length}`); }
+    if (clientId) {
+      const clientIdColumn = cols.has('client_id') ? 'client_id' : cols.has('id_cliente') ? 'id_cliente' : null;
+      if (clientIdColumn) { params.push(clientId); conds.push(`"${clientIdColumn}" = $${params.length}`); }
+    }
     const result = await db.query(
       `DELETE FROM "${tabella}" WHERE ${conds.join(' AND ')} RETURNING id`,
       params
@@ -5676,6 +5688,226 @@ app.post('/api/sql/rollback', requireAuth, requireAdmin, ensureSqlEditorEnabled,
   } finally {
     activeTransactions.delete(txKey);
     client.release();
+  }
+});
+
+// ==========================================
+// ISSUE ENDPOINTS (modulo Issue)
+// ==========================================
+
+// GET /api/auth/context - Dati del contesto autenticato (usato da js/issue.js per
+// popolare userRole/contextUserId/contextTenantId). Endpoint mancante segnalato
+// dalla guida di installazione: senza questo issue.js riceveva 404.
+app.get('/api/auth/context', requireAuth, async (req, res) => {
+  res.json({
+    user_id: req.user.user_id,
+    tenant_id: req.user.tenant_id,
+    id_roles: req.user.id_roles,
+    name: req.user.name
+  });
+});
+
+// GET /api/issue/clients - Ottieni i clienti disponibili per l'utente corrente
+app.get('/api/issue/clients', requireAuth, async (req, res) => {
+  try {
+    const pool = pickDb(req);
+    const { tenant_id, user_id } = req.user;
+    
+    const result = await pool.query(
+      `SELECT id, valore2 AS name FROM public.clients
+       WHERE argument = 'Cliente' AND campo = 'Cliente'
+         AND tenant_id = $1 AND user_id = $2 AND valore2 IS NOT NULL
+       ORDER BY valore2`,
+      [tenant_id, user_id]
+    );
+    
+    res.json(result.rows);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// GET /api/issue - Ottieni le issue filtrate per cliente
+app.get('/api/issue', requireAuth, async (req, res) => {
+  try {
+    const pool = pickDb(req);
+    const { tenant_id, user_id, id_roles } = req.user;
+    const { client_id } = req.query;
+    
+    if (!client_id) {
+      return res.status(400).json({ error: 'client_id richiesto' });
+    }
+    
+    // Verificare che l'utente ha accesso al cliente
+    const clientCheck = await pool.query(
+      `SELECT id FROM public.clients 
+       WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+      [client_id, tenant_id, user_id]
+    );
+    
+    if (clientCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Accesso negato a questo cliente' });
+    }
+    
+    const result = await pool.query(
+      `SELECT * FROM public.issue 
+       WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
+       ORDER BY data_segnalazione DESC`,
+      [tenant_id, user_id, client_id]
+    );
+    
+    res.json(result.rows);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// POST /api/issue - Crea una nuova issue
+app.post('/api/issue', requireAuth, async (req, res) => {
+  try {
+    const pool = pickDb(req);
+    const { tenant_id, user_id, id_roles } = req.user;
+    
+    let data = { ...req.body };
+    
+    // Forza i valori di contesto
+    data.tenant_id = tenant_id;
+    data.user_id = user_id;
+    
+    // Valida che client_id esista e sia accessibile
+    const clientCheck = await pool.query(
+      `SELECT id FROM public.clients 
+       WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+      [data.client_id, tenant_id, user_id]
+    );
+    
+    if (clientCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Cliente non accessibile' });
+    }
+    
+    // Imposta i valori di default
+    if (!data.id_roles_write) data.id_roles_write = id_roles;
+    if (!data.id_roles) data.id_roles = 70; // default role
+    if (!data.visibilita) data.visibilita = 'Privata';
+    if (!data.categoria) data.categoria = 'Richiesta';
+    if (!data.stato) data.stato = 'Aperto';
+    if (!data.priorita) data.priorita = 'Media';
+    if (!data.scadenza) data.scadenza = '2099-12-31';
+    if (!data.data_segnalazione) data.data_segnalazione = new Date().toISOString().split('T')[0];
+    
+    // Stringhe vuote diventano NULL
+    for (const k of Object.keys(data)) {
+      if (data[k] === '') data[k] = null;
+    }
+    
+    const columns = Object.keys(data).map(assertValidIdentifier);
+    const values = columns.map(col => data[col]);
+    const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+    const quotedColumns = columns.map(c => `"${c}"`).join(', ');
+    
+    const query = `INSERT INTO public.issue (${quotedColumns}) VALUES (${placeholders}) RETURNING *`;
+    const result = await pool.query(query, values);
+    
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// PUT /api/issue/:id - Modifica un'issue
+app.put('/api/issue/:id', requireAuth, async (req, res) => {
+  try {
+    const pool = pickDb(req);
+    const { tenant_id, user_id, id_roles } = req.user;
+    const issueId = req.params.id;
+    
+    let data = { ...req.body };
+    delete data.id;
+    delete data.tenant_id;
+    delete data.user_id;
+    delete data.client_id;
+    
+    // Recupera l'issue esistente
+    const issueResult = await pool.query(
+      `SELECT * FROM public.issue 
+       WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+      [issueId, tenant_id, user_id]
+    );
+    
+    if (issueResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Issue non trovata' });
+    }
+    
+    const issue = issueResult.rows[0];
+    
+    // Verifica permessi: può modificare solo se id_roles <= id_roles_write
+    if (id_roles > issue.id_roles_write) {
+      return res.status(403).json({ error: 'Non hai i permessi per modificare questa issue' });
+    }
+    
+    // Stringhe vuote diventano NULL
+    for (const k of Object.keys(data)) {
+      if (data[k] === '') data[k] = null;
+    }
+    
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+    
+    for (const [col, val] of Object.entries(data)) {
+      assertValidIdentifier(col);
+      updates.push(`"${col}" = $${paramCount}`);
+      values.push(val);
+      paramCount++;
+    }
+    
+    if (updates.length === 0) {
+      return res.json(issue);
+    }
+    
+    values.push(issueId);
+    const query = `UPDATE public.issue SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`;
+    const result = await pool.query(query, values);
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/issue/:id - Elimina un'issue
+app.delete('/api/issue/:id', requireAuth, async (req, res) => {
+  try {
+    const pool = pickDb(req);
+    const { tenant_id, user_id, id_roles } = req.user;
+    const issueId = req.params.id;
+    
+    // Recupera l'issue
+    const issueResult = await pool.query(
+      `SELECT * FROM public.issue 
+       WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+      [issueId, tenant_id, user_id]
+    );
+    
+    if (issueResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Issue non trovata' });
+    }
+    
+    const issue = issueResult.rows[0];
+    
+    // Verifica permessi: può eliminare solo se id_roles <= id_roles_write
+    if (id_roles > issue.id_roles_write) {
+      return res.status(403).json({ error: 'Non hai i permessi per eliminare questa issue' });
+    }
+    
+    await pool.query(
+      `DELETE FROM public.issue WHERE id = $1`,
+      [issueId]
+    );
+    
+    res.json({ success: true, message: 'Issue eliminata' });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
