@@ -4256,6 +4256,27 @@ app.get('/api/roles', requireAuth, async (req, res) => {
 // Legge una preferenza booleana (valore1) dalla tabella settings per l'utente/tenant
 // del login, dato argument e campo. Restituisce { value: true|false }.
 // Usato ad es. per "Abilita Organigramma" (argument=Preferenze, campo=Abilita Organigramma).
+// Controllo feature della sidebar. A differenza dell'endpoint generico /api/data/settings,
+// questo filtro viene applicato SEMPRE anche agli admin: durante l'impersonificazione
+// tenant_id e user_id devono essere esclusivamente quelli presenti nel token attivo.
+app.get('/api/settings/feature-flag', requireAuth, async (req, res) => {
+  try {
+    const campo = String((req.query && req.query.campo) || '').trim();
+    if (!campo) return res.status(400).json({ error: 'campo richiesto' });
+    const result = await db.query(
+      `SELECT COALESCE(BOOL_OR(valore1 IS TRUE), false) AS enabled
+       FROM settings
+       WHERE tenant_id = $1
+         AND user_id = $2
+         AND campo IN ($3, '(*) ' || $3)`,
+      [req.user.tenant_id, req.user.user_id, campo]
+    );
+    res.json({ enabled: result.rows[0]?.enabled === true });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 app.get('/api/settings/preference', requireAuth, async (req, res) => {
   try {
     const argument = ((req.query && req.query.argument) || '').trim();

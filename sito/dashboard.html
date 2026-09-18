@@ -1309,6 +1309,37 @@
             white-space: pre-wrap;
         }
 
+        .kpi-modal-item .kpi-item-created-at {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            margin-top: 0.2rem;
+        }
+
+        .kpi-created-today-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.1rem 0.45rem;
+            border-radius: 999px;
+            background: #dcfce7;
+            color: #15803d;
+            font-size: 0.72rem;
+            font-weight: 600;
+            line-height: 1.35;
+        }
+
+        .kpi-created-today-badge::before {
+            content: '';
+            width: 0.42rem;
+            height: 0.42rem;
+            border-radius: 50%;
+            background: #22c55e;
+        }
+
         .kpi-modal-item .kpi-item-extra {
             display: flex;
             flex-wrap: wrap;
@@ -2025,52 +2056,6 @@
             color: white;
         }
 
-        /* RECENT ACTIVITY */
-        .activity-list {
-            background: white;
-            border-radius: 12px;
-            border: 1px solid var(--border);
-            overflow: hidden;
-        }
-
-        .activity-item {
-            padding: 1.5rem;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            gap: 1rem;
-        }
-
-        .activity-item:last-child {
-            border-bottom: none;
-        }
-
-        .activity-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: rgba(59, 130, 246, 0.1);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--primary);
-            flex-shrink: 0;
-        }
-
-        .activity-content {
-            flex: 1;
-        }
-
-        .activity-title {
-            font-weight: 600;
-            color: var(--dark);
-            margin-bottom: 0.25rem;
-        }
-
-        .activity-time {
-            font-size: 0.85rem;
-            color: var(--text-muted);
-        }
-
         .empty-state {
             text-align: center;
             padding: 3rem 2rem;
@@ -2323,7 +2308,7 @@
             <li><a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-3 6h14l-1 12H6L5 9Zm4 2v7h2v-7H9Zm4 0v7h2v-7h-2Z"/></svg> <span>Archivio</span></a></li>
             <!-- Jira: visibile solo se il flag settings (campo='Jira', valore1=true) è attivo. Gestita da js/jira.js -->
             <li id="navJira" style="display: none;"><a href="#"><i class="fab fa-jira"></i> <span>Jira</span></a></li>
-            <!-- Qlik: visibile solo se il flag settings (valore2='Qlik', valore1=true) è attivo per il
+            <!-- Qlik: visibile solo se il flag settings (campo='Qlik', valore1=true) è attivo per il
                  tenant_id/user_id del login. Gestita da js/Qlik_voucher.js (import voucher da Excel). -->
             <li id="navQlik" style="display: none;"><a href="#" id="navQlikLink"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19h18v2H1V3h2v16Zm2-3.4 4.2-4.2 3 3L18.6 8H16V6h6v6h-2V9.4l-7.8 7.8-3-3L6.4 17 5 15.6Z"/></svg> <span>Qlik</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
@@ -2609,9 +2594,6 @@
                          Gestito da js/integrazioni.js -->
                     <button class="btn btn-secondary" id="btnAggiornaIntegrazioni" type="button" style="display: none;">
                         <i class="fas fa-rotate"></i> Aggiorna Integrazioni
-                    </button>
-                    <button class="btn btn-primary">
-                        <i class="fas fa-plus"></i> Nuovo Progetto
                     </button>
                 </div>
             </div>
@@ -2919,55 +2901,6 @@
                 </div>
             </div>
 
-            <!-- RECENT ACTIVITY -->
-            <div>
-                <div class="section-title">
-                    <i class="fas fa-history" style="color: var(--primary);"></i>
-                    Attività recente
-                </div>
-
-                <div class="activity-list">
-                    <div class="activity-item">
-                        <div class="activity-icon">
-                            <i class="fas fa-file-alt"></i>
-                        </div>
-                        <div class="activity-content">
-                            <div class="activity-title">Piano generato per "Refactor Backend API"</div>
-                            <div class="activity-time">Oggi alle 14:32 • Fedrica</div>
-                        </div>
-                    </div>
-
-                    <div class="activity-item">
-                        <div class="activity-icon" style="background: rgba(16, 185, 129, 0.1); color: var(--secondary);">
-                            <i class="fas fa-check"></i>
-                        </div>
-                        <div class="activity-content">
-                            <div class="activity-title">6 task completati in "Mobile App Redesign"</div>
-                            <div class="activity-time">Ieri alle 16:45 • Team</div>
-                        </div>
-                    </div>
-
-                    <div class="activity-item">
-                        <div class="activity-icon" style="background: rgba(245, 158, 11, 0.1); color: var(--warning);">
-                            <i class="fas fa-exclamation"></i>
-                        </div>
-                        <div class="activity-content">
-                            <div class="activity-title">Nuovo rischio identificato: "Delay risorse"</div>
-                            <div class="activity-time">2 giorni fa • Yan ko</div>
-                        </div>
-                    </div>
-
-                    <div class="activity-item">
-                        <div class="activity-icon">
-                            <i class="fas fa-users"></i>
-                        </div>
-                        <div class="activity-content">
-                            <div class="activity-title">Marco aggiunto al progetto "Q4 Marketing Campaign"</div>
-                            <div class="activity-time">3 giorni fa • Admin</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
     </main>
 
@@ -3306,6 +3239,7 @@
         function renderKpiModalItem(item) {
             const client = item.client ? escapeHtml(item.client) : 'Cliente non specificato';
             const project = item.project ? escapeHtml(item.project) : 'Progetto non specificato';
+            const createdAt = renderKpiCreatedAt(item);
             const clickable = item.project_id != null && item.client_id != null;
             const attrs = clickable
                 ? ` class="kpi-modal-item kpi-modal-item-clickable" data-project-id="${escapeHtml(item.project_id)}" data-client-id="${escapeHtml(item.client_id)}" data-project-name="${escapeHtml(item.project || '')}" role="button" tabindex="0"`
@@ -3313,9 +3247,37 @@
             return `
                 <div${attrs}>
                     <div class="kpi-item-client">${client}</div>
+                    ${createdAt}
                     <div class="kpi-item-description">${project}</div>
                 </div>
             `;
+        }
+
+        // La data viene mostrata solo se created_at e' stato incluso esplicitamente
+        // nella colonna dettaglio di kpi_tab. Il confronto con "oggi" usa il giorno
+        // locale del browser, coerente con la data visualizzata all'utente.
+        function renderKpiCreatedAt(item) {
+            if (!Object.prototype.hasOwnProperty.call(item, 'created_at') || !item.created_at) return '';
+            const createdAt = new Date(item.created_at);
+            if (Number.isNaN(createdAt.getTime())) {
+                return `<div class="kpi-item-created-at">Creata il ${escapeHtml(item.created_at)}</div>`;
+            }
+
+            const now = new Date();
+            const isToday = createdAt.getFullYear() === now.getFullYear()
+                && createdAt.getMonth() === now.getMonth()
+                && createdAt.getDate() === now.getDate();
+            const formatted = new Intl.DateTimeFormat('it-IT', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            }).format(createdAt);
+            const todayBadge = isToday
+                ? '<span class="kpi-created-today-badge">Nuovo oggi</span>'
+                : '';
+            return `<div class="kpi-item-created-at"><span>Creata il ${escapeHtml(formatted)}</span>${todayBadge}</div>`;
         }
 
         // Apre il flyout di dettaglio del progetto cliccato nella finestra KPI, riusando la
@@ -4526,10 +4488,6 @@
             card.addEventListener('click', function() {
                 sendPrompt('Mostrami il dettaglio di un progetto: Gantt chart, rischi, action items, email recap');
             });
-        });
-
-        document.querySelector('.btn-primary')?.addEventListener('click', function() {
-            sendPrompt('Mostrami il flow per creare un nuovo progetto: upload file, connessioni, generazione automatica');
         });
 
         // === AGGIUNGI PULSANTE LOGOUT IN ALTO A DESTRA ===
@@ -9195,6 +9153,7 @@
                 try { loadSettingsArguments(); } catch (e) {}
                 // Integrazioni: il flag 'Jira' mostra/nasconde la voce nella sidebar.
                 try { window.ProjexaJira?.refreshNav(); } catch (e) {}
+                try { window.QlikVoucher?.refreshNav?.(); } catch (e) {}
                 // Dopo il salvataggio (valori e/o spostamento label) "Abilita modifica" torna spento.
                 clientDetailMode = 'view';
                 await openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);

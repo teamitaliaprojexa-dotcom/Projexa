@@ -11,8 +11,8 @@
 //   Il pulsante "Qlik" compare solo se esiste, per il tenant_id/user_id del
 //   login corrente, una riga in settings con campo = 'Qlik' e valore1 = true
 //   (stessa convenzione già usata per Jira, che usa campo='Jira'). La lettura
-//   passa dall'endpoint generico GET /api/data/settings, che isola già i
-//   risultati per tenant per i non amministratori.
+//   passa dall'endpoint dedicato GET /api/settings/feature-flag, che applica
+//   sempre tenant_id e user_id del token, anche durante l'impersonificazione.
 //
 // STEP 1 — Configurazione "Qlik voucher"
 //   All'avvio il modulo cerca la riga settings.valore2 = 'Qlik voucher' per
@@ -87,30 +87,25 @@
 
     // ==========================================================================
     // VISIBILITÀ DEL PULSANTE (settings.campo = 'Qlik', valore1 = true)
-    // Il filtro per query string fa un ILIKE '%Qlik%' sulla colonna campo, quindi
-    // può restituire anche righe non pertinenti (es. un campo custom "(*) Qlik xyz"):
-    // il confronto esatto viene sempre rifatto lato client dopo la risposta.
+    // L'endpoint dedicato applica sempre tenant_id e user_id del token attivo,
+    // senza il bypass amministratore previsto dall'endpoint generico /api/data.
     // ==========================================================================
     async function checkQlikVisibility() {
         const nav = document.getElementById('navQlik');
         if (!nav) return;
         try {
-            const res = await fetch(`${API_BASE}/data/settings?campo=${encodeURIComponent('Qlik')}`, {
+            const res = await fetch(`${API_BASE}/settings/feature-flag?campo=${encodeURIComponent('Qlik')}`, {
                 headers: authHeaders()
             });
             if (!res.ok) { nav.style.display = 'none'; return; }
-            const rows = await res.json();
-            const enabled = Array.isArray(rows) && rows.some((row) => {
-                // I campi custom hanno il prefisso "(*) ": lo togliamo prima del confronto.
-                const campo = String(row.campo == null ? '' : row.campo).trim().replace(/^\(\*\)\s*/, '');
-                const v1 = row.valore1;
-                return campo === 'Qlik' && (v1 === true || v1 === 'true' || v1 === 't' || v1 === 1);
-            });
-            nav.style.display = enabled ? '' : 'none';
+            const data = await res.json();
+            nav.style.display = data.enabled === true ? '' : 'none';
         } catch (e) {
             nav.style.display = 'none';
         }
     }
+
+    QlikVoucher.refreshNav = checkQlikVisibility;
 
     // ==========================================================================
     // STEP 1 — Configurazione "Qlik voucher": id del contenitore + righe figlie
