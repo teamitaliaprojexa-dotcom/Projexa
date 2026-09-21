@@ -3110,6 +3110,7 @@
 
         function logout() {
             if (confirm('Sei sicuro di voler effettuare il logout?')) {
+                window.ProjexaKeepAlive?.stop?.();
                 // Rimuovi TUTTE le credenziali, non solo i dati profilo.
                 localStorage.removeItem('user');
                 localStorage.removeItem('authToken');
@@ -10867,6 +10868,7 @@
             <div class="kpi-modal-body" id="kpiModalBody"></div>
         </div>
     </div>
+    <script src="js/render-keepalive.js"></script>
     <script src="js/privacy.js"></script>
     <script src="js/jira.js"></script>
     <script src="js/integrazioni.js"></script>

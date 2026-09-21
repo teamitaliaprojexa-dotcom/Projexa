@@ -94,6 +94,13 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Projexa API is running' });
 });
 
+// Heartbeat leggero del browser: mantiene attivo il servizio Render soltanto
+// mentre esiste una sessione autenticata. Non interroga il database e non
+// rinnova il token; un token assente o scaduto riceve 401/403 e il client si ferma.
+app.get('/api/session/heartbeat', requireAuth, (req, res) => {
+  res.status(204).end();
+});
+
 // API Routes
 app.use('/api/auth/login', loginRateLimit);
 app.use('/api/auth/register', registerRateLimit);
