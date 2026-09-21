@@ -5785,21 +5785,45 @@
             document.querySelectorAll('.sidebar, .settings-flyout, .settings-detail-flyout, .settings-flyout-inner, .settings-detail-flyout-inner')
                 .forEach(el => { el.style.height = h + 'px'; });
         }
-        // Adatta la scala dell'interfaccia (zoom) in base al campo settings tipo_valore=30
-        // con valore2='schermo' (valore3 = percentuale; 100 = normale, 70 = tutto al 70%).
+        // Adatta la scala dell'interfaccia (zoom) in base a
+        // Settings > Preferenze > Dimensioni (tipo_valore=30, valore2='schermo').
+        // Il dettaglio settings viene letto per primo perché applica lo stesso filtro
+        // tenant_id/user_id usato dal flyout: in questo modo anche un utente non admin
+        // (e l'utente attivo durante l'impersonificazione) riceve il proprio valore.
+        // L'endpoint storico screen-scale resta come fallback per compatibilità.
         async function applyScreenScale() {
             try {
-                const r = await fetch(`${API_URL}/settings/screen-scale`, { headers: getAuthHeaders() });
-                if (r.ok) {
-                    const d = await r.json();
-                    let pct = Number(d && d.value);
-                    if (!Number.isFinite(pct) || pct <= 0) pct = 100;
-                    // limiti di sicurezza per non rendere la UI inutilizzabile
-                    pct = Math.max(35, Math.min(pct, 150));
-                    currentUiZoom = pct / 100;
-                    document.body.style.zoom = currentUiZoom;
-                    adjustFixedHeightsForZoom();
+                let pct = NaN;
+
+                const detailsUrl = `${API_URL}/settings/details?argument=${encodeURIComponent('Preferenze')}`;
+                const detailsResponse = await fetch(detailsUrl, { headers: getAuthHeaders() });
+                if (detailsResponse.ok) {
+                    const rows = await detailsResponse.json();
+                    if (Array.isArray(rows)) {
+                        const dimensionRow = rows.find(row => {
+                            const campo = String(row && row.campo || '').trim().toLowerCase();
+                            const target = String(row && row.valore2 || '').trim().toLowerCase();
+                            return Number(row && row.tipo_valore) === 30 &&
+                                (campo === 'dimensioni' || target === 'schermo');
+                        });
+                        pct = Number(dimensionRow && dimensionRow.valore3);
+                    }
                 }
+
+                if (!Number.isFinite(pct) || pct <= 0) {
+                    const fallbackResponse = await fetch(`${API_URL}/settings/screen-scale`, { headers: getAuthHeaders() });
+                    if (fallbackResponse.ok) {
+                        const fallbackData = await fallbackResponse.json();
+                        pct = Number(fallbackData && fallbackData.value);
+                    }
+                }
+
+                if (!Number.isFinite(pct) || pct <= 0) pct = 100;
+                // limiti di sicurezza per non rendere la UI inutilizzabile
+                pct = Math.max(35, Math.min(pct, 150));
+                currentUiZoom = pct / 100;
+                document.body.style.zoom = currentUiZoom;
+                adjustFixedHeightsForZoom();
             } catch (e) { /* ignore */ }
         }
         // Operazione argomento settings in attesa della scelta ambito tenant: { op, name }.
