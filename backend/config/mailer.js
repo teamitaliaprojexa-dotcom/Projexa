@@ -56,3 +56,31 @@ export function buildConfirmEmail({ nome, confirmUrl }) {
   const text = `${saluto}\n\nIl team Projexa ti ringrazia per esserti iscritto.\nPer completare l'iscrizione e attivare la prova gratuita di 1 mese, apri questo link:\n${confirmUrl}\n\nSe non hai richiesto tu questa iscrizione, ignora questa email.`;
   return { html, text };
 }
+
+// Costruisce l'HTML dell'email di reimpostazione password ("Password dimenticata").
+// Il link porta a reset-password.html con un token a scadenza breve.
+export function buildResetPasswordEmail({ nome, resetUrl, validHours = 1 }) {
+  const saluto = nome ? `Ciao ${nome},` : 'Ciao,';
+  const durata = validHours === 1 ? '1 ora' : `${validHours} ore`;
+  const html = `
+  <div style="font-family:Arial,Helvetica,sans-serif; max-width:520px; margin:0 auto; color:#111827;">
+    <div style="text-align:center; padding:16px 0;">
+      <div style="font-size:22px; font-weight:700; color:#059669;">Projexa</div>
+    </div>
+    <div style="background:#ffffff; border:1px solid #E5E7EB; border-radius:12px; padding:24px;">
+      <p>${saluto}</p>
+      <p>Abbiamo ricevuto una richiesta di <strong>reimpostazione della password</strong> del tuo account Projexa.</p>
+      <p>Clicca sul pulsante qui sotto per scegliere una nuova password:</p>
+      <div style="text-align:center; margin:28px 0;">
+        <a href="${resetUrl}" style="background:#10B981; color:#ffffff; text-decoration:none; padding:12px 24px; border-radius:8px; font-weight:700; display:inline-block;">Imposta nuova password</a>
+      </div>
+      <p style="font-size:13px; color:#6B7280;">Se il pulsante non funziona, copia e incolla questo link nel browser:<br>
+      <a href="${resetUrl}" style="color:#059669; word-break:break-all;">${resetUrl}</a></p>
+      <p style="font-size:13px; color:#6B7280;">Il link è valido per <strong>${durata}</strong> e può essere usato una sola volta.</p>
+      <p style="font-size:13px; color:#6B7280;">Se non hai richiesto tu il cambio password, ignora questa email: la tua password attuale resta valida.</p>
+    </div>
+    <p style="text-align:center; font-size:12px; color:#9CA3AF; margin-top:16px;">© Projexa</p>
+  </div>`;
+  const text = `${saluto}\n\nAbbiamo ricevuto una richiesta di reimpostazione della password del tuo account Projexa.\nApri questo link per scegliere una nuova password:\n${resetUrl}\n\nIl link è valido per ${durata} e può essere usato una sola volta.\nSe non hai richiesto tu il cambio password, ignora questa email.`;
+  return { html, text };
+}

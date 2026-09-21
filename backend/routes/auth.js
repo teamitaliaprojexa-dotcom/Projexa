@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import db from '../config/database.js';
 import authDb from '../config/authDatabase.js';
 import JWT_SECRET from '../config/jwt.js';
-import { sendMail, buildConfirmEmail, isMailerConfigured } from '../config/mailer.js';
+import { sendMail, buildConfirmEmail, buildResetPasswordEmail, isMailerConfigured } from '../config/mailer.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -305,6 +305,204 @@ router.post('/confirm', async (req, res) => {
     res.json({ success: true, message: 'Iscrizione confermata! Prova gratuita di 1 mese attivata.' });
   } catch (e) {
     return res.status(400).json({ error: 'Link non valido o scaduto' });
+  }
+});
+
+// ==========================================
+// Modifica password (campo settings con tipo_valore = 40)
+// ==========================================
+
+// Rate-limit anti brute-force sulla password attuale: max 5 tentativi errati
+// per utente ogni 15 minuti. Il contatore si azzera al cambio riuscito.
+const changePwdAttempts = new Map(); // user_id -> { count, first }
+function tooManyPwdAttempts(userId) {
+  const rec = changePwdAttempts.get(userId);
+  if (!rec) return false;
+  if (Date.now() - rec.first > 15 * 60 * 1000) { changePwdAttempts.delete(userId); return false; }
+  return rec.count >= 5;
+}
+function registerPwdFailure(userId) {
+  const rec = changePwdAttempts.get(userId);
+  if (!rec || Date.now() - rec.first > 15 * 60 * 1000) changePwdAttempts.set(userId, { count: 1, first: Date.now() });
+  else rec.count += 1;
+}
+
+// Cambia la password dell'utente autenticato: verifica quella attuale e salva la nuova
+// come hash bcrypt su Projexa-Auth (users.password_hash). L'utente è sempre quello del
+// token: non è possibile cambiare la password di altri da questo endpoint.
+router.post('/change-password', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user?.user_id;
+    if (!userId) return res.status(401).json({ error: 'Autenticazione richiesta' });
+
+    const b = req.body || {};
+    const currentPassword = b.currentPassword || '';
+    const newPassword = b.newPassword || '';
+    const confirmPassword = b.confirmPassword != null ? b.confirmPassword : newPassword;
+
+    if (!currentPassword) return res.status(400).json({ error: 'Password attuale richiesta.' });
+    if (newPassword.length < 8) return res.status(400).json({ error: 'La nuova password deve avere almeno 8 caratteri.' });
+    if (newPassword !== confirmPassword) return res.status(400).json({ error: 'Le password non coincidono.' });
+    if (newPassword === currentPassword) return res.status(400).json({ error: 'La nuova password deve essere diversa da quella attuale.' });
+
+    if (tooManyPwdAttempts(userId)) {
+      return res.status(429).json({ error: 'Troppi tentativi. Riprova tra qualche minuto.' });
+    }
+
+    const r = await authDb.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Utente non trovato.' });
+
+    const match = await bcrypt.compare(currentPassword, r.rows[0].password_hash || '');
+    if (!match) {
+      registerPwdFailure(userId);
+      console.warn(`[CHANGE-PASSWORD] Password attuale errata per utente ${userId}`);
+      return res.status(401).json({ error: 'Password attuale non corretta.' });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await authDb.query(
+      'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+      [newHash, userId]
+    );
+    changePwdAttempts.delete(userId);
+    console.log(`[CHANGE-PASSWORD] Password aggiornata per utente ${userId}`);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ CHANGE-PASSWORD ERROR:', error.message);
+    res.status(500).json({ error: 'Errore durante il cambio password' });
+  }
+});
+
+// ==========================================
+// Password dimenticata / reimpostazione via email
+// ==========================================
+
+// Il token del link email è un JWT a scadenza breve che contiene anche una "firma"
+// dell'hash attuale: quando la password cambia, la firma non torna più e il link
+// diventa inutilizzabile (uso singolo, senza colonne aggiuntive sul DB).
+const RESET_TOKEN_HOURS = 1;
+function passwordHashSignature(passwordHash) {
+  return crypto.createHmac('sha256', JWT_SECRET).update(String(passwordHash || '')).digest('hex').slice(0, 32);
+}
+
+// Verifica il token del link: restituisce { uid, email, nome } o lancia un errore.
+async function verifyResetToken(token) {
+  const d = jwt.verify(token, JWT_SECRET); // lancia se scaduto/alterato
+  if (d.purpose !== 'password-reset') throw new Error('purpose');
+  const r = await authDb.query('SELECT id, email, password_hash FROM users WHERE id = $1', [d.uid]);
+  if (r.rows.length === 0) throw new Error('not-found');
+  if (passwordHashSignature(r.rows[0].password_hash) !== d.sig) throw new Error('used'); // password già cambiata
+  const p = await db.query('SELECT name, cognome FROM users WHERE id = $1', [d.uid]);
+  return { uid: d.uid, email: r.rows[0].email, nome: (p.rows[0] && p.rows[0].name) || '' };
+}
+
+// Rate-limit anti abuso sull'invio del link: max 5 richieste per IP ogni 60 minuti.
+const forgotAttempts = new Map(); // ip -> { count, first }
+function forgotRateLimited(ip) {
+  const now = Date.now(), windowMs = 60 * 60 * 1000, max = 5;
+  const rec = forgotAttempts.get(ip);
+  if (!rec || now - rec.first > windowMs) { forgotAttempts.set(ip, { count: 1, first: now }); return false; }
+  rec.count += 1;
+  return rec.count > max;
+}
+
+// Richiesta "Password dimenticata": invia all'indirizzo indicato un'email con il link
+// di reimpostazione. La risposta è sempre la stessa, anche se l'email non esiste,
+// per non rivelare quali indirizzi sono registrati.
+router.post('/forgot-password', async (req, res) => {
+  const email = ((req.body && req.body.email) || '').trim().toLowerCase();
+  try {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Email non valida.' });
+    }
+    if (forgotRateLimited(req.ip || 'unknown')) {
+      return res.status(429).json({ error: 'Troppe richieste. Riprova tra qualche minuto.' });
+    }
+
+    const r = await authDb.query('SELECT id, password_hash FROM users WHERE email = $1', [email]);
+    if (r.rows.length === 0) {
+      console.log(`[FORGOT-PASSWORD] Email non registrata: ${email}`);
+      return res.json({ success: true }); // risposta neutra
+    }
+    const user = r.rows[0];
+
+    const token = jwt.sign(
+      { uid: user.id, purpose: 'password-reset', sig: passwordHashSignature(user.password_hash) },
+      JWT_SECRET,
+      { expiresIn: `${RESET_TOKEN_HOURS}h` }
+    );
+    const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
+    const resetUrl = `${base}/reset-password.html?token=${encodeURIComponent(token)}`;
+    console.log(`[FORGOT-PASSWORD] Link di reimpostazione per ${email}: ${resetUrl}`); // utile in locale
+
+    const p = await db.query('SELECT name FROM users WHERE id = $1', [user.id]);
+    const nome = (p.rows[0] && p.rows[0].name) || '';
+
+    let emailSent = false;
+    try {
+      if (isMailerConfigured()) {
+        const { html, text } = buildResetPasswordEmail({ nome, resetUrl, validHours: RESET_TOKEN_HOURS });
+        await sendMail({ to: email, subject: 'Reimposta la password di Projexa', html, text });
+        emailSent = true;
+      }
+    } catch (mailErr) {
+      console.error('❌ FORGOT-PASSWORD MAIL ERROR:', mailErr.message);
+    }
+
+    res.json({ success: true, emailSent });
+  } catch (error) {
+    console.error('❌ FORGOT-PASSWORD ERROR:', error.message);
+    res.status(500).json({ error: 'Errore durante la richiesta' });
+  }
+});
+
+// Info per la pagina di reimpostazione (mostra l'email in sola lettura e valida il link).
+router.get('/reset-info', async (req, res) => {
+  try {
+    const info = await verifyResetToken((req.query.token || '').trim());
+    res.json({ email: info.email, nome: info.nome });
+  } catch (e) {
+    const msg = e.message === 'used'
+      ? 'Link già utilizzato: la password è stata cambiata. Richiedine uno nuovo.'
+      : 'Link non valido o scaduto.';
+    res.status(400).json({ error: msg });
+  }
+});
+
+// Imposta la nuova password a partire dal link ricevuto via email.
+router.post('/reset-password', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const token = (b.token || '').trim();
+    const newPassword = b.newPassword || '';
+    const confirmPassword = b.confirmPassword != null ? b.confirmPassword : newPassword;
+
+    if (newPassword.length < 8) return res.status(400).json({ error: 'La nuova password deve avere almeno 8 caratteri.' });
+    if (newPassword !== confirmPassword) return res.status(400).json({ error: 'Le password non coincidono.' });
+
+    let info;
+    try {
+      info = await verifyResetToken(token);
+    } catch (e) {
+      const msg = e.message === 'used'
+        ? 'Link già utilizzato: la password è stata cambiata. Richiedine uno nuovo.'
+        : 'Link non valido o scaduto.';
+      return res.status(400).json({ error: msg });
+    }
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await authDb.query(
+      'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+      [newHash, info.uid]
+    );
+    changePwdAttempts.delete(info.uid);
+    console.log(`[RESET-PASSWORD] Password reimpostata per utente ${info.uid}`);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ RESET-PASSWORD ERROR:', error.message);
+    res.status(500).json({ error: 'Errore durante la reimpostazione della password' });
   }
 });
 

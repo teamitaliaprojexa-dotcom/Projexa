@@ -2510,6 +2510,41 @@
         </div>
     </div>
 
+    <!-- Modale: Modifica password (campo tipo_valore=40). La nuova password viene
+         salvata come hash bcrypt su Projexa-Auth (users.password_hash). -->
+    <div id="changePasswordModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 660; display: none; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 420px; max-width: 92vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+            <div id="changePasswordUser" style="font-size: 0.8rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.25rem;"></div>
+            <h3 id="changePasswordTitle" style="margin: 0 0 1rem; color: var(--dark);">Modifica password</h3>
+            <div style="margin-bottom: 0.6rem;">
+                <label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Password attuale</label>
+                <input id="changePasswordCurrent" type="password" autocomplete="current-password" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">
+                <!-- Password dimenticata: invia all'email dell'utente un link per impostarne una nuova. -->
+                <div style="text-align:right; margin-top:0.25rem;">
+                    <button id="changePasswordForgot" type="button" onclick="sendForgotPasswordLink()" style="border:none; background:transparent; padding:0; font-size:0.78rem; color:var(--primary); text-decoration:underline; cursor:pointer;">Password dimenticata?</button>
+                </div>
+            </div>
+            <div style="margin-bottom: 0.6rem;">
+                <label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Nuova password</label>
+                <input id="changePasswordNew" type="password" autocomplete="new-password" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div style="margin-bottom: 0.6rem;">
+                <label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Conferma nuova password</label>
+                <input id="changePasswordConfirm" type="password" autocomplete="new-password" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <label style="display:flex; align-items:center; gap:0.4rem; font-size:0.8rem; color:var(--text-muted); margin-bottom:0.4rem;">
+                <input id="changePasswordShow" type="checkbox"> Mostra le password
+            </label>
+            <div style="font-size:0.78rem; color:var(--text-muted);">La nuova password deve avere almeno 8 caratteri.</div>
+            <div id="changePasswordError" style="display:none; font-size:0.8rem; color:#EF4444; margin-top:0.5rem;"></div>
+            <div id="changePasswordInfo" style="display:none; font-size:0.8rem; color:#065F46; background:#ECFDF5; border:1px solid #A7F3D0; border-radius:6px; padding:0.5rem 0.6rem; margin-top:0.5rem;"></div>
+            <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+                <button id="changePasswordSave" type="button" onclick="saveChangePassword()" style="flex:1; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva</button>
+                <button id="changePasswordCancel" type="button" onclick="closeChangePasswordModal()" style="flex:0 0 auto; padding:0.6rem 0.9rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modale: tipo campo (standard / custom) — solo per id_roles <= 20 -->
     <div id="clientKindModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: 90vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
@@ -8091,6 +8126,140 @@
             }
         }
 
+        // tipo_valore = 40: finestra di modifica della password dell'utente collegato.
+        // Richiede la password attuale; la nuova viene salvata come hash su Projexa-Auth.
+        function openChangePasswordModal(label) {
+            const modal = document.getElementById('changePasswordModal');
+            if (!modal) return;
+            const titleEl = document.getElementById('changePasswordTitle');
+            const userEl = document.getElementById('changePasswordUser');
+            const errEl = document.getElementById('changePasswordError');
+            const infoEl = document.getElementById('changePasswordInfo');
+            const showChk = document.getElementById('changePasswordShow');
+            const inputs = ['changePasswordCurrent', 'changePasswordNew', 'changePasswordConfirm'].map(id => document.getElementById(id));
+
+            if (titleEl) titleEl.textContent = label || 'Modifica password';
+            if (userEl) {
+                const claims = decodeJwtPayload();
+                const stored = (() => { try { return JSON.parse(localStorage.getItem('user') || '{}'); } catch (e) { return {}; } })();
+                // L'email serve anche al link "Password dimenticata?" per l'invio.
+                userEl.dataset.email = claims.email || stored.email || '';
+                userEl.textContent = userEl.dataset.email;
+            }
+            if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+            if (infoEl) { infoEl.style.display = 'none'; infoEl.textContent = ''; }
+            const forgotBtn = document.getElementById('changePasswordForgot');
+            if (forgotBtn) forgotBtn.disabled = false;
+            inputs.forEach(i => { if (i) { i.value = ''; i.type = 'password'; i.style.borderColor = ''; } });
+            if (showChk) {
+                showChk.checked = false;
+                showChk.onchange = () => inputs.forEach(i => { if (i) i.type = showChk.checked ? 'text' : 'password'; });
+            }
+            modal.style.display = 'flex';
+            if (inputs[0]) inputs[0].focus();
+        }
+
+        function closeChangePasswordModal() {
+            const modal = document.getElementById('changePasswordModal');
+            if (!modal) return;
+            // Non lasciare le password in chiaro nel DOM dopo la chiusura.
+            ['changePasswordCurrent', 'changePasswordNew', 'changePasswordConfirm'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) { el.value = ''; el.type = 'password'; }
+            });
+            modal.style.display = 'none';
+        }
+
+        // Salva la nuova password: il backend verifica quella attuale e scrive l'hash
+        // bcrypt su Projexa-Auth (users.password_hash) dell'utente autenticato.
+        async function saveChangePassword() {
+            const curEl = document.getElementById('changePasswordCurrent');
+            const newEl = document.getElementById('changePasswordNew');
+            const confEl = document.getElementById('changePasswordConfirm');
+            const errEl = document.getElementById('changePasswordError');
+            const infoEl = document.getElementById('changePasswordInfo');
+            const saveBtn = document.getElementById('changePasswordSave');
+            if (!curEl || !newEl || !confEl) return;
+            const showErr = (msg) => {
+                if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; }
+                else showNotification(msg, 'info');
+            };
+            if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+            if (infoEl) { infoEl.style.display = 'none'; infoEl.textContent = ''; }
+
+            const currentPassword = curEl.value;
+            const newPassword = newEl.value;
+            const confirmPassword = confEl.value;
+            if (!currentPassword) { showErr('Inserisci la password attuale'); curEl.focus(); return; }
+            if (newPassword.length < 8) { showErr('La nuova password deve avere almeno 8 caratteri'); newEl.focus(); return; }
+            if (newPassword !== confirmPassword) { showErr('Le password non coincidono'); confEl.focus(); return; }
+            if (newPassword === currentPassword) { showErr('La nuova password deve essere diversa da quella attuale'); newEl.focus(); return; }
+
+            if (saveBtn) saveBtn.disabled = true;
+            try {
+                const res = await fetch(`${API_URL}/auth/change-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ currentPassword, newPassword, confirmPassword })
+                });
+                if (res.ok) {
+                    closeChangePasswordModal();
+                    showNotification('Password aggiornata', 'success');
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showErr(err.error || `Errore nel salvataggio (${res.status})`);
+                }
+            } catch (e) {
+                showErr('Errore di connessione');
+            } finally {
+                if (saveBtn) saveBtn.disabled = false;
+            }
+        }
+
+        // "Password dimenticata?": chiede al backend di inviare all'email dell'utente
+        // un link (valido 1 ora, monouso) che apre reset-password.html, dove può
+        // impostare la nuova password senza conoscere quella attuale.
+        async function sendForgotPasswordLink() {
+            const errEl = document.getElementById('changePasswordError');
+            const infoEl = document.getElementById('changePasswordInfo');
+            const btn = document.getElementById('changePasswordForgot');
+            const userEl = document.getElementById('changePasswordUser');
+            const showErr = (msg) => {
+                if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; }
+                else showNotification(msg, 'info');
+            };
+            const showInfo = (msg) => {
+                if (infoEl) { infoEl.textContent = msg; infoEl.style.display = 'block'; }
+                else showNotification(msg, 'success');
+            };
+            if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+            if (infoEl) { infoEl.style.display = 'none'; infoEl.textContent = ''; }
+
+            const claims = decodeJwtPayload();
+            const stored = (() => { try { return JSON.parse(localStorage.getItem('user') || '{}'); } catch (e) { return {}; } })();
+            const email = (userEl && userEl.dataset.email) || claims.email || stored.email || '';
+            if (!email) { showErr('Email dell\'utente non disponibile: rifai il login e riprova.'); return; }
+
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch(`${API_URL}/auth/forgot-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ email })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok) {
+                    showInfo(`Ti abbiamo inviato un'email a ${email} con il link per impostare una nuova password. Il link è valido 1 ora.`);
+                } else {
+                    showErr(data.error || `Invio non riuscito (${res.status})`);
+                    if (btn) btn.disabled = false;
+                }
+            } catch (e) {
+                showErr('Errore di connessione');
+                if (btn) btn.disabled = false;
+            }
+        }
+
         // tipo_valore = 11: normalizza l'elenco configurato nel campo "colonna".
         // Sono supportati array JSON, nomi separati da virgola o da punto e virgola.
         // Un nome racchiuso tra parentesi — es. '(colonna_projexa),colonna_jira' — resta
@@ -8947,6 +9116,10 @@
                 // Routine custom: riga verde cliccabile. L'azione dipende da valore2
                 // (es. valore2='Nuovo_utente' apre il flyout di creazione utente).
                 return `<div class="settings-detail-link settings-detail-routine drag-handle" data-row-id="${id}" data-campo="${campo}" data-routine="${escapeHtml(row.valore2 == null ? '' : row.valore2)}"${drag}><span style="display:flex; align-items:center; min-width:0;">${earlyDeleteCheckbox}${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+            } else if (tipo === 40) {
+                // Modifica password: riga cliccabile che apre la finestra di cambio password.
+                // La nuova password viene salvata come hash su Projexa-Auth (users.password_hash).
+                return `<div class="settings-detail-link settings-detail-password drag-handle" data-row-id="${id}" data-campo="${campo}" data-pwd-label="${campo}"${drag}><span style="display:flex; align-items:center; min-width:0;">${earlyDeleteCheckbox}${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
             } else {
                 input = `<span style="color: var(--text-muted);">—</span>`;
             }
@@ -9944,6 +10117,9 @@
                 // tipo 50: routine custom — azione in base a valore2 (deve precedere il link tipo 20).
                 const routine = e.target.closest('.settings-detail-routine');
                 if (routine) { openRoutineFlyout(routine.dataset.routine); return; }
+                // tipo 40: modifica password dell'utente collegato (deve precedere il link tipo 20).
+                const pwd = e.target.closest('.settings-detail-password');
+                if (pwd) { openChangePasswordModal(pwd.dataset.pwdLabel); return; }
                 const link = e.target.closest('.settings-detail-link');
                 if (link) { openLinkedList(link.dataset.linkId, link.dataset.linkLabel, link); return; }
                 const parent = e.target.closest('.settings-detail-parent');

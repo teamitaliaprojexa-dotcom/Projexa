@@ -630,6 +630,10 @@
             } else if (p.get('registered') === '1') {
                 s.textContent = 'Registrazione completata! Ti abbiamo inviato un\'email: clicca su "Conferma iscrizione" per attivare la prova gratuita.';
                 s.style.display = 'block';
+            } else if (p.get('password_reset') === '1') {
+                // Ritorno da reset-password.html dopo "Password dimenticata".
+                s.textContent = 'Password aggiornata! Accedi con la nuova password.';
+                s.style.display = 'block';
             }
         });
     </script>
