@@ -3030,19 +3030,57 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
          AND ec.cod_commessa = ANY($3::text[])${activeProjectFilter}`,
       [req.user.tenant_id, req.user.user_id, codes]
     );
+    const normalizeCommessaTitle = (value) => String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLocaleLowerCase('it-IT')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
     const projectKey = (cod, titolo) => String(cod).trim() + '\u0001'
-      + String(titolo || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('it-IT');
+      + normalizeCommessaTitle(titolo);
     const projectsByCommessa = new Map();
+    const projectsByCode = new Map();
     for (const row of commesseResult.rows) {
       const key = projectKey(row.cod_commessa, row.titolo_commessa);
       const matches = projectsByCommessa.get(key) || [];
       if (!matches.some((project) => String(project.projectId) === String(row.project_id))) {
         matches.push({
           projectId: row.project_id,
-          clientId: row.client_id
+          clientId: row.client_id,
+          titolo: row.titolo_commessa
         });
       }
       projectsByCommessa.set(key, matches);
+
+      const codeKey = String(row.cod_commessa).trim();
+      const codeMatches = projectsByCode.get(codeKey) || [];
+      if (!codeMatches.some((project) => String(project.projectId) === String(row.project_id))) {
+        codeMatches.push({
+          projectId: row.project_id,
+          clientId: row.client_id,
+          titolo: row.titolo_commessa
+        });
+      }
+      projectsByCode.set(codeKey, codeMatches);
+    }
+
+    function resolveCommessaProjects(cod, titolo) {
+      const exactMatches = projectsByCommessa.get(projectKey(cod, titolo)) || [];
+      if (exactMatches.length > 0) return exactMatches;
+
+      const codeMatches = projectsByCode.get(String(cod).trim()) || [];
+      if (codeMatches.length <= 1) return codeMatches;
+
+      // Se nello storico lo stesso codice compare su più progetti, prova un
+      // confronto tollerante del titolo (maiuscole, accenti, trattini e spazi).
+      const wantedTitle = normalizeCommessaTitle(titolo);
+      const fuzzyMatches = codeMatches.filter((project) => {
+        const storedTitle = normalizeCommessaTitle(project.titolo);
+        return storedTitle && wantedTitle
+          && (storedTitle.includes(wantedTitle) || wantedTitle.includes(storedTitle));
+      });
+      return fuzzyMatches;
     }
 
     // 1b) Risolve l'id di proj_componenti per (project_id, email) leggendo le righe
@@ -3078,7 +3116,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
     try {
       await client.query('BEGIN');
       for (const g of groups) {
-        const projects = projectsByCommessa.get(projectKey(g.cod, g.titolo)) || [];
+        const projects = resolveCommessaProjects(g.cod, g.titolo);
         if (projects.length === 0) {
           notFoundCommessa.push(`${g.cod} — ${g.titolo}`);
           continue;
@@ -3112,10 +3150,10 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
           const updateParams = [g.ore, componentId, req.user.tenant_id, req.user.user_id];
           let scadenzaRepairClause = '';
           if (componentiCols.has('scadenza')) {
-            // Ripara anche le righe create da versioni precedenti dell'import,
-            // che potevano avere scadenza NULL e risultare invisibili in griglia.
+            // Ogni componente interessato dall'import Qlik viene mantenuto attivo,
+            // anche se esisteva già con una scadenza precedente o nulla.
             scadenzaRepairClause = `,
-                 scadenza = COALESCE(scadenza, DATE '2099-12-31')`;
+                 scadenza = DATE '2099-12-31'`;
           }
           // Cast esplicito a numeric: se time_spent_hh/time_spent_gg non sono già di
           // tipo numerico (es. varchar, o una precisione che non accetta il valore
