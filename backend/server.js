@@ -4268,18 +4268,35 @@ app.get('/api/roles', requireAuth, async (req, res) => {
 // tenant_id e user_id devono essere esclusivamente quelli presenti nel token attivo.
 app.get('/api/settings/feature-flag', requireAuth, async (req, res) => {
   try {
+    const argument = String((req.query && req.query.argument) || 'Integrazioni').trim();
     const campo = String((req.query && req.query.campo) || '').trim();
     if (!campo) return res.status(400).json({ error: 'campo richiesto' });
     const result = await db.query(
-      `SELECT COALESCE(BOOL_OR(valore1 IS TRUE), false) AS enabled
-       FROM settings
-       WHERE tenant_id = $1
-         AND user_id = $2
-         AND campo IN ($3, '(*) ' || $3)`,
-      [req.user.tenant_id, req.user.user_id, campo]
+      `SELECT EXISTS (
+         SELECT 1
+         FROM settings
+         WHERE tenant_id = $1
+           AND user_id = $2
+           AND LOWER(BTRIM(argument)) = LOWER(BTRIM($3))
+           AND LOWER(BTRIM(campo)) IN (
+             LOWER(BTRIM($4)),
+             LOWER(BTRIM('(*) ' || $4))
+           )
+           AND LOWER(BTRIM(COALESCE(valore1::text, ''))) IN ('true', 't', '1', 'yes', 'on')
+       ) AS enabled`,
+      [req.user.tenant_id, req.user.user_id, argument, campo]
     );
-    res.json({ enabled: result.rows[0]?.enabled === true });
+    const enabled = result.rows[0]?.enabled === true
+      || ['true', 't', '1'].includes(String(result.rows[0]?.enabled).toLowerCase());
+    res.json({ enabled });
   } catch (error) {
+    console.error('[SETTINGS FEATURE FLAG]', {
+      argument: req.query?.argument || 'Integrazioni',
+      campo: req.query?.campo,
+      tenant_id: req.user?.tenant_id,
+      user_id: req.user?.user_id,
+      error: error.message
+    });
     res.status(error.statusCode || 500).json({ error: error.message });
   }
 });

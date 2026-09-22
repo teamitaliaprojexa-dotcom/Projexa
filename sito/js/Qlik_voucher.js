@@ -94,12 +94,22 @@
         const nav = document.getElementById('navQlik');
         if (!nav) return;
         try {
-            const res = await fetch(`${API_BASE}/settings/feature-flag?campo=${encodeURIComponent('Qlik')}`, {
+            const params = new URLSearchParams({ argument: 'Integrazioni', campo: 'Qlik' });
+            const res = await fetch(`${API_BASE}/settings/feature-flag?${params.toString()}`, {
                 headers: authHeaders()
             });
             if (!res.ok) { nav.style.display = 'none'; return; }
             const data = await res.json();
-            nav.style.display = data.enabled === true ? '' : 'none';
+            // Accetta sia il contratto corrente { enabled: boolean } sia quello
+            // storico { value: boolean }; normalizza inoltre gli eventuali valori
+            // testuali restituiti da versioni precedenti del backend.
+            const rawValue = Object.prototype.hasOwnProperty.call(data, 'enabled')
+                ? data.enabled
+                : data.value;
+            const enabled = rawValue === true
+                || rawValue === 1
+                || ['true', 't', '1'].includes(String(rawValue).trim().toLowerCase());
+            nav.style.display = enabled ? '' : 'none';
         } catch (e) {
             nav.style.display = 'none';
         }

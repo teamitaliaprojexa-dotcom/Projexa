@@ -10945,7 +10945,9 @@
     <script src="js/privacy.js"></script>
     <script src="js/jira.js"></script>
     <script src="js/integrazioni.js"></script>
-    <script src="js/Qlik_voucher.js"></script>
+    <!-- Versione esplicita per evitare che il browser mantenga in cache una precedente
+         risposta 404 del modulo: senza questo script la voce Qlik resta display:none. -->
+    <script src="js/Qlik_voucher.js?v=20260922-2"></script>
 <script>
 (function () {
     const colorClasses = [
