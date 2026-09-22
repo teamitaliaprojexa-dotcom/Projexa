@@ -3037,7 +3037,10 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
       const key = projectKey(row.cod_commessa, row.titolo_commessa);
       const matches = projectsByCommessa.get(key) || [];
       if (!matches.some((project) => String(project.projectId) === String(row.project_id))) {
-        matches.push({ projectId: row.project_id, clientId: row.client_id });
+        matches.push({
+          projectId: row.project_id,
+          clientId: row.client_id
+        });
       }
       projectsByCommessa.set(key, matches);
     }
@@ -3085,7 +3088,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
           const componentKey = String(projectId) + '\u0001' + g.email;
           const componentId = componentIdByKey.get(componentKey);
           if (!componentId) {
-            const insertResult = await insertRowEncrypted(client, 'main', 'proj_componenti', {
+            const newComponentData = {
               tenant_id: req.user.tenant_id,
               user_id: req.user.user_id,
               client_id: project.clientId,
@@ -3094,23 +3097,36 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
               nominativo: g.nominativo || null,
               time_spent_hh: g.ore,
               time_spent_gg: g.ore / 8
-            });
+            };
+            // Le nuove righe Qlik restano attive e visibili nella griglia.
+            if (componentiCols.has('scadenza')) {
+              newComponentData.scadenza = '2099-12-31';
+            }
+            const insertResult = await insertRowEncrypted(client, 'main', 'proj_componenti', newComponentData);
             const newComponent = insertResult.rows[0];
             inserted += insertResult.rowCount;
             if (newComponent?.id) componentIdByKey.set(componentKey, newComponent.id);
             continue;
           }
           const updatedAtClause = hasUpdatedAt ? ', updated_at = CURRENT_TIMESTAMP' : '';
+          const updateParams = [g.ore, componentId, req.user.tenant_id, req.user.user_id];
+          let scadenzaRepairClause = '';
+          if (componentiCols.has('scadenza')) {
+            // Ripara anche le righe create da versioni precedenti dell'import,
+            // che potevano avere scadenza NULL e risultare invisibili in griglia.
+            scadenzaRepairClause = `,
+                 scadenza = COALESCE(scadenza, DATE '2099-12-31')`;
+          }
           // Cast esplicito a numeric: se time_spent_hh/time_spent_gg non sono già di
           // tipo numerico (es. varchar, o una precisione che non accetta il valore
           // grezzo) Postgres rifiuta l'operazione con un errore esplicito.
           const result = await client.query(
             `UPDATE proj_componenti
              SET time_spent_hh = $1::numeric,
-                 time_spent_gg = ($1::numeric) / 8.0${updatedAtClause}
+                 time_spent_gg = ($1::numeric) / 8.0${scadenzaRepairClause}${updatedAtClause}
              WHERE id = $2 AND tenant_id = $3 AND user_id = $4
              RETURNING id`,
-            [g.ore, componentId, req.user.tenant_id, req.user.user_id]
+            updateParams
           );
           if (result.rowCount > 0) updated += result.rowCount;
           else notFoundComponente.push({ codiceCommessa: g.cod, email: g.email });
