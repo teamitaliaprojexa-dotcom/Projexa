@@ -3935,7 +3935,8 @@ app.get('/api/projects/search', requireAuth, async (req, res) => {
     // valore2 di projects/clients può essere cifrato a riposo: il LIKE viene quindi
     // applicato dopo la lettura, sui valori già decifrati dal pool.
     const result = await db.query(
-      `SELECT p.id, p.valore2 AS name, p.client_id, c.valore2 AS client_name
+      `SELECT p.id, p.valore2 AS name, p.client_id, c.valore2 AS client_name,
+              (p.scadenza IS NOT NULL AND p.scadenza < CURRENT_DATE) AS is_closed
        FROM projects p
        JOIN clients c
          ON c.id = p.client_id
@@ -3946,8 +3947,7 @@ app.get('/api/projects/search', requireAuth, async (req, res) => {
          AND p.campo = 'Progetto'
          AND p.tenant_id = $1
          AND p.user_id = $2
-         AND p.valore2 IS NOT NULL
-         AND p.scadenza > CURRENT_DATE${clientFilter}
+         AND p.valore2 IS NOT NULL${clientFilter}
        ORDER BY c.valore2, p.valore2`,
       params
     );
@@ -5170,6 +5170,58 @@ app.post('/api/projects/close', requireAuth, async (req, res) => {
   }
 });
 
+// Riapre un progetto chiuso impostando al 31/12/2099 la scadenza della riga
+// identita e di tutte le righe EAV discendenti, a qualunque livello di argument.
+// La CTE ricorsiva mantiene l'operazione limitata al tenant, all'utente e al cliente
+// del progetto autenticato; UNION evita cicli in caso di dati gerarchici anomali.
+app.post('/api/projects/reopen', requireAuth, async (req, res) => {
+  const projectId = String((req.body && req.body.projectId) || '').trim();
+  const clientId = String((req.body && req.body.clientId) || '').trim();
+  if (!projectId) return res.status(400).json({ error: 'projectId richiesto' });
+  if (!clientId) return res.status(400).json({ error: 'clientId richiesto' });
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      `WITH RECURSIVE project_tree(id) AS (
+         SELECT id
+         FROM projects
+         WHERE id = $1
+           AND tenant_id = $2
+           AND user_id = $3
+           AND client_id = $4
+           AND argument = 'Progetto'
+           AND campo = 'Progetto'
+           AND scadenza < CURRENT_DATE
+         UNION
+         SELECT child.id
+         FROM projects child
+         JOIN project_tree parent ON child.argument = parent.id::text
+         WHERE child.tenant_id = $2
+           AND child.user_id = $3
+           AND child.client_id = $4
+       )
+       UPDATE projects p
+       SET scadenza = DATE '2099-12-31'
+       WHERE p.id IN (SELECT id FROM project_tree)
+       RETURNING p.id`,
+      [projectId, req.user.tenant_id, req.user.user_id, clientId]
+    );
+    if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Progetto non trovato o non autorizzato' });
+    }
+    await client.query('COMMIT');
+    res.json({ updated: result.rowCount, scadenza: '2099-12-31' });
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch (rollbackError) { /* ignore */ }
+    res.status(error.statusCode || 500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 // tipo_valore = 20: elenco valori da una tabella esterna. Il campo (fieldId) contiene
 // tabella (clients.tabella) e colonna (clients.colonna). Restituisce { id, value } per
 // ogni riga, filtrando per tenant_id, user_id e id_cliente (se presenti nella tabella).
@@ -5508,11 +5560,17 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
       if (projClientId) { params.push(projClientId); projClause = ` AND client_id = $${params.length}`; clientContextId = projClientId; }
       projectContextId = argument;
     }
+    // Un progetto chiuso puo essere consultato integralmente in sola lettura quando
+    // il frontend richiede includeExpired=1. Gli stessi filtri di ownership restano
+    // obbligatori, quindi l'opzione non amplia il perimetro tenant/utente/cliente.
+    const includeExpired = table === 'projects'
+      && ['1', 'true'].includes(String(req.query && req.query.includeExpired).toLowerCase());
+    const expiryClause = includeExpired ? '' : 'AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)';
     const result = await db.query(
       `SELECT * FROM "${table}"
        WHERE argument = $1 AND tenant_id = $2 AND user_id = $3
          AND (id_roles IS NULL OR id_roles >= $4)
-         AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)  -- nascondi i campi scaduti
+         ${expiryClause}
          ${projClause}
        ORDER BY ordinamento NULLS LAST, campo`,
       params

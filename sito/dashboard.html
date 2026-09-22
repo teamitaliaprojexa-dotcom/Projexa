@@ -2383,6 +2383,11 @@
                     <div class="settings-flyout-title" id="settingsDetailTitle" style="margin-bottom: 0;">Dettaglio</div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 0.5rem; flex: 0 0 auto;">
+                    <button id="reopenProjectBtn" type="button" style="display: none; flex: 0 0 auto; padding: 0.35rem 0.75rem; background: var(--secondary); color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">Riapri progetto</button>
+                    <label id="showAllProjectFieldsWrap" style="display: none; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">
+                        <span>Mostra tutti i campi</span>
+                        <span class="toggle-switch"><input type="checkbox" id="showAllProjectFieldsToggle"><span class="toggle-slider"></span></span>
+                    </label>
                     <button id="closeProjectBtn" type="button" style="display: none; flex: 0 0 auto; padding: 0.35rem 0.75rem; background: var(--warning); color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">Chiudi Progetto</button>
                     <label id="clientEditToggleWrap" style="display: none; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">
                         <span>Abilita modifica</span>
@@ -3754,8 +3759,9 @@
                     <button type="button" class="project-search-item" role="option"
                             data-project-id="${escapeHtml(project.id)}"
                             data-project-name="${escapeHtml(project.name)}"
-                            data-client-id="${escapeHtml(project.client_id)}">
-                        ${escapeHtml(project.client_name || 'Cliente')} - ${escapeHtml(project.name || 'Progetto')}
+                            data-client-id="${escapeHtml(project.client_id)}"
+                            data-project-closed="${project.is_closed ? 'true' : 'false'}">
+                        ${escapeHtml(project.client_name || 'Cliente')} - ${escapeHtml(project.name || 'Progetto')}${project.is_closed ? ' <span style="color:#B45309; font-size:0.78rem; font-weight:600;">(chiuso)</span>' : ''}
                     </button>`).join('');
 
                 results.querySelectorAll('.project-search-item').forEach(item => {
@@ -3763,13 +3769,14 @@
                         const clientId = item.dataset.clientId;
                         const projectId = item.dataset.projectId;
                         const projectName = item.dataset.projectName;
+                        const projectClosed = item.dataset.projectClosed === 'true';
                         detailNavStack = [];
                         currentView = null;
                         document.querySelectorAll('#projectClientsList li[data-client-id]').forEach(li => {
                             li.classList.toggle('active-client', li.dataset.clientId === clientId);
                         });
                         closeProjectSearchResults();
-                        openProjectDetail(projectId, projectName, clientId);
+                        openProjectDetail(projectId, projectName, clientId, projectClosed);
                     });
                 });
             } catch (error) {
@@ -5533,6 +5540,8 @@
         // ===== PROGETTI CLIENTI (sidebar "Progetti clienti") =====
         let projectClientId = null;      // client_id del progetto attualmente aperto
         let projectDetailActive = false; // true quando il flyout progetti è aperto (persistente)
+        let currentProjectClosed = false; // progetto aperto con scadenza precedente a oggi
+        let currentProjectShowAllFields = false; // include le righe scadute, sempre in sola lettura
         let detailMaxCols = 5;           // tutti i flyout di dettaglio usano il layout a 5 colonne
         // Valore corrente del campo booleano "Gestione a HH" del progetto aperto (valore1).
         // null = non presente/non applicabile. true -> nascondi i campi "_gg" (e nelle
@@ -5649,9 +5658,11 @@
         }
 
         // Livello 3: dettaglio del progetto (campi EAV, 5 colonne). Riusa openDetailFlyout.
-        function openProjectDetail(projectId, name, clientId) {
+        function openProjectDetail(projectId, name, clientId, isClosed = false) {
             if (currentView) detailNavStack.push(currentView);
             projectClientId = clientId;
+            currentProjectClosed = !!isClosed;
+            currentProjectShowAllFields = false;
             detailMaxCols = 5;
             detailReorderMode = false;     // apre in vista (non riordino)
             clientDetailMode = 'view';     // "Abilita modifica" sempre spento all'apertura:
@@ -5973,7 +5984,9 @@
             if (!content || !parentFormState) return;
 
             title.textContent = parentFormState.label || 'Dettaglio';
-            if (toggleWrap) toggleWrap.style.display = 'inline-flex';
+            const closedProjectReadOnly = parentFormState.source === 'projects' && currentProjectClosed;
+            if (closedProjectReadOnly) parentFormState.edit = false;
+            if (toggleWrap) toggleWrap.style.display = closedProjectReadOnly ? 'none' : 'inline-flex';
             if (toggle) toggle.checked = !!parentFormState.edit;
             const action = parentFormState.action || 'values';
             if (save) {
@@ -5990,7 +6003,9 @@
             try {
                 const clientQs = parentFormState.source === 'projects' && projectClientId
                     ? `&clientId=${encodeURIComponent(projectClientId)}` : '';
-                const response = await fetch(`${API_URL}/${parentFormState.source}/details?argument=${encodeURIComponent(parentFormState.argument)}${clientQs}`, {
+                const expiredQs = parentFormState.source === 'projects' && currentProjectClosed && currentProjectShowAllFields
+                    ? '&includeExpired=1' : '';
+                const response = await fetch(`${API_URL}/${parentFormState.source}/details?argument=${encodeURIComponent(parentFormState.argument)}${clientQs}${expiredQs}`, {
                     headers: getAuthHeaders()
                 });
                 if (!response.ok) throw new Error('Errore nel caricamento');
@@ -6496,6 +6511,8 @@
             document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar', 'contacts-wide');
             projectDetailActive = false;
             projectClientId = null;
+            currentProjectClosed = false;
+            currentProjectShowAllFields = false;
             currentProjectManageByHoursValue = null;
             detailMaxCols = 5;
             const detailCloseBtn = document.getElementById('detailCloseBtn');
@@ -6519,6 +6536,7 @@
         function hideDetailManagement() {
             setDetailColumns(1); // le viste collegate sono sempre a colonna singola
             ['clientEditToggleWrap', 'clientEditButtons', 'clientNewFieldForm',
+             'closeProjectBtn', 'reopenProjectBtn', 'showAllProjectFieldsWrap',
              'clientDeleteBar', 'clientRenameBar', 'settingsDetailSaveBar'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.style.display = 'none';
@@ -7796,7 +7814,9 @@
 
             try {
                 const clientQs = (source === 'projects' && projectClientId) ? `&clientId=${encodeURIComponent(projectClientId)}` : '';
-                const res = await fetch(`${API_URL}/${source}/details?argument=${encodeURIComponent(argument)}${clientQs}`, { headers: getAuthHeaders() });
+                const expiredQs = source === 'projects' && currentProjectClosed && currentProjectShowAllFields
+                    ? '&includeExpired=1' : '';
+                const res = await fetch(`${API_URL}/${source}/details?argument=${encodeURIComponent(argument)}${clientQs}${expiredQs}`, { headers: getAuthHeaders() });
                 if (!res.ok) {
                     listEl.innerHTML = '<div style="color: var(--text-muted);">Errore nel caricamento</div>';
                     return;
@@ -7982,8 +8002,13 @@
         // abilita/disabilita i valori, mostra/nasconde toggle, pulsanti e barre.
         // Vale sia per Clienti che per Impostazioni.
         function applyDetailMode() {
-            const mode = clientDetailMode;
+            let mode = clientDetailMode;
             const listEl = document.getElementById('settingsDetailList');
+            const closedProject = currentDetailSource === 'projects' && currentProjectClosed;
+            if (closedProject) {
+                clientDetailMode = 'view';
+                mode = 'view';
+            }
 
             // Il logo è sempre visibile; testo e pulsante di caricamento compaiono
             // soltanto quando "Abilita modifica" è attivo.
@@ -7992,25 +8017,32 @@
 
             // Valori modificabili solo in 'edit'
             if (listEl) {
-                const disabled = (mode !== 'edit');
+                const disabled = closedProject || (mode !== 'edit');
                 listEl.querySelectorAll('[data-setting-id]').forEach(inp => { inp.disabled = disabled; });
             }
 
             // Toggle "Abilita modifica"
             const toggleWrap = document.getElementById('clientEditToggleWrap');
-            if (toggleWrap) toggleWrap.style.display = 'inline-flex';
+            if (toggleWrap) toggleWrap.style.display = closedProject ? 'none' : 'inline-flex';
             const toggle = document.getElementById('clientEditToggle');
             if (toggle) toggle.checked = (mode !== 'view');
 
             // "Chiudi Progetto": solo nel dettaglio progetto, e solo con modifica abilitata.
             const closeProjectBtn = document.getElementById('closeProjectBtn');
             if (closeProjectBtn) {
-                closeProjectBtn.style.display = (currentDetailSource === 'projects' && mode !== 'view') ? 'inline-flex' : 'none';
+                closeProjectBtn.style.display = (currentDetailSource === 'projects' && !closedProject && mode !== 'view') ? 'inline-flex' : 'none';
             }
+
+            const reopenProjectBtn = document.getElementById('reopenProjectBtn');
+            if (reopenProjectBtn) reopenProjectBtn.style.display = closedProject ? 'inline-flex' : 'none';
+            const showAllWrap = document.getElementById('showAllProjectFieldsWrap');
+            if (showAllWrap) showAllWrap.style.display = closedProject ? 'inline-flex' : 'none';
+            const showAllToggle = document.getElementById('showAllProjectFieldsToggle');
+            if (showAllToggle) showAllToggle.checked = closedProject && currentProjectShowAllFields;
 
             // Pulsanti +/Elimina/Rinomina: visibili con modifica abilitata
             const editButtons = document.getElementById('clientEditButtons');
-            if (editButtons) editButtons.style.display = (mode !== 'view') ? 'flex' : 'none';
+            if (editButtons) editButtons.style.display = (!closedProject && mode !== 'view') ? 'flex' : 'none';
 
             // Fuori dalla modalità 'edit' il riordino non ha senso: azzeralo.
             if (mode !== 'edit') detailReorderMode = false;
@@ -10069,6 +10101,8 @@
                     projectDetailActive = false;
                     detailMaxCols = 5;
                     projectClientId = null;
+                    currentProjectClosed = false;
+                    currentProjectShowAllFields = false;
                     currentProjectManageByHoursValue = null;
                     document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar');
                     document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open', 'flyout-active');
@@ -10078,6 +10112,45 @@
                     showNotification('Errore di connessione', 'info');
                 } finally {
                     closeProjectBtn.disabled = false;
+                }
+            });
+
+            // Il toggle consulta anche le righe scadute senza riaprire il progetto e
+            // senza rendere editabile alcun controllo.
+            const showAllProjectFieldsToggle = document.getElementById('showAllProjectFieldsToggle');
+            if (showAllProjectFieldsToggle) showAllProjectFieldsToggle.addEventListener('change', () => {
+                if (currentDetailSource !== 'projects' || !currentProjectClosed) return;
+                currentProjectShowAllFields = showAllProjectFieldsToggle.checked;
+                clientDetailMode = 'view';
+                rerender();
+            });
+
+            const reopenProjectBtn = document.getElementById('reopenProjectBtn');
+            if (reopenProjectBtn) reopenProjectBtn.addEventListener('click', async () => {
+                if (currentDetailSource !== 'projects' || !currentDetailArgument || !currentProjectClosed) return;
+                if (!confirm('Confermi la riapertura del progetto?')) return;
+                reopenProjectBtn.disabled = true;
+                try {
+                    const response = await fetch(`${API_URL}/projects/reopen`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ projectId: currentDetailArgument, clientId: projectClientId })
+                    });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        showNotification('Errore: ' + (data.error || response.status), 'info');
+                        return;
+                    }
+                    currentProjectClosed = false;
+                    currentProjectShowAllFields = false;
+                    clientDetailMode = 'view';
+                    showNotification(`Progetto riaperto (${data.updated || 0} righe aggiornate)`, 'success');
+                    refreshProjectSearch();
+                    rerender();
+                } catch (e) {
+                    showNotification('Errore di connessione', 'info');
+                } finally {
+                    reopenProjectBtn.disabled = false;
                 }
             });
 
