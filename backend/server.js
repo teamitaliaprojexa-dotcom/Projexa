@@ -2955,6 +2955,7 @@ app.post('/api/data/import/rollback', requireAuth, async (req, res) => {
 app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
   try {
     const groupsIn = Array.isArray(req.body?.groups) ? req.body.groups : [];
+    const scope = req.body?.scope === 'history' ? 'history' : 'active';
     if (groupsIn.length === 0) {
       return res.status(400).json({ error: 'Nessun dato da importare' });
     }
@@ -2966,13 +2967,15 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
     const groups = [];
     for (const g of groupsIn) {
       const cod = String((g && g.codiceCommessa) || '').trim();
+      const titolo = String((g && g.titoloCommessa) || '').trim();
       const email = String((g && g.email) || '').trim().toLowerCase();
+      const nominativo = String((g && g.nominativo) || '').trim();
       const ore = Number(g && g.oreTotali);
-      if (!cod || !email || !Number.isFinite(ore)) continue;
-      groups.push({ cod, email, ore });
+      if (!cod || !titolo || !email || !Number.isFinite(ore)) continue;
+      groups.push({ cod, titolo, email, nominativo, ore });
     }
     if (groups.length === 0) {
-      return res.status(400).json({ error: 'Nessuna riga valida da importare (Codice Commessa / Email / Ore mancanti)' });
+      return res.status(400).json({ error: 'Nessuna riga valida da importare (Codice Commessa / Titolo Commessa / Email / Ore mancanti)' });
     }
 
     // Verifica la struttura minima delle due tabelle coinvolte, con un errore
@@ -2994,26 +2997,60 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
     if (componentiCols.size === 0) {
       return res.status(400).json({ error: 'Tabella proj_componenti non trovata' });
     }
-    if (!['tenant_id', 'user_id', 'email', 'project_id', 'time_spent_hh', 'time_spent_gg'].every((c) => componentiCols.has(c))) {
-      return res.status(400).json({ error: 'La tabella proj_componenti deve contenere email, project_id, time_spent_hh e time_spent_gg' });
+    if (!['tenant_id', 'user_id', 'client_id', 'email', 'nominativo', 'project_id', 'time_spent_hh', 'time_spent_gg'].every((c) => componentiCols.has(c))) {
+      return res.status(400).json({ error: 'La tabella proj_componenti deve contenere tenant_id, user_id, client_id, project_id, email, nominativo, time_spent_hh e time_spent_gg' });
     }
     const hasUpdatedAt = componentiCols.has('updated_at');
 
     // 1) Risolve tutti i codici commessa coinvolti in un'unica query.
     const codes = [...new Set(groups.map((g) => g.cod))];
+    // Ambito richiesto dall'utente:
+    // - active: considera esclusivamente i progetti la cui riga identita ha
+    //   scadenza esattamente al 31/12/2099;
+    // - history: nessun filtro sulla scadenza del progetto.
+    // Il controllo e' lato server per evitare che un payload alterato possa
+    // aggiornare involontariamente lo storico.
+    const activeProjectFilter = scope === 'active'
+      ? ` AND p.scadenza = DATE '2099-12-31'`
+      : '';
+    const commessaTitleExpression = commesseCols.has('titolo_commessa')
+      ? 'COALESCE(ec.titolo_commessa, p.valore2)'
+      : 'p.valore2';
     const commesseResult = await db.query(
-      `SELECT cod_commessa, project_id FROM ele_commesse
-       WHERE tenant_id = $1 AND user_id = $2 AND cod_commessa = ANY($3::text[])`,
+      `SELECT ec.cod_commessa, ec.project_id, p.client_id,
+              ${commessaTitleExpression} AS titolo_commessa
+       FROM ele_commesse ec
+       JOIN projects p
+         ON p.id::text = ec.project_id::text
+        AND p.tenant_id = ec.tenant_id
+        AND p.user_id = ec.user_id
+        AND p.argument = 'Progetto'
+        AND p.campo = 'Progetto'
+       WHERE ec.tenant_id = $1 AND ec.user_id = $2
+         AND ec.cod_commessa = ANY($3::text[])${activeProjectFilter}`,
       [req.user.tenant_id, req.user.user_id, codes]
     );
-    const projectByCode = new Map(commesseResult.rows.map((r) => [String(r.cod_commessa), r.project_id]));
+    const projectKey = (cod, titolo) => String(cod).trim() + '\u0001'
+      + String(titolo || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('it-IT');
+    const projectsByCommessa = new Map();
+    for (const row of commesseResult.rows) {
+      const key = projectKey(row.cod_commessa, row.titolo_commessa);
+      const matches = projectsByCommessa.get(key) || [];
+      if (!matches.some((project) => String(project.projectId) === String(row.project_id))) {
+        matches.push({ projectId: row.project_id, clientId: row.client_id });
+      }
+      projectsByCommessa.set(key, matches);
+    }
 
     // 1b) Risolve l'id di proj_componenti per (project_id, email) leggendo le righe
     // (così passano dal pool che decifra in lettura) e confrontando l'email in
     // JavaScript, MAI in una WHERE SQL: se la colonna è cifrata a riposo, un confronto
     // diretto in SQL tra il valore in chiaro del file e il ciphertext in colonna non
     // potrà mai corrispondere. L'aggiornamento successivo avviene sempre per id.
-    const projectIds = [...new Set([...projectByCode.values()].filter(Boolean).map(String))];
+    const projectIds = [...new Set(
+      [...projectsByCommessa.values()].flatMap((matches) => matches)
+        .map((p) => p.projectId).filter(Boolean).map(String)
+    )];
     const componentIdByKey = new Map(); // "projectId\u0001email" -> id
     if (projectIds.length) {
       const componentiResult = await db.query(
@@ -3030,6 +3067,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
     // 2) Aggiorna, per ciascun gruppo risolto, la riga proj_componenti corrispondente
     // (per id, mai per email in WHERE: vedi nota sulla cifratura sopra).
     let updated = 0;
+    let inserted = 0;
     let workerUpdated = 0;
     const notFoundCommessa = [];
     const notFoundComponente = [];
@@ -3037,24 +3075,36 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
     try {
       await client.query('BEGIN');
       for (const g of groups) {
-        const projectId = projectByCode.get(g.cod);
-        if (!projectId) {
-          notFoundCommessa.push(g.cod);
+        const projects = projectsByCommessa.get(projectKey(g.cod, g.titolo)) || [];
+        if (projects.length === 0) {
+          notFoundCommessa.push(`${g.cod} — ${g.titolo}`);
           continue;
         }
-        const componentId = componentIdByKey.get(String(projectId) + '\u0001' + g.email);
-        if (!componentId) {
-          notFoundComponente.push({ codiceCommessa: g.cod, email: g.email });
-          continue;
-        }
-        const updatedAtClause = hasUpdatedAt ? ', updated_at = CURRENT_TIMESTAMP' : '';
-        // Cast esplicito a numeric: se time_spent_hh/time_spent_gg non sono già di
-        // tipo numerico (es. varchar, o una precisione che non accetta il valore
-        // grezzo) Postgres rifiuta l'operazione con un errore di tipo/operatore,
-        // che senza il cast si presentava come 500 generico all'importazione.
-        let result;
-        try {
-          result = await client.query(
+        for (const project of projects) {
+          const projectId = project.projectId;
+          const componentKey = String(projectId) + '\u0001' + g.email;
+          const componentId = componentIdByKey.get(componentKey);
+          if (!componentId) {
+            const insertResult = await insertRowEncrypted(client, 'main', 'proj_componenti', {
+              tenant_id: req.user.tenant_id,
+              user_id: req.user.user_id,
+              client_id: project.clientId,
+              project_id: projectId,
+              email: g.email,
+              nominativo: g.nominativo || null,
+              time_spent_hh: g.ore,
+              time_spent_gg: g.ore / 8
+            });
+            const newComponent = insertResult.rows[0];
+            inserted += insertResult.rowCount;
+            if (newComponent?.id) componentIdByKey.set(componentKey, newComponent.id);
+            continue;
+          }
+          const updatedAtClause = hasUpdatedAt ? ', updated_at = CURRENT_TIMESTAMP' : '';
+          // Cast esplicito a numeric: se time_spent_hh/time_spent_gg non sono già di
+          // tipo numerico (es. varchar, o una precisione che non accetta il valore
+          // grezzo) Postgres rifiuta l'operazione con un errore esplicito.
+          const result = await client.query(
             `UPDATE proj_componenti
              SET time_spent_hh = $1::numeric,
                  time_spent_gg = ($1::numeric) / 8.0${updatedAtClause}
@@ -3062,16 +3112,9 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
              RETURNING id`,
             [g.ore, componentId, req.user.tenant_id, req.user.user_id]
           );
-        } catch (rowErr) {
-          // Non interrompe l'intera importazione per una singola riga con dati
-          // incompatibili (es. valore fuori dalla precisione della colonna):
-          // la si segnala come "non trovata/non aggiornata" e si prosegue.
-          console.error('[QLIK VOUCHER IMPORT] riga non aggiornata', g.cod, g.email, rowErr.message);
-          notFoundComponente.push({ codiceCommessa: g.cod, email: g.email, error: rowErr.message });
-          continue;
+          if (result.rowCount > 0) updated += result.rowCount;
+          else notFoundComponente.push({ codiceCommessa: g.cod, email: g.email });
         }
-        if (result.rowCount > 0) updated += result.rowCount;
-        else notFoundComponente.push({ codiceCommessa: g.cod, email: g.email });
       }
 
       // 3) Propagazione a proj_worker: per ciascun progetto toccato dall'import,
@@ -3122,8 +3165,10 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
 
     res.json({
       updated,
+      inserted,
       workerUpdated,
       totalGroups: groups.length,
+      scope,
       notFoundCommessa: [...new Set(notFoundCommessa)],
       notFoundComponente
     });

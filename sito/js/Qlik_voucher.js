@@ -23,17 +23,20 @@
 //   configurazione non è (ancora) presente.
 //
 // STEP 2 — Importazione del file Excel
-//   1) Click su "Qlik" -> selezione di un file .xlsx dal PC.
+//   1) Click su "Qlik" -> scelta dell'ambito (solo progetti attivi oppure
+//      tutto lo storico) e selezione di un file .xlsx dal PC.
 //   2) Il file viene letto interamente nel browser (SheetJS) e caricato in una
 //      tabella in memoria con la STESSA struttura del file (una colonna per
 //      ogni intestazione del foglio) — QlikVoucher.table.
 //   3) Vengono lette le righe di ele_commesse (tenant_id/user_id del login)
 //      per ricavare, da ele_commesse.cod_commessa, il project_id.
 //   4) Le righe del file vengono raggruppate per (Email Dipendente, Codice
-//      Commessa) sommando "Ore Attivita" (numero decimale, es. 4,50 = 4h30m).
+//      Commessa, Titolo Commessa) sommando "Ore Attivita" (numero decimale,
+//      es. 4,50 = 4h30m).
 //   5) Per ogni gruppo risolto in un project_id, il backend
 //      (POST /api/qlik-voucher/import) aggiorna la riga di proj_componenti con
-//      la stessa email e lo stesso project_id:
+//      la stessa email e lo stesso project_id oppure, se non esiste, la crea
+//      usando anche "Nome Dipendente":
 //        proj_componenti.time_spent_hh = totale ore del gruppo
 //        proj_componenti.time_spent_gg = time_spent_hh / 8
 //
@@ -81,7 +84,8 @@
     const QlikVoucher = {
         config: null,   // { rootId, root, fields } — righe figlie di 'Qlik voucher'
         table: null,    // { columns, rows } — ultimo file importato ("insightDB" in memoria)
-        lastResult: null
+        lastResult: null,
+        scope: 'active'
     };
     window.QlikVoucher = QlikVoucher;
 
@@ -165,12 +169,49 @@
         return fileInput;
     }
 
-    function openQlikFilePicker() {
+    function openQlikFilePicker(scope) {
         if (typeof XLSX === 'undefined') {
             notify('Libreria di lettura Excel non disponibile (SheetJS non caricato)', 'info');
             return;
         }
+        QlikVoucher.scope = scope === 'history' ? 'history' : 'active';
         ensureFileInput().click();
+    }
+
+    // Chiede esplicitamente se limitare l'aggiornamento ai progetti attivi
+    // (scadenza 31/12/2099) oppure includere anche tutti i progetti storici.
+    function showQlikScopeModal() {
+        let modal = document.getElementById('qlikScopeModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'qlikScopeModal';
+            modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:950; display:flex; align-items:center; justify-content:center;';
+            document.body.appendChild(modal);
+        }
+
+        modal.innerHTML = `
+            <div style="background:white; border-radius:10px; padding:1.5rem; width:480px; max-width:92vw; box-shadow:0 10px 40px rgba(0,0,0,0.25);">
+                <h3 style="margin:0 0 0.75rem; color:#1F2937;">Aggiornamento Qlik</h3>
+                <p style="margin:0; color:#4B5563; line-height:1.45;">Quali progetti vuoi aggiornare?</p>
+                <div style="display:flex; flex-direction:column; gap:0.65rem; margin-top:1.15rem;">
+                    <button id="qlikScopeActive" type="button" style="padding:0.75rem 1rem; text-align:left; background:#3B82F6; color:white; border:none; border-radius:7px; font-weight:600; cursor:pointer;">
+                        Attivo <span style="display:block; font-size:0.78rem; font-weight:400; opacity:0.9; margin-top:0.2rem;">Solo progetti con scadenza 31/12/2099</span>
+                    </button>
+                    <button id="qlikScopeHistory" type="button" style="padding:0.75rem 1rem; text-align:left; background:#F3F4F6; color:#1F2937; border:1px solid #D1D5DB; border-radius:7px; font-weight:600; cursor:pointer;">
+                        Tutto lo storico <span style="display:block; font-size:0.78rem; font-weight:400; color:#6B7280; margin-top:0.2rem;">Tutti i progetti, senza filtro sulla scadenza</span>
+                    </button>
+                </div>
+                <div style="display:flex; justify-content:flex-end; margin-top:1rem;">
+                    <button id="qlikScopeCancel" type="button" style="padding:0.5rem 0.9rem; background:white; color:#4B5563; border:1px solid #D1D5DB; border-radius:6px; cursor:pointer;">Annulla</button>
+                </div>
+            </div>`;
+        modal.style.display = 'flex';
+
+        const close = () => { modal.style.display = 'none'; };
+        document.getElementById('qlikScopeActive').onclick = () => { close(); openQlikFilePicker('active'); };
+        document.getElementById('qlikScopeHistory').onclick = () => { close(); openQlikFilePicker('history'); };
+        document.getElementById('qlikScopeCancel').onclick = close;
+        modal.onclick = (e) => { if (e.target === modal) close(); };
     }
 
     // Normalizza il nome di un'intestazione colonna (per il confronto case/spazi-insensitive).
@@ -233,31 +274,44 @@
         });
 
         // Tabella in memoria (equivalente strutturale al file caricato).
-        QlikVoucher.table = { columns, rows, fileName: file.name };
+        QlikVoucher.table = { columns, rows, fileName: file.name, scope: QlikVoucher.scope };
 
         const colCommessa = findColumn(columns, 'Codice Commessa');
+        const colTitoloCommessa = findColumn(columns, 'Titolo Commessa');
         const colEmail = findColumn(columns, 'Email Dipendente');
+        const colNomeDipendente = findColumn(columns, 'Nome Dipendente');
         const colOre = findColumn(columns, 'Ore Attivita');
-        if (!colCommessa || !colEmail || !colOre) {
-            notify('Il file deve contenere le colonne "Codice Commessa", "Email Dipendente" e "Ore Attivita"', 'info');
+        if (!colCommessa || !colTitoloCommessa || !colEmail || !colNomeDipendente || !colOre) {
+            notify('Il file deve contenere le colonne "Codice Commessa", "Titolo Commessa", "Email Dipendente", "Nome Dipendente" e "Ore Attivita"', 'info');
             return;
         }
 
-        // Raggruppa per (Email Dipendente, Codice Commessa) sommando le ore.
+        // Raggruppa per (Email Dipendente, Codice Commessa, Titolo Commessa)
+        // sommando le ore. Il nominativo viene mantenuto per creare l'eventuale
+        // componente che non esiste ancora nel progetto.
         const groupsMap = new Map();
         for (const row of rows) {
             const cod = String(row[colCommessa] == null ? '' : row[colCommessa]).trim();
+            const titolo = String(row[colTitoloCommessa] == null ? '' : row[colTitoloCommessa]).trim();
             const email = String(row[colEmail] == null ? '' : row[colEmail]).trim();
-            if (!cod || !email) continue; // riga incompleta, viene ignorata
+            const nominativo = String(row[colNomeDipendente] == null ? '' : row[colNomeDipendente]).trim();
+            if (!cod || !titolo || !email) continue; // riga incompleta, viene ignorata
             const ore = parseOreAttivita(row[colOre]);
-            const key = email.toLowerCase() + '\u0001' + cod;
-            const current = groupsMap.get(key) || { codiceCommessa: cod, email, oreTotali: 0 };
+            const key = email.toLowerCase() + '\u0001' + cod + '\u0001' + titolo.toLowerCase();
+            const current = groupsMap.get(key) || {
+                codiceCommessa: cod,
+                titoloCommessa: titolo,
+                email,
+                nominativo,
+                oreTotali: 0
+            };
+            if (!current.nominativo && nominativo) current.nominativo = nominativo;
             current.oreTotali += ore;
             groupsMap.set(key, current);
         }
         const groups = [...groupsMap.values()];
         if (groups.length === 0) {
-            notify('Nessuna riga valida trovata nel file (Codice Commessa / Email Dipendente mancanti)', 'info');
+            notify('Nessuna riga valida trovata nel file (Codice Commessa / Titolo Commessa / Email Dipendente mancanti)', 'info');
             return;
         }
 
@@ -270,6 +324,7 @@
     async function sendQlikImport(groups) {
         const CHUNK_SIZE = 2000;
         let totalUpdated = 0;
+        let totalInserted = 0;
         let totalWorkerUpdated = 0;
         let totalGroups = 0;
         const notFoundCommessa = new Set();
@@ -281,7 +336,7 @@
                 const res = await fetch(`${API_BASE}/qlik-voucher/import`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-                    body: JSON.stringify({ groups: chunk })
+                    body: JSON.stringify({ groups: chunk, scope: QlikVoucher.scope })
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) {
@@ -289,6 +344,7 @@
                     return;
                 }
                 totalUpdated += Number(data.updated) || 0;
+                totalInserted += Number(data.inserted) || 0;
                 // Il ricalcolo di proj_worker è per progetto (somma TUTTE le righe di
                 // proj_componenti di quel progetto): se lo stesso progetto ricorre in più
                 // blocchi viene ricalcolato più volte, quindi questo totale può contare la
@@ -306,8 +362,10 @@
 
         QlikVoucher.lastResult = {
             updated: totalUpdated,
+            inserted: totalInserted,
             workerUpdated: totalWorkerUpdated,
             totalGroups,
+            scope: QlikVoucher.scope,
             notFoundCommessa: [...notFoundCommessa],
             notFoundComponente
         };
@@ -341,7 +399,9 @@
         modal.innerHTML = `
             <div style="background:white; border-radius:10px; padding:1.5rem; width:460px; max-width:92vw; max-height:80vh; overflow-y:auto; box-shadow:0 10px 40px rgba(0,0,0,0.25);">
                 <h3 style="margin:0 0 0.75rem; color:#1F2937;">Importazione Qlik voucher</h3>
+                <p style="margin:0 0 0.45rem; font-size:0.85rem; color:#6B7280;">Ambito: <strong>${result.scope === 'history' ? 'Tutto lo storico' : 'Solo progetti attivi'}</strong></p>
                 <p style="margin:0; font-size:0.95rem;">Righe aggiornate: <strong>${result.updated}</strong> di ${result.totalGroups} gruppi.</p>
+                <p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Nuovi componenti inseriti: <strong>${result.inserted}</strong></p>
                 <p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Righe proj_worker ricalcolate: <strong>${result.workerUpdated}</strong></p>
                 ${notFoundCommessaHtml}
                 ${notFoundComponenteHtml}
@@ -353,7 +413,7 @@
         document.getElementById('qlikResultClose').addEventListener('click', () => { modal.style.display = 'none'; });
         modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; }, { once: true });
 
-        notify(`Import Qlik completato: ${result.updated}/${result.totalGroups} righe aggiornate`, result.updated > 0 ? 'success' : 'info');
+        notify(`Import Qlik completato: ${result.updated} aggiornate, ${result.inserted} inserite`, (result.updated + result.inserted) > 0 ? 'success' : 'info');
     }
 
     // ==========================================================================
@@ -364,7 +424,7 @@
         if (link) {
             link.addEventListener('click', (e) => {
                 e.preventDefault();
-                openQlikFilePicker();
+                showQlikScopeModal();
             });
         }
         checkQlikVisibility();
