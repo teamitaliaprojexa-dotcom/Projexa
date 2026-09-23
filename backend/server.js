@@ -2970,9 +2970,10 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
       const titolo = String((g && g.titoloCommessa) || '').trim();
       const email = String((g && g.email) || '').trim().toLowerCase();
       const nominativo = String((g && g.nominativo) || '').trim();
+      const codiceArticolo = String((g && g.codiceArticolo) || '').trim();
       const ore = Number(g && g.oreTotali);
       if (!cod || !titolo || !email || !Number.isFinite(ore)) continue;
-      groups.push({ cod, titolo, email, nominativo, ore });
+      groups.push({ cod, titolo, email, nominativo, codiceArticolo, ore });
     }
     if (groups.length === 0) {
       return res.status(400).json({ error: 'Nessuna riga valida da importare (Codice Commessa / Titolo Commessa / Email / Ore mancanti)' });
@@ -3105,6 +3106,38 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
       }
     }
 
+    // Risolve Codice Articolo -> UUID proj_worker_cost.id nel contesto del
+    // cliente del progetto. Se una corrispondenza non esiste, il team_pro della
+    // nuova riga restera' NULL.
+    const workerCostIdByKey = new Map(); // "clientId\u0001codBilling" -> UUID
+    if (componentiCols.has('team_pro')) {
+      const workerCostCols = await getTableColumns('proj_worker_cost');
+      const requiredWorkerCostCols = ['id', 'tenant_id', 'user_id', 'client_id', 'cod_billing'];
+      if (requiredWorkerCostCols.every((column) => workerCostCols.has(column))) {
+        const clientIds = [...new Set(
+          [...projectsByCode.values()].flatMap((matches) => matches)
+            .map((project) => project.clientId).filter(Boolean).map(String)
+        )];
+        const billingCodes = [...new Set(groups.map((group) => group.codiceArticolo).filter(Boolean))];
+        if (clientIds.length > 0 && billingCodes.length > 0) {
+          const workerCostsResult = await db.query(
+            `SELECT id, client_id, cod_billing
+             FROM proj_worker_cost
+             WHERE tenant_id = $1 AND user_id = $2
+               AND client_id::text = ANY($3::text[])
+               AND BTRIM(cod_billing::text) = ANY($4::text[])`,
+            [req.user.tenant_id, req.user.user_id, clientIds, billingCodes]
+          );
+          for (const row of workerCostsResult.rows) {
+            const key = String(row.client_id) + '\u0001' + String(row.cod_billing || '').trim();
+            workerCostIdByKey.set(key, row.id);
+          }
+        }
+      } else {
+        console.error('[QLIK VOUCHER IMPORT] Struttura proj_worker_cost non compatibile: team_pro lasciato vuoto sulle nuove righe');
+      }
+    }
+
     // 2) Aggiorna, per ciascun gruppo risolto, la riga proj_componenti corrispondente
     // (per id, mai per email in WHERE: vedi nota sulla cifratura sopra).
     let updated = 0;
@@ -3132,10 +3165,24 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
               client_id: project.clientId,
               project_id: projectId,
               email: g.email,
-              nominativo: g.nominativo || null,
+              // proj_componenti.nominativo e' NOT NULL: se il file non riporta
+              // "Nome Dipendente" per quel gruppo si usa l'email come fallback,
+              // altrimenti l'INSERT fallisce (violazione NOT NULL) e l'intera
+              // transazione va in rollback, annullando anche gli aggiornamenti
+              // delle righe gia' esistenti nello stesso blocco.
+              nominativo: g.nominativo || g.email,
               time_spent_hh: g.ore,
               time_spent_gg: g.ore / 8
             };
+            if (componentiCols.has('team_pro')) {
+              const workerCostKey = String(project.clientId) + '\u0001' + g.codiceArticolo;
+              const workerCostId = workerCostIdByKey.get(workerCostKey);
+              // Non valorizzare esplicitamente team_pro con NULL quando non è stata
+              // trovata una corrispondenza: in questo modo eventuali DEFAULT/trigger
+              // della tabella possono valorizzare il campo e l'INSERT non viene
+              // bloccato inutilmente da un NULL esplicito.
+              if (workerCostId) newComponentData.team_pro = workerCostId;
+            }
             // Le nuove righe Qlik restano attive e visibili nella griglia.
             if (componentiCols.has('scadenza')) {
               newComponentData.scadenza = '2099-12-31';

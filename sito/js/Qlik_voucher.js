@@ -280,9 +280,10 @@
         const colTitoloCommessa = findColumn(columns, 'Titolo Commessa');
         const colEmail = findColumn(columns, 'Email Dipendente');
         const colNomeDipendente = findColumn(columns, 'Nome Dipendente');
+        const colCodiceArticolo = findColumn(columns, 'Codice Articolo');
         const colOre = findColumn(columns, 'Ore Attivita');
-        if (!colCommessa || !colTitoloCommessa || !colEmail || !colNomeDipendente || !colOre) {
-            notify('Il file deve contenere le colonne "Codice Commessa", "Titolo Commessa", "Email Dipendente", "Nome Dipendente" e "Ore Attivita"', 'info');
+        if (!colCommessa || !colTitoloCommessa || !colEmail || !colNomeDipendente || !colCodiceArticolo || !colOre) {
+            notify('Il file deve contenere le colonne "Codice Commessa", "Titolo Commessa", "Email Dipendente", "Nome Dipendente", "Codice Articolo" e "Ore Attivita"', 'info');
             return;
         }
 
@@ -295,6 +296,7 @@
             const titolo = String(row[colTitoloCommessa] == null ? '' : row[colTitoloCommessa]).trim();
             const email = String(row[colEmail] == null ? '' : row[colEmail]).trim();
             const nominativo = String(row[colNomeDipendente] == null ? '' : row[colNomeDipendente]).trim();
+            const codiceArticolo = String(row[colCodiceArticolo] == null ? '' : row[colCodiceArticolo]).trim();
             if (!cod || !titolo || !email) continue; // riga incompleta, viene ignorata
             const ore = parseOreAttivita(row[colOre]);
             const key = email.toLowerCase() + '\u0001' + cod + '\u0001' + titolo.toLowerCase();
@@ -303,9 +305,11 @@
                 titoloCommessa: titolo,
                 email,
                 nominativo,
+                codiceArticolo,
                 oreTotali: 0
             };
             if (!current.nominativo && nominativo) current.nominativo = nominativo;
+            if (!current.codiceArticolo && codiceArticolo) current.codiceArticolo = codiceArticolo;
             current.oreTotali += ore;
             groupsMap.set(key, current);
         }
