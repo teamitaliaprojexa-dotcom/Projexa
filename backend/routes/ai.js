@@ -27,7 +27,9 @@ const MAX_PROMPT_CHARS = 20000;
 const PROVIDERS = {
   chatgpt: { provider: 'ChatGPT', label: 'ChatGPT', prefix: 'chatgpt', model: process.env.OPENAI_MODEL || 'gpt-5' },
   claude: { provider: 'Claude', label: 'Claude', prefix: 'claude', model: 'claude-opus-5' },
-  gemini: { provider: 'Gemini', label: 'Gemini', prefix: 'gemini', model: process.env.GEMINI_MODEL || 'gemini-3.6-flash' },
+  // Gemini: "Flash Lite" di default perché nel piano gratuito ha limiti molto più ampi
+  // (es. 15 richieste/minuto e 500/giorno, contro 5 e 20 dei modelli Flash).
+  gemini: { provider: 'Gemini', label: 'Gemini', prefix: 'gemini', model: process.env.GEMINI_MODEL || 'gemini-flash-lite-latest' },
   // Mistral AI (Francia): alias "-latest" aggiornato dal fornitore, sovrascrivibile da MISTRAL_MODEL.
   // "small" è incluso anche nel piano gratuito "Experiment" (il "large" no: errore tier_not_allowed).
   mistral: { provider: 'Mistral', label: 'Mistral', prefix: 'mistral', model: process.env.MISTRAL_MODEL || 'mistral-small-latest' }
@@ -313,7 +315,11 @@ export async function askAiProvider(userId, providerName, prompt) {
   // per circa 2 minuti (i sovraccarichi di Gemini gratuito possono durare a lungo). Per Gemini,
   // se resta sovraccarico, tentativi con modelli alternativi (GEMINI_FALLBACK_MODEL, separati
   // da virgola), ognuno a sua volta con qualche nuovo tentativo.
-  const isTemporary = (e) => [429, 500, 502, 503, 529].includes(e.upstreamStatus) || e.status === 429 || /overloaded|high demand|sovraccaric/i.test(e.message || '');
+  // Limite di richieste (429, es. quota giornaliera del piano gratuito): inutile riprovare lo
+  // stesso modello, si passa subito ai modelli alternativi. Sovraccarico (5xx): si riprova.
+  const isQuota = (e) => e.status === 429 || e.upstreamStatus === 429;
+  const isOverload = (e) => [500, 502, 503, 529].includes(e.upstreamStatus) || /overloaded|high demand|sovraccaric/i.test(e.message || '');
+  const isTemporary = (e) => isQuota(e) || isOverload(e);
   const waits = [5000, 10000, 20000, 30000, 45000];
   let lastError;
   for (let attempt = 0; attempt <= waits.length; attempt++) {
@@ -322,13 +328,13 @@ export async function askAiProvider(userId, providerName, prompt) {
       return { text: result.text, label: cfg.label, model: cfg.model };
     } catch (error) {
       lastError = error;
-      if (!isTemporary(error) || attempt === waits.length) break;
+      if (!isOverload(error) || attempt === waits.length) break;
       console.warn(`[AI] ${cfg.label} temporaneamente non disponibile (${error.upstreamStatus || error.status}), nuovo tentativo tra ${waits[attempt] / 1000}s`);
       await new Promise((r) => setTimeout(r, waits[attempt]));
     }
   }
   if (key === 'gemini' && isTemporary(lastError)) {
-    const fallbacks = String(process.env.GEMINI_FALLBACK_MODEL || 'gemini-flash-latest,gemini-flash-lite-latest')
+    const fallbacks = String(process.env.GEMINI_FALLBACK_MODEL || 'gemini-flash-latest,gemini-3.6-flash,gemini-flash-lite-latest')
       .split(',').map((m) => m.trim()).filter((m) => m && m !== cfg.model);
     for (const fallback of fallbacks) {
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -337,7 +343,8 @@ export async function askAiProvider(userId, providerName, prompt) {
           const result = await askGemini(apiKey, prompt, fallback);
           return { text: result.text, label: cfg.label, model: fallback };
         } catch (e) {
-          if (!isTemporary(e)) break;
+          lastError = e;
+          if (!isOverload(e)) break; // quota esaurita o altro errore: modello successivo
           await new Promise((r) => setTimeout(r, 8000));
         }
       }
