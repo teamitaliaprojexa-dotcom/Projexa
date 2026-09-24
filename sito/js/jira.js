@@ -259,7 +259,8 @@
     }
 
     async function onOAuthMessage(event) {
-        if (event.origin !== location.origin) return;
+        // Il callback è servito dal backend (Render): in produzione origine diversa dal frontend.
+        if (event.origin !== location.origin && event.origin !== new URL(API_URL).origin) return;
         const data = event.data;
         if (!data || data.source !== 'projexa-jira') return;
         if (!data.ok) {

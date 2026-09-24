@@ -2655,6 +2655,13 @@
                             <option value="google">📅 Google Calendar</option>
                             <option value="microsoft">📧 Outlook Calendar</option>
                         </select>
+                        <span id="calendarAccount" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+                        <button id="calendarConnectBtn" type="button" style="padding: 0.5rem 0.9rem; background: #10B981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; display: none;">
+                            <i class="fas fa-link"></i> Collega
+                        </button>
+                        <button id="calendarDisconnectBtn" type="button" style="padding: 0.5rem 0.9rem; background: #FEE2E2; color: #B91C1C; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; display: none;">
+                            <i class="fas fa-unlink"></i> Scollega
+                        </button>
                         <span id="lastSyncTime" style="font-size: 0.8rem; color: var(--text-muted);">Sincronizzazione...</span>
                         <button id="refreshMeetingsBtn" style="padding: 0.5rem 1rem; background: #4285F4; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem; transition: all 0.3s; display: inline-block;">
                             <i class="fas fa-sync"></i> Aggiorna
@@ -3001,14 +3008,13 @@
                 localStorage.setItem('authToken', jwtFromUrl);
             }
 
-            // I token (access token OAuth + JWT) arrivano in query string dal redirect di login.
-            // Vengono già letti/salvati; qui li rimuoviamo subito dalla URL per non lasciarli
-            // nella cronologia del browser, nei log o nell'header Referer.
+            // Il JWT (usato per autenticare le chiamate API, incluso /api/calendar) arriva in
+            // query string dal redirect di login: è già stato salvato sopra. I calendari
+            // (Google/Outlook) non usano più il token OAuth del login: hanno una propria
+            // connessione dedicata (vedi pulsanti "Collega"/"Scollega" della dashboard).
+            // Qui si ripulisce subito la query string per non lasciare nulla nella cronologia
+            // del browser, nei log o nell'header Referer.
             if (jwtFromUrl || params.get('access_token') || params.get('microsoft_access_token')) {
-                // getGoogle/MicrosoftAccessToken leggono i token dall'URL: assicuriamoci che
-                // vengano messi in cache/localStorage prima di ripulire la query string.
-                getGoogleAccessToken();
-                getMicrosoftAccessToken();
                 window.history.replaceState({}, document.title, window.location.pathname);
             }
 
@@ -4727,242 +4733,137 @@
             await loadTodoData();
         }
 
-        // === CALENDAR INTEGRATION (Google + Microsoft) ===
-        const GOOGLE_CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
-        const MICROSOFT_CALENDAR_API = 'https://graph.microsoft.com/v1.0';
+        // === CALENDAR INTEGRATION (Google + Outlook, via backend OAuth /api/calendar) ===
+        // I token di accesso non arrivano più dal login (né da URL né da localStorage):
+        // ogni provider ha una propria connessione OAuth dedicata (pulsanti "Collega"/
+        // "Scollega"), gestita dal backend e salvata su Projexa-Auth (tabella
+        // integr_tok_auth, tipo_integrazione='Calendar', provider Google/Outlook),
+        // con refresh automatico del token quando scade.
         let meetingsRefreshInterval = null;
-        let cachedGoogleAccessToken = null;
-        let cachedMicrosoftAccessToken = null;
-        let currentCalendarProvider = 'google';
+        let currentCalendarProvider = 'google'; // valore del <select>: 'google' | 'microsoft'
+        let calendarStatus = { google: {}, outlook: {} };
 
-        // Recupera il token Google OAuth da URL o localStorage
-        function getGoogleAccessToken() {
-            // Se abbiamo già in cache, usa quello
-            if (cachedGoogleAccessToken) return cachedGoogleAccessToken;
-
-            // Leggi dai parametri URL (passati dal login)
-            const params = new URLSearchParams(window.location.search);
-            const tokenFromUrl = params.get('access_token');
-            if (tokenFromUrl) {
-                // Salva il token in localStorage per usi futuri
-                localStorage.setItem('google_access_token', tokenFromUrl);
-                cachedGoogleAccessToken = tokenFromUrl;
-                console.log('[AUTH] Google Access token salvato da URL e localStorage');
-                return tokenFromUrl;
-            }
-
-            // Leggi da localStorage (se disponibile)
-            try {
-                const storedToken = localStorage.getItem('google_access_token');
-                if (storedToken) {
-                    cachedGoogleAccessToken = storedToken;
-                    console.log('[AUTH] Google Access token letto da localStorage');
-                    return storedToken;
-                }
-            } catch (e) {
-                console.warn('⚠️ localStorage non accessibile');
-            }
-
-            // Fallback: leggi da userData (legacy)
-            try {
-                const user = localStorage.getItem('user');
-                if (!user) return null;
-                const userData = JSON.parse(user);
-                const token = userData.access_token || userData.token;
-                if (token) {
-                    cachedGoogleAccessToken = token;
-                    return token;
-                }
-            } catch (e) {
-                console.warn('⚠️ Tracking Prevention: localStorage non accessibile');
-            }
-
-            return null;
+        function calendarAuthHeaders() {
+            const token = localStorage.getItem('authToken');
+            return token ? { Authorization: 'Bearer ' + token } : {};
         }
 
-        // Recupera il token Microsoft OAuth da URL o localStorage
-        function getMicrosoftAccessToken() {
-            // Se abbiamo già in cache, usa quello
-            if (cachedMicrosoftAccessToken) return cachedMicrosoftAccessToken;
-
-            // Leggi dai parametri URL (passati dal login)
-            const params = new URLSearchParams(window.location.search);
-            const tokenFromUrl = params.get('microsoft_access_token');
-            if (tokenFromUrl) {
-                // Salva il token in localStorage per usi futuri
-                localStorage.setItem('microsoft_access_token', tokenFromUrl);
-                cachedMicrosoftAccessToken = tokenFromUrl;
-                console.log('[AUTH] Microsoft Access token salvato da URL e localStorage');
-                return tokenFromUrl;
-            }
-
-            // Leggi da localStorage (se disponibile)
-            try {
-                const storedToken = localStorage.getItem('microsoft_access_token');
-                if (storedToken) {
-                    cachedMicrosoftAccessToken = storedToken;
-                    console.log('[AUTH] Microsoft Access token letto da localStorage');
-                    return storedToken;
-                }
-            } catch (e) {
-                console.warn('⚠️ localStorage non accessibile');
-            }
-
-            // Fallback: leggi da userData (legacy)
-            try {
-                const user = localStorage.getItem('user');
-                if (!user) return null;
-                const userData = JSON.parse(user);
-                const token = userData.microsoft_access_token || userData.microsoft_token;
-                if (token) {
-                    cachedMicrosoftAccessToken = token;
-                    return token;
-                }
-            } catch (e) {
-                console.warn('⚠️ Tracking Prevention: localStorage non accessibile');
-            }
-
-            return null;
+        // Mappa il valore del <select> alla chiave provider usata dal backend.
+        function calendarBackendKey(sel) {
+            return sel === 'microsoft' ? 'outlook' : 'google';
         }
 
-        // Carica gli eventi di oggi dal provider selezionato
-        async function loadTodaysMeetings() {
-            if (currentCalendarProvider === 'microsoft') {
-                return await loadMicrosoftCalendarEvents();
+        async function fetchCalendarStatus() {
+            try {
+                const res = await fetch(`${API_URL}/calendar/status`, { headers: calendarAuthHeaders() });
+                if (!res.ok) return null;
+                const data = await res.json();
+                calendarStatus = data.providers || { google: {}, outlook: {} };
+                return calendarStatus;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function renderCalendarConnectionUi() {
+            const key = calendarBackendKey(currentCalendarProvider);
+            const s = calendarStatus[key] || {};
+            const connectBtn = document.getElementById('calendarConnectBtn');
+            const disconnectBtn = document.getElementById('calendarDisconnectBtn');
+            const account = document.getElementById('calendarAccount');
+            if (!connectBtn || !disconnectBtn || !account) return;
+            const connected = !!s.connected;
+            connectBtn.style.display = connected ? 'none' : 'inline-block';
+            disconnectBtn.style.display = connected ? 'inline-block' : 'none';
+            account.textContent = connected ? (s.email || '') : '';
+        }
+
+        // Il popup va aperto nel gestore del click, altrimenti il browser lo blocca:
+        // lo apriamo vuoto e ci mettiamo dentro l'URL appena il backend lo restituisce
+        // (stessa tecnica usata per il collegamento a Jira).
+        async function connectCalendarProvider() {
+            const key = calendarBackendKey(currentCalendarProvider);
+            const popup = window.open('', 'projexa-calendar-oauth', 'width=680,height=780');
+            try {
+                const res = await fetch(`${API_URL}/calendar/${key}/authorize-url`, { headers: calendarAuthHeaders() });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Errore');
+                if (popup) popup.location.href = data.url;
+                else window.location.href = data.url; // popup bloccato: si prosegue nella stessa scheda
+            } catch (e) {
+                if (popup) popup.close();
+                displayMeetingsError('Collegamento non riuscito: ' + e.message);
+            }
+        }
+
+        async function disconnectCalendarProvider() {
+            const key = calendarBackendKey(currentCalendarProvider);
+            if (!window.confirm('Scollegare questo calendario? I dati di accesso salvati verranno eliminati.')) return;
+            try {
+                await fetch(`${API_URL}/calendar/${key}/disconnect`, { method: 'POST', headers: calendarAuthHeaders() });
+            } catch (e) { /* la UI si aggiorna comunque */ }
+            await fetchCalendarStatus();
+            renderCalendarConnectionUi();
+            await loadTodaysMeetings();
+        }
+
+        // Il popup termina sulla pagina di callback del backend (Render), che in
+        // produzione ha un'origine diversa dal frontend (GitHub Pages).
+        async function onCalendarOAuthMessage(event) {
+            if (event.origin !== location.origin && event.origin !== new URL(API_URL).origin) return;
+            const data = event.data;
+            if (!data || data.source !== 'projexa-calendar') return;
+            await fetchCalendarStatus();
+            renderCalendarConnectionUi();
+            if (data.ok) {
+                await loadTodaysMeetings();
             } else {
-                return await loadGoogleCalendarEvents();
+                displayMeetingsError('Collegamento non riuscito: ' + (data.error || ''));
             }
         }
+        window.addEventListener('message', onCalendarOAuthMessage);
 
-        // Carica gli eventi di oggi da Google Calendar
-        async function loadGoogleCalendarEvents() {
-            try {
-                const token = getGoogleAccessToken();
-                if (!token) {
-                    displayMeetingsError('Autenticazione Google non disponibile. Accedi per vedere le riunioni.');
-                    return [];
-                }
-
-                // Calcola intervallo temporale: da adesso a 24 ore dopo
-                const now = new Date();
-                const tomorrow = new Date(now);
-                tomorrow.setHours(now.getHours() + 24);
-
-                const timeMin = now.toISOString();
-                const timeMax = tomorrow.toISOString();
-
-                // Chiama Google Calendar API senza la public key (usiamo solo il Bearer token)
-                const response = await fetch(
-                    `${GOOGLE_CALENDAR_API}/calendars/primary/events?` +
-                    `timeMin=${encodeURIComponent(timeMin)}&` +
-                    `timeMax=${encodeURIComponent(timeMax)}&` +
-                    `singleEvents=true&` +
-                    `orderBy=startTime`,
-                    {
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Accept': 'application/json',
-                            'Content-Type': 'application/json'
-                        }
-                    }
-                );
-
-                if (!response.ok) {
-                    if (response.status === 401) {
-                        throw new Error('Token scaduto o non valido');
-                    }
-                    throw new Error(`API Error: ${response.status}`);
-                }
-
-                const data = await response.json();
-                const events = data.items || [];
-
-                // Filtra escludendo "transparent" events (busy: false)
-                const meetings = events.filter(event => event.transparency !== 'transparent' && !event.eventType?.includes('focusTime'));
-
-                updateMeetingsUI(meetings);
-                updateSyncTime();
-                return meetings;
-
-            } catch (error) {
-                console.warn('⚠️ Google Calendar API Error:', error.message);
-                displayMeetingsError(`Errore nel caricamento: ${error.message}`);
+        // Carica gli eventi di oggi dal provider selezionato, tramite il backend
+        // (che gestisce l'accesso OAuth e l'eventuale refresh del token).
+        async function loadTodaysMeetings() {
+            const key = calendarBackendKey(currentCalendarProvider);
+            const s = calendarStatus[key] || {};
+            if (!s.connected) {
+                displayMeetingsError(`Calendario ${key === 'outlook' ? 'Outlook' : 'Google'} non collegato. Usa il pulsante "Collega" per autorizzare l'accesso.`);
                 return [];
             }
-        }
-
-        // Carica gli eventi di oggi da Microsoft Outlook Calendar (via backend proxy)
-        async function loadMicrosoftCalendarEvents() {
             try {
-                const token = getMicrosoftAccessToken();
-                if (!token) {
-                    displayMeetingsError('Autenticazione Outlook non disponibile. Accedi per vedere le riunioni.');
-                    return [];
-                }
-
                 // Calcola intervallo temporale: da adesso a 24 ore dopo
                 const now = new Date();
                 const tomorrow = new Date(now);
                 tomorrow.setHours(now.getHours() + 24);
 
-                const startDateTime = now.toISOString();
-                const endDateTime = tomorrow.toISOString();
-
-                console.log('[CALENDAR] Calling backend proxy for Microsoft Calendar...');
-
-                // Chiama il BACKEND PROXY invece di Microsoft Graph direttamente.
-                // Il token viaggia nell'header Authorization (non in query string)
-                // per non finire nei log del server / cronologia / Referer.
-                const response = await fetch(
-                    `${API_URL}/calendar/microsoft-events?` +
-                    `startDateTime=${encodeURIComponent(startDateTime)}&` +
-                    `endDateTime=${encodeURIComponent(endDateTime)}`,
-                    {
-                        headers: {
-                            'Accept': 'application/json',
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${token}`
-                        }
-                    }
+                const res = await fetch(
+                    `${API_URL}/calendar/events?provider=${key}&` +
+                    `timeMin=${encodeURIComponent(now.toISOString())}&` +
+                    `timeMax=${encodeURIComponent(tomorrow.toISOString())}`,
+                    { headers: calendarAuthHeaders() }
                 );
-
-                if (!response.ok) {
-                    if (response.status === 401) {
-                        throw new Error('Token scaduto o non valido');
+                const data = await res.json();
+                if (!res.ok) {
+                    if (data.code === 'CALENDAR_REAUTH_REQUIRED' || data.code === 'CALENDAR_NOT_CONNECTED') {
+                        await fetchCalendarStatus();
+                        renderCalendarConnectionUi();
                     }
-                    throw new Error(`API Error: ${response.status}`);
+                    throw new Error(data.error || `Errore ${res.status}`);
                 }
 
-                const data = await response.json();
-                let events = data.events || [];
-
-                console.log(`[CALENDAR] ✓ Received ${events.length} Microsoft Calendar events from backend`);
-
-                // Converti formato Microsoft in formato Google per compatibilità con updateMeetingsUI
-                const meetings = events.map(event => ({
-                    id: event.id,
-                    summary: event.subject,
-                    start: {
-                        dateTime: event.start.dateTime,
-                        date: event.start.date
-                    },
-                    end: {
-                        dateTime: event.end.dateTime,
-                        date: event.end.date
-                    },
-                    conferenceData: event.onlineMeetingUrl ? {
-                        entryPoints: [{ uri: event.onlineMeetingUrl }]
-                    } : null,
-                    attendees: event.attendees || [],
-                    organizer: event.organizer
-                })).filter(event => event.summary); // Esclude eventi senza titolo
+                // Filtra escludendo eventi "transparent" (occupato: false) e focus time
+                const meetings = (data.events || []).filter(
+                    event => event.transparency !== 'transparent' && !(event.eventType || '').includes('focusTime')
+                );
 
                 updateMeetingsUI(meetings);
                 updateSyncTime();
                 return meetings;
 
             } catch (error) {
-                console.warn('⚠️ Microsoft Calendar Error:', error.message);
+                console.warn('⚠️ Calendar Error:', error.message);
                 displayMeetingsError(`Errore nel caricamento: ${error.message}`);
                 return [];
             }
@@ -5053,7 +4954,7 @@
                 <div class="meeting-empty">
                     <i class="fas fa-exclamation-circle" style="font-size: 2rem; color: var(--warning); margin-bottom: 1rem;"></i>
                     <p style="font-size: 0.95rem; margin: 0; color: var(--dark);">⚠️ ${message}</p>
-                    <p style="font-size: 0.8rem; margin-top: 0.75rem; color: var(--text-muted);">Assicurati di essere autenticato con Google</p>
+                    <p style="font-size: 0.8rem; margin-top: 0.75rem; color: var(--text-muted);">Se il problema persiste, prova a scollegare e ricollegare il calendario</p>
                 </div>
             `;
             document.getElementById('refreshMeetingsBtn').style.display = 'inline-block';
@@ -5068,12 +4969,21 @@
 
         // Inizializza il caricamento delle riunioni
         async function initMeetings() {
+            // Stato di connessione per entrambi i provider + pulsanti Collega/Scollega
+            await fetchCalendarStatus();
+            renderCalendarConnectionUi();
+            const connectBtn = document.getElementById('calendarConnectBtn');
+            if (connectBtn) connectBtn.addEventListener('click', connectCalendarProvider);
+            const disconnectBtn = document.getElementById('calendarDisconnectBtn');
+            if (disconnectBtn) disconnectBtn.addEventListener('click', disconnectCalendarProvider);
+
             // Listener al cambio provider
             const providerSelector = document.getElementById('calendarProviderSelector');
             if (providerSelector) {
                 providerSelector.addEventListener('change', async (e) => {
                     currentCalendarProvider = e.target.value;
                     console.log(`📅 Provider cambiato a: ${currentCalendarProvider}`);
+                    renderCalendarConnectionUi();
                     // Ricarica le riunioni con il nuovo provider
                     await loadTodaysMeetings();
                 });
