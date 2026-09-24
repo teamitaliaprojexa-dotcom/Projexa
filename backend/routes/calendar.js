@@ -15,6 +15,7 @@
 // il nuovo redirect URI e i nuovi scope (vedi fondo file / .env.example).
 import express from 'express';
 import crypto from 'crypto';
+import ical from 'node-ical';
 import jwt from 'jsonwebtoken';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -39,7 +40,8 @@ const PROVIDERS = {
     provider: 'Google',
     label: 'Google Calendar',
     prefix: 'google',
-    clientId: process.env.GOOGLE_CLIENT_ID,
+    // Stesso fallback del login Google (routes/auth.js): il client ID non è un segreto.
+    clientId: process.env.GOOGLE_CLIENT_ID || '128379880931-guh70j47lsvplo9m1intpj9tt7escdn8.apps.googleusercontent.com',
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
     tokenUrl: 'https://oauth2.googleapis.com/token',
@@ -192,9 +194,11 @@ router.get('/status', requireAuth, async (req, res) => {
     for (const key of Object.keys(PROVIDERS)) {
       const cfg = PROVIDERS[key];
       const el = await getIntegration(req.user.user_id, cfg.provider);
+      const ics = !!el[`${cfg.prefix}_ics_url`];
       out[key] = {
         configured: isConfigured(cfg),
-        connected: !!el[`${cfg.prefix}_refresh_token`],
+        connected: !!el[`${cfg.prefix}_refresh_token`] || ics,
+        mode: ics ? 'ics' : 'oauth',
         email: el[`${cfg.prefix}_email`] || null
       };
     }
@@ -344,6 +348,142 @@ router.post('/:provider(google|outlook)/disconnect', requireAuth, requireProvide
 });
 
 // ==========================================
+// OUTLOOK VIA LINK ICS (alternativa senza OAuth)
+// ==========================================
+//
+// Nei tenant che non permettono agli utenti di dare il consenso ad app esterne
+// (serve l'approvazione dell'amministratore), l'utente può pubblicare il proprio
+// calendario da Outlook web (Impostazioni > Calendario > Calendari condivisi >
+// Pubblica un calendario) e incollare qui il link ICS. Il link è salvato cifrato
+// su integr_tok_auth (elemento outlook_ics_url) al posto dei token OAuth.
+//
+// Per evitare che il backend venga usato per scaricare URL arbitrari (SSRF) sono
+// accettati solo link https verso i domini di Outlook, senza redirect.
+const ICS_ALLOWED_HOSTS = new Set(['outlook.office365.com', 'outlook.office.com', 'outlook.live.com']);
+const ICS_MAX_BYTES = 5 * 1024 * 1024;
+
+function normalizeIcsUrl(raw) {
+  let url;
+  try {
+    url = new URL(String(raw || '').trim().replace(/^webcals?:\/\//i, 'https://'));
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' || !ICS_ALLOWED_HOSTS.has(url.hostname.toLowerCase())) return null;
+  return url.toString();
+}
+
+async function downloadIcs(url) {
+  const response = await fetch(url, {
+    redirect: 'error',
+    headers: { Accept: 'text/calendar' },
+    signal: AbortSignal.timeout(15000)
+  });
+  if (!response.ok) {
+    const err = new Error(`Il link ICS ha risposto ${response.status}: verifica che il calendario sia ancora pubblicato`);
+    err.status = 502;
+    throw err;
+  }
+  const text = await response.text();
+  if (text.length > ICS_MAX_BYTES) {
+    const err = new Error('Il calendario pubblicato è troppo grande');
+    err.status = 502;
+    throw err;
+  }
+  if (!text.includes('BEGIN:VCALENDAR')) {
+    const err = new Error('Il link non restituisce un calendario ICS valido');
+    err.status = 502;
+    throw err;
+  }
+  return text;
+}
+
+// I valori di node-ical possono essere stringhe o { params, val }.
+function icalText(v) {
+  if (v == null) return '';
+  if (typeof v === 'object' && 'val' in v) return String(v.val ?? '');
+  return String(v);
+}
+
+function icsAttendees(ev) {
+  const list = ev.attendee == null ? [] : (Array.isArray(ev.attendee) ? ev.attendee : [ev.attendee]);
+  return list.map((a) => {
+    const email = icalText(a).replace(/^mailto:/i, '');
+    const name = (a && a.params && a.params.CN) ? String(a.params.CN).replace(/^"|"$/g, '') : '';
+    return { email, displayName: name || undefined };
+  });
+}
+
+// Link Teams/Meet/Zoom: Outlook lo mette in una proprietà dedicata oppure nel testo.
+function icsMeetingLink(ev) {
+  const direct = icalText(ev['MICROSOFT-SKYPETEAMSMEETINGURL'] || ev['X-MICROSOFT-SKYPETEAMSMEETINGURL']);
+  if (direct) return direct;
+  const text = `${icalText(ev.location)} ${icalText(ev.description)}`;
+  const m = text.match(/https:\/\/(?:teams\.microsoft\.com|teams\.live\.com|meet\.google\.com|[\w.-]*zoom\.us)\/[^\s<>"')\]]+/i);
+  return m ? m[0] : null;
+}
+
+// Converte gli eventi ICS nello stesso formato restituito per Google/Graph.
+async function fetchIcsEvents(icsUrl, timeMin, timeMax) {
+  const data = ical.sync.parseICS(await downloadIcs(icsUrl));
+  const from = new Date(timeMin);
+  const to = new Date(timeMax);
+  const out = [];
+
+  for (const ev of Object.values(data)) {
+    if (!ev || ev.type !== 'VEVENT') continue;
+    // Le occorrenze modificate (RECURRENCE-ID) sono già applicate dall'espansione dell'evento base.
+    if (ev.recurrenceid) continue;
+    if (String(ev.status || '').toUpperCase() === 'CANCELLED') continue;
+
+    const instances = ical.expandRecurringEvent(ev, { from, to, expandOngoing: true });
+    for (const inst of instances) {
+      if (inst.isFullDay) continue; // le giornate intere non sono riunioni
+      const e = inst.event || ev;
+      if (String(e.status || '').toUpperCase() === 'CANCELLED') continue;
+      const busy = String(icalText(e['MICROSOFT-CDO-BUSYSTATUS'] || e['X-MICROSOFT-CDO-BUSYSTATUS'])).toUpperCase();
+      const transparent = String(icalText(e.transparency)).toUpperCase() === 'TRANSPARENT' || busy === 'FREE';
+      const link = icsMeetingLink(e);
+      out.push({
+        id: `${e.uid || ''}_${new Date(inst.start).toISOString()}`,
+        summary: icalText(inst.summary || e.summary),
+        start: { dateTime: new Date(inst.start).toISOString() },
+        end: { dateTime: new Date(inst.end || inst.start).toISOString() },
+        attendees: icsAttendees(e),
+        conferenceData: link ? { entryPoints: [{ uri: link }] } : null,
+        transparency: transparent ? 'transparent' : 'opaque',
+        eventType: ''
+      });
+    }
+  }
+
+  return out
+    .filter((e) => e.summary && new Date(e.end.dateTime) > from && new Date(e.start.dateTime) < to)
+    .sort((a, b) => a.start.dateTime.localeCompare(b.start.dateTime));
+}
+
+// Salva il link ICS (sostituisce un eventuale collegamento OAuth di Outlook).
+// Il link viene scaricato subito, così un errore di copia emerge qui e non dopo.
+router.post('/outlook/ics', requireAuth, async (req, res) => {
+  try {
+    const icsUrl = normalizeIcsUrl(req.body && req.body.url);
+    if (!icsUrl) {
+      return res.status(400).json({ error: 'Link non valido: incolla il link ICS pubblicato da Outlook (https://outlook.office365.com/owa/calendar/...)' });
+    }
+    await downloadIcs(icsUrl);
+    await saveIntegration(req.user.user_id, PROVIDERS.outlook.provider, TIPO_INTEGRAZIONE, {
+      outlook_ics_url: icsUrl,
+      outlook_email: 'link ICS'
+    });
+    console.log(`[CALENDAR:outlook] ✓ Link ICS collegato per l'utente ${req.user.user_id}`);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ CALENDAR_ICS:', error.message);
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// ==========================================
 // ENDPOINT: EVENTI
 // ==========================================
 //
@@ -425,6 +565,14 @@ router.get('/events', requireAuth, async (req, res) => {
     const timeMin = String(req.query.timeMin || '').trim();
     const timeMax = String(req.query.timeMax || '').trim();
     if (!timeMin || !timeMax) return res.status(400).json({ error: 'timeMin e timeMax richiesti' });
+
+    if (key === 'outlook') {
+      const el = await getIntegration(req.user.user_id, PROVIDERS.outlook.provider);
+      if (el.outlook_ics_url) {
+        const events = await fetchIcsEvents(el.outlook_ics_url, timeMin, timeMax);
+        return res.json({ events, count: events.length });
+      }
+    }
 
     const session = await getCalendarSession(req.user.user_id, key);
     const events = key === 'outlook'

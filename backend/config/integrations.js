@@ -22,7 +22,9 @@ import { encryptValue, decryptValue, hasEncryptionKey } from './crypto.js';
 const SECRET_ELEMENTS = new Set([
   'jira_access_token', 'jira_refresh_token', 'whatsapp_access_token',
   'google_access_token', 'google_refresh_token',
-  'outlook_access_token', 'outlook_refresh_token'
+  'outlook_access_token', 'outlook_refresh_token',
+  // Link ICS pubblicato da Outlook: chi lo possiede legge il calendario, quindi è un segreto.
+  'outlook_ics_url'
 ]);
 
 // La chiave è ENCRYPTION_KEY (config/crypto.js); INTEGR_ENC_KEY resta valida in

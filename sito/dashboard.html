@@ -2659,6 +2659,9 @@
                         <button id="calendarConnectBtn" type="button" style="padding: 0.5rem 0.9rem; background: #10B981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; display: none;">
                             <i class="fas fa-link"></i> Collega
                         </button>
+                        <button id="calendarIcsBtn" type="button" title="Collega Outlook incollando il link ICS del calendario pubblicato (non richiede l'approvazione dell'amministratore)" style="padding: 0.5rem 0.9rem; background: #0078D4; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; display: none;">
+                            <i class="fas fa-calendar-plus"></i> Link ICS
+                        </button>
                         <button id="calendarDisconnectBtn" type="button" style="padding: 0.5rem 0.9rem; background: #FEE2E2; color: #B91C1C; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; display: none;">
                             <i class="fas fa-unlink"></i> Scollega
                         </button>
@@ -4776,6 +4779,32 @@
             connectBtn.style.display = connected ? 'none' : 'inline-block';
             disconnectBtn.style.display = connected ? 'inline-block' : 'none';
             account.textContent = connected ? (s.email || '') : '';
+            const icsBtn = document.getElementById('calendarIcsBtn');
+            if (icsBtn) icsBtn.style.display = (!connected && key === 'outlook') ? 'inline-block' : 'none';
+        }
+
+        // Outlook senza OAuth: l'utente pubblica il calendario da Outlook web e incolla
+        // qui il link ICS, che il backend salva cifrato su integr_tok_auth.
+        async function connectOutlookIcs() {
+            const url = window.prompt(
+                'Incolla il link ICS del tuo calendario Outlook.\n\n' +
+                'Outlook web > Impostazioni > Calendario > Calendari condivisi > Pubblica un calendario > link ICS'
+            );
+            if (!url || !url.trim()) return;
+            try {
+                const res = await fetch(`${API_URL}/calendar/outlook/ics`, {
+                    method: 'POST',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url.trim() })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `il backend ha risposto ${res.status}`);
+                await fetchCalendarStatus();
+                renderCalendarConnectionUi();
+                await loadTodaysMeetings();
+            } catch (e) {
+                displayMeetingsError('Collegamento non riuscito: ' + e.message);
+            }
         }
 
         // Il popup va aperto nel gestore del click, altrimenti il browser lo blocca:
@@ -4786,8 +4815,8 @@
             const popup = window.open('', 'projexa-calendar-oauth', 'width=680,height=780');
             try {
                 const res = await fetch(`${API_URL}/calendar/${key}/authorize-url`, { headers: calendarAuthHeaders() });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Errore');
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.url) throw new Error(data.error || `il backend ha risposto ${res.status} (${API_URL}) - è aggiornato?`);
                 if (popup) popup.location.href = data.url;
                 else window.location.href = data.url; // popup bloccato: si prosegue nella stessa scheda
             } catch (e) {
@@ -4976,6 +5005,8 @@
             if (connectBtn) connectBtn.addEventListener('click', connectCalendarProvider);
             const disconnectBtn = document.getElementById('calendarDisconnectBtn');
             if (disconnectBtn) disconnectBtn.addEventListener('click', disconnectCalendarProvider);
+            const icsBtn = document.getElementById('calendarIcsBtn');
+            if (icsBtn) icsBtn.addEventListener('click', connectOutlookIcs);
 
             // Listener al cambio provider
             const providerSelector = document.getElementById('calendarProviderSelector');
