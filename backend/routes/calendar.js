@@ -1,145 +1,440 @@
+// === INTEGRAZIONE CALENDARIO (Google Calendar + Outlook/Microsoft 365, SOLA LETTURA) ===
+//
+// Stesso schema dell'integrazione Jira (vedi routes/jira.js): OAuth 2.0 con scope di
+// sola lettura, i dati di autenticazione vengono salvati sul progetto Neon
+// "Projexa-Auth", tabella integr_tok_auth, una riga per elemento (vedi
+// config/integrations.js) con tipo_integrazione = 'Calendar' e
+// provider_integrazione = 'Google' oppure 'Outlook'.
+//
+// A differenza del vecchio calendar.js, il token NON arriva più dal login (via URL o
+// localStorage): ogni provider ha una propria connessione OAuth dedicata, indipendente
+// dal login applicativo, con refresh automatico del token quando scade.
+//
+// Riusa le stesse credenziali OAuth già configurate per il login (GOOGLE_CLIENT_ID/
+// SECRET, MICROSOFT_CLIENT_ID/SECRET/TENANT_ID): sullo stesso client basta aggiungere
+// il nuovo redirect URI e i nuovi scope (vedi fondo file / .env.example).
 import express from 'express';
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import JWT_SECRET from '../config/jwt.js';
+import { requireAuth } from '../middleware/auth.js';
+import { isAllowedOrigin } from '../config/origins.js';
+import {
+  getIntegration,
+  saveIntegration,
+  updateIntegrationElements,
+  deleteIntegration
+} from '../config/integrations.js';
 
 const router = express.Router();
 
-// === MICROSOFT CALENDAR PROXY ===
-// Frontend chiama questo endpoint, che fa da proxy per Microsoft Graph API
-router.get('/microsoft-events', async (req, res) => {
+const TIPO_INTEGRAZIONE = 'Calendar';
+const BACKEND_URL = process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
+const MS_TENANT = process.env.MICROSOFT_TENANT_ID || 'common';
+
+// Configurazione dei due provider supportati. "prefix" è il prefisso degli elementi
+// su integr_tok_auth (es. google_access_token, outlook_refresh_token).
+const PROVIDERS = {
+  google: {
+    provider: 'Google',
+    label: 'Google Calendar',
+    prefix: 'google',
+    clientId: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    authUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    userInfoUrl: 'https://www.googleapis.com/oauth2/v3/userinfo',
+    scope: ['https://www.googleapis.com/auth/calendar.readonly', 'openid', 'email'],
+    redirectUri: `${BACKEND_URL}/api/calendar/google/callback`,
+    // access_type=offline + prompt=consent: indispensabili per ottenere un refresh_token
+    // (senza, Google lo restituisce solo la primissima volta in assoluto).
+    extraAuthParams: { access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true' }
+  },
+  outlook: {
+    provider: 'Outlook',
+    label: 'Outlook Calendar',
+    prefix: 'outlook',
+    clientId: process.env.MICROSOFT_CLIENT_ID,
+    clientSecret: process.env.MICROSOFT_CLIENT_SECRET,
+    authUrl: `https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/authorize`,
+    tokenUrl: `https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`,
+    userInfoUrl: 'https://graph.microsoft.com/v1.0/me',
+    scope: ['offline_access', 'openid', 'email', 'https://graph.microsoft.com/Calendars.Read'],
+    redirectUri: `${BACKEND_URL}/api/calendar/outlook/callback`,
+    extraAuthParams: { prompt: 'consent' }
+  }
+};
+
+function isConfigured(cfg) {
+  return !!(cfg.clientId && cfg.clientSecret);
+}
+
+// Valida il parametro :provider delle route (solo google|outlook).
+function requireProvider(req, res, next) {
+  const cfg = PROVIDERS[req.params.provider];
+  if (!cfg) return res.status(404).json({ error: 'Provider non supportato' });
+  req.calendarProvider = cfg;
+  next();
+}
+
+// ==========================================
+// OAUTH: SCAMBIO E RINNOVO TOKEN
+// ==========================================
+
+async function postForm(url, body) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: new URLSearchParams(body).toString()
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    const err = new Error(`Token endpoint ${response.status}: ${text.slice(0, 300)}`);
+    err.status = response.status;
+    throw err;
+  }
+  return JSON.parse(text);
+}
+
+function exchangeCode(cfg, code) {
+  return postForm(cfg.tokenUrl, {
+    client_id: cfg.clientId,
+    client_secret: cfg.clientSecret,
+    code,
+    redirect_uri: cfg.redirectUri,
+    grant_type: 'authorization_code'
+  });
+}
+
+function refreshAccessToken(cfg, refreshToken) {
+  return postForm(cfg.tokenUrl, {
+    client_id: cfg.clientId,
+    client_secret: cfg.clientSecret,
+    refresh_token: refreshToken,
+    grant_type: 'refresh_token'
+  });
+}
+
+// Salva access token + scadenza; il refresh token viene incluso solo se il provider
+// ne ha restituito uno nuovo (Google in refresh normalmente NON lo rimanda: in quel
+// caso la chiave resta assente e updateIntegrationElements lascia intatto il vecchio).
+function tokenElements(cfg, tokenData) {
+  const p = cfg.prefix;
+  const expiresAt = new Date(Date.now() + (Number(tokenData.expires_in) || 3600) * 1000).toISOString();
+  const elements = {
+    [`${p}_access_token`]: tokenData.access_token,
+    [`${p}_token_expires_at`]: expiresAt,
+    [`${p}_scopes`]: tokenData.scope || cfg.scope.join(' ')
+  };
+  if (tokenData.refresh_token) elements[`${p}_refresh_token`] = tokenData.refresh_token;
+  return elements;
+}
+
+async function fetchProfile(cfg, accessToken) {
   try {
-    const { startDateTime, endDateTime } = req.query;
-
-    // Il token si legge dall'header Authorization (preferito, non finisce nei log).
-    // Fallback alla query string solo per retrocompatibilità.
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : req.query.token;
-
-    // Validazione
-    if (!token) {
-      return res.status(400).json({ error: 'Microsoft access token required' });
-    }
-    if (!startDateTime || !endDateTime) {
-      return res.status(400).json({ error: 'startDateTime and endDateTime required' });
-    }
-
-    console.log('[CALENDAR] Fetching Microsoft Calendar events...');
-    console.log(`[CALENDAR] Token: ${token.slice(0, 20)}...`);
-    console.log(`[CALENDAR] Range: ${startDateTime} to ${endDateTime}`);
-
-    // === Chiama Microsoft Graph API ===
-    const graphUrl = new URL('https://graph.microsoft.com/v1.0/me/calendarview');
-    graphUrl.searchParams.set('startDateTime', startDateTime);
-    graphUrl.searchParams.set('endDateTime', endDateTime);
-    graphUrl.searchParams.set('$orderby', 'start/dateTime');
-
-    const response = await fetch(graphUrl.toString(), {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      }
+    const res = await fetch(cfg.userInfoUrl, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }
     });
+    if (!res.ok) return {};
+    const data = await res.json();
+    // Google: email; Microsoft Graph /me: mail (o userPrincipalName se mail è vuoto).
+    const email = data.email || data.mail || data.userPrincipalName || '';
+    return { email };
+  } catch (e) {
+    return {};
+  }
+}
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[CALENDAR] Microsoft API Error: ${response.status}`, errorText);
+// Restituisce un access token valido per (utente, provider), rinnovandolo se scaduto.
+// Se il refresh fallisce (consenso revocato) cancella l'integrazione: l'utente dovrà
+// ricollegare il calendario.
+async function getCalendarSession(userId, key) {
+  const cfg = PROVIDERS[key];
+  const p = cfg.prefix;
+  const el = await getIntegration(userId, cfg.provider);
+  if (!el[`${p}_refresh_token`]) {
+    const err = new Error(`${cfg.label} non collegato`);
+    err.status = 428;
+    err.code = 'CALENDAR_NOT_CONNECTED';
+    throw err;
+  }
 
-      // Se 401, il token è scaduto o invalido
-      if (response.status === 401) {
-        return res.status(401).json({ 
-          error: 'Token scaduto o non valido',
-          status: response.status 
-        });
-      }
+  const expiresAt = Date.parse(el[`${p}_token_expires_at`] || '');
+  const stillValid = el[`${p}_access_token`] && Number.isFinite(expiresAt) && expiresAt - Date.now() > 60000;
 
-      throw new Error(`Microsoft API returned ${response.status}: ${errorText}`);
+  if (!stillValid) {
+    let tokenData;
+    try {
+      tokenData = await refreshAccessToken(cfg, el[`${p}_refresh_token`]);
+    } catch (error) {
+      console.error(`[CALENDAR:${key}] Refresh token non più valido:`, error.message);
+      await deleteIntegration(userId, cfg.provider);
+      const err = new Error(`Autorizzazione ${cfg.label} scaduta: ricollega il calendario`);
+      err.status = 428;
+      err.code = 'CALENDAR_REAUTH_REQUIRED';
+      throw err;
     }
+    const elements = tokenElements(cfg, tokenData);
+    await updateIntegrationElements(userId, cfg.provider, TIPO_INTEGRAZIONE, elements);
+    el[`${p}_access_token`] = elements[`${p}_access_token`];
+  }
 
-    const data = await response.json();
-    const events = data.value || [];
+  return { accessToken: el[`${p}_access_token`], email: el[`${p}_email`] || '' };
+}
 
-    console.log(`[CALENDAR] ✓ Fetched ${events.length} events from Microsoft Calendar`);
+// ==========================================
+// ENDPOINT: STATO CONNESSIONE
+// ==========================================
 
-    // Ritorna gli eventi al frontend
-    res.json({
-      success: true,
-      events: events,
-      count: events.length
-    });
-
+router.get('/status', requireAuth, async (req, res) => {
+  try {
+    const out = {};
+    for (const key of Object.keys(PROVIDERS)) {
+      const cfg = PROVIDERS[key];
+      const el = await getIntegration(req.user.user_id, cfg.provider);
+      out[key] = {
+        configured: isConfigured(cfg),
+        connected: !!el[`${cfg.prefix}_refresh_token`],
+        email: el[`${cfg.prefix}_email`] || null
+      };
+    }
+    res.json({ providers: out });
   } catch (error) {
-    console.error('❌ CALENDAR_ERROR:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to fetch calendar events',
-      message: error.message 
-    });
+    console.error('❌ CALENDAR_STATUS:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// === GOOGLE CALENDAR PROXY (opzionale, per coerenza) ===
-router.get('/google-events', async (req, res) => {
+// ==========================================
+// ENDPOINT: AVVIO OAUTH
+// ==========================================
+
+// URL a cui aprire la finestra di consenso. Lo "state" è un JWT firmato che lega
+// l'autorizzazione all'utente, al provider e all'origine da cui è partita (stessa
+// tecnica usata da routes/jira.js): protegge da CSRF e dice al callback a chi
+// inviare l'esito via postMessage.
+router.get('/:provider(google|outlook)/authorize-url', requireAuth, requireProvider, async (req, res) => {
   try {
-    const { timeMin, timeMax } = req.query;
-
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : req.query.token;
-
-    if (!token) {
-      return res.status(400).json({ error: 'Google access token required' });
-    }
-    if (!timeMin || !timeMax) {
-      return res.status(400).json({ error: 'timeMin and timeMax required' });
+    const cfg = req.calendarProvider;
+    if (!isConfigured(cfg)) {
+      return res.status(503).json({ error: `Credenziali OAuth di ${cfg.label} non configurate sul server` });
     }
 
-    console.log('[CALENDAR] Fetching Google Calendar events...');
+    let origin = req.get('origin') || '';
+    if (!origin && req.get('referer')) {
+      try { origin = new URL(req.get('referer')).origin; } catch { origin = ''; }
+    }
+    if (origin && !isAllowedOrigin(origin)) {
+      return res.status(400).json({ error: 'Origine non consentita' });
+    }
+    if (!origin) origin = new URL(BACKEND_URL).origin;
 
-    // === Chiama Google Calendar API ===
-    const googleUrl = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events');
-    googleUrl.searchParams.set('timeMin', timeMin);
-    googleUrl.searchParams.set('timeMax', timeMax);
-    googleUrl.searchParams.set('singleEvents', 'true');
-    googleUrl.searchParams.set('orderBy', 'startTime');
+    const state = jwt.sign(
+      {
+        uid: req.user.user_id,
+        tid: req.user.tenant_id,
+        provider: req.params.provider,
+        origin,
+        nonce: crypto.randomBytes(8).toString('hex')
+      },
+      JWT_SECRET,
+      { expiresIn: '10m' }
+    );
 
-    const response = await fetch(googleUrl.toString(), {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      }
+    const params = new URLSearchParams({
+      client_id: cfg.clientId,
+      redirect_uri: cfg.redirectUri,
+      response_type: 'code',
+      scope: cfg.scope.join(' '),
+      state,
+      ...cfg.extraAuthParams
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[CALENDAR] Google API Error: ${response.status}`, errorText);
-
-      if (response.status === 401) {
-        return res.status(401).json({ 
-          error: 'Token scaduto o non valido',
-          status: response.status 
-        });
-      }
-
-      throw new Error(`Google API returned ${response.status}: ${errorText}`);
-    }
-
-    const data = await response.json();
-    const events = data.items || [];
-
-    console.log(`[CALENDAR] ✓ Fetched ${events.length} events from Google Calendar`);
-
-    res.json({
-      success: true,
-      events: events,
-      count: events.length
-    });
-
+    res.json({ url: `${cfg.authUrl}?${params.toString()}` });
   } catch (error) {
-    console.error('❌ CALENDAR_ERROR:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to fetch calendar events',
-      message: error.message 
+    console.error('❌ CALENDAR_AUTHORIZE_URL:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// ENDPOINT: CALLBACK OAUTH
+// ==========================================
+
+// Pagina restituita al termine del consenso: comunica l'esito alla finestra che ha
+// aperto il popup (window.opener) e si chiude, esattamente come per Jira.
+function callbackPage(origin, payload) {
+  const json = JSON.stringify({ source: 'projexa-calendar', ...payload }).replace(/</g, '\\u003c');
+  const safeOrigin = JSON.stringify(origin).replace(/</g, '\\u003c');
+  return `<!DOCTYPE html>
+<html lang="it"><head><meta charset="utf-8"><title>Calendario</title></head>
+<body style="font-family: system-ui, sans-serif; padding: 2rem; color: #1F2937;">
+<p>${payload.ok ? 'Collegamento al calendario completato. Puoi chiudere questa finestra.' : 'Collegamento al calendario non riuscito. Puoi chiudere questa finestra.'}</p>
+<script>
+  try { if (window.opener) window.opener.postMessage(${json}, ${safeOrigin}); } catch (e) {}
+  setTimeout(function () { window.close(); }, 800);
+</script>
+</body></html>`;
+}
+
+// Il callback arriva dal provider OAuth, quindi senza il JWT di Projexa nell'header:
+// l'identità dell'utente viene dallo "state" firmato all'avvio del flusso.
+router.get('/:provider(google|outlook)/callback', requireProvider, async (req, res) => {
+  const cfg = req.calendarProvider;
+  const { code, state, error, error_description } = req.query;
+  let origin = new URL(BACKEND_URL).origin;
+
+  try {
+    if (!state) return res.status(400).send(callbackPage(origin, { ok: false, provider: req.params.provider, error: 'state mancante' }));
+
+    let claims;
+    try {
+      claims = jwt.verify(state, JWT_SECRET);
+    } catch {
+      return res.status(400).send(callbackPage(origin, { ok: false, provider: req.params.provider, error: 'state non valido o scaduto' }));
+    }
+    if (claims.origin && isAllowedOrigin(claims.origin)) origin = claims.origin;
+    if (claims.provider !== req.params.provider) {
+      return res.status(400).send(callbackPage(origin, { ok: false, provider: req.params.provider, error: 'provider non corrispondente' }));
+    }
+
+    if (error) {
+      return res.status(400).send(callbackPage(origin, { ok: false, provider: req.params.provider, error: error_description || error }));
+    }
+    if (!code) {
+      return res.status(400).send(callbackPage(origin, { ok: false, provider: req.params.provider, error: 'codice di autorizzazione mancante' }));
+    }
+
+    const tokenData = await exchangeCode(cfg, code);
+    if (!tokenData.refresh_token) {
+      // Capita se l'utente ha già dato il consenso in passato senza revocarlo mai
+      // (Google/Microsoft non ne rimandano uno nuovo). Si chiede di riprovare
+      // revocando l'accesso all'app dal proprio account, cosa che forza un nuovo
+      // refresh_token al prossimo tentativo.
+      return res.status(400).send(callbackPage(origin, {
+        ok: false, provider: req.params.provider,
+        error: 'Nessun refresh token ricevuto: revoca l\'accesso dell\'app dal tuo account e riprova'
+      }));
+    }
+    const profile = await fetchProfile(cfg, tokenData.access_token);
+    const elements = tokenElements(cfg, tokenData);
+
+    await saveIntegration(claims.uid, cfg.provider, TIPO_INTEGRAZIONE, {
+      [`${cfg.prefix}_email`]: profile.email || '',
+      ...elements
     });
+
+    console.log(`[CALENDAR:${req.params.provider}] ✓ Account collegato per l'utente ${claims.uid}`);
+    res.send(callbackPage(origin, { ok: true, provider: req.params.provider, email: profile.email || '' }));
+  } catch (err) {
+    console.error(`❌ CALENDAR_CALLBACK (${req.params.provider}):`, err.message);
+    res.status(500).send(callbackPage(origin, { ok: false, provider: req.params.provider, error: err.message }));
+  }
+});
+
+// Scollega l'account: rimuove tutte le righe dell'utente su integr_tok_auth per quel provider.
+router.post('/:provider(google|outlook)/disconnect', requireAuth, requireProvider, async (req, res) => {
+  try {
+    const removed = await deleteIntegration(req.user.user_id, req.calendarProvider.provider);
+    res.json({ success: true, removed });
+  } catch (error) {
+    console.error('❌ CALENDAR_DISCONNECT:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// ENDPOINT: EVENTI
+// ==========================================
+//
+// Restituisce sempre lo stesso formato ("shape" di Google Calendar), qualunque sia
+// il provider: { summary, start:{dateTime}, end:{dateTime}, attendees:[{email,
+// displayName}], conferenceData:{entryPoints:[{uri}]}, transparency }. Così il
+// frontend (dashboard.html) non deve distinguere i due provider.
+
+async function fetchGoogleEvents(session, timeMin, timeMax) {
+  const url = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events');
+  url.searchParams.set('timeMin', timeMin);
+  url.searchParams.set('timeMax', timeMax);
+  url.searchParams.set('singleEvents', 'true');
+  url.searchParams.set('orderBy', 'startTime');
+
+  const response = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${session.accessToken}`, Accept: 'application/json' }
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    const err = new Error(`Google Calendar API ${response.status}: ${text.slice(0, 300)}`);
+    err.status = response.status === 401 ? 428 : response.status;
+    throw err;
+  }
+  const data = await response.json();
+  return data.items || [];
+}
+
+// Microsoft Graph restituisce start/end senza suffisso di fuso orario: l'header
+// Prefer richiede esplicitamente UTC, e qui si aggiunge la "Z" mancante perché il
+// browser interpreti correttamente l'orario (altrimenti verrebbe letto come ora locale).
+async function fetchOutlookEvents(session, timeMin, timeMax) {
+  const url = new URL('https://graph.microsoft.com/v1.0/me/calendarview');
+  url.searchParams.set('startDateTime', timeMin);
+  url.searchParams.set('endDateTime', timeMax);
+  url.searchParams.set('$orderby', 'start/dateTime');
+  url.searchParams.set('$top', '50');
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${session.accessToken}`,
+      Accept: 'application/json',
+      Prefer: 'outlook.timezone="UTC"'
+    }
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    const err = new Error(`Microsoft Graph ${response.status}: ${text.slice(0, 300)}`);
+    err.status = response.status === 401 ? 428 : response.status;
+    throw err;
+  }
+  const data = await response.json();
+  const events = data.value || [];
+
+  const withZ = (dt) => (dt && !/[zZ]|[+-]\d{2}:\d{2}$/.test(dt) ? `${dt}Z` : dt);
+
+  return events.map((e) => ({
+    id: e.id,
+    summary: e.subject || '',
+    start: { dateTime: withZ(e.start && e.start.dateTime) },
+    end: { dateTime: withZ(e.end && e.end.dateTime) },
+    attendees: (e.attendees || []).map((a) => ({
+      email: a.emailAddress && a.emailAddress.address,
+      displayName: a.emailAddress && a.emailAddress.name
+    })),
+    conferenceData: (e.onlineMeeting && e.onlineMeeting.joinUrl) || e.onlineMeetingUrl
+      ? { entryPoints: [{ uri: (e.onlineMeeting && e.onlineMeeting.joinUrl) || e.onlineMeetingUrl }] }
+      : null,
+    // showAs di Graph: free/tentative/busy/oof/workingElsewhere/unknown.
+    transparency: e.showAs === 'free' ? 'transparent' : 'opaque',
+    eventType: ''
+  })).filter((e) => e.summary);
+}
+
+router.get('/events', requireAuth, async (req, res) => {
+  try {
+    const key = String(req.query.provider || '').trim();
+    if (!PROVIDERS[key]) return res.status(400).json({ error: 'Parametro provider richiesto (google|outlook)' });
+    const timeMin = String(req.query.timeMin || '').trim();
+    const timeMax = String(req.query.timeMax || '').trim();
+    if (!timeMin || !timeMax) return res.status(400).json({ error: 'timeMin e timeMax richiesti' });
+
+    const session = await getCalendarSession(req.user.user_id, key);
+    const events = key === 'outlook'
+      ? await fetchOutlookEvents(session, timeMin, timeMax)
+      : await fetchGoogleEvents(session, timeMin, timeMax);
+
+    res.json({ events, count: events.length });
+  } catch (error) {
+    console.error('❌ CALENDAR_EVENTS:', error.message);
+    res.status(error.status || 500).json({ error: error.message, code: error.code });
   }
 });
 
