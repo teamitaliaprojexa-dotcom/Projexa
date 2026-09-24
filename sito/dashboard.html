@@ -2148,12 +2148,130 @@
             justify-content: center;
             text-align: center;
         }
-        .meeting-manage-flag {
-            width: 1rem;
-            height: 1rem;
+        .meeting-rec-btn {
+            width: 5rem;
+            padding: 0.3rem 0.4rem;
+            border: 1px solid #FACC15;
+            border-radius: 6px;
+            background: #FEF08A; /* giallo: avvia la registrazione */
+            color: #713F12;
+            font-weight: 600;
+            font-size: 0.78rem;
             cursor: pointer;
-            accent-color: #10B981;
+            white-space: nowrap;
         }
+        .meeting-rec-btn i { font-size: 0.65rem; vertical-align: 1px; }
+        .meeting-rec-btn:hover { background: #FDE047; }
+        .meeting-rec-btn.recording { background: #DC2626; border-color: #B91C1C; color: white; } /* rosso: ferma */
+        .meeting-rec-btn.recording:hover { background: #B91C1C; }
+        .meeting-rec-btn:disabled { opacity: 0.6; cursor: wait; }
+
+        /* Lente trascrizione/recap e finestra con il testo formattato */
+        .meeting-text-btn {
+            border: none;
+            background: transparent;
+            color: #10B981;
+            cursor: pointer;
+            font-size: 0.9rem;
+            padding: 0.15rem 0.4rem;
+            border-radius: 6px;
+        }
+        .meeting-text-btn:hover { background: #ECFDF5; }
+        .meeting-text-body {
+            padding: 0.9rem 1.25rem 1.1rem;
+            max-height: 62vh;
+            overflow: auto;
+            font-size: 0.9rem;
+            line-height: 1.55;
+            color: var(--dark);
+        }
+        .meeting-text-section {
+            margin: 0.9rem 0 0.5rem;
+            padding-bottom: 0.3rem;
+            border-bottom: 1px solid var(--border);
+            font-weight: 700;
+            font-size: 0.85rem;
+            color: #047857;
+        }
+        .meeting-text-section:first-child { margin-top: 0; }
+        .meeting-text-line { display: flex; gap: 0.6rem; margin: 0 0 0.45rem; }
+        .meeting-text-time {
+            flex: 0 0 auto;
+            height: fit-content;
+            padding: 0.05rem 0.4rem;
+            border-radius: 4px;
+            background: #EEF2FF;
+            color: #4338CA;
+            font-family: ui-monospace, Consolas, monospace;
+            font-size: 0.75rem;
+        }
+        .meeting-text-par { margin: 0 0 0.45rem; white-space: pre-wrap; word-wrap: break-word; }
+        .meeting-text-line > span:last-child { white-space: pre-wrap; word-wrap: break-word; min-width: 0; }
+        .meeting-text-empty { color: var(--text-muted); }
+        .meeting-text-speaker { color: #047857; }
+        .meeting-text-speaker.others { color: #4338CA; }
+
+        /* Pannello registrazione/trascrizione riunione (in basso a destra) */
+        .meeting-recorder {
+            position: fixed;
+            right: 1.25rem;
+            bottom: 1.25rem;
+            z-index: 790;
+            width: min(360px, calc(100vw - 2.5rem));
+            padding: 0.9rem 1rem;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+            font-size: 0.85rem;
+            color: var(--dark);
+        }
+        .meeting-recorder-head { display: flex; align-items: center; gap: 0.5rem; }
+        .meeting-recorder-head strong { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .meeting-recorder-head button { border: none; background: transparent; color: var(--text-muted); cursor: pointer; }
+        .meeting-recorder-dot { width: 10px; height: 10px; border-radius: 50%; background: #D1D5DB; flex: 0 0 auto; }
+        .meeting-recorder-dot.live { background: #DC2626; animation: recPulse 1.2s infinite; }
+        @keyframes recPulse { 50% { opacity: 0.35; } }
+        .meeting-recorder-status { margin: 0.5rem 0 0.25rem; font-weight: 600; }
+        .meeting-recorder-status.error { color: #B91C1C; }
+        .meeting-recorder-note { margin: 0 0 0.6rem; font-size: 0.75rem; color: var(--text-muted); line-height: 1.4; }
+        .meeting-recorder-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+        .meeting-recorder-actions button { padding: 0.45rem 0.9rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.82rem; }
+        .meeting-recorder-stop { background: #1F2937; color: white; }
+        .meeting-recorder-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Pulsante e finestra dispositivi audio (riquadro Riunioni di Oggi) */
+        .audio-devices-btn {
+            width: 36px;
+            height: 36px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: white;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        .audio-devices-btn:hover { color: #4285F4; border-color: #4285F4; }
+        .audio-dev-title { font-weight: 600; color: var(--dark); font-size: 0.9rem; margin-bottom: 0.4rem; }
+        .audio-dev-title i { color: #4285F4; width: 1.1rem; }
+        .audio-dev-list { display: flex; flex-direction: column; gap: 0.3rem; }
+        .audio-dev-item {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.45rem 0.7rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            color: var(--dark);
+        }
+        .audio-dev-item input { accent-color: #4285F4; }
+        .audio-dev-item.selected { border-color: #4285F4; background: rgba(66, 133, 244, 0.06); }
+        .audio-dev-empty { font-size: 0.85rem; color: var(--text-muted); }
+        .audio-dev-badge { margin-left: auto; padding: 0.05rem 0.45rem; border-radius: 999px; background: #DCFCE7; color: #166534; font-size: 0.7rem; font-weight: 600; }
+        .audio-meter { height: 6px; margin-top: 0.5rem; border-radius: 3px; background: #E5E7EB; overflow: hidden; }
+        .audio-meter-bar { height: 100%; width: 0; background: #10B981; transition: width 0.08s linear; }
 
         /* Finestra AI: risposta in testo semplice con a capo preservati */
         .ai-chat-answer {
@@ -2411,11 +2529,12 @@
             <!-- Qlik: visibile solo se il flag settings (campo='Qlik', valore1=true) è attivo per il
                  tenant_id/user_id del login. Gestita da js/Qlik_voucher.js (import voucher da Excel). -->
             <li id="navQlik" style="display: none;"><a href="#" id="navQlikLink"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19h18v2H1V3h2v16Zm2-3.4 4.2-4.2 3 3L18.6 8H16V6h6v6h-2V9.4l-7.8 7.8-3-3L6.4 17 5 15.6Z"/></svg> <span>Qlik</span></a></li>
-            <!-- AI: visibili solo se abilitate in Impostazioni › AI (toggle on + chiave API collegata).
+            <!-- AI (ChatGPT, Claude, Gemini, Mistral): visibili solo se abilitate in Impostazioni › AI (toggle on + chiave API collegata).
                  Il clic apre la finestra di richiesta/risposta (aiChatModal). -->
             <li id="navAi_chatgpt" class="nav-ai" style="display: none;"><a href="#" data-ai-open="chatgpt" title="ChatGPT"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5a4.6 4.6 0 0 1 4.4 3.2 4.6 4.6 0 0 1 4.3 6.6 4.6 4.6 0 0 1-3 7.2 4.6 4.6 0 0 1-7.6.8 4.6 4.6 0 0 1-6.8-3.3 4.6 4.6 0 0 1-.1-7.3A4.6 4.6 0 0 1 12 2.5Zm0 2a2.6 2.6 0 0 0-2.6 2.4l3.6 2.1 2.6-1.5A2.6 2.6 0 0 0 12 4.5Zm-5.3 2.9a2.6 2.6 0 0 0-.9 3.5l3.6-2.1V5.8a2.6 2.6 0 0 0-2.7 1.6Zm10.6 1.4-3.6 2.1v3l2.6 1.5a2.6 2.6 0 0 0 1-6.6ZM12 10.3 10.5 11.2v1.6l1.5.9 1.5-.9v-1.6L12 10.3Zm-6.3 2.4a2.6 2.6 0 0 0 3 3.4l3.6-2.1-2.6-1.5-4 .2Zm8.3 2.7-3.6 2.1a2.6 2.6 0 0 0 5.2-.5V16l-1.6-.6Z"/></svg> <span>ChatGPT</span></a></li>
             <li id="navAi_claude" class="nav-ai" style="display: none;"><a href="#" data-ai-open="claude" title="Claude"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 2h2l.6 6.2 3.6-5.1 1.6 1.2-3.2 5.4 5.8-2.4.7 1.9-6 1.9 6 1.3-.4 2-6.1-.8 4.9 3.8-1.3 1.6-5-3.9 1.3 6.2-2 .5-1.9-6-1.9 6-2-.5 1.3-6.2-5 3.9-1.3-1.6 4.9-3.8-6.1.8-.4-2 6-1.3-6-1.9.7-1.9 5.8 2.4L5.2 4.3l1.6-1.2 3.6 5.1L11 2Z"/></svg> <span>Claude</span></a></li>
             <li id="navAi_gemini" class="nav-ai" style="display: none;"><a href="#" data-ai-open="gemini" title="Gemini"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.6 5.3 4.7 9.4 10 10-5.3.6-9.4 4.7-10 10-.6-5.3-4.7-9.4-10-10 5.3-.6 9.4-4.7 10-10Z"/></svg> <span>Gemini</span></a></li>
+            <li id="navAi_mistral" class="nav-ai" style="display: none;"><a href="#" data-ai-open="mistral" title="Mistral"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h4v4H3V3Zm14 0h4v4h-4V3ZM3 7h4v4H3V7Zm4 0h4v4H7V7Zm6 0h4v4h-4V7Zm4 0h4v4h-4V7ZM3 11h4v4H3v-4Zm6 0h6v4H9v-4Zm8 0h4v4h-4v-4ZM3 15h4v4H3v-4Zm14 0h4v4h-4v-4ZM1 19h8v2H1v-2Zm14 0h8v2h-8v-2Z"/></svg> <span>Mistral</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
             <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 3 3.8 3 6v12c0 2.2 3.5 4 9 4s9-1.8 9-4V6c0-2.2-3.5-4-9-4Zm0 2c4.6 0 7 1.4 7 2s-2.4 2-7 2-7-1.4-7-2 2.4-2 7-2Zm0 16c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V18c0 .6-2.4 2-7 2Zm0-5c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V13c0 .6-2.4 2-7 2Z"/></svg> <span>Database</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
@@ -2756,6 +2875,7 @@
                         Riunioni di Oggi
                     </div>
                     <div style="display: flex; gap: 1rem; align-items: center;">
+                        <button id="audioDevicesBtn" type="button" class="audio-devices-btn" title="Dispositivi audio: microfono e altoparlanti" aria-label="Dispositivi audio"><i class="fas fa-cog"></i></button>
                         <select id="calendarProviderSelector" style="padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; cursor: pointer; background: white; color: var(--dark); font-weight: 500;">
                             <option value="google">📅 Google Calendar</option>
                             <option value="microsoft">📧 Outlook Calendar</option>
@@ -5261,10 +5381,7 @@
                 </div>`;
             container.innerHTML = header + meetings.map(meeting => createMeetingCard(meeting)).join('');
             // Tendine Cliente/Progetto sulle riunioni già gestite con Projexa
-            container.querySelectorAll('.meeting-card').forEach((row) => {
-                const cb = row.querySelector('.meeting-manage-flag');
-                if (cb && cb.checked) renderMeetingAssign(row);
-            });
+            container.querySelectorAll('.meeting-card[data-managed="1"]').forEach((row) => renderMeetingAssign(row));
         }
 
         // Loghi (SVG semplificati, inline: nessuna risorsa esterna) delle piattaforme di riunione.
@@ -5276,41 +5393,633 @@
             goto: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="5" fill="#F68D2E"/><path d="M16.5 9.2A5 5 0 1 0 17 12h-4.5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>`
         };
 
-        // Flag "Gestisci con Projexa": spuntato crea la riga su rec_meeting, tolto la
-        // cancella. Salvataggio immediato; se non riesce il flag torna com'era.
-        async function onMeetingManageChange(e) {
-            const cb = e.target;
-            if (!cb || !cb.classList || !cb.classList.contains('meeting-manage-flag')) return;
-            const d = cb.dataset;
-            const checked = cb.checked;
-            cb.disabled = true;
+        // "Gestisci con Projexa" crea la riga rec_meeting della riunione (se non c'è già: il
+        // backend non la duplica) e mostra le tendine Cliente/Progetto.
+        async function ensureManagedMeeting(btn) {
+            const d = btn.dataset;
+            const res = await fetch(`${API_URL}/calendar/meetings/managed`, {
+                method: 'POST',
+                headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_calendar: d.eventId, oggetto: d.title, provider: d.provider || null, data_calendar: d.date, orario_calendar: d.time })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+            const row = btn.closest('.meeting-card');
+            if (row && row.dataset.managed !== '1') {
+                row.dataset.managed = '1';
+                renderMeetingAssign(row);
+            }
+        }
+
+        // === LENTE: testo di trascrizione / recap della riunione (rec_meeting) ===
+        function meetingTextButton(event, field, title) {
+            const label = field === 'recap' ? 'Apri il recap' : 'Apri la trascrizione';
+            return `<button type="button" class="meeting-text-btn" data-event-id="${escapeHtml(event.id || '')}" data-field="${field}" data-title="${escapeHtml(title)}" title="${label}" aria-label="${label}"><i class="fas fa-search"></i></button>`;
+        }
+
+        // Testo -> HTML sicuro (tutto passa da escapeHtml):
+        //   "--- Registrazione del ... ---"  -> titolo di sezione
+        //   "[hh:mm:ss] testo"               -> orario come etichetta + testo
+        //   righe vuote                      -> separano i paragrafi; "\n" e "\r\n" -> a capo
+        function formatMeetingText(raw) {
+            const text = String(raw || '').replace(/\r\n?/g, '\n').replace(/\\n/g, '\n').trim();
+            if (!text) return '<p class="meeting-text-empty">Nessun testo.</p>';
+            const out = [];
+            let par = [];
+            let inTimed = false; // ultima riga era un blocco con orario (senza righe vuote dopo)
+            const flush = () => {
+                if (par.length) out.push(`<p class="meeting-text-par">${escapeHtml(par.join('\n'))}</p>`);
+                par = [];
+            };
+            for (const line of text.split('\n')) {
+                const t = line.trim();
+                const sec = /^-{3,}\s*(.*?)\s*-{3,}$/.exec(t);
+                const ts = /^\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*(.*)$/.exec(t);
+                if (!t) { flush(); inTimed = false; continue; }
+                if (sec) { flush(); inTimed = false; out.push(`<div class="meeting-text-section">${escapeHtml(sec[1])}</div>`); continue; }
+                if (ts) {
+                    flush();
+                    inTimed = true;
+                    // "Nome Cognome: testo" -> nome in evidenza ("Partecipanti" = audio di sistema)
+                    const sp = /^([^:\n]{1,80}?):\s+(.*)$/.exec(ts[2]);
+                    const body = sp
+                        ? `<b class="meeting-text-speaker${sp[1] === 'Partecipanti' ? ' others' : ''}">${escapeHtml(sp[1])}:</b> ${escapeHtml(sp[2])}`
+                        : escapeHtml(ts[2]);
+                    out.push(`<div class="meeting-text-line"><span class="meeting-text-time">${escapeHtml(ts[1])}</span><span>${body}</span></div>`);
+                    continue;
+                }
+                // riga subito sotto un blocco con orario (cambio interlocutore): resta nel blocco
+                const last = out[out.length - 1];
+                if (inTimed && last) {
+                    out[out.length - 1] = last.replace(/<\/span><\/div>$/, '\n' + escapeHtml(t) + '</span></div>');
+                    continue;
+                }
+                par.push(line);
+            }
+            flush();
+            return out.join('');
+        }
+
+        async function openMeetingText(btn) {
+            const modal = document.getElementById('meetingTextModal');
+            const body = document.getElementById('meetingTextBody');
+            const field = btn.dataset.field === 'recap' ? 'recap' : 'trascrizione';
+            document.getElementById('meetingTextTitleText').textContent = `${field === 'recap' ? 'Recap' : 'Trascrizione'} — ${btn.dataset.title || ''}`;
+            document.getElementById('meetingTextSub').textContent = '';
+            body.innerHTML = '<p class="meeting-text-empty"><i class="fas fa-spinner fa-spin"></i> Caricamento…</p>';
+            body.dataset.raw = '';
+            modal.classList.add('open');
             try {
-                const res = await fetch(`${API_URL}/calendar/meetings/managed`, {
-                    method: checked ? 'POST' : 'DELETE',
-                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify(checked
-                        ? { id_calendar: d.eventId, oggetto: d.title, provider: d.provider || null, data_calendar: d.date, orario_calendar: d.time }
-                        : { id_calendar: d.eventId })
-                });
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/text?id_calendar=${encodeURIComponent(btn.dataset.eventId)}&field=${field}`, { headers: calendarAuthHeaders() });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
-                const row = cb.closest('.meeting-card');
-                const assign = row && row.querySelector('.meeting-assign');
-                if (assign) {
-                    assign.dataset.clientId = '';
-                    assign.dataset.projectId = '';
-                    if (checked) renderMeetingAssign(row); else assign.innerHTML = '';
-                }
-                if (row && !checked) {
-                    row.querySelectorAll('.meeting-status').forEach((el) => { el.innerHTML = ''; });
-                }
-            } catch (err) {
-                cb.checked = !checked;
-                console.warn('⚠️ rec_meeting:', err.message);
-                alert('Salvataggio non riuscito: ' + err.message);
-            } finally {
-                cb.disabled = false;
+                body.dataset.raw = data.text || '';
+                body.innerHTML = formatMeetingText(data.text);
+                const when = [data.data ? new Date(data.data + 'T00:00:00').toLocaleDateString('it-IT') : '', data.orario ? String(data.orario).slice(0, 5) : ''].filter(Boolean).join(' ');
+                const words = (data.text || '').trim() ? (data.text.trim().split(/\s+/).length) : 0;
+                document.getElementById('meetingTextSub').textContent = [when, words ? `${words} parole` : ''].filter(Boolean).join(' · ');
+            } catch (e) {
+                body.innerHTML = `<p class="meeting-text-empty" style="color:#B91C1C;">${escapeHtml(e.message)}</p>`;
             }
+        }
+
+        function initMeetingText() {
+            document.getElementById('meetingsContainer')?.addEventListener('click', (e) => {
+                const b = e.target.closest && e.target.closest('.meeting-text-btn');
+                if (!b) return;
+                e.preventDefault();
+                openMeetingText(b);
+            });
+            const modal = document.getElementById('meetingTextModal');
+            const close = () => modal.classList.remove('open');
+            document.getElementById('meetingTextClose')?.addEventListener('click', close);
+            document.getElementById('meetingTextDone')?.addEventListener('click', close);
+            modal?.addEventListener('click', (e) => { if (e.target === modal) close(); });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal?.classList.contains('open')) close(); });
+            document.getElementById('meetingTextCopy')?.addEventListener('click', () => {
+                const raw = document.getElementById('meetingTextBody').dataset.raw || '';
+                if (raw && navigator.clipboard) navigator.clipboard.writeText(raw).then(() => showNotification('Testo copiato', 'success')).catch(() => {});
+            });
+        }
+
+        // === REGISTRAZIONE E TRASCRIZIONE RIUNIONE (solo audio, nessun file salvato) ===
+        // Il pulsante giallo "Registra" (colonna Gestisci con Projexa) avvia la registrazione e
+        // diventa rosso "Ferma" finché è in corso. Cattura l'audio di sistema (voci degli altri,
+        // da getDisplayMedia) e il microfono scelto con l'ingranaggio, li mescola, li converte
+        // in WAV mono 16 kHz e ogni ~60 s invia un blocco al backend, che lo trascrive con
+        // il servizio Whisper (gratuito, su Render) e aggiunge il testo a rec_meeting.trascrizione. Il pannello in basso a
+        // destra mostra solo lo stato (tempo, blocchi trascritti, errori).
+        const REC_SAMPLE_RATE = 16000;
+        const REC_CHUNK_SECONDS = 60;
+        let meetingRec = null;
+
+        function recUi() {
+            return {
+                box: document.getElementById('meetingRecorder'),
+                title: document.getElementById('meetingRecorderTitle'),
+                status: document.getElementById('meetingRecorderStatus'),
+                dot: document.getElementById('meetingRecorderDot'),
+                stop: document.getElementById('meetingRecorderStop')
+            };
+        }
+
+        function setRecStatus(text, isError) {
+            const ui = recUi();
+            ui.status.textContent = text;
+            ui.status.classList.toggle('error', !!isError);
+        }
+
+        function isRecordingMeeting(eventId) {
+            return !!(meetingRec && meetingRec.running && eventId && meetingRec.eventId === eventId);
+        }
+
+        function recButtonLabel(recording) {
+            return recording ? '<i class="fas fa-stop"></i> Ferma' : '<i class="fas fa-circle"></i> Registra';
+        }
+
+        // Allinea tutti i pulsanti Registra/Ferma allo stato della registrazione in corso.
+        function refreshRecButtons() {
+            document.querySelectorAll('.meeting-rec-btn').forEach((b) => {
+                const recording = isRecordingMeeting(b.dataset.eventId);
+                b.classList.toggle('recording', recording);
+                b.innerHTML = recButtonLabel(recording);
+                b.disabled = false;
+            });
+        }
+
+        function showMeetingRecorder(title) {
+            const ui = recUi();
+            ui.title.textContent = title;
+            ui.box.style.display = 'block';
+        }
+
+        function formatRecTime(sec) {
+            const p = (n) => String(n).padStart(2, '0');
+            return `${p(Math.floor(sec / 3600))}:${p(Math.floor(sec % 3600 / 60))}:${p(Math.floor(sec % 60))}`;
+        }
+
+        function encodeWav(samples, sampleRate) {
+            const buffer = new ArrayBuffer(44 + samples.length * 2);
+            const v = new DataView(buffer);
+            const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+            w(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); w(8, 'WAVE');
+            w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+            v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+            w(36, 'data'); v.setUint32(40, samples.length * 2, true);
+            for (let i = 0; i < samples.length; i++) v.setInt16(44 + i * 2, samples[i], true);
+            return new Uint8Array(buffer);
+        }
+
+        function bytesToBase64(bytes) {
+            let bin = '';
+            for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+            return btoa(bin);
+        }
+
+        // Invio in coda (un blocco alla volta, in ordine) al backend che trascrive e scrive.
+        // Due tracce separate: il microfono (l'utente, il cui nome viene messo davanti alle sue
+        // frasi) e l'audio di sistema (gli altri partecipanti). Se una manca non viene inviata.
+        function queueRecChunk(rec, micSamples, sysSamples, offsetSec, isFirst) {
+            const payload = {
+                id_calendar: rec.eventId,
+                mime: 'audio/wav',
+                audio_mic: micSamples ? bytesToBase64(encodeWav(micSamples, REC_SAMPLE_RATE)) : undefined,
+                audio_system: sysSamples ? bytesToBase64(encodeWav(sysSamples, REC_SAMPLE_RATE)) : undefined,
+                offset_sec: offsetSec,
+                start_label: isFirst
+                    ? `Registrazione del ${new Date(rec.startedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}${rec.baseOffset ? ` (ripresa da ${formatRecTime(rec.baseOffset)})` : ''}`
+                    : undefined
+            };
+            rec.pending++;
+            rec.queue = rec.queue.then(async () => {
+                const body = JSON.stringify(payload);
+                try {
+                    // Errori temporanei (AI sovraccarica, rete): il blocco non va perso, si
+                    // rimanda dopo 20 s, 40 s e 60 s mantenendo l'ordine dei blocchi.
+                    for (let attempt = 1; ; attempt++) {
+                        try {
+                            const res = await fetch(`${API_URL}/calendar/meetings/managed/transcribe`, {
+                                method: 'POST',
+                                headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                                body
+                            });
+                            const data = await res.json().catch(() => ({}));
+                            if (!res.ok) {
+                                const err = new Error(data.error || `Errore ${res.status}`);
+                                err.status = res.status;
+                                throw err;
+                            }
+                            break;
+                        } catch (e) {
+                            const temporary = !e.status || e.status === 429 || e.status >= 500;
+                            if (!temporary || attempt >= 4) throw e;
+                            rec.lastError = `${e.message} — nuovo tentativo tra ${attempt * 20} s`;
+                            updateRecStatus(rec);
+                            await new Promise((r) => setTimeout(r, attempt * 20000));
+                        }
+                    }
+                    rec.sent++;
+                    rec.lastError = '';
+                } catch (e) {
+                    rec.lastError = e.message;
+                    // Nessuna AI per trascrivere o riunione non più gestita: inutile continuare.
+                    if ((e.status === 428 || e.status === 404) && rec.running) stopMeetingRecording(e.message);
+                } finally {
+                    rec.pending--;
+                    updateRecStatus(rec);
+                }
+            });
+        }
+
+        function flushRecBuffer(rec, force) {
+            const minSamples = force ? REC_SAMPLE_RATE : REC_SAMPLE_RATE * REC_CHUNK_SECONDS;
+            if (rec.bufferLen < minSamples) return;
+            const join = (parts) => {
+                const out = new Int16Array(rec.bufferLen);
+                let pos = 0;
+                for (const part of parts) { out.set(part, pos); pos += part.length; }
+                return out;
+            };
+            const micSamples = rec.mic ? join(rec.bufMic) : null;
+            const sysSamples = rec.hasSystemAudio ? join(rec.bufSys) : null;
+            // Gli orari continuano da quelli della sessione precedente (rec.baseOffset).
+            const offsetSec = (rec.baseOffset || 0) + rec.flushedSamples / REC_SAMPLE_RATE;
+            rec.flushedSamples += rec.bufferLen;
+            rec.bufMic = [];
+            rec.bufSys = [];
+            rec.bufferLen = 0;
+            queueRecChunk(rec, micSamples, sysSamples, offsetSec, rec.chunks++ === 0);
+        }
+
+        function updateRecStatus(rec) {
+            if (rec !== meetingRec) return;
+            const elapsed = rec.startedAt ? (Date.now() - rec.startedAt) / 1000 : 0;
+            if (rec.running) {
+                let t = `● Registrazione in corso ${formatRecTime(elapsed)} · blocchi trascritti: ${rec.sent}`;
+                if (!rec.hasSystemAudio) t += ' · solo microfono';
+                setRecStatus(rec.lastError ? `${t} · ultimo errore: ${rec.lastError}` : t, !!rec.lastError);
+            } else if (rec.pending > 0) {
+                setRecStatus(`Completamento della trascrizione… (${rec.pending} blocchi in coda)`);
+            } else if (rec.stoppedReason) {
+                setRecStatus(rec.stoppedReason, true);
+            } else if (rec.startedAt) {
+                setRecStatus(`Trascrizione completata (${rec.sent} blocchi). Il testo è in rec_meeting.`);
+            }
+        }
+
+        async function startMeetingRecording(btn) {
+            const ui = recUi();
+            if (meetingRec && (meetingRec.running || meetingRec.starting)) {
+                showNotification('È già in corso la registrazione di un\'altra riunione', 'info');
+                return;
+            }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+                showNotification('Questo browser non permette di registrare l\'audio della riunione (usa Chrome o Edge)', 'info');
+                return;
+            }
+            const rec = meetingRec = { eventId: btn.dataset.eventId, title: btn.dataset.title, running: false, starting: true };
+            btn.disabled = true;
+            showMeetingRecorder(rec.title);
+            ui.stop.style.display = 'none';
+            ui.dot.classList.remove('live');
+            // Audio di sistema: da un dispositivo di "loopback" scelto con l'ingranaggio (Mix stereo,
+            // VB-Cable...: nessuna finestra di condivisione) oppure dalla condivisione dello schermo.
+            // rec.display contiene in entrambi i casi il flusso con l'audio del PC.
+            const audioPref = readAudioPref();
+            if (audioPref.system) {
+                setRecStatus('Avvio della registrazione…');
+                try {
+                    rec.display = await navigator.mediaDevices.getUserMedia({
+                        audio: { deviceId: { exact: audioPref.system }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+                    });
+                } catch (e) {
+                    rec.starting = false;
+                    btn.disabled = false;
+                    setRecStatus('Dispositivo "Audio di sistema" non disponibile: sceglilo di nuovo con l\'ingranaggio ⚙️ oppure imposta "Condivisione schermo".', true);
+                    return;
+                }
+            } else {
+                setRecStatus('Scegli cosa condividere nella finestra del browser…');
+                // La scelta dello schermo va chiesta subito, nel clic: il browser la consente solo lì.
+                try {
+                    // Audio di sistema: il browser lo concede solo insieme a una condivisione schermo.
+                    rec.display = await navigator.mediaDevices.getDisplayMedia({
+                        // Apre la scelta su "Schermo intero": cattura l'audio anche delle app (Teams, Zoom...)
+                        video: { displaySurface: 'monitor' },
+                        audio: { echoCancellation: false, noiseSuppression: false },
+                        systemAudio: 'include',
+                        selfBrowserSurface: 'exclude'
+                    });
+                } catch (e) {
+                    rec.starting = false;
+                    btn.disabled = false;
+                    setRecStatus('Registrazione annullata: nessuna condivisione scelta.', true);
+                    return;
+                }
+            }
+            // Riga rec_meeting della riunione (creata se non esiste ancora)
+            try {
+                await ensureManagedMeeting(btn);
+            } catch (e) {
+                rec.display.getTracks().forEach((t) => t.stop());
+                rec.starting = false;
+                btn.disabled = false;
+                setRecStatus('Riunione non salvata in Projexa: ' + e.message, true);
+                return;
+            }
+            // Riunione già trascritta in precedenza: gli orari riprendono da dove erano arrivati.
+            rec.baseOffset = 0;
+            try {
+                const r = await fetch(`${API_URL}/calendar/meetings/managed/offset?id_calendar=${encodeURIComponent(rec.eventId)}`, { headers: calendarAuthHeaders() });
+                const d = await r.json().catch(() => ({}));
+                if (r.ok) rec.baseOffset = Math.max(0, Number(d.offset) || 0);
+            } catch (e) { /* si parte da 00:00:00 */ }
+            rec.hasSystemAudio = rec.display.getAudioTracks().length > 0;
+            try {
+                // Il microfono non deve essere lo stesso dispositivo usato come audio di sistema.
+                const micId = audioPref.input && audioPref.input !== audioPref.system ? audioPref.input : undefined;
+                rec.mic = await navigator.mediaDevices.getUserMedia({
+                    audio: { deviceId: micId ? { ideal: micId } : undefined, echoCancellation: true, noiseSuppression: true }
+                });
+            } catch (e) {
+                rec.mic = null;
+            }
+            if (!rec.hasSystemAudio && !rec.mic) {
+                rec.display.getTracks().forEach((t) => t.stop());
+                rec.starting = false;
+                btn.disabled = false;
+                setRecStatus('Nessun audio disponibile: attiva "Condividi audio di sistema" o consenti il microfono.', true);
+                return;
+            }
+
+            // Due tracce separate (canale 0 = microfono dell'utente, canale 1 = audio di sistema),
+            // ciascuna convertita in mono 16 kHz Int16: così si sa chi sta parlando.
+            rec.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const merger = rec.ctx.createChannelMerger(2);
+            if (rec.mic) rec.ctx.createMediaStreamSource(rec.mic).connect(merger, 0, 0);
+            if (rec.hasSystemAudio) rec.ctx.createMediaStreamSource(new MediaStream(rec.display.getAudioTracks())).connect(merger, 0, 1);
+            rec.processor = rec.ctx.createScriptProcessor(4096, 2, 1);
+            const ratio = rec.ctx.sampleRate / REC_SAMPLE_RATE;
+            rec.bufMic = []; rec.bufSys = []; rec.bufferLen = 0; rec.flushedSamples = 0; rec.chunks = 0;
+            rec.sent = 0; rec.pending = 0; rec.lastError = ''; rec.stoppedReason = '';
+            rec.queue = Promise.resolve();
+            const downsample = (input) => {
+                const outLen = Math.floor(input.length / ratio);
+                const out = new Int16Array(outLen);
+                for (let i = 0; i < outLen; i++) {
+                    const start = Math.floor(i * ratio);
+                    const end = Math.min(input.length, Math.floor((i + 1) * ratio));
+                    let sum = 0;
+                    for (let j = start; j < end; j++) sum += input[j];
+                    const v = Math.max(-1, Math.min(1, sum / Math.max(1, end - start)));
+                    out[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
+                }
+                return out;
+            };
+            rec.processor.onaudioprocess = (ev) => {
+                if (!rec.running) return;
+                const mic = downsample(ev.inputBuffer.getChannelData(0));
+                const sys = downsample(ev.inputBuffer.getChannelData(1));
+                rec.bufMic.push(mic);
+                rec.bufSys.push(sys);
+                rec.bufferLen += mic.length;
+                flushRecBuffer(rec, false);
+            };
+            merger.connect(rec.processor);
+            rec.processor.connect(rec.ctx.destination); // l'uscita è silenziosa: serve solo a far girare il nodo
+
+            // Se l'utente interrompe la condivisione dal browser, la registrazione si ferma.
+            rec.display.getVideoTracks().forEach((t) => t.addEventListener('ended', () => stopMeetingRecording()));
+            rec.display.getAudioTracks().forEach((t) => t.addEventListener('ended', () => stopMeetingRecording()));
+
+            rec.running = true;
+            rec.starting = false;
+            rec.startedAt = Date.now();
+            rec.timer = setInterval(() => updateRecStatus(rec), 1000);
+            refreshRecButtons();
+            ui.stop.style.display = 'inline-block';
+            ui.dot.classList.add('live');
+            updateRecStatus(rec);
+            if (!rec.hasSystemAudio) showNotification('Audio di sistema non condiviso: verrà trascritto solo il tuo microfono', 'info');
+        }
+
+        async function stopMeetingRecording(reason) {
+            const rec = meetingRec;
+            if (!rec || !rec.running) return;
+            rec.running = false;
+            rec.stoppedReason = reason || '';
+            clearInterval(rec.timer);
+            flushRecBuffer(rec, true); // ultimo blocco (se almeno 1 secondo)
+            try { rec.processor.disconnect(); } catch (e) { /* già scollegato */ }
+            if (rec.ctx) rec.ctx.close().catch(() => {});
+            if (rec.display) rec.display.getTracks().forEach((t) => t.stop());
+            if (rec.mic) rec.mic.getTracks().forEach((t) => t.stop());
+            const ui = recUi();
+            ui.stop.style.display = 'none';
+            ui.dot.classList.remove('live');
+            refreshRecButtons();
+            updateRecStatus(rec);
+            await rec.queue;
+            updateRecStatus(rec);
+            loadTodaysMeetings(); // aggiorna il flag "Trascrizione"
+        }
+
+        function initMeetingRecorder() {
+            document.getElementById('meetingsContainer')?.addEventListener('click', (e) => {
+                // Partecipa: apre la riunione nel suo programma/sito
+                const link = e.target.closest && e.target.closest('.meeting-link[data-meeting-link]');
+                if (link) {
+                    e.preventDefault();
+                    window.open(link.dataset.meetingLink, '_blank', 'noopener');
+                    return;
+                }
+                // Gestisci con Projexa: giallo "Registra" avvia, rosso "Ferma" interrompe
+                const rb = e.target.closest && e.target.closest('.meeting-rec-btn');
+                if (!rb) return;
+                e.preventDefault();
+                if (isRecordingMeeting(rb.dataset.eventId)) stopMeetingRecording();
+                else startMeetingRecording(rb);
+            });
+            document.getElementById('meetingRecorderStop')?.addEventListener('click', () => stopMeetingRecording());
+            document.getElementById('meetingRecorderClose')?.addEventListener('click', () => {
+                if (meetingRec && meetingRec.running) {
+                    showNotification('Ferma prima la registrazione', 'info');
+                    return;
+                }
+                recUi().box.style.display = 'none';
+            });
+            // Chiudere o ricaricare la pagina durante la registrazione interromperebbe la trascrizione.
+            window.addEventListener('beforeunload', (e) => {
+                if (meetingRec && (meetingRec.running || meetingRec.pending > 0)) {
+                    e.preventDefault();
+                    e.returnValue = '';
+                }
+            });
+        }
+
+        // === DISPOSITIVI AUDIO (microfono / uscita) - riquadro Riunioni di Oggi ===
+        // Elenca i dispositivi del PC con navigator.mediaDevices. I nomi sono visibili solo
+        // dopo il permesso al microfono (regola dei browser). La scelta è una preferenza di
+        // questo browser (localStorage), pronta per registrazione/trascrizione delle riunioni.
+        const AUDIO_PREF_KEY = 'projexa.audioDevices';
+        let audioMeterStream = null;
+        let audioMeterFrame = null;
+
+        function readAudioPref() {
+            try { return JSON.parse(localStorage.getItem(AUDIO_PREF_KEY) || '{}') || {}; } catch (e) { return {}; }
+        }
+        function writeAudioPref(pref) {
+            try { localStorage.setItem(AUDIO_PREF_KEY, JSON.stringify(pref)); } catch (e) { /* solo preferenza locale */ }
+        }
+
+        function stopAudioMeter() {
+            if (audioMeterFrame) cancelAnimationFrame(audioMeterFrame);
+            audioMeterFrame = null;
+            if (audioMeterStream) audioMeterStream.getTracks().forEach((t) => t.stop());
+            audioMeterStream = null;
+            const bar = document.getElementById('audioMeterBar');
+            if (bar) bar.style.width = '0';
+        }
+
+        // Barra del livello del microfono selezionato: conferma che "sente".
+        async function startAudioMeter(deviceId) {
+            stopAudioMeter();
+            try {
+                audioMeterStream = await navigator.mediaDevices.getUserMedia({ audio: deviceId ? { deviceId: { exact: deviceId } } : true });
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const analyser = ctx.createAnalyser();
+                analyser.fftSize = 512;
+                ctx.createMediaStreamSource(audioMeterStream).connect(analyser);
+                const data = new Uint8Array(analyser.fftSize);
+                const bar = document.getElementById('audioMeterBar');
+                const tick = () => {
+                    if (!audioMeterStream) { ctx.close().catch(() => {}); return; }
+                    analyser.getByteTimeDomainData(data);
+                    let peak = 0;
+                    for (const v of data) peak = Math.max(peak, Math.abs(v - 128));
+                    if (bar) bar.style.width = Math.min(100, Math.round(peak / 128 * 180)) + '%';
+                    audioMeterFrame = requestAnimationFrame(tick);
+                };
+                tick();
+            } catch (e) { /* senza permesso la barra resta ferma */ }
+        }
+
+        function renderAudioList(listEl, devices, kind, selectedId) {
+            if (!devices.length) {
+                listEl.innerHTML = `<div class="audio-dev-empty">Nessun dispositivo trovato</div>`;
+                return;
+            }
+            const sel = devices.some((d) => d.deviceId === selectedId) ? selectedId : devices[0].deviceId;
+            listEl.innerHTML = devices.map((d, i) => {
+                const name = d.label || `${kind === 'audioinput' ? 'Microfono' : 'Uscita audio'} ${i + 1}`;
+                const checked = d.deviceId === sel;
+                return `<label class="audio-dev-item${checked ? ' selected' : ''}"><input type="radio" name="${kind}" value="${escapeHtml(d.deviceId)}" ${checked ? 'checked' : ''}> ${escapeHtml(name)}</label>`;
+            }).join('');
+            return sel;
+        }
+
+        async function loadAudioDevices() {
+            const msg = document.getElementById('audioDevicesMsg');
+            const inList = document.getElementById('audioInputList');
+            const outList = document.getElementById('audioOutputList');
+            if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+                msg.textContent = 'Questo browser non permette di leggere i dispositivi audio.';
+                return;
+            }
+            msg.textContent = 'Lettura dei dispositivi…';
+            let devices = await navigator.mediaDevices.enumerateDevices();
+            // Senza permesso i nomi sono vuoti: lo si chiede una volta, poi si rilegge l'elenco.
+            if (!devices.some((d) => d.kind === 'audioinput' && d.label)) {
+                try {
+                    const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    tmp.getTracks().forEach((t) => t.stop());
+                    devices = await navigator.mediaDevices.enumerateDevices();
+                } catch (e) {
+                    msg.textContent = 'Permesso al microfono negato: i nomi dei dispositivi non sono visibili. Consentilo dall\'icona del lucchetto nella barra degli indirizzi.';
+                }
+            }
+            if (msg.textContent === 'Lettura dei dispositivi…') msg.textContent = 'Scegli il microfono e l\'uscita audio da usare per le riunioni.';
+            // "default"/"communications" sono alias di Windows: si mostrano i dispositivi reali.
+            const real = (kind) => devices.filter((d) => d.kind === kind && d.deviceId !== 'communications');
+            const pref = readAudioPref();
+            const inSel = renderAudioList(inList, real('audioinput'), 'audioinput', pref.input);
+            renderAudioList(outList, real('audiooutput'), 'audiooutput', pref.output);
+            if (!real('audiooutput').length) {
+                outList.innerHTML = `<div class="audio-dev-empty">Questo browser non elenca le uscite audio (disponibile su Chrome ed Edge).</div>`;
+            }
+            renderSystemAudioList(real('audioinput'), pref.system);
+            if (inSel) startAudioMeter(inSel);
+        }
+
+        // Nomi tipici dei dispositivi che riportano l'audio del PC come ingresso (loopback).
+        const LOOPBACK_RE = /stereo mix|mix stereo|missaggio stereo|what u hear|cable output|vb-audio|voicemeeter|loopback/i;
+
+        function renderSystemAudioList(inputs, selected) {
+            const el = document.getElementById('audioSystemList');
+            if (!el) return;
+            const sel = inputs.some((d) => d.deviceId === selected) ? selected : '';
+            const item = (value, label, extra) => `<label class="audio-dev-item${value === sel ? ' selected' : ''}"><input type="radio" name="audiosystem" value="${escapeHtml(value)}" ${value === sel ? 'checked' : ''}> ${label}${extra || ''}</label>`;
+            let html = item('', 'Condivisione schermo <span style="color: var(--text-muted);">(il browser chiede ogni volta cosa condividere)</span>');
+            const loop = inputs.filter((d) => LOOPBACK_RE.test(d.label || ''));
+            const others = inputs.filter((d) => !LOOPBACK_RE.test(d.label || ''));
+            html += loop.map((d) => item(d.deviceId, escapeHtml(d.label), ' <span class="audio-dev-badge">consigliato</span>')).join('');
+            html += others.map((d, i) => item(d.deviceId, escapeHtml(d.label || `Ingresso ${i + 1}`))).join('');
+            if (!loop.length) {
+                html += `<div class="audio-dev-empty">Nessun dispositivo "Mix stereo" o cavo virtuale trovato. Puoi attivare Mix stereo da Impostazioni di Windows › Audio › Altre impostazioni audio › Registrazione (clic destro › Mostra dispositivi disattivati), oppure installare VB-Audio Virtual Cable.</div>`;
+            }
+            el.innerHTML = html;
+        }
+
+        function openAudioDevices() {
+            document.getElementById('audioDevicesModal').classList.add('open');
+            loadAudioDevices();
+        }
+        function closeAudioDevices() {
+            stopAudioMeter();
+            document.getElementById('audioDevicesModal').classList.remove('open');
+        }
+
+        // Suono di prova sull'uscita scelta (setSinkId: Chrome/Edge; altrove uscita predefinita).
+        async function testAudioOutput() {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const pref = readAudioPref();
+            try { if (pref.output && ctx.setSinkId) await ctx.setSinkId(pref.output); } catch (e) { /* uscita predefinita */ }
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.frequency.value = 660;
+            gain.gain.setValueAtTime(0.15, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.6);
+            osc.onended = () => ctx.close().catch(() => {});
+        }
+
+        function initAudioDevices() {
+            document.getElementById('audioDevicesBtn')?.addEventListener('click', openAudioDevices);
+            document.getElementById('audioDevicesClose')?.addEventListener('click', closeAudioDevices);
+            document.getElementById('audioDevicesDone')?.addEventListener('click', closeAudioDevices);
+            document.getElementById('audioDevicesRefresh')?.addEventListener('click', loadAudioDevices);
+            document.getElementById('audioTestOutput')?.addEventListener('click', testAudioOutput);
+            const modal = document.getElementById('audioDevicesModal');
+            modal?.addEventListener('click', (e) => { if (e.target === modal) closeAudioDevices(); });
+            modal?.addEventListener('change', (e) => {
+                const r = e.target;
+                if (!r || r.type !== 'radio') return;
+                const pref = readAudioPref();
+                if (r.name === 'audioinput') { pref.input = r.value; startAudioMeter(r.value); }
+                if (r.name === 'audiooutput') pref.output = r.value;
+                if (r.name === 'audiosystem') pref.system = r.value || undefined;
+                writeAudioPref(pref);
+                r.closest('.audio-dev-list').querySelectorAll('.audio-dev-item').forEach((l) => l.classList.toggle('selected', l.contains(r)));
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && modal?.classList.contains('open')) closeAudioDevices();
+            });
+            // Collegamento o scollegamento di cuffie/microfoni con la finestra aperta
+            navigator.mediaDevices?.addEventListener?.('devicechange', () => {
+                if (modal?.classList.contains('open')) loadAudioDevices();
+            });
         }
 
         // === INTEGRAZIONE AI (ChatGPT, Claude, Gemini) - backend /api/ai ===
@@ -5320,7 +6029,8 @@
         const AI_INFO = {
             chatgpt: { label: 'ChatGPT', keyHint: 'Crea la chiave su platform.openai.com › API keys (inizia con "sk-").', keyUrl: 'https://platform.openai.com/api-keys' },
             claude: { label: 'Claude', keyHint: 'Crea la chiave su console.anthropic.com › API keys (inizia con "sk-ant-").', keyUrl: 'https://console.anthropic.com/settings/keys' },
-            gemini: { label: 'Gemini', keyHint: 'Crea la chiave su aistudio.google.com › Get API key.', keyUrl: 'https://aistudio.google.com/apikey' }
+            gemini: { label: 'Gemini', keyHint: 'Crea la chiave su aistudio.google.com › Get API key.', keyUrl: 'https://aistudio.google.com/apikey' },
+            mistral: { label: 'Mistral', keyHint: 'Crea la chiave su console.mistral.ai › API Keys (piano gratuito "Experiment" disponibile).', keyUrl: 'https://console.mistral.ai/api-keys' }
         };
         let aiStatus = {};
 
@@ -5329,6 +6039,7 @@
             if (c === 'chatgpt') return 'chatgpt';
             if (c === 'claude') return 'claude';
             if (c === 'gemini') return 'gemini';
+            if (c === 'mistral') return 'mistral';
             if (c === 'copilot') return 'copilot';
             return null;
         }
@@ -5705,21 +6416,21 @@
                 ? `<span class="meeting-provider" title="${escapeHtml(provider.label)}" aria-label="${escapeHtml(provider.label)}">${provider.icon}</span>`
                 : `<span class="meeting-provider"></span>`;
             const meetingLinkBtn = meetingLink
-                ? `<button class="meeting-link" data-meeting-link="${escapeHtml(meetingLink)}" onclick="window.open(this.dataset.meetingLink, '_blank'); return false;"><i class="fas fa-video"></i> Partecipa</button>`
+                ? `<button type="button" class="meeting-link" data-meeting-link="${escapeHtml(meetingLink)}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(event.summary || 'Riunione')}"><i class="fas fa-video"></i> Partecipa</button>`
                 : `<span class="meeting-link-empty"></span>`;
 
             // Una sola riga: partecipa - durata - ora - provider - gestisci con Projexa - titolo -
             // trascrizione - recap - inviata (flag da rec_meeting) - cliente/progetto
             return `
-                <div class="meeting-card">
+                <div class="meeting-card" data-managed="${event.managed ? '1' : ''}">
                     ${meetingLinkBtn}
                     <div class="meeting-duration">${escapeHtml(durationStr)}</div>
                     <div class="meeting-time"><i class="fas fa-clock"></i> ${escapeHtml(timeStr)}</div>
                     ${providerBadge}
-                    <div class="meeting-manage"><input type="checkbox" class="meeting-manage-flag" ${event.managed ? 'checked' : ''} data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}" title="Gestisci con Projexa" aria-label="Gestisci con Projexa"></div>
+                    <div class="meeting-manage">${(meetingLink || isRecordingMeeting(event.id)) ? `<button type="button" class="meeting-rec-btn${isRecordingMeeting(event.id) ? ' recording' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">${recButtonLabel(isRecordingMeeting(event.id))}</button>` : ''}</div>
                     <div class="meeting-title" title="${escapeHtml(tooltip)}">${escapeHtml(title)}</div>
-                    <div class="meeting-status meeting-status-trascrizione">${event.has_trascrizione ? '<i class="fas fa-flag" title="Trascrizione presente"></i>' : ''}</div>
-                    <div class="meeting-status meeting-status-recap">${event.has_recap ? '<i class="fas fa-flag" title="Recap presente"></i>' : ''}</div>
+                    <div class="meeting-status meeting-status-trascrizione">${event.has_trascrizione ? meetingTextButton(event, 'trascrizione', title) : ''}</div>
+                    <div class="meeting-status meeting-status-recap">${event.has_recap ? meetingTextButton(event, 'recap', title) : ''}</div>
                     <div class="meeting-status meeting-status-inviata">${event.inviata ? '<i class="fas fa-flag" title="Inviata"></i>' : ''}</div>
                     <div class="meeting-assign" data-event-id="${escapeHtml(event.id || '')}" data-client-id="${escapeHtml(event.client_id || '')}" data-project-id="${escapeHtml(event.project_id || '')}"></div>
                 </div>
@@ -5759,7 +6470,6 @@
             renderCalendarConnectionUi();
             const meetingsBox = document.getElementById('meetingsContainer');
             if (meetingsBox) {
-                meetingsBox.addEventListener('change', onMeetingManageChange);
                 meetingsBox.addEventListener('change', onMeetingAssignChange);
             }
 
@@ -11555,6 +12265,9 @@
             // bloccano il caricamento del resto della dashboard.
             initMeetings().catch((e) => console.warn('⚠️ Calendar init:', e.message));
             initAiIntegration();
+            initAudioDevices();
+            initMeetingRecorder();
+            initMeetingText();
             await loadTenantHeaderLogo();
             await loadPageLabels();
             applyRoleVisibility();
@@ -11588,6 +12301,62 @@
             await loadDashboardKpis(); // carica i KPI progetti attivi/completati/rischi aperti
         });
     </script>
+    <div id="meetingTextModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="meetingTextTitle">
+        <div class="task-modal-card" style="width: min(820px, 96vw);">
+            <div class="task-modal-header">
+                <h3 id="meetingTextTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem; min-width: 0;"><i class="fas fa-search" style="color: #10B981;"></i> <span id="meetingTextTitleText">Trascrizione</span></h3>
+                <button id="meetingTextClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="meetingTextSub" style="padding: 0.6rem 1.25rem 0; font-size: 0.8rem; color: var(--text-muted);"></div>
+            <div id="meetingTextBody" class="meeting-text-body"></div>
+            <div class="task-modal-footer">
+                <button id="meetingTextCopy" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-copy"></i> Copia testo</button>
+                <button id="meetingTextDone" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;">Chiudi</button>
+            </div>
+        </div>
+    </div>
+    <div id="meetingRecorder" class="meeting-recorder" role="region" aria-label="Registrazione riunione" style="display: none;">
+        <div class="meeting-recorder-head">
+            <span class="meeting-recorder-dot" id="meetingRecorderDot"></span>
+            <strong id="meetingRecorderTitle">Riunione</strong>
+            <button id="meetingRecorderClose" type="button" aria-label="Chiudi" title="Chiudi"><i class="fas fa-times"></i></button>
+        </div>
+        <p id="meetingRecorderStatus" class="meeting-recorder-status"></p>
+        <p class="meeting-recorder-note">Informa i partecipanti che la riunione viene registrata e trascritta. Nella finestra che si apre scegli <b>Schermo intero</b> e attiva <b>Condividi anche l'audio di sistema</b>. Lascia aperta questa scheda di Projexa.</p>
+        <div class="meeting-recorder-actions">
+            <button id="meetingRecorderStop" type="button" class="meeting-recorder-stop" style="display: none;"><i class="fas fa-stop"></i> Ferma</button>
+        </div>
+    </div>
+    <div id="audioDevicesModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="audioDevicesTitle">
+        <div class="task-modal-card" style="width: min(520px, 94vw);">
+            <div class="task-modal-header">
+                <h3 id="audioDevicesTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-headset" style="color: #4285F4;"></i> Dispositivi audio</h3>
+                <button id="audioDevicesClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
+            </div>
+            <div style="padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem; overflow: auto;">
+                <p id="audioDevicesMsg" style="margin: 0; font-size: 0.85rem; color: var(--text-muted);"></p>
+                <div>
+                    <div class="audio-dev-title"><i class="fas fa-microphone"></i> Microfono</div>
+                    <div id="audioInputList" class="audio-dev-list"></div>
+                    <div class="audio-meter" title="Livello del microfono selezionato"><div id="audioMeterBar" class="audio-meter-bar"></div></div>
+                </div>
+                <div>
+                    <div class="audio-dev-title"><i class="fas fa-desktop"></i> Audio di sistema per la registrazione delle riunioni</div>
+                    <p style="margin: 0 0 0.4rem; font-size: 0.78rem; color: var(--text-muted);">Con un dispositivo che riporta l'audio del PC (es. <b>Mix stereo</b> o <b>CABLE Output</b> di VB-Audio) la registrazione parte senza la finestra di condivisione dello schermo.</p>
+                    <div id="audioSystemList" class="audio-dev-list"></div>
+                </div>
+                <div>
+                    <div class="audio-dev-title"><i class="fas fa-volume-up"></i> Audio in uscita (altoparlanti / cuffie)</div>
+                    <div id="audioOutputList" class="audio-dev-list"></div>
+                    <button id="audioTestOutput" type="button" style="margin-top: 0.5rem; padding: 0.35rem 0.8rem; border: 1px solid var(--border); border-radius: 8px; background: white; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-play"></i> Prova audio</button>
+                </div>
+            </div>
+            <div class="task-modal-footer">
+                <button id="audioDevicesRefresh" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-sync"></i> Aggiorna elenco</button>
+                <button id="audioDevicesDone" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #4285F4; color: white; font-weight: 600; cursor: pointer;">Chiudi</button>
+            </div>
+        </div>
+    </div>
     <div id="aiKeyModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="aiKeyTitle">
         <div class="task-modal-card" style="width: min(480px, 94vw);">
             <div class="task-modal-header">

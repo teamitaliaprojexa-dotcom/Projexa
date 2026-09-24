@@ -141,3 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Servizio Whisper (Python): ambiente locale e cache
+whisper-service/.venv/
+__pycache__/

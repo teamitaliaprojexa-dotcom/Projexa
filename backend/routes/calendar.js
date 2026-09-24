@@ -18,6 +18,7 @@ import crypto from 'crypto';
 import ical from 'node-ical';
 import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
+import { transcribeAudio } from './ai.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
 import { isAllowedOrigin } from '../config/origins.js';
@@ -614,6 +615,142 @@ router.patch('/meetings/managed', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('❌ REC_MEETING_UPDATE:', error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Testo completo di trascrizione o recap di una riunione (finestra "lente" della dashboard).
+// Le righe delle riunioni ricevono solo "presente sì/no": il testo si carica qui, su richiesta.
+router.get('/meetings/managed/text', requireAuth, async (req, res) => {
+  try {
+    const idCalendar = String(req.query.id_calendar || '').trim();
+    const field = String(req.query.field || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    if (field !== 'trascrizione' && field !== 'recap') return res.status(400).json({ error: 'Campo non valido' });
+    // Nome di colonna da una whitelist fissa: nessun input utente nella query.
+    const result = await db.query(
+      `SELECT ${field === 'recap' ? 'recap' : 'trascrizione'} AS testo, oggetto, data_calendar, orario_calendar
+         FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    const r = result.rows[0];
+    res.json({ text: r.testo || '', oggetto: r.oggetto || '', data: r.data_calendar, orario: r.orario_calendar });
+  } catch (error) {
+    console.error('❌ REC_MEETING_TEXT:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Trascrizione dal vivo: il browser registra la riunione e invia blocchi WAV di circa
+// 60 secondi, in ordine, su DUE tracce separate: audio_mic (il microfono dell'utente) e
+// audio_system (l'audio del PC, cioè gli altri partecipanti). Ogni traccia viene trascritta
+// in frasi con l'orario (routes/ai.js); le frasi vengono unite in ordine di tempo con il
+// nome di chi parla e AGGIUNTE a rec_meeting.trascrizione. L'audio non viene salvato.
+const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
+const OTHERS_LABEL = 'Partecipanti';
+
+function hhmmss(totalSec) {
+  const t = Math.max(0, Math.floor(Number(totalSec) || 0));
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(Math.floor(t / 3600))}:${p(Math.floor((t % 3600) / 60))}:${p(t % 60)}`;
+}
+
+function decodeAudio(b64) {
+  if (!b64) return null;
+  const buf = Buffer.from(String(b64), 'base64');
+  if (buf.length === 0) return null;
+  if (buf.length > MAX_AUDIO_BYTES) {
+    const err = new Error('Blocco audio troppo grande');
+    err.status = 413;
+    throw err;
+  }
+  return buf;
+}
+
+// Chi parla al microfono: nome e cognome dell'utente (tabella users), altrimenti l'email.
+async function speakerName(user) {
+  try {
+    const r = await db.query('SELECT name, cognome FROM users WHERE id = $1 LIMIT 1', [user.user_id]);
+    const u = r.rows[0] || {};
+    const full = [u.name, u.cognome].filter(Boolean).join(' ').trim();
+    if (full) return full;
+  } catch (e) { /* si ripiega sull'email */ }
+  return user.email || 'Io';
+}
+
+// Punto di ripresa degli orari: una nuova registrazione della stessa riunione continua
+// dall'ultimo orario già presente in trascrizione (+1 s), invece di ripartire da 00:00:00.
+router.get('/meetings/managed/offset', requireAuth, async (req, res) => {
+  try {
+    const idCalendar = String(req.query.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    const r = await db.query(
+      `SELECT trascrizione FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    let last = -1;
+    const re = /^\[(\d{1,3}):(\d{2}):(\d{2})\]/gm;
+    const text = (r.rows[0] && r.rows[0].trascrizione) || '';
+    for (let m = re.exec(text); m; m = re.exec(text)) {
+      last = Math.max(last, Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]));
+    }
+    res.json({ offset: last >= 0 ? last + 1 : 0 });
+  } catch (error) {
+    console.error('❌ REC_MEETING_OFFSET:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    const mime = String(b.mime || 'audio/wav');
+    if (!/^audio\/(wav|x-wav|wave)$/.test(mime)) return res.status(400).json({ error: 'Formato audio non supportato' });
+    const micAudio = decodeAudio(b.audio_mic);
+    const sysAudio = decodeAudio(b.audio_system || b.audio); // "audio": formato precedente, una sola traccia
+    if (!micAudio && !sysAudio) return res.status(400).json({ error: 'Audio mancante' });
+
+    const row = await db.query(
+      `SELECT 1 FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    if (row.rows.length === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+
+    // Le due tracce si trascrivono una dopo l'altra (i piani gratuiti limitano le richieste al secondo).
+    const lines = [];
+    let provider = '';
+    if (micAudio) {
+      const me = await speakerName(req.user);
+      const r = await transcribeAudio(req.user.user_id, micAudio, mime);
+      provider = r.provider;
+      r.segments.forEach((x) => lines.push({ start: x.start, who: me, text: x.text }));
+    }
+    if (sysAudio) {
+      const r = await transcribeAudio(req.user.user_id, sysAudio, mime);
+      provider = r.provider;
+      const who = micAudio ? OTHERS_LABEL : '';
+      r.segments.forEach((x) => lines.push({ start: x.start, who, text: x.text }));
+    }
+    lines.sort((a, b2) => a.start - b2.start);
+
+    // Righe da aggiungere: intestazione a inizio registrazione + frasi del blocco (se c'è parlato).
+    const offset = Number(b.offset_sec) || 0;
+    let add = '';
+    if (b.start_label) add += `\n--- ${String(b.start_label).slice(0, 80)} ---\n`;
+    for (const l of lines) add += `[${hhmmss(offset + l.start)}] ${l.who ? `${l.who}: ` : ''}${l.text.replace(/\s*\n\s*/g, ' ')}\n`;
+    if (add) {
+      await db.query(
+        `UPDATE rec_meeting SET trascrizione = COALESCE(trascrizione, '') || $1
+          WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
+        [add, req.user.tenant_id, req.user.user_id, idCalendar]
+      );
+    }
+    res.json({ success: true, provider, lines: lines.length });
+  } catch (error) {
+    console.error('❌ REC_MEETING_TRANSCRIBE:', error.message);
+    res.status(error.status || 500).json({ error: error.message });
   }
 });
 

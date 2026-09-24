@@ -1,8 +1,8 @@
-// === INTEGRAZIONE AI (ChatGPT, Claude, Gemini) ===
+// === INTEGRAZIONE AI (ChatGPT, Claude, Gemini, Mistral) ===
 //
 // Stesso schema delle integrazioni Calendar/Jira: i dati di autenticazione stanno sul
 // progetto Neon "Projexa-Auth", tabella integr_tok_auth (vedi config/integrations.js),
-// con tipo_integrazione = 'AI' e provider_integrazione = 'ChatGPT' | 'Claude' | 'Gemini'.
+// con tipo_integrazione = 'AI' e provider_integrazione = 'ChatGPT' | 'Claude' | 'Gemini' | 'Mistral'.
 //
 // I fornitori non offrono un login OAuth per usare l'abbonamento personale (ChatGPT Plus,
 // Claude Pro, Gemini Advanced) da app esterne: il collegamento avviene con la chiave API
@@ -27,7 +27,10 @@ const MAX_PROMPT_CHARS = 20000;
 const PROVIDERS = {
   chatgpt: { provider: 'ChatGPT', label: 'ChatGPT', prefix: 'chatgpt', model: process.env.OPENAI_MODEL || 'gpt-5' },
   claude: { provider: 'Claude', label: 'Claude', prefix: 'claude', model: 'claude-opus-5' },
-  gemini: { provider: 'Gemini', label: 'Gemini', prefix: 'gemini', model: process.env.GEMINI_MODEL || 'gemini-2.5-flash' }
+  gemini: { provider: 'Gemini', label: 'Gemini', prefix: 'gemini', model: process.env.GEMINI_MODEL || 'gemini-3.6-flash' },
+  // Mistral AI (Francia): alias "-latest" aggiornato dal fornitore, sovrascrivibile da MISTRAL_MODEL.
+  // "small" è incluso anche nel piano gratuito "Experiment" (il "large" no: errore tier_not_allowed).
+  mistral: { provider: 'Mistral', label: 'Mistral', prefix: 'mistral', model: process.env.MISTRAL_MODEL || 'mistral-small-latest' }
 };
 
 function requireProvider(req, res, next) {
@@ -68,13 +71,20 @@ async function readJson(response, label) {
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
   if (!response.ok) {
-    const detail = (data.error && (data.error.message || data.error.status)) || text.slice(0, 300);
+    // OpenAI/Gemini: { error: { message } }; Mistral: { message, type } al primo livello.
+    const detail = (data.error && (data.error.message || data.error.status)) || data.message || text.slice(0, 300);
+    // Modello non incluso nel piano dell'account (es. Mistral gratuito con modello "large").
+    if (data.type === 'tier_not_allowed' || (data.error && data.error.type === 'tier_not_allowed')) {
+      throw httpError(403, `${label}: il modello richiesto non è incluso nel tuo piano (${detail}). Usa un modello più piccolo o passa a un piano a pagamento.`);
+    }
     // Gemini segnala la chiave errata con 400 "API key not valid" invece di 401.
     if (response.status === 401 || response.status === 403 || (response.status === 400 && /api key/i.test(detail))) {
-      throw httpError(400, `Chiave API ${label} non valida o senza permessi`);
+      throw httpError(400, `Chiave API ${label} non valida o senza permessi${detail ? ` (${String(detail).slice(0, 200)})` : ''}`);
     }
     if (response.status === 429) throw httpError(429, `${label}: limite di utilizzo o credito esaurito (${detail})`);
-    throw httpError(502, `${label} ${response.status}: ${detail}`);
+    const err = httpError(502, `${label} ${response.status}: ${detail}`);
+    err.upstreamStatus = response.status; // es. 503 = fornitore sovraccarico (temporaneo)
+    throw err;
   }
   return data;
 }
@@ -121,32 +131,61 @@ async function verifyClaudeKey(apiKey) {
   }
 }
 
-// --- ChatGPT (OpenAI Chat Completions) ---
-async function askChatGpt(apiKey, prompt) {
-  const data = await readJson(await callApi('https://api.openai.com/v1/chat/completions', {
+// --- ChatGPT (OpenAI) e Mistral: stesso formato "chat completions" ---
+const CHAT_COMPLETIONS_BASE = { chatgpt: 'https://api.openai.com/v1', mistral: 'https://api.mistral.ai/v1' };
+
+async function askChatCompletions(key, apiKey, prompt) {
+  const cfg = PROVIDERS[key];
+  const send = async () => readJson(await callApi(`${CHAT_COMPLETIONS_BASE[key]}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: PROVIDERS.chatgpt.model, messages: [{ role: 'user', content: prompt }] })
-  }, 'ChatGPT'), 'ChatGPT');
+    body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: prompt }] })
+  }, cfg.label), cfg.label);
+  let data;
+  try {
+    data = await send();
+  } catch (error) {
+    // 429 "rate limit": i piani gratuiti (es. Mistral) ammettono pochissime richieste al
+    // secondo; dopo una breve pausa si riprova una volta. Se è finito il credito/quota
+    // mensile anche il secondo tentativo fallisce e l'errore arriva all'utente.
+    if (error.status !== 429) throw error;
+    await new Promise((r) => setTimeout(r, 2000));
+    data = await send();
+  }
   const choice = (data.choices || [])[0] || {};
   return { text: String((choice.message && choice.message.content) || '').trim(), truncated: choice.finish_reason === 'length' };
 }
 
-async function verifyChatGptKey(apiKey) {
-  await readJson(await callApi('https://api.openai.com/v1/models', {
+async function verifyChatCompletionsKey(key, apiKey) {
+  await readJson(await callApi(`${CHAT_COMPLETIONS_BASE[key]}/models`, {
     headers: { Authorization: `Bearer ${apiKey}` },
     timeoutMs: 20000
-  }, 'ChatGPT'), 'ChatGPT');
+  }, PROVIDERS[key].label), PROVIDERS[key].label);
 }
 
 // --- Gemini (Google AI Studio, Generative Language API) ---
-async function askGemini(apiKey, prompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(PROVIDERS.gemini.model)}:generateContent`;
-  const data = await readJson(await callApi(url, {
+async function geminiGenerate(apiKey, model, prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  return readJson(await callApi(url, {
     method: 'POST',
     headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
     body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] })
   }, 'Gemini'), 'Gemini');
+}
+
+async function askGemini(apiKey, prompt) {
+  let data;
+  try {
+    data = await geminiGenerate(apiKey, PROVIDERS.gemini.model, prompt);
+  } catch (error) {
+    // Modello ritirato: Google risponde 404 indicando il sostituto ("use models/<nuovo>").
+    // Si passa a quello per le richieste successive (va aggiornato GEMINI_MODEL / il default).
+    const m = /no longer available[\s\S]*?use models\/([\w.-]+)/i.exec(error.message || '');
+    if (!m) throw error;
+    console.warn(`[AI] Modello Gemini ${PROVIDERS.gemini.model} ritirato: uso ${m[1]} (aggiornare GEMINI_MODEL)`);
+    PROVIDERS.gemini.model = m[1];
+    data = await geminiGenerate(apiKey, PROVIDERS.gemini.model, prompt);
+  }
   const cand = (data.candidates || [])[0] || {};
   const text = ((cand.content && cand.content.parts) || []).map((p) => p.text || '').join('').trim();
   if (!text && data.promptFeedback && data.promptFeedback.blockReason) {
@@ -162,8 +201,18 @@ async function verifyGeminiKey(apiKey) {
   }, 'Gemini'), 'Gemini');
 }
 
-const ASK = { chatgpt: askChatGpt, claude: askClaude, gemini: askGemini };
-const VERIFY = { chatgpt: verifyChatGptKey, claude: verifyClaudeKey, gemini: verifyGeminiKey };
+const ASK = {
+  chatgpt: (k, p) => askChatCompletions('chatgpt', k, p),
+  mistral: (k, p) => askChatCompletions('mistral', k, p),
+  claude: askClaude,
+  gemini: askGemini
+};
+const VERIFY = {
+  chatgpt: (k) => verifyChatCompletionsKey('chatgpt', k),
+  mistral: (k) => verifyChatCompletionsKey('mistral', k),
+  claude: verifyClaudeKey,
+  gemini: verifyGeminiKey
+};
 
 // ==========================================
 // ENDPOINT
@@ -176,7 +225,7 @@ router.get('/status', requireAuth, async (req, res) => {
     const flags = await db.query(
       `SELECT LOWER(BTRIM(campo)) AS campo, valore1 FROM settings
         WHERE tenant_id = $1 AND user_id = $2
-          AND LOWER(BTRIM(campo)) IN ('chatgpt', 'claude', 'gemini', '(*) chatgpt', '(*) claude', '(*) gemini')`,
+          AND LOWER(BTRIM(campo)) IN ('chatgpt', 'claude', 'gemini', 'mistral', '(*) chatgpt', '(*) claude', '(*) gemini', '(*) mistral')`,
       [req.user.tenant_id, req.user.user_id]
     );
     const enabled = {};
@@ -242,5 +291,43 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
     res.status(error.status || 500).json({ error: error.message });
   }
 });
+
+// ==========================================
+// TRASCRIZIONE AUDIO (riunioni gestite con Projexa, vedi routes/calendar.js)
+// ==========================================
+//
+// La trascrizione NON usa le AI a pagamento/cloud dell'utente: la fa il servizio
+// "Projexa Whisper" (cartella whisper-service, Python + faster-whisper, gratuito),
+// pubblicato su Render come servizio separato. Qui si inoltra il blocco WAV e si ricevono
+// le frasi con l'orario di inizio. Configurazione: WHISPER_URL e WHISPER_API_KEY.
+// Restituisce { segments: [{ start, text }], provider }.
+export async function transcribeAudio(userId, audioBuffer, mime) {
+  const base = String(process.env.WHISPER_URL || '').replace(/\/+$/, '');
+  if (!base || !process.env.WHISPER_API_KEY) {
+    // 428: il browser ferma subito la registrazione invece di riprovare.
+    throw httpError(428, 'Servizio di trascrizione non configurato sul server (WHISPER_URL / WHISPER_API_KEY)');
+  }
+  // Errori temporanei (servizio in avvio dopo l'inattività, sovraccarico): nuovi tentativi
+  // dopo 5 e 15 secondi; se persiste l'errore torna al browser, che rimanda il blocco.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const data = await readJson(await callApi(`${base}/transcribe`, {
+        method: 'POST',
+        headers: { 'X-Whisper-Key': process.env.WHISPER_API_KEY, 'Content-Type': mime || 'audio/wav' },
+        body: audioBuffer,
+        timeoutMs: 180000
+      }, 'Whisper'), 'Whisper');
+      const segments = (Array.isArray(data.segments) ? data.segments : [])
+        .map((x) => ({ start: Number(x.start) || 0, text: String(x.text || '').trim() }))
+        .filter((x) => x.text);
+      return { segments, provider: `Whisper ${data.model || ''}`.trim() };
+    } catch (error) {
+      const temporary = [429, 500, 502, 503, 504].includes(error.upstreamStatus) || (error.status === 502 && !error.upstreamStatus);
+      if (!temporary || attempt >= 3) throw error;
+      console.warn(`[AI] Trascrizione Whisper: errore temporaneo (${error.upstreamStatus || error.message}), nuovo tentativo ${attempt + 1}/3`);
+      await new Promise((r) => setTimeout(r, attempt === 1 ? 5000 : 15000));
+    }
+  }
+}
 
 export default router;

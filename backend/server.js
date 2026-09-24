@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import tls from 'tls';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcrypt';
 import db from './config/database.js';
@@ -21,6 +22,19 @@ import { requireAuth } from './middleware/auth.js';
 import { encryptRowForWrite } from './config/crypto.js';
 
 dotenv.config();
+
+// In locale su Windows, dietro il proxy aziendale che ispeziona l'HTTPS (certificato
+// aziendale installato in Windows), Node rifiuta le connessioni verso i servizi esterni
+// (es. Gemini: SELF_SIGNED_CERT_IN_CHAIN) perché usa solo i propri certificati.
+// Qui si aggiungono quelli di Windows a quelli di Node: stesso effetto di --use-system-ca,
+// senza cambiare il comando di avvio. Su Render (Linux) non si applica.
+if (process.platform === 'win32' && typeof tls.setDefaultCACertificates === 'function') {
+  try {
+    tls.setDefaultCACertificates([...new Set([...tls.getCACertificates('default'), ...tls.getCACertificates('system')])]);
+  } catch (e) {
+    console.warn('⚠️ Certificati di sistema non caricati:', e.message);
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,7 +60,9 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  // Microfono consentito solo alle pagine di Projexa (self): serve alla finestra
+  // "Dispositivi audio" delle riunioni. Geolocalizzazione e fotocamera restano vietate.
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(self), camera=()');
   next();
 });
 
