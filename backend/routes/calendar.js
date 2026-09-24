@@ -679,6 +679,55 @@ router.delete('/meetings/managed/recap', requireAuth, async (req, res) => {
   }
 });
 
+// Registrazioni libere (pulsante microfono nella barra laterale): righe rec_meeting con
+// id_calendar "manual:<uuid>", non legate al calendario. Restituite nello stesso formato
+// degli eventi (/events) per i giorni indicati (date locali YYYY-MM-DD), così la
+// dashboard le mostra sotto le riunioni del calendario.
+router.get('/meetings/manual', requireAuth, async (req, res) => {
+  try {
+    const from = String(req.query.from || '').trim();
+    const to = String(req.query.to || from).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      return res.status(400).json({ error: 'from/to non validi (YYYY-MM-DD)' });
+    }
+    const r = await db.query(
+      `SELECT id_calendar, oggetto, data_calendar, orario_calendar, client_id, project_id,
+              (trascrizione IS NOT NULL AND BTRIM(trascrizione) <> '') AS has_trascrizione,
+              (recap IS NOT NULL AND BTRIM(recap) <> '') AS has_recap,
+              (inviata IS TRUE) AS inviata
+         FROM rec_meeting
+        WHERE tenant_id = $1 AND user_id = $2 AND id_calendar LIKE 'manual:%'
+          AND data_calendar BETWEEN $3::date AND $4::date
+        ORDER BY data_calendar, orario_calendar`,
+      [req.user.tenant_id, req.user.user_id, from, to]
+    );
+    const events = r.rows.map((x) => {
+      const time = x.orario_calendar ? String(x.orario_calendar).slice(0, 8) : '00:00:00';
+      // Data/ora locali dell'utente, senza fuso: il browser le interpreta come ora locale.
+      const start = `${x.data_calendar}T${time.length === 5 ? time + ':00' : time}`;
+      return {
+        id: x.id_calendar,
+        manual: true,
+        summary: x.oggetto || 'Registrazione',
+        start: { dateTime: start },
+        end: { dateTime: start },
+        attendees: [],
+        conferenceData: null,
+        managed: true,
+        client_id: x.client_id,
+        project_id: x.project_id,
+        has_trascrizione: x.has_trascrizione === true,
+        has_recap: x.has_recap === true,
+        inviata: x.inviata === true
+      };
+    });
+    res.json({ events });
+  } catch (error) {
+    console.error('❌ REC_MEETING_MANUAL:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Stato leggero delle riunioni a video (aggiornamento periodico della griglia, senza
 // rileggere il calendario): per ogni id_calendar indicato restituisce se la riunione è
 // gestita, se trascrizione/recap contengono testo, inviata, cliente e progetto.

@@ -2460,6 +2460,48 @@
 
         /* Segnaposto quando non c'è link: stessa larghezza del pulsante Partecipa,
            così durata, ora e titolo restano allineati tra le righe */
+        /* X rossa: cancella i dati Projexa (rec_meeting) della riunione */
+        .meeting-del-cell { flex: 0 0 1.6rem; display: flex; justify-content: center; }
+        /* Microfono rosso nella barra laterale: colori propri (non segue il colore del testo) */
+        .sidebar-menu .nav-record-icon { fill: none; }
+        .meeting-del-btn {
+            width: 1.5rem;
+            height: 1.5rem;
+            border: 1px solid #FCA5A5;
+            border-radius: 6px;
+            background: #FEF2F2;
+            color: #DC2626;
+            cursor: pointer;
+            font-size: 0.8rem;
+            line-height: 1;
+            padding: 0;
+        }
+        .meeting-del-btn:hover { background: #DC2626; color: white; }
+
+        /* Icona calendario cliccabile: sceglie il giorno delle riunioni */
+        .meetings-date-btn {
+            border: none;
+            background: transparent;
+            color: #4285F4;
+            cursor: pointer;
+            font-size: 1.1rem;
+            padding: 0.15rem 0.3rem;
+            border-radius: 6px;
+        }
+        .meetings-date-btn:hover { background: rgba(66, 133, 244, 0.12); }
+        .meetings-date-input { position: absolute; left: 0; top: 100%; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+        .meetings-today-btn {
+            margin-left: 0.5rem;
+            padding: 0.15rem 0.6rem;
+            border: 1px solid #93C5FD;
+            border-radius: 999px;
+            background: #EFF6FF;
+            color: #1D4ED8;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
         .meeting-link-empty {
             flex: 0 0 auto;
             width: 6.6rem;
@@ -2586,6 +2628,8 @@
             <li id="navAi_mistral" class="nav-ai" style="display: none;"><a href="#" data-ai-open="mistral" title="Mistral"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h4v4H3V3Zm14 0h4v4h-4V3ZM3 7h4v4H3V7Zm4 0h4v4H7V7Zm6 0h4v4h-4V7Zm4 0h4v4h-4V7ZM3 11h4v4H3v-4Zm6 0h6v4H9v-4Zm8 0h4v4h-4v-4ZM3 15h4v4H3v-4Zm14 0h4v4h-4v-4ZM1 19h8v2H1v-2Zm14 0h8v2h-8v-2Z"/></svg> <span>Mistral</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
             <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 3 3.8 3 6v12c0 2.2 3.5 4 9 4s9-1.8 9-4V6c0-2.2-3.5-4-9-4Zm0 2c4.6 0 7 1.4 7 2s-2.4 2-7 2-7-1.4-7-2 2.4-2 7-2Zm0 16c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V18c0 .6-2.4 2-7 2Zm0-5c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V13c0 .6-2.4 2-7 2Z"/></svg> <span>Database</span></a></li>
+            <!-- Registrazione libera (non legata al calendario): chiede il nome e avvia la registrazione -->
+            <li id="navRecord" style="border: none;"><a href="#" id="navRecordLink" title="Nuova registrazione"><svg class="sidebar-icon nav-record-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="#DC2626" stroke-width="1.8"/><rect x="9.6" y="5.6" width="4.8" height="8.2" rx="2.4" fill="#DC2626"/><path d="M7.4 11.4a4.6 4.6 0 0 0 9.2 0" fill="none" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/><path d="M12 16v2.4M9.6 18.4h4.8" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/></svg> <span>Registra</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
                 <a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m19.4 13 .1-1-.1-1 2.1-1.6-2-3.5-2.6 1a8 8 0 0 0-1.7-1L14.8 3h-4l-.4 2.9a8 8 0 0 0-1.7 1l-2.6-1-2 3.5L6.2 11l-.1 1 .1 1-2.1 1.6 2 3.5 2.6-1a8 8 0 0 0 1.7 1l.4 2.9h4l.4-2.9a8 8 0 0 0 1.7-1l2.6 1 2-3.5L19.4 13ZM12.8 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"/></svg> <span>Impostazioni</span></a>
                 <div class="settings-flyout">
@@ -2919,9 +2963,11 @@
             <!-- RIUNIONI DI OGGI - GOOGLE CALENDAR -->
             <div style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                    <div class="section-title" style="margin: 0;">
-                        <i class="fas fa-calendar-alt" style="color: #4285F4;"></i>
-                        Riunioni di Oggi
+                    <div class="section-title" style="margin: 0; position: relative;">
+                        <button id="meetingsDateBtn" type="button" class="meetings-date-btn" title="Scegli il giorno delle riunioni" aria-label="Scegli il giorno delle riunioni"><i class="fas fa-calendar-alt"></i></button>
+                        <input id="meetingsDatePicker" type="date" class="meetings-date-input" tabindex="-1" aria-hidden="true">
+                        <span id="meetingsTitle">Riunioni di Oggi</span>
+                        <button id="meetingsTodayBtn" type="button" class="meetings-today-btn" style="display: none;" title="Torna alle riunioni di oggi">Oggi</button>
                     </div>
                     <div style="display: flex; gap: 1rem; align-items: center;">
                         <button id="audioDevicesBtn" type="button" class="audio-devices-btn" title="Dispositivi audio: microfono e altoparlanti" aria-label="Dispositivi audio"><i class="fas fa-cog"></i></button>
@@ -2949,7 +2995,7 @@
 
                 <!-- Info riunioni -->
                 <div style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;">
-                    <span id="meetingCount">0</span> riunioni oggi • Prossima: <span id="nextMeetingTime">--</span>
+                    <span id="meetingCount">0</span> <span id="meetingCountLabel">riunioni oggi</span> • <span id="nextMeetingLabel">Prossima</span>: <span id="nextMeetingTime">--</span>
                 </div>
             </div>
 
@@ -5338,6 +5384,9 @@
             const key = calendarBackendKey(currentCalendarProvider);
             const s = calendarStatus[key] || {};
             if (!s.connected) {
+                // Senza calendario collegato si mostrano comunque le registrazioni libere
+                const manual = await fetchManualRecordings();
+                if (manual.length) { updateMeetingsUI(manual); return manual; }
                 displayMeetingsError(`Calendario ${key === 'outlook' ? 'Outlook' : 'Google'} non collegato. Collegalo da Impostazioni › Calendar con il pulsante "Collega".`);
                 return [];
             }
@@ -5352,10 +5401,16 @@
                     </div>`;
             }
             try {
-                // Calcola intervallo temporale: da adesso a 24 ore dopo
-                const now = new Date();
-                const tomorrow = new Date(now);
+                // Intervallo: oggi = da adesso alle prossime 24 ore; giorno scelto con l'icona
+                // del calendario = l'intera giornata (00:00 - 24:00, ora locale).
+                let now = new Date();
+                let tomorrow = new Date(now);
                 tomorrow.setHours(now.getHours() + 24);
+                if (meetingsDate) {
+                    now = new Date(`${meetingsDate}T00:00:00`);
+                    tomorrow = new Date(now);
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                }
 
                 const res = await fetch(
                     `${API_URL}/calendar/events?provider=${key}&` +
@@ -5375,7 +5430,7 @@
                 // Filtra escludendo eventi "transparent" (occupato: false) e focus time
                 const meetings = (data.events || []).filter(
                     event => event.transparency !== 'transparent' && !(event.eventType || '').includes('focusTime')
-                );
+                ).concat(await fetchManualRecordings()); // registrazioni libere: sotto al calendario
 
                 updateMeetingsUI(meetings);
                 updateSyncTime();
@@ -5400,8 +5455,8 @@
                 container.innerHTML = `
                     <div class="meeting-empty">
                         <i class="fas fa-calendar-check" style="font-size: 2.5rem; color: var(--light); margin-bottom: 1rem;"></i>
-                        <p style="font-size: 1rem; margin: 0; color: var(--text-muted);">Nessuna riunione oggi dopo questo orario</p>
-                        <p style="font-size: 0.85rem; margin-top: 0.5rem; color: var(--text-muted);">Hai una giornata libera! 🎉</p>
+                        <p style="font-size: 1rem; margin: 0; color: var(--text-muted);">${meetingsDate ? `Nessuna riunione ${meetingsDayLabel()}` : 'Nessuna riunione oggi dopo questo orario'}</p>
+                        <p style="font-size: 0.85rem; margin-top: 0.5rem; color: var(--text-muted);">${meetingsDate ? '' : 'Hai una giornata libera! 🎉'}</p>
                     </div>
                 `;
                 nextMeetingTime.textContent = '--';
@@ -5417,6 +5472,7 @@
             // Riga d'intestazione allineata alle colonne delle righe riunione
             const header = `
                 <div class="meeting-header">
+                    <span class="meeting-del-cell"></span>
                     <span style="flex: 0 0 6.6rem;"></span>
                     <span class="meeting-duration" style="visibility: hidden;">0h 0m</span>
                     <span class="meeting-time" style="visibility: hidden;"><i class="fas fa-clock"></i> 00:00</span>
@@ -5453,10 +5509,164 @@
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
-            const row = btn.closest('.meeting-card');
+            const row = btn.closest ? btn.closest('.meeting-card') : null;
             if (row && row.dataset.managed !== '1') {
                 row.dataset.managed = '1';
                 renderMeetingAssign(row);
+            }
+        }
+
+        // === GIORNO DELLE RIUNIONI (icona calendario accanto al titolo) ===
+        // null = oggi (da adesso alle prossime 24 ore); 'YYYY-MM-DD' = giorno scelto.
+        let meetingsDate = null;
+
+        function meetingsDayLabel() {
+            if (!meetingsDate) return 'oggi';
+            const d = new Date(`${meetingsDate}T00:00:00`);
+            return 'del ' + d.toLocaleDateString('it-IT', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
+        }
+
+        function renderMeetingsDateUi() {
+            const title = document.getElementById('meetingsTitle');
+            if (title) title.textContent = meetingsDate ? `Riunioni ${meetingsDayLabel()}` : 'Riunioni di Oggi';
+            const today = document.getElementById('meetingsTodayBtn');
+            if (today) today.style.display = meetingsDate ? 'inline-block' : 'none';
+            const cl = document.getElementById('meetingCountLabel');
+            if (cl) cl.textContent = meetingsDate ? 'riunioni nel giorno' : 'riunioni oggi';
+            const nl = document.getElementById('nextMeetingLabel');
+            if (nl) nl.textContent = meetingsDate ? 'Prima' : 'Prossima';
+        }
+
+        function setMeetingsDate(value) {
+            const pad = (n) => String(n).padStart(2, '0');
+            const t = new Date();
+            const todayStr = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+            meetingsDate = value && value !== todayStr ? value : null; // oggi = vista standard
+            renderMeetingsDateUi();
+            loadTodaysMeetings();
+        }
+
+        function initMeetingsDate() {
+            const btn = document.getElementById('meetingsDateBtn');
+            const picker = document.getElementById('meetingsDatePicker');
+            btn?.addEventListener('click', () => {
+                if (!picker) return;
+                const pad = (n) => String(n).padStart(2, '0');
+                const t = new Date();
+                picker.value = meetingsDate || `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+                if (typeof picker.showPicker === 'function') {
+                    try { picker.showPicker(); return; } catch (e) { /* ripiego sotto */ }
+                }
+                picker.focus();
+                picker.click();
+            });
+            picker?.addEventListener('change', () => { if (picker.value) setMeetingsDate(picker.value); });
+            document.getElementById('meetingsTodayBtn')?.addEventListener('click', () => setMeetingsDate(null));
+        }
+
+        // === REGISTRAZIONI LIBERE (microfono rosso nella barra laterale) ===
+        // Righe rec_meeting con id "manual:<uuid>", titolo = nome scelto, data e ora del
+        // momento. Compaiono sotto le riunioni del calendario del giorno visualizzato.
+        async function fetchManualRecordings() {
+            const pad = (n) => String(n).padStart(2, '0');
+            const t = new Date();
+            const day = meetingsDate || `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+            try {
+                const res = await fetch(`${API_URL}/calendar/meetings/manual?from=${day}&to=${day}`, { headers: calendarAuthHeaders() });
+                if (!res.ok) return [];
+                return (await res.json()).events || [];
+            } catch (e) {
+                return [];
+            }
+        }
+
+        function openNewRecording() {
+            if (meetingRec && (meetingRec.running || meetingRec.starting)) {
+                showNotification('È già in corso una registrazione: fermala prima di avviarne un\'altra', 'info');
+                return;
+            }
+            const modal = document.getElementById('newRecordingModal');
+            const input = document.getElementById('newRecordingName');
+            const now = new Date();
+            input.value = `Registrazione del ${now.toLocaleDateString('it-IT')} ${now.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+            document.getElementById('newRecordingError').textContent = '';
+            modal.classList.add('open');
+            input.focus();
+            input.select();
+        }
+
+        function closeNewRecording() {
+            document.getElementById('newRecordingModal').classList.remove('open');
+        }
+
+        // "Salva e registra": il clic avvia subito la cattura dell'audio (il browser la consente
+        // solo dentro un clic); la riga rec_meeting viene creata da startMeetingRecording.
+        function saveNewRecording() {
+            const name = document.getElementById('newRecordingName').value.trim();
+            if (!name) { document.getElementById('newRecordingError').textContent = 'Inserisci un nome'; return; }
+            const pad = (n) => String(n).padStart(2, '0');
+            const now = new Date();
+            const id = 'manual:' + (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+            closeNewRecording();
+            // Si torna alla vista di oggi, dove la nuova registrazione compare in fondo all'elenco
+            if (meetingsDate) { meetingsDate = null; renderMeetingsDateUi(); }
+            startMeetingRecording({
+                dataset: {
+                    eventId: id,
+                    title: name,
+                    provider: '',
+                    date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+                    time: `${pad(now.getHours())}:${pad(now.getMinutes())}`
+                }
+            });
+        }
+
+        function initNewRecording() {
+            document.getElementById('navRecordLink')?.addEventListener('click', (e) => { e.preventDefault(); openNewRecording(); });
+            document.getElementById('newRecordingSave')?.addEventListener('click', saveNewRecording);
+            document.getElementById('newRecordingCancel')?.addEventListener('click', closeNewRecording);
+            const modal = document.getElementById('newRecordingModal');
+            modal?.addEventListener('click', (e) => { if (e.target === modal) closeNewRecording(); });
+            document.getElementById('newRecordingName')?.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); saveNewRecording(); }
+                else if (e.key === 'Escape') closeNewRecording();
+            });
+        }
+
+        // === X ROSSA: cancella i dati Projexa della riunione (riga rec_meeting) ===
+        // La riunione resta nell'elenco perché è nel calendario Outlook/Google (sola lettura).
+        function meetingDeleteButton(eventId) {
+            return `<button type="button" class="meeting-del-btn" data-event-id="${escapeHtml(eventId || '')}" title="Cancella i dati Projexa di questa riunione (trascrizione, recap, cliente, progetto)" aria-label="Cancella i dati Projexa della riunione"><i class="fas fa-times"></i></button>`;
+        }
+
+        async function deleteMeetingData(btn) {
+            const row = btn.closest('.meeting-card');
+            const eventId = btn.dataset.eventId;
+            if (!row || !eventId) return;
+            if (isRecordingMeeting(eventId)) { showNotification('Ferma prima la registrazione di questa riunione', 'info'); return; }
+            const title = row.dataset.title || 'questa riunione';
+            if (!window.confirm(`Cancellare i dati Projexa di "${title}"?\n\nVerranno eliminati trascrizione, recap, cliente e progetto. La riunione resta nel calendario. L'operazione non si può annullare.`)) return;
+            btn.disabled = true;
+            try {
+                const res = await fetch(`${API_URL}/calendar/meetings/managed`, {
+                    method: 'DELETE',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_calendar: eventId })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                // Riga "pulita": nessun dato Projexa
+                row.dataset.managed = '';
+                const assign = row.querySelector('.meeting-assign');
+                if (assign) { assign.innerHTML = ''; assign.dataset.clientId = ''; assign.dataset.projectId = ''; }
+                row.querySelectorAll('.meeting-status').forEach((c) => { c.innerHTML = ''; c.dataset.state = ''; });
+                row.querySelector('.meeting-del-cell').innerHTML = '';
+                recapSeen.delete(eventId);
+                recapToastShown.delete(eventId);
+                showNotification('Dati Projexa della riunione cancellati', 'success');
+            } catch (e) {
+                btn.disabled = false;
+                showNotification('Cancellazione non riuscita: ' + e.message, 'info');
             }
         }
 
@@ -5565,6 +5775,11 @@
                     const m = map[row.dataset.eventId];
                     const ev = { id: row.dataset.eventId };
                     const title = row.dataset.title || '';
+                    const delCell = row.querySelector('.meeting-del-cell');
+                    if (delCell) {
+                        const html = m && !isRecordingMeeting(ev.id) ? meetingDeleteButton(ev.id) : '';
+                        if (delCell.dataset.state !== html) { delCell.innerHTML = html; delCell.dataset.state = html; }
+                    }
                     // durante una generazione in corso il pulsante "Recap…" non va sovrascritto
                     if (!manualRecapRunning.has(ev.id)) {
                         setStatusCell(row, 'meeting-status-genrecap', m && m.has_trascrizione && !m.has_recap ? manualRecapButton(ev.id) : '');
@@ -6112,6 +6327,8 @@
             rec.startedAt = Date.now();
             rec.timer = setInterval(() => updateRecStatus(rec), 1000);
             refreshRecButtons();
+            // Registrazione libera: compare in fondo all'elenco, già con il pulsante rosso "Ferma"
+            if (String(rec.eventId).startsWith('manual:')) loadTodaysMeetings();
             ui.stop.style.display = 'inline-block';
             ui.dot.classList.add('live');
             updateRecStatus(rec);
@@ -6168,6 +6385,13 @@
                 if (link) {
                     e.preventDefault();
                     window.open(link.dataset.meetingLink, '_blank', 'noopener');
+                    return;
+                }
+                // X rossa: cancella i dati Projexa della riunione
+                const del = e.target.closest && e.target.closest('.meeting-del-btn');
+                if (del) {
+                    e.preventDefault();
+                    deleteMeetingData(del);
                     return;
                 }
                 // Recap manuale (pulsante azzurro)
@@ -6734,8 +6958,9 @@
             // Calcola durata
             const durationMs = end - start;
             const durationMinutes = Math.round(durationMs / (1000 * 60));
-            const durationStr = durationMinutes < 60 
-                ? `${durationMinutes}m` 
+            // Registrazione libera: non ha una durata prevista
+            const durationStr = event.manual ? 'REC' : durationMinutes < 60
+                ? `${durationMinutes}m`
                 : `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`;
 
             // Partecipanti: non occupano spazio nella riga, compaiono nel tooltip del titolo
@@ -6755,7 +6980,9 @@
             // Link alla riunione (solo se URL con schema sicuro)
             const rawLink = event.conferenceData?.entryPoints?.[0]?.uri || event.hangoutLink || null;
             const meetingLink = safeUrl(rawLink);
-            const provider = meetingProvider(meetingLink);
+            const provider = event.manual
+                ? { label: 'Registrazione libera', name: '', icon: '<i class="fas fa-microphone" style="color:#DC2626;"></i>' }
+                : meetingProvider(meetingLink);
             const providerBadge = provider
                 ? `<span class="meeting-provider" title="${escapeHtml(provider.label)}" aria-label="${escapeHtml(provider.label)}">${provider.icon}</span>`
                 : `<span class="meeting-provider"></span>`;
@@ -6767,11 +6994,12 @@
             // trascrizione - recap - inviata (flag da rec_meeting) - cliente/progetto
             return `
                 <div class="meeting-card" data-managed="${event.managed ? '1' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}">
+                    <div class="meeting-del-cell">${event.managed && !isRecordingMeeting(event.id) ? meetingDeleteButton(event.id) : ''}</div>
                     ${meetingLinkBtn}
                     <div class="meeting-duration">${escapeHtml(durationStr)}</div>
                     <div class="meeting-time"><i class="fas fa-clock"></i> ${escapeHtml(timeStr)}</div>
                     ${providerBadge}
-                    <div class="meeting-manage">${(meetingLink || isRecordingMeeting(event.id)) ? `<button type="button" class="meeting-rec-btn${isRecordingMeeting(event.id) ? ' recording' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">${recButtonLabel(isRecordingMeeting(event.id))}</button>` : ''}</div>
+                    <div class="meeting-manage">${(meetingLink || event.manual || isRecordingMeeting(event.id)) ? `<button type="button" class="meeting-rec-btn${isRecordingMeeting(event.id) ? ' recording' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">${recButtonLabel(isRecordingMeeting(event.id))}</button>` : ''}</div>
                     <div class="meeting-title" title="${escapeHtml(tooltip)}">${escapeHtml(title)}</div>
                     <div class="meeting-status meeting-status-genrecap">${event.has_trascrizione && !event.has_recap ? manualRecapButton(event.id) : ''}</div>
                     <div class="meeting-status meeting-status-trascrizione">${event.has_trascrizione ? meetingTextButton(event, 'trascrizione', title) : ''}</div>
@@ -12612,6 +12840,8 @@
             initAudioDevices();
             initMeetingRecorder();
             initMeetingText();
+            initMeetingsDate();
+            initNewRecording();
             await loadTenantHeaderLogo();
             await loadPageLabels();
             applyRoleVisibility();
@@ -12660,6 +12890,22 @@
                 <button id="meetingTextDownload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Scarica il testo in un file .txt"><i class="fas fa-download"></i> Scarica .txt</button>
                 <button id="meetingTextCopy" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-copy"></i> Copia testo</button>
                 <button id="meetingTextDone" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;">Chiudi</button>
+            </div>
+        </div>
+    </div>
+    <div id="newRecordingModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="newRecordingTitle">
+        <div class="task-modal-card" style="width: min(400px, 94vw);">
+            <div class="task-modal-header">
+                <h3 id="newRecordingTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-microphone" style="color: #DC2626;"></i> Nuova registrazione</h3>
+            </div>
+            <div style="padding: 1.25rem; display: flex; flex-direction: column; gap: 0.5rem;">
+                <label for="newRecordingName" style="font-size: 0.9rem; color: var(--dark); font-weight: 600;">Nome della registrazione</label>
+                <input id="newRecordingName" type="text" maxlength="200" autocomplete="off" style="padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem;">
+                <p id="newRecordingError" style="margin: 0; font-size: 0.8rem; color: #B91C1C; min-height: 1em;"></p>
+            </div>
+            <div class="task-modal-footer">
+                <button id="newRecordingCancel" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
+                <button id="newRecordingSave" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #DC2626; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-circle"></i> Salva e registra</button>
             </div>
         </div>
     </div>
