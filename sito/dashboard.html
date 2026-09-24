@@ -3440,11 +3440,12 @@
             return rows.reduce((totals, item) => {
                 totals.totale += Number(item.totale) || 0;
                 totals.forecast += Number(item.forecast) || 0;
+                totals.da_fatturare += Number(item.da_fatturare) || 0;
                 return totals;
-            }, { totale: 0, forecast: 0 });
+            }, { totale: 0, forecast: 0, da_fatturare: 0 });
         }
 
-        // Somma totale/forecast di un cliente su TUTTI gli anni presenti nei dati caricati
+        // Somma totale/forecast/da_fatturare di un cliente su TUTTI gli anni presenti nei dati caricati
         // (usata quando in tendina è selezionato "Tutto").
         function getKpiClientAllYearsTotals(clientId) {
             const rows = kpiFatturazioneData.filter(item => String(item.client_id) === String(clientId));
@@ -3452,8 +3453,9 @@
             return rows.reduce((totals, item) => {
                 totals.totale += Number(item.totale) || 0;
                 totals.forecast += Number(item.forecast) || 0;
+                totals.da_fatturare += Number(item.da_fatturare) || 0;
                 return totals;
-            }, { totale: 0, forecast: 0 });
+            }, { totale: 0, forecast: 0, da_fatturare: 0 });
         }
 
         function updateRevenueChart(year) {
@@ -3464,6 +3466,7 @@
             let clients = [];
             let revenues = [];
             let forecasts = [];
+            let daFatturare = [];
 
             const getTotals = (clientId) => isAllYears
                 ? getKpiClientAllYearsTotals(clientId)
@@ -3478,13 +3481,14 @@
                     .map(client => {
                         const clientId = client?.id == null ? null : String(client.id);
                         const totals = getTotals(clientId);
-                        return { name: client.name, totale: totals.totale, forecast: totals.forecast };
+                        return { name: client.name, totale: totals.totale, forecast: totals.forecast, da_fatturare: totals.da_fatturare };
                     })
-                    .filter(c => (Number(c.totale) || 0) !== 0 || (Number(c.forecast) || 0) !== 0);
+                    .filter(c => (Number(c.totale) || 0) !== 0 || (Number(c.forecast) || 0) !== 0 || (Number(c.da_fatturare) || 0) !== 0);
 
                 clients = withData.map(c => c.name);
                 revenues = withData.map(c => c.totale);
                 forecasts = withData.map(c => c.forecast);
+                daFatturare = withData.map(c => c.da_fatturare);
             } else {
                 // Uno o più clienti selezionati: vengono mostrati tutti (anche a zero),
                 // così come già avveniva per la selezione singola.
@@ -3492,23 +3496,26 @@
                     const client = dashboardClients.find(c => c.name === name);
                     const clientId = client?.id == null ? null : String(client.id);
                     const totals = getTotals(clientId);
-                    return { name, totale: totals.totale, forecast: totals.forecast };
+                    return { name, totale: totals.totale, forecast: totals.forecast, da_fatturare: totals.da_fatturare };
                 });
 
                 clients = withData.map(c => c.name);
                 revenues = withData.map(c => c.totale);
                 forecasts = withData.map(c => c.forecast);
+                daFatturare = withData.map(c => c.da_fatturare);
             }
 
             const totalRevenue = revenues.reduce((a, b) => a + b, 0);
             const totalForecast = forecasts.reduce((a, b) => a + b, 0);
+            const totalDaFatturare = daFatturare.reduce((a, b) => a + b, 0);
             const totalClients = clients.length;
 
             const yearLabel = isAllYears ? 'Tutti' : year;
             document.getElementById('selectedYear').textContent = yearLabel;
             document.getElementById('totalRevenue').innerHTML = `
                 <div style="font-size: 2rem; font-weight: bold; color: var(--primary);">€${totalRevenue.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                <div style="font-size: 1rem; color: #10B981; margin-top: 0.5rem; font-weight: 600;">+ €${totalForecast.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} forecast</div>
+                <div style="font-size: 1rem; color: #10B981; margin-top: 0.5rem; font-weight: 600;">+ €${totalForecast.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Fatturato Futuro</div>
+                <div style="font-size: 1rem; color: #F59E0B; margin-top: 0.5rem; font-weight: 600;">+ €${totalDaFatturare.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Da Fatturare</div>
             `;
             document.getElementById('totalClients').textContent = totalClients;
 
@@ -3539,13 +3546,22 @@
                             hoverBackgroundColor: 'rgba(59, 130, 246, 0.9)',
                         },
                         {
-                            label: `Forecast ${datasetYearLabel}`,
+                            label: `Fatturato Futuro ${datasetYearLabel}`,
                             data: forecasts,
                             backgroundColor: 'rgba(16, 185, 129, 0.7)',
                             borderColor: 'rgb(16, 185, 129)',
                             borderWidth: 2,
                             borderRadius: 6,
                             hoverBackgroundColor: 'rgba(16, 185, 129, 0.9)',
+                        },
+                        {
+                            label: `Da Fatturare ${datasetYearLabel}`,
+                            data: daFatturare,
+                            backgroundColor: 'rgba(245, 158, 11, 0.7)',
+                            borderColor: 'rgb(245, 158, 11)',
+                            borderWidth: 2,
+                            borderRadius: 6,
+                            hoverBackgroundColor: 'rgba(245, 158, 11, 0.9)',
                         }
                     ]
                 },
@@ -3574,7 +3590,11 @@
                                 afterLabel: function(context) {
                                     if (context.datasetIndex === 0) {
                                         const forecastValue = context.chart.data.datasets[1].data[context.dataIndex] || 0;
-                                        return 'Forecast: €' + Number(forecastValue).toLocaleString('it-IT', {
+                                        const daFattValue = context.chart.data.datasets[2].data[context.dataIndex] || 0;
+                                        return 'Fatturato Futuro: €' + Number(forecastValue).toLocaleString('it-IT', {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2
+                                        }) + '\nDa Fatturare: €' + Number(daFattValue).toLocaleString('it-IT', {
                                             minimumFractionDigits: 2,
                                             maximumFractionDigits: 2
                                         });

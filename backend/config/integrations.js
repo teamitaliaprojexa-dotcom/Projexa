@@ -19,7 +19,7 @@ import { encryptValue, decryptValue, hasEncryptionKey } from './crypto.js';
 
 // Elementi il cui valore è un segreto: sono SEMPRE cifrati a riposo con AES-256-GCM,
 // a prescindere dalla colonna crypto della tabella.
-const SECRET_ELEMENTS = new Set(['jira_access_token', 'jira_refresh_token']);
+const SECRET_ELEMENTS = new Set(['jira_access_token', 'jira_refresh_token', 'whatsapp_access_token']);
 
 // La chiave è ENCRYPTION_KEY (config/crypto.js); INTEGR_ENC_KEY resta valida in
 // decifratura per i token salvati prima dell'unificazione della chiave.

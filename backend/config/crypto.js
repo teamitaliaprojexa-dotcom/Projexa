@@ -240,7 +240,8 @@ const NEVER_ENCRYPT_COLUMNS = new Set([
 // Colonne mai cifrate solo in certe tabelle (chiavi di ricerca di quella tabella).
 // users.email è la chiave del login: cifrarla impedirebbe l'accesso.
 const NEVER_ENCRYPT_BY_TABLE = {
-  users: new Set(['email', 'username'])
+  users: new Set(['email', 'username']),
+  tasks: new Set(['status'])
 };
 
 // Tabelle con elenco chiuso di colonne da cifrare (regola esplicita del punto 3).

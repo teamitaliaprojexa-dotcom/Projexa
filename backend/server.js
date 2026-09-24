@@ -1952,7 +1952,7 @@ app.get('/api/kpi-fatturazione', requireAuth, async (req, res) => {
     if (Number.isFinite(anno)) { params.push(anno); conditions.push(`anno = $${params.length}`); }
     if (clientIds.length) { params.push(clientIds); conditions.push(`client_id = ANY($${params.length})`); }
     const result = await db.query(
-      `SELECT tenant_id, client_id, user_id, anno, totale, forecast
+      `SELECT tenant_id, client_id, user_id, anno, totale, forecast, da_fatturare
        FROM kpi_fatturazione WHERE ${conditions.join(' AND ')}`,
       params
     );
@@ -3787,6 +3787,14 @@ app.put('/api/tenant-logo', requireAuth, requireAdmin, clientLogoBody, async (re
   }
 });
 
+// Cliente/progetto "Modello standard": quando la creazione di un nuovo cliente o
+// progetto non specifica un modello proprio dell'utente, la struttura viene copiata da
+// questo cliente/progetto di riferimento, che vive sempre sullo stesso tenant dedicato
+// ai modelli standard — indipendentemente dal tenant/cliente da cui parte la richiesta.
+const STANDARD_TEMPLATE_TENANT_ID = '22e0984d-3a07-4cdc-9497-c9b2e7986842';
+const STANDARD_TEMPLATE_CLIENT_ID = '212e87c1-1589-40fb-8256-623010277f9d';
+const STANDARD_TEMPLATE_PROJECT_ID = '1b13f99a-55b8-47ea-9f49-de9f691c9b5b';
+
 // Copia ricorsivamente la STRUTTURA dei campi di un contenitore (cliente o Nodo Padre)
 // sotto un nuovo contenitore, azzerando i valori. Preserva la gerarchia: per ogni Nodo
 // Padre (tipo_valore=0) copiato, copia anche i suoi figli (argument = id del nodo sorgente).
@@ -4010,9 +4018,9 @@ app.post('/api/clients', requireAuth, async (req, res) => {
     }
     if (!srcId) {
       const m = await client.query(
-        `SELECT c.id FROM clients c JOIN tenants t ON t.id = c.tenant_id
-         WHERE t.name = 'PROJEXA' AND c.argument='Cliente' AND c.campo='Cliente'
-           AND c.valore2 = 'PROJEXA_COPIA_CLIENTE' LIMIT 1`
+        `SELECT id FROM clients WHERE id = $1 AND tenant_id = $2
+           AND argument='Cliente' AND campo='Cliente' LIMIT 1`,
+        [STANDARD_TEMPLATE_CLIENT_ID, STANDARD_TEMPLATE_TENANT_ID]
       );
       if (m.rows.length) srcId = m.rows[0].id;
     }
@@ -4165,9 +4173,9 @@ app.post('/api/projects', requireAuth, async (req, res) => {
     }
     if (!srcId) {
       const m = await client.query(
-        `SELECT p.id FROM projects p JOIN tenants t ON t.id = p.tenant_id
-         WHERE t.name = 'PROJEXA' AND p.argument='Progetto' AND p.campo='Progetto'
-           AND p.valore2 = 'PROGETTO_COPIA' LIMIT 1`
+        `SELECT id FROM projects WHERE id = $1 AND tenant_id = $2 AND client_id = $3
+           AND argument='Progetto' AND campo='Progetto' LIMIT 1`,
+        [STANDARD_TEMPLATE_PROJECT_ID, STANDARD_TEMPLATE_TENANT_ID, STANDARD_TEMPLATE_CLIENT_ID]
       );
       if (m.rows.length) srcId = m.rows[0].id;
     }
