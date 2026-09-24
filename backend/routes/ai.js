@@ -173,11 +173,14 @@ async function geminiGenerate(apiKey, model, prompt) {
   }, 'Gemini'), 'Gemini');
 }
 
-async function askGemini(apiKey, prompt) {
+// model: di norma quello configurato; per il ripiego su un modello più leggero
+// (Gemini sovraccarico, vedi askAiProvider) se ne passa un altro.
+async function askGemini(apiKey, prompt, model = null) {
   let data;
   try {
-    data = await geminiGenerate(apiKey, PROVIDERS.gemini.model, prompt);
+    data = await geminiGenerate(apiKey, model || PROVIDERS.gemini.model, prompt);
   } catch (error) {
+    if (model) throw error;
     // Modello ritirato: Google risponde 404 indicando il sostituto ("use models/<nuovo>").
     // Si passa a quello per le richieste successive (va aggiornato GEMINI_MODEL / il default).
     const m = /no longer available[\s\S]*?use models\/([\w.-]+)/i.exec(error.message || '');
@@ -291,6 +294,57 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
     res.status(error.status || 500).json({ error: error.message });
   }
 });
+
+// ==========================================
+// TESTO GENERATO DA UN'AI SCELTA (es. recap delle riunioni, vedi routes/calendar.js)
+// ==========================================
+//
+// providerName: valore scritto in settings (es. "Gemini", "ChatGPT", "Claude", "Mistral").
+// Usa la chiave API collegata dall'utente in Impostazioni › AI. Restituisce { text, label, model }.
+export async function askAiProvider(userId, providerName, prompt) {
+  const key = String(providerName || '').trim().toLowerCase();
+  if (key === 'copilot') throw httpError(400, 'Copilot non è disponibile per il recap: scegli un\'altra AI');
+  const cfg = PROVIDERS[key];
+  if (!cfg) throw httpError(400, `AI "${providerName}" non riconosciuta per il recap`);
+  const el = await getIntegration(userId, cfg.provider);
+  const apiKey = el[`${cfg.prefix}_api_key`];
+  if (!apiKey) throw httpError(428, `${cfg.label} non collegato: attivalo da Impostazioni › AI`);
+  // Errori temporanei del fornitore (sovraccarico 503/529, 500, limite 429): nuovi tentativi
+  // per circa 2 minuti (i sovraccarichi di Gemini gratuito possono durare a lungo). Per Gemini,
+  // se resta sovraccarico, tentativi con modelli alternativi (GEMINI_FALLBACK_MODEL, separati
+  // da virgola), ognuno a sua volta con qualche nuovo tentativo.
+  const isTemporary = (e) => [429, 500, 502, 503, 529].includes(e.upstreamStatus) || e.status === 429 || /overloaded|high demand|sovraccaric/i.test(e.message || '');
+  const waits = [5000, 10000, 20000, 30000, 45000];
+  let lastError;
+  for (let attempt = 0; attempt <= waits.length; attempt++) {
+    try {
+      const result = await ASK[key](apiKey, prompt);
+      return { text: result.text, label: cfg.label, model: cfg.model };
+    } catch (error) {
+      lastError = error;
+      if (!isTemporary(error) || attempt === waits.length) break;
+      console.warn(`[AI] ${cfg.label} temporaneamente non disponibile (${error.upstreamStatus || error.status}), nuovo tentativo tra ${waits[attempt] / 1000}s`);
+      await new Promise((r) => setTimeout(r, waits[attempt]));
+    }
+  }
+  if (key === 'gemini' && isTemporary(lastError)) {
+    const fallbacks = String(process.env.GEMINI_FALLBACK_MODEL || 'gemini-flash-latest,gemini-flash-lite-latest')
+      .split(',').map((m) => m.trim()).filter((m) => m && m !== cfg.model);
+    for (const fallback of fallbacks) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        console.warn(`[AI] Gemini ${cfg.model} sovraccarico: ripiego su ${fallback} (tentativo ${attempt + 1}/3)`);
+        try {
+          const result = await askGemini(apiKey, prompt, fallback);
+          return { text: result.text, label: cfg.label, model: fallback };
+        } catch (e) {
+          if (!isTemporary(e)) break;
+          await new Promise((r) => setTimeout(r, 8000));
+        }
+      }
+    }
+  }
+  throw lastError;
+}
 
 // ==========================================
 // TRASCRIZIONE AUDIO (riunioni gestite con Projexa, vedi routes/calendar.js)

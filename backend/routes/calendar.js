@@ -18,7 +18,11 @@ import crypto from 'crypto';
 import ical from 'node-ical';
 import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
-import { transcribeAudio } from './ai.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { transcribeAudio, askAiProvider } from './ai.js';
+import { encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
 import { isAllowedOrigin } from '../config/origins.js';
@@ -526,6 +530,17 @@ router.post('/outlook/ics', requireAuth, async (req, res) => {
 // (id_calendar = id dell'evento restituito da /events: id Google, id Graph oppure
 // UID_istante per il link ICS, così ogni occorrenza di una ricorrente è distinta).
 
+// Colonne di rec_meeting cifrate a riposo (AES-256-GCM, config/crypto.js): oggetto,
+// mittente, trascrizione, recap. In lettura tornano in chiaro in automatico (cryptoPool).
+function encRec(value) {
+  if (value === null || value === undefined || value === '') return value;
+  if (!hasEncryptionKey()) {
+    console.warn('⚠️  ENCRYPTION_KEY non impostata: rec_meeting viene scritta in chiaro.');
+    return value;
+  }
+  return isEncrypted(value) ? value : encryptValue(String(value));
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Righe rec_meeting delle riunioni indicate: Map id_calendar -> { client_id, project_id,
@@ -572,7 +587,7 @@ router.post('/meetings/managed', requireAuth, async (req, res) => {
           SELECT 1 FROM rec_meeting WHERE tenant_id = $1::uuid AND user_id = $2::uuid AND id_calendar = $3::text
         )
        RETURNING id`,
-      [req.user.tenant_id, req.user.user_id, idCalendar, oggetto, provider, data, orario]
+      [req.user.tenant_id, req.user.user_id, idCalendar, encRec(oggetto), provider, data, orario]
     );
     res.json({ success: true, created: result.rowCount > 0 });
   } catch (error) {
@@ -614,6 +629,70 @@ router.patch('/meetings/managed', requireAuth, async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('❌ REC_MEETING_UPDATE:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Caricamento di trascrizione o recap da file (.txt / .vtt, convertito in testo dal
+// browser): SOSTITUISCE il contenuto della colonna ed è scritto cifrato.
+const MAX_TEXT_UPLOAD = 2 * 1024 * 1024;
+
+router.put('/meetings/managed/text', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
+    const field = String(b.field || '').trim();
+    const text = String(b.text == null ? '' : b.text).replace(/\r\n?/g, '\n').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    if (field !== 'trascrizione' && field !== 'recap') return res.status(400).json({ error: 'Campo non valido' });
+    if (!text) return res.status(400).json({ error: 'Il file non contiene testo' });
+    if (text.length > MAX_TEXT_UPLOAD) return res.status(413).json({ error: 'Testo troppo lungo (max 2 MB)' });
+    // Nome di colonna da una whitelist fissa: nessun input utente nella query.
+    const col = field === 'recap' ? 'recap' : 'trascrizione';
+    const result = await db.query(
+      `UPDATE rec_meeting SET ${col} = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
+      [encRec(text), req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    res.json({ success: true, length: text.length });
+  } catch (error) {
+    console.error('❌ REC_MEETING_UPLOAD:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// "Svuota" (finestra della lente): cancella completamente il recap della riunione.
+// Solo il recap: la trascrizione non si svuota da qui.
+router.delete('/meetings/managed/recap', requireAuth, async (req, res) => {
+  try {
+    const idCalendar = String((req.body && req.body.id_calendar) || req.query.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    const result = await db.query(
+      `UPDATE rec_meeting SET recap = NULL WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3`,
+      [req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ REC_MEETING_CLEAR_RECAP:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Stato leggero delle riunioni a video (aggiornamento periodico della griglia, senza
+// rileggere il calendario): per ogni id_calendar indicato restituisce se la riunione è
+// gestita, se trascrizione/recap contengono testo, inviata, cliente e progetto.
+router.post('/meetings/managed/status', requireAuth, async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body && req.body.ids)
+      ? req.body.ids.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 200)
+      : [];
+    const map = await getManagedMeetings(req.user, ids);
+    const out = {};
+    for (const [id, row] of map) out[id] = row;
+    res.json({ meetings: out });
+  } catch (error) {
+    console.error('❌ REC_MEETING_STATUS:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -741,15 +820,87 @@ router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
     if (b.start_label) add += `\n--- ${String(b.start_label).slice(0, 80)} ---\n`;
     for (const l of lines) add += `[${hhmmss(offset + l.start)}] ${l.who ? `${l.who}: ` : ''}${l.text.replace(/\s*\n\s*/g, ' ')}\n`;
     if (add) {
+      // Il testo è cifrato: si legge in chiaro (decifratura automatica), si aggiunge il
+      // blocco e si riscrive tutto cifrato (i blocchi arrivano in ordine, uno alla volta).
+      const cur = await db.query(
+        `SELECT trascrizione FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+        [req.user.tenant_id, req.user.user_id, idCalendar]
+      );
+      const full = ((cur.rows[0] && cur.rows[0].trascrizione) || '') + add;
       await db.query(
-        `UPDATE rec_meeting SET trascrizione = COALESCE(trascrizione, '') || $1
+        `UPDATE rec_meeting SET trascrizione = $1, crypto = 1
           WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
-        [add, req.user.tenant_id, req.user.user_id, idCalendar]
+        [encRec(full), req.user.tenant_id, req.user.user_id, idCalendar]
       );
     }
     res.json({ success: true, provider, lines: lines.length });
   } catch (error) {
     console.error('❌ REC_MEETING_TRANSCRIBE:', error.message);
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// RECAP AUTOMATICO DELLA RIUNIONE (rec_meeting.recap)
+// ==========================================
+//
+// Chiamato dalla dashboard quando la trascrizione è terminata (tutti i blocchi scritti).
+// L'AI si sceglie in Impostazioni › AI con il campo "AI generazione e-mail recap"
+// (settings.valore2 per tenant/utente); il prompt è il file prompts/recap_email.txt,
+// modificabile senza toccare il codice. Segnaposto: {{TRASCRIZIONE}}, {{OGGETTO}},
+// {{DATA}}, {{UTENTE}}. Il recap sostituisce quello eventualmente già presente.
+const RECAP_PROMPT_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'prompts', 'recap_email.txt');
+
+function buildRecapPrompt(vars) {
+  let tpl = fs.readFileSync(RECAP_PROMPT_FILE, 'utf8');
+  // Se il file non prevede il segnaposto, la trascrizione si aggiunge in fondo.
+  if (!tpl.includes('{{TRASCRIZIONE}}')) tpl += '\n\nTrascrizione:\n{{TRASCRIZIONE}}';
+  return tpl.replace(/\{\{(TRASCRIZIONE|OGGETTO|DATA|UTENTE)\}\}/g, (m, k) => vars[k] || '');
+}
+
+router.post('/meetings/managed/recap', requireAuth, async (req, res) => {
+  try {
+    const idCalendar = String((req.body && req.body.id_calendar) || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+
+    const row = (await db.query(
+      `SELECT trascrizione, oggetto, data_calendar, orario_calendar FROM rec_meeting
+        WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, idCalendar]
+    )).rows[0];
+    if (!row) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    if (!row.trascrizione || !row.trascrizione.trim()) return res.status(400).json({ error: 'Nessuna trascrizione da cui generare il recap' });
+
+    const setting = (await db.query(
+      `SELECT valore2 FROM settings
+        WHERE tenant_id = $1 AND user_id = $2
+          AND LOWER(BTRIM(campo)) IN ('ai generazione e-mail recap', '(*) ai generazione e-mail recap')
+        LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id]
+    )).rows[0];
+    const providerName = setting && setting.valore2 ? String(setting.valore2).trim() : '';
+    if (!providerName) return res.status(400).json({ error: 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"' });
+
+    const data = row.data_calendar ? String(row.data_calendar).split('-').reverse().join('/') : '';
+    const prompt = buildRecapPrompt({
+      TRASCRIZIONE: row.trascrizione.trim(),
+      OGGETTO: row.oggetto || '',
+      DATA: [data, row.orario_calendar ? String(row.orario_calendar).slice(0, 5) : ''].filter(Boolean).join(' '),
+      UTENTE: await speakerName(req.user)
+    });
+
+    const result = await askAiProvider(req.user.user_id, providerName, prompt);
+    const recap = String(result.text || '').trim();
+    if (!recap) return res.status(502).json({ error: `${result.label} non ha restituito alcun testo` });
+
+    await db.query(
+      `UPDATE rec_meeting SET recap = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
+      [encRec(recap), req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    console.log(`[RECAP] ✓ Recap generato con ${result.label} per la riunione ${idCalendar}`);
+    res.json({ success: true, provider: result.label, model: result.model, length: recap.length });
+  } catch (error) {
+    console.error('❌ REC_MEETING_RECAP:', error.message);
     res.status(error.status || 500).json({ error: error.message });
   }
 });

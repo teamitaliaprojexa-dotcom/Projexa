@@ -2211,6 +2211,41 @@
         .meeting-text-speaker { color: #047857; }
         .meeting-text-speaker.others { color: #4338CA; }
 
+        /* Avviso "Recap pronto" (in basso a destra) */
+        .recap-toasts {
+            position: fixed;
+            right: 1.25rem;
+            bottom: 1.25rem;
+            z-index: 795;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            align-items: flex-end;
+        }
+        .recap-toast {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            width: min(360px, calc(100vw - 2.5rem));
+            padding: 0.75rem 0.9rem;
+            background: white;
+            border: 1px solid #7DD3FC;
+            border-left: 4px solid #0284C7;
+            border-radius: 10px;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+            font-size: 0.85rem;
+            color: var(--dark);
+            animation: recapToastIn 0.25s ease-out;
+            transition: opacity 0.25s, transform 0.25s;
+        }
+        .recap-toast.leaving { opacity: 0; transform: translateY(8px); }
+        @keyframes recapToastIn { from { opacity: 0; transform: translateY(12px); } }
+        .recap-toast-icon { color: #0284C7; font-size: 1.2rem; }
+        .recap-toast-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+        .recap-toast-text span { color: var(--text-muted); font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .recap-toast-open { padding: 0.35rem 0.8rem; border: none; border-radius: 6px; background: #0284C7; color: white; font-weight: 600; cursor: pointer; font-size: 0.8rem; }
+        .recap-toast-close { border: none; background: transparent; color: var(--text-muted); cursor: pointer; }
+
         /* Pannello registrazione/trascrizione riunione (in basso a destra) */
         .meeting-recorder {
             position: fixed;
@@ -2314,7 +2349,7 @@
         .calendar-conn-ics { background: #0078D4; color: white; }
         .calendar-conn-off { background: #FEE2E2; color: #B91C1C; }
 
-        /* Trascrizione / Recap / Inviata: flag verde se su rec_meeting il dato è presente */
+        /* Trascrizione / Recap: lente se su rec_meeting il testo è presente */
         .meeting-status {
             flex: 0 0 auto;
             text-align: center;
@@ -2322,8 +2357,22 @@
             font-size: 0.85rem;
         }
         .meeting-status-trascrizione { width: 5.8rem; }
-        .meeting-status-recap,
-        .meeting-status-inviata { width: 3.6rem; }
+        .meeting-status-recap { width: 3.6rem; }
+        .meeting-status-genrecap { width: 5rem; }
+        .meeting-genrecap-btn {
+            width: 4.8rem;
+            padding: 0.25rem 0.4rem;
+            border: 1px solid #7DD3FC;
+            border-radius: 6px;
+            background: #E0F2FE; /* azzurro */
+            color: #075985;
+            font-weight: 600;
+            font-size: 0.78rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .meeting-genrecap-btn:hover { background: #BAE6FD; }
+        .meeting-genrecap-btn:disabled { opacity: 0.7; cursor: wait; }
         .meeting-header .meeting-status { color: var(--text-muted); font-size: 0.7rem; }
 
         /* Cliente e Progetto (solo per le riunioni gestite con Projexa), dopo il titolo */
@@ -5374,9 +5423,9 @@
                     <span class="meeting-provider"></span>
                     <span class="meeting-manage">Gestisci con Projexa</span>
                     <span class="meeting-header-title">Titolo</span>
+                    <span class="meeting-status meeting-status-genrecap"></span>
                     <span class="meeting-status meeting-status-trascrizione">Trascrizione</span>
                     <span class="meeting-status meeting-status-recap">Recap</span>
-                    <span class="meeting-status meeting-status-inviata">Inviata</span>
                     <span class="meeting-assign meeting-assign-head"><span>Cliente</span><span>Progetto</span></span>
                 </div>`;
             container.innerHTML = header + meetings.map(meeting => createMeetingCard(meeting)).join('');
@@ -5410,6 +5459,146 @@
                 renderMeetingAssign(row);
             }
         }
+
+        // === AVVISO "RECAP PRONTO" (in basso a destra) ===
+        // Uno per riunione (niente doppioni tra recap manuale, automatico e aggiornamento
+        // della griglia); "Apri" mostra il recap nella finestra della lente. Si chiude da solo.
+        const recapSeen = new Map();       // id riunione -> recap presente all'ultimo controllo
+        const recapToastShown = new Map(); // id riunione -> istante dell'ultimo avviso
+
+        function showRecapReady(eventId, title, provider) {
+            recapSeen.set(eventId, true);
+            const last = recapToastShown.get(eventId) || 0;
+            if (Date.now() - last < 60000) return;
+            recapToastShown.set(eventId, Date.now());
+            const box = document.getElementById('recapToasts');
+            if (!box) return;
+            // Se è aperto il pannello di registrazione, gli avvisi si impilano sopra di esso
+            const rec = document.getElementById('meetingRecorder');
+            box.style.bottom = rec && rec.style.display !== 'none' ? `${rec.offsetHeight + 32}px` : '1.25rem';
+            const t = document.createElement('div');
+            t.className = 'recap-toast';
+            t.setAttribute('role', 'status');
+            t.innerHTML = `
+                <i class="fas fa-envelope-open-text recap-toast-icon"></i>
+                <div class="recap-toast-text">
+                    <strong>Recap pronto</strong>
+                    <span>${escapeHtml(title || 'Riunione')}${provider ? ` · ${escapeHtml(provider)}` : ''}</span>
+                </div>
+                <button type="button" class="recap-toast-open">Apri</button>
+                <button type="button" class="recap-toast-close" aria-label="Chiudi"><i class="fas fa-times"></i></button>`;
+            const close = () => { t.classList.add('leaving'); setTimeout(() => t.remove(), 250); };
+            t.querySelector('.recap-toast-open').addEventListener('click', () => {
+                close();
+                openMeetingText({ dataset: { eventId, field: 'recap', title: title || '' } });
+            });
+            t.querySelector('.recap-toast-close').addEventListener('click', close);
+            box.appendChild(t);
+            setTimeout(close, 12000);
+        }
+
+        // === RECAP MANUALE (pulsante azzurro "Recap") ===
+        // Visibile se la riunione ha la trascrizione ma non ancora il recap: avvia la stessa
+        // generazione del recap automatico (AI scelta in Impostazioni › AI, prompt
+        // backend/prompts/recap_email.txt, risultato cifrato in rec_meeting.recap).
+        const manualRecapRunning = new Set();
+
+        function manualRecapButton(eventId) {
+            const running = manualRecapRunning.has(eventId);
+            return `<button type="button" class="meeting-genrecap-btn" data-event-id="${escapeHtml(eventId || '')}" ${running ? 'disabled' : ''} title="Genera il recap con l'AI scelta in Impostazioni › AI">${running ? '<i class="fas fa-spinner fa-spin"></i> Recap…' : 'Recap'}</button>`;
+        }
+
+        async function runManualRecap(btn) {
+            const eventId = btn.dataset.eventId;
+            if (!eventId || manualRecapRunning.has(eventId)) return;
+            manualRecapRunning.add(eventId);
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Recap…';
+            try {
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/recap`, {
+                    method: 'POST',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_calendar: eventId })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                showRecapReady(eventId, btn.closest('.meeting-card')?.dataset.title, data.provider);
+            } catch (e) {
+                showNotification('Recap non generato: ' + e.message, 'info');
+            } finally {
+                manualRecapRunning.delete(eventId);
+                refreshMeetingStatuses(); // sparisce il pulsante, compare la lente in "Recap"
+                if (btn.isConnected && btn.disabled) { btn.disabled = false; btn.textContent = 'Recap'; }
+            }
+        }
+
+        // === AGGIORNAMENTO DELLA GRIGLIA RIUNIONI (senza rileggere il calendario) ===
+        // Rilegge da rec_meeting solo lo stato delle riunioni a video (trascrizione, recap,
+        // inviata, gestita) e aggiorna le celle al loro posto: ogni 15 s a pagina visibile,
+        // e subito dopo ogni blocco trascritto e dopo il recap.
+        const MEETING_STATUS_EVERY_MS = 15000;
+        let meetingStatusBusy = false;
+
+        function setStatusCell(row, cls, html) {
+            const cell = row.querySelector('.' + cls);
+            if (cell && cell.dataset.state !== html) {
+                cell.innerHTML = html;
+                cell.dataset.state = html;
+            }
+        }
+
+        async function refreshMeetingStatuses() {
+            if (meetingStatusBusy) return;
+            const rows = [...document.querySelectorAll('#meetingsContainer .meeting-card[data-event-id]')];
+            const ids = rows.map((r) => r.dataset.eventId).filter(Boolean);
+            if (!ids.length) return;
+            meetingStatusBusy = true;
+            try {
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/status`, {
+                    method: 'POST',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids })
+                });
+                if (!res.ok) return;
+                const map = (await res.json()).meetings || {};
+                for (const row of rows) {
+                    const m = map[row.dataset.eventId];
+                    const ev = { id: row.dataset.eventId };
+                    const title = row.dataset.title || '';
+                    // durante una generazione in corso il pulsante "Recap…" non va sovrascritto
+                    if (!manualRecapRunning.has(ev.id)) {
+                        setStatusCell(row, 'meeting-status-genrecap', m && m.has_trascrizione && !m.has_recap ? manualRecapButton(ev.id) : '');
+                    }
+                    setStatusCell(row, 'meeting-status-trascrizione', m && m.has_trascrizione ? meetingTextButton(ev, 'trascrizione', title) : '');
+                    setStatusCell(row, 'meeting-status-recap', m && m.has_recap ? meetingTextButton(ev, 'recap', title) : '');
+                    // Recap appena comparso (es. generato da un'altra scheda): avviso "Recap pronto"
+                    const hadRecap = recapSeen.get(ev.id);
+                    if (m && m.has_recap && hadRecap === false) showRecapReady(ev.id, title);
+                    recapSeen.set(ev.id, !!(m && m.has_recap));
+                    // Riunione diventata gestita (es. registrata da un'altra scheda): tendine Cliente/Progetto
+                    if (m && row.dataset.managed !== '1') {
+                        row.dataset.managed = '1';
+                        const assign = row.querySelector('.meeting-assign');
+                        if (assign) {
+                            assign.dataset.clientId = m.client_id || '';
+                            assign.dataset.projectId = m.project_id || '';
+                        }
+                        renderMeetingAssign(row);
+                    }
+                }
+            } catch (e) {
+                /* nuovo tentativo al giro successivo */
+            } finally {
+                meetingStatusBusy = false;
+            }
+        }
+
+        setInterval(() => {
+            if (document.visibilityState === 'visible') refreshMeetingStatuses();
+        }, MEETING_STATUS_EVERY_MS);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') refreshMeetingStatuses();
+        });
 
         // === LENTE: testo di trascrizione / recap della riunione (rec_meeting) ===
         function meetingTextButton(event, field, title) {
@@ -5460,10 +5649,122 @@
             return out.join('');
         }
 
+        // --- Scarica .txt: testo in chiaro (il server lo restituisce già decifrato), con gli
+        // eventuali "\n" scritti come testo trasformati in veri a capo e fine riga Windows.
+        function downloadMeetingText() {
+            const modal = document.getElementById('meetingTextModal');
+            const raw = document.getElementById('meetingTextBody').dataset.raw || '';
+            if (!raw.trim()) { showNotification('Nessun testo da scaricare', 'info'); return; }
+            const text = raw.replace(/\r\n?/g, '\n').replace(/\\n/g, '\n').trim().replace(/\n/g, '\r\n') + '\r\n';
+            const kind = modal.dataset.field === 'recap' ? 'Recap' : 'Trascrizione';
+            const name = `${kind} - ${modal.dataset.title || 'riunione'}`.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+            // BOM UTF-8: il Blocco note di Windows mostra correttamente accenti e caratteri speciali
+            const blob = new Blob(['﻿' + text], { type: 'text/plain;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `${name}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }
+
+        // WebVTT (sottotitoli di Teams, Zoom, Meet...) -> "[hh:mm:ss] Nome: testo", una riga per battuta.
+        function vttToText(vtt) {
+            const lines = String(vtt).replace(/^﻿/, '').replace(/\r\n?/g, '\n').split('\n');
+            const out = [];
+            const timing = /^\s*((?:\d+:)?\d{1,2}:\d{2})[.,]\d{1,3}\s+-->\s+/;
+            let i = 0;
+            while (i < lines.length) {
+                const line = lines[i].trim();
+                // intestazione e blocchi NOTE / STYLE / REGION: si saltano fino alla riga vuota
+                if (/^(WEBVTT|NOTE|STYLE|REGION)\b/.test(line)) {
+                    while (i < lines.length && lines[i].trim() !== '') i++;
+                    continue;
+                }
+                const m = timing.exec(line) || (lines[i + 1] && timing.exec(lines[i + 1].trim()));
+                if (!m) { i++; continue; }
+                if (!timing.test(line)) i++; // la riga prima dei tempi era l'identificativo della battuta
+                const parts = m[1].split(':').map(Number);
+                while (parts.length < 3) parts.unshift(0);
+                const hhmmss = parts.map((n) => String(n).padStart(2, '0')).join(':');
+                i++;
+                const textLines = [];
+                while (i < lines.length && lines[i].trim() !== '') textLines.push(lines[i++].trim());
+                let txt = textLines.join(' ');
+                const sp = /<v(?:\.[^\s>]+)?\s+([^>]+)>/.exec(txt);           // <v Nome Cognome>testo</v>
+                txt = txt.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+                if (txt) out.push(`[${hhmmss}] ${sp ? sp[1].trim() + ': ' : ''}${txt}`);
+            }
+            return out.join('\n');
+        }
+
+        // --- Carica file: .txt così com'è, .vtt convertito; SOSTITUISCE il testo della colonna
+        // (il server lo salva cifrato).
+        async function uploadMeetingText(file) {
+            const modal = document.getElementById('meetingTextModal');
+            const field = modal.dataset.field === 'recap' ? 'recap' : 'trascrizione';
+            const label = field === 'recap' ? 'il recap' : 'la trascrizione';
+            if (!file) return;
+            if (!/\.(txt|vtt)$/i.test(file.name)) { showNotification('Sono ammessi solo file .txt o .vtt', 'info'); return; }
+            if (file.size > 2 * 1024 * 1024) { showNotification('File troppo grande (max 2 MB)', 'info'); return; }
+            const current = document.getElementById('meetingTextBody').dataset.raw || '';
+            if (current.trim() && !window.confirm(`Il contenuto del file sostituirà ${label} attuale di questa riunione. Continuare?`)) return;
+            try {
+                let text = await file.text();
+                if (/\.vtt$/i.test(file.name) || /^﻿?WEBVTT/.test(text)) text = vttToText(text);
+                text = text.replace(/^﻿/, '').trim();
+                if (!text) throw new Error('Il file non contiene testo');
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/text`, {
+                    method: 'PUT',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_calendar: modal.dataset.eventId, field, text })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                showNotification(`${field === 'recap' ? 'Recap' : 'Trascrizione'} caricat${field === 'recap' ? 'o' : 'a'} da ${file.name}`, 'success');
+                // Riapre la finestra con il testo appena salvato e aggiorna le lenti della griglia
+                openMeetingText({ dataset: { eventId: modal.dataset.eventId, field, title: modal.dataset.title } });
+                refreshMeetingStatuses();
+            } catch (e) {
+                showNotification('Caricamento non riuscito: ' + e.message, 'info');
+            }
+        }
+
+        // --- Svuota (solo recap): cancella completamente il recap della riunione.
+        async function clearMeetingRecap() {
+            const modal = document.getElementById('meetingTextModal');
+            if (modal.dataset.field !== 'recap') return;
+            const raw = document.getElementById('meetingTextBody').dataset.raw || '';
+            if (!raw.trim()) { showNotification('Il recap è già vuoto', 'info'); return; }
+            if (!window.confirm('Cancellare completamente il recap di questa riunione? L\'operazione non si può annullare.')) return;
+            try {
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/recap`, {
+                    method: 'DELETE',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_calendar: modal.dataset.eventId })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                modal.classList.remove('open');
+                showNotification('Recap svuotato', 'success');
+                recapSeen.set(modal.dataset.eventId, false); // un nuovo recap farà di nuovo comparire l'avviso
+                recapToastShown.delete(modal.dataset.eventId);
+                refreshMeetingStatuses(); // sparisce la lente "Recap", ricompare il pulsante azzurro
+            } catch (e) {
+                showNotification('Recap non svuotato: ' + e.message, 'info');
+            }
+        }
+
         async function openMeetingText(btn) {
             const modal = document.getElementById('meetingTextModal');
             const body = document.getElementById('meetingTextBody');
             const field = btn.dataset.field === 'recap' ? 'recap' : 'trascrizione';
+            modal.dataset.eventId = btn.dataset.eventId || '';
+            modal.dataset.field = field;
+            const clearBtn = document.getElementById('meetingTextClear');
+            if (clearBtn) clearBtn.style.display = field === 'recap' ? 'inline-block' : 'none';
+            modal.dataset.title = btn.dataset.title || '';
             document.getElementById('meetingTextTitleText').textContent = `${field === 'recap' ? 'Recap' : 'Trascrizione'} — ${btn.dataset.title || ''}`;
             document.getElementById('meetingTextSub').textContent = '';
             body.innerHTML = '<p class="meeting-text-empty"><i class="fas fa-spinner fa-spin"></i> Caricamento…</p>';
@@ -5496,6 +5797,15 @@
             document.getElementById('meetingTextDone')?.addEventListener('click', close);
             modal?.addEventListener('click', (e) => { if (e.target === modal) close(); });
             document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal?.classList.contains('open')) close(); });
+            document.getElementById('meetingTextDownload')?.addEventListener('click', downloadMeetingText);
+            document.getElementById('meetingTextClear')?.addEventListener('click', clearMeetingRecap);
+            const fileInput = document.getElementById('meetingTextFile');
+            document.getElementById('meetingTextUpload')?.addEventListener('click', () => fileInput?.click());
+            fileInput?.addEventListener('change', () => {
+                const f = fileInput.files && fileInput.files[0];
+                fileInput.value = ''; // permette di ricaricare lo stesso file
+                uploadMeetingText(f);
+            });
             document.getElementById('meetingTextCopy')?.addEventListener('click', () => {
                 const raw = document.getElementById('meetingTextBody').dataset.raw || '';
                 if (raw && navigator.clipboard) navigator.clipboard.writeText(raw).then(() => showNotification('Testo copiato', 'success')).catch(() => {});
@@ -5619,6 +5929,7 @@
                         }
                     }
                     rec.sent++;
+                    refreshMeetingStatuses(); // mostra subito la lente "Trascrizione"
                     rec.lastError = '';
                 } catch (e) {
                     rec.lastError = e.message;
@@ -5825,7 +6136,29 @@
             updateRecStatus(rec);
             await rec.queue;
             updateRecStatus(rec);
-            loadTodaysMeetings(); // aggiorna il flag "Trascrizione"
+            refreshMeetingStatuses(); // aggiorna le colonne Trascrizione / Recap
+            // Trascrizione terminata (tutti i blocchi scritti): parte il recap con l'AI scelta
+            // in Impostazioni › AI › "AI generazione e-mail recap".
+            if (rec.sent > 0 && !rec.stoppedReason) await generateMeetingRecap(rec);
+        }
+
+        async function generateMeetingRecap(rec) {
+            const base = `Trascrizione completata (${rec.sent} blocchi).`;
+            setRecStatus(`${base} Generazione del recap in corso…`);
+            try {
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/recap`, {
+                    method: 'POST',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_calendar: rec.eventId })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                if (rec === meetingRec) setRecStatus(`${base} Recap generato con ${data.provider}: aprilo con la lente nella colonna Recap.`);
+                showRecapReady(rec.eventId, rec.title, data.provider);
+                refreshMeetingStatuses(); // mostra subito la lente "Recap"
+            } catch (e) {
+                if (rec === meetingRec) setRecStatus(`${base} Recap non generato: ${e.message}`, true);
+            }
         }
 
         function initMeetingRecorder() {
@@ -5835,6 +6168,13 @@
                 if (link) {
                     e.preventDefault();
                     window.open(link.dataset.meetingLink, '_blank', 'noopener');
+                    return;
+                }
+                // Recap manuale (pulsante azzurro)
+                const gr = e.target.closest && e.target.closest('.meeting-genrecap-btn');
+                if (gr) {
+                    e.preventDefault();
+                    runManualRecap(gr);
                     return;
                 }
                 // Gestisci con Projexa: giallo "Registra" avvia, rosso "Ferma" interrompe
@@ -6426,16 +6766,16 @@
             // Una sola riga: partecipa - durata - ora - provider - gestisci con Projexa - titolo -
             // trascrizione - recap - inviata (flag da rec_meeting) - cliente/progetto
             return `
-                <div class="meeting-card" data-managed="${event.managed ? '1' : ''}">
+                <div class="meeting-card" data-managed="${event.managed ? '1' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}">
                     ${meetingLinkBtn}
                     <div class="meeting-duration">${escapeHtml(durationStr)}</div>
                     <div class="meeting-time"><i class="fas fa-clock"></i> ${escapeHtml(timeStr)}</div>
                     ${providerBadge}
                     <div class="meeting-manage">${(meetingLink || isRecordingMeeting(event.id)) ? `<button type="button" class="meeting-rec-btn${isRecordingMeeting(event.id) ? ' recording' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">${recButtonLabel(isRecordingMeeting(event.id))}</button>` : ''}</div>
                     <div class="meeting-title" title="${escapeHtml(tooltip)}">${escapeHtml(title)}</div>
+                    <div class="meeting-status meeting-status-genrecap">${event.has_trascrizione && !event.has_recap ? manualRecapButton(event.id) : ''}</div>
                     <div class="meeting-status meeting-status-trascrizione">${event.has_trascrizione ? meetingTextButton(event, 'trascrizione', title) : ''}</div>
                     <div class="meeting-status meeting-status-recap">${event.has_recap ? meetingTextButton(event, 'recap', title) : ''}</div>
-                    <div class="meeting-status meeting-status-inviata">${event.inviata ? '<i class="fas fa-flag" title="Inviata"></i>' : ''}</div>
                     <div class="meeting-assign" data-event-id="${escapeHtml(event.id || '')}" data-client-id="${escapeHtml(event.client_id || '')}" data-project-id="${escapeHtml(event.project_id || '')}"></div>
                 </div>
             `;
@@ -12314,11 +12654,16 @@
             <div id="meetingTextSub" style="padding: 0.6rem 1.25rem 0; font-size: 0.8rem; color: var(--text-muted);"></div>
             <div id="meetingTextBody" class="meeting-text-body"></div>
             <div class="task-modal-footer">
+                <input id="meetingTextFile" type="file" accept=".txt,.vtt,text/plain,text/vtt" style="display: none;">
+                <button id="meetingTextUpload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer; margin-right: auto;" title="Carica un file .txt o .vtt: sostituisce il testo di questa riunione"><i class="fas fa-upload"></i> Carica file</button>
+                <button id="meetingTextClear" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid #FCA5A5; border-radius: 8px; background: #FEF2F2; color: #B91C1C; cursor: pointer;" title="Cancella completamente il recap di questa riunione"><i class="fas fa-eraser"></i> Svuota</button>
+                <button id="meetingTextDownload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Scarica il testo in un file .txt"><i class="fas fa-download"></i> Scarica .txt</button>
                 <button id="meetingTextCopy" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-copy"></i> Copia testo</button>
                 <button id="meetingTextDone" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;">Chiudi</button>
             </div>
         </div>
     </div>
+    <div id="recapToasts" class="recap-toasts" aria-live="polite"></div>
     <div id="meetingRecorder" class="meeting-recorder" role="region" aria-label="Registrazione riunione" style="display: none;">
         <div class="meeting-recorder-head">
             <span class="meeting-recorder-dot" id="meetingRecorderDot"></span>

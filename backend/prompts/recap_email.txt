@@ -1,0 +1,14 @@
+Scrivimi una email di recap sulla base di questa trascrizione come un project manager senior.
+Scrivila in modo sintetico, ma toccando tutti i punti e indicando chi deve fare cosa e quando.
+
+Restituisci solo l'email, pronta da incollare in un client di posta: prima riga "Oggetto: ...",
+poi il testo. Usa testo semplice, senza formattazione Markdown (niente asterischi, cancelletti,
+tabelle o righe di separazione); per gli elenchi usa righe che iniziano con "- ".
+Non aggiungere introduzioni o commenti prima o dopo l'email.
+
+Riunione: {{OGGETTO}}
+Data: {{DATA}}
+Nella trascrizione "{{UTENTE}}" sono io (autore dell'email); "Partecipanti" sono gli altri presenti.
+
+Trascrizione:
+{{TRASCRIZIONE}}
