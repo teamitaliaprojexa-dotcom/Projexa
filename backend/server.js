@@ -17,6 +17,7 @@ import aiRoutes from './routes/ai.js';
 import jiraRoutes from './routes/jira.js';
 import cryptoMigrationRoutes from './routes/crypto-migration.js';
 import integrazioniRoutes from './routes/integrazioni.js';
+import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
 import { encryptRowForWrite } from './config/crypto.js';
@@ -6469,6 +6470,8 @@ app.listen(PORT, () => {
   console.log(`\n🚀 Projexa API running on http://localhost:${PORT}`);
   console.log(`📊 Database: PostgreSQL on Neon`);
   console.log(`\n✓ Health check: http://localhost:${PORT}/api/health\n`);
+  // Riprende i blocchi di trascrizione rimasti in coda (es. dopo un riavvio di Render)
+  kickTranscriptionWorker();
 });
 
 // Graceful shutdown

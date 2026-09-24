@@ -18,11 +18,9 @@ import crypto from 'crypto';
 import ical from 'node-ical';
 import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { transcribeAudio, askAiProvider } from './ai.js';
-import { encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js';
+import {
+  encRec, enqueueChunk, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset
+} from '../jobs/meetingTranscription.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
 import { isAllowedOrigin } from '../config/origins.js';
@@ -530,17 +528,6 @@ router.post('/outlook/ics', requireAuth, async (req, res) => {
 // (id_calendar = id dell'evento restituito da /events: id Google, id Graph oppure
 // UID_istante per il link ICS, così ogni occorrenza di una ricorrente è distinta).
 
-// Colonne di rec_meeting cifrate a riposo (AES-256-GCM, config/crypto.js): oggetto,
-// mittente, trascrizione, recap. In lettura tornano in chiaro in automatico (cryptoPool).
-function encRec(value) {
-  if (value === null || value === undefined || value === '') return value;
-  if (!hasEncryptionKey()) {
-    console.warn('⚠️  ENCRYPTION_KEY non impostata: rec_meeting viene scritta in chiaro.');
-    return value;
-  }
-  return isEncrypted(value) ? value : encryptValue(String(value));
-}
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Righe rec_meeting delle riunioni indicate: Map id_calendar -> { client_id, project_id,
@@ -737,8 +724,9 @@ router.post('/meetings/managed/status', requireAuth, async (req, res) => {
       ? req.body.ids.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 200)
       : [];
     const map = await getManagedMeetings(req.user, ids);
+    const pending = await pendingChunks(req.user, ids);
     const out = {};
-    for (const [id, row] of map) out[id] = row;
+    for (const [id, row] of map) out[id] = { ...row, pending: pending.get(id) || 0 };
     res.json({ meetings: out });
   } catch (error) {
     console.error('❌ REC_MEETING_STATUS:', error.message);
@@ -769,45 +757,28 @@ router.get('/meetings/managed/text', requireAuth, async (req, res) => {
   }
 });
 
-// Trascrizione dal vivo: il browser registra la riunione e invia blocchi WAV di circa
-// 60 secondi, in ordine, su DUE tracce separate: audio_mic (il microfono dell'utente) e
-// audio_system (l'audio del PC, cioè gli altri partecipanti). Ogni traccia viene trascritta
-// in frasi con l'orario (routes/ai.js); le frasi vengono unite in ordine di tempo con il
-// nome di chi parla e AGGIUNTE a rec_meeting.trascrizione. L'audio non viene salvato.
+// Trascrizione: il browser registra la riunione e invia blocchi WAV di circa 60 secondi,
+// in ordine, su DUE tracce: audio_mic (il microfono dell'utente) e audio_system (l'audio
+// del PC, cioè gli altri partecipanti). Ogni blocco viene messo IN CODA sul server
+// (tabella rec_meeting_chunks, audio cifrato) e trascritto in background da
+// jobs/meetingTranscription.js: la pagina si può chiudere dopo "Ferma".
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
-const OTHERS_LABEL = 'Partecipanti';
 
-function hhmmss(totalSec) {
-  const t = Math.max(0, Math.floor(Number(totalSec) || 0));
-  const p = (n) => String(n).padStart(2, '0');
-  return `${p(Math.floor(t / 3600))}:${p(Math.floor((t % 3600) / 60))}:${p(t % 60)}`;
-}
-
-function decodeAudio(b64) {
+function checkAudio(b64) {
   if (!b64) return null;
-  const buf = Buffer.from(String(b64), 'base64');
-  if (buf.length === 0) return null;
-  if (buf.length > MAX_AUDIO_BYTES) {
+  const s = String(b64);
+  // stima della dimensione decodificata (base64: 4 caratteri = 3 byte)
+  if (Math.floor(s.length * 3 / 4) > MAX_AUDIO_BYTES) {
     const err = new Error('Blocco audio troppo grande');
     err.status = 413;
     throw err;
   }
-  return buf;
-}
-
-// Chi parla al microfono: nome e cognome dell'utente (tabella users), altrimenti l'email.
-async function speakerName(user) {
-  try {
-    const r = await db.query('SELECT name, cognome FROM users WHERE id = $1 LIMIT 1', [user.user_id]);
-    const u = r.rows[0] || {};
-    const full = [u.name, u.cognome].filter(Boolean).join(' ').trim();
-    if (full) return full;
-  } catch (e) { /* si ripiega sull'email */ }
-  return user.email || 'Io';
+  return s.length ? s : null;
 }
 
 // Punto di ripresa degli orari: una nuova registrazione della stessa riunione continua
-// dall'ultimo orario già presente in trascrizione (+1 s), invece di ripartire da 00:00:00.
+// dall'ultimo orario già presente in trascrizione (+1 s) o prenotato dai blocchi ancora in
+// coda, invece di ripartire da 00:00:00.
 router.get('/meetings/managed/offset', requireAuth, async (req, res) => {
   try {
     const idCalendar = String(req.query.id_calendar || '').trim();
@@ -822,13 +793,15 @@ router.get('/meetings/managed/offset', requireAuth, async (req, res) => {
     for (let m = re.exec(text); m; m = re.exec(text)) {
       last = Math.max(last, Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]));
     }
-    res.json({ offset: last >= 0 ? last + 1 : 0 });
+    last = Math.max(last, await queuedEndOffset(req.user, idCalendar));
+    res.json({ offset: last >= 0 ? Math.floor(last) + 1 : 0 });
   } catch (error) {
     console.error('❌ REC_MEETING_OFFSET:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
+// Blocco audio: salvato in coda e trascritto in background (risposta immediata 202).
 router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
   try {
     const b = req.body || {};
@@ -836,9 +809,9 @@ router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
     if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
     const mime = String(b.mime || 'audio/wav');
     if (!/^audio\/(wav|x-wav|wave)$/.test(mime)) return res.status(400).json({ error: 'Formato audio non supportato' });
-    const micAudio = decodeAudio(b.audio_mic);
-    const sysAudio = decodeAudio(b.audio_system || b.audio); // "audio": formato precedente, una sola traccia
-    if (!micAudio && !sysAudio) return res.status(400).json({ error: 'Audio mancante' });
+    const micB64 = checkAudio(b.audio_mic);
+    const sysB64 = checkAudio(b.audio_system || b.audio); // "audio": formato precedente, una sola traccia
+    if (!micB64 && !sysB64) return res.status(400).json({ error: 'Audio mancante' });
 
     const row = await db.query(
       `SELECT 1 FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
@@ -846,108 +819,50 @@ router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
     );
     if (row.rows.length === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
 
-    // Le due tracce si trascrivono una dopo l'altra (i piani gratuiti limitano le richieste al secondo).
-    const lines = [];
-    let provider = '';
-    if (micAudio) {
-      const me = await speakerName(req.user);
-      const r = await transcribeAudio(req.user.user_id, micAudio, mime);
-      provider = r.provider;
-      r.segments.forEach((x) => lines.push({ start: x.start, who: me, text: x.text }));
+    try {
+      await enqueueChunk(req.user, idCalendar, {
+        micB64, sysB64, mime, offset: Number(b.offset_sec) || 0, startLabel: b.start_label || null
+      });
+    } catch (e) {
+      if (/rec_meeting_chunks/.test(e.message || '')) {
+        return res.status(503).json({ error: 'Coda di trascrizione non disponibile: eseguire Supporto/CreaDB/rec_meeting_chunks.sql sul database' });
+      }
+      throw e;
     }
-    if (sysAudio) {
-      const r = await transcribeAudio(req.user.user_id, sysAudio, mime);
-      provider = r.provider;
-      const who = micAudio ? OTHERS_LABEL : '';
-      r.segments.forEach((x) => lines.push({ start: x.start, who, text: x.text }));
-    }
-    lines.sort((a, b2) => a.start - b2.start);
-
-    // Righe da aggiungere: intestazione a inizio registrazione + frasi del blocco (se c'è parlato).
-    const offset = Number(b.offset_sec) || 0;
-    let add = '';
-    if (b.start_label) add += `\n--- ${String(b.start_label).slice(0, 80)} ---\n`;
-    for (const l of lines) add += `[${hhmmss(offset + l.start)}] ${l.who ? `${l.who}: ` : ''}${l.text.replace(/\s*\n\s*/g, ' ')}\n`;
-    if (add) {
-      // Il testo è cifrato: si legge in chiaro (decifratura automatica), si aggiunge il
-      // blocco e si riscrive tutto cifrato (i blocchi arrivano in ordine, uno alla volta).
-      const cur = await db.query(
-        `SELECT trascrizione FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
-        [req.user.tenant_id, req.user.user_id, idCalendar]
-      );
-      const full = ((cur.rows[0] && cur.rows[0].trascrizione) || '') + add;
-      await db.query(
-        `UPDATE rec_meeting SET trascrizione = $1, crypto = 1
-          WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
-        [encRec(full), req.user.tenant_id, req.user.user_id, idCalendar]
-      );
-    }
-    res.json({ success: true, provider, lines: lines.length });
+    res.status(202).json({ success: true, queued: true });
   } catch (error) {
     console.error('❌ REC_MEETING_TRANSCRIBE:', error.message);
     res.status(error.status || 500).json({ error: error.message });
   }
 });
 
+// Fine registrazione: quando i blocchi in coda della riunione sono trascritti, il server
+// genera da solo il recap (anche a pagina chiusa).
+router.post('/meetings/managed/finalize', requireAuth, async (req, res) => {
+  try {
+    const idCalendar = String((req.body && req.body.id_calendar) || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    await enqueueFinalize(req.user, idCalendar);
+    res.status(202).json({ success: true, queued: true });
+  } catch (error) {
+    console.error('❌ REC_MEETING_FINALIZE:', error.message);
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
 // ==========================================
-// RECAP AUTOMATICO DELLA RIUNIONE (rec_meeting.recap)
+// RECAP DELLA RIUNIONE (rec_meeting.recap)
 // ==========================================
 //
-// Chiamato dalla dashboard quando la trascrizione è terminata (tutti i blocchi scritti).
-// L'AI si sceglie in Impostazioni › AI con il campo "AI generazione e-mail recap"
-// (settings.valore2 per tenant/utente); il prompt è il file prompts/recap_email.txt,
-// modificabile senza toccare il codice. Segnaposto: {{TRASCRIZIONE}}, {{OGGETTO}},
-// {{DATA}}, {{UTENTE}}. Il recap sostituisce quello eventualmente già presente.
-const RECAP_PROMPT_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'prompts', 'recap_email.txt');
-
-function buildRecapPrompt(vars) {
-  let tpl = fs.readFileSync(RECAP_PROMPT_FILE, 'utf8');
-  // Se il file non prevede il segnaposto, la trascrizione si aggiunge in fondo.
-  if (!tpl.includes('{{TRASCRIZIONE}}')) tpl += '\n\nTrascrizione:\n{{TRASCRIZIONE}}';
-  return tpl.replace(/\{\{(TRASCRIZIONE|OGGETTO|DATA|UTENTE)\}\}/g, (m, k) => vars[k] || '');
-}
-
+// Pulsante azzurro "Recap" della dashboard. Il recap automatico a fine registrazione lo
+// genera invece la coda (jobs/meetingTranscription.js). Stessa logica: AI scelta in
+// Impostazioni › AI, prompt backend/prompts/recap_email.txt.
 router.post('/meetings/managed/recap', requireAuth, async (req, res) => {
   try {
     const idCalendar = String((req.body && req.body.id_calendar) || '').trim();
     if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
-
-    const row = (await db.query(
-      `SELECT trascrizione, oggetto, data_calendar, orario_calendar FROM rec_meeting
-        WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
-      [req.user.tenant_id, req.user.user_id, idCalendar]
-    )).rows[0];
-    if (!row) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
-    if (!row.trascrizione || !row.trascrizione.trim()) return res.status(400).json({ error: 'Nessuna trascrizione da cui generare il recap' });
-
-    const setting = (await db.query(
-      `SELECT valore2 FROM settings
-        WHERE tenant_id = $1 AND user_id = $2
-          AND LOWER(BTRIM(campo)) IN ('ai generazione e-mail recap', '(*) ai generazione e-mail recap')
-        LIMIT 1`,
-      [req.user.tenant_id, req.user.user_id]
-    )).rows[0];
-    const providerName = setting && setting.valore2 ? String(setting.valore2).trim() : '';
-    if (!providerName) return res.status(400).json({ error: 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"' });
-
-    const data = row.data_calendar ? String(row.data_calendar).split('-').reverse().join('/') : '';
-    const prompt = buildRecapPrompt({
-      TRASCRIZIONE: row.trascrizione.trim(),
-      OGGETTO: row.oggetto || '',
-      DATA: [data, row.orario_calendar ? String(row.orario_calendar).slice(0, 5) : ''].filter(Boolean).join(' '),
-      UTENTE: await speakerName(req.user)
-    });
-
-    const result = await askAiProvider(req.user.user_id, providerName, prompt);
-    const recap = String(result.text || '').trim();
-    if (!recap) return res.status(502).json({ error: `${result.label} non ha restituito alcun testo` });
-
-    await db.query(
-      `UPDATE rec_meeting SET recap = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
-      [encRec(recap), req.user.tenant_id, req.user.user_id, idCalendar]
-    );
-    console.log(`[RECAP] ✓ Recap generato con ${result.label} per la riunione ${idCalendar}`);
-    res.json({ success: true, provider: result.label, model: result.model, length: recap.length });
+    const result = await generateRecap(req.user, idCalendar);
+    res.json({ success: true, ...result });
   } catch (error) {
     console.error('❌ REC_MEETING_RECAP:', error.message);
     res.status(error.status || 500).json({ error: error.message });

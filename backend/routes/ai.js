@@ -384,7 +384,13 @@ export async function transcribeAudio(userId, audioBuffer, mime) {
       return { segments, provider: `Whisper ${data.model || ''}`.trim() };
     } catch (error) {
       const temporary = [429, 500, 502, 503, 504].includes(error.upstreamStatus) || (error.status === 502 && !error.upstreamStatus);
-      if (!temporary || attempt >= 3) throw error;
+      if (!temporary || attempt >= 3) {
+        // Servizio locale non avviato: messaggio con l'istruzione per avviarlo.
+        if (/ECONNREFUSED/.test(error.message || '') && /localhost|127\.0\.0\.1/.test(base)) {
+          throw httpError(503, `Servizio Whisper non avviato su ${base}: avvia whisper-service/avvia_locale.bat (oppure imposta WHISPER_URL con l'indirizzo di Render)`);
+        }
+        throw error;
+      }
       console.warn(`[AI] Trascrizione Whisper: errore temporaneo (${error.upstreamStatus || error.message}), nuovo tentativo ${attempt + 1}/3`);
       await new Promise((r) => setTimeout(r, attempt === 1 ? 5000 : 15000));
     }

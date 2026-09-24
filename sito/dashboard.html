@@ -2358,6 +2358,7 @@
         }
         .meeting-status-trascrizione { width: 5.8rem; }
         .meeting-status-recap { width: 3.6rem; }
+        .meeting-queued { color: #D97706; font-size: 0.8rem; margin-left: 0.2rem; animation: recPulse 1.6s infinite; }
         .meeting-status-genrecap { width: 5rem; }
         .meeting-genrecap-btn {
             width: 4.8rem;
@@ -5487,6 +5488,7 @@
             container.innerHTML = header + meetings.map(meeting => createMeetingCard(meeting)).join('');
             // Tendine Cliente/Progetto sulle riunioni già gestite con Projexa
             container.querySelectorAll('.meeting-card[data-managed="1"]').forEach((row) => renderMeetingAssign(row));
+            refreshMeetingStatuses(); // blocchi in coda (clessidra) e stato aggiornato
         }
 
         // Loghi (SVG semplificati, inline: nessuna risorsa esterna) delle piattaforme di riunione.
@@ -5655,15 +5657,12 @@
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
-                // Riga "pulita": nessun dato Projexa
-                row.dataset.managed = '';
-                const assign = row.querySelector('.meeting-assign');
-                if (assign) { assign.innerHTML = ''; assign.dataset.clientId = ''; assign.dataset.projectId = ''; }
-                row.querySelectorAll('.meeting-status').forEach((c) => { c.innerHTML = ''; c.dataset.state = ''; });
-                row.querySelector('.meeting-del-cell').innerHTML = '';
                 recapSeen.delete(eventId);
                 recapToastShown.delete(eventId);
                 showNotification('Dati Projexa della riunione cancellati', 'success');
+                // Ricarica l'elenco: la riunione del calendario torna "pulita", una
+                // registrazione libera sparisce (non esiste più).
+                await loadTodaysMeetings();
             } catch (e) {
                 btn.disabled = false;
                 showNotification('Cancellazione non riuscita: ' + e.message, 'info');
@@ -5782,9 +5781,12 @@
                     }
                     // durante una generazione in corso il pulsante "Recap…" non va sovrascritto
                     if (!manualRecapRunning.has(ev.id)) {
-                        setStatusCell(row, 'meeting-status-genrecap', m && m.has_trascrizione && !m.has_recap ? manualRecapButton(ev.id) : '');
+                        setStatusCell(row, 'meeting-status-genrecap', m && m.has_trascrizione && !m.has_recap && !m.pending ? manualRecapButton(ev.id) : '');
                     }
-                    setStatusCell(row, 'meeting-status-trascrizione', m && m.has_trascrizione ? meetingTextButton(ev, 'trascrizione', title) : '');
+                    const queued = m && m.pending > 0
+                        ? `<i class="fas fa-hourglass-half meeting-queued" title="Trascrizione in corso sul server: ${m.pending} blocc${m.pending === 1 ? 'o' : 'hi'} in coda"></i>`
+                        : '';
+                    setStatusCell(row, 'meeting-status-trascrizione', (m && m.has_trascrizione ? meetingTextButton(ev, 'trascrizione', title) : '') + queued);
                     setStatusCell(row, 'meeting-status-recap', m && m.has_recap ? meetingTextButton(ev, 'recap', title) : '');
                     // Recap appena comparso (es. generato da un'altra scheda): avviso "Recap pronto"
                     const hadRecap = recapSeen.get(ev.id);
@@ -6182,18 +6184,18 @@
             if (rec !== meetingRec) return;
             const elapsed = rec.startedAt ? (Date.now() - rec.startedAt) / 1000 : 0;
             if (rec.running) {
-                let t = `● Registrazione in corso ${formatRecTime(elapsed)} · blocchi trascritti: ${rec.sent}`;
+                let t = `● Registrazione in corso ${formatRecTime(elapsed)} · blocchi inviati al server: ${rec.sent}`;
                 if (!rec.hasSystemAudio) t += ' · solo microfono';
                 setRecStatus(rec.lastError ? `${t} · ultimo errore: ${rec.lastError}` : t, !!rec.lastError);
             } else if (rec.pending > 0) {
-                setRecStatus(`Completamento della trascrizione… (${rec.pending} blocchi in coda)`);
+                setRecStatus(`Invio degli ultimi blocchi al server… (${rec.pending}) — attendi prima di chiudere la pagina`);
             } else if (rec.stoppedReason) {
                 setRecStatus(rec.stoppedReason, true);
             } else if (rec.failed > 0) {
                 // Blocchi non trascritti: si mostra il motivo invece di "completata".
-                setRecStatus(`Trascrizione non riuscita per ${rec.failed} blocc${rec.failed === 1 ? 'o' : 'hi'} su ${rec.failed + rec.sent}: ${rec.lastError}`, true);
+                setRecStatus(`Invio non riuscito per ${rec.failed} blocc${rec.failed === 1 ? 'o' : 'hi'} su ${rec.failed + rec.sent}: ${rec.lastError}`, true);
             } else if (rec.startedAt) {
-                setRecStatus(`Trascrizione completata (${rec.sent} blocchi). Il testo è in rec_meeting.`);
+                setRecStatus(`Registrazione inviata al server (${rec.sent} blocchi): la trascrizione prosegue in background.`);
             }
         }
 
@@ -6354,27 +6356,26 @@
             await rec.queue;
             updateRecStatus(rec);
             refreshMeetingStatuses(); // aggiorna le colonne Trascrizione / Recap
-            // Trascrizione terminata (tutti i blocchi scritti): parte il recap con l'AI scelta
-            // in Impostazioni › AI › "AI generazione e-mail recap".
-            if (rec.sent > 0 && !rec.stoppedReason) await generateMeetingRecap(rec);
+            // Tutti i blocchi sono in coda sul server: segnale di fine registrazione. Quando la
+            // coda ha trascritto tutto, il SERVER genera il recap (anche a pagina chiusa);
+            // l'avviso "Recap pronto" arriva dall'aggiornamento della griglia.
+            if (rec.sent > 0 && !rec.stoppedReason) await finalizeMeetingRecording(rec);
         }
 
-        async function generateMeetingRecap(rec) {
-            const base = `Trascrizione completata (${rec.sent} blocchi).`;
-            setRecStatus(`${base} Generazione del recap in corso…`);
+        async function finalizeMeetingRecording(rec) {
             try {
-                const res = await fetch(`${API_URL}/calendar/meetings/managed/recap`, {
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/finalize`, {
                     method: 'POST',
                     headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id_calendar: rec.eventId })
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
-                if (rec === meetingRec) setRecStatus(`${base} Recap generato con ${data.provider}: aprilo con la lente nella colonna Recap.`);
-                showRecapReady(rec.eventId, rec.title, data.provider);
-                refreshMeetingStatuses(); // mostra subito la lente "Recap"
+                if (rec === meetingRec) {
+                    setRecStatus(`Registrazione inviata al server (${rec.sent} blocchi). Trascrizione e recap proseguono in background: puoi chiudere la pagina.`);
+                }
             } catch (e) {
-                if (rec === meetingRec) setRecStatus(`${base} Recap non generato: ${e.message}`, true);
+                if (rec === meetingRec) setRecStatus(`Blocchi inviati, ma il recap automatico non è stato prenotato (${e.message}): usa il pulsante "Recap" a trascrizione finita.`, true);
             }
         }
 
