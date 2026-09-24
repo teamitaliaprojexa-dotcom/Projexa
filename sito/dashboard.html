@@ -5622,6 +5622,7 @@
                     rec.lastError = '';
                 } catch (e) {
                     rec.lastError = e.message;
+                    rec.failed = (rec.failed || 0) + 1;
                     // Nessuna AI per trascrivere o riunione non più gestita: inutile continuare.
                     if ((e.status === 428 || e.status === 404) && rec.running) stopMeetingRecording(e.message);
                 } finally {
@@ -5662,6 +5663,9 @@
                 setRecStatus(`Completamento della trascrizione… (${rec.pending} blocchi in coda)`);
             } else if (rec.stoppedReason) {
                 setRecStatus(rec.stoppedReason, true);
+            } else if (rec.failed > 0) {
+                // Blocchi non trascritti: si mostra il motivo invece di "completata".
+                setRecStatus(`Trascrizione non riuscita per ${rec.failed} blocc${rec.failed === 1 ? 'o' : 'hi'} su ${rec.failed + rec.sent}: ${rec.lastError}`, true);
             } else if (rec.startedAt) {
                 setRecStatus(`Trascrizione completata (${rec.sent} blocchi). Il testo è in rec_meeting.`);
             }
@@ -5761,7 +5765,7 @@
             rec.processor = rec.ctx.createScriptProcessor(4096, 2, 1);
             const ratio = rec.ctx.sampleRate / REC_SAMPLE_RATE;
             rec.bufMic = []; rec.bufSys = []; rec.bufferLen = 0; rec.flushedSamples = 0; rec.chunks = 0;
-            rec.sent = 0; rec.pending = 0; rec.lastError = ''; rec.stoppedReason = '';
+            rec.sent = 0; rec.failed = 0; rec.pending = 0; rec.lastError = ''; rec.stoppedReason = '';
             rec.queue = Promise.resolve();
             const downsample = (input) => {
                 const outLen = Math.floor(input.length / ratio);
