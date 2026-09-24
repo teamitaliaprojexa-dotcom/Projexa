@@ -2089,16 +2089,19 @@
             gap: 1rem;
         }
 
-        /* MEETING CARDS */
+        /* MEETING CARDS: una riga per riunione (ora - titolo - durata - partecipa) */
         .meeting-card {
             background: white;
             border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 1.5rem;
-            transition: all 0.3s;
-            cursor: pointer;
+            border-radius: 8px;
+            padding: 0.5rem 0.9rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
             position: relative;
             overflow: hidden;
+            display: flex;
+            align-items: center;
+            gap: 0.9rem;
+            min-height: 44px;
         }
 
         .meeting-card::before {
@@ -2106,96 +2109,193 @@
             position: absolute;
             top: 0;
             left: 0;
-            width: 4px;
+            width: 3px;
             height: 100%;
             background: #4285F4;
-            transition: width 0.3s;
         }
 
         .meeting-card:hover {
             border-color: #4285F4;
-            box-shadow: 0 8px 24px rgba(66, 133, 244, 0.15);
-            transform: translateY(-2px);
-        }
-
-        .meeting-card:hover::before {
-            width: 100%;
-            opacity: 0.1;
+            box-shadow: 0 2px 8px rgba(66, 133, 244, 0.12);
         }
 
         .meeting-time {
-            font-size: 1.3rem;
+            flex: 0 0 auto;
+            min-width: 4.2rem;
+            font-size: 0.95rem;
             font-weight: 700;
             color: #4285F4;
-            margin-bottom: 0.5rem;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.4rem;
         }
 
+        /* Colonna piattaforma (logo Teams, Google Meet, Zoom...): larghezza fissa, vuota se senza link */
+        .meeting-provider {
+            flex: 0 0 1.4rem;
+            height: 1.4rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .meeting-provider svg { width: 1.3rem; height: 1.3rem; display: block; }
+
+        /* Colonna "Gestisci con Projexa": flag (checkbox). Comportamento ancora da definire. */
+        .meeting-manage {
+            flex: 0 0 5.2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+        .meeting-manage-flag {
+            width: 1rem;
+            height: 1rem;
+            cursor: pointer;
+            accent-color: #10B981;
+        }
+
+        /* Finestra AI: risposta in testo semplice con a capo preservati */
+        .ai-chat-answer {
+            min-height: 6rem;
+            max-height: 50vh;
+            overflow: auto;
+            padding: 0.9rem 1rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: #F9FAFB;
+            color: var(--dark);
+            font-size: 0.9rem;
+            line-height: 1.55;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .ai-chat-answer:empty::before { content: 'La risposta comparirà qui.'; color: var(--text-muted); }
+        .ai-chat-answer.ai-chat-error { background: #FEF2F2; border-color: #FECACA; color: #B91C1C; }
+        .ai-chat-wait { color: var(--text-muted); }
+
+        /* Collega / Scollega calendario nel flyout Impostazioni › Calendar */
+        .calendar-conn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-left: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .calendar-conn-account { font-size: 0.8rem; color: var(--text-muted); }
+        .calendar-conn-btn {
+            padding: 0.35rem 0.8rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 0.8rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .calendar-conn-on { background: #10B981; color: white; }
+        .calendar-conn-ics { background: #0078D4; color: white; }
+        .calendar-conn-off { background: #FEE2E2; color: #B91C1C; }
+
+        /* Trascrizione / Recap / Inviata: flag verde se su rec_meeting il dato è presente */
+        .meeting-status {
+            flex: 0 0 auto;
+            text-align: center;
+            color: #10B981;
+            font-size: 0.85rem;
+        }
+        .meeting-status-trascrizione { width: 5.8rem; }
+        .meeting-status-recap,
+        .meeting-status-inviata { width: 3.6rem; }
+        .meeting-header .meeting-status { color: var(--text-muted); font-size: 0.7rem; }
+
+        /* Cliente e Progetto (solo per le riunioni gestite con Projexa), dopo il titolo */
+        .meeting-assign {
+            flex: 0 0 auto;
+            display: flex;
+            gap: 0.5rem;
+        }
+        .meeting-assign select {
+            width: 12rem;
+            padding: 0.25rem 0.4rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: white;
+            color: var(--dark);
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+        .meeting-assign select:disabled { background: #F9FAFB; color: var(--text-muted); cursor: not-allowed; }
+        .meeting-assign-head > span { width: 12rem; }
+
+        /* Intestazione dell'elenco: stesse colonne (e stesse larghezze) delle righe */
+        .meeting-header {
+            display: flex;
+            align-items: flex-end;
+            gap: 0.9rem;
+            padding: 0 0.9rem 0.15rem;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            line-height: 1.2;
+        }
+        .meeting-header .meeting-duration,
+        .meeting-header .meeting-time { background: none; }
+        .meeting-header-title { flex: 1 1 auto; }
+
+        /* Ultimo elemento della riga: occupa lo spazio restante (troncato con "…"). */
         .meeting-title {
-            font-size: 1.1rem;
+            flex: 1 1 auto;
+            min-width: 0;
+            font-size: 0.95rem;
             font-weight: 600;
             color: var(--dark);
-            margin-bottom: 0.75rem;
-            line-height: 1.4;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .meeting-duration {
-            display: inline-block;
-            padding: 0.35rem 0.75rem;
+            flex: 0 0 auto;
+            min-width: 3.6rem; /* stessa larghezza su tutte le righe: gli orari restano allineati */
+            text-align: center;
+            padding: 0.2rem 0.6rem;
             background: rgba(66, 133, 244, 0.1);
             color: #4285F4;
             border-radius: 6px;
             font-size: 0.8rem;
             font-weight: 500;
-            margin-bottom: 1rem;
-        }
-
-        .meeting-attendees {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            margin-bottom: 1rem;
-            font-size: 0.9rem;
-            color: var(--text-muted);
-        }
-
-        .meeting-attendee-avatar {
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #4285F4 0%, #34A853 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 0.75rem;
-            font-weight: bold;
         }
 
         .meeting-link {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.75rem 1rem;
-            background: rgba(66, 133, 244, 0.05);
-            border: 1px solid rgba(66, 133, 244, 0.2);
-            border-radius: 8px;
-            color: #4285F4;
-            text-decoration: none;
-            font-weight: 500;
-            font-size: 0.9rem;
-            transition: all 0.3s;
-            cursor: pointer;
-            width: 100%;
-            text-align: center;
+            flex: 0 0 auto;
+            width: 6.6rem;
             justify-content: center;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.3rem 0.8rem;
+            background: #ECFDF5; /* verde tenue */
+            border: 1px solid #A7F3D0;
+            border-radius: 6px;
+            color: #047857;
+            font-weight: 500;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s;
         }
 
         .meeting-link:hover {
-            background: rgba(66, 133, 244, 0.1);
-            border-color: rgba(66, 133, 244, 0.4);
+            background: #D1FAE5;
+            border-color: #6EE7B7;
+        }
+
+        /* Segnaposto quando non c'è link: stessa larghezza del pulsante Partecipa,
+           così durata, ora e titolo restano allineati tra le righe */
+        .meeting-link-empty {
+            flex: 0 0 auto;
+            width: 6.6rem;
         }
 
         .meeting-empty {
@@ -2311,6 +2411,11 @@
             <!-- Qlik: visibile solo se il flag settings (campo='Qlik', valore1=true) è attivo per il
                  tenant_id/user_id del login. Gestita da js/Qlik_voucher.js (import voucher da Excel). -->
             <li id="navQlik" style="display: none;"><a href="#" id="navQlikLink"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19h18v2H1V3h2v16Zm2-3.4 4.2-4.2 3 3L18.6 8H16V6h6v6h-2V9.4l-7.8 7.8-3-3L6.4 17 5 15.6Z"/></svg> <span>Qlik</span></a></li>
+            <!-- AI: visibili solo se abilitate in Impostazioni › AI (toggle on + chiave API collegata).
+                 Il clic apre la finestra di richiesta/risposta (aiChatModal). -->
+            <li id="navAi_chatgpt" class="nav-ai" style="display: none;"><a href="#" data-ai-open="chatgpt" title="ChatGPT"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5a4.6 4.6 0 0 1 4.4 3.2 4.6 4.6 0 0 1 4.3 6.6 4.6 4.6 0 0 1-3 7.2 4.6 4.6 0 0 1-7.6.8 4.6 4.6 0 0 1-6.8-3.3 4.6 4.6 0 0 1-.1-7.3A4.6 4.6 0 0 1 12 2.5Zm0 2a2.6 2.6 0 0 0-2.6 2.4l3.6 2.1 2.6-1.5A2.6 2.6 0 0 0 12 4.5Zm-5.3 2.9a2.6 2.6 0 0 0-.9 3.5l3.6-2.1V5.8a2.6 2.6 0 0 0-2.7 1.6Zm10.6 1.4-3.6 2.1v3l2.6 1.5a2.6 2.6 0 0 0 1-6.6ZM12 10.3 10.5 11.2v1.6l1.5.9 1.5-.9v-1.6L12 10.3Zm-6.3 2.4a2.6 2.6 0 0 0 3 3.4l3.6-2.1-2.6-1.5-4 .2Zm8.3 2.7-3.6 2.1a2.6 2.6 0 0 0 5.2-.5V16l-1.6-.6Z"/></svg> <span>ChatGPT</span></a></li>
+            <li id="navAi_claude" class="nav-ai" style="display: none;"><a href="#" data-ai-open="claude" title="Claude"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 2h2l.6 6.2 3.6-5.1 1.6 1.2-3.2 5.4 5.8-2.4.7 1.9-6 1.9 6 1.3-.4 2-6.1-.8 4.9 3.8-1.3 1.6-5-3.9 1.3 6.2-2 .5-1.9-6-1.9 6-2-.5 1.3-6.2-5 3.9-1.3-1.6 4.9-3.8-6.1.8-.4-2 6-1.3-6-1.9.7-1.9 5.8 2.4L5.2 4.3l1.6-1.2 3.6 5.1L11 2Z"/></svg> <span>Claude</span></a></li>
+            <li id="navAi_gemini" class="nav-ai" style="display: none;"><a href="#" data-ai-open="gemini" title="Gemini"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.6 5.3 4.7 9.4 10 10-5.3.6-9.4 4.7-10 10-.6-5.3-4.7-9.4-10-10 5.3-.6 9.4-4.7 10-10Z"/></svg> <span>Gemini</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
             <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 3 3.8 3 6v12c0 2.2 3.5 4 9 4s9-1.8 9-4V6c0-2.2-3.5-4-9-4Zm0 2c4.6 0 7 1.4 7 2s-2.4 2-7 2-7-1.4-7-2 2.4-2 7-2Zm0 16c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V18c0 .6-2.4 2-7 2Zm0-5c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V13c0 .6-2.4 2-7 2Z"/></svg> <span>Database</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
@@ -2656,15 +2761,6 @@
                             <option value="microsoft">📧 Outlook Calendar</option>
                         </select>
                         <span id="calendarAccount" style="font-size: 0.8rem; color: var(--text-muted);"></span>
-                        <button id="calendarConnectBtn" type="button" style="padding: 0.5rem 0.9rem; background: #10B981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; display: none;">
-                            <i class="fas fa-link"></i> Collega
-                        </button>
-                        <button id="calendarIcsBtn" type="button" title="Collega Outlook incollando il link ICS del calendario pubblicato (non richiede l'approvazione dell'amministratore)" style="padding: 0.5rem 0.9rem; background: #0078D4; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; display: none;">
-                            <i class="fas fa-calendar-plus"></i> Link ICS
-                        </button>
-                        <button id="calendarDisconnectBtn" type="button" style="padding: 0.5rem 0.9rem; background: #FEE2E2; color: #B91C1C; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; display: none;">
-                            <i class="fas fa-unlink"></i> Scollega
-                        </button>
                         <span id="lastSyncTime" style="font-size: 0.8rem; color: var(--text-muted);">Sincronizzazione...</span>
                         <button id="refreshMeetingsBtn" style="padding: 0.5rem 1rem; background: #4285F4; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem; transition: all 0.3s; display: inline-block;">
                             <i class="fas fa-sync"></i> Aggiorna
@@ -2673,11 +2769,11 @@
                 </div>
 
                 <!-- Griglia Riunioni -->
-                <div id="meetingsContainer" style="display: flex; flex-direction: column; gap: 1rem; min-height: 150px;">
+                <div id="meetingsContainer" style="display: flex; flex-direction: column; gap: 0.4rem; min-height: 60px;">
                     <div style="display: flex; align-items: center; justify-content: center; padding: 3rem; color: var(--text-muted);">
                         <div style="text-align: center;">
                             <i class="fas fa-calendar" style="font-size: 2.5rem; margin-bottom: 1rem; opacity: 0.3;"></i>
-                            <p style="font-size: 1rem; margin: 0;">Caricamento riunioni da Google Calendar...</p>
+                            <p style="font-size: 1rem; margin: 0;">Caricamento riunioni...</p>
                         </div>
                     </div>
                 </div>
@@ -4745,6 +4841,8 @@
         let meetingsRefreshInterval = null;
         let currentCalendarProvider = 'google'; // valore del <select>: 'google' | 'microsoft'
         let calendarStatus = { google: {}, outlook: {} };
+        // Da settings (campo 'calendario default', valore2 Google/Outlook): 'google' | 'outlook' | null
+        let calendarDefaultProvider = null;
 
         function calendarAuthHeaders() {
             const token = localStorage.getItem('authToken');
@@ -4762,6 +4860,7 @@
                 if (!res.ok) return null;
                 const data = await res.json();
                 calendarStatus = data.providers || { google: {}, outlook: {} };
+                calendarDefaultProvider = data.defaultProvider || null;
                 return calendarStatus;
             } catch (e) {
                 return null;
@@ -4771,26 +4870,199 @@
         function renderCalendarConnectionUi() {
             const key = calendarBackendKey(currentCalendarProvider);
             const s = calendarStatus[key] || {};
-            const connectBtn = document.getElementById('calendarConnectBtn');
-            const disconnectBtn = document.getElementById('calendarDisconnectBtn');
             const account = document.getElementById('calendarAccount');
-            if (!connectBtn || !disconnectBtn || !account) return;
-            const connected = !!s.connected;
-            connectBtn.style.display = connected ? 'none' : 'inline-block';
-            disconnectBtn.style.display = connected ? 'inline-block' : 'none';
-            account.textContent = connected ? (s.email || '') : '';
-            const icsBtn = document.getElementById('calendarIcsBtn');
-            if (icsBtn) icsBtn.style.display = (!connected && key === 'outlook') ? 'inline-block' : 'none';
+            if (account) account.textContent = s.connected ? (s.email || '') : '';
+            renderCalendarSettingsButtons();
+        }
+
+        // === Pulsanti Collega / Scollega nel flyout Impostazioni › Calendar ===
+        // renderSettingRow aggiunge, accanto al toggle dei campi Google Calendar e
+        // Outlook, un segnaposto <span class="calendar-conn" data-cal-provider="...">
+        // che qui viene riempito in base allo stato di connessione.
+        function calendarProviderFromCampo(campo) {
+            const c = String(campo || '').toLowerCase();
+            if (/google/.test(c)) return 'google';
+            if (/\bou?t?look\b/.test(c)) return 'outlook'; // accetta anche "Oulook"
+            return null;
+        }
+
+        // Accanto al toggle: account collegato; se il toggle è acceso ma il calendario non
+        // risulta collegato (es. autorizzazione scaduta) compare "Collega" per riprovare.
+        function renderCalendarSettingsButtons() {
+            document.querySelectorAll('.calendar-conn[data-cal-provider]').forEach((el) => {
+                const key = el.dataset.calProvider;
+                const s = calendarStatus[key] || {};
+                const toggle = el.parentElement && el.parentElement.querySelector('.calendar-toggle');
+                if (s.connected) {
+                    el.innerHTML = `<span class="calendar-conn-account" title="Account collegato"><i class="fas fa-check-circle" style="color:#10B981;"></i> ${escapeHtml(s.email || 'collegato')}</span>`;
+                } else if (toggle && toggle.checked && !calendarPendingConnect) {
+                    el.innerHTML = `<span class="calendar-conn-account">non collegato</span>`
+                        + `<button type="button" class="calendar-conn-btn calendar-conn-on" data-cal-action="connect" data-cal-provider="${key}"><i class="fas fa-link"></i> Collega</button>`;
+                } else {
+                    el.innerHTML = '';
+                }
+            });
+        }
+
+        // Chiamata da renderSettingRow: i segnaposto vengono inseriti nel DOM subito dopo,
+        // quindi il riempimento avviene al giro successivo del ciclo eventi.
+        let calendarSettingsRefreshQueued = false;
+        function queueCalendarSettingsButtons() {
+            if (calendarSettingsRefreshQueued) return;
+            calendarSettingsRefreshQueued = true;
+            setTimeout(async () => {
+                calendarSettingsRefreshQueued = false;
+                renderCalendarSettingsButtons();
+                await fetchCalendarStatus();
+                renderCalendarSettingsButtons();
+            }, 0);
+        }
+
+        document.addEventListener('click', (e) => {
+            const b = e.target.closest && e.target.closest('.calendar-conn-btn[data-cal-action]');
+            if (!b) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const key = b.dataset.calProvider;
+            if (b.dataset.calAction === 'connect') {
+                const toggle = document.querySelector(`.calendar-toggle[data-cal-provider="${key}"]`);
+                startCalendarConnect(key, toggle);
+            }
+        });
+
+        // --- Toggle Impostazioni › Calendar ---
+        // on  -> parte il collegamento (Google: consenso; Outlook: scelta account Microsoft / link ICS)
+        // off -> popup di conferma; "Sì" scollega, "No" riporta il toggle su on.
+        // valore1 viene salvato subito, e solo se l'operazione riesce; altrimenti il toggle torna com'era.
+        let calendarPendingConnect = null; // { key, toggle, popup, timer }
+
+        async function saveCalendarToggle(toggle, value) {
+            if (!toggle) return;
+            toggle.checked = value;
+            try {
+                const res = await fetch(`${API_URL}/data/settings/${toggle.dataset.settingId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ valore1: value })
+                });
+                if (!res.ok) throw new Error(`Errore ${res.status}`);
+            } catch (e) {
+                showNotification('Impostazione del calendario non salvata: ' + e.message, 'info');
+            }
+            clearCalendarToggleDirty(toggle);
+        }
+
+        // Il toggle non deve restare "da salvare" (lo gestiamo noi): se non ci sono altre
+        // modifiche in sospeso nasconde anche la barra Salva.
+        function clearCalendarToggleDirty(toggle) {
+            if (!toggle) return;
+            delete toggle.dataset.dirty;
+            const listEl = document.getElementById('settingsDetailList');
+            const saveBar = document.getElementById('settingsDetailSaveBar');
+            if (listEl && saveBar && !listEl.querySelector('[data-setting-id][data-dirty="1"]')) saveBar.style.display = 'none';
+        }
+
+        function revertCalendarToggle(toggle, value) {
+            if (!toggle) return;
+            toggle.checked = value;
+            clearCalendarToggleDirty(toggle);
+        }
+
+        async function finishCalendarConnect(ok, message) {
+            const p = calendarPendingConnect;
+            if (!p) return;
+            calendarPendingConnect = null;
+            if (p.timer) clearInterval(p.timer);
+            await fetchCalendarStatus();
+            if (ok && (calendarStatus[p.key] || {}).connected) {
+                await saveCalendarToggle(p.toggle, true);
+                showNotification(`${p.key === 'outlook' ? 'Outlook' : 'Google Calendar'} collegato`, 'success');
+                await loadTodaysMeetings();
+            } else {
+                if (p.toggle) revertCalendarToggle(p.toggle, false);
+                if (message) reportCalendarError(message);
+            }
+            renderCalendarConnectionUi();
+        }
+
+        async function startCalendarConnect(key, toggle) {
+            if (calendarPendingConnect) return; // un collegamento alla volta
+            let method = 'oauth';
+            if (key === 'outlook') {
+                method = await chooseOutlookConnectMethod();
+                if (!method) { revertCalendarToggle(toggle, false); renderCalendarSettingsButtons(); return; }
+            }
+            calendarPendingConnect = { key, toggle };
+            renderCalendarSettingsButtons();
+            if (method === 'ics') {
+                const ok = await connectOutlookIcs();
+                await finishCalendarConnect(ok, null);
+                return;
+            }
+            const popup = await connectCalendarProvider(key);
+            if (!popup) { await finishCalendarConnect(false, null); return; }
+            // Finestra chiusa senza esito (l'utente ha rinunciato): si ricontrolla lo stato.
+            calendarPendingConnect.popup = popup;
+            calendarPendingConnect.timer = setInterval(() => {
+                if (popup.closed && calendarPendingConnect && calendarPendingConnect.popup === popup) {
+                    clearInterval(calendarPendingConnect.timer);
+                    setTimeout(() => finishCalendarConnect(true, null), 1200);
+                }
+            }, 700);
+        }
+
+        document.addEventListener('change', async (e) => {
+            const toggle = e.target;
+            if (!toggle || !toggle.classList || !toggle.classList.contains('calendar-toggle')) return;
+            const key = toggle.dataset.calProvider;
+            if (toggle.checked) {
+                await startCalendarConnect(key, toggle);
+            } else {
+                const done = await disconnectCalendarProvider(key);
+                if (done) await saveCalendarToggle(toggle, false);
+                else revertCalendarToggle(toggle, true);
+                renderCalendarSettingsButtons();
+            }
+        });
+
+        // Outlook: scelta del metodo di collegamento. Risolve 'oauth' | 'ics' | null (annulla).
+        function chooseOutlookConnectMethod() {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('calendarOutlookChoiceModal');
+                if (!modal) return resolve('ics');
+                const close = (answer) => {
+                    modal.classList.remove('open');
+                    modal.removeEventListener('click', onClick);
+                    document.removeEventListener('keydown', onKey);
+                    resolve(answer);
+                };
+                const onClick = (e) => {
+                    if (e.target === modal) return close(null);
+                    const b = e.target.closest && e.target.closest('[data-outlook-method]');
+                    if (b) close(b.dataset.outlookMethod || null);
+                };
+                const onKey = (e) => { if (e.key === 'Escape') close(null); };
+                modal.addEventListener('click', onClick);
+                document.addEventListener('keydown', onKey);
+                modal.classList.add('open');
+            });
+        }
+
+        // Errori di collegamento: messaggio a comparsa (il flyout Impostazioni può coprire il
+        // riquadro riunioni) e, se il riquadro è visibile, anche lì.
+        function reportCalendarError(message) {
+            if (typeof showNotification === 'function') showNotification(message, 'error');
+            displayMeetingsError(message);
         }
 
         // Outlook senza OAuth: l'utente pubblica il calendario da Outlook web e incolla
         // qui il link ICS, che il backend salva cifrato su integr_tok_auth.
-        async function connectOutlookIcs() {
+        async function connectOutlookIcs() { // true se collegato
             const url = window.prompt(
                 'Incolla il link ICS del tuo calendario Outlook.\n\n' +
                 'Outlook web > Impostazioni > Calendario > Calendari condivisi > Pubblica un calendario > link ICS'
             );
-            if (!url || !url.trim()) return;
+            if (!url || !url.trim()) return false;
             try {
                 const res = await fetch(`${API_URL}/calendar/outlook/ics`, {
                     method: 'POST',
@@ -4802,16 +5074,17 @@
                 await fetchCalendarStatus();
                 renderCalendarConnectionUi();
                 await loadTodaysMeetings();
+                return true;
             } catch (e) {
-                displayMeetingsError('Collegamento non riuscito: ' + e.message);
+                reportCalendarError('Collegamento non riuscito: ' + e.message);
+                return false;
             }
         }
 
         // Il popup va aperto nel gestore del click, altrimenti il browser lo blocca:
         // lo apriamo vuoto e ci mettiamo dentro l'URL appena il backend lo restituisce
         // (stessa tecnica usata per il collegamento a Jira).
-        async function connectCalendarProvider() {
-            const key = calendarBackendKey(currentCalendarProvider);
+        async function connectCalendarProvider(key) {
             const popup = window.open('', 'projexa-calendar-oauth', 'width=680,height=780');
             try {
                 const res = await fetch(`${API_URL}/calendar/${key}/authorize-url`, { headers: calendarAuthHeaders() });
@@ -4819,21 +5092,55 @@
                 if (!res.ok || !data.url) throw new Error(data.error || `il backend ha risposto ${res.status} (${API_URL}) - è aggiornato?`);
                 if (popup) popup.location.href = data.url;
                 else window.location.href = data.url; // popup bloccato: si prosegue nella stessa scheda
+                return popup;
             } catch (e) {
                 if (popup) popup.close();
-                displayMeetingsError('Collegamento non riuscito: ' + e.message);
+                reportCalendarError('Collegamento non riuscito: ' + e.message);
+                return null;
             }
         }
 
-        async function disconnectCalendarProvider() {
-            const key = calendarBackendKey(currentCalendarProvider);
-            if (!window.confirm('Scollegare questo calendario? I dati di accesso salvati verranno eliminati.')) return;
+        // Popup di conferma Sì/No: risolve true solo con "Sì"; "No", clic fuori dal
+        // riquadro o Esc annullano la richiesta.
+        function confirmCalendarDisconnect(label, title = 'Scollega calendario') {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('calendarDisconnectModal');
+                if (!modal) return resolve(window.confirm(`Vuoi scollegarti da ${label}?`));
+                const titleEl = document.getElementById('calendarDisconnectTitleText');
+                if (titleEl) titleEl.textContent = title;
+                const yes = document.getElementById('calendarDisconnectYes');
+                const no = document.getElementById('calendarDisconnectNo');
+                document.getElementById('calendarDisconnectText').textContent = `Vuoi scollegarti da ${label}?`;
+                const close = (answer) => {
+                    modal.classList.remove('open');
+                    yes.removeEventListener('click', onYes);
+                    no.removeEventListener('click', onNo);
+                    modal.removeEventListener('click', onBackdrop);
+                    document.removeEventListener('keydown', onKey);
+                    resolve(answer);
+                };
+                const onYes = () => close(true);
+                const onNo = () => close(false);
+                const onBackdrop = (e) => { if (e.target === modal) close(false); };
+                const onKey = (e) => { if (e.key === 'Escape') close(false); };
+                yes.addEventListener('click', onYes);
+                no.addEventListener('click', onNo);
+                modal.addEventListener('click', onBackdrop);
+                document.addEventListener('keydown', onKey);
+                modal.classList.add('open');
+                no.focus();
+            });
+        }
+
+        async function disconnectCalendarProvider(key) { // true se l'utente ha confermato
+            if (!(await confirmCalendarDisconnect(key === 'outlook' ? 'Outlook Calendar' : 'Google Calendar'))) return false;
             try {
                 await fetch(`${API_URL}/calendar/${key}/disconnect`, { method: 'POST', headers: calendarAuthHeaders() });
             } catch (e) { /* la UI si aggiorna comunque */ }
             await fetchCalendarStatus();
             renderCalendarConnectionUi();
             await loadTodaysMeetings();
+            return true;
         }
 
         // Il popup termina sulla pagina di callback del backend (Render), che in
@@ -4842,12 +5149,16 @@
             if (event.origin !== location.origin && event.origin !== new URL(API_URL).origin) return;
             const data = event.data;
             if (!data || data.source !== 'projexa-calendar') return;
+            if (calendarPendingConnect && calendarPendingConnect.key === data.provider) {
+                await finishCalendarConnect(!!data.ok, data.ok ? null : 'Collegamento non riuscito: ' + (data.error || ''));
+                return;
+            }
             await fetchCalendarStatus();
             renderCalendarConnectionUi();
             if (data.ok) {
                 await loadTodaysMeetings();
             } else {
-                displayMeetingsError('Collegamento non riuscito: ' + (data.error || ''));
+                reportCalendarError('Collegamento non riuscito: ' + (data.error || ''));
             }
         }
         window.addEventListener('message', onCalendarOAuthMessage);
@@ -4858,8 +5169,18 @@
             const key = calendarBackendKey(currentCalendarProvider);
             const s = calendarStatus[key] || {};
             if (!s.connected) {
-                displayMeetingsError(`Calendario ${key === 'outlook' ? 'Outlook' : 'Google'} non collegato. Usa il pulsante "Collega" per autorizzare l'accesso.`);
+                displayMeetingsError(`Calendario ${key === 'outlook' ? 'Outlook' : 'Google'} non collegato. Collegalo da Impostazioni › Calendar con il pulsante "Collega".`);
                 return [];
+            }
+            const container = document.getElementById('meetingsContainer');
+            if (container) {
+                container.innerHTML = `
+                    <div style="display: flex; align-items: center; justify-content: center; padding: 3rem; color: var(--text-muted);">
+                        <div style="text-align: center;">
+                            <i class="fas fa-spinner fa-spin" style="font-size: 2rem; margin-bottom: 1rem; opacity: 0.4;"></i>
+                            <p style="font-size: 1rem; margin: 0;">Caricamento riunioni da ${key === 'outlook' ? 'Outlook Calendar' : 'Google Calendar'}...</p>
+                        </div>
+                    </div>`;
             }
             try {
                 // Calcola intervallo temporale: da adesso a 24 ore dopo
@@ -4924,7 +5245,423 @@
             nextMeetingTime.textContent = startTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
 
             // Renderizza le card
-            container.innerHTML = meetings.map(meeting => createMeetingCard(meeting)).join('');
+            // Riga d'intestazione allineata alle colonne delle righe riunione
+            const header = `
+                <div class="meeting-header">
+                    <span style="flex: 0 0 6.6rem;"></span>
+                    <span class="meeting-duration" style="visibility: hidden;">0h 0m</span>
+                    <span class="meeting-time" style="visibility: hidden;"><i class="fas fa-clock"></i> 00:00</span>
+                    <span class="meeting-provider"></span>
+                    <span class="meeting-manage">Gestisci con Projexa</span>
+                    <span class="meeting-header-title">Titolo</span>
+                    <span class="meeting-status meeting-status-trascrizione">Trascrizione</span>
+                    <span class="meeting-status meeting-status-recap">Recap</span>
+                    <span class="meeting-status meeting-status-inviata">Inviata</span>
+                    <span class="meeting-assign meeting-assign-head"><span>Cliente</span><span>Progetto</span></span>
+                </div>`;
+            container.innerHTML = header + meetings.map(meeting => createMeetingCard(meeting)).join('');
+            // Tendine Cliente/Progetto sulle riunioni già gestite con Projexa
+            container.querySelectorAll('.meeting-card').forEach((row) => {
+                const cb = row.querySelector('.meeting-manage-flag');
+                if (cb && cb.checked) renderMeetingAssign(row);
+            });
+        }
+
+        // Loghi (SVG semplificati, inline: nessuna risorsa esterna) delle piattaforme di riunione.
+        const MEETING_PROVIDER_ICONS = {
+            teams: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="6.5" r="2.6" fill="#7B83EB"/><path d="M15 10h6.2c.4 0 .8.4.8.8v5.4a3.6 3.6 0 0 1-3.6 3.6h-.2A3.2 3.2 0 0 1 15 16.6z" fill="#7B83EB"/><circle cx="11.5" cy="5.2" r="3.2" fill="#5059C9"/><path d="M6 9h10.2c.5 0 .8.4.8.8V16a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z" fill="#5059C9"/><rect x="2" y="7" width="10" height="10" rx="1.4" fill="#4B53BC"/><path d="M4.4 9.6h5.2v1.3H7.7v4.6H6.3v-4.6H4.4z" fill="#fff"/></svg>`,
+            meet: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5 7 4h8a1.5 1.5 0 0 1 1.5 1.5V9H3z" fill="#EA4335"/><path d="M3 9h13.5v6H3z" fill="#FBBC04"/><path d="M3 15h13.5v3.5A1.5 1.5 0 0 1 15 20H4.5A1.5 1.5 0 0 1 3 18.5z" fill="#34A853"/><path d="M3 7.5V15H7V4z" fill="#4285F4"/><path d="m16.5 9 4.3-3.4c.5-.4 1.2 0 1.2.6v11.6c0 .6-.7 1-1.2.6L16.5 15z" fill="#00AC47"/></svg>`,
+            zoom: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#2D8CFF"/><rect x="5.5" y="8.5" width="9" height="7" rx="1.6" fill="#fff"/><path d="m15.2 11 3.3-2.2v6.4L15.2 13z" fill="#fff"/></svg>`,
+            webex: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#07C1E4"/><path d="M5.5 9.5 8 15l2-4.5 2 4.5 2-4.5 2 4.5 2.5-5.5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+            goto: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" rx="5" fill="#F68D2E"/><path d="M16.5 9.2A5 5 0 1 0 17 12h-4.5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>`
+        };
+
+        // Flag "Gestisci con Projexa": spuntato crea la riga su rec_meeting, tolto la
+        // cancella. Salvataggio immediato; se non riesce il flag torna com'era.
+        async function onMeetingManageChange(e) {
+            const cb = e.target;
+            if (!cb || !cb.classList || !cb.classList.contains('meeting-manage-flag')) return;
+            const d = cb.dataset;
+            const checked = cb.checked;
+            cb.disabled = true;
+            try {
+                const res = await fetch(`${API_URL}/calendar/meetings/managed`, {
+                    method: checked ? 'POST' : 'DELETE',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify(checked
+                        ? { id_calendar: d.eventId, oggetto: d.title, provider: d.provider || null, data_calendar: d.date, orario_calendar: d.time }
+                        : { id_calendar: d.eventId })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                const row = cb.closest('.meeting-card');
+                const assign = row && row.querySelector('.meeting-assign');
+                if (assign) {
+                    assign.dataset.clientId = '';
+                    assign.dataset.projectId = '';
+                    if (checked) renderMeetingAssign(row); else assign.innerHTML = '';
+                }
+                if (row && !checked) {
+                    row.querySelectorAll('.meeting-status').forEach((el) => { el.innerHTML = ''; });
+                }
+            } catch (err) {
+                cb.checked = !checked;
+                console.warn('⚠️ rec_meeting:', err.message);
+                alert('Salvataggio non riuscito: ' + err.message);
+            } finally {
+                cb.disabled = false;
+            }
+        }
+
+        // === INTEGRAZIONE AI (ChatGPT, Claude, Gemini) - backend /api/ai ===
+        // Toggle in Impostazioni › AI: on -> chiave API (verificata e salvata cifrata su
+        // integr_tok_auth), off -> conferma e scollegamento. Le AI abilitate e collegate
+        // compaiono nella barra laterale; il clic apre la finestra richiesta/risposta.
+        const AI_INFO = {
+            chatgpt: { label: 'ChatGPT', keyHint: 'Crea la chiave su platform.openai.com › API keys (inizia con "sk-").', keyUrl: 'https://platform.openai.com/api-keys' },
+            claude: { label: 'Claude', keyHint: 'Crea la chiave su console.anthropic.com › API keys (inizia con "sk-ant-").', keyUrl: 'https://console.anthropic.com/settings/keys' },
+            gemini: { label: 'Gemini', keyHint: 'Crea la chiave su aistudio.google.com › Get API key.', keyUrl: 'https://aistudio.google.com/apikey' }
+        };
+        let aiStatus = {};
+
+        function aiProviderFromCampo(campo) {
+            const c = String(campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
+            if (c === 'chatgpt') return 'chatgpt';
+            if (c === 'claude') return 'claude';
+            if (c === 'gemini') return 'gemini';
+            if (c === 'copilot') return 'copilot';
+            return null;
+        }
+
+        async function fetchAiStatus() {
+            try {
+                const res = await fetch(`${API_URL}/ai/status`, { headers: calendarAuthHeaders() });
+                if (!res.ok) return aiStatus;
+                const data = await res.json();
+                aiStatus = data.providers || {};
+            } catch (e) { /* stato precedente */ }
+            return aiStatus;
+        }
+
+        // Voci della barra laterale: visibili solo per le AI abilitate e collegate.
+        function renderAiSidebar() {
+            Object.keys(AI_INFO).forEach((key) => {
+                const li = document.getElementById(`navAi_${key}`);
+                const s = aiStatus[key] || {};
+                if (li) li.style.display = (s.enabled && s.connected) ? '' : 'none';
+            });
+        }
+
+        function renderAiSettingsStatus() {
+            document.querySelectorAll('.ai-conn[data-ai-provider]').forEach((el) => {
+                const s = aiStatus[el.dataset.aiProvider] || {};
+                const toggle = el.parentElement && el.parentElement.querySelector('.ai-toggle');
+                if (s.connected) {
+                    el.innerHTML = `<span class="calendar-conn-account"><i class="fas fa-check-circle" style="color:#10B981;"></i> chiave API collegata</span>`;
+                } else if (toggle && toggle.checked) {
+                    el.innerHTML = `<span class="calendar-conn-account">non collegato</span>`
+                        + `<button type="button" class="calendar-conn-btn calendar-conn-on" data-ai-action="connect" data-ai-provider="${el.dataset.aiProvider}"><i class="fas fa-key"></i> Collega</button>`;
+                } else {
+                    el.innerHTML = '';
+                }
+            });
+        }
+
+        let aiSettingsRefreshQueued = false;
+        function queueAiSettingsStatus() {
+            if (aiSettingsRefreshQueued) return;
+            aiSettingsRefreshQueued = true;
+            setTimeout(async () => {
+                aiSettingsRefreshQueued = false;
+                renderAiSettingsStatus();
+                await fetchAiStatus();
+                renderAiSettingsStatus();
+            }, 0);
+        }
+
+        // Popup chiave API. Risolve true se la chiave è stata verificata e salvata, false se annullato.
+        function askAiApiKey(key) {
+            return new Promise((resolve) => {
+                const info = AI_INFO[key];
+                const modal = document.getElementById('aiKeyModal');
+                const input = document.getElementById('aiKeyInput');
+                const msg = document.getElementById('aiKeyError');
+                const ok = document.getElementById('aiKeyConfirm');
+                const cancel = document.getElementById('aiKeyCancel');
+                document.getElementById('aiKeyTitleText').textContent = `Collega ${info.label}`;
+                const hint = document.getElementById('aiKeyHint');
+                hint.textContent = info.keyHint + ' ';
+                const link = document.createElement('a');
+                link.href = info.keyUrl; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Apri';
+                hint.appendChild(link);
+                input.value = '';
+                msg.textContent = '';
+                const close = (answer) => {
+                    modal.classList.remove('open');
+                    ok.removeEventListener('click', onOk);
+                    cancel.removeEventListener('click', onCancel);
+                    modal.removeEventListener('click', onBackdrop);
+                    input.removeEventListener('keydown', onKey);
+                    input.value = '';
+                    resolve(answer);
+                };
+                const onOk = async () => {
+                    const apiKey = input.value.trim();
+                    if (!apiKey) { msg.textContent = 'Incolla la chiave API'; return; }
+                    ok.disabled = true;
+                    msg.style.color = 'var(--text-muted)';
+                    msg.textContent = 'Verifica della chiave in corso…';
+                    try {
+                        const res = await fetch(`${API_URL}/ai/${key}/key`, {
+                            method: 'POST',
+                            headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ api_key: apiKey })
+                        });
+                        const data = await res.json().catch(() => ({}));
+                        if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                        close(true);
+                    } catch (e) {
+                        msg.style.color = '#B91C1C';
+                        msg.textContent = e.message;
+                    } finally {
+                        ok.disabled = false;
+                    }
+                };
+                const onCancel = () => close(false);
+                const onBackdrop = (e) => { if (e.target === modal) close(false); };
+                const onKey = (e) => { if (e.key === 'Enter') onOk(); else if (e.key === 'Escape') close(false); };
+                ok.addEventListener('click', onOk);
+                cancel.addEventListener('click', onCancel);
+                modal.addEventListener('click', onBackdrop);
+                input.addEventListener('keydown', onKey);
+                modal.classList.add('open');
+                input.focus();
+            });
+        }
+
+        async function connectAiProvider(key, toggle) {
+            const done = await askAiApiKey(key);
+            await fetchAiStatus();
+            if (done && (aiStatus[key] || {}).connected) {
+                await saveCalendarToggle(toggle, true);
+                showNotification(`${AI_INFO[key].label} collegato`, 'success');
+            } else if (toggle && !(aiStatus[key] || {}).connected) {
+                revertCalendarToggle(toggle, false);
+            }
+            await fetchAiStatus();
+            renderAiSettingsStatus();
+            renderAiSidebar();
+        }
+
+        document.addEventListener('change', async (e) => {
+            const toggle = e.target;
+            if (!toggle || !toggle.classList || !toggle.classList.contains('ai-toggle')) return;
+            const key = toggle.dataset.aiProvider;
+            if (toggle.checked) {
+                await connectAiProvider(key, toggle);
+            } else {
+                const yes = await confirmCalendarDisconnect(AI_INFO[key].label, `Scollega ${AI_INFO[key].label}`);
+                if (yes) {
+                    try { await fetch(`${API_URL}/ai/${key}/disconnect`, { method: 'POST', headers: calendarAuthHeaders() }); } catch (err) { /* la UI si aggiorna comunque */ }
+                    await saveCalendarToggle(toggle, false);
+                } else {
+                    revertCalendarToggle(toggle, true);
+                }
+                await fetchAiStatus();
+                renderAiSettingsStatus();
+                renderAiSidebar();
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            const b = e.target.closest && e.target.closest('[data-ai-action="connect"]');
+            if (b) {
+                e.preventDefault();
+                e.stopPropagation();
+                const key = b.dataset.aiProvider;
+                connectAiProvider(key, document.querySelector(`.ai-toggle[data-ai-provider="${key}"]`));
+                return;
+            }
+            const open = e.target.closest && e.target.closest('[data-ai-open]');
+            if (open) {
+                e.preventDefault();
+                openAiChat(open.dataset.aiOpen);
+            }
+        });
+
+        // --- Finestra richiesta/risposta ---
+        let aiChatProvider = null;
+
+        function openAiChat(key) {
+            const info = AI_INFO[key];
+            if (!info) return;
+            aiChatProvider = key;
+            const s = aiStatus[key] || {};
+            document.getElementById('aiChatTitleText').textContent = info.label;
+            document.getElementById('aiChatModel').textContent = s.model ? `modello: ${s.model}` : '';
+            document.getElementById('aiChatModal').classList.add('open');
+            document.getElementById('aiChatPrompt').focus();
+        }
+
+        function closeAiChat() {
+            document.getElementById('aiChatModal').classList.remove('open');
+        }
+
+        async function sendAiChat() {
+            const key = aiChatProvider;
+            const promptEl = document.getElementById('aiChatPrompt');
+            const answerEl = document.getElementById('aiChatAnswer');
+            const sendBtn = document.getElementById('aiChatSend');
+            const prompt = promptEl.value.trim();
+            if (!key || !prompt) return;
+            sendBtn.disabled = true;
+            answerEl.classList.remove('ai-chat-error');
+            answerEl.innerHTML = '<span class="ai-chat-wait"><i class="fas fa-spinner fa-spin"></i> In attesa della risposta…</span>';
+            try {
+                const res = await fetch(`${API_URL}/ai/${key}/chat`, {
+                    method: 'POST',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                // Testo semplice: nessun HTML interpretato, a capo preservati dal CSS.
+                answerEl.textContent = data.text || '(risposta vuota)';
+                if (data.truncated) answerEl.textContent += '\n\n[Risposta interrotta per lunghezza massima]';
+            } catch (e) {
+                answerEl.classList.add('ai-chat-error');
+                answerEl.textContent = e.message;
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+
+        function initAiIntegration() {
+            document.getElementById('aiChatSend')?.addEventListener('click', sendAiChat);
+            document.getElementById('aiChatClose')?.addEventListener('click', closeAiChat);
+            document.getElementById('aiChatPrompt')?.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendAiChat(); }
+            });
+            document.getElementById('aiChatCopy')?.addEventListener('click', () => {
+                const t = document.getElementById('aiChatAnswer').textContent;
+                if (t && navigator.clipboard) navigator.clipboard.writeText(t).then(() => showNotification('Risposta copiata', 'success')).catch(() => {});
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && document.getElementById('aiChatModal')?.classList.contains('open')) closeAiChat();
+            });
+            fetchAiStatus().then(renderAiSidebar);
+        }
+
+        // === Cliente / Progetto della riunione gestita (rec_meeting.client_id / project_id) ===
+        // Stessi elenchi del resto della dashboard: clienti da /clients/names, progetti del
+        // cliente da /projects/list. Caricati una volta e tenuti in cache per la sessione.
+        let meetingClientsPromise = null;
+        const meetingProjectsCache = new Map();
+
+        function getMeetingClients() {
+            if (!meetingClientsPromise) {
+                meetingClientsPromise = fetch(`${API_URL}/clients/names`, { headers: getAuthHeaders() })
+                    .then((r) => (r.ok ? r.json() : []))
+                    .then((list) => (Array.isArray(list) ? list : []))
+                    .catch(() => { meetingClientsPromise = null; return []; });
+            }
+            return meetingClientsPromise;
+        }
+
+        function getMeetingProjects(clientId) {
+            if (!clientId) return Promise.resolve([]);
+            if (!meetingProjectsCache.has(clientId)) {
+                meetingProjectsCache.set(clientId,
+                    fetch(`${API_URL}/projects/list?clientId=${encodeURIComponent(clientId)}`, { headers: getAuthHeaders() })
+                        .then((r) => (r.ok ? r.json() : []))
+                        .then((list) => (Array.isArray(list) ? list : []))
+                        .catch(() => { meetingProjectsCache.delete(clientId); return []; }));
+            }
+            return meetingProjectsCache.get(clientId);
+        }
+
+        function meetingOptions(list, selectedId, placeholder) {
+            return `<option value="">${escapeHtml(placeholder)}</option>` + list.map((x) =>
+                `<option value="${escapeHtml(x.id)}" ${String(x.id) === String(selectedId) ? 'selected' : ''}>${escapeHtml(x.name)}</option>`
+            ).join('');
+        }
+
+        async function renderMeetingAssign(row) {
+            const assign = row.querySelector('.meeting-assign');
+            if (!assign) return;
+            const clientId = assign.dataset.clientId || '';
+            const projectId = assign.dataset.projectId || '';
+            assign.innerHTML = `
+                <select class="meeting-assign-client" title="Cliente" aria-label="Cliente" disabled><option>Caricamento…</option></select>
+                <select class="meeting-assign-project" title="Progetto" aria-label="Progetto" disabled><option value="">— progetto —</option></select>`;
+            const clientSel = assign.querySelector('.meeting-assign-client');
+            const projectSel = assign.querySelector('.meeting-assign-project');
+            clientSel.innerHTML = meetingOptions(await getMeetingClients(), clientId, '— cliente —');
+            clientSel.disabled = false;
+            await fillMeetingProjects(projectSel, clientId, projectId);
+        }
+
+        // Il progetto è selezionabile solo dopo aver scelto il cliente, e mostra solo i suoi progetti.
+        async function fillMeetingProjects(projectSel, clientId, projectId) {
+            if (!clientId) {
+                projectSel.innerHTML = '<option value="">— progetto —</option>';
+                projectSel.disabled = true;
+                return;
+            }
+            projectSel.disabled = true;
+            projectSel.innerHTML = '<option value="">Caricamento…</option>';
+            projectSel.innerHTML = meetingOptions(await getMeetingProjects(clientId), projectId, '— progetto —');
+            projectSel.disabled = false;
+        }
+
+        async function saveMeetingAssign(assign, clientId, projectId) {
+            const res = await fetch(`${API_URL}/calendar/meetings/managed`, {
+                method: 'PATCH',
+                headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_calendar: assign.dataset.eventId, client_id: clientId || null, project_id: projectId || null })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+            assign.dataset.clientId = clientId || '';
+            assign.dataset.projectId = projectId || '';
+        }
+
+        // Salvataggio immediato a ogni scelta; cambiando cliente il progetto viene azzerato.
+        async function onMeetingAssignChange(e) {
+            const sel = e.target;
+            const assign = sel && sel.closest && sel.closest('.meeting-assign');
+            if (!assign) return;
+            const clientSel = assign.querySelector('.meeting-assign-client');
+            const projectSel = assign.querySelector('.meeting-assign-project');
+            const prevClient = assign.dataset.clientId || '';
+            const prevProject = assign.dataset.projectId || '';
+            try {
+                if (sel === clientSel) {
+                    await saveMeetingAssign(assign, clientSel.value, '');
+                    await fillMeetingProjects(projectSel, clientSel.value, '');
+                } else if (sel === projectSel) {
+                    await saveMeetingAssign(assign, clientSel.value, projectSel.value);
+                }
+            } catch (err) {
+                console.warn('⚠️ rec_meeting cliente/progetto:', err.message);
+                alert('Salvataggio non riuscito: ' + err.message);
+                clientSel.value = prevClient;
+                await fillMeetingProjects(projectSel, prevClient, prevProject);
+            }
+        }
+
+        // Piattaforma della riunione ricavata dal dominio del link (null se non c'è link).
+        function meetingProvider(url) {
+            if (!url) return null;
+            let host = '';
+            try { host = new URL(url).hostname.toLowerCase(); } catch (e) { return null; }
+            const is = (d) => host === d || host.endsWith('.' + d);
+            if (is('teams.microsoft.com') || is('teams.live.com')) return { label: 'Microsoft Teams', icon: MEETING_PROVIDER_ICONS.teams, name: 'Teams' };
+            if (is('meet.google.com')) return { label: 'Google Meet', icon: MEETING_PROVIDER_ICONS.meet, name: 'Google Meet' };
+            if (is('zoom.us')) return { label: 'Zoom', icon: MEETING_PROVIDER_ICONS.zoom, name: 'Zoom' };
+            if (is('webex.com')) return { label: 'Webex', icon: MEETING_PROVIDER_ICONS.webex, name: 'Webex' };
+            if (is('gotomeeting.com') || is('goto.com')) return { label: 'GoTo Meeting', icon: MEETING_PROVIDER_ICONS.goto, name: 'GoTo' };
+            return { label: 'Altra piattaforma', name: 'Altro', icon: '<i class="fas fa-video" style="color: #6B7280;"></i>' };
         }
 
         // Crea una singola card per la riunione
@@ -4934,6 +5671,10 @@
             
             // Formatta orario
             const timeStr = start.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+            // Data e ora locali (come le vede l'utente) per rec_meeting
+            const pad2 = (n) => String(n).padStart(2, '0');
+            const localDate = `${start.getFullYear()}-${pad2(start.getMonth() + 1)}-${pad2(start.getDate())}`;
+            const localTime = `${pad2(start.getHours())}:${pad2(start.getMinutes())}`;
             
             // Calcola durata
             const durationMs = end - start;
@@ -4942,36 +5683,45 @@
                 ? `${durationMinutes}m` 
                 : `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`;
 
-            // Estrai attendees (gestisce sia il formato Google {email, displayName}
-            // sia quello Microsoft Graph {emailAddress: {name, address}})
-            const attendees = event.attendees || [];
-            const attendeesDisplay = attendees.slice(0, 2).map((a) => {
+            // Partecipanti: non occupano spazio nella riga, compaiono nel tooltip del titolo
+            // (gestisce sia il formato Google {email, displayName} sia quello Graph {emailAddress})
+            const attendeeNames = (event.attendees || []).map((a) => {
                 const email = a.email || a.emailAddress?.address || '';
-                const name = a.displayName || a.emailAddress?.name || (email ? email.split('@')[0] : 'Ospite');
-                const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '?';
-                return `<div class="meeting-attendee-avatar" title="${escapeHtml(name)}">${escapeHtml(initials)}</div>`;
-            }).join('');
-            const moreAttendees = attendees.length > 2 ? `<span style="font-size: 0.85rem; color: var(--text-muted);">+${attendees.length - 2}</span>` : '';
+                return a.displayName || a.emailAddress?.name || email;
+            }).filter(Boolean);
+            const title = event.summary || 'Riunione senza titolo';
+            // Google usa già { email, displayName, self } per organizer: stesso formato.
+            const org = event.organizer || {};
+            const orgText = org.displayName && org.email ? `${org.displayName} <${org.email}>` : (org.displayName || org.email || '');
+            let tooltip = title;
+            if (orgText) tooltip += `\nOrganizzatore: ${orgText}`;
+            if (attendeeNames.length) tooltip += `\nPartecipanti: ${attendeeNames.join(', ')}`;
 
             // Link alla riunione (solo se URL con schema sicuro)
             const rawLink = event.conferenceData?.entryPoints?.[0]?.uri || event.hangoutLink || null;
             const meetingLink = safeUrl(rawLink);
+            const provider = meetingProvider(meetingLink);
+            const providerBadge = provider
+                ? `<span class="meeting-provider" title="${escapeHtml(provider.label)}" aria-label="${escapeHtml(provider.label)}">${provider.icon}</span>`
+                : `<span class="meeting-provider"></span>`;
             const meetingLinkBtn = meetingLink
                 ? `<button class="meeting-link" data-meeting-link="${escapeHtml(meetingLink)}" onclick="window.open(this.dataset.meetingLink, '_blank'); return false;"><i class="fas fa-video"></i> Partecipa</button>`
-                : `<div style="text-align: center; color: var(--text-muted); font-size: 0.9rem;">Nessun link disponibile</div>`;
+                : `<span class="meeting-link-empty"></span>`;
 
+            // Una sola riga: partecipa - durata - ora - provider - gestisci con Projexa - titolo -
+            // trascrizione - recap - inviata (flag da rec_meeting) - cliente/progetto
             return `
                 <div class="meeting-card">
-                    <div class="meeting-time">
-                        <i class="fas fa-clock"></i> ${escapeHtml(timeStr)}
-                    </div>
-                    <div class="meeting-title">${escapeHtml(event.summary || 'Riunione senza titolo')}</div>
-                    <div class="meeting-duration">${escapeHtml(durationStr)}</div>
-                    <div class="meeting-attendees">
-                        ${attendeesDisplay}
-                        ${moreAttendees}
-                    </div>
                     ${meetingLinkBtn}
+                    <div class="meeting-duration">${escapeHtml(durationStr)}</div>
+                    <div class="meeting-time"><i class="fas fa-clock"></i> ${escapeHtml(timeStr)}</div>
+                    ${providerBadge}
+                    <div class="meeting-manage"><input type="checkbox" class="meeting-manage-flag" ${event.managed ? 'checked' : ''} data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}" title="Gestisci con Projexa" aria-label="Gestisci con Projexa"></div>
+                    <div class="meeting-title" title="${escapeHtml(tooltip)}">${escapeHtml(title)}</div>
+                    <div class="meeting-status meeting-status-trascrizione">${event.has_trascrizione ? '<i class="fas fa-flag" title="Trascrizione presente"></i>' : ''}</div>
+                    <div class="meeting-status meeting-status-recap">${event.has_recap ? '<i class="fas fa-flag" title="Recap presente"></i>' : ''}</div>
+                    <div class="meeting-status meeting-status-inviata">${event.inviata ? '<i class="fas fa-flag" title="Inviata"></i>' : ''}</div>
+                    <div class="meeting-assign" data-event-id="${escapeHtml(event.id || '')}" data-client-id="${escapeHtml(event.client_id || '')}" data-project-id="${escapeHtml(event.project_id || '')}"></div>
                 </div>
             `;
         }
@@ -5000,13 +5750,18 @@
         async function initMeetings() {
             // Stato di connessione per entrambi i provider + pulsanti Collega/Scollega
             await fetchCalendarStatus();
+            // Calendario predefinito dell'utente (settings 'calendario default')
+            if (calendarDefaultProvider) {
+                currentCalendarProvider = calendarDefaultProvider === 'outlook' ? 'microsoft' : 'google';
+                const sel = document.getElementById('calendarProviderSelector');
+                if (sel) sel.value = currentCalendarProvider;
+            }
             renderCalendarConnectionUi();
-            const connectBtn = document.getElementById('calendarConnectBtn');
-            if (connectBtn) connectBtn.addEventListener('click', connectCalendarProvider);
-            const disconnectBtn = document.getElementById('calendarDisconnectBtn');
-            if (disconnectBtn) disconnectBtn.addEventListener('click', disconnectCalendarProvider);
-            const icsBtn = document.getElementById('calendarIcsBtn');
-            if (icsBtn) icsBtn.addEventListener('click', connectOutlookIcs);
+            const meetingsBox = document.getElementById('meetingsContainer');
+            if (meetingsBox) {
+                meetingsBox.addEventListener('change', onMeetingManageChange);
+                meetingsBox.addEventListener('change', onMeetingAssignChange);
+            }
 
             // Listener al cambio provider
             const providerSelector = document.getElementById('calendarProviderSelector');
@@ -8984,7 +9739,23 @@
             } else if (tipo === 1) {
                 // Booleano -> valore1, interruttore a levetta (toggle)
                 const checked = (row.valore1 === true || row.valore1 === 'true' || row.valore1 === 't') ? 'checked' : '';
-                input = `<label class="toggle-switch"><input type="checkbox" data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>`;
+                // Impostazioni › Calendar: il toggle di Google/Outlook collega (on) o scollega (off)
+                const calKey = (currentDetailSource === 'settings' && !detailReorderMode) ? calendarProviderFromCampo(row.campo) : null;
+                // Impostazioni › AI: il toggle di ChatGPT/Claude/Gemini collega (chiave API) o scollega
+                const aiKey = (!calKey && currentDetailSource === 'settings' && !detailReorderMode) ? aiProviderFromCampo(row.campo) : null;
+                const calAttrs = calKey ? ` class="calendar-toggle" data-cal-provider="${calKey}"`
+                    : (aiKey === 'copilot' ? ' disabled title="Copilot non disponibile: non ha un\'API pubblica"'
+                    : (aiKey ? ` class="ai-toggle" data-ai-provider="${aiKey}"` : ''));
+                input = `<label class="toggle-switch"><input type="checkbox"${calAttrs} data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>`;
+                if (calKey) {
+                    input += `<span class="calendar-conn" data-cal-provider="${calKey}"></span>`;
+                    queueCalendarSettingsButtons();
+                } else if (aiKey === 'copilot') {
+                    input += `<span class="calendar-conn"><span class="calendar-conn-account">non disponibile</span></span>`;
+                } else if (aiKey) {
+                    input += `<span class="ai-conn calendar-conn" data-ai-provider="${aiKey}"></span>`;
+                    queueAiSettingsStatus();
+                }
             } else if (tipo === 14) {
                 // Booleano con valore alfanumerico condizionale:
                 // valore1 abilita/disabilita il campo valore2. Quando il toggle è spento,
@@ -10780,6 +11551,10 @@
 
         window.addEventListener('DOMContentLoaded', async () => {
             initializeUser();
+            // Riunioni in background appena si entra (non attese): non aspettano né
+            // bloccano il caricamento del resto della dashboard.
+            initMeetings().catch((e) => console.warn('⚠️ Calendar init:', e.message));
+            initAiIntegration();
             await loadTenantHeaderLogo();
             await loadPageLabels();
             applyRoleVisibility();
@@ -10811,9 +11586,77 @@
             initProjectSearch();
             initKpiCards();
             await loadDashboardKpis(); // carica i KPI progetti attivi/completati/rischi aperti
-            initMeetings(); // Carica le riunioni da Google Calendar
         });
     </script>
+    <div id="aiKeyModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="aiKeyTitle">
+        <div class="task-modal-card" style="width: min(480px, 94vw);">
+            <div class="task-modal-header">
+                <h3 id="aiKeyTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-key" style="color: #10B981;"></i> <span id="aiKeyTitleText">Collega AI</span></h3>
+            </div>
+            <div style="padding: 1.25rem; display: flex; flex-direction: column; gap: 0.6rem;">
+                <label for="aiKeyInput" style="font-size: 0.9rem; color: var(--dark); font-weight: 600;">Chiave API</label>
+                <input id="aiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Incolla qui la tua chiave API" style="padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem;">
+                <p id="aiKeyHint" style="margin: 0; font-size: 0.8rem; color: var(--text-muted);"></p>
+                <p style="margin: 0; font-size: 0.78rem; color: var(--text-muted);">La chiave viene verificata e salvata cifrata. L'uso è addebitato sul tuo account API del fornitore (è separato dall'abbonamento ChatGPT Plus / Claude Pro / Gemini Advanced).</p>
+                <p id="aiKeyError" style="margin: 0; font-size: 0.85rem; min-height: 1.1em;"></p>
+            </div>
+            <div class="task-modal-footer">
+                <button id="aiKeyCancel" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
+                <button id="aiKeyConfirm" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;">Collega</button>
+            </div>
+        </div>
+    </div>
+    <div id="aiChatModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="aiChatTitle">
+        <div class="task-modal-card" style="width: min(760px, 96vw);">
+            <div class="task-modal-header">
+                <h3 id="aiChatTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-robot" style="color: #6366F1;"></i> <span id="aiChatTitleText">AI</span> <span id="aiChatModel" style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;"></span></h3>
+                <button id="aiChatClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
+            </div>
+            <div style="padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; overflow: auto;">
+                <textarea id="aiChatPrompt" rows="4" placeholder="Scrivi la tua richiesta… (Ctrl+Invio per inviare)" style="width: 100%; resize: vertical; padding: 0.7rem 0.8rem; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 0.9rem;"></textarea>
+                <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                    <button id="aiChatCopy" type="button" style="padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-copy"></i> Copia risposta</button>
+                    <button id="aiChatSend" type="button" style="padding: 0.5rem 1.2rem; border: none; border-radius: 8px; background: #6366F1; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-paper-plane"></i> Invia</button>
+                </div>
+                <div id="aiChatAnswer" class="ai-chat-answer" aria-live="polite"></div>
+            </div>
+        </div>
+    </div>
+    <div id="calendarOutlookChoiceModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="calendarOutlookChoiceTitle">
+        <div class="task-modal-card" style="width: min(460px, 94vw);">
+            <div class="task-modal-header">
+                <h3 id="calendarOutlookChoiceTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-calendar-alt" style="color: #0078D4;"></i> Collega Outlook</h3>
+            </div>
+            <div style="padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem;">
+                <button type="button" data-outlook-method="oauth" style="text-align: left; padding: 0.8rem 1rem; border: 1px solid var(--border); border-radius: 10px; background: white; cursor: pointer;">
+                    <strong style="color: var(--dark);"><i class="fas fa-link" style="color:#10B981;"></i> Account Microsoft</strong><br>
+                    <span style="font-size: 0.82rem; color: var(--text-muted);">Accesso con l'account Outlook/Microsoft 365. Negli account aziendali può richiedere l'approvazione dell'amministratore.</span>
+                </button>
+                <button type="button" data-outlook-method="ics" style="text-align: left; padding: 0.8rem 1rem; border: 1px solid var(--border); border-radius: 10px; background: white; cursor: pointer;">
+                    <strong style="color: var(--dark);"><i class="fas fa-calendar-plus" style="color:#0078D4;"></i> Link ICS</strong><br>
+                    <span style="font-size: 0.82rem; color: var(--text-muted);">Incolla il link del calendario pubblicato da Outlook web. Non richiede approvazioni.</span>
+                </button>
+            </div>
+            <div class="task-modal-footer">
+                <button type="button" data-outlook-method="" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
+            </div>
+        </div>
+    </div>
+    <div id="calendarDisconnectModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="calendarDisconnectTitle">
+        <div class="task-modal-card" style="width: min(420px, 94vw);">
+            <div class="task-modal-header">
+                <h3 id="calendarDisconnectTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-unlink" style="color: #B91C1C;"></i> <span id="calendarDisconnectTitleText">Scollega calendario</span></h3>
+            </div>
+            <div style="padding: 1.25rem; color: var(--dark); line-height: 1.5;">
+                <p id="calendarDisconnectText" style="margin: 0;">Vuoi scollegarti?</p>
+                <p style="margin: 0.5rem 0 0; font-size: 0.85rem; color: var(--text-muted);">I dati di accesso salvati verranno eliminati.</p>
+            </div>
+            <div class="task-modal-footer">
+                <button id="calendarDisconnectNo" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">No</button>
+                <button id="calendarDisconnectYes" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #DC2626; color: white; font-weight: 600; cursor: pointer;">Sì</button>
+            </div>
+        </div>
+    </div>
     <div id="taskModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
         <div class="task-modal-card">
             <div class="task-modal-header">

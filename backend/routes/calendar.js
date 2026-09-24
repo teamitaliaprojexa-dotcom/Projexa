@@ -17,6 +17,7 @@ import express from 'express';
 import crypto from 'crypto';
 import ical from 'node-ical';
 import jwt from 'jsonwebtoken';
+import db from '../config/database.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
 import { isAllowedOrigin } from '../config/origins.js';
@@ -185,6 +186,27 @@ async function getCalendarSession(userId, key) {
 }
 
 // ==========================================
+// CALENDARIO PREDEFINITO (settings)
+// ==========================================
+
+// Calendario da mostrare all'ingresso: riga settings con campo = 'calendario default'
+// (anche nella forma custom '(*) calendario default') per tenant/utente del token;
+// valore2 contiene 'Google' oppure 'Outlook'. Restituisce 'google' | 'outlook' | null.
+async function getDefaultCalendarProvider(user) {
+  const result = await db.query(
+    `SELECT valore2 FROM settings
+      WHERE tenant_id = $1 AND user_id = $2
+        AND LOWER(BTRIM(campo)) IN ('calendario default', '(*) calendario default')
+      LIMIT 1`,
+    [user.tenant_id, user.user_id]
+  );
+  const v = String((result.rows[0] && result.rows[0].valore2) || '').toLowerCase();
+  if (v.includes('google')) return 'google';
+  if (v.includes('outlook')) return 'outlook';
+  return null;
+}
+
+// ==========================================
 // ENDPOINT: STATO CONNESSIONE
 // ==========================================
 
@@ -202,7 +224,13 @@ router.get('/status', requireAuth, async (req, res) => {
         email: el[`${cfg.prefix}_email`] || null
       };
     }
-    res.json({ providers: out });
+    let defaultProvider = null;
+    try {
+      defaultProvider = await getDefaultCalendarProvider(req.user);
+    } catch (e) {
+      console.warn('⚠️ CALENDAR_DEFAULT:', e.message);
+    }
+    res.json({ providers: out, defaultProvider });
   } catch (error) {
     console.error('❌ CALENDAR_STATUS:', error.message);
     res.status(500).json({ error: error.message });
@@ -419,7 +447,7 @@ function icsMeetingLink(ev) {
   const direct = icalText(ev['MICROSOFT-SKYPETEAMSMEETINGURL'] || ev['X-MICROSOFT-SKYPETEAMSMEETINGURL']);
   if (direct) return direct;
   const text = `${icalText(ev.location)} ${icalText(ev.description)}`;
-  const m = text.match(/https:\/\/(?:teams\.microsoft\.com|teams\.live\.com|meet\.google\.com|[\w.-]*zoom\.us)\/[^\s<>"')\]]+/i);
+  const m = text.match(/https:\/\/(?:teams\.microsoft\.com|teams\.live\.com|meet\.google\.com|[\w.-]*zoom\.us|[\w.-]*webex\.com|(?:[\w.-]*\.)?gotomeeting\.com|meet\.goto\.com)\/[^\s<>"')\]]+/i);
   return m ? m[0] : null;
 }
 
@@ -452,7 +480,12 @@ async function fetchIcsEvents(icsUrl, timeMin, timeMax) {
         attendees: icsAttendees(e),
         conferenceData: link ? { entryPoints: [{ uri: link }] } : null,
         transparency: transparent ? 'transparent' : 'opaque',
-        eventType: ''
+        eventType: '',
+        organizer: {
+          email: icalText(e.organizer).replace(/^mailto:/i, '').trim(),
+          displayName: (e.organizer && e.organizer.params && e.organizer.params.CN)
+            ? String(e.organizer.params.CN).replace(/^"|"$/g, '') : ''
+        }
       });
     }
   }
@@ -482,6 +515,145 @@ router.post('/outlook/ics', requireAuth, async (req, res) => {
     res.status(error.status || 500).json({ error: error.message });
   }
 });
+
+// ==========================================
+// RIUNIONI GESTITE CON PROJEXA (tabella rec_meeting, database principale)
+// ==========================================
+//
+// Il flag "Gestisci con Projexa" della dashboard crea (spuntato) o cancella (tolto)
+// la riga di rec_meeting per tenant/utente del token e id della riunione
+// (id_calendar = id dell'evento restituito da /events: id Google, id Graph oppure
+// UID_istante per il link ICS, così ogni occorrenza di una ricorrente è distinta).
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Righe rec_meeting delle riunioni indicate: Map id_calendar -> { client_id, project_id,
+// has_trascrizione, has_recap, inviata }. Di trascrizione e recap si restituisce solo se
+// contengono testo (non il testo, che può essere lungo).
+async function getManagedMeetings(user, ids) {
+  if (!ids.length) return new Map();
+  const result = await db.query(
+    `SELECT id_calendar, client_id, project_id,
+            (trascrizione IS NOT NULL AND BTRIM(trascrizione) <> '') AS has_trascrizione,
+            (recap IS NOT NULL AND BTRIM(recap) <> '') AS has_recap,
+            (inviata IS TRUE) AS inviata
+       FROM rec_meeting
+      WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = ANY($3::text[])`,
+    [user.tenant_id, user.user_id, ids]
+  );
+  return new Map(result.rows.map((r) => [r.id_calendar, {
+    client_id: r.client_id,
+    project_id: r.project_id,
+    has_trascrizione: r.has_trascrizione === true,
+    has_recap: r.has_recap === true,
+    inviata: r.inviata === true
+  }]));
+}
+
+router.post('/meetings/managed', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
+    const oggetto = String(b.oggetto || '').trim().slice(0, 1000);
+    const provider = b.provider ? String(b.provider).trim().slice(0, 50) : null;
+    // Data e ora arrivano dal browser, già nel fuso orario in cui l'utente le vede.
+    const data = String(b.data_calendar || '').trim();
+    const orario = String(b.orario_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return res.status(400).json({ error: 'data_calendar non valida (YYYY-MM-DD)' });
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(orario)) return res.status(400).json({ error: 'orario_calendar non valido (HH:MM)' });
+
+    // Una sola riga per utente/riunione: se c'è già non se ne crea un'altra.
+    const result = await db.query(
+      `INSERT INTO rec_meeting (tenant_id, user_id, id_calendar, oggetto, provider, data_calendar, orario_calendar)
+       SELECT $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::date, $7::time
+        WHERE NOT EXISTS (
+          SELECT 1 FROM rec_meeting WHERE tenant_id = $1::uuid AND user_id = $2::uuid AND id_calendar = $3::text
+        )
+       RETURNING id`,
+      [req.user.tenant_id, req.user.user_id, idCalendar, oggetto, provider, data, orario]
+    );
+    res.json({ success: true, created: result.rowCount > 0 });
+  } catch (error) {
+    console.error('❌ REC_MEETING_INSERT:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Associa cliente e progetto alla riga rec_meeting della riunione (UUID o null).
+// Il progetto deve appartenere al cliente scelto (stessa regola della tendina in dashboard).
+router.patch('/meetings/managed', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
+    const clientId = b.client_id ? String(b.client_id).trim() : null;
+    const projectId = b.project_id ? String(b.project_id).trim() : null;
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    if (clientId && !UUID_RE.test(clientId)) return res.status(400).json({ error: 'client_id non valido' });
+    if (projectId && !UUID_RE.test(projectId)) return res.status(400).json({ error: 'project_id non valido' });
+    if (projectId && !clientId) return res.status(400).json({ error: 'Seleziona prima il cliente' });
+
+    if (projectId) {
+      const check = await db.query(
+        `SELECT 1 FROM projects
+          WHERE id = $1 AND client_id = $2 AND tenant_id = $3 AND user_id = $4
+            AND argument = 'Progetto' AND campo = 'Progetto'
+          LIMIT 1`,
+        [projectId, clientId, req.user.tenant_id, req.user.user_id]
+      );
+      if (check.rows.length === 0) return res.status(400).json({ error: 'Il progetto non appartiene al cliente selezionato' });
+    }
+
+    const result = await db.query(
+      `UPDATE rec_meeting SET client_id = $1, project_id = $2
+        WHERE tenant_id = $3 AND user_id = $4 AND id_calendar = $5`,
+      [clientId, projectId, req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ REC_MEETING_UPDATE:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.delete('/meetings/managed', requireAuth, async (req, res) => {
+  try {
+    const idCalendar = String((req.body && req.body.id_calendar) || req.query.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    const result = await db.query(
+      `DELETE FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3`,
+      [req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    res.json({ success: true, removed: result.rowCount });
+  } catch (error) {
+    console.error('❌ REC_MEETING_DELETE:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Aggiunge a ogni evento managed (stato del flag) e client_id/project_id associati.
+// Se rec_meeting non è leggibile gli eventi vengono restituiti comunque, senza flag.
+async function withManagedFlag(user, events) {
+  let managed = new Map();
+  try {
+    managed = await getManagedMeetings(user, events.map((e) => String(e.id || '')).filter(Boolean));
+  } catch (e) {
+    console.warn('⚠️ REC_MEETING_READ:', e.message);
+  }
+  return events.map((e) => {
+    const row = managed.get(String(e.id || ''));
+    return {
+      ...e,
+      managed: !!row,
+      client_id: row ? row.client_id : null,
+      project_id: row ? row.project_id : null,
+      has_trascrizione: row ? row.has_trascrizione : false,
+      has_recap: row ? row.has_recap : false,
+      inviata: row ? row.inviata : false
+    };
+  });
+}
 
 // ==========================================
 // ENDPOINT: EVENTI
@@ -554,7 +726,11 @@ async function fetchOutlookEvents(session, timeMin, timeMax) {
       : null,
     // showAs di Graph: free/tentative/busy/oof/workingElsewhere/unknown.
     transparency: e.showAs === 'free' ? 'transparent' : 'opaque',
-    eventType: ''
+    eventType: '',
+    organizer: {
+      email: (e.organizer && e.organizer.emailAddress && e.organizer.emailAddress.address) || '',
+      displayName: (e.organizer && e.organizer.emailAddress && e.organizer.emailAddress.name) || ''
+    }
   })).filter((e) => e.summary);
 }
 
@@ -569,15 +745,15 @@ router.get('/events', requireAuth, async (req, res) => {
     if (key === 'outlook') {
       const el = await getIntegration(req.user.user_id, PROVIDERS.outlook.provider);
       if (el.outlook_ics_url) {
-        const events = await fetchIcsEvents(el.outlook_ics_url, timeMin, timeMax);
+        const events = await withManagedFlag(req.user, await fetchIcsEvents(el.outlook_ics_url, timeMin, timeMax));
         return res.json({ events, count: events.length });
       }
     }
 
     const session = await getCalendarSession(req.user.user_id, key);
-    const events = key === 'outlook'
+    const events = await withManagedFlag(req.user, key === 'outlook'
       ? await fetchOutlookEvents(session, timeMin, timeMax)
-      : await fetchGoogleEvents(session, timeMin, timeMax);
+      : await fetchGoogleEvents(session, timeMin, timeMax));
 
     res.json({ events, count: events.length });
   } catch (error) {

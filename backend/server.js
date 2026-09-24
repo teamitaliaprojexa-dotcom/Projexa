@@ -12,6 +12,7 @@ import authRoutes from './routes/auth.js';
 import microsoftOAuthRoutes from './routes/microsoft-oauth.js';
 import tableStructuresRoutes from './routes/table-structures.js';
 import calendarRoutes from './routes/calendar.js';
+import aiRoutes from './routes/ai.js';
 import jiraRoutes from './routes/jira.js';
 import cryptoMigrationRoutes from './routes/crypto-migration.js';
 import integrazioniRoutes from './routes/integrazioni.js';
@@ -108,6 +109,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/auth', microsoftOAuthRoutes);
 app.use('/api/table-structures', requireAuth, tableStructuresRoutes);
 app.use('/api/calendar', calendarRoutes);
+app.use('/api/ai', aiRoutes);
 app.use('/api/jira', jiraRoutes);
 // Pulsante «Aggiorna Integrazioni» della dashboard -> programmi in backend/jobs/.
 app.use('/api/integrazioni', integrazioniRoutes);
