@@ -315,7 +315,7 @@ export async function transcribeAudio(userId, audioBuffer, mime) {
         method: 'POST',
         headers: { 'X-Whisper-Key': process.env.WHISPER_API_KEY, 'Content-Type': mime || 'audio/wav' },
         body: audioBuffer,
-        timeoutMs: 180000
+        timeoutMs: 600000 // su istanze lente un blocco può richiedere alcuni minuti
       }, 'Whisper'), 'Whisper');
       const segments = (Array.isArray(data.segments) ? data.segments : [])
         .map((x) => ({ start: Number(x.start) || 0, text: String(x.text || '').trim() }))

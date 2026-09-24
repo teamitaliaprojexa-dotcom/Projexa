@@ -12,13 +12,14 @@ Variabili d'ambiente:
   WHISPER_MODEL     tiny | base | small | medium | large-v3   (default: small)
   WHISPER_LANGUAGE  lingua del parlato (default: it)
   WHISPER_COMPUTE   int8 (default, meno RAM) | int8_float32 | float32
-  WHISPER_THREADS   thread CPU (default: 0 = automatico)
+  WHISPER_THREADS   thread CPU (default: 1; su istanze da 2+ CPU si può alzare)
 """
 import hmac
 import io
 import os
 import threading
 import time
+import wave
 
 # In locale su Windows, dietro il proxy aziendale che ispeziona l'HTTPS, il download del
 # modello fallirebbe (CERTIFICATE_VERIFY_FAILED): si usano i certificati di Windows.
@@ -31,13 +32,16 @@ if os.name == "nt":
         pass
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
+import numpy as np
 from faster_whisper import WhisperModel
 
 API_KEY = os.environ.get("WHISPER_API_KEY", "")
 MODEL_NAME = os.environ.get("WHISPER_MODEL", "small")
 LANGUAGE = os.environ.get("WHISPER_LANGUAGE", "it")
 COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE", "int8")
-THREADS = int(os.environ.get("WHISPER_THREADS", "0") or 0)
+# Su istanze con una frazione di CPU (Render Free 0.1, Starter 0.5) più thread si ostacolano.
+THREADS = int(os.environ.get("WHISPER_THREADS", "1") or 1)
 MAX_AUDIO_BYTES = 8 * 1024 * 1024
 
 app = FastAPI(title="Projexa Whisper", docs_url=None, redoc_url=None)
@@ -70,21 +74,26 @@ def health():
     return {"ok": True, "model": MODEL_NAME, "ready": _model is not None}
 
 
-@app.post("/transcribe")
-async def transcribe(request: Request, x_whisper_key: str = Header(default="")):
-    if not API_KEY or not hmac.compare_digest(x_whisper_key, API_KEY):
-        raise HTTPException(status_code=401, detail="Chiave non valida")
-    audio = await request.body()
-    if not audio:
-        raise HTTPException(status_code=400, detail="Audio mancante")
-    if len(audio) > MAX_AUDIO_BYTES:
-        raise HTTPException(status_code=413, detail="Blocco audio troppo grande")
+def _wav_to_float32(audio: bytes):
+    """WAV PCM 16 bit mono 16 kHz (quello che invia la dashboard) -> array float32.
+    Letto direttamente, senza il decodificatore generico (meno memoria, errori chiari)."""
+    try:
+        with wave.open(io.BytesIO(audio), "rb") as w:
+            if w.getsampwidth() != 2 or w.getnchannels() != 1 or w.getframerate() != 16000:
+                raise ValueError("serve WAV PCM 16 bit, mono, 16 kHz")
+            pcm = w.readframes(w.getnframes())
+    except (wave.Error, EOFError) as e:
+        raise ValueError(f"WAV non valido ({e})")
+    return np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
 
+
+def _transcribe_blocking(audio: bytes):
     model = get_model()
+    samples = _wav_to_float32(audio)
     t = time.time()
     with _run_lock:
         segments, _info = model.transcribe(
-            io.BytesIO(audio),
+            samples,
             language=LANGUAGE,
             task="transcribe",
             beam_size=1,        # più veloce: adatto alla trascrizione "dal vivo"
@@ -97,4 +106,23 @@ async def transcribe(request: Request, x_whisper_key: str = Header(default="")):
             if s.text.strip()
         ]
     print(f"[whisper] blocco trascritto in {time.time() - t:.1f}s, {len(out)} frasi", flush=True)
+    return out
+
+
+@app.post("/transcribe")
+async def transcribe(request: Request, x_whisper_key: str = Header(default="")):
+    if not API_KEY or not hmac.compare_digest(x_whisper_key, API_KEY):
+        raise HTTPException(status_code=401, detail="Chiave non valida")
+    audio = await request.body()
+    if not audio:
+        raise HTTPException(status_code=400, detail="Audio mancante")
+    if len(audio) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Blocco audio troppo grande")
+
+    # La trascrizione gira in un thread separato: il server continua a rispondere a /health
+    # (altrimenti Render lo crede guasto e lo riavvia a metà lavoro).
+    try:
+        out = await run_in_threadpool(_transcribe_blocking, audio)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Audio non valido: {e}")
     return {"segments": out, "model": MODEL_NAME}
