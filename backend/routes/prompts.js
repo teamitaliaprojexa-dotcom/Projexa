@@ -139,7 +139,9 @@ router.delete('/:funzione', requireKnownFunction, async (req, res) => {
       await deleteUserPrompt(req.funzione, tenantId, userId);
       console.log(`[PROMPT] ${req.funzione} personalizzato (tenant ${tenantId} / utente ${userId}) eliminato da ${autore}`);
     } else {
-      await savePrompt(req.funzione, null, null, readPromptFile(req.funzione), `file (ripristino di ${autore})`);
+      const testo = readPromptFile(req.funzione);
+      if (!testo.trim()) throw httpError(409, `Il file ${req.funzione.toLowerCase()}.txt è vuoto: ripristino annullato, il prompt standard resta invariato`);
+      await savePrompt(req.funzione, null, null, testo, `file (ripristino di ${autore})`);
       console.log(`[PROMPT] ${req.funzione} standard ripristinato dal file da ${autore}`);
     }
     res.json({ success: true });

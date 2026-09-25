@@ -52,6 +52,8 @@
         .counter { font-size: 0.8rem; color: #6b7280; align-self: center; }
         .scope { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: center; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb; font-size: 0.9rem; }
         .scope label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+        .funzione-row { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; margin-bottom: 1rem; font-size: 0.9rem; font-weight: 600; }
+        .funzione-row select { padding: 0.5rem 0.7rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.9rem; min-width: 260px; max-width: 100%; font-weight: 400; }
         .scope select { padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.88rem; min-width: 180px; max-width: 100%; }
         .custom-list { margin-top: 1rem; font-size: 0.85rem; }
         .custom-list h2 { font-size: 0.95rem; margin-bottom: 0.5rem; color: #374151; }
@@ -70,6 +72,10 @@
         </header>
 
         <div id="editorCard" class="card" style="display: none;">
+            <div class="funzione-row">
+                <label for="funzioneSel">Funzione</label>
+                <select id="funzioneSel"></select>
+            </div>
             <div class="scope">
                 <label><input type="radio" name="scope" value="standard" checked> Standard (tutti)</label>
                 <label><input type="radio" name="scope" value="utente"> Personalizzato per</label>
@@ -87,7 +93,7 @@
             <textarea id="promptText" spellcheck="false"></textarea>
             <div class="actions">
                 <div>
-                    <button id="resetBtn" class="btn btn-danger" type="button"><i class="fas fa-rotate-left"></i> <span id="resetLabel">Ripristina dal file</span></button>
+                    <button id="resetBtn" class="btn btn-danger" type="button"><i class="fas fa-rotate-left"></i> <span id="resetLabel">Elimina personalizzato</span></button>
                     <button id="reloadBtn" class="btn btn-secondary" type="button"><i class="fas fa-rotate"></i> Annulla modifiche</button>
                 </div>
                 <div>
@@ -113,8 +119,10 @@
         const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
           ? location.origin
           : (location.hostname.endsWith('github.io') ? 'https://projexa-4mix.onrender.com' : location.origin)) + '/api';
-        // Funzione del prompt (tabella app_prompts): ?funzione=... nell'URL, default RECAP_EMAIL.
-        const FUNZIONE = (new URLSearchParams(location.search).get('funzione') || 'RECAP_EMAIL').toUpperCase();
+        // Funzione del prompt (tabella app_prompts): scelta dal menu "Funzione"; si può
+        // aprire direttamente con ?funzione=... nell'URL (default: la prima disponibile).
+        let FUNZIONE = (new URLSearchParams(location.search).get('funzione') || '').toUpperCase();
+        let funzioni = [];
 
         const $ = (id) => document.getElementById(id);
         const textEl = $('promptText');
@@ -188,8 +196,10 @@
                 badge.textContent = 'prompt standard (vale per chi non ha un personalizzato)';
                 badge.className = 'badge badge-db';
             }
-            $('resetLabel').textContent = user ? 'Elimina personalizzato' : 'Ripristina dal file';
-            $('resetBtn').disabled = !scopeReady() || (user && !data.esiste);
+            // Lo standard vive solo nel database: si modifica, non si elimina.
+            $('resetLabel').textContent = 'Elimina personalizzato';
+            $('resetBtn').style.display = user ? '' : 'none';
+            $('resetBtn').disabled = !scopeReady() || !data.esiste;
             $('lastUpdate').textContent = data.esiste && data.updated_at
                 ? `Ultima modifica: ${new Date(data.updated_at).toLocaleString('it-IT')}${data.updated_by ? ' · ' + data.updated_by : ''}`
                 : '';
@@ -331,17 +341,44 @@
             if (isDirty()) { ev.preventDefault(); ev.returnValue = ''; }
         });
 
+        // Applica la funzione scelta: titolo, segnaposto, URL, testo ed elenco personalizzati.
+        async function selectFunzione(codice) {
+            const def = funzioni.find((x) => x.funzione === codice);
+            if (!def) throw Object.assign(new Error(`Funzione ${codice} non gestita`), { status: 404 });
+            FUNZIONE = codice;
+            $('funzioneSel').value = codice;
+            document.title = `Projexa - Prompt ${def.titolo}`;
+            $('pageTitle').textContent = `Prompt: ${def.titolo}`;
+            $('placeholders').innerHTML = (def.segnaposto || [])
+                .map((p) => `<code data-ph="{{${p}}}">{{${p}}}</code>`).join('');
+            const url = new URL(location.href);
+            url.searchParams.set('funzione', codice);
+            history.replaceState(null, '', url);
+            $('status').className = 'status';
+            await Promise.all([loadPrompt(), loadCustomList()]);
+        }
+
+        $('funzioneSel').addEventListener('change', async () => {
+            const scelta = $('funzioneSel').value;
+            if (!confirmDiscard()) { $('funzioneSel').value = FUNZIONE; return; }
+            try {
+                await selectFunzione(scelta);
+            } catch (e) {
+                showStatus(e.message, 'error');
+            }
+        });
+
         async function init() {
             try {
-                const funzioni = await request('GET', '/prompts');
-                const def = funzioni.find((x) => x.funzione === FUNZIONE);
-                if (!def) throw Object.assign(new Error(`Funzione ${FUNZIONE} non gestita`), { status: 404 });
-                document.title = `Projexa - Prompt ${def.titolo}`;
-                $('pageTitle').textContent = `Prompt: ${def.titolo}`;
-                $('placeholders').innerHTML = (def.segnaposto || [])
-                    .map((p) => `<code data-ph="{{${p}}}">{{${p}}}</code>`).join('');
+                funzioni = await request('GET', '/prompts');
+                if (!funzioni.length) throw new Error('Nessuna funzione con prompt modificabile');
+                $('funzioneSel').innerHTML = funzioni
+                    .map((x) => `<option value="${esc(x.funzione)}">${esc(x.funzione)} – ${esc(x.titolo)}</option>`).join('');
                 $('editorCard').style.display = '';
-                await Promise.all([loadPrompt(), loadCustomList(), loadTenants()]);
+                await Promise.all([
+                    selectFunzione(funzioni.some((x) => x.funzione === FUNZIONE) ? FUNZIONE : funzioni[0].funzione),
+                    loadTenants()
+                ]);
             } catch (e) {
                 if (e.status === 401) { window.location.href = 'index.html'; return; }
                 $('editorCard').style.display = 'none';

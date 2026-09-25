@@ -2,10 +2,10 @@
 // Chiave: tenant_id + user_id + funzione (es. RECAP_EMAIL).
 //   - riga con tenant_id e user_id dell'utente del contesto -> prompt personalizzato;
 //   - altrimenti la riga "standard" (tenant_id NULL, user_id NULL).
-// La riga standard nasce dal file backend/prompts/<funzione in minuscolo>.txt, che resta
-// anche come riserva se il database non risponde. Il prompt si rilegge a ogni uso: le
-// modifiche fatte da prompt-editor.html valgono subito, senza riavvii, e i deploy (che
-// sovrascrivono i file) non le toccano.
+// Il testo vive nel database e lo modifica solo l'admin di Projexa (prompt-editor.html):
+// il file backend/prompts/<funzione in minuscolo>.txt serve solo a creare la riga standard
+// se manca e come riserva se il database non risponde; può restare vuoto. Il prompt si
+// rilegge a ogni uso: le modifiche valgono subito, senza riavvii, e i deploy non le toccano.
 //
 // Tabella: Supporto/CreaDB/app_prompts.sql (creata anche in automatico al primo uso).
 import fs from 'fs';
@@ -46,13 +46,15 @@ function ensureTable() {
            CONSTRAINT app_prompts_ambito CHECK ((tenant_id IS NULL) = (user_id IS NULL))
          )`
       );
-      // Riga standard di ogni funzione: se manca, dal file.
+      // Riga standard di ogni funzione: se manca, dal file (se il file ha un testo).
       for (const funzione of Object.keys(PROMPT_FUNCTIONS)) {
+        const testo = readPromptFile(funzione);
+        if (!testo.trim()) continue;
         await db.query(
           `INSERT INTO app_prompts (tenant_id, user_id, funzione, testo, updated_by)
            VALUES (NULL, NULL, $1, $2, 'file')
            ON CONFLICT ON CONSTRAINT app_prompts_chiave DO NOTHING`,
-          [funzione, readPromptFile(funzione)]
+          [funzione, testo]
         );
       }
     })().catch((e) => { tableReady = null; throw e; });
@@ -60,8 +62,13 @@ function ensureTable() {
   return tableReady;
 }
 
+// Testo del file di riserva ('' se il file manca o è vuoto).
 export function readPromptFile(funzione) {
-  return fs.readFileSync(path.join(PROMPTS_DIR, `${String(funzione).toLowerCase()}.txt`), 'utf8');
+  try {
+    return fs.readFileSync(path.join(PROMPTS_DIR, `${String(funzione).toLowerCase()}.txt`), 'utf8');
+  } catch {
+    return '';
+  }
 }
 
 // Prompt da usare per l'utente del contesto: il suo se esiste, altrimenti lo standard.
@@ -83,7 +90,15 @@ export async function getPromptFor(funzione, user) {
   } catch (e) {
     console.error(`[PROMPT] lettura di ${funzione} dal database fallita, uso il file:`, e.message);
   }
-  return { testo: readPromptFile(funzione), ambito: 'file' };
+  const testo = readPromptFile(funzione);
+  if (!testo.trim()) {
+    // Niente prompt: meglio un errore (503 = la coda del recap ritenta) che un recap
+    // generato senza istruzioni.
+    const err = new Error(`Prompt ${funzione} non disponibile: database non raggiungibile o prompt standard mancante`);
+    err.status = 503;
+    throw err;
+  }
+  return { testo, ambito: 'file' };
 }
 
 // Riga esatta di un ambito (tenantId/userId null = standard), senza ripiego. null se assente.
