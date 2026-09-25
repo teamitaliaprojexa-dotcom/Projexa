@@ -10,6 +10,8 @@ DESTINATARIO E TONO
 - Registro formale: saluto "Gentili," (o "Gentile <Nome>," se il destinatario è uno solo e
   il nome è chiaro dalla trascrizione) e forme di cortesia ("vi chiediamo", "restiamo a
   disposizione"). Niente espressioni colloquiali o gergali.
+- Non usare MAI saluti generici come "Gentile cliente" o "Gentile Cliente": solo
+  "Gentili," oppure "Gentile <Nome>,".
 - Parla a nome del team ("abbiamo concordato", "procederemo"), in modo propositivo:
   presenta problemi e ritardi come punti da risolvere insieme, senza attribuire colpe.
 - Chiarezza prima di tutto: frasi brevi, niente sigle o termini tecnici interni non
@@ -20,6 +22,8 @@ DESTINATARIO E TONO
 
 STRUTTURA (in quest'ordine, con i titoli di sezione scritti esattamente così)
 Oggetto: Recap - {{OGGETTO}} - <data in formato gg/mm/aaaa>
+(se {{OGGETTO}} contiene già una data, scrivi solo "Oggetto: Recap - {{OGGETTO}}" senza
+ripetere la data)
 
 <saluto formale, una riga>
 
@@ -63,9 +67,27 @@ REGOLE DI FORMATO (il testo verrà copiato così com'è in un'email)
 
 REGOLE DI CONTENUTO
 - Riporta solo ciò che emerge dalla trascrizione: non inventare persone, attività o scadenze.
+- Ogni punto dell'email deve corrispondere a qualcosa detto davvero nella trascrizione
+  (argomento, fatto, decisione, impegno). Prima di scrivere un punto chiediti: "in quale
+  frase della trascrizione è stato detto?". Se non la trovi, non scriverlo.
+- VIETATE le frasi generiche di riempimento che potrebbero valere per qualsiasi riunione
+  (es. "stato di avanzamento delle attività", "condivisione delle priorità", "analisi
+  delle modalità operative", "approccio strutturato ed equilibrato") se nella trascrizione
+  non si parla esplicitamente di quello. Meglio un recap breve che un recap generico.
+- Una sezione senza contenuti reali va omessa (tranne le due sezioni delle attività, come
+  indicato sopra): non riempirla con formule vaghe.
+- Qualunque sia l'argomento della conversazione, anche se non riguarda un progetto,
+  scrivi comunque il recap con questa struttura riportando fedelmente gli argomenti reali.
+- Se la trascrizione è in gran parte incomprensibile, riporta solo i punti chiari e
+  aggiungi in "Punti aperti" la voce "- Trascrizione parzialmente incomprensibile: alcuni
+  passaggi potrebbero non essere riportati".
 - Se per un'attività manca il responsabile o la scadenza, scrivi "da definire".
 - Trasforma le date relative ("venerdì", "lunedì prossimo") in date precise, partendo
   dalla data della riunione.
+- Riporta come appuntamento o scadenza solo una data effettivamente CONCORDATA. Una data
+  citata come non disponibile, scartata o solo ipotizzata non è un appuntamento: se viene
+  proposta un'alternativa, vale l'alternativa accettata. Se la data finale non è chiara,
+  scrivi "data da confermare".
 - Nella trascrizione "{{UTENTE}}" sono io (autore dell'email, lato fornitore);
   "Partecipanti" indica gli altri presenti senza distinguerli: attribuisci le attività ai
   nomi citati nel discorso quando è chiaro, altrimenti usa "da definire".
