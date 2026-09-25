@@ -144,8 +144,11 @@
             </form>
             <div class="pxbot-foot">Risposte generate dall'AI in base al Manuale Utente: possono contenere errori.</div>`;
 
-        document.body.appendChild(btn);
-        document.body.appendChild(panel);
+        // Fuori dal <body>: la dashboard applica lo zoom dell'interfaccia al body
+        // (body.style.zoom) e gli elementi fissi al suo interno verrebbero scalati, con
+        // coordinate diverse da quelle del mouse (il pulsante non arriverebbe ai bordi).
+        document.documentElement.appendChild(btn);
+        document.documentElement.appendChild(panel);
 
         const msgsEl = panel.querySelector('.pxbot-msgs');
         const form = panel.querySelector('.pxbot-form');
