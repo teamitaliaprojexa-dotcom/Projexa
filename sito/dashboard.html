@@ -2114,6 +2114,20 @@
             background: #4285F4;
         }
 
+        /* Riunione imminente (da 2 minuti prima a 30 secondi dopo l'inizio): la riga pulsa */
+        .meeting-card.imminent {
+            border: 1.5px solid #4285F4;
+            z-index: 1;
+            animation: meetingImminent 1.6s ease-in-out infinite;
+        }
+        @keyframes meetingImminent {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.07); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .meeting-card.imminent { animation: none; }
+        }
+
         .meeting-card:hover {
             border-color: #4285F4;
             box-shadow: 0 2px 8px rgba(66, 133, 244, 0.12);
@@ -2985,7 +2999,7 @@
                 </div>
 
                 <!-- Griglia Riunioni -->
-                <div id="meetingsContainer" style="display: flex; flex-direction: column; gap: 0.4rem; min-height: 60px;">
+                <div id="meetingsContainer" style="display: flex; flex-direction: column; gap: 0.4rem; min-height: 60px; overflow-x: clip;">
                     <div style="display: flex; align-items: center; justify-content: center; padding: 3rem; color: var(--text-muted);">
                         <div style="text-align: center;">
                             <i class="fas fa-calendar" style="font-size: 2.5rem; margin-bottom: 1rem; opacity: 0.3;"></i>
@@ -5391,8 +5405,17 @@
                 displayMeetingsError(`Calendario ${key === 'outlook' ? 'Outlook' : 'Google'} non collegato. Collegalo da Impostazioni › Calendar con il pulsante "Collega".`);
                 return [];
             }
+            // Aggiornamento "silenzioso": se a video c'è già l'elenco dello stesso calendario e
+            // dello stesso giorno, le righe restano finché non arrivano i dati nuovi (niente
+            // riquadro vuoto). La rotellina solo quando il contenuto cambia davvero (primo
+            // caricamento, cambio di calendario o di giorno).
             const container = document.getElementById('meetingsContainer');
-            if (container) {
+            const viewKey = `${key}|${meetingsDate || 'oggi'}`;
+            const sameView = container && container.dataset.view === viewKey && container.querySelector('.meeting-card, .meeting-empty');
+            const syncEl = document.getElementById('lastSyncTime');
+            if (sameView) {
+                if (syncEl) syncEl.textContent = 'Aggiornamento…';
+            } else if (container) {
                 container.innerHTML = `
                     <div style="display: flex; align-items: center; justify-content: center; padding: 3rem; color: var(--text-muted);">
                         <div style="text-align: center;">
@@ -5401,6 +5424,7 @@
                         </div>
                     </div>`;
             }
+            if (container) container.dataset.view = viewKey;
             try {
                 // Intervallo: oggi = da adesso alle prossime 24 ore; giorno scelto con l'icona
                 // del calendario = l'intera giornata (00:00 - 24:00, ora locale).
@@ -5439,6 +5463,12 @@
 
             } catch (error) {
                 console.warn('⚠️ Calendar Error:', error.message);
+                if (sameView) {
+                    // Aggiornamento silenzioso non riuscito: l'elenco già a video resta.
+                    if (syncEl) syncEl.textContent = 'Aggiornamento non riuscito, riprovo più tardi';
+                    if (syncEl) syncEl.title = error.message;
+                    return [];
+                }
                 displayMeetingsError(`Errore nel caricamento: ${error.message}`);
                 return [];
             }
@@ -5489,6 +5519,7 @@
             // Tendine Cliente/Progetto sulle riunioni già gestite con Projexa
             container.querySelectorAll('.meeting-card[data-managed="1"]').forEach((row) => renderMeetingAssign(row));
             refreshMeetingStatuses(); // blocchi in coda (clessidra) e stato aggiornato
+            updateImminentMeetings(); // riunione che sta per iniziare: animazione
         }
 
         // Loghi (SVG semplificati, inline: nessuna risorsa esterna) delle piattaforme di riunione.
@@ -5740,6 +5771,21 @@
                 if (btn.isConnected && btn.disabled) { btn.disabled = false; btn.textContent = 'Recap'; }
             }
         }
+
+        // === RIUNIONE IMMINENTE: la riga pulsa da 2 minuti prima a 30 secondi dopo l'inizio ===
+        const IMMINENT_BEFORE_MS = 2 * 60 * 1000;
+        const IMMINENT_AFTER_MS = 30 * 1000;
+
+        function updateImminentMeetings() {
+            const now = Date.now();
+            document.querySelectorAll('#meetingsContainer .meeting-card[data-start]').forEach((row) => {
+                const start = Date.parse(row.dataset.start);
+                const diff = start - now;
+                const on = Number.isFinite(start) && diff <= IMMINENT_BEFORE_MS && diff >= -IMMINENT_AFTER_MS;
+                row.classList.toggle('imminent', on);
+            });
+        }
+        setInterval(updateImminentMeetings, 10000);
 
         // === AGGIORNAMENTO DELLA GRIGLIA RIUNIONI (senza rileggere il calendario) ===
         // Rilegge da rec_meeting solo lo stato delle riunioni a video (trascrizione, recap,
@@ -6033,11 +6079,12 @@
         // Il pulsante giallo "Registra" (colonna Gestisci con Projexa) avvia la registrazione e
         // diventa rosso "Ferma" finché è in corso. Cattura l'audio di sistema (voci degli altri,
         // da getDisplayMedia) e il microfono scelto con l'ingranaggio, li mescola, li converte
-        // in WAV mono 16 kHz e ogni ~60 s invia un blocco al backend, che lo trascrive con
+        // in WAV mono 16 kHz e ogni ~30 s invia un blocco al backend, che lo trascrive con
         // il servizio Whisper (gratuito, su Render) e aggiunge il testo a rec_meeting.trascrizione. Il pannello in basso a
         // destra mostra solo lo stato (tempo, blocchi trascritti, errori).
         const REC_SAMPLE_RATE = 16000;
-        const REC_CHUNK_SECONDS = 60;
+        // Blocchi da 30 s: chiudendo il browser per errore si perde al massimo mezzo minuto
+        const REC_CHUNK_SECONDS = 30;
         let meetingRec = null;
 
         function recUi() {
@@ -6103,15 +6150,17 @@
             return btoa(bin);
         }
 
-        // Invio in coda (un blocco alla volta, in ordine) al backend che trascrive e scrive.
-        // Due tracce separate: il microfono (l'utente, il cui nome viene messo davanti alle sue
-        // frasi) e l'audio di sistema (gli altri partecipanti). Se una manca non viene inviata.
-        function queueRecChunk(rec, micSamples, sysSamples, offsetSec, isFirst) {
+        // Invio in coda (un blocco alla volta, in ordine) al server, che trascrive in background.
+        // Una sola traccia: microfono + audio di sistema mixati (una trascrizione invece di due);
+        // il volume delle due tracce ogni 0,5 s (energy) permette al server di capire chi parla
+        // (utente o altri partecipanti).
+        function queueRecChunk(rec, mixSamples, energy, offsetSec, isFirst) {
             const payload = {
                 id_calendar: rec.eventId,
                 mime: 'audio/wav',
-                audio_mic: micSamples ? bytesToBase64(encodeWav(micSamples, REC_SAMPLE_RATE)) : undefined,
-                audio_system: sysSamples ? bytesToBase64(encodeWav(sysSamples, REC_SAMPLE_RATE)) : undefined,
+                audio_mix: bytesToBase64(encodeWav(mixSamples, REC_SAMPLE_RATE)),
+                energy_mic: energy.mic,
+                energy_system: energy.system,
                 offset_sec: offsetSec,
                 start_label: isFirst
                     ? `Registrazione del ${new Date(rec.startedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}${rec.baseOffset ? ` (ripresa da ${formatRecTime(rec.baseOffset)})` : ''}`
@@ -6177,7 +6226,39 @@
             rec.bufMic = [];
             rec.bufSys = [];
             rec.bufferLen = 0;
-            queueRecChunk(rec, micSamples, sysSamples, offsetSec, rec.chunks++ === 0);
+
+            // Volume (RMS 0..1) di ogni traccia per finestre di 0,5 s.
+            const energy = { mic: micSamples ? recEnergy(micSamples) : null, system: sysSamples ? recEnergy(sysSamples) : null };
+            const loudest = Math.max(0, ...(energy.mic || []), ...(energy.system || []));
+            // Blocco muto (nessuno parla): non si invia, il server non deve trascrivere nulla.
+            // L'intestazione di sessione passa al primo blocco inviato.
+            if (loudest < REC_SILENCE_RMS) {
+                rec.skipped = (rec.skipped || 0) + 1;
+                updateRecStatus(rec);
+                return;
+            }
+            // Una sola traccia: microfono + audio di sistema sommati (con limitazione).
+            const len = (micSamples || sysSamples).length;
+            const mix = new Int16Array(len);
+            for (let i = 0; i < len; i++) {
+                const v = (micSamples ? micSamples[i] : 0) + (sysSamples ? sysSamples[i] : 0);
+                mix[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
+            }
+            queueRecChunk(rec, mix, energy, offsetSec, rec.chunks++ === 0);
+        }
+
+        // Volume di una traccia (RMS, 0..1) per finestre di 0,5 s: 30 s -> 60 valori.
+        const REC_ENERGY_WINDOW = REC_SAMPLE_RATE / 2;
+        const REC_SILENCE_RMS = 0.01; // circa -40 dB: sotto questa soglia il blocco è muto
+        function recEnergy(samples) {
+            const out = [];
+            for (let i = 0; i < samples.length; i += REC_ENERGY_WINDOW) {
+                const end = Math.min(samples.length, i + REC_ENERGY_WINDOW);
+                let sum = 0;
+                for (let j = i; j < end; j++) { const v = samples[j] / 32768; sum += v * v; }
+                out.push(Math.round(Math.sqrt(sum / Math.max(1, end - i)) * 10000) / 10000);
+            }
+            return out;
         }
 
         function updateRecStatus(rec) {
@@ -6185,6 +6266,7 @@
             const elapsed = rec.startedAt ? (Date.now() - rec.startedAt) / 1000 : 0;
             if (rec.running) {
                 let t = `● Registrazione in corso ${formatRecTime(elapsed)} · blocchi inviati al server: ${rec.sent}`;
+                if (rec.skipped) t += ` · silenzi saltati: ${rec.skipped}`;
                 if (!rec.hasSystemAudio) t += ' · solo microfono';
                 setRecStatus(rec.lastError ? `${t} · ultimo errore: ${rec.lastError}` : t, !!rec.lastError);
             } else if (rec.pending > 0) {
@@ -6994,7 +7076,7 @@
             // Una sola riga: partecipa - durata - ora - provider - gestisci con Projexa - titolo -
             // trascrizione - recap - inviata (flag da rec_meeting) - cliente/progetto
             return `
-                <div class="meeting-card" data-managed="${event.managed ? '1' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}">
+                <div class="meeting-card" data-managed="${event.managed ? '1' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-start="${isNaN(start) ? '' : start.toISOString()}">
                     <div class="meeting-del-cell">${event.managed && !isRecordingMeeting(event.id) ? meetingDeleteButton(event.id) : ''}</div>
                     ${meetingLinkBtn}
                     <div class="meeting-duration">${escapeHtml(durationStr)}</div>

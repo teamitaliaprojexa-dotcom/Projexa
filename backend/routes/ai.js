@@ -362,14 +362,24 @@ export async function askAiProvider(userId, providerName, prompt) {
 // pubblicato su Render come servizio separato. Qui si inoltra il blocco WAV e si ricevono
 // le frasi con l'orario di inizio. Configurazione: WHISPER_URL e WHISPER_API_KEY.
 // Restituisce { segments: [{ start, text }], provider }.
-export async function transcribeAudio(userId, audioBuffer, mime) {
-  const base = String(process.env.WHISPER_URL || '').replace(/\/+$/, '');
+// Indirizzi dei servizi Whisper: WHISPER_URLS (più servizi, separati da virgola, usati in
+// parallelo dalla coda di trascrizione) oppure WHISPER_URL (uno solo).
+export function whisperUrls() {
+  const list = String(process.env.WHISPER_URLS || process.env.WHISPER_URL || '')
+    .split(',').map((u) => u.trim().replace(/\/+$/, '')).filter(Boolean);
+  return [...new Set(list)];
+}
+
+// baseUrl: servizio da usare (la coda assegna ogni blocco a un servizio); di default il primo.
+// Restituisce { segments: [{ start, end, text }], provider }.
+export async function transcribeAudio(userId, audioBuffer, mime, baseUrl = null) {
+  const base = String(baseUrl || whisperUrls()[0] || '').replace(/\/+$/, '');
   if (!base || !process.env.WHISPER_API_KEY) {
     // 428: il browser ferma subito la registrazione invece di riprovare.
-    throw httpError(428, 'Servizio di trascrizione non configurato sul server (WHISPER_URL / WHISPER_API_KEY)');
+    throw httpError(428, 'Servizio di trascrizione non configurato sul server (WHISPER_URLS / WHISPER_URL / WHISPER_API_KEY)');
   }
   // Errori temporanei (servizio in avvio dopo l'inattività, sovraccarico): nuovi tentativi
-  // dopo 5 e 15 secondi; se persiste l'errore torna al browser, che rimanda il blocco.
+  // dopo 5 e 15 secondi; se persiste, la coda riprova il blocco più tardi.
   for (let attempt = 1; ; attempt++) {
     try {
       const data = await readJson(await callApi(`${base}/transcribe`, {
@@ -379,7 +389,7 @@ export async function transcribeAudio(userId, audioBuffer, mime) {
         timeoutMs: 600000 // su istanze lente un blocco può richiedere alcuni minuti
       }, 'Whisper'), 'Whisper');
       const segments = (Array.isArray(data.segments) ? data.segments : [])
-        .map((x) => ({ start: Number(x.start) || 0, text: String(x.text || '').trim() }))
+        .map((x) => ({ start: Number(x.start) || 0, end: Number(x.end) || Number(x.start) || 0, text: String(x.text || '').trim() }))
         .filter((x) => x.text);
       return { segments, provider: `Whisper ${data.model || ''}`.trim() };
     } catch (error) {
@@ -391,7 +401,7 @@ export async function transcribeAudio(userId, audioBuffer, mime) {
         }
         throw error;
       }
-      console.warn(`[AI] Trascrizione Whisper: errore temporaneo (${error.upstreamStatus || error.message}), nuovo tentativo ${attempt + 1}/3`);
+      console.warn(`[AI] Trascrizione Whisper (${base}): errore temporaneo (${error.upstreamStatus || error.message}), nuovo tentativo ${attempt + 1}/3`);
       await new Promise((r) => setTimeout(r, attempt === 1 ? 5000 : 15000));
     }
   }

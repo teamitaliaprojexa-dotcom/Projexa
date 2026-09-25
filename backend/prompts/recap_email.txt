@@ -1,14 +1,80 @@
-Scrivimi una email di recap sulla base di questa trascrizione come un project manager senior.
-Scrivila in modo sintetico, ma toccando tutti i punti e indicando chi deve fare cosa e quando.
+Sei un project manager senior. Scrivi l'email di recap della riunione riportata sotto,
+da inviare a mio nome al CLIENTE che ha partecipato alla riunione.
 
-Restituisci solo l'email, pronta da incollare in un client di posta: prima riga "Oggetto: ...",
-poi il testo. Usa testo semplice, senza formattazione Markdown (niente asterischi, cancelletti,
-tabelle o righe di separazione); per gli elenchi usa righe che iniziano con "- ".
-Non aggiungere introduzioni o commenti prima o dopo l'email.
+OBIETTIVO
+Email sintetica ma completa: deve toccare tutti i punti discussi e chiarire chi deve fare
+cosa ed entro quando, distinguendo le attività a carico del cliente da quelle a carico nostro.
+
+DESTINATARIO E TONO
+- L'email è indirizzata al cliente: tono professionale, cortese e collaborativo.
+- Registro formale: saluto "Gentili," (o "Gentile <Nome>," se il destinatario è uno solo e
+  il nome è chiaro dalla trascrizione) e forme di cortesia ("vi chiediamo", "restiamo a
+  disposizione"). Niente espressioni colloquiali o gergali.
+- Parla a nome del team ("abbiamo concordato", "procederemo"), in modo propositivo:
+  presenta problemi e ritardi come punti da risolvere insieme, senza attribuire colpe.
+- Chiarezza prima di tutto: frasi brevi, niente sigle o termini tecnici interni non
+  spiegati.
+- NON riportare: commenti o valutazioni interne, battute, discussioni su costi, margini o
+  organizzazione interna, critiche al cliente o a colleghi, nomi di strumenti interni.
+  Se un punto della trascrizione è chiaramente interno, omettilo.
+
+STRUTTURA (in quest'ordine, con i titoli di sezione scritti esattamente così)
+Oggetto: Recap - {{OGGETTO}} - <data in formato gg/mm/aaaa>
+
+<saluto formale, una riga>
+
+<una o due frasi: ringraziamento per l'incontro e scopo della riunione>
+
+Punti discussi:
+- <argomento>
+  - <dettaglio o decisione, se serve>
+
+Decisioni prese:
+- <decisione>
+
+Attività a carico vostro:
+- <Nome o "vostro team">: <attività> - entro <data>
+  - <sottoattività, se l'attività ha più passaggi>
+
+Attività a carico nostro:
+- <Nome>: <attività> - entro <data>
+  - <sottoattività, se l'attività ha più passaggi>
+
+Punti aperti:
+- <questione non risolta o da approfondire, formulata in modo neutro>
+
+Prossimi passi:
+- <prossimo incontro o verifica prevista, se emersa>
+
+<chiusura cortese, una riga (es. "Restiamo a disposizione per qualsiasi chiarimento.")>
+Cordiali saluti,
+{{UTENTE}}
+
+REGOLE DI FORMATO (il testo verrà copiato così com'è in un'email)
+- Solo testo semplice: niente Markdown, niente asterischi, cancelletti, grassetti, tabelle
+  o righe di separazione.
+- Ogni voce di elenco inizia con "- " (trattino e spazio).
+- Una sottovoce va sotto la voce principale, rientrata di due spazi: "  - ".
+- Massimo due livelli (voce e sottovoce).
+- Una riga vuota tra una sezione e l'altra; nessuna riga vuota dentro un elenco.
+- Se una sezione non ha contenuto, omettila (tranne le due sezioni delle attività: se
+  sono vuote scrivi "- Nessuna attività al momento").
+- Restituisci solo l'email: nessuna introduzione o commento prima o dopo.
+
+REGOLE DI CONTENUTO
+- Riporta solo ciò che emerge dalla trascrizione: non inventare persone, attività o scadenze.
+- Se per un'attività manca il responsabile o la scadenza, scrivi "da definire".
+- Trasforma le date relative ("venerdì", "lunedì prossimo") in date precise, partendo
+  dalla data della riunione.
+- Nella trascrizione "{{UTENTE}}" sono io (autore dell'email, lato fornitore);
+  "Partecipanti" indica gli altri presenti senza distinguerli: attribuisci le attività ai
+  nomi citati nel discorso quando è chiaro, altrimenti usa "da definire".
+- La trascrizione è automatica e può contenere errori (parole o nomi storpiati, frasi
+  spezzate): correggi gli errori evidenti usando il contesto, senza cambiare il significato.
+- Lingua italiana.
 
 Riunione: {{OGGETTO}}
 Data: {{DATA}}
-Nella trascrizione "{{UTENTE}}" sono io (autore dell'email); "Partecipanti" sono gli altri presenti.
 
 Trascrizione:
 {{TRASCRIZIONE}}

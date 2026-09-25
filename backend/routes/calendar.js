@@ -757,7 +757,7 @@ router.get('/meetings/managed/text', requireAuth, async (req, res) => {
   }
 });
 
-// Trascrizione: il browser registra la riunione e invia blocchi WAV di circa 60 secondi,
+// Trascrizione: il browser registra la riunione e invia blocchi WAV di circa 30 secondi,
 // in ordine, su DUE tracce: audio_mic (il microfono dell'utente) e audio_system (l'audio
 // del PC, cioè gli altri partecipanti). Ogni blocco viene messo IN CODA sul server
 // (tabella rec_meeting_chunks, audio cifrato) e trascritto in background da
@@ -809,9 +809,17 @@ router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
     if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
     const mime = String(b.mime || 'audio/wav');
     if (!/^audio\/(wav|x-wav|wave)$/.test(mime)) return res.status(400).json({ error: 'Formato audio non supportato' });
-    const micB64 = checkAudio(b.audio_mic);
-    const sysB64 = checkAudio(b.audio_system || b.audio); // "audio": formato precedente, una sola traccia
-    if (!micB64 && !sysB64) return res.status(400).json({ error: 'Audio mancante' });
+    // Formato attuale: una sola traccia mixata (audio_mix) + volume delle due tracce per
+    // finestre di 0,5 s (energy_mic / energy_system), per capire chi parla.
+    // Formati precedenti ancora accettati: audio_mic / audio_system (o "audio").
+    const mixB64 = checkAudio(b.audio_mix);
+    const micB64 = mixB64 ? null : checkAudio(b.audio_mic);
+    const sysB64 = mixB64 ? null : checkAudio(b.audio_system || b.audio);
+    if (!mixB64 && !micB64 && !sysB64) return res.status(400).json({ error: 'Audio mancante' });
+    const cleanEnergy = (v) => (Array.isArray(v)
+      ? v.slice(0, 1200).map((x) => Math.max(0, Math.min(1, Number(x) || 0)))
+      : null);
+    const energy = mixB64 ? { mic: cleanEnergy(b.energy_mic), system: cleanEnergy(b.energy_system) } : null;
 
     const row = await db.query(
       `SELECT 1 FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
@@ -821,7 +829,7 @@ router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
 
     try {
       await enqueueChunk(req.user, idCalendar, {
-        micB64, sysB64, mime, offset: Number(b.offset_sec) || 0, startLabel: b.start_label || null
+        mixB64, energy, micB64, sysB64, mime, offset: Number(b.offset_sec) || 0, startLabel: b.start_label || null
       });
     } catch (e) {
       if (/rec_meeting_chunks/.test(e.message || '')) {

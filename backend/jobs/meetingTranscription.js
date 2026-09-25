@@ -1,12 +1,17 @@
 // ============================================================================
 // PROGRAMMA: TRASCRIZIONE E RECAP DELLE RIUNIONI (coda sul server)
 // ----------------------------------------------------------------------------
-// La dashboard registra la riunione e invia blocchi audio WAV di ~60 s su due tracce
-// (microfono dell'utente / audio di sistema). Ogni blocco viene SALVATO SUBITO nella
-// tabella rec_meeting_chunks (audio cifrato) e il server lo elabora in background:
-//   1. trascrizione con il servizio Whisper (routes/ai.js -> transcribeAudio);
-//   2. frasi aggiunte, cifrate, a rec_meeting.trascrizione;
-//   3. il blocco viene CANCELLATO dalla coda appena trascritto.
+// La dashboard registra la riunione e invia blocchi audio WAV di ~30 s: microfono
+// dell'utente e audio di sistema MIXATI in una sola traccia (audio_mix), più il volume
+// delle due tracce per finestre di 0,5 s (energy), che serve a capire chi parla. I blocchi
+// muti non vengono inviati. Ogni blocco viene SALVATO SUBITO nella tabella
+// rec_meeting_chunks (audio cifrato) e il server lo elabora in background:
+//   1. trascrizione con Whisper: più servizi (WHISPER_URLS) lavorano IN PARALLELO, un
+//      blocco ciascuno;
+//   2. il testo del blocco (già formattato, cifrato) resta in coda finché i blocchi
+//      precedenti della stessa riunione non sono pronti: viene aggiunto a
+//      rec_meeting.trascrizione sempre nell'ordine giusto;
+//   3. il blocco viene CANCELLATO dalla coda appena accodato.
 // Quando arriva il segnale di fine registrazione (riga "finalize") e i blocchi di quella
 // riunione sono finiti, il server genera da solo il recap (rec_meeting.recap).
 //
@@ -22,7 +27,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import db from '../config/database.js';
 import { encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js';
-import { transcribeAudio, askAiProvider } from '../routes/ai.js';
+import { transcribeAudio, askAiProvider, whisperUrls } from '../routes/ai.js';
 
 export const NOME_PROGRAMMA = 'meetingTranscription';
 
@@ -75,43 +80,98 @@ const isTemporary = (e) =>
   [429, 500, 502, 503, 504, 529].includes(e.status) || [429, 500, 502, 503, 504, 529].includes(e.upstreamStatus);
 
 // ----------------------------------------------------------------------------
-// TRASCRIZIONE DI UN BLOCCO -> rec_meeting.trascrizione
+// TRASCRIZIONE DI UN BLOCCO -> testo formattato
 // ----------------------------------------------------------------------------
 
-// Le due tracce si trascrivono una dopo l'altra; le frasi si uniscono in ordine di tempo
-// con il nome di chi parla e si AGGIUNGONO (cifrate) alla trascrizione della riunione.
-export async function transcribeChunkInto(user, idCalendar, { mic, sys, mime, offset, startLabel }) {
-  const lines = [];
-  if (mic) {
-    const me = await speakerName(user);
-    const r = await transcribeAudio(user.user_id, mic, mime);
-    r.segments.forEach((x) => lines.push({ start: x.start, who: me, text: x.text }));
-  }
-  if (sys) {
-    const r = await transcribeAudio(user.user_id, sys, mime);
-    const who = mic ? OTHERS_LABEL : '';
-    r.segments.forEach((x) => lines.push({ start: x.start, who, text: x.text }));
-  }
-  lines.sort((a, b) => a.start - b.start);
+const ENERGY_WINDOW_SEC = 0.5;
 
+function jobUser(job) {
+  return { tenant_id: job.tenant_id, user_id: job.user_id, email: job.user_email };
+}
+
+function parseEnergy(raw) {
+  try {
+    const e = JSON.parse(raw || '{}');
+    return {
+      mic: Array.isArray(e.mic) && e.mic.length ? e.mic : null,
+      system: Array.isArray(e.system) && e.system.length ? e.system : null
+    };
+  } catch {
+    return { mic: null, system: null };
+  }
+}
+
+// Volume medio di una traccia tra start ed end (secondi), sulle finestre da 0,5 s.
+function avgEnergy(list, start, end) {
+  const i0 = Math.max(0, Math.floor(start / ENERGY_WINDOW_SEC));
+  const i1 = Math.min(list.length - 1, Math.max(i0, Math.ceil(end / ENERGY_WINDOW_SEC) - 1));
+  let sum = 0;
+  let n = 0;
+  for (let i = i0; i <= i1; i++) { sum += Number(list[i]) || 0; n++; }
+  return n ? sum / n : 0;
+}
+
+// Righe "[hh:mm:ss] Nome: testo" di un blocco, con l'intestazione di sessione se presente.
+function formatLines(lines, offset, startLabel) {
+  lines.sort((a, b) => a.start - b.start);
   let add = '';
   if (startLabel) add += `\n--- ${String(startLabel).slice(0, 80)} ---\n`;
   for (const l of lines) add += `[${hhmmss((Number(offset) || 0) + l.start)}] ${l.who ? `${l.who}: ` : ''}${l.text.replace(/\s*\n\s*/g, ' ')}\n`;
-  if (!add) return 0;
+  return add;
+}
 
-  // Il testo è cifrato: si legge in chiaro (decifratura automatica), si aggiunge il blocco e
-  // si riscrive tutto cifrato (la coda elabora i blocchi di una riunione in ordine, uno alla volta).
-  const cur = await db.query(
-    `SELECT trascrizione FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+// Trascrive un blocco sul servizio Whisper indicato e restituisce il testo formattato.
+//  - traccia unica (audio_mix): UNA trascrizione; per ogni frase si confronta il volume del
+//    microfono con quello dell'audio di sistema nello stesso intervallo: se prevale il
+//    microfono la frase è dell'utente, altrimenti degli altri partecipanti;
+//  - formato precedente (audio_mic / audio_system): due trascrizioni, una per traccia.
+async function transcribeJob(job, baseUrl) {
+  const user = jobUser(job);
+  const mime = job.mime || 'audio/wav';
+  const lines = [];
+  if (job.audio_mix) {
+    const energy = parseEnergy(job.energy);
+    const me = energy.mic ? await speakerName(user) : '';
+    const r = await transcribeAudio(user.user_id, Buffer.from(job.audio_mix, 'base64'), mime, baseUrl);
+    for (const seg of r.segments) {
+      let who = '';
+      if (energy.mic && energy.system) {
+        who = avgEnergy(energy.mic, seg.start, seg.end) >= avgEnergy(energy.system, seg.start, seg.end) ? me : OTHERS_LABEL;
+      } else if (energy.mic) {
+        who = me;
+      }
+      lines.push({ start: seg.start, who, text: seg.text });
+    }
+  } else {
+    if (job.audio_mic) {
+      const me = await speakerName(user);
+      const r = await transcribeAudio(user.user_id, Buffer.from(job.audio_mic, 'base64'), mime, baseUrl);
+      r.segments.forEach((x) => lines.push({ start: x.start, who: me, text: x.text }));
+    }
+    if (job.audio_system) {
+      const r = await transcribeAudio(user.user_id, Buffer.from(job.audio_system, 'base64'), mime, baseUrl);
+      const who = job.audio_mic ? OTHERS_LABEL : '';
+      r.segments.forEach((x) => lines.push({ start: x.start, who, text: x.text }));
+    }
+  }
+  return formatLines(lines, job.offset_sec, job.start_label);
+}
+
+// Aggiunge (cifrato) il testo di un blocco alla trascrizione della riunione.
+// q: client della transazione di flushInOrder (scrittura in ordine, sotto lock).
+async function appendTranscript(q, user, idCalendar, add) {
+  if (!add) return;
+  // Il testo è cifrato: si legge in chiaro (decifratura automatica), si aggiunge e si
+  // riscrive tutto cifrato.
+  const cur = await q.query(
+    `SELECT trascrizione FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1 FOR UPDATE`,
     [user.tenant_id, user.user_id, idCalendar]
   );
-  if (cur.rows.length === 0) return 0; // riunione cancellata nel frattempo
-  const full = (cur.rows[0].trascrizione || '') + add;
-  await db.query(
+  if (cur.rows.length === 0) return; // riunione cancellata nel frattempo
+  await q.query(
     `UPDATE rec_meeting SET trascrizione = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
-    [encRec(full), user.tenant_id, user.user_id, idCalendar]
+    [encRec((cur.rows[0].trascrizione || '') + add), user.tenant_id, user.user_id, idCalendar]
   );
-  return lines.length;
 }
 
 // ----------------------------------------------------------------------------
@@ -175,16 +235,21 @@ export async function generateRecap(user, idCalendar) {
 // CODA (tabella rec_meeting_chunks)
 // ----------------------------------------------------------------------------
 
-// Blocco audio in coda (base64 dei WAV, cifrato). Restituisce l'id della riga.
-export async function enqueueChunk(user, idCalendar, { micB64, sysB64, mime, offset, startLabel }) {
+// Blocco audio in coda (cifrato). Restituisce l'id della riga.
+//   mixB64 + energy: traccia unica mixata con il volume delle due tracce (formato attuale);
+//   micB64 / sysB64: due tracce separate (formato precedente, ancora accettato).
+export async function enqueueChunk(user, idCalendar, { mixB64, energy, micB64, sysB64, mime, offset, startLabel }) {
   const r = await db.query(
     `INSERT INTO rec_meeting_chunks
-       (tenant_id, user_id, user_email, id_calendar, kind, mime, offset_sec, start_label, audio_mic, audio_system)
-     VALUES ($1, $2, $3, $4, 'audio', $5, $6, $7, $8, $9)
+       (tenant_id, user_id, user_email, id_calendar, kind, mime, offset_sec, start_label,
+        audio_mix, energy, audio_mic, audio_system)
+     VALUES ($1, $2, $3, $4, 'audio', $5, $6, $7, $8, $9, $10, $11)
      RETURNING id`,
-    // Cifrati: audio, email e intestazione. In chiaro solo le chiavi tecniche della coda.
+    // Cifrati: audio, email e intestazione. In chiaro solo le chiavi tecniche della coda e
+    // il volume (numeri, nessun dato personale).
     [user.tenant_id, user.user_id, user.email ? encRec(user.email) : null, idCalendar, mime || 'audio/wav',
       Number(offset) || 0, startLabel ? encRec(String(startLabel).slice(0, 120)) : null,
+      mixB64 ? encRec(mixB64) : null, energy ? JSON.stringify(energy) : null,
       micB64 ? encRec(micB64) : null, sysB64 ? encRec(sysB64) : null]
   );
   kickTranscriptionWorker();
@@ -226,24 +291,139 @@ export async function queuedEndOffset(user, idCalendar) {
         WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND kind = 'audio'`,
       [user.tenant_id, user.user_id, idCalendar]
     );
-    return r.rows[0].m == null ? -1 : Number(r.rows[0].m) + 60;
+    return r.rows[0].m == null ? -1 : Number(r.rows[0].m) + 30; // + durata di un blocco
   } catch (e) {
     return -1;
   }
 }
 
-// Prossimo lavoro: il più vecchio tra i "primi della fila" di ogni riunione pronti ora
-// (l'ordine dei blocchi di una riunione è sempre rispettato, anche durante i tentativi).
-async function nextJob() {
+// Blocco che non si riesce a trascrivere: nella trascrizione resta una nota (niente buchi
+// silenziosi), accodata comunque nel punto giusto.
+function lostChunkNote(job, reason) {
+  return `${job.start_label ? `\n--- ${job.start_label} ---\n` : ''}[${hhmmss(job.offset_sec)}] (blocco audio non trascritto: ${String(reason).slice(0, 150)})\n`;
+}
+
+// Trascrive un blocco già "prenotato" (state = 'transcribing') sul servizio indicato.
+async function processAudioJob(job, baseUrl) {
+  try {
+    const text = await transcribeJob(job, baseUrl);
+    await db.query(
+      `UPDATE rec_meeting_chunks SET state = 'done', result = $2, audio_mix = NULL, audio_mic = NULL, audio_system = NULL WHERE id = $1`,
+      [job.id, encRec(text || ' ')]
+    );
+    console.log(`[TRASCRIZIONE] ✓ ${job.id_calendar} blocco da ${hhmmss(job.offset_sec)} (${baseUrl})`);
+  } catch (error) {
+    // Servizio irraggiungibile: per un po' non gli si assegnano altri blocchi.
+    if (baseUrl && (error.status === 502 || error.status === 503) && !error.upstreamStatus) markUrl(baseUrl, false);
+    const attempts = (Number(job.attempts) || 0) + 1;
+    if (isTemporary(error) && attempts < MAX_ATTEMPTS) {
+      const waitSec = Math.min(60 * attempts, 15 * 60); // 1, 2, 3 ... fino a 15 minuti
+      await db.query(
+        `UPDATE rec_meeting_chunks
+            SET state = 'pending', attempts = $2, last_error = $3, next_try_at = NOW() + ($4 || ' seconds')::interval
+          WHERE id = $1`,
+        [job.id, attempts, encRec(String(error.message || error).slice(0, 500)), String(waitSec)]
+      );
+      console.warn(`[TRASCRIZIONE] ${job.id_calendar}: tentativo ${attempts}/${MAX_ATTEMPTS} fallito (${error.message}), nuovo tentativo tra ${waitSec}s`);
+      return;
+    }
+    console.error(`❌ [TRASCRIZIONE] ${job.id_calendar} blocco da ${hhmmss(job.offset_sec)} abbandonato: ${error.message}`);
+    await db.query(
+      `UPDATE rec_meeting_chunks SET state = 'done', result = $2, audio_mix = NULL, audio_mic = NULL, audio_system = NULL WHERE id = $1`,
+      [job.id, encRec(lostChunkNote(job, error.message))]
+    );
+  }
+}
+
+// Recap a fine registrazione. La riga "finalize" è già stata tolta dalla coda (sotto lock):
+// in caso di errore temporaneo viene rimessa in coda con un nuovo tentativo.
+async function processFinalize(job) {
+  const user = jobUser(job);
+  try {
+    const t = await db.query(
+      `SELECT (trascrizione IS NOT NULL AND BTRIM(trascrizione) <> '') AS has_tr FROM rec_meeting
+        WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [user.tenant_id, user.user_id, job.id_calendar]
+    );
+    if (t.rows[0] && t.rows[0].has_tr) await generateRecap(user, job.id_calendar);
+  } catch (error) {
+    const attempts = (Number(job.attempts) || 0) + 1;
+    if (isTemporary(error) && attempts < 10) {
+      await db.query(
+        `INSERT INTO rec_meeting_chunks (tenant_id, user_id, user_email, id_calendar, kind, attempts, last_error, next_try_at)
+         VALUES ($1, $2, $3, $4, 'finalize', $5, $6, NOW() + interval '2 minutes')`,
+        [user.tenant_id, user.user_id, user.email ? encRec(user.email) : null, job.id_calendar, attempts,
+          encRec(String(error.message || error).slice(0, 500))]
+      );
+      console.warn(`[RECAP] ${job.id_calendar}: tentativo ${attempts} fallito (${error.message}), nuovo tentativo tra 2 minuti`);
+      return;
+    }
+    console.error(`❌ [RECAP] ${job.id_calendar} non generato: ${error.message}`);
+  }
+}
+
+// Accoda IN ORDINE i blocchi pronti: per ogni riunione si guarda il primo della fila; se è
+// trascritto il suo testo va nella riunione e la riga si cancella, e si passa al successivo.
+// Se in testa c'è la riga "finalize" parte il recap.
+// Può esserci più di un server sullo stesso database (es. Render e un server locale): un
+// lock di transazione garantisce che uno solo alla volta faccia questo passo.
+const FLUSH_LOCK_KEY = 771010;
+const finalizing = new Map(); // id riga finalize -> promise
+async function flushInOrder() {
+  const client = await db.connect();
+  const toFinalize = [];
+  try {
+    await client.query('BEGIN');
+    const got = (await client.query('SELECT pg_try_advisory_xact_lock($1) AS ok', [FLUSH_LOCK_KEY])).rows[0].ok;
+    if (!got) { await client.query('ROLLBACK'); return; }
+    for (;;) {
+      const heads = await client.query(
+        `SELECT c.* FROM rec_meeting_chunks c
+          WHERE c.seq = (SELECT MIN(c2.seq) FROM rec_meeting_chunks c2
+                          WHERE c2.tenant_id = c.tenant_id AND c2.user_id = c.user_id AND c2.id_calendar = c.id_calendar)`
+      );
+      let progressed = false;
+      for (const head of heads.rows) {
+        if (head.kind === 'audio' && head.state === 'done') {
+          await appendTranscript(client, jobUser(head), head.id_calendar, String(head.result || '').trim() ? head.result : '');
+          await client.query('DELETE FROM rec_meeting_chunks WHERE id = $1', [head.id]);
+          progressed = true;
+        } else if (head.kind === 'finalize' && new Date(head.next_try_at) <= new Date()) {
+          await client.query('DELETE FROM rec_meeting_chunks WHERE id = $1', [head.id]);
+          toFinalize.push(head);
+          progressed = true;
+        }
+      }
+      if (!progressed) break;
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+  // Il recap (lento: chiama l'AI) parte fuori dalla transazione.
+  for (const job of toFinalize) {
+    const p = processFinalize(job).finally(() => finalizing.delete(job.id));
+    finalizing.set(job.id, p);
+  }
+}
+
+// Prenota fino a n blocchi da trascrivere (i più vecchi), marcandoli 'transcribing'.
+// SKIP LOCKED: con più server sullo stesso database nessun blocco viene preso due volte.
+async function claimAudioJobs(n) {
+  if (n <= 0) return [];
   const r = await db.query(
-    `SELECT c.* FROM rec_meeting_chunks c
-      WHERE c.seq = (SELECT MIN(c2.seq) FROM rec_meeting_chunks c2
-                      WHERE c2.tenant_id = c.tenant_id AND c2.user_id = c.user_id AND c2.id_calendar = c.id_calendar)
-        AND c.next_try_at <= NOW()
-      ORDER BY c.seq
-      LIMIT 1`
+    `UPDATE rec_meeting_chunks SET state = 'transcribing', next_try_at = NOW()
+      WHERE id IN (SELECT id FROM rec_meeting_chunks
+                    WHERE kind = 'audio' AND state = 'pending' AND next_try_at <= NOW()
+                    ORDER BY seq LIMIT $1
+                    FOR UPDATE SKIP LOCKED)
+      RETURNING *`,
+    [n]
   );
-  return r.rows[0] || null;
+  return r.rows.sort((a, b) => Number(a.seq) - Number(b.seq));
 }
 
 async function hasPendingJobs() {
@@ -251,68 +431,32 @@ async function hasPendingJobs() {
   return r.rows.length > 0;
 }
 
-async function dropJob(job) {
-  await db.query('DELETE FROM rec_meeting_chunks WHERE id = $1', [job.id]);
+// ----------------------------------------------------------------------------
+// SERVIZI WHISPER: si assegna un blocco solo a un servizio che risponde
+// ----------------------------------------------------------------------------
+// Un server con un servizio spento (es. un server locale senza Whisper avviato) non deve
+// "prendere" blocchi che un altro server potrebbe trascrivere. Il controllo /health ha un
+// timeout lungo perché un servizio Render Free addormentato impiega un minuto a svegliarsi.
+const urlHealth = new Map(); // url -> { ok, until, checking }
+
+function markUrl(url, ok) {
+  urlHealth.set(url, { ok, until: Date.now() + (ok ? 5 * 60 * 1000 : 60 * 1000), checking: false });
 }
 
-async function retryLater(job, error) {
-  const attempts = (Number(job.attempts) || 0) + 1;
-  const waitSec = Math.min(60 * attempts, 15 * 60); // 1, 2, 3 ... fino a 15 minuti
-  await db.query(
-    `UPDATE rec_meeting_chunks
-        SET attempts = $2, last_error = $3, next_try_at = NOW() + ($4 || ' seconds')::interval
-      WHERE id = $1`,
-    [job.id, attempts, encRec(String(error.message || error).slice(0, 500)), String(waitSec)]
-  );
-  console.warn(`[TRASCRIZIONE] ${job.kind} ${job.id_calendar}: tentativo ${attempts}/${MAX_ATTEMPTS} fallito (${error.message}), nuovo tentativo tra ${waitSec}s`);
-}
-
-// Blocco che non si riesce a trascrivere: nella trascrizione resta una nota (niente buchi silenziosi).
-async function markChunkLost(user, job, reason) {
-  try {
-    const cur = await db.query(
-      `SELECT trascrizione FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
-      [user.tenant_id, user.user_id, job.id_calendar]
-    );
-    if (cur.rows.length === 0) return;
-    const note = `${job.start_label ? `\n--- ${job.start_label} ---\n` : ''}[${hhmmss(job.offset_sec)}] (blocco audio non trascritto: ${String(reason).slice(0, 150)})\n`;
-    await db.query(
-      `UPDATE rec_meeting SET trascrizione = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
-      [encRec((cur.rows[0].trascrizione || '') + note), user.tenant_id, user.user_id, job.id_calendar]
-    );
-  } catch (e) { /* la nota è facoltativa */ }
-}
-
-async function processJob(job) {
-  const user = { tenant_id: job.tenant_id, user_id: job.user_id, email: job.user_email };
-  try {
-    if (job.kind === 'finalize') {
-      const t = await db.query(
-        `SELECT (trascrizione IS NOT NULL AND BTRIM(trascrizione) <> '') AS has_tr FROM rec_meeting
-          WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
-        [user.tenant_id, user.user_id, job.id_calendar]
-      );
-      if (t.rows[0] && t.rows[0].has_tr) await generateRecap(user, job.id_calendar);
-    } else {
-      // Lettura dal pool con decifratura automatica: l'audio torna base64 in chiaro.
-      const mic = job.audio_mic ? Buffer.from(job.audio_mic, 'base64') : null;
-      const sys = job.audio_system ? Buffer.from(job.audio_system, 'base64') : null;
-      const n = await transcribeChunkInto(user, job.id_calendar, {
-        mic, sys, mime: job.mime || 'audio/wav', offset: job.offset_sec, startLabel: job.start_label
+function urlReady(url) {
+  const h = urlHealth.get(url);
+  if (h && h.until > Date.now()) return h.ok;
+  if (!h || !h.checking) {
+    urlHealth.set(url, { ok: false, until: 0, checking: true });
+    fetch(`${url}/health`, { signal: AbortSignal.timeout(90000) })
+      .then((r) => r.ok)
+      .catch(() => false)
+      .then((ok) => {
+        markUrl(url, ok);
+        if (!ok) console.warn(`[TRASCRIZIONE] servizio Whisper non raggiungibile: ${url}`);
       });
-      console.log(`[TRASCRIZIONE] ✓ ${job.id_calendar} blocco da ${hhmmss(job.offset_sec)}: ${n} frasi`);
-    }
-    await dropJob(job);
-  } catch (error) {
-    const attempts = (Number(job.attempts) || 0) + 1;
-    if (isTemporary(error) && attempts < MAX_ATTEMPTS) {
-      await retryLater(job, error);
-      return;
-    }
-    console.error(`❌ [TRASCRIZIONE] ${job.kind} ${job.id_calendar} abbandonato: ${error.message}`);
-    if (job.kind === 'audio') await markChunkLost(user, job, error.message);
-    await dropJob(job);
   }
+  return false;
 }
 
 // ----------------------------------------------------------------------------
@@ -321,6 +465,8 @@ async function processJob(job) {
 
 let workerRunning = false;
 let keepAliveTimer = null;
+const busyUrls = new Set();   // servizi Whisper occupati
+const inflight = new Map();   // id blocco -> promise della trascrizione
 
 // Finché la coda lavora, il server chiama il proprio indirizzo pubblico: per Render è
 // traffico in ingresso, quindi il servizio Free non si spegne a metà (anche a pagina chiusa).
@@ -343,6 +489,11 @@ async function cleanupStale() {
     [String(STALE_HOURS)]
   );
   if (r.rowCount) console.warn(`[TRASCRIZIONE] scartati ${r.rowCount} blocchi più vecchi di ${STALE_HOURS} ore`);
+  // Blocchi rimasti "in trascrizione" da molto (server riavviato a metà): di nuovo in attesa.
+  await db.query(
+    `UPDATE rec_meeting_chunks SET state = 'pending'
+      WHERE state = 'transcribing' AND next_try_at < NOW() - interval '15 minutes'`
+  );
 }
 
 async function runWorker() {
@@ -352,14 +503,38 @@ async function runWorker() {
   try {
     await cleanupStale();
     for (;;) {
-      const job = await nextJob();
-      if (job) { await processJob(job); continue; }
-      if (!(await hasPendingJobs())) break;               // coda vuota: fine
-      await new Promise((r) => setTimeout(r, IDLE_POLL_MS)); // solo blocchi in attesa di nuovo tentativo
+      await flushInOrder();
+
+      const urls = whisperUrls();
+      if (urls.length) {
+        // Un blocco per ogni servizio Whisper libero e raggiungibile: lavorano in parallelo.
+        const free = urls.filter((u) => !busyUrls.has(u) && urlReady(u));
+        const jobs = await claimAudioJobs(free.length);
+        jobs.forEach((job, i) => {
+          const url = free[i];
+          busyUrls.add(url);
+          const p = processAudioJob(job, url).finally(() => { busyUrls.delete(url); inflight.delete(job.id); });
+          inflight.set(job.id, p);
+        });
+      } else {
+        // Nessun servizio configurato: i blocchi vengono chiusi con una nota (non restano in coda).
+        const orphan = await claimAudioJobs(50);
+        for (const job of orphan) await processAudioJob(job, null);
+      }
+
+      if (!inflight.size && !finalizing.size && !(await hasPendingJobs())) break; // coda vuota: fine
+      // Si riparte appena finisce una trascrizione o un recap, o dopo qualche secondo (blocchi
+      // in attesa di un nuovo tentativo o servizi che si stanno svegliando).
+      await Promise.race([
+        ...inflight.values(),
+        ...finalizing.values(),
+        new Promise((r) => setTimeout(r, 5000))
+      ]);
     }
   } catch (error) {
     // Tabella non ancora creata o database non raggiungibile: si riproverà al prossimo avvio/blocco.
     if (!/rec_meeting_chunks/.test(error.message || '')) console.error('❌ [TRASCRIZIONE] coda:', error.message);
+    await Promise.allSettled([...inflight.values(), ...finalizing.values()]);
   } finally {
     workerRunning = false;
     stopKeepAlive();
