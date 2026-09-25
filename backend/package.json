@@ -21,12 +21,17 @@
     "@anthropic-ai/sdk": "^0.128.0",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
+    "docx": "^9.7.2",
     "dotenv": "^16.3.1",
+    "exceljs": "^4.4.0",
     "express": "^4.22.3",
     "jsonwebtoken": "^9.0.3",
+    "mammoth": "^1.12.3",
     "node-ical": "^0.27.2",
     "nodemailer": "^9.1.1",
+    "pdfkit": "^0.20.2",
     "pg": "^8.8.0",
+    "unpdf": "^1.8.1",
     "uuid": "^11.1.1"
   },
   "devDependencies": {

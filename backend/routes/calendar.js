@@ -19,7 +19,7 @@ import ical from 'node-ical';
 import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
 import {
-  encRec, enqueueChunk, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset
+  encRec, enqueueChunk, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices
 } from '../jobs/meetingTranscription.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -783,6 +783,8 @@ router.get('/meetings/managed/offset', requireAuth, async (req, res) => {
   try {
     const idCalendar = String(req.query.id_calendar || '').trim();
     if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    // Chiamato all'avvio della registrazione: si svegliano subito i servizi Whisper.
+    warmWhisperServices();
     const r = await db.query(
       `SELECT trascrizione FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
       [req.user.tenant_id, req.user.user_id, idCalendar]

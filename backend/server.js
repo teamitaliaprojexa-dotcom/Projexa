@@ -1169,8 +1169,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     const result = await db.query(
       `SELECT ${selectList}
        FROM "${tableName}" src${joinClause}
-       WHERE src.tenant_id = $1 AND src.user_id = $2${clientFilter}${projectFilter}${expiryFilter}${extraCondition}${orderBy}
-       LIMIT 100`,
+       WHERE src.tenant_id = $1 AND src.user_id = $2${clientFilter}${projectFilter}${expiryFilter}${extraCondition}${orderBy}`,
       queryParams
     );
     // Formato oggetto uniforme per tutte le sorgenti: righe, colonne effettivamente

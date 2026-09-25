@@ -16,6 +16,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getIntegration, saveIntegration, deleteIntegration } from '../config/integrations.js';
+import { prepareAttachments, attachmentsText, pdfToText, EXPORT_FORMATS } from '../config/aiAttachments.js';
 
 const router = express.Router();
 
@@ -94,19 +95,37 @@ async function readJson(response, label) {
 // ==========================================
 // CHIAMATE AI FORNITORI
 // ==========================================
+//
+// atts (facoltativo): allegati preparati da prepareAttachments (config/aiAttachments.js).
+// Immagini e PDF vanno al fornitore così come sono; Word/Excel/testo come testo prima
+// della richiesta. Senza allegati le chiamate restano identiche a prima.
+
+function promptWithText(prompt, atts) {
+  const files = attachmentsText(atts || []);
+  return files ? `${files}\n\n${prompt}` : prompt;
+}
 
 // --- Claude (SDK ufficiale Anthropic) ---
 // fallbacks "default": se la richiesta viene rifiutata dai filtri di sicurezza, l'API la
 // ripete automaticamente su un modello alternativo (server-side, nessuna lista da gestire).
-async function askClaude(apiKey, prompt) {
+async function askClaude(apiKey, prompt, atts = []) {
   const client = new Anthropic({ apiKey, timeout: 120000, maxRetries: 1 });
+  const binary = atts.filter((a) => a.kind === 'image' || a.kind === 'pdf');
+  const content = binary.length
+    ? [
+        ...binary.map((a) => (a.kind === 'image'
+          ? { type: 'image', source: { type: 'base64', media_type: a.mime, data: a.data } }
+          : { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: a.data }, title: a.name })),
+        { type: 'text', text: promptWithText(prompt, atts) }
+      ]
+    : promptWithText(prompt, atts);
   try {
     const response = await client.beta.messages.create({
       model: PROVIDERS.claude.model,
       max_tokens: 16000,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
-      messages: [{ role: 'user', content: prompt }]
+      messages: [{ role: 'user', content }]
     });
     if (response.stop_reason === 'refusal') {
       throw httpError(422, 'Claude ha rifiutato la richiesta' + (response.stop_details && response.stop_details.explanation ? `: ${response.stop_details.explanation}` : ''));
@@ -136,12 +155,35 @@ async function verifyClaudeKey(apiKey) {
 // --- ChatGPT (OpenAI) e Mistral: stesso formato "chat completions" ---
 const CHAT_COMPLETIONS_BASE = { chatgpt: 'https://api.openai.com/v1', mistral: 'https://api.mistral.ai/v1' };
 
-async function askChatCompletions(key, apiKey, prompt) {
+async function askChatCompletions(key, apiKey, prompt, atts = []) {
   const cfg = PROVIDERS[key];
+  // Mistral non legge i PDF nella chat: se ne estrae il testo (i PDF scansionati, senza
+  // testo, restano illeggibili). ChatGPT li riceve come file.
+  let list = atts;
+  if (key === 'mistral' && atts.some((a) => a.kind === 'pdf')) {
+    list = [];
+    for (const a of atts) {
+      if (a.kind !== 'pdf') { list.push(a); continue; }
+      const text = await pdfToText(a).catch(() => '');
+      list.push({ kind: 'text', name: a.name, text: text || '[PDF senza testo leggibile (probabilmente una scansione)]' });
+    }
+  }
+  const binary = list.filter((a) => a.kind === 'image' || a.kind === 'pdf');
+  const text = promptWithText(prompt, list);
+  const content = binary.length
+    ? [
+        { type: 'text', text },
+        ...binary.map((a) => {
+          const dataUrl = `data:${a.mime};base64,${a.data}`;
+          if (a.kind === 'pdf') return { type: 'file', file: { filename: a.name, file_data: dataUrl } };
+          return key === 'mistral' ? { type: 'image_url', image_url: dataUrl } : { type: 'image_url', image_url: { url: dataUrl } };
+        })
+      ]
+    : text;
   const send = async () => readJson(await callApi(`${CHAT_COMPLETIONS_BASE[key]}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: prompt }] })
+    body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content }] })
   }, cfg.label), cfg.label);
   let data;
   try {
@@ -166,21 +208,25 @@ async function verifyChatCompletionsKey(key, apiKey) {
 }
 
 // --- Gemini (Google AI Studio, Generative Language API) ---
-async function geminiGenerate(apiKey, model, prompt) {
+async function geminiGenerate(apiKey, model, prompt, atts = []) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const parts = [
+    ...atts.filter((a) => a.kind === 'image' || a.kind === 'pdf').map((a) => ({ inline_data: { mime_type: a.mime, data: a.data } })),
+    { text: promptWithText(prompt, atts) }
+  ];
   return readJson(await callApi(url, {
     method: 'POST',
     headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] })
+    body: JSON.stringify({ contents: [{ role: 'user', parts }] })
   }, 'Gemini'), 'Gemini');
 }
 
 // model: di norma quello configurato; per il ripiego su un modello più leggero
 // (Gemini sovraccarico, vedi askAiProvider) se ne passa un altro.
-async function askGemini(apiKey, prompt, model = null) {
+async function askGemini(apiKey, prompt, model = null, atts = []) {
   let data;
   try {
-    data = await geminiGenerate(apiKey, model || PROVIDERS.gemini.model, prompt);
+    data = await geminiGenerate(apiKey, model || PROVIDERS.gemini.model, prompt, atts);
   } catch (error) {
     if (model) throw error;
     // Modello ritirato: Google risponde 404 indicando il sostituto ("use models/<nuovo>").
@@ -189,14 +235,22 @@ async function askGemini(apiKey, prompt, model = null) {
     if (!m) throw error;
     console.warn(`[AI] Modello Gemini ${PROVIDERS.gemini.model} ritirato: uso ${m[1]} (aggiornare GEMINI_MODEL)`);
     PROVIDERS.gemini.model = m[1];
-    data = await geminiGenerate(apiKey, PROVIDERS.gemini.model, prompt);
+    data = await geminiGenerate(apiKey, PROVIDERS.gemini.model, prompt, atts);
   }
   const cand = (data.candidates || [])[0] || {};
-  const text = ((cand.content && cand.content.parts) || []).map((p) => p.text || '').join('').trim();
-  if (!text && data.promptFeedback && data.promptFeedback.blockReason) {
+  const parts = (cand.content && cand.content.parts) || [];
+  const text = parts.map((p) => p.text || '').join('').trim();
+  // Immagini generate (modelli Gemini che producono immagini): restituite come file da scaricare.
+  const files = parts.map((p) => p.inlineData || p.inline_data).filter((d) => d && d.data)
+    .map((d, i) => {
+      const mime = d.mimeType || d.mime_type || 'application/octet-stream';
+      const ext = (mime.split('/')[1] || 'bin').replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '');
+      return { name: `immagine-${i + 1}.${ext}`, mime, data: d.data };
+    });
+  if (!text && !files.length && data.promptFeedback && data.promptFeedback.blockReason) {
     throw httpError(422, `Gemini ha bloccato la richiesta (${data.promptFeedback.blockReason})`);
   }
-  return { text, truncated: cand.finishReason === 'MAX_TOKENS' };
+  return { text, files, truncated: cand.finishReason === 'MAX_TOKENS' };
 }
 
 async function verifyGeminiKey(apiKey) {
@@ -207,10 +261,10 @@ async function verifyGeminiKey(apiKey) {
 }
 
 const ASK = {
-  chatgpt: (k, p) => askChatCompletions('chatgpt', k, p),
-  mistral: (k, p) => askChatCompletions('mistral', k, p),
-  claude: askClaude,
-  gemini: askGemini
+  chatgpt: (k, p, a) => askChatCompletions('chatgpt', k, p, a || []),
+  mistral: (k, p, a) => askChatCompletions('mistral', k, p, a || []),
+  claude: (k, p, a) => askClaude(k, p, a || []),
+  gemini: (k, p, a) => askGemini(k, p, null, a || [])
 };
 const VERIFY = {
   chatgpt: (k) => verifyChatCompletionsKey('chatgpt', k),
@@ -277,11 +331,37 @@ router.post('/:provider/disconnect', requireAuth, requireProvider, async (req, r
   }
 });
 
+// Pulsante "Scarica" della finestra AI: genera al volo il file (Word, PDF, Excel, testo)
+// dal testo della risposta e lo restituisce al browser. Nulla viene salvato sul server.
+router.post('/export', requireAuth, async (req, res) => {
+  try {
+    const format = String((req.body && req.body.format) || '').toLowerCase();
+    const fmt = Object.prototype.hasOwnProperty.call(EXPORT_FORMATS, format) ? EXPORT_FORMATS[format] : null;
+    if (!fmt) return res.status(400).json({ error: 'Formato non supportato' });
+    const text = String((req.body && req.body.text) || '');
+    if (!text.trim()) return res.status(400).json({ error: 'Nessun testo da scaricare' });
+    if (text.length > 2000000) return res.status(413).json({ error: 'Testo troppo lungo' });
+    const title = String((req.body && req.body.title) || 'Risposta AI').replace(/[\r\n]/g, ' ').slice(0, 150);
+    const buffer = await fmt.build(text, title);
+    const fileName = `${title.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Risposta AI'}.${format}`;
+    res.setHeader('Content-Type', fmt.mime);
+    res.setHeader('Content-Disposition', `attachment; filename="export.${format}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buffer);
+  } catch (error) {
+    console.error('❌ AI_EXPORT:', error.message);
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
 // Invia una richiesta (una domanda, una risposta) al fornitore con la chiave dell'utente.
 router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) => {
   const cfg = req.aiProvider;
   try {
-    const prompt = String((req.body && req.body.prompt) || '').trim();
+    // Allegati: solo in memoria per la durata della richiesta, mai salvati.
+    const atts = await prepareAttachments(req.body && req.body.files);
+    let prompt = String((req.body && req.body.prompt) || '').trim();
+    if (!prompt && atts.length) prompt = atts.length > 1 ? 'Analizza i file allegati.' : 'Analizza il file allegato.';
     if (!prompt) return res.status(400).json({ error: 'Scrivi una richiesta' });
     if (prompt.length > MAX_PROMPT_CHARS) return res.status(400).json({ error: `Richiesta troppo lunga (max ${MAX_PROMPT_CHARS} caratteri)` });
 
@@ -289,8 +369,8 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
     const apiKey = el[`${cfg.prefix}_api_key`];
     if (!apiKey) return res.status(428).json({ error: `${cfg.label} non collegato: attivalo da Impostazioni › AI`, code: 'AI_NOT_CONNECTED' });
 
-    const result = await ASK[req.params.provider](apiKey, prompt);
-    res.json({ provider: req.params.provider, model: cfg.model, text: result.text, truncated: !!result.truncated });
+    const result = await ASK[req.params.provider](apiKey, prompt, atts);
+    res.json({ provider: req.params.provider, model: cfg.model, text: result.text, files: result.files || [], truncated: !!result.truncated });
   } catch (error) {
     console.error(`❌ AI_CHAT (${req.params.provider}):`, error.message);
     res.status(error.status || 500).json({ error: error.message });

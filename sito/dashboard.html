@@ -699,6 +699,46 @@
             border-radius: 10px 0 0 10px;
         }
         .type11-grid-table th:last-child { border-radius: 0 10px 10px 0; }
+        /* Ordinamento (clic sull'intestazione) e riga dei filtri sotto le intestazioni */
+        .type11-grid-table th.type11-sortable { cursor: pointer; user-select: none; }
+        .type11-grid-table th.type11-sortable:hover { filter: brightness(1.08); }
+        .type11-grid-table th.type11-sorted { background: linear-gradient(135deg, #4f6688, #6f86a6); }
+        .type11-sort-ind { font-size: 0.7rem; }
+        .type11-grid-table .type11-filter-row th {
+            background: #e9eef5;
+            padding: 0.25rem 0.3rem;
+            box-shadow: inset -1px 0 #ffffff;
+            border-radius: 0;
+            z-index: 2;
+        }
+        .type11-grid-table .type11-filter-row th:first-child { border-radius: 8px 0 0 8px; }
+        .type11-grid-table .type11-filter-row th:last-child { border-radius: 0 8px 8px 0; }
+        .type11-filter-box { display: flex; gap: 2px; min-width: 0; }
+        .type11-filter-op {
+            flex: 0 0 30px;
+            width: 30px;
+            padding: 0 2px;
+            font-size: 0.72rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 5px;
+            background: #fff;
+            color: #334155;
+            cursor: pointer;
+        }
+        .type11-filter-val {
+            flex: 1 1 auto;
+            min-width: 0;
+            width: 100%;
+            padding: 0.2rem 0.35rem;
+            font-size: 0.75rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 5px;
+            background: #fff;
+            color: #111827;
+        }
+        .type11-filter-val:disabled { background: #f1f5f9; }
+        .type11-grid-count { font-size: 0.75rem; color: #64748b; padding: 0.2rem 0.4rem 0; }
+        .type11-grid-count a { color: #1d4ed8; }
         .type11-grid-table th:not(:first-child),
         .type11-grid-table td:not(:first-child) { text-align: center; }
         .type11-grid-table tbody td {
@@ -2340,6 +2380,34 @@
         .ai-chat-answer:empty::before { content: 'La risposta comparirà qui.'; color: var(--text-muted); }
         .ai-chat-answer.ai-chat-error { background: #FEF2F2; border-color: #FECACA; color: #B91C1C; }
         .ai-chat-wait { color: var(--text-muted); }
+        /* Allegati in ingresso (chip con nome e X) e file generati dall'AI */
+        .ai-chat-files { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+        .ai-chat-files:empty { display: none; }
+        .ai-chat-file {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            max-width: 100%; padding: 0.25rem 0.6rem;
+            border: 1px solid var(--border); border-radius: 999px;
+            background: #EEF2FF; color: var(--dark); font-size: 0.8rem;
+        }
+        .ai-chat-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+        .ai-chat-file small { color: var(--text-muted); }
+        .ai-chat-file button { border: none; background: transparent; color: #B91C1C; cursor: pointer; padding: 0 0.1rem; }
+        a.ai-chat-file { text-decoration: none; background: #ECFDF5; }
+        #aiChatModal .task-modal-card.ai-chat-dragover { outline: 3px dashed #6366F1; outline-offset: -6px; }
+        .ai-chat-dl { position: relative; }
+        .ai-chat-dl button:disabled { opacity: 0.45; cursor: default !important; }
+        .ai-chat-dl-menu {
+            display: none; position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 20;
+            min-width: 170px; padding: 0.3rem; border: 1px solid var(--border); border-radius: 8px;
+            background: white; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+        }
+        .ai-chat-dl-menu.open { display: block; }
+        .ai-chat-dl-menu button {
+            display: flex; align-items: center; gap: 0.5rem; width: 100%;
+            padding: 0.45rem 0.6rem; border: none; border-radius: 6px;
+            background: transparent; color: var(--dark); font-size: 0.85rem; text-align: left; cursor: pointer;
+        }
+        .ai-chat-dl-menu button:hover { background: #F3F4F6; }
 
         /* Collega / Scollega calendario nel flyout Impostazioni › Calendar */
         .calendar-conn {
@@ -6869,27 +6937,123 @@
             document.getElementById('aiChatModal').classList.remove('open');
         }
 
+        // Allegati della richiesta: restano solo nel browser finché non si invia; il server
+        // li usa per la chiamata all'AI e li scarta (nessun salvataggio).
+        const AI_ATTACH_MAX_FILES = 5;
+        const AI_ATTACH_MAX_BYTES = 10 * 1024 * 1024;
+        const AI_ATTACH_EXT = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'docx', 'xlsx', 'txt', 'csv', 'tsv', 'md', 'json', 'vtt', 'srt', 'xml', 'html', 'htm', 'log', 'sql', 'js', 'ts', 'py', 'css', 'yaml', 'yml', 'ini'];
+        let aiChatAttachments = [];   // File selezionati
+        let aiChatLastAnswer = null;  // { text, label } per il pulsante Scarica
+
+        function aiFormatSize(bytes) {
+            return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+        }
+
+        function renderAiChatAttachments() {
+            const box = document.getElementById('aiChatFiles');
+            if (!box) return;
+            box.innerHTML = aiChatAttachments.map((f, i) => `<span class="ai-chat-file" title="${escapeHtml(f.name)}"><i class="fas fa-paperclip"></i><span>${escapeHtml(f.name)}</span><small>${aiFormatSize(f.size)}</small><button type="button" data-ai-remove="${i}" aria-label="Rimuovi ${escapeHtml(f.name)}"><i class="fas fa-times"></i></button></span>`).join('');
+        }
+
+        function addAiChatFiles(fileList) {
+            for (const file of [...(fileList || [])]) {
+                const ext = (/\.([a-z0-9]+)$/i.exec(file.name) || [])[1]?.toLowerCase() || '';
+                if (!AI_ATTACH_EXT.includes(ext)) { showNotification(`Tipo di file non supportato: ${file.name}`, 'info'); continue; }
+                if (aiChatAttachments.length >= AI_ATTACH_MAX_FILES) { showNotification(`Massimo ${AI_ATTACH_MAX_FILES} allegati`, 'info'); break; }
+                const total = aiChatAttachments.reduce((t, f) => t + f.size, 0) + file.size;
+                if (total > AI_ATTACH_MAX_BYTES) { showNotification('Allegati troppo grandi (massimo 10 MB in tutto)', 'info'); continue; }
+                if (aiChatAttachments.some(f => f.name === file.name && f.size === file.size)) continue;
+                aiChatAttachments.push(file);
+            }
+            renderAiChatAttachments();
+            document.getElementById('aiChatPrompt')?.focus(); // così Invio invia subito
+        }
+
+        function readFileBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+                reader.onerror = () => reject(new Error(`Impossibile leggere ${file.name}`));
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // File prodotti dall'AI (es. immagini generate): link di download creati nel browser.
+        function renderAiChatOutFiles(files) {
+            const box = document.getElementById('aiChatOutFiles');
+            if (!box) return;
+            box.querySelectorAll('a[href^="blob:"]').forEach(a => URL.revokeObjectURL(a.href));
+            box.innerHTML = '';
+            (files || []).forEach(f => {
+                try {
+                    const bytes = Uint8Array.from(atob(f.data), c => c.charCodeAt(0));
+                    const a = document.createElement('a');
+                    a.className = 'ai-chat-file';
+                    a.href = URL.createObjectURL(new Blob([bytes], { type: f.mime || 'application/octet-stream' }));
+                    a.download = f.name || 'file';
+                    a.innerHTML = `<i class="fas fa-download"></i><span>${escapeHtml(f.name || 'file')}</span>`;
+                    box.appendChild(a);
+                } catch { /* file non valido: ignorato */ }
+            });
+        }
+
+        async function downloadAiAnswer(format) {
+            document.getElementById('aiChatDownloadMenu')?.classList.remove('open');
+            if (!aiChatLastAnswer || !aiChatLastAnswer.text) return;
+            const stamp = new Date().toLocaleString('it-IT', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).replace(/[/:]/g, '-').replace(', ', ' ');
+            const title = `Risposta ${aiChatLastAnswer.label} ${stamp}`;
+            try {
+                const res = await fetch(`${API_URL}/ai/export`, {
+                    method: 'POST',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: aiChatLastAnswer.text, format, title })
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.error || `Errore ${res.status}`);
+                }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${title}.${format}`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 10000);
+            } catch (e) {
+                showNotification('Download non riuscito: ' + e.message, 'info');
+            }
+        }
+
         async function sendAiChat() {
             const key = aiChatProvider;
             const promptEl = document.getElementById('aiChatPrompt');
             const answerEl = document.getElementById('aiChatAnswer');
             const sendBtn = document.getElementById('aiChatSend');
+            const downloadBtn = document.getElementById('aiChatDownload');
             const prompt = promptEl.value.trim();
-            if (!key || !prompt) return;
+            if (!key || sendBtn.disabled || (!prompt && !aiChatAttachments.length)) return;
             sendBtn.disabled = true;
             answerEl.classList.remove('ai-chat-error');
-            answerEl.innerHTML = '<span class="ai-chat-wait"><i class="fas fa-spinner fa-spin"></i> In attesa della risposta…</span>';
+            answerEl.innerHTML = `<span class="ai-chat-wait"><i class="fas fa-spinner fa-spin"></i> ${aiChatAttachments.length ? 'Invio degli allegati e attesa della risposta…' : 'In attesa della risposta…'}</span>`;
+            renderAiChatOutFiles([]);
             try {
+                const files = [];
+                for (const f of aiChatAttachments) files.push({ name: f.name, data: await readFileBase64(f) });
                 const res = await fetch(`${API_URL}/ai/${key}/chat`, {
                     method: 'POST',
                     headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt })
+                    body: JSON.stringify(files.length ? { prompt, files } : { prompt })
                 });
                 const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                if (!res.ok) throw new Error(data.error || (res.status === 413 ? 'Allegati troppo grandi' : `Errore ${res.status}`));
                 // Testo semplice: nessun HTML interpretato, a capo preservati dal CSS.
-                answerEl.textContent = data.text || '(risposta vuota)';
+                answerEl.textContent = data.text || (data.files && data.files.length ? '' : '(risposta vuota)');
                 if (data.truncated) answerEl.textContent += '\n\n[Risposta interrotta per lunghezza massima]';
+                renderAiChatOutFiles(data.files);
+                aiChatLastAnswer = data.text ? { text: data.text, label: (AI_INFO[key] && AI_INFO[key].label) || 'AI' } : null;
+                if (downloadBtn) downloadBtn.disabled = !aiChatLastAnswer;
             } catch (e) {
                 answerEl.classList.add('ai-chat-error');
                 answerEl.textContent = e.message;
@@ -6901,9 +7065,60 @@
         function initAiIntegration() {
             document.getElementById('aiChatSend')?.addEventListener('click', sendAiChat);
             document.getElementById('aiChatClose')?.addEventListener('click', closeAiChat);
-            document.getElementById('aiChatPrompt')?.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendAiChat(); }
+
+            // Tasto Invio: invia la richiesta (testo e/o allegati) ovunque sia il cursore nella
+            // finestra. Maiusc+Invio va a capo nel testo. Sui pulsanti di chiusura e del menu
+            // Scarica, Invio mantiene il suo comportamento normale.
+            const aiModal = document.getElementById('aiChatModal');
+            aiModal?.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.isComposing) return;
+                if (e.target.closest('#aiChatClose, #aiChatDownload, .ai-chat-dl-menu, a, [data-ai-remove]')) return;
+                e.preventDefault();
+                sendAiChat();
             });
+
+            const fileInput = document.getElementById('aiChatFileInput');
+            document.getElementById('aiChatAttach')?.addEventListener('click', () => fileInput?.click());
+            fileInput?.addEventListener('change', () => { addAiChatFiles(fileInput.files); fileInput.value = ''; });
+            document.getElementById('aiChatFiles')?.addEventListener('click', (e) => {
+                const btn = e.target.closest('[data-ai-remove]');
+                if (!btn) return;
+                aiChatAttachments.splice(Number(btn.dataset.aiRemove), 1);
+                renderAiChatAttachments();
+                document.getElementById('aiChatPrompt')?.focus();
+            });
+            // Trascina i file sulla finestra oppure incolla un'immagine (Ctrl+V) nel testo.
+            const card = aiModal?.querySelector('.task-modal-card');
+            card?.addEventListener('dragover', (e) => {
+                if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+                e.preventDefault();
+                card.classList.add('ai-chat-dragover');
+            });
+            card?.addEventListener('dragleave', (e) => { if (!card.contains(e.relatedTarget)) card.classList.remove('ai-chat-dragover'); });
+            card?.addEventListener('drop', (e) => {
+                if (!e.dataTransfer?.files?.length) return;
+                e.preventDefault();
+                card.classList.remove('ai-chat-dragover');
+                addAiChatFiles(e.dataTransfer.files);
+            });
+            document.getElementById('aiChatPrompt')?.addEventListener('paste', (e) => {
+                const pasted = [...(e.clipboardData?.files || [])];
+                if (!pasted.length) return;
+                e.preventDefault();
+                const stamp = Date.now();
+                addAiChatFiles(pasted.map((f, i) => (f.name && f.name !== 'image.png') ? f
+                    : new File([f], `immagine-incollata-${stamp}${i ? '-' + i : ''}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, { type: f.type })));
+            });
+
+            // Pulsante Scarica: menu dei formati; il file viene generato dal server al momento.
+            const dlBtn = document.getElementById('aiChatDownload');
+            const dlMenu = document.getElementById('aiChatDownloadMenu');
+            dlBtn?.addEventListener('click', (e) => { e.stopPropagation(); if (!dlBtn.disabled) dlMenu?.classList.toggle('open'); });
+            dlMenu?.addEventListener('click', (e) => {
+                const item = e.target.closest('[data-ai-export]');
+                if (item) downloadAiAnswer(item.dataset.aiExport);
+            });
+            document.addEventListener('click', (e) => { if (!e.target.closest('.ai-chat-dl')) dlMenu?.classList.remove('open'); });
             document.getElementById('aiChatCopy')?.addEventListener('click', () => {
                 const t = document.getElementById('aiChatAnswer').textContent;
                 if (t && navigator.clipboard) navigator.clipboard.writeText(t).then(() => showNotification('Risposta copiata', 'success')).catch(() => {});
@@ -10756,6 +10971,152 @@
             return { ok: true, updated };
         }
 
+        // Filtri disponibili sotto le intestazioni delle griglie (tipo 11 e 13).
+        const TYPE11_FILTER_OPS = [
+            { value: 'contains', symbol: '∋', label: 'contiene' },
+            { value: 'notcontains', symbol: '∌', label: 'non contiene' },
+            { value: 'eq', symbol: '=', label: 'uguale a' },
+            { value: 'neq', symbol: '≠', label: 'diverso da' },
+            { value: 'starts', symbol: 'A…', label: 'inizia con' },
+            { value: 'ends', symbol: '…Z', label: 'finisce con' },
+            { value: 'gt', symbol: '>', label: 'maggiore di' },
+            { value: 'lt', symbol: '<', label: 'minore di' },
+            { value: 'empty', symbol: '∅', label: 'vuoto' },
+            { value: 'notempty', symbol: '≠∅', label: 'non vuoto' }
+        ];
+
+        // Confronto "naturale": numeri come numeri (anche con la virgola decimale),
+        // date ISO e testo in ordine alfabetico senza distinzione di maiuscole.
+        function type11CompareValues(a, b) {
+            const num = v => {
+                const t = String(v ?? '').trim().replace(/\s/g, '');
+                if (!/^-?\d+([.,]\d+)?$/.test(t)) return null;
+                return Number(t.replace(',', '.'));
+            };
+            const na = num(a), nb = num(b);
+            if (na !== null && nb !== null) return na - nb;
+            return String(a ?? '').localeCompare(String(b ?? ''), 'it', { numeric: true, sensitivity: 'base' });
+        }
+
+        function type11MatchesFilter(value, op, needle) {
+            const text = String(value ?? '').trim();
+            const t = text.toLocaleLowerCase('it-IT');
+            const n = String(needle ?? '').trim().toLocaleLowerCase('it-IT');
+            switch (op) {
+                case 'empty': return text === '';
+                case 'notempty': return text !== '';
+            }
+            if (!n) return true; // filtro senza testo = nessun filtro
+            switch (op) {
+                case 'notcontains': return !t.includes(n);
+                case 'eq': return t === n;
+                case 'neq': return t !== n;
+                case 'starts': return t.startsWith(n);
+                case 'ends': return t.endsWith(n);
+                case 'gt': return text !== '' && type11CompareValues(text, needle) > 0;
+                case 'lt': return text !== '' && type11CompareValues(text, needle) < 0;
+                default: return t.includes(n);
+            }
+        }
+
+        // Filtri e ordinamento lato browser: il server restituisce tutte le righe.
+        // Lo stato resta sul widget, così sopravvive al ricaricamento dopo un salvataggio.
+        function type11SetupView(widget, records, columns, displayedValue) {
+            const state = widget._type11View || (widget._type11View = { filters: {}, sort: null });
+            const table = widget.querySelector('.type11-grid-table');
+            const tbody = table && table.querySelector('tbody');
+            if (!table || !tbody) return;
+            const countEl = widget.querySelector('.type11-grid-count');
+
+            // I filtri restano visibili sotto l'intestazione anche scorrendo la griglia.
+            const headRow = table.querySelector('.type11-head-row');
+            const filterRow = table.querySelector('.type11-filter-row');
+            const stickFilters = () => {
+                if (!headRow || !filterRow) return;
+                const top = filterRow.offsetTop - headRow.offsetTop;
+                filterRow.querySelectorAll('th').forEach(th => { th.style.top = top + 'px'; });
+            };
+
+            const apply = () => {
+                const rows = [...tbody.querySelectorAll('tr[data-type11-index]')];
+                const active = Object.entries(state.filters).filter(([col, f]) =>
+                    columns.includes(col) && f && (f.op === 'empty' || f.op === 'notempty' || String(f.val || '').trim()));
+                let shown = 0;
+                rows.forEach(row => {
+                    const record = records[Number(row.dataset.type11Index)];
+                    const ok = !record || active.every(([col, f]) => type11MatchesFilter(displayedValue(record, col), f.op, f.val));
+                    row.style.display = ok ? '' : 'none';
+                    if (ok) shown++;
+                });
+
+                const sort = state.sort && columns.includes(state.sort.col) ? state.sort : null;
+                // Con un ordinamento attivo il raggruppamento a colori non riordina le righe.
+                table.dataset.type11Sorted = sort ? '1' : '';
+                const ordered = rows.slice().sort((ra, rb) => {
+                    const ia = Number(ra.dataset.type11Index), ib = Number(rb.dataset.type11Index);
+                    if (!sort) return ia - ib;
+                    const c = type11CompareValues(displayedValue(records[ia], sort.col), displayedValue(records[ib], sort.col));
+                    return (sort.dir === 'desc' ? -c : c) || ia - ib;
+                });
+                ordered.forEach(row => tbody.appendChild(row));
+                if (!sort && typeof window.applyType11GridGrouping === 'function') window.applyType11GridGrouping();
+
+                table.querySelectorAll('th.type11-sortable').forEach(th => {
+                    const on = sort && th.dataset.sortCol === sort.col;
+                    th.classList.toggle('type11-sorted', !!on);
+                    const ind = th.querySelector('.type11-sort-ind');
+                    if (ind) ind.textContent = on ? (sort.dir === 'desc' ? ' ▼' : ' ▲') : '';
+                });
+                if (countEl) {
+                    countEl.innerHTML = rows.length
+                        ? `${shown === rows.length ? `${rows.length} righe` : `${shown} di ${rows.length} righe`}`
+                          + (active.length || sort ? ' · <a href="#" class="type11-reset-view">Azzera filtri e ordinamento</a>' : '')
+                        : '';
+                    countEl.querySelector('.type11-reset-view')?.addEventListener('click', event => {
+                        event.preventDefault();
+                        state.filters = {};
+                        state.sort = null;
+                        table.querySelectorAll('.type11-filter-op').forEach(sel => { sel.value = 'contains'; });
+                        table.querySelectorAll('.type11-filter-val').forEach(input => { input.value = ''; input.disabled = false; });
+                        apply();
+                    });
+                }
+            };
+
+            table.querySelectorAll('.type11-filter-op').forEach(sel => {
+                const col = sel.dataset.filterCol;
+                const input = table.querySelector(`.type11-filter-val[data-filter-col="${CSS.escape(col)}"]`);
+                const saved = state.filters[col];
+                if (saved) { sel.value = saved.op; if (input) input.value = saved.val || ''; }
+                const noValue = () => sel.value === 'empty' || sel.value === 'notempty';
+                if (input) input.disabled = noValue();
+                const update = () => {
+                    if (input) input.disabled = noValue();
+                    state.filters[col] = { op: sel.value, val: input ? input.value : '' };
+                    apply();
+                };
+                sel.addEventListener('change', update);
+                sel.addEventListener('click', event => event.stopPropagation());
+                if (input) {
+                    input.addEventListener('input', update);
+                    input.addEventListener('click', event => event.stopPropagation());
+                    input.addEventListener('keydown', event => event.stopPropagation());
+                }
+            });
+
+            table.querySelectorAll('th.type11-sortable').forEach(th => {
+                th.addEventListener('click', () => {
+                    const col = th.dataset.sortCol;
+                    const cur = state.sort && state.sort.col === col ? state.sort.dir : null;
+                    state.sort = cur === null ? { col, dir: 'asc' } : (cur === 'asc' ? { col, dir: 'desc' } : null);
+                    apply();
+                });
+            });
+
+            apply();
+            requestAnimationFrame(stickFilters);
+        }
+
         async function loadType11Grid(widget) {
             const tableName = String(widget.dataset.gridTable || '').trim();
             const columns = parseType11Columns(widget.dataset.gridColumns);
@@ -10833,8 +11194,15 @@
                     + '</colgroup>';
                 const tableWidth = Math.max(1, columnWidths.reduce((total, width) => total + width, 0) + (canExpire ? 44 : 0));
 
-                const head = visibleColumns.map(column => `<th scope="col"${linkClass(column)} title="${escapeHtml(column)}">${escapeHtml(type11ColumnLabel(column))}</th>`).join('')
+                // Clic sull'intestazione = ordinamento (crescente, decrescente, nessuno);
+                // la seconda riga dell'intestazione contiene i filtri per colonna.
+                const head = visibleColumns.map(column => `<th scope="col"${linkClass(column)} class="type11-sortable" data-sort-col="${escapeHtml(column)}" title="${escapeHtml(column)} – clic per ordinare">${escapeHtml(type11ColumnLabel(column))}<span class="type11-sort-ind"></span></th>`).join('')
                     + (canExpire ? '<th scope="col" class="type11-expire-col" title="Seleziona le righe da chiudere"><i class="fas fa-check-square" aria-hidden="true"></i></th>' : '');
+                const filterHead = visibleColumns.map(column => `<th class="type11-filter-cell"><div class="type11-filter-box">`
+                    + `<select class="type11-filter-op" data-filter-col="${escapeHtml(column)}" title="Tipo di filtro">${TYPE11_FILTER_OPS.map(op => `<option value="${op.value}" title="${escapeHtml(op.label)}">${escapeHtml(op.symbol + ' ' + op.label)}</option>`).join('')}</select>`
+                    + `<input type="text" class="type11-filter-val" data-filter-col="${escapeHtml(column)}" placeholder="Filtra…" aria-label="Filtro ${escapeHtml(type11ColumnLabel(column))}">`
+                    + `</div></th>`).join('')
+                    + (canExpire ? '<th class="type11-filter-cell type11-expire-col"></th>' : '');
                 const body = records.map((record, index) => {
                     const selected = '';
                     return `<tr data-type11-index="${index}"${selected}>` + visibleColumns.map(column => {
@@ -10868,7 +11236,8 @@
                 const emptyRow = records.length
                     ? ''
                     : `<tr class="type11-empty-row"><td colspan="${Math.max(visibleColumns.length + (canExpire ? 1 : 0), 1)}" class="type11-grid-state">Nessun dato</td></tr>`;
-                widget.innerHTML = `${toolbar}<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}" style="width:${tableWidth}px;">${colgroup}<thead><tr>${head}</tr></thead><tbody>${body}${emptyRow}</tbody></table></div>`;
+                widget.innerHTML = `${toolbar}<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}" style="width:${tableWidth}px;">${colgroup}<thead><tr class="type11-head-row">${head}</tr><tr class="type11-filter-row">${filterHead}</tr></thead><tbody>${body}${emptyRow}</tbody></table></div><div class="type11-grid-count"></div>`;
+                type11SetupView(widget, records, visibleColumns, displayedValue);
 
                 // Il click sull'icona apre solo il link: non deve anche selezionare la riga.
                 widget.querySelectorAll('.type11-cell-link').forEach(link =>
@@ -13060,12 +13429,25 @@
                 <button id="aiChatClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
             </div>
             <div style="padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; overflow: auto;">
-                <textarea id="aiChatPrompt" rows="4" placeholder="Scrivi la tua richiesta… (Ctrl+Invio per inviare)" style="width: 100%; resize: vertical; padding: 0.7rem 0.8rem; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 0.9rem;"></textarea>
-                <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                <textarea id="aiChatPrompt" rows="4" placeholder="Scrivi la tua richiesta… (Invio per inviare, Maiusc+Invio per andare a capo). Puoi trascinare qui i file da allegare." style="width: 100%; resize: vertical; padding: 0.7rem 0.8rem; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 0.9rem;"></textarea>
+                <input id="aiChatFileInput" type="file" multiple hidden accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.docx,.xlsx,.txt,.csv,.tsv,.md,.json,.vtt,.srt,.xml,.html,.htm,.log,.sql,.js,.ts,.py,.css,.yaml,.yml,.ini">
+                <div id="aiChatFiles" class="ai-chat-files"></div>
+                <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                    <button id="aiChatAttach" type="button" title="Allega file (immagini, PDF, Word, Excel, testo) – max 5 file, 10 MB in tutto" style="margin-right: auto; padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-paperclip"></i> Allega</button>
                     <button id="aiChatCopy" type="button" style="padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-copy"></i> Copia risposta</button>
+                    <div class="ai-chat-dl">
+                        <button id="aiChatDownload" type="button" disabled style="padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-download"></i> Scarica <i class="fas fa-caret-down"></i></button>
+                        <div id="aiChatDownloadMenu" class="ai-chat-dl-menu" role="menu">
+                            <button type="button" data-ai-export="docx" role="menuitem"><i class="fas fa-file-word" style="color:#2B579A;"></i> Word (.docx)</button>
+                            <button type="button" data-ai-export="pdf" role="menuitem"><i class="fas fa-file-pdf" style="color:#DC2626;"></i> PDF (.pdf)</button>
+                            <button type="button" data-ai-export="xlsx" role="menuitem"><i class="fas fa-file-excel" style="color:#217346;"></i> Excel (.xlsx)</button>
+                            <button type="button" data-ai-export="txt" role="menuitem"><i class="fas fa-file-alt" style="color:#6B7280;"></i> Testo (.txt)</button>
+                        </div>
+                    </div>
                     <button id="aiChatSend" type="button" style="padding: 0.5rem 1.2rem; border: none; border-radius: 8px; background: #6366F1; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-paper-plane"></i> Invia</button>
                 </div>
                 <div id="aiChatAnswer" class="ai-chat-answer" aria-live="polite"></div>
+                <div id="aiChatOutFiles" class="ai-chat-files"></div>
             </div>
         </div>
     </div>
@@ -13243,10 +13625,13 @@
                 orderedRows.push.apply(orderedRows, group);
             });
 
-            orderedRows.forEach(function (row) {
+            // Con un ordinamento scelto dall'utente (clic sull'intestazione) i colori
+            // restano, ma le righe non vengono riordinate per gruppo.
+            const keepOrder = table.dataset.type11Sorted === "1";
+            (keepOrder ? rows : orderedRows).forEach(function (row) {
                 colorClasses.forEach(c => row.classList.remove(c));
                 row.classList.add("group-color-" + groups.get(row.__gridGroupKey));
-                tbody.appendChild(row);
+                if (!keepOrder) tbody.appendChild(row);
             });
         });
     }

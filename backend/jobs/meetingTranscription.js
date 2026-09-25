@@ -448,15 +448,33 @@ function urlReady(url) {
   if (h && h.until > Date.now()) return h.ok;
   if (!h || !h.checking) {
     urlHealth.set(url, { ok: false, until: 0, checking: true });
-    fetch(`${url}/health`, { signal: AbortSignal.timeout(90000) })
-      .then((r) => r.ok)
-      .catch(() => false)
-      .then((ok) => {
-        markUrl(url, ok);
-        if (!ok) console.warn(`[TRASCRIZIONE] servizio Whisper non raggiungibile: ${url}`);
-      });
+    checkUrlHealth(url).then(({ ok, reason }) => {
+      markUrl(url, ok);
+      if (ok) console.log(`[TRASCRIZIONE] servizio Whisper pronto: ${url}`);
+      else console.warn(`[TRASCRIZIONE] servizio Whisper non raggiungibile: ${url} (${reason})`);
+    });
   }
   return false;
+}
+
+// Durante il risveglio di un servizio Render Free le prime richieste possono fallire
+// subito (connessione chiusa, 502/503) invece di attendere: si riprova per circa 3 minuti,
+// finché /health risponde e il modello risulta caricato ("ready": true).
+async function checkUrlHealth(url) {
+  const deadline = Date.now() + 180000;
+  let reason = '';
+  while (Date.now() < deadline) {
+    try {
+      const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(90000) });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok && data.ready !== false) return { ok: true };
+      reason = r.ok ? 'modello in caricamento' : `HTTP ${r.status}`;
+    } catch (error) {
+      reason = error.name === 'TimeoutError' ? 'timeout' : (error.cause && (error.cause.code || error.cause.message)) || error.message;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+  }
+  return { ok: false, reason };
 }
 
 // ----------------------------------------------------------------------------
@@ -475,7 +493,18 @@ function startKeepAlive() {
   if (keepAliveTimer || !/^https:\/\//.test(base)) return;
   keepAliveTimer = setInterval(() => {
     fetch(`${base}/api/health`, { signal: AbortSignal.timeout(20000) }).catch(() => {});
+    // Anche i servizi Whisper restano svegli finché la coda lavora.
+    for (const url of whisperUrls()) fetch(`${url}/health`, { signal: AbortSignal.timeout(20000) }).catch(() => {});
   }, KEEPALIVE_MS);
+}
+
+// Sveglia i servizi Whisper (Render Free si addormenta dopo 15 minuti) all'inizio di una
+// registrazione: il risveglio richiede circa un minuto, così sono pronti quando arriva il
+// primo blocco. Usa lo stesso controllo della coda (urlReady), quindi non ripete la
+// richiesta se un servizio risulta già sveglio o è in corso di verifica. Non tiene accesi
+// i servizi in modo permanente: le ore gratuite di Render sono condivise tra tutti.
+export function warmWhisperServices() {
+  for (const url of whisperUrls()) urlReady(url);
 }
 
 function stopKeepAlive() {
