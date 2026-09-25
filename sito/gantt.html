@@ -247,6 +247,16 @@
             font-size: 0.85rem; z-index: 90; opacity: 0; transition: opacity 0.25s; pointer-events: none;
         }
         .toast.show { opacity: 1; }
+        /* Sola visualizzazione (mode=view): nascosti i comandi di modifica e salvataggio */
+        .gantt-readonly #addBtn, .gantt-readonly #copyBtn, .gantt-readonly #copyBtnEmpty,
+        .gantt-readonly .autosave-wrap, .gantt-readonly #saveBtn,
+        .gantt-readonly #cfgDepPick, .gantt-readonly #cfgDepClear, .gantt-readonly #cfgAddChild,
+        .gantt-readonly .flyout-foot { display: none !important; }
+        .gantt-readonly .title::after {
+            content: 'Sola visualizzazione'; margin-left: 10px; padding: 2px 8px;
+            border-radius: 999px; background: #E0E7FF; color: #3730A3;
+            font-size: 0.72rem; font-weight: 600; vertical-align: middle;
+        }
     </style>
 </head>
 <body>
@@ -397,6 +407,21 @@
     <div class="toast" id="toast"></div>
 
     <script>
+        // Sola visualizzazione: campi della configurazione non modificabili, niente
+        // trascinamento dei pulsanti e niente rinomina delle colonne.
+        if (new URLSearchParams(location.search).get('mode') === 'view') {
+            document.addEventListener('DOMContentLoaded', () => {
+                document.querySelectorAll('#flyout .flyout-body input, #flyout .flyout-body textarea, #flyout .flyout-body select, #modelSel')
+                    .forEach(el => { el.disabled = true; });
+            });
+            document.addEventListener('dragstart', e => { if (e.target.closest && e.target.closest('.node-btn')) e.preventDefault(); }, true);
+            document.addEventListener('click', e => {
+                if (e.target.closest && e.target.closest('.board-head .col-head')) { e.stopPropagation(); e.preventDefault(); }
+            }, true);
+        }
+    </script>
+
+    <script>
         'use strict';
 
         // ===== Contesto pagina =====
@@ -406,6 +431,10 @@
         const urlParams = new URLSearchParams(location.search);
         const fieldId = urlParams.get('fieldId') || '';
         const pageLabel = urlParams.get('label') || 'Gantt';
+        // mode=view (pulsante "Visualizza" della dashboard): sola lettura. Niente pulsanti
+        // di modifica e, soprattutto, nessun salvataggio verso il server.
+        const readOnly = urlParams.get('mode') === 'view';
+        if (readOnly) document.body.classList.add('gantt-readonly');
 
         function getAuthHeaders() {
             const token = localStorage.getItem('authToken');
@@ -637,6 +666,7 @@
         // subito (con un piccolo debounce per raggruppare le modifiche rapide),
         // altrimenti abilita il pulsante Salva.
         function scheduleSave() {
+            if (readOnly) return;
             updateSaveUi();
             if (!document.getElementById('autosaveToggle').checked) return;
             clearTimeout(saveTimer);
@@ -644,6 +674,7 @@
         }
 
         async function flush() {
+            if (readOnly) return;
             if (flushing) { flushAgain = true; return; }
             const pending = computePending();
             if (!pending.inserts.length && !pending.updates.length && !pending.deletes.length) { updateSaveUi(); return; }
@@ -696,7 +727,7 @@
             updateSaveUi();
         });
         window.addEventListener('beforeunload', (e) => {
-            if (hasPending()) { e.preventDefault(); e.returnValue = ''; }
+            if (!readOnly && hasPending()) { e.preventDefault(); e.returnValue = ''; }
         });
 
         // ===== Colori =====
@@ -1089,7 +1120,7 @@
             const level = nodeLevel(node);
             document.getElementById('cfgName').value = node.name || '';
             const colorInput = document.getElementById('cfgColor');
-            colorInput.disabled = level !== 1;
+            colorInput.disabled = readOnly || level !== 1;
             colorInput.value = level === 1 ? (node.colore || DEFAULT_COLOR) : rootColor(node);
             document.getElementById('cfgColorHint').textContent = level === 1
                 ? '' : `Ereditato da Argomento 1 (tonalità livello ${level})`;

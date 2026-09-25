@@ -487,28 +487,18 @@ async function validateDashboardTaskRelations(data, req) {
     }
   }
   if (data.assigned_to) {
-    if (!data.client_id) {
-      const error = new Error('Per assegnare la task devi indicare il cliente');
-      error.statusCode = 400;
-      throw error;
-    }
-    const parameters = [data.assigned_to, req.user.tenant_id, data.client_id];
-    let projectCondition = '';
-    if (data.project_id) {
-      parameters.push(data.project_id);
-      projectCondition = ` AND project_id = $${parameters.length}`;
-    }
-    const component = await db.query(
+    // assigned_to = rubrica.id: il contatto deve appartenere a tenant e utente del contesto.
+    const contact = await db.query(
       `SELECT 1
-       FROM proj_componenti
+       FROM rubrica
        WHERE id = $1
          AND tenant_id = $2
-         AND client_id = $3${projectCondition}
+         AND user_id = $3
        LIMIT 1`,
-      parameters
+      [data.assigned_to, req.user.tenant_id, req.user.user_id]
     );
-    if (component.rows.length === 0) {
-      const error = new Error('Assegnatario non disponibile per il cliente e il progetto selezionati');
+    if (contact.rows.length === 0) {
+      const error = new Error('Assegnatario non presente in rubrica');
       error.statusCode = 403;
       throw error;
     }
@@ -559,29 +549,20 @@ app.get('/api/dashboard/tasks', requireAuth, async (req, res) => {
       const fk = fkByColumn.get(column);
       let resolvedForeign = false;
 
-      // assigned_to contiene proj_componenti.id; in griglia viene restituito
-      // il relativo proj_componenti.nominativo.
+      // assigned_to contiene rubrica.id; in griglia viene mostrato rubrica.nominativo.
       if (column === 'assigned_to' && metadata.udt_name === 'uuid') {
-        tableColumnsCache.delete('main:proj_componenti');
-        const componentColumns = await getTableColumns('proj_componenti');
-        if (['id', 'nominativo', 'tenant_id', 'client_id'].every(name => componentColumns.has(name))) {
-          const projectOrdering = componentColumns.has('project_id')
-            ? ', (src.project_id IS NOT NULL AND pc.project_id = src.project_id) DESC'
-            : '';
-          selectExpressions.push('src."assigned_to" AS "__raw_assigned_to"');
-          selectExpressions.push(
-            `COALESCE((
-               SELECT NULLIF(TRIM(pc.nominativo::text), '')
-               FROM proj_componenti pc
-               WHERE pc.id = src.assigned_to
-                 AND pc.tenant_id = src.tenant_id
-               ORDER BY (pc.client_id = src.client_id) DESC
-                 ${projectOrdering}, pc.nominativo NULLS LAST
-               LIMIT 1
-             ), 'Nominativo non disponibile') AS "assigned_to"`
-          );
-          resolvedForeign = true;
-        }
+        selectExpressions.push('src."assigned_to" AS "__raw_assigned_to"');
+        selectExpressions.push(
+          `CASE WHEN src.assigned_to IS NULL THEN NULL ELSE COALESCE((
+             SELECT NULLIF(TRIM(r.nominativo::text), '')
+             FROM rubrica r
+             WHERE r.id = src.assigned_to
+               AND r.tenant_id = src.tenant_id
+               AND r.user_id = src.user_id
+             LIMIT 1
+           ), 'Nominativo non disponibile') END AS "assigned_to"`
+        );
+        resolvedForeign = true;
       }
 
       if (!resolvedForeign && metadata.udt_name === 'uuid' && fk) {
@@ -590,7 +571,7 @@ app.get('/api/dashboard/tasks', requireAuth, async (req, res) => {
         tableColumnsCache.delete('main:' + fk.foreign_table);
         const foreignColumns = await getTableColumns(fk.foreign_table);
         const foreignNames = [...foreignColumns];
-        const preferredNames = ['description', 'descrizione', 'name', 'nome', 'title', 'titile', 'label', 'valore2'];
+        const preferredNames = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'titile', 'label', 'valore2'];
         // In Projexa clienti e progetti sono contenitori EAV: il loro nome
         // leggibile e' nella riga identita', colonna valore2.
         const eavDisplayColumn = ['clients', 'projects'].includes(fk.foreign_table)
@@ -620,7 +601,7 @@ app.get('/api/dashboard/tasks', requireAuth, async (req, res) => {
         type: metadata.data_type,
         uuid: metadata.udt_name === 'uuid',
         resolvedForeign,
-        references: fk ? fk.foreign_table : (column === 'assigned_to' ? 'proj_componenti' : null),
+        references: fk ? fk.foreign_table : (column === 'assigned_to' ? 'rubrica' : null),
         nullable: metadata.is_nullable === 'YES',
         hasDefault: metadata.column_default != null,
         editable: !DASHBOARD_TASK_READONLY_COLUMNS.has(column)
@@ -651,74 +632,41 @@ app.get('/api/dashboard/tasks/foreign-options/:column', requireAuth, async (req,
     const column = assertValidIdentifier(String(req.params.column || '').trim());
 
     if (column === 'assigned_to') {
-      const clientId = String(req.query.clientId || '').trim();
-      const projectId = String(req.query.projectId || '').trim();
+      // Assegnatari = contatti della rubrica di tenant e utente del contesto (non scaduti),
+      // indipendenti da cliente e progetto. Il valore già salvato resta sempre selezionabile.
       const selectedValue = String(req.query.selectedValue || '').trim();
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      if ((clientId && !uuidPattern.test(clientId)) || (projectId && !uuidPattern.test(projectId))
-          || (selectedValue && !uuidPattern.test(selectedValue))) {
-        return res.status(400).json({ error: 'Cliente, progetto o assegnatario non valido' });
-      }
-
-      tableColumnsCache.delete('main:proj_componenti');
-      const componentColumns = await getTableColumns('proj_componenti');
-      const requiredColumns = ['id', 'tenant_id', 'client_id', 'nominativo'];
-      if (projectId) requiredColumns.push('project_id');
-      if (requiredColumns.some(name => !componentColumns.has(name))) {
-        return res.status(500).json({ error: 'Struttura proj_componenti non compatibile con il filtro assegnatari' });
-      }
-      // Filtro user_id: applicato quando la colonna esiste, oltre a tenant/client/project.
-      const hasUserCol = componentColumns.has('user_id');
-      if (!clientId) {
-        if (!selectedValue) return res.json({ options: [] });
-        const selParams = [req.user.tenant_id, selectedValue];
-        let selUserCond = '';
-        if (hasUserCol) { selParams.push(req.user.user_id); selUserCond = ` AND pc.user_id = $${selParams.length}`; }
-        const selected = await db.query(
-          `SELECT pc.id::text AS value,
-                  COALESCE(NULLIF(TRIM(pc.nominativo::text), ''), 'Nominativo non disponibile') AS label
-           FROM proj_componenti pc
-           WHERE pc.tenant_id = $1 AND pc.id = $2${selUserCond}
-           LIMIT 1`,
-          selParams
-        );
-        return res.json({ options: selected.rows });
-      }
-      const parameters = [req.user.tenant_id, clientId];
-      let userCondition = '';
-      if (hasUserCol) { parameters.push(req.user.user_id); userCondition = ` AND pc.user_id = $${parameters.length}`; }
-      let projectCondition = '';
-      if (projectId) {
-        parameters.push(projectId);
-        projectCondition = ` AND pc.project_id = $${parameters.length}`;
-      }
-      let selectedFallback = '';
-      if (selectedValue) {
-        parameters.push(selectedValue);
-        selectedFallback = `
-          UNION
-          SELECT pc.id::text AS value,
-                 COALESCE(NULLIF(TRIM(pc.nominativo::text), ''), 'Nominativo non disponibile') AS label
-          FROM proj_componenti pc
-          WHERE pc.tenant_id = $1
-            AND pc.id = $${parameters.length}`;
+      if (selectedValue && !uuidPattern.test(selectedValue)) {
+        return res.status(400).json({ error: 'Assegnatario non valido' });
       }
       const result = await db.query(
-        `SELECT DISTINCT options.value, options.label
-         FROM (
-           SELECT pc.id::text AS value,
-                  COALESCE(NULLIF(TRIM(pc.nominativo::text), ''), 'Nominativo non disponibile') AS label
-           FROM proj_componenti pc
-           WHERE pc.tenant_id = $1
-             AND pc.client_id = $2
-             AND pc.id IS NOT NULL${userCondition}${projectCondition}
-           ${selectedFallback}
-         ) options
-         ORDER BY label
-         LIMIT 500`,
-        parameters
+        `SELECT r.id::text AS value,
+                COALESCE(NULLIF(TRIM(r.nominativo::text), ''), 'Nominativo non disponibile') AS label,
+                r.email::text AS email
+         FROM rubrica r
+         WHERE r.tenant_id = $1
+           AND r.user_id = $2
+           AND ((r.scadenza IS NULL OR r.scadenza >= CURRENT_DATE) OR r.id::text = $3)
+         LIMIT 5000`,
+        [req.user.tenant_id, req.user.user_id, selectedValue]
       );
-      return res.json({ options: result.rows });
+      // Ordinamento dopo la lettura: con la cifratura attiva il database vedrebbe
+      // solo il testo cifrato. L'email distingue eventuali omonimi.
+      const counts = new Map();
+      result.rows.forEach(row => counts.set(row.label, (counts.get(row.label) || 0) + 1));
+      const options = result.rows
+        .map(row => ({
+          value: row.value,
+          label: counts.get(row.label) > 1 && row.email ? `${row.label} (${row.email})` : row.label,
+          name: row.label,
+          email: row.email || ''
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'it', { sensitivity: 'base' }));
+      // Pulsante "me": il contatto di rubrica con l'email dell'utente collegato. Confronto
+      // fatto qui (non in SQL) perché l'email in rubrica può essere cifrata.
+      const myEmail = String(req.user.email || '').trim().toLowerCase();
+      const meRow = myEmail ? result.rows.find(row => String(row.email || '').trim().toLowerCase() === myEmail) : null;
+      return res.json({ options, me: meRow ? meRow.value : null });
     }
 
     const relationResult = await db.query(
@@ -767,7 +715,7 @@ app.get('/api/dashboard/tasks/foreign-options/:column', requireAuth, async (req,
     }
 
     const foreignNames = [...foreignColumns];
-    const preferredNames = ['description', 'descrizione', 'name', 'nome', 'title', 'titile', 'label', 'valore2'];
+    const preferredNames = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'titile', 'label', 'valore2'];
     const displayColumn = foreignNames.find(name => /^desc_/i.test(name))
       || preferredNames.find(name => foreignColumns.has(name))
       || foreignColumn;
@@ -796,6 +744,43 @@ app.get('/api/dashboard/tasks/foreign-options/:column', requireAuth, async (req,
     res.json({ options: result.rows });
   } catch (error) {
     console.error('[DASHBOARD TASK FOREIGN OPTIONS]', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Nuovo contatto in rubrica dal campo "Assegnato a:" del task (tenant e utente dal token).
+// Un'email può comparire una sola volta per tenant e utente: il controllo è fatto qui,
+// dopo la lettura, perché l'email in rubrica può essere cifrata.
+app.post('/api/dashboard/rubrica', requireAuth, async (req, res) => {
+  try {
+    const nominativo = String((req.body && req.body.nominativo) || '').replace(/\s+/g, ' ').trim();
+    const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+    if (!nominativo) return res.status(400).json({ error: 'Il nominativo è obbligatorio' });
+    if (nominativo.length > 255) return res.status(400).json({ error: 'Nominativo troppo lungo' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 255) {
+      return res.status(400).json({ error: 'Indirizzo email non valido' });
+    }
+    const existing = await db.query(
+      'SELECT id, nominativo, email FROM rubrica WHERE tenant_id = $1 AND user_id = $2',
+      [req.user.tenant_id, req.user.user_id]
+    );
+    const duplicate = existing.rows.find(row => String(row.email || '').trim().toLowerCase() === email);
+    if (duplicate) {
+      return res.status(409).json({
+        error: `L'email è già in rubrica (${duplicate.nominativo})`,
+        option: { value: String(duplicate.id), label: duplicate.nominativo, name: duplicate.nominativo, email: String(duplicate.email || '').trim() }
+      });
+    }
+    const result = await insertRowEncrypted(db, 'main', 'rubrica', {
+      tenant_id: req.user.tenant_id,
+      user_id: req.user.user_id,
+      nominativo,
+      email
+    });
+    res.status(201).json({ option: { value: String(result.rows[0].id), label: nominativo, name: nominativo, email } });
+  } catch (error) {
+    if (error.code === '23505') return res.status(409).json({ error: "L'email è già in rubrica" });
+    console.error('[RUBRICA CREATE]', error);
     res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
@@ -1102,7 +1087,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       tableColumnsCache.delete('main:' + fk.foreign_table);
       const foreignColumns = await getTableColumns(fk.foreign_table);
       const foreignNames = [...foreignColumns];
-      const preferredNames = ['description', 'descrizione', 'name', 'nome', 'title', 'label', 'valore2'];
+      const preferredNames = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2'];
       const displayColumn = foreignNames.find(name => /^desc_/i.test(name))
         || preferredNames.find(name => foreignColumns.has(name))
         || null;
@@ -1349,7 +1334,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget/fk-options', requir
     // appena effettuate allo schema (stessa cautela usata per la griglia principale).
     tableColumnsCache.delete('main:' + foreignTable);
     const foreignColumns = await getTableColumns(foreignTable);
-    const preferredNames = ['description', 'descrizione', 'name', 'nome', 'title', 'label', 'valore2'];
+    const preferredNames = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2'];
     const displayColumn = [...foreignColumns].find(name => /^desc_/i.test(name))
       || preferredNames.find(name => foreignColumns.has(name))
       || foreignColumn;

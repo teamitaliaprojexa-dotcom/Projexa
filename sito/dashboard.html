@@ -662,6 +662,7 @@
         .settings-detail-row.type11-grid-row.collapsed .type11-grid-widget {
             display: none;
         }
+        .type11-grid-snapshot { pointer-events: none; }
         .type11-grid-scroll {
             width: 100%;
             max-height: 320px;
@@ -700,10 +701,20 @@
         }
         .type11-grid-table th:last-child { border-radius: 0 10px 10px 0; }
         /* Ordinamento (clic sull'intestazione) e riga dei filtri sotto le intestazioni */
-        .type11-grid-table th.type11-sortable { cursor: pointer; user-select: none; }
-        .type11-grid-table th.type11-sortable:hover { filter: brightness(1.08); }
         .type11-grid-table th.type11-sorted { background: linear-gradient(135deg, #4f6688, #6f86a6); }
-        .type11-sort-ind { font-size: 0.7rem; }
+        .type11-sort-btn {
+            margin-left: 0.35rem; padding: 0 0.15rem;
+            border: none; background: transparent; color: inherit;
+            font-size: 0.72rem; cursor: pointer; opacity: 0.45; vertical-align: middle;
+        }
+        .type11-sort-btn:hover { opacity: 0.85; }
+        /* Maniglia sul bordo destro dell'intestazione per allargare la colonna */
+        .type11-col-resizer {
+            position: absolute; top: 0; right: 0; bottom: 0; width: 7px;
+            cursor: col-resize; touch-action: none; z-index: 3;
+        }
+        .type11-col-resizer:hover, .type11-col-resizer.active { background: rgba(255, 255, 255, 0.45); }
+        .type11-sorted .type11-sort-btn { opacity: 1; }
         .type11-grid-table .type11-filter-row th {
             background: #e9eef5;
             padding: 0.25rem 0.3rem;
@@ -713,22 +724,9 @@
         }
         .type11-grid-table .type11-filter-row th:first-child { border-radius: 8px 0 0 8px; }
         .type11-grid-table .type11-filter-row th:last-child { border-radius: 0 8px 8px 0; }
-        .type11-filter-box { display: flex; gap: 2px; min-width: 0; }
-        .type11-filter-op {
-            flex: 0 0 30px;
-            width: 30px;
-            padding: 0 2px;
-            font-size: 0.72rem;
-            border: 1px solid #cbd5e1;
-            border-radius: 5px;
-            background: #fff;
-            color: #334155;
-            cursor: pointer;
-        }
         .type11-filter-val {
-            flex: 1 1 auto;
-            min-width: 0;
             width: 100%;
+            box-sizing: border-box;
             padding: 0.2rem 0.35rem;
             font-size: 0.75rem;
             border: 1px solid #cbd5e1;
@@ -736,7 +734,6 @@
             background: #fff;
             color: #111827;
         }
-        .type11-filter-val:disabled { background: #f1f5f9; }
         .type11-grid-count { font-size: 0.75rem; color: #64748b; padding: 0.2rem 0.4rem 0; }
         .type11-grid-count a { color: #1d4ed8; }
         .type11-grid-table th:not(:first-child),
@@ -2380,6 +2377,56 @@
         .ai-chat-answer:empty::before { content: 'La risposta comparirà qui.'; color: var(--text-muted); }
         .ai-chat-answer.ai-chat-error { background: #FEF2F2; border-color: #FECACA; color: #B91C1C; }
         .ai-chat-wait { color: var(--text-muted); }
+        /* Assegnatario del task: campo di ricerca sui contatti della rubrica */
+        .task-assignee { position: relative; }
+        .task-assignee-me {
+            margin-left: 0.5rem; padding: 0.05rem 0.5rem;
+            border: 1px solid #EAB308; border-radius: 999px;
+            background: #FDE047; color: #713F12;
+            font-size: 0.72rem; font-weight: 700; line-height: 1.4;
+            cursor: pointer; vertical-align: middle;
+        }
+        .task-assignee-me:hover { background: #FACC15; }
+        .task-assignee-list {
+            display: none; position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 30;
+            max-height: 220px; overflow-y: auto;
+            border: 1px solid var(--border); border-radius: 8px; background: white;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+        }
+        .task-assignee-list.open { display: block; }
+        .task-assignee-item { padding: 0.45rem 0.7rem; font-size: 0.88rem; cursor: pointer; }
+        .task-assignee-item small { display: block; font-size: 0.74rem; color: var(--text-muted); }
+        .task-assignee-list.rubrica-ac-list { position: fixed; top: 0; left: 0; right: auto; z-index: 3100; text-align: left; }
+        .task-assignee-item:hover, .task-assignee-item.active { background: #EEF2FF; }
+        .task-assignee-empty {
+            display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+            padding: 0.45rem 0.7rem; font-size: 0.85rem; color: var(--text-muted);
+        }
+        .task-assignee-add {
+            padding: 0.2rem 0.6rem; border: none; border-radius: 6px;
+            background: #10B981; color: white; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+        }
+        .task-assignee-add:hover { background: #059669; }
+        .rubrica-add-modal { z-index: 3000; }
+        /* Lente dei campi note e finestra del testo completo */
+        .field-lens {
+            flex: 0 0 auto; margin-right: 6px; padding: 0.3rem 0.45rem;
+            border: 1px solid var(--border); border-radius: 6px;
+            background: white; color: #6366F1; font-size: 0.78rem; cursor: pointer;
+        }
+        .field-lens:hover { background: #EEF2FF; }
+        .field-text-modal { z-index: 3000; }
+        .field-text-area {
+            width: 100%; box-sizing: border-box; resize: vertical;
+            padding: 0.7rem 0.8rem; border: 1px solid var(--border); border-radius: 8px;
+            font: inherit; font-size: 0.9rem; line-height: 1.5;
+        }
+        .field-text-area[readonly] { background: #F9FAFB; }
+        .rubrica-add-field { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; font-weight: 600; color: var(--dark); }
+        .rubrica-add-field input {
+            padding: 0.55rem 0.7rem; border: 1px solid var(--border); border-radius: 8px;
+            font: inherit; font-size: 0.9rem; font-weight: 400;
+        }
         /* Allegati in ingresso (chip con nome e X) e file generati dall'AI */
         .ai-chat-files { display: flex; flex-wrap: wrap; gap: 0.4rem; }
         .ai-chat-files:empty { display: none; }
@@ -4709,6 +4756,13 @@
                 control = `<select id="taskField_client_id" name="client_id">${taskSelectOptions(options, currentValue)}</select>`;
             } else if (column.name === 'project_id') {
                 control = '<select id="taskField_project_id" name="project_id"><option value="">Nessun progetto</option></select>';
+            } else if (column.name === 'assigned_to') {
+                // Assegnatario: si scrive il nominativo e si sceglie dai contatti della rubrica.
+                // Il campo nascosto contiene rubrica.id, quello visibile il nominativo.
+                control = `<div class="task-assignee">
+                    <input type="hidden" id="taskField_assigned_to" name="assigned_to" value="">
+                    <input type="text" id="taskField_assigned_to_search" autocomplete="off" placeholder="Scrivi il nominativo…" aria-autocomplete="list">
+                </div>`;
             } else if (column.uuid && column.references) {
                 control = `<select id="taskField_${escapeHtml(column.name)}" name="${escapeHtml(column.name)}"><option value="">Nessun valore</option></select>`;
             } else if (column.name === 'priority') {
@@ -4736,8 +4790,12 @@
                 control = `<input id="taskField_${escapeHtml(column.name)}" name="${escapeHtml(column.name)}" type="${inputType}" ${step} value="${escapeHtml(formValue)}" ${required}>`;
             }
 
+            // Accanto a "Assegnato a:" il pulsante "me" inserisce il proprio nominativo dalla rubrica.
+            const meButton = column.name === 'assigned_to'
+                ? '<button type="button" class="task-assignee-me" id="taskAssigneeMe" title="Assegna a me (contatto di rubrica con la mia email)">me</button>'
+                : '';
             return `<div class="task-form-field ${wide ? 'wide' : ''}">
-                <label for="taskField_${escapeHtml(column.name)}"><span>${escapeHtml(todoColumnLabel(column.name))}</span>${required ? '<span aria-hidden="true"> *</span>' : ''}</label>
+                <label for="taskField_${escapeHtml(column.name === 'assigned_to' ? 'assigned_to_search' : column.name)}"><span>${escapeHtml(todoColumnLabel(column.name))}</span>${required ? '<span aria-hidden="true"> *</span>' : ''}${meButton}</label>
                 ${control}
             </div>`;
         }
@@ -4770,7 +4828,258 @@
             }
         }
 
+        // === Ricerca nella rubrica (tenant e utente del contesto) ===
+        // Usata dal campo "Assegnato a:" del task e dalla colonna "nominativo" delle griglie.
+        // I contatti vengono letti una volta e filtrati nel browser mentre si scrive
+        // (contiene, senza maiuscole/minuscole). L'elenco dei risultati è "fixed" sul body,
+        // così non viene tagliato dalle celle o dai contenitori con scorrimento.
+        let rubricaCache = null; // Promise di { options, me }
+
+        function loadRubrica(selectedValue = '', force = false) {
+            if (!selectedValue && rubricaCache && !force) return rubricaCache;
+            const query = new URLSearchParams(selectedValue ? { selectedValue } : {});
+            const promise = fetch(`${API_URL}/dashboard/tasks/foreign-options/assigned_to?${query.toString()}`, { headers: getAuthHeaders() })
+                .then(async response => {
+                    const result = await response.json().catch(() => ({}));
+                    if (!response.ok) throw new Error(result.error || `Errore HTTP ${response.status}`);
+                    return { options: Array.isArray(result.options) ? result.options : [], me: result.me || null };
+                })
+                .catch(error => {
+                    showNotification('Errore rubrica: ' + error.message, 'info');
+                    if (!selectedValue) rubricaCache = null;
+                    return { options: [], me: null };
+                });
+            if (!selectedValue) rubricaCache = promise;
+            return promise;
+        }
+
+        // input: campo di testo. data: { options } condiviso (i nuovi contatti vi si aggiungono).
+        // strict = true: il testo deve corrispondere a un contatto (altrimenti torna alla scelta
+        // precedente); false: testo libero, il contatto serve solo a compilare più in fretta.
+        // onChoose(option | null) viene chiamato a ogni scelta.
+        function attachRubricaAutocomplete(input, data, { strict = false, onChoose = () => {} } = {}) {
+            const list = document.createElement('div');
+            list.className = 'task-assignee-list rubrica-ac-list';
+            list.setAttribute('role', 'listbox');
+            document.body.appendChild(list);
+            let selectedText = input.value;
+            let active = -1;
+            let shown = [];
+
+            const close = () => { list.classList.remove('open'); active = -1; };
+            const choose = option => {
+                input.value = selectedText = option ? (option.name || option.label) : '';
+                close();
+                onChoose(option);
+            };
+            const position = () => {
+                const rect = input.getBoundingClientRect();
+                list.style.left = rect.left + 'px';
+                list.style.top = (rect.bottom + 2) + 'px';
+                list.style.width = Math.max(rect.width, 240) + 'px';
+            };
+            const render = () => {
+                if (!input.isConnected) { list.remove(); return; }
+                const needle = input.value.trim().toLocaleLowerCase('it-IT');
+                shown = data.options.filter(option => !needle || option.label.toLocaleLowerCase('it-IT').includes(needle)).slice(0, 30);
+                // Nessun risultato: pulsante verde "+ Aggiungi" per creare il contatto in rubrica.
+                list.innerHTML = shown.length
+                    ? shown.map((option, index) => `<div class="task-assignee-item${index === active ? ' active' : ''}" role="option" data-index="${index}">${escapeHtml(option.label)}${option.email ? `<small>${escapeHtml(option.email)}</small>` : ''}</div>`).join('')
+                    : `<div class="task-assignee-empty"><span>${data.options.length ? 'Nessun contatto trovato' : 'Rubrica vuota'}</span><button type="button" class="task-assignee-add" title="Aggiungi un contatto alla rubrica"><i class="fas fa-plus"></i> Aggiungi</button></div>`;
+                position();
+                list.classList.add('open');
+            };
+
+            input.setAttribute('autocomplete', 'off');
+            input.addEventListener('focus', render);
+            input.addEventListener('input', () => { active = -1; render(); });
+            input.addEventListener('keydown', event => {
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    if (!list.classList.contains('open')) render();
+                    if (!shown.length) return;
+                    active = (active + (event.key === 'ArrowDown' ? 1 : -1) + shown.length) % shown.length;
+                    render();
+                    list.querySelector('.task-assignee-item.active')?.scrollIntoView({ block: 'nearest' });
+                } else if (event.key === 'Enter' && list.classList.contains('open')) {
+                    event.preventDefault();
+                    if (active >= 0 && shown[active]) choose(shown[active]);
+                    else if (shown.length === 1) choose(shown[0]);
+                } else if (event.key === 'Escape' && list.classList.contains('open')) {
+                    event.stopPropagation();
+                    if (strict) input.value = selectedText;
+                    close();
+                }
+            });
+            // mousedown (non click): scatta prima che il campo perda il fuoco.
+            list.addEventListener('mousedown', event => {
+                event.preventDefault();
+                if (event.target.closest('.task-assignee-add')) {
+                    const typed = input.value.trim();
+                    if (strict) input.value = selectedText;
+                    close();
+                    openRubricaAddDialog(typed, option => {
+                        if (!data.options.some(o => String(o.value) === String(option.value))) {
+                            data.options.push(option);
+                            data.options.sort((a, b) => a.label.localeCompare(b.label, 'it', { sensitivity: 'base' }));
+                        }
+                        choose(option);
+                    });
+                    return;
+                }
+                const item = event.target.closest('.task-assignee-item');
+                if (item) choose(shown[Number(item.dataset.index)]);
+            });
+            // Uscendo dal campo: un testo uguale a un solo nominativo sceglie quel contatto.
+            // In modalità strict: testo vuoto = nessuno; testo non trovato = scelta precedente.
+            input.addEventListener('blur', () => {
+                const text = input.value.trim().toLocaleLowerCase('it-IT');
+                const exact = text ? data.options.filter(option => String(option.name || option.label).toLocaleLowerCase('it-IT') === text) : [];
+                if (exact.length === 1 && input.value !== selectedText) choose(exact[0]);
+                else if (strict && !text) choose(null);
+                else if (strict && exact.length !== 1) { input.value = selectedText; close(); }
+                else close();
+            });
+            // Con la pagina che scorre l'elenco "fixed" resterebbe staccato dal campo.
+            window.addEventListener('scroll', event => {
+                if (list.classList.contains('open') && !list.contains(event.target)) close();
+            }, true);
+            return { choose, setSelectedText: text => { selectedText = text; } };
+        }
+
+        // Campo "Assegnato a:" del task: si sceglie un contatto (salvato come rubrica.id).
+        async function setupTaskAssigneeSearch(selectedValue = '', selectedLabel = '') {
+            const hidden = document.getElementById('taskField_assigned_to');
+            const input = document.getElementById('taskField_assigned_to_search');
+            if (!hidden || !input) return;
+            hidden.value = selectedValue || '';
+            input.value = selectedValue ? (selectedLabel && selectedLabel !== selectedValue ? selectedLabel : '') : '';
+            const loaded = await loadRubrica(selectedValue);
+            const data = { options: loaded.options.slice() };
+            const current = data.options.find(option => String(option.value) === String(hidden.value));
+            if (current) input.value = current.name || current.label;
+            const ac = attachRubricaAutocomplete(input, data, {
+                strict: true,
+                onChoose: option => { hidden.value = option ? option.value : ''; }
+            });
+            ac.setSelectedText(input.value);
+            document.getElementById('taskAssigneeMe')?.addEventListener('click', event => {
+                event.preventDefault();
+                const me = data.options.find(option => String(option.value) === String(loaded.me));
+                if (me) ac.choose(me);
+                else showNotification('Il tuo nominativo non è in rubrica: aggiungi un contatto con la tua email', 'info');
+            });
+        }
+
+        // Griglie (tipo 11): nella colonna "nominativo" in modifica si cerca in rubrica e,
+        // scelto il contatto, si compila anche la colonna "email" della stessa riga.
+        // Il nominativo resta comunque scrivibile liberamente.
+        async function attachType11RubricaSearch(rowEl) {
+            const nameInput = rowEl.querySelector('input.type11-editor-field[data-col="nominativo"][type="text"]:not([disabled])');
+            if (!nameInput || nameInput.dataset.rubrica === '1') return;
+            nameInput.dataset.rubrica = '1';
+            nameInput.placeholder = 'Cerca in rubrica…';
+            const loaded = await loadRubrica();
+            const data = { options: loaded.options };
+            attachRubricaAutocomplete(nameInput, data, {
+                strict: false,
+                onChoose: option => {
+                    // Evento "change": la griglia segna la riga come modificata (non "input",
+                    // che riaprirebbe l'elenco dei risultati).
+                    nameInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    const emailInput = rowEl.querySelector('input.type11-editor-field[data-col="email"]:not([disabled])');
+                    if (option && emailInput && option.email) {
+                        emailInput.value = option.email;
+                        emailInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+            });
+        }
+
+        // Piccola finestra "Nuovo contatto" (nominativo + email) che scrive la riga in rubrica.
+        // onSaved riceve { value, label } del contatto creato (o già esistente con quell'email).
+        function openRubricaAddDialog(typedText, onSaved) {
+            let dialog = document.getElementById('rubricaAddModal');
+            if (!dialog) {
+                dialog = document.createElement('div');
+                dialog.id = 'rubricaAddModal';
+                dialog.className = 'task-modal rubrica-add-modal';
+                dialog.setAttribute('role', 'dialog');
+                dialog.setAttribute('aria-modal', 'true');
+                dialog.innerHTML = `<div class="task-modal-card" style="width: min(420px, 94vw);">
+                    <div class="task-modal-header">
+                        <h3 style="margin: 0; font-size: 1rem; color: var(--dark);"><i class="fas fa-address-book" style="color: #10B981;"></i> Nuovo contatto in rubrica</h3>
+                        <button type="button" class="rubrica-add-close" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.1rem;"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div style="padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.7rem;">
+                        <label class="rubrica-add-field">Nominativo *<input type="text" id="rubricaAddNominativo" maxlength="255" autocomplete="off" placeholder="Nome e cognome"></label>
+                        <label class="rubrica-add-field">Email *<input type="email" id="rubricaAddEmail" maxlength="255" autocomplete="off" placeholder="nome.cognome@azienda.com"></label>
+                        <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.3rem;">
+                            <button type="button" class="rubrica-add-close" style="padding: 0.45rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; cursor: pointer;">Annulla</button>
+                            <button type="button" id="rubricaAddSave" style="padding: 0.45rem 1.1rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-plus"></i> Aggiungi</button>
+                        </div>
+                    </div>
+                </div>`;
+                document.body.appendChild(dialog);
+            }
+            const nameInput = dialog.querySelector('#rubricaAddNominativo');
+            const emailInput = dialog.querySelector('#rubricaAddEmail');
+            const saveBtn = dialog.querySelector('#rubricaAddSave');
+            // Il testo scritto nel campo diventa il nominativo oppure l'email, secondo cosa sembra.
+            const typed = String(typedText || '').trim();
+            nameInput.value = typed.includes('@') ? '' : typed;
+            emailInput.value = typed.includes('@') ? typed : '';
+
+            const closeDialog = () => {
+                dialog.classList.remove('open');
+                dialog.onkeydown = null;
+                saveBtn.onclick = null;
+                dialog.querySelectorAll('.rubrica-add-close').forEach(b => { b.onclick = null; });
+            };
+            const save = async () => {
+                const nominativo = nameInput.value.trim();
+                const email = emailInput.value.trim();
+                if (!nominativo) { nameInput.focus(); showNotification('Inserisci il nominativo', 'info'); return; }
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { emailInput.focus(); showNotification('Inserisci un indirizzo email valido', 'info'); return; }
+                saveBtn.disabled = true;
+                try {
+                    const response = await fetch(`${API_URL}/dashboard/rubrica`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ nominativo, email })
+                    });
+                    const result = await response.json().catch(() => ({}));
+                    if (response.status === 409 && result.option) {
+                        // Email già in rubrica: si usa il contatto esistente.
+                        showNotification(result.error, 'info');
+                        closeDialog();
+                        onSaved(result.option);
+                        return;
+                    }
+                    if (!response.ok) throw new Error(result.error || `Errore HTTP ${response.status}`);
+                    rubricaCache = null;
+                    closeDialog();
+                    onSaved(result.option);
+                    showNotification('Contatto aggiunto alla rubrica', 'success');
+                } catch (error) {
+                    showNotification('Errore: ' + error.message, 'info');
+                } finally {
+                    saveBtn.disabled = false;
+                }
+            };
+            saveBtn.onclick = save;
+            dialog.querySelectorAll('.rubrica-add-close').forEach(b => { b.onclick = closeDialog; });
+            // Invio salva, Esc chiude solo questa finestra (non quella del task).
+            dialog.onkeydown = event => {
+                if (event.key === 'Enter') { event.preventDefault(); save(); }
+                else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeDialog(); }
+            };
+            dialog.classList.add('open');
+            (nameInput.value ? emailInput : nameInput).focus();
+        }
+
         async function loadTaskForeignOptions(column, selectedValue = '', selectedLabel = '') {
+            if (column.name === 'assigned_to') return setupTaskAssigneeSearch(selectedValue, selectedLabel);
             const select = document.getElementById(`taskField_${column.name}`);
             if (!select) return;
             select.disabled = true;
@@ -4807,12 +5116,6 @@
             }
         }
 
-        async function reloadTaskAssignedTo(selectedValue = '', selectedLabel = '') {
-            const assignedColumn = todoColumns.find(column => column.name === 'assigned_to');
-            if (!assignedColumn) return;
-            await loadTaskForeignOptions(assignedColumn, selectedValue, selectedLabel);
-        }
-
         async function openTaskModal(task = null) {
             if (todoColumns.length === 0) {
                 showNotification('Impossibile aprire il task: struttura non disponibile', 'info');
@@ -4833,7 +5136,6 @@
                         saveButton.disabled = true;
                         try {
                             await loadTaskProjectOptions(clientSelect.value);
-                            await reloadTaskAssignedTo();
                         } finally {
                             saveButton.disabled = false;
                         }
@@ -4842,17 +5144,6 @@
                 await loadTaskProjectOptions(
                     clientSelect?.value || '', selectedProjectId, task?.project_id || ''
                 );
-                const projectSelect = document.getElementById('taskField_project_id');
-                if (projectSelect) {
-                    projectSelect.addEventListener('change', async () => {
-                        saveButton.disabled = true;
-                        try {
-                            await reloadTaskAssignedTo();
-                        } finally {
-                            saveButton.disabled = false;
-                        }
-                    });
-                }
                 const foreignPromises = todoColumns
                     .filter(column => column.editable !== false
                         && column.uuid && column.references
@@ -10064,7 +10355,10 @@
 
         // Apre il flyout di dettaglio per la sorgente indicata (settings o clients),
         // filtrando per l'argument/cliente selezionato.
-        async function openDetailFlyout(source, argument, label, keepMode = false) {
+        // silent = true: ridisegno "invisibile" dello stesso dettaglio (es. cambio di
+        // "Abilita modifica"): il contenuto attuale resta a video finché quello nuovo è
+        // pronto, e si conservano scorrimento e griglie aperte/chiuse.
+        async function openDetailFlyout(source, argument, label, keepMode = false, silent = false) {
             if (source !== 'clients') clearClientLogoFlyoutUrl();
             clearTenantLogoUrl('flyout');
             currentDetailSource = source;
@@ -10079,7 +10373,19 @@
             if (!flyout || !listEl) return;
 
             titleEl.innerHTML = campoLabelHtml(label || argument);
-            listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
+            // Stato da ripristinare dopo un ridisegno silenzioso: scorrimento dei contenitori
+            // e griglie tipo 11 chiuse dall'utente.
+            const silentState = silent && listEl.children.length ? {
+                scroll: (() => {
+                    const list = [];
+                    for (let el = listEl; el && el !== document.body; el = el.parentElement) {
+                        if (el.scrollTop || el.scrollLeft) list.push([el, el.scrollTop, el.scrollLeft]);
+                    }
+                    return list;
+                })(),
+                collapsed: new Set([...listEl.querySelectorAll('.type11-grid-row')].map(r => `${r.dataset.rowId}:${r.classList.contains('collapsed') ? 1 : 0}`))
+            } : null;
+            if (!silentState) listEl.innerHTML = '<div style="color: var(--text-muted);">Caricamento…</div>';
             const saveBar = document.getElementById('settingsDetailSaveBar');
             if (saveBar) saveBar.style.display = 'none';
             const newFieldForm = document.getElementById('clientNewFieldForm');
@@ -10289,6 +10595,23 @@
                     });
                 });
                 applyDetailMode();
+                if (silentState) {
+                    // Griglie: stesso stato aperto/chiuso di prima.
+                    listEl.querySelectorAll('.type11-grid-row').forEach(r => {
+                        const wasCollapsed = silentState.collapsed.has(`${r.dataset.rowId}:1`);
+                        const wasOpen = silentState.collapsed.has(`${r.dataset.rowId}:0`);
+                        if (!wasCollapsed && !wasOpen) return;
+                        r.classList.toggle('collapsed', wasCollapsed);
+                        const icon = r.querySelector('.type11-arrow i');
+                        if (icon) {
+                            icon.classList.toggle('fa-chevron-down', wasCollapsed);
+                            icon.classList.toggle('fa-chevron-up', !wasCollapsed);
+                        }
+                    });
+                    const restoreScroll = () => silentState.scroll.forEach(([el, top, left]) => { el.scrollTop = top; el.scrollLeft = left; });
+                    restoreScroll();
+                    requestAnimationFrame(restoreScroll);
+                }
             } catch (e) {
                 listEl.innerHTML = '<div style="color: var(--text-muted);">Errore di connessione</div>';
             }
@@ -10907,6 +11230,7 @@
                     return;
                 }
                 await loadType11Grid(widget);
+                type11DataChanged(widget);
                 showNotification('Riga eliminata', 'success');
             } catch (e) {
                 showNotification('Errore di connessione', 'info');
@@ -10940,7 +11264,10 @@
                     if (options.notify !== false) showNotification('Errore: ' + (data.error || response.status), 'info');
                     return { ok: false, updated: 0 };
                 }
-                if (options.reload !== false) await loadType11Grid(widget);
+                if (options.reload !== false) {
+                    await loadType11Grid(widget);
+                    type11DataChanged(widget);
+                }
                 const updated = Number(data.updated ?? selectedIds.length);
                 if (options.notify !== false) {
                     showNotification(`${updated} rig${updated === 1 ? 'a aggiornata' : 'he aggiornate'}`, 'success');
@@ -10971,20 +11298,6 @@
             return { ok: true, updated };
         }
 
-        // Filtri disponibili sotto le intestazioni delle griglie (tipo 11 e 13).
-        const TYPE11_FILTER_OPS = [
-            { value: 'contains', symbol: '∋', label: 'contiene' },
-            { value: 'notcontains', symbol: '∌', label: 'non contiene' },
-            { value: 'eq', symbol: '=', label: 'uguale a' },
-            { value: 'neq', symbol: '≠', label: 'diverso da' },
-            { value: 'starts', symbol: 'A…', label: 'inizia con' },
-            { value: 'ends', symbol: '…Z', label: 'finisce con' },
-            { value: 'gt', symbol: '>', label: 'maggiore di' },
-            { value: 'lt', symbol: '<', label: 'minore di' },
-            { value: 'empty', symbol: '∅', label: 'vuoto' },
-            { value: 'notempty', symbol: '≠∅', label: 'non vuoto' }
-        ];
-
         // Confronto "naturale": numeri come numeri (anche con la virgola decimale),
         // date ISO e testo in ordine alfabetico senza distinzione di maiuscole.
         function type11CompareValues(a, b) {
@@ -10998,25 +11311,78 @@
             return String(a ?? '').localeCompare(String(b ?? ''), 'it', { numeric: true, sensitivity: 'base' });
         }
 
-        function type11MatchesFilter(value, op, needle) {
-            const text = String(value ?? '').trim();
-            const t = text.toLocaleLowerCase('it-IT');
+        // --- Larghezza colonne regolabile con il mouse, memorizzata nel browser ---
+        const TYPE11_WIDTHS_KEY = 'projexa.gridColumnWidths';
+
+        function type11LoadColumnWidths(fieldId) {
+            try {
+                const all = JSON.parse(localStorage.getItem(TYPE11_WIDTHS_KEY) || '{}');
+                return (all && typeof all[fieldId] === 'object' && all[fieldId]) || {};
+            } catch { return {}; }
+        }
+
+        function type11SaveColumnWidth(fieldId, column, width) {
+            try {
+                const all = JSON.parse(localStorage.getItem(TYPE11_WIDTHS_KEY) || '{}') || {};
+                const grid = all[fieldId] || (all[fieldId] = {});
+                if (width) grid[column] = width; else delete grid[column];
+                if (!Object.keys(grid).length) delete all[fieldId];
+                localStorage.setItem(TYPE11_WIDTHS_KEY, JSON.stringify(all));
+            } catch { /* memoria del browser non disponibile: la larghezza vale solo per ora */ }
+        }
+
+        function type11SetupColumnResize(widget, fieldId, columns) {
+            const table = widget.querySelector('.type11-grid-table');
+            const cols = table ? [...table.querySelectorAll('colgroup col')] : [];
+            if (!table || !cols.length) return;
+            const setWidth = (col, width) => {
+                col.style.width = col.style.minWidth = col.style.maxWidth = width + 'px';
+            };
+            const updateTableWidth = () => {
+                table.style.width = cols.reduce((total, col) => total + (parseFloat(col.style.width) || 0), 0) + 'px';
+            };
+            table.querySelectorAll('.type11-col-resizer').forEach(handle => {
+                const column = handle.dataset.resizeCol;
+                const index = columns.indexOf(column);
+                const col = cols[index];
+                if (!col) return;
+                handle.addEventListener('click', event => event.stopPropagation());
+                handle.addEventListener('pointerdown', event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const startX = event.clientX;
+                    const startWidth = parseFloat(col.style.width) || handle.closest('th').offsetWidth;
+                    handle.setPointerCapture(event.pointerId);
+                    handle.classList.add('active');
+                    const move = e => {
+                        setWidth(col, Math.max(40, Math.round(startWidth + e.clientX - startX)));
+                        updateTableWidth();
+                    };
+                    const up = () => {
+                        handle.releasePointerCapture(event.pointerId);
+                        handle.classList.remove('active');
+                        handle.removeEventListener('pointermove', move);
+                        handle.removeEventListener('pointerup', up);
+                        handle.removeEventListener('pointercancel', up);
+                        type11SaveColumnWidth(fieldId, column, parseFloat(col.style.width));
+                    };
+                    handle.addEventListener('pointermove', move);
+                    handle.addEventListener('pointerup', up);
+                    handle.addEventListener('pointercancel', up);
+                });
+                // Doppio clic: si torna alla larghezza calcolata automaticamente.
+                handle.addEventListener('dblclick', event => {
+                    event.stopPropagation();
+                    type11SaveColumnWidth(fieldId, column, null);
+                    loadType11Grid(widget);
+                });
+            });
+        }
+
+        // Filtro di colonna: sempre "contiene" (come un LIKE '%testo%'), senza distinzione di maiuscole.
+        function type11MatchesFilter(value, needle) {
             const n = String(needle ?? '').trim().toLocaleLowerCase('it-IT');
-            switch (op) {
-                case 'empty': return text === '';
-                case 'notempty': return text !== '';
-            }
-            if (!n) return true; // filtro senza testo = nessun filtro
-            switch (op) {
-                case 'notcontains': return !t.includes(n);
-                case 'eq': return t === n;
-                case 'neq': return t !== n;
-                case 'starts': return t.startsWith(n);
-                case 'ends': return t.endsWith(n);
-                case 'gt': return text !== '' && type11CompareValues(text, needle) > 0;
-                case 'lt': return text !== '' && type11CompareValues(text, needle) < 0;
-                default: return t.includes(n);
-            }
+            return !n || String(value ?? '').toLocaleLowerCase('it-IT').includes(n);
         }
 
         // Filtri e ordinamento lato browser: il server restituisce tutte le righe.
@@ -11039,12 +11405,12 @@
 
             const apply = () => {
                 const rows = [...tbody.querySelectorAll('tr[data-type11-index]')];
-                const active = Object.entries(state.filters).filter(([col, f]) =>
-                    columns.includes(col) && f && (f.op === 'empty' || f.op === 'notempty' || String(f.val || '').trim()));
+                const active = Object.entries(state.filters).filter(([col, val]) =>
+                    columns.includes(col) && String(val || '').trim());
                 let shown = 0;
                 rows.forEach(row => {
                     const record = records[Number(row.dataset.type11Index)];
-                    const ok = !record || active.every(([col, f]) => type11MatchesFilter(displayedValue(record, col), f.op, f.val));
+                    const ok = !record || active.every(([col, val]) => type11MatchesFilter(displayedValue(record, col), val));
                     row.style.display = ok ? '' : 'none';
                     if (ok) shown++;
                 });
@@ -11061,11 +11427,12 @@
                 ordered.forEach(row => tbody.appendChild(row));
                 if (!sort && typeof window.applyType11GridGrouping === 'function') window.applyType11GridGrouping();
 
-                table.querySelectorAll('th.type11-sortable').forEach(th => {
-                    const on = sort && th.dataset.sortCol === sort.col;
-                    th.classList.toggle('type11-sorted', !!on);
-                    const ind = th.querySelector('.type11-sort-ind');
-                    if (ind) ind.textContent = on ? (sort.dir === 'desc' ? ' ▼' : ' ▲') : '';
+                // Freccia giù = crescente, freccia su = decrescente; sbiadita = colonna non ordinata.
+                table.querySelectorAll('.type11-sort-btn').forEach(btn => {
+                    const on = sort && btn.dataset.sortCol === sort.col;
+                    btn.closest('th')?.classList.toggle('type11-sorted', !!on);
+                    btn.innerHTML = `<i class="fas ${on && sort.dir === 'desc' ? 'fa-arrow-up' : 'fa-arrow-down'}" aria-hidden="true"></i>`;
+                    btn.title = on ? (sort.dir === 'desc' ? 'Ordinato decrescente (clic per crescente)' : 'Ordinato crescente (clic per decrescente)') : 'Ordina crescente';
                 });
                 if (countEl) {
                     countEl.innerHTML = rows.length
@@ -11076,39 +11443,27 @@
                         event.preventDefault();
                         state.filters = {};
                         state.sort = null;
-                        table.querySelectorAll('.type11-filter-op').forEach(sel => { sel.value = 'contains'; });
-                        table.querySelectorAll('.type11-filter-val').forEach(input => { input.value = ''; input.disabled = false; });
+                        table.querySelectorAll('.type11-filter-val').forEach(input => { input.value = ''; });
                         apply();
                     });
                 }
             };
 
-            table.querySelectorAll('.type11-filter-op').forEach(sel => {
-                const col = sel.dataset.filterCol;
-                const input = table.querySelector(`.type11-filter-val[data-filter-col="${CSS.escape(col)}"]`);
-                const saved = state.filters[col];
-                if (saved) { sel.value = saved.op; if (input) input.value = saved.val || ''; }
-                const noValue = () => sel.value === 'empty' || sel.value === 'notempty';
-                if (input) input.disabled = noValue();
-                const update = () => {
-                    if (input) input.disabled = noValue();
-                    state.filters[col] = { op: sel.value, val: input ? input.value : '' };
-                    apply();
-                };
-                sel.addEventListener('change', update);
-                sel.addEventListener('click', event => event.stopPropagation());
-                if (input) {
-                    input.addEventListener('input', update);
-                    input.addEventListener('click', event => event.stopPropagation());
-                    input.addEventListener('keydown', event => event.stopPropagation());
-                }
+            table.querySelectorAll('.type11-filter-val').forEach(input => {
+                const col = input.dataset.filterCol;
+                input.value = state.filters[col] || '';
+                input.addEventListener('input', () => { state.filters[col] = input.value; apply(); });
+                input.addEventListener('click', event => event.stopPropagation());
+                input.addEventListener('keydown', event => event.stopPropagation());
             });
 
-            table.querySelectorAll('th.type11-sortable').forEach(th => {
-                th.addEventListener('click', () => {
-                    const col = th.dataset.sortCol;
+            // Primo clic sulla freccia: crescente; ogni clic successivo inverte il verso.
+            table.querySelectorAll('.type11-sort-btn').forEach(btn => {
+                btn.addEventListener('click', event => {
+                    event.stopPropagation();
+                    const col = btn.dataset.sortCol;
                     const cur = state.sort && state.sort.col === col ? state.sort.dir : null;
-                    state.sort = cur === null ? { col, dir: 'asc' } : (cur === 'asc' ? { col, dir: 'desc' } : null);
+                    state.sort = { col, dir: cur === 'asc' ? 'desc' : 'asc' };
                     apply();
                 });
             });
@@ -11116,6 +11471,51 @@
             apply();
             requestAnimationFrame(stickFilters);
         }
+
+        // Apre la pagina Gantt del campo tipo 13. readOnly = true: sola visualizzazione.
+        // Il pulsante "Torna al Progetto" della pagina Gantt deve riaprire QUESTO progetto:
+        // oltre al campo servono progetto e cliente (con i nomi, per i titoli dei flyout).
+        function openGantt13Page(widget, readOnly) {
+            const context = getType11GridContext(widget);
+            const label = widget.closest('.type11-grid-row')?.dataset.campo || '';
+            const projList = [...detailNavStack].reverse().find(v => v && v.kind === 'projectList');
+            const params = new URLSearchParams({
+                fieldId: String(widget.dataset.gridFieldId || '').trim(),
+                clientId: context.clientId || '',
+                label,
+                projectId: context.projectId || currentDetailArgument || '',
+                projectName: currentDetailLabel || '',
+                clientName: (projList && projList.label) || ''
+            });
+            if (readOnly) params.set('mode', 'view');
+            window.location.href = `gantt.html?${params.toString()}`;
+        }
+
+        // Dopo una scrittura in una griglia (nuova riga, modifica, eliminazione, chiusura)
+        // si aggiornano anche gli altri dati del dettaglio, che possono dipendere da quella
+        // tabella tramite view (es. Costi Progetto -> Invoice) o campi calcolati.
+        // - Nessuna modifica in sospeso nel flyout: ridisegno silenzioso dell'intero dettaglio
+        //   (campi e griglie), mantenendo scorrimento e griglie aperte/chiuse.
+        // - Modifiche in sospeso (campi non salvati, altre griglie in modifica o con righe
+        //   spuntate): si ricaricano solo le altre griglie libere, senza toccare il resto.
+        function type11DataChanged(widget) {
+            const listEl = widget.closest('#settingsDetailList');
+            if (!listEl) return;
+            const others = [...listEl.querySelectorAll('.type11-grid-widget')].filter(w => w !== widget);
+            const busy = w => !!w.querySelector('.type11-editing-row, .type11-expire-check:checked');
+            const pending = detailLayoutDirty
+                || !!listEl.querySelector('[data-setting-id][data-dirty="1"]')
+                || others.some(busy);
+            if (!pending && currentDetailSource && currentDetailArgument) {
+                openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true, true);
+                return;
+            }
+            others.filter(w => !busy(w)).forEach(w => loadType11Grid(w));
+        }
+
+        // Ultima griglia disegnata per campo: mostrata durante il ricaricamento successivo
+        // (es. cambio di "Abilita modifica") al posto della scritta "Caricamento griglia…".
+        const type11GridSnapshots = new Map();
 
         async function loadType11Grid(widget) {
             const tableName = String(widget.dataset.gridTable || '').trim();
@@ -11132,7 +11532,22 @@
                 return;
             }
 
-            widget.innerHTML = '<div class="type11-grid-state">Caricamento griglia…</div>';
+            // Tipo 13 (Attività progettuale): niente griglia, solo il pulsante che apre la
+            // pagina Gantt. Con "Abilita modifica" → Modifica; altrimenti → Visualizza
+            // (la pagina Gantt si apre in sola lettura, senza salvataggi).
+            if (Number(widget.dataset.gridTipo) === 13) {
+                const editMode = (widget.dataset.gridEditMode || clientDetailMode) === 'edit';
+                widget.innerHTML = `<div class="type11-grid-toolbar type13-toolbar">
+                    <button type="button" class="type13-open-gantt${editMode ? ' primary' : ''}"><i class="fas ${editMode ? 'fa-pen' : 'fa-eye'}"></i> ${editMode ? 'Modifica' : 'Visualizza'}</button>
+                </div>`;
+                widget.querySelector('.type13-open-gantt').addEventListener('click', () => openGantt13Page(widget, !editMode));
+                return;
+            }
+
+            const snapshot = type11GridSnapshots.get(fieldId);
+            widget.innerHTML = snapshot
+                ? `<div class="type11-grid-snapshot">${snapshot}</div>`
+                : '<div class="type11-grid-state">Caricamento griglia…</div>';
             try {
                 const query = new URLSearchParams({ fieldId, clientId: context.clientId || '' });
                 const res = await fetch(`${API_URL}/${encodeURIComponent(source)}/grid-widget?${query.toString()}`, { headers: getAuthHeaders() });
@@ -11182,7 +11597,10 @@
                 const displayedValue = (record, column) => String(column).toLowerCase() === 'project_id'
                     ? projectDisplayValue(record, column)
                     : formatType11Cell(type11CellValue(record, column), column);
-                const columnWidths = visibleColumns.map((column, index) => type11PreferredColumnWidth(
+                // Larghezze allargate/ristrette a mano dall'utente (bordo destro dell'intestazione):
+                // salvate nel browser per griglia e colonna, hanno la precedenza su quelle automatiche.
+                const savedWidths = type11LoadColumnWidths(fieldId);
+                const columnWidths = visibleColumns.map((column, index) => savedWidths[column] || type11PreferredColumnWidth(
                     column,
                     records.map(record => displayedValue(record, column)),
                     linkColumns.has(column),
@@ -11194,14 +11612,13 @@
                     + '</colgroup>';
                 const tableWidth = Math.max(1, columnWidths.reduce((total, width) => total + width, 0) + (canExpire ? 44 : 0));
 
-                // Clic sull'intestazione = ordinamento (crescente, decrescente, nessuno);
-                // la seconda riga dell'intestazione contiene i filtri per colonna.
-                const head = visibleColumns.map(column => `<th scope="col"${linkClass(column)} class="type11-sortable" data-sort-col="${escapeHtml(column)}" title="${escapeHtml(column)} – clic per ordinare">${escapeHtml(type11ColumnLabel(column))}<span class="type11-sort-ind"></span></th>`).join('')
+                // Freccia nell'intestazione = ordinamento; la seconda riga dell'intestazione
+                // contiene il filtro di ogni colonna ("contiene", mentre si scrive).
+                const head = visibleColumns.map(column => `<th scope="col"${linkClass(column)} title="${escapeHtml(column)}">${escapeHtml(type11ColumnLabel(column))}<button type="button" class="type11-sort-btn" data-sort-col="${escapeHtml(column)}" aria-label="Ordina per ${escapeHtml(type11ColumnLabel(column))}"></button><span class="type11-col-resizer" data-resize-col="${escapeHtml(column)}" title="Trascina per cambiare la larghezza (doppio clic: larghezza automatica)"></span></th>`).join('')
                     + (canExpire ? '<th scope="col" class="type11-expire-col" title="Seleziona le righe da chiudere"><i class="fas fa-check-square" aria-hidden="true"></i></th>' : '');
-                const filterHead = visibleColumns.map(column => `<th class="type11-filter-cell"><div class="type11-filter-box">`
-                    + `<select class="type11-filter-op" data-filter-col="${escapeHtml(column)}" title="Tipo di filtro">${TYPE11_FILTER_OPS.map(op => `<option value="${op.value}" title="${escapeHtml(op.label)}">${escapeHtml(op.symbol + ' ' + op.label)}</option>`).join('')}</select>`
+                const filterHead = visibleColumns.map(column => `<th class="type11-filter-cell">`
                     + `<input type="text" class="type11-filter-val" data-filter-col="${escapeHtml(column)}" placeholder="Filtra…" aria-label="Filtro ${escapeHtml(type11ColumnLabel(column))}">`
-                    + `</div></th>`).join('')
+                    + `</th>`).join('')
                     + (canExpire ? '<th class="type11-filter-cell type11-expire-col"></th>' : '');
                 const body = records.map((record, index) => {
                     const selected = '';
@@ -11238,6 +11655,10 @@
                     : `<tr class="type11-empty-row"><td colspan="${Math.max(visibleColumns.length + (canExpire ? 1 : 0), 1)}" class="type11-grid-state">Nessun dato</td></tr>`;
                 widget.innerHTML = `${toolbar}<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}" style="width:${tableWidth}px;">${colgroup}<thead><tr class="type11-head-row">${head}</tr><tr class="type11-filter-row">${filterHead}</tr></thead><tbody>${body}${emptyRow}</tbody></table></div><div class="type11-grid-count"></div>`;
                 type11SetupView(widget, records, visibleColumns, displayedValue);
+                // Fotografia della sola tabella (senza pulsanti) per il prossimo ricaricamento.
+                const scrollBox = widget.querySelector('.type11-grid-scroll');
+                if (scrollBox) type11GridSnapshots.set(fieldId, scrollBox.outerHTML);
+                type11SetupColumnResize(widget, fieldId, visibleColumns);
 
                 // Il click sull'icona apre solo il link: non deve anche selezionare la riga.
                 widget.querySelectorAll('.type11-cell-link').forEach(link =>
@@ -11272,22 +11693,7 @@
                 if (editing && isGantt13) {
                     // Tipo 13: il pulsante "Modifica" apre la pagina Gantt nella stessa
                     // scheda; il ritorno alla dashboard avviene dal pulsante della pagina.
-                    widget.querySelector('.type13-open-gantt')?.addEventListener('click', () => {
-                        const label = widget.closest('.type11-grid-row')?.dataset.campo || '';
-                        // Il pulsante "Torna al Progetto" della pagina Gantt deve riaprire
-                        // QUESTO progetto: oltre al campo servono progetto e cliente (con i
-                        // nomi, per i titoli dei flyout ricostruiti al rientro).
-                        const projList = [...detailNavStack].reverse().find(v => v && v.kind === 'projectList');
-                        const params = new URLSearchParams({
-                            fieldId,
-                            clientId: context.clientId || '',
-                            label,
-                            projectId: context.projectId || currentDetailArgument || '',
-                            projectName: currentDetailLabel || '',
-                            clientName: (projList && projList.label) || ''
-                        });
-                        window.location.href = `gantt.html?${params.toString()}`;
-                    });
+                    widget.querySelector('.type13-open-gantt')?.addEventListener('click', () => openGantt13Page(widget, false));
                 } else if (editing) {
                     // Colonne/metadati con cui costruire gli input inline: esattamente le stesse
                     // colonne (e lo stesso ordine) già mostrate in visualizzazione nella griglia.
@@ -11331,6 +11737,7 @@
                         tr.innerHTML = await type11BuildInlineRowCellsHtml(orderedMeta, {}, true, source, fieldId, context, editOptionsCache)
                             + (canExpire ? '<td class="type11-expire-col"></td>' : '');
                         tbody.insertBefore(tr, tbody.firstChild);
+                        attachType11RubricaSearch(tr);
                         editingRows = [tr];
                         editingIsNew = true;
                         setToolbarEditingState(true);
@@ -11363,6 +11770,7 @@
                                 input.addEventListener('input', markDirty);
                                 input.addEventListener('change', markDirty);
                             });
+                            attachType11RubricaSearch(rowEl);
                             editingRows.push(rowEl);
                         }
                         editingIsNew = false;
@@ -11421,6 +11829,7 @@
                                 return;
                             }
                             await loadType11Grid(widget);
+                            type11DataChanged(widget);
                             showNotification('Salvato', 'success');
                         } catch (e) {
                             showNotification('Errore di connessione', 'info');
@@ -11434,6 +11843,67 @@
             }
         }
 
+
+        // Lente dei campi "note": mostra il testo completo in una finestra ampia. Se il campo
+        // è modificabile, "Applica" riporta il testo nel campo e lo segna da salvare.
+        function openFieldTextDialog(targetInput, title) {
+            let dialog = document.getElementById('fieldTextModal');
+            if (!dialog) {
+                dialog = document.createElement('div');
+                dialog.id = 'fieldTextModal';
+                dialog.className = 'task-modal field-text-modal';
+                dialog.setAttribute('role', 'dialog');
+                dialog.setAttribute('aria-modal', 'true');
+                dialog.innerHTML = `<div class="task-modal-card" style="width: min(720px, 96vw);">
+                    <div class="task-modal-header">
+                        <h3 style="margin: 0; font-size: 1rem; color: var(--dark);"><i class="fas fa-search" style="color: #6366F1;"></i> <span class="field-text-title"></span></h3>
+                        <button type="button" class="field-text-close" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.1rem;"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div style="padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.75rem;">
+                        <textarea class="field-text-area" rows="14"></textarea>
+                        <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+                            <button type="button" class="field-text-close" style="padding: 0.45rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; cursor: pointer;">Chiudi</button>
+                            <button type="button" class="field-text-apply" style="padding: 0.45rem 1.1rem; border: none; border-radius: 8px; background: #6366F1; color: white; font-weight: 600; cursor: pointer;">Applica</button>
+                        </div>
+                    </div>
+                </div>`;
+                document.body.appendChild(dialog);
+            }
+            const area = dialog.querySelector('.field-text-area');
+            const applyBtn = dialog.querySelector('.field-text-apply');
+            const editable = !targetInput.disabled && !targetInput.readOnly;
+            dialog.querySelector('.field-text-title').textContent = title || 'Testo';
+            area.value = targetInput.value;
+            area.readOnly = !editable;
+            applyBtn.style.display = editable ? '' : 'none';
+            const closeDialog = () => { dialog.classList.remove('open'); dialog.onkeydown = null; };
+            dialog.querySelectorAll('.field-text-close').forEach(b => { b.onclick = closeDialog; });
+            applyBtn.onclick = () => {
+                if (targetInput.value !== area.value) {
+                    targetInput.value = area.value;
+                    targetInput.dispatchEvent(new Event('input', { bubbles: true })); // segna il campo da salvare
+                }
+                closeDialog();
+            };
+            // Esc chiude solo questa finestra.
+            dialog.onkeydown = event => {
+                if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeDialog(); }
+            };
+            dialog.classList.add('open');
+            area.focus();
+            area.setSelectionRange(0, 0);
+            area.scrollTop = 0;
+        }
+
+        document.addEventListener('click', event => {
+            const lens = event.target.closest('.field-lens');
+            if (!lens) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const row = lens.closest('.settings-detail-row') || lens.parentElement;
+            const target = row && row.querySelector(`[data-setting-id="${CSS.escape(lens.dataset.lensTarget)}"]`);
+            if (target) openFieldTextDialog(target, lens.dataset.lensTitle);
+        });
 
         function hydrateType11Grids(root) {
             if (!root) return;
@@ -11504,6 +11974,10 @@
             } else if (tipo === 2) {
                 // Alfanumerico -> valore2
                 input = `<input type="text" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(row.valore2 == null ? '' : row.valore2)}">`;
+                // Campi "note": lente tra etichetta e campo che apre il testo completo.
+                if (/note/i.test(String(row.campo || ''))) {
+                    input = `<button type="button" class="field-lens" data-lens-target="${id}" data-lens-title="${campo}" title="Apri il testo completo"><i class="fas fa-search"></i></button>${input}`;
+                }
             } else if (tipo === 3) {
                 // Numerico intero -> valore3
                 input = `<input type="number" step="1" data-setting-id="${id}" data-field="valore3" value="${escapeHtml(row.valore3 == null ? '' : row.valore3)}">`;
@@ -12536,10 +13010,11 @@
 
             const rerender = () => openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true);
 
-            // Toggle: ON -> 'edit' (valori modificabili + pulsanti), OFF -> 'view' (sola lettura)
+            // Toggle: ON -> 'edit' (valori modificabili + pulsanti), OFF -> 'view' (sola lettura).
+            // Ridisegno silenzioso: niente "Caricamento…" né salti di scorrimento.
             if (toggle) toggle.addEventListener('change', () => {
                 clientDetailMode = toggle.checked ? 'edit' : 'view';
-                rerender();
+                openDetailFlyout(currentDetailSource, currentDetailArgument, currentDetailLabel, true, true);
             });
 
             // "Chiudi Progetto": chiede conferma, poi esegue l'istruzione configurata in
