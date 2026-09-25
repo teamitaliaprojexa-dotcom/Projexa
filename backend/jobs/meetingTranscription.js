@@ -22,10 +22,8 @@
 //
 // Tabella: Supporto/CreaDB/rec_meeting_chunks.sql
 // ============================================================================
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import db from '../config/database.js';
+import { getPromptFor } from '../config/prompts.js';
 import { encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js';
 import { transcribeAudio, askAiProvider, whisperUrls } from '../routes/ai.js';
 
@@ -179,13 +177,14 @@ async function appendTranscript(q, user, idCalendar, add) {
 // ----------------------------------------------------------------------------
 //
 // L'AI si sceglie in Impostazioni › AI con il campo "AI generazione e-mail recap"
-// (settings.valore2 per tenant/utente); il prompt è il file prompts/recap_email.txt,
-// modificabile senza toccare il codice. Segnaposto: {{TRASCRIZIONE}}, {{OGGETTO}},
-// {{DATA}}, {{UTENTE}}. Il recap sostituisce quello eventualmente già presente.
-const RECAP_PROMPT_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'prompts', 'recap_email.txt');
-
-function buildRecapPrompt(vars) {
-  let tpl = fs.readFileSync(RECAP_PROMPT_FILE, 'utf8');
+// (settings.valore2 per tenant/utente). Il prompt è la funzione RECAP_EMAIL della tabella
+// app_prompts (modificabile dall'admin di Projexa in prompt-editor.html): quello
+// personalizzato per tenant + utente se esiste, altrimenti lo standard; si rilegge a ogni
+// recap, senza riavvii.
+// Segnaposto: {{TRASCRIZIONE}}, {{OGGETTO}}, {{DATA}}, {{UTENTE}}. Il recap sostituisce
+// quello eventualmente già presente.
+async function buildRecapPrompt(user, vars) {
+  let tpl = (await getPromptFor('RECAP_EMAIL', user)).testo;
   // Se il file non prevede il segnaposto, la trascrizione si aggiunge in fondo.
   if (!tpl.includes('{{TRASCRIZIONE}}')) tpl += '\n\nTrascrizione:\n{{TRASCRIZIONE}}';
   return tpl.replace(/\{\{(TRASCRIZIONE|OGGETTO|DATA|UTENTE)\}\}/g, (m, k) => vars[k] || '');
@@ -212,7 +211,7 @@ export async function generateRecap(user, idCalendar) {
   if (!providerName) throw httpError(400, 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"');
 
   const data = row.data_calendar ? String(row.data_calendar).split('-').reverse().join('/') : '';
-  const prompt = buildRecapPrompt({
+  const prompt = await buildRecapPrompt(user, {
     TRASCRIZIONE: row.trascrizione.trim(),
     OGGETTO: row.oggetto || '',
     DATA: [data, row.orario_calendar ? String(row.orario_calendar).slice(0, 5) : ''].filter(Boolean).join(' '),

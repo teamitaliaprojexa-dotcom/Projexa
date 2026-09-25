@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - Prompt AI</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            background: #f5f5f5;
+            color: #1f2937;
+        }
+        .container { max-width: 1100px; margin: 0 auto; padding: 2rem 1rem; }
+        header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+        h1 { font-size: 1.6rem; color: #3B82F6; }
+        .btn {
+            padding: 0.65rem 1.2rem; border: none; border-radius: 8px; font-weight: 600;
+            cursor: pointer; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 0.5rem;
+            text-decoration: none;
+        }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: #3B82F6; color: white; }
+        .btn-primary:hover:not(:disabled) { background: #1E40AF; }
+        .btn-secondary { background: #e5e7eb; color: #1f2937; }
+        .btn-secondary:hover:not(:disabled) { background: #d1d5db; }
+        .btn-danger { background: #fff; color: #DC2626; border: 1px solid #FCA5A5; }
+        .btn-danger:hover:not(:disabled) { background: #FEF2F2; }
+        .card { background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 1.25rem; }
+        .info { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; font-size: 0.85rem; color: #4b5563; margin-bottom: 0.9rem; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+        .badge-db { background: #DBEAFE; color: #1E40AF; }
+        .badge-file { background: #F3F4F6; color: #374151; }
+        .placeholders { font-size: 0.85rem; color: #4b5563; margin-bottom: 0.75rem; }
+        .placeholders code {
+            background: #EEF2FF; color: #3730A3; padding: 1px 6px; border-radius: 4px; cursor: pointer;
+            font-family: Consolas, Menlo, monospace; margin-right: 4px;
+        }
+        textarea {
+            width: 100%; min-height: 60vh; padding: 0.9rem; border: 1px solid #d1d5db; border-radius: 8px;
+            font-family: Consolas, Menlo, monospace; font-size: 0.88rem; line-height: 1.5; resize: vertical;
+        }
+        textarea:focus { outline: 2px solid #93C5FD; border-color: #3B82F6; }
+        .actions { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: space-between; margin-top: 0.9rem; }
+        .actions > div { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+        .status { margin-top: 0.9rem; padding: 0.7rem 0.9rem; border-radius: 8px; font-size: 0.9rem; display: none; }
+        .status.success { display: block; background: #ECFDF5; color: #065F46; }
+        .status.error { display: block; background: #FEF2F2; color: #991B1B; }
+        .denied { text-align: center; padding: 3rem 1rem; color: #6b7280; }
+        .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; }
+        .counter { font-size: 0.8rem; color: #6b7280; align-self: center; }
+        .scope { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: center; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb; font-size: 0.9rem; }
+        .scope label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+        .scope select { padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.88rem; min-width: 180px; max-width: 100%; }
+        .custom-list { margin-top: 1rem; font-size: 0.85rem; }
+        .custom-list h2 { font-size: 0.95rem; margin-bottom: 0.5rem; color: #374151; }
+        .custom-list ul { list-style: none; }
+        .custom-list li { padding: 0.45rem 0.6rem; border-radius: 6px; cursor: pointer; display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+        .custom-list li:hover { background: #F3F4F6; }
+        .custom-list .muted { color: #6b7280; }
+        textarea:disabled { background: #f9fafb; color: #9ca3af; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-envelope-open-text"></i> <span id="pageTitle">Prompt AI</span></h1>
+            <a class="btn btn-secondary" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
+        </header>
+
+        <div id="editorCard" class="card" style="display: none;">
+            <div class="scope">
+                <label><input type="radio" name="scope" value="standard" checked> Standard (tutti)</label>
+                <label><input type="radio" name="scope" value="utente"> Personalizzato per</label>
+                <select id="tenantSel" disabled><option value="">Tenant…</option></select>
+                <select id="userSel" disabled><option value="">Utente…</option></select>
+            </div>
+            <div class="info">
+                <span>Stai modificando: <span id="origine" class="badge"></span></span>
+                <span id="lastUpdate"></span>
+            </div>
+            <div class="placeholders">
+                Segnaposto (clic per inserirli nel punto del cursore): <span id="placeholders"></span>
+                <br>Se il testo non contiene <code style="cursor: default;">{{TRASCRIZIONE}}</code>, la trascrizione viene aggiunta in fondo.
+            </div>
+            <textarea id="promptText" spellcheck="false"></textarea>
+            <div class="actions">
+                <div>
+                    <button id="resetBtn" class="btn btn-danger" type="button"><i class="fas fa-rotate-left"></i> <span id="resetLabel">Ripristina dal file</span></button>
+                    <button id="reloadBtn" class="btn btn-secondary" type="button"><i class="fas fa-rotate"></i> Annulla modifiche</button>
+                </div>
+                <div>
+                    <span id="counter" class="counter"></span>
+                    <button id="saveBtn" class="btn btn-primary" type="button" disabled><i class="fas fa-save"></i> Salva</button>
+                </div>
+            </div>
+            <div id="status" class="status"></div>
+            <div class="custom-list">
+                <h2>Prompt personalizzati</h2>
+                <ul id="customList"><li class="muted" style="cursor: default;">Nessuno: tutti usano lo standard.</li></ul>
+            </div>
+        </div>
+
+        <div id="deniedCard" class="card denied" style="display: none;">
+            <div><i class="fas fa-lock"></i></div>
+            <div id="deniedMsg">Pagina riservata all'amministratore di Projexa.</div>
+        </div>
+    </div>
+
+    <script>
+        // Stesso criterio delle altre pagine: in locale e su Oracle l'API è sulla stessa origine.
+        const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+          ? location.origin
+          : (location.hostname.endsWith('github.io') ? 'https://projexa-4mix.onrender.com' : location.origin)) + '/api';
+        // Funzione del prompt (tabella app_prompts): ?funzione=... nell'URL, default RECAP_EMAIL.
+        const FUNZIONE = (new URLSearchParams(location.search).get('funzione') || 'RECAP_EMAIL').toUpperCase();
+
+        const $ = (id) => document.getElementById(id);
+        const textEl = $('promptText');
+        let savedText = '';
+        let current = { esiste: false };
+
+        const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        function authHeaders(json) {
+            const h = { 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` };
+            if (json) h['Content-Type'] = 'application/json';
+            return h;
+        }
+
+        function showStatus(msg, type) {
+            const el = $('status');
+            el.textContent = msg;
+            el.className = 'status ' + type;
+        }
+
+        async function request(method, url, body) {
+            const res = await fetch(`${API_URL}${url}`, {
+                method,
+                headers: authHeaders(!!body),
+                body: body ? JSON.stringify(body) : undefined
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const err = new Error(data.error || `Errore ${res.status}`);
+                err.status = res.status;
+                throw err;
+            }
+            return data;
+        }
+
+        // Ambito scelto: {} = standard, { tenant_id, user_id } = personalizzato.
+        function scope() {
+            if (document.querySelector('input[name="scope"]:checked').value !== 'utente') return {};
+            return { tenant_id: $('tenantSel').value, user_id: $('userSel').value };
+        }
+        const isUserScope = () => !!scope().tenant_id;
+        const scopeReady = () => document.querySelector('input[name="scope"]:checked').value === 'standard' || (scope().tenant_id && scope().user_id);
+        const scopeQuery = () => { const sc = scope(); return sc.tenant_id ? `?tenant_id=${encodeURIComponent(sc.tenant_id)}&user_id=${encodeURIComponent(sc.user_id)}` : ''; };
+
+        function isDirty() { return textEl.value !== savedText; }
+
+        function refreshDirty() {
+            const dirty = isDirty();
+            const ready = scopeReady();
+            $('saveBtn').disabled = !dirty || !ready;
+            $('reloadBtn').disabled = !dirty;
+            $('counter').textContent = ready
+                ? `${textEl.value.length.toLocaleString('it-IT')} caratteri${dirty ? ' · modifiche non salvate' : ''}`
+                : 'Scegli tenant e utente';
+        }
+
+        function render(data) {
+            current = data;
+            savedText = data.testo || '';
+            textEl.value = savedText;
+            textEl.disabled = !scopeReady();
+            const user = isUserScope();
+            const badge = $('origine');
+            if (!scopeReady()) {
+                badge.textContent = 'scegli tenant e utente';
+                badge.className = 'badge badge-file';
+            } else if (user) {
+                badge.textContent = data.esiste ? 'prompt personalizzato dell\'utente' : 'nuovo personalizzato (parte dallo standard)';
+                badge.className = 'badge ' + (data.esiste ? 'badge-db' : 'badge-file');
+            } else {
+                badge.textContent = 'prompt standard (vale per chi non ha un personalizzato)';
+                badge.className = 'badge badge-db';
+            }
+            $('resetLabel').textContent = user ? 'Elimina personalizzato' : 'Ripristina dal file';
+            $('resetBtn').disabled = !scopeReady() || (user && !data.esiste);
+            $('lastUpdate').textContent = data.esiste && data.updated_at
+                ? `Ultima modifica: ${new Date(data.updated_at).toLocaleString('it-IT')}${data.updated_by ? ' · ' + data.updated_by : ''}`
+                : '';
+            refreshDirty();
+        }
+
+        async function loadPrompt() {
+            if (!scopeReady()) { render({ testo: '', esiste: false }); return; }
+            try {
+                render(await request('GET', `/prompts/${FUNZIONE}${scopeQuery()}`));
+            } catch (e) {
+                showStatus(e.message, 'error');
+            }
+        }
+
+        async function loadCustomList() {
+            const ul = $('customList');
+            try {
+                const rows = await request('GET', `/prompts/${FUNZIONE}/personalizzazioni`);
+                ul.innerHTML = rows.length
+                    ? rows.map((r) => `<li data-t="${esc(r.tenant_id)}" data-u="${esc(r.user_id)}">
+                            <span>${esc(r.tenant_name || r.tenant_id)} · <strong>${esc(r.user_name || r.user_id)}</strong></span>
+                            <span class="muted">${r.updated_at ? new Date(r.updated_at).toLocaleString('it-IT') : ''}</span></li>`).join('')
+                    : '<li class="muted" style="cursor: default;">Nessuno: tutti usano lo standard.</li>';
+            } catch (e) {
+                ul.innerHTML = `<li class="muted" style="cursor: default;">${esc(e.message)}</li>`;
+            }
+        }
+
+        async function loadTenants() {
+            const tenants = await request('GET', '/auth/impersonate/tenants');
+            $('tenantSel').innerHTML = '<option value="">Tenant…</option>' +
+                tenants.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
+        }
+
+        async function loadUsers(tenantId) {
+            $('userSel').innerHTML = '<option value="">Utente…</option>';
+            if (!tenantId) return;
+            const users = await request('GET', `/auth/impersonate/users?tenant_id=${encodeURIComponent(tenantId)}`);
+            $('userSel').innerHTML = '<option value="">Utente…</option>' + users.map((u) =>
+                `<option value="${esc(u.id)}">${esc([u.name, u.cognome].filter(Boolean).join(' ') || u.email || u.id)}${u.email ? ' – ' + esc(u.email) : ''}</option>`).join('');
+        }
+
+        function confirmDiscard() {
+            return !isDirty() || confirm('Ci sono modifiche non salvate: vuoi perderle?');
+        }
+
+        // Cambio ambito: si ricorda la selezione precedente per poterla ripristinare
+        let lastScopeRadio = 'standard';
+        document.querySelectorAll('input[name="scope"]').forEach((r) => r.addEventListener('change', async () => {
+            if (!confirmDiscard()) {
+                document.querySelector(`input[name="scope"][value="${lastScopeRadio}"]`).checked = true;
+                return;
+            }
+            lastScopeRadio = r.value;
+            const user = r.value === 'utente';
+            $('tenantSel').disabled = !user;
+            $('userSel').disabled = !user;
+            await loadPrompt();
+        }));
+
+        let lastTenant = '', lastUser = '';
+        $('tenantSel').addEventListener('change', async () => {
+            if (!confirmDiscard()) { $('tenantSel').value = lastTenant; return; }
+            lastTenant = $('tenantSel').value;
+            lastUser = '';
+            await loadUsers(lastTenant);
+            await loadPrompt();
+        });
+        $('userSel').addEventListener('change', async () => {
+            if (!confirmDiscard()) { $('userSel').value = lastUser; return; }
+            lastUser = $('userSel').value;
+            await loadPrompt();
+        });
+
+        // Clic su un personalizzato esistente: lo apre
+        $('customList').addEventListener('click', async (ev) => {
+            const li = ev.target.closest('li[data-t]');
+            if (!li || !confirmDiscard()) return;
+            document.querySelector('input[name="scope"][value="utente"]').checked = true;
+            lastScopeRadio = 'utente';
+            $('tenantSel').disabled = false;
+            $('userSel').disabled = false;
+            $('tenantSel').value = lastTenant = li.dataset.t;
+            await loadUsers(li.dataset.t);
+            $('userSel').value = lastUser = li.dataset.u;
+            await loadPrompt();
+            textEl.focus();
+        });
+
+        $('placeholders').addEventListener('click', (ev) => {
+            const ph = ev.target.getAttribute && ev.target.getAttribute('data-ph');
+            if (!ph || textEl.disabled) return;
+            textEl.setRangeText(ph, textEl.selectionStart, textEl.selectionEnd, 'end');
+            textEl.focus();
+            refreshDirty();
+        });
+
+        textEl.addEventListener('input', refreshDirty);
+
+        $('saveBtn').addEventListener('click', async () => {
+            if (!textEl.value.trim()) { showStatus('Il prompt non può essere vuoto.', 'error'); return; }
+            $('saveBtn').disabled = true;
+            try {
+                const r = await request('PUT', `/prompts/${FUNZIONE}`, { testo: textEl.value, ...scope() });
+                render({ ...current, testo: textEl.value, esiste: true, updated_at: r.updated_at, updated_by: r.updated_by });
+                showStatus('Salvato. Vale dal prossimo utilizzo, senza riavviare nulla.', 'success');
+                loadCustomList();
+            } catch (e) {
+                showStatus(`Errore nel salvataggio: ${e.message}`, 'error');
+                refreshDirty();
+            }
+        });
+
+        $('reloadBtn').addEventListener('click', () => {
+            if (!confirm('Annullare le modifiche non salvate?')) return;
+            textEl.value = savedText;
+            refreshDirty();
+            showStatus('Modifiche annullate.', 'success');
+        });
+
+        $('resetBtn').addEventListener('click', async () => {
+            const user = isUserScope();
+            const msg = user
+                ? 'Eliminare il prompt personalizzato? L\'utente tornerà a usare il prompt standard.'
+                : 'Ripristinare il prompt standard con il testo originale del file? Il testo attuale verrà sostituito.';
+            if (!confirm(msg)) return;
+            try {
+                await request('DELETE', `/prompts/${FUNZIONE}${scopeQuery()}`);
+                await loadPrompt();
+                loadCustomList();
+                showStatus(user ? 'Personalizzato eliminato: l\'utente usa lo standard.' : 'Prompt standard ripristinato dal file.', 'success');
+            } catch (e) {
+                showStatus(`Errore: ${e.message}`, 'error');
+            }
+        });
+
+        window.addEventListener('beforeunload', (ev) => {
+            if (isDirty()) { ev.preventDefault(); ev.returnValue = ''; }
+        });
+
+        async function init() {
+            try {
+                const funzioni = await request('GET', '/prompts');
+                const def = funzioni.find((x) => x.funzione === FUNZIONE);
+                if (!def) throw Object.assign(new Error(`Funzione ${FUNZIONE} non gestita`), { status: 404 });
+                document.title = `Projexa - Prompt ${def.titolo}`;
+                $('pageTitle').textContent = `Prompt: ${def.titolo}`;
+                $('placeholders').innerHTML = (def.segnaposto || [])
+                    .map((p) => `<code data-ph="{{${p}}}">{{${p}}}</code>`).join('');
+                $('editorCard').style.display = '';
+                await Promise.all([loadPrompt(), loadCustomList(), loadTenants()]);
+            } catch (e) {
+                if (e.status === 401) { window.location.href = 'index.html'; return; }
+                $('editorCard').style.display = 'none';
+                $('deniedMsg').textContent = e.status === 403 ? 'Pagina riservata all\'amministratore di Projexa.' : e.message;
+                $('deniedCard').style.display = '';
+            }
+        }
+
+        if (!localStorage.getItem('authToken')) window.location.href = 'index.html';
+        else init();
+    </script>
+</body>
+</html>

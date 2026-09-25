@@ -1,7 +1,7 @@
 // API Configuration
 const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
   ? location.origin
-  : 'https://projexa-4mix.onrender.com') + '/api';
+  : (location.hostname.endsWith('github.io') ? 'https://projexa-4mix.onrender.com' : location.origin)) + '/api';
 
 // State
 let currentUser = null;

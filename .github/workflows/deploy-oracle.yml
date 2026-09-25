@@ -1,0 +1,47 @@
+name: Deploy Projexa su Oracle Cloud
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-oracle
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configura chiave SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.ORACLE_SSH_KEY }}" > ~/.ssh/id_oracle
+          chmod 600 ~/.ssh/id_oracle
+          ssh-keyscan -H "${{ secrets.ORACLE_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Copia backend e sito sulla VM
+        run: |
+          RSYNC_SSH="ssh -i ~/.ssh/id_oracle"
+          TARGET="${{ secrets.ORACLE_USER }}@${{ secrets.ORACLE_HOST }}:/opt/projexa"
+          rsync -az --delete -e "$RSYNC_SSH" --exclude node_modules --exclude .env ./backend/ "$TARGET/backend/"
+          rsync -az --delete -e "$RSYNC_SSH" ./sito/ "$TARGET/sito/"
+          rsync -az --delete -e "$RSYNC_SSH" --exclude .venv --exclude __pycache__ ./whisper-service/ "$TARGET/whisper-service/"
+
+      - name: Installa dipendenze e riavvia
+        run: |
+          ssh -i ~/.ssh/id_oracle "${{ secrets.ORACLE_USER }}@${{ secrets.ORACLE_HOST }}" '
+            set -e
+            cd /opt/projexa/backend
+            npm ci --omit=dev
+            pm2 reload projexa --update-env || pm2 start server.js --name projexa
+            pm2 save
+            /opt/projexa/whisper-venv/bin/pip install -q -r /opt/projexa/whisper-service/requirements.txt
+            for u in $(systemctl list-units --plain --no-legend 'projexa-whisper@*' | awk '{print $1}'); do sudo systemctl restart "$u"; done
+            sleep 3
+            curl -fsS http://localhost:3001/api/health
+          '

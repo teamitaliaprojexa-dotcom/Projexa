@@ -7,7 +7,7 @@
     const HEARTBEAT_INTERVAL_MS = 8 * 60 * 1000;
     const API_ORIGIN = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
         ? location.origin
-        : 'https://projexa-4mix.onrender.com';
+        : (location.hostname.endsWith('github.io') ? 'https://projexa-4mix.onrender.com' : location.origin);
 
     let timerId = null;
     let activeRequest = null;

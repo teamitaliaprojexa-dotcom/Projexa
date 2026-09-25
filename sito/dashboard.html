@@ -2758,6 +2758,8 @@
             <li id="navAi_mistral" class="nav-ai" style="display: none;"><a href="#" data-ai-open="mistral" title="Mistral"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h4v4H3V3Zm14 0h4v4h-4V3ZM3 7h4v4H3V7Zm4 0h4v4H7V7Zm6 0h4v4h-4V7Zm4 0h4v4h-4V7ZM3 11h4v4H3v-4Zm6 0h6v4H9v-4Zm8 0h4v4h-4v-4ZM3 15h4v4H3v-4Zm14 0h4v4h-4v-4ZM1 19h8v2H1v-2Zm14 0h8v2h-8v-2Z"/></svg> <span>Mistral</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
             <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 3 3.8 3 6v12c0 2.2 3.5 4 9 4s9-1.8 9-4V6c0-2.2-3.5-4-9-4Zm0 2c4.6 0 7 1.4 7 2s-2.4 2-7 2-7-1.4-7-2 2.4-2 7-2Zm0 16c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V18c0 .6-2.4 2-7 2Zm0-5c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V13c0 .6-2.4 2-7 2Z"/></svg> <span>Database</span></a></li>
+            <!-- Prompt recap email: solo admin (id_roles = 1) del tenant PROJEXA -->
+            <li id="navPromptRecap" style="display: none;"><a href="prompt-editor.html?funzione=RECAP_EMAIL" title="Prompt AI (recap email)"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v.5l8 5 8-5V6H4Zm16 2.8-7.5 4.7a1 1 0 0 1-1 0L4 8.8V18h16V8.8Z"/></svg> <span>Prompt recap</span></a></li>
             <!-- Registrazione libera (non legata al calendario): chiede il nome e avvia la registrazione -->
             <li id="navRecord" style="border: none;"><a href="#" id="navRecordLink" title="Nuova registrazione"><svg class="sidebar-icon nav-record-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="#DC2626" stroke-width="1.8"/><rect x="9.6" y="5.6" width="4.8" height="8.2" rx="2.4" fill="#DC2626"/><path d="M7.4 11.4a4.6 4.6 0 0 0 9.2 0" fill="none" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/><path d="M12 16v2.4M9.6 18.4h4.8" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/></svg> <span>Registra</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
@@ -5297,7 +5299,7 @@
         // su GitHub Pages, quindi punta al backend Render. Stesso codice ovunque.
         const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
           ? location.origin
-          : 'https://projexa-4mix.onrender.com') + '/api';
+          : (location.hostname.endsWith('github.io') ? 'https://projexa-4mix.onrender.com' : location.origin)) + '/api';
 
         function getAuthHeaders() {
             const token = localStorage.getItem('authToken');
@@ -7688,6 +7690,13 @@
             const dbNav = document.getElementById('navDatabase');
             if (dbNav) {
                 dbNav.style.display = isAdmin ? '' : 'none';
+            }
+            // Il prompt del recap vale per tutti i tenant: solo l'admin del tenant PROJEXA
+            // (il backend lo verifica comunque su /api/prompts).
+            const promptNav = document.getElementById('navPromptRecap');
+            if (promptNav) {
+                const isProjexa = String(claims.tenant_name || '').trim().toUpperCase() === 'PROJEXA';
+                promptNav.style.display = (isAdmin && isProjexa) ? '' : 'none';
             }
         }
 

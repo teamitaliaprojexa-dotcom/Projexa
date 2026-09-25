@@ -17,6 +17,7 @@ import aiRoutes from './routes/ai.js';
 import jiraRoutes from './routes/jira.js';
 import cryptoMigrationRoutes from './routes/crypto-migration.js';
 import integrazioniRoutes from './routes/integrazioni.js';
+import promptsRoutes from './routes/prompts.js';
 import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
@@ -130,6 +131,8 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/jira', jiraRoutes);
 // Pulsante «Aggiorna Integrazioni» della dashboard -> programmi in backend/jobs/.
 app.use('/api/integrazioni', integrazioniRoutes);
+// Editor dei prompt AI (prompt-editor.html): solo admin del tenant PROJEXA.
+app.use('/api/prompts', promptsRoutes);
 // Migrazione Crypto (database-viewer): riservata agli amministratori.
 app.use('/api/crypto', requireAuth, requireAdmin, cryptoMigrationRoutes);
 
