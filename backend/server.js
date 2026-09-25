@@ -18,6 +18,7 @@ import jiraRoutes from './routes/jira.js';
 import cryptoMigrationRoutes from './routes/crypto-migration.js';
 import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
+import chatbotRoutes from './routes/chatbot.js';
 import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
@@ -133,6 +134,8 @@ app.use('/api/jira', jiraRoutes);
 app.use('/api/integrazioni', integrazioniRoutes);
 // Editor dei prompt AI (prompt-editor.html): solo admin del tenant PROJEXA.
 app.use('/api/prompts', promptsRoutes);
+// Assistente "Projexa" della dashboard (Gemini + Manuale Utente): tutti gli utenti.
+app.use('/api/chatbot', chatbotRoutes);
 // Migrazione Crypto (database-viewer): riservata agli amministratori.
 app.use('/api/crypto', requireAuth, requireAdmin, cryptoMigrationRoutes);
 

@@ -25,7 +25,7 @@ const MAX_PROMPT_CHARS = 20000;
 
 // Modelli: per ChatGPT e Gemini sovrascrivibili da variabile d'ambiente, così un modello
 // ritirato dal fornitore si cambia su Render senza toccare il codice.
-const PROVIDERS = {
+export const PROVIDERS = {
   chatgpt: { provider: 'ChatGPT', label: 'ChatGPT', prefix: 'chatgpt', model: process.env.OPENAI_MODEL || 'gpt-5' },
   claude: { provider: 'Claude', label: 'Claude', prefix: 'claude', model: 'claude-opus-5' },
   // Gemini: "Flash Lite" di default perché nel piano gratuito ha limiti molto più ampi
@@ -52,7 +52,7 @@ function httpError(status, message) {
 // fetch verso un fornitore AI. Gli errori di rete di Node ("fetch failed") nascondono il
 // motivo in error.cause: lo si riporta (DNS, connessione, certificato, timeout) e si
 // riprova una volta, perché spesso sono intoppi momentanei.
-async function callApi(url, options, label) {
+export async function callApi(url, options, label) {
   for (let attempt = 1; ; attempt++) {
     try {
       return await fetch(url, { ...options, signal: AbortSignal.timeout(options.timeoutMs || 120000) });
@@ -69,7 +69,7 @@ async function callApi(url, options, label) {
 }
 
 // Legge la risposta di un'API esterna e trasforma gli errori in messaggi comprensibili.
-async function readJson(response, label) {
+export async function readJson(response, label) {
   const text = await response.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }

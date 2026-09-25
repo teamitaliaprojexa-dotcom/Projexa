@@ -31,6 +31,8 @@ jobs:
           rsync -az --delete -e "$RSYNC_SSH" --exclude node_modules --exclude .env ./backend/ "$TARGET/backend/"
           rsync -az --delete -e "$RSYNC_SSH" ./sito/ "$TARGET/sito/"
           rsync -az --delete -e "$RSYNC_SSH" --exclude .venv --exclude __pycache__ ./whisper-service/ "$TARGET/whisper-service/"
+          # Manuale Utente: lo legge l'assistente AI della dashboard (backend/routes/chatbot.js)
+          rsync -az --delete -e "$RSYNC_SSH" ./Documentazione/ "$TARGET/Documentazione/"
 
       - name: Installa dipendenze e riavvia
         run: |
