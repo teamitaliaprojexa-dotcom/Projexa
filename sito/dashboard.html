@@ -3453,7 +3453,6 @@
             const pictureFromUrl = params.get('picture');
             const genderFromUrl = params.get('gender');
             const provider = params.get('provider');
-            const jwtFromUrl = params.get('jwt_token');
 
             // Merge dei dati (URL ha priorità)
             if (nameFromUrl) userData.name = decodeURIComponent(nameFromUrl);
@@ -3462,18 +3461,10 @@
             if (genderFromUrl) userData.gender = genderFromUrl;
             if (provider) userData.provider = provider;
 
-            // Salva il JWT dell'app (usato per autenticare le chiamate API protette).
-            if (jwtFromUrl) {
-                localStorage.setItem('authToken', jwtFromUrl);
-            }
-
-            // Il JWT (usato per autenticare le chiamate API, incluso /api/calendar) arriva in
-            // query string dal redirect di login: è già stato salvato sopra. I calendari
-            // (Google/Outlook) non usano più il token OAuth del login: hanno una propria
-            // connessione dedicata (vedi pulsanti "Collega"/"Scollega" della dashboard).
-            // Qui si ripulisce subito la query string per non lasciare nulla nella cronologia
-            // del browser, nei log o nell'header Referer.
-            if (jwtFromUrl || params.get('access_token') || params.get('microsoft_access_token')) {
+            // Il token di sessione non arriva mai dall'URL: dopo un login Google/Microsoft lo
+            // salva oauth-complete.html (cookie monouso). Eventuali token in un vecchio link
+            // (jwt_token, access_token) vengono ignorati e tolti dalla barra degli indirizzi.
+            if (params.get('jwt_token') || params.get('access_token') || params.get('microsoft_access_token')) {
                 window.history.replaceState({}, document.title, window.location.pathname);
             }
 
@@ -10932,6 +10923,9 @@
                     body: JSON.stringify({ currentPassword, newPassword, confirmPassword })
                 });
                 if (res.ok) {
+                    // Le sessioni con la vecchia password decadono: questa riceve un token nuovo.
+                    const data = await res.json().catch(() => ({}));
+                    if (data.token) localStorage.setItem('authToken', data.token);
                     closeChangePasswordModal();
                     showNotification('Password aggiornata', 'success');
                 } else {

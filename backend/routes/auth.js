@@ -5,8 +5,14 @@ import crypto from 'crypto';
 import db from '../config/database.js';
 import authDb from '../config/authDatabase.js';
 import JWT_SECRET from '../config/jwt.js';
-import { sendMail, buildConfirmEmail, buildResetPasswordEmail, isMailerConfigured } from '../config/mailer.js';
+import { sendMail, buildConfirmEmail, buildResetPasswordEmail, buildMagicLinkEmail, isMailerConfigured } from '../config/mailer.js';
 import { requireAuth } from '../middleware/auth.js';
+import { signSessionToken, verifySessionToken, forgetSessionSignature, passwordSignature } from '../config/session.js';
+import { startOAuthLogin, checkOAuthState, deliverLoginToken, takeLoginToken } from '../config/oauthLogin.js';
+
+// Link con token (conferma iscrizione, reset password) nel log solo in locale: in
+// produzione chi legge i log potrebbe usarli per prendere il controllo degli account.
+const LOG_LINKS = process.env.NODE_ENV !== 'production';
 
 const router = express.Router();
 
@@ -128,8 +134,8 @@ router.post('/login', async (req, res) => {
     );
     const userRole = roleRes.rows[0] || {};
 
-    // Generate JWT token
-    const token = jwt.sign(
+    // Token di sessione (tipo "session", legato alla password attuale)
+    const token = signSessionToken(
       {
         user_id: userData.id,
         email: userData.email,
@@ -139,8 +145,7 @@ router.post('/login', async (req, res) => {
         id_roles: userRole.id_roles,
         role_name: userRole.role_name
       },
-      JWT_SECRET,
-      { expiresIn: '24h' }
+      authUser.password_hash
     );
 
     res.json({
@@ -240,7 +245,7 @@ router.post('/register', async (req, res) => {
     const confirmToken = jwt.sign({ uid: userId, purpose: 'signup-confirm' }, JWT_SECRET, { expiresIn: '30d' });
     const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
     const confirmUrl = `${base}/prova-gratuita.html?token=${encodeURIComponent(confirmToken)}`;
-    console.log(`[REGISTER] Link di conferma per ${email}: ${confirmUrl}`); // utile per i test in locale
+    if (LOG_LINKS) console.log(`[REGISTER] Link di conferma per ${email}: ${confirmUrl}`); // solo in locale, per i test
 
     let emailSent = false;
     try {
@@ -365,9 +370,11 @@ router.post('/change-password', requireAuth, async (req, res) => {
       [newHash, userId]
     );
     changePwdAttempts.delete(userId);
+    // Le sessioni aperte con la vecchia password decadono; questa riceve un token nuovo.
+    forgetSessionSignature(userId);
     console.log(`[CHANGE-PASSWORD] Password aggiornata per utente ${userId}`);
 
-    res.json({ success: true });
+    res.json({ success: true, token: signSessionToken(req.user, newHash) });
   } catch (error) {
     console.error('❌ CHANGE-PASSWORD ERROR:', error.message);
     res.status(500).json({ error: 'Errore durante il cambio password' });
@@ -382,9 +389,7 @@ router.post('/change-password', requireAuth, async (req, res) => {
 // dell'hash attuale: quando la password cambia, la firma non torna più e il link
 // diventa inutilizzabile (uso singolo, senza colonne aggiuntive sul DB).
 const RESET_TOKEN_HOURS = 1;
-function passwordHashSignature(passwordHash) {
-  return crypto.createHmac('sha256', JWT_SECRET).update(String(passwordHash || '')).digest('hex').slice(0, 32);
-}
+const passwordHashSignature = passwordSignature; // stessa firma dei token di sessione
 
 // Verifica il token del link: restituisce { uid, email, nome } o lancia un errore.
 async function verifyResetToken(token) {
@@ -434,7 +439,7 @@ router.post('/forgot-password', async (req, res) => {
     );
     const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
     const resetUrl = `${base}/reset-password.html?token=${encodeURIComponent(token)}`;
-    console.log(`[FORGOT-PASSWORD] Link di reimpostazione per ${email}: ${resetUrl}`); // utile in locale
+    if (LOG_LINKS) console.log(`[FORGOT-PASSWORD] Link di reimpostazione per ${email}: ${resetUrl}`); // solo in locale
 
     const p = await db.query('SELECT name FROM users WHERE id = $1', [user.id]);
     const nome = (p.rows[0] && p.rows[0].name) || '';
@@ -497,6 +502,7 @@ router.post('/reset-password', async (req, res) => {
       [newHash, info.uid]
     );
     changePwdAttempts.delete(info.uid);
+    forgetSessionSignature(info.uid); // chiude le sessioni aperte con la vecchia password
     console.log(`[RESET-PASSWORD] Password reimpostata per utente ${info.uid}`);
 
     res.json({ success: true });
@@ -506,28 +512,194 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
+// ==========================================
+// Magic link: accesso senza password con un link via email
+// ==========================================
+//
+// 1. L'utente scrive l'email nella pagina di login e clicca "Magic link": se l'email è
+//    registrata gli arriva un link a magic-link.html con un token firmato.
+// 2. Il token vale MAGIC_LINK_SECONDS secondi (60), si usa una sola volta (jti annotato
+//    alla prima verifica) ed è legato alla password attuale, come il link di reset.
+// 3. magic-link.html manda il token a /magic-link/verify con una POST (non un GET: i
+//    sistemi che "pre-aprono" i link nelle email non lo consumano) e riceve il token di
+//    sessione, come dopo un login normale.
+const MAGIC_LINK_SECONDS = 60;
+const usedMagicLinks = new Map(); // jti -> scadenza (ms): link già usati
+
+// Max 5 richieste ogni 15 minuti per IP e per email: evita di inondare una casella.
+const magicAttempts = new Map(); // chiave -> { count, first }
+function magicRateLimited(key) {
+  const now = Date.now(), windowMs = 15 * 60 * 1000, max = 5;
+  const rec = magicAttempts.get(key);
+  if (!rec || now - rec.first > windowMs) { magicAttempts.set(key, { count: 1, first: now }); return false; }
+  rec.count += 1;
+  return rec.count > max;
+}
+
+router.post('/magic-link', async (req, res) => {
+  const email = ((req.body && req.body.email) || '').trim().toLowerCase();
+  try {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Inserisci un indirizzo email valido.' });
+    }
+    if (magicRateLimited('ip:' + (req.ip || 'unknown')) || magicRateLimited('email:' + email)) {
+      return res.status(429).json({ error: 'Troppe richieste. Riprova tra qualche minuto.' });
+    }
+
+    // L'email deve essere già registrata (Projexa-Auth).
+    const r = await authDb.query(
+      'SELECT id, email, password_hash, scadenza FROM users WHERE LOWER(email) = $1 LIMIT 1',
+      [email]
+    );
+    const user = r.rows[0];
+    if (!user) {
+      return res.status(404).json({ error: 'Email non presente in archivio: registrati con la prova gratuita.', code: 'not_registered' });
+    }
+    if (!checkLicenseExpiry(user).valid) {
+      return res.status(403).json({ error: 'La licenza di questo account è scaduta.' });
+    }
+    if (!isMailerConfigured()) {
+      return res.status(503).json({ error: 'Invio email non configurato sul server.' });
+    }
+
+    const token = jwt.sign(
+      { uid: user.id, purpose: 'magic-link', sig: passwordHashSignature(user.password_hash), jti: crypto.randomUUID() },
+      JWT_SECRET,
+      { expiresIn: MAGIC_LINK_SECONDS }
+    );
+    const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
+    const magicUrl = `${base}/magic-link.html?token=${encodeURIComponent(token)}`;
+    if (LOG_LINKS) console.log(`[MAGIC-LINK] Link di accesso per ${email}: ${magicUrl}`); // solo in locale
+
+    const p = await db.query('SELECT name FROM users WHERE id = $1', [user.id]);
+    const nome = (p.rows[0] && p.rows[0].name) || '';
+    const { html, text } = buildMagicLinkEmail({ nome, magicUrl, validSeconds: MAGIC_LINK_SECONDS });
+    try {
+      await sendMail({ to: user.email, subject: 'Il tuo link di accesso a Projexa', html, text });
+    } catch (mailErr) {
+      console.error('❌ MAGIC-LINK MAIL ERROR:', mailErr.message);
+      return res.status(502).json({ error: 'Invio dell\'email non riuscito: riprova tra poco.' });
+    }
+    console.log(`[MAGIC-LINK] Link inviato all'utente ${user.id}`);
+    res.json({ success: true, validSeconds: MAGIC_LINK_SECONDS });
+  } catch (error) {
+    console.error('❌ MAGIC-LINK ERROR:', error.message);
+    res.status(500).json({ error: 'Errore durante l\'invio del link' });
+  }
+});
+
+router.post('/magic-link/verify', async (req, res) => {
+  const token = ((req.body && req.body.token) || '').trim();
+  let d;
+  try {
+    d = jwt.verify(token, JWT_SECRET);
+  } catch (e) {
+    const expired = e && e.name === 'TokenExpiredError';
+    return res.status(400).json({ error: expired ? 'Link scaduto: richiedine uno nuovo dalla pagina di accesso.' : 'Link non valido.' });
+  }
+  try {
+    if (d.purpose !== 'magic-link' || !d.uid || !d.jti) return res.status(400).json({ error: 'Link non valido.' });
+
+    // Monouso: il primo utilizzo annota il jti fino alla sua scadenza.
+    const now = Date.now();
+    for (const [k, exp] of usedMagicLinks) if (exp < now) usedMagicLinks.delete(k);
+    if (usedMagicLinks.has(d.jti)) return res.status(400).json({ error: 'Link già utilizzato: richiedine uno nuovo.' });
+    usedMagicLinks.set(d.jti, d.exp * 1000);
+
+    const a = await authDb.query('SELECT id, email, password_hash, scadenza FROM users WHERE id = $1', [d.uid]);
+    const authUser = a.rows[0];
+    if (!authUser || passwordHashSignature(authUser.password_hash) !== d.sig) {
+      return res.status(400).json({ error: 'Link non più valido: richiedine uno nuovo.' });
+    }
+    if (!checkLicenseExpiry(authUser).valid) return res.status(403).json({ error: 'La licenza di questo account è scaduta.' });
+
+    // Stesso esito di un login: primo tenant dell'utente e relativo ruolo.
+    const nameRow = (await db.query('SELECT name, cognome FROM users WHERE id = $1', [authUser.id])).rows[0] || {};
+    const tenant = (await db.query(
+      `SELECT t.id, t.name FROM tenants t JOIN user_tenants ut ON ut.tenant_id = t.id
+        WHERE ut.user_id = $1 ORDER BY t.name LIMIT 1`,
+      [authUser.id]
+    )).rows[0];
+    if (!tenant) return res.status(401).json({ error: 'Nessuna organizzazione associata a questo account.' });
+    const role = (await db.query(
+      `SELECT ut.role_id, ut.id_roles, r.name AS role_name
+         FROM user_tenants ut LEFT JOIN roles r ON r.id_roles = ut.id_roles
+        WHERE ut.user_id = $1 AND ut.tenant_id = $2 LIMIT 1`,
+      [authUser.id, tenant.id]
+    )).rows[0] || {};
+
+    const sessionToken = signSessionToken(
+      {
+        user_id: authUser.id,
+        email: authUser.email,
+        tenant_id: tenant.id,
+        tenant_name: tenant.name,
+        role_id: role.role_id,
+        id_roles: role.id_roles,
+        role_name: role.role_name
+      },
+      authUser.password_hash
+    );
+    console.log(`[MAGIC-LINK] Accesso effettuato dall'utente ${authUser.id}`);
+    res.json({
+      success: true,
+      token: sessionToken,
+      user: {
+        id: authUser.id,
+        email: authUser.email,
+        name: buildFullName({ name: nameRow.name, cognome: nameRow.cognome }),
+        tenant_name: tenant.name,
+        provider: 'magic-link'
+      }
+    });
+  } catch (error) {
+    console.error('❌ MAGIC-LINK VERIFY ERROR:', error.message);
+    res.status(500).json({ error: 'Errore durante l\'accesso' });
+  }
+});
+
 // Verify token endpoint
-router.get('/verify', (req, res) => {
+router.get('/verify', async (req, res) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
       return res.status(401).json({ error: 'No token provided' });
     }
 
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = await verifySessionToken(token);
     res.json({ valid: true, user: decoded });
   } catch (error) {
     res.status(401).json({ valid: false, error: 'Invalid token' });
   }
 });
 
+// Avvio del login con Google / Microsoft: "state" anti login-CSRF (vedi config/oauthLogin.js)
+router.get('/google/start', (req, res) => startOAuthLogin(req, res, 'google'));
+router.get('/microsoft/start', (req, res) => startOAuthLogin(req, res, 'microsoft'));
+
+// oauth-complete.html: scambia il cookie monouso del login con il token di sessione.
+router.post('/oauth-exchange', async (req, res) => {
+  const data = takeLoginToken(req, res);
+  if (!data || !data.t) return res.status(401).json({ error: 'Accesso non riuscito o scaduto: riprova' });
+  try {
+    await verifySessionToken(data.t);
+    res.json({ token: data.t, user: data.u || {} });
+  } catch (e) {
+    res.status(401).json({ error: 'Accesso non riuscito o scaduto: riprova' });
+  }
+});
+
 // Google OAuth Callback
 router.get('/google-callback', async (req, res) => {
   try {
-    const { code, state } = req.query;
+    const { code } = req.query;
 
+    if (!checkOAuthState(req, res)) {
+      console.warn('[GOOGLE_AUTH] state mancante o non valido: accesso rifiutato');
+      return res.redirect('/login.html?error=sessione_login_non_valida');
+    }
     if (!code) {
-      return res.redirect('/sito/?error=missing_code');
+      return res.redirect('/login.html?error=missing_code');
     }
 
     // Scambia il code con l'access token
@@ -549,7 +721,6 @@ router.get('/google-callback', async (req, res) => {
     }
 
     const tokenData = await tokenResponse.json();
-    const accessToken = tokenData.access_token;
     const idToken = tokenData.id_token;
 
     // Decodifica l'ID token per ottenere le info utente
@@ -570,7 +741,7 @@ router.get('/google-callback', async (req, res) => {
     }
 
     // Cerca l'utente su Projexa-Auth.
-    let authUser = (await authDb.query('SELECT id, email, scadenza FROM users WHERE email = $1', [email])).rows[0];
+    let authUser = (await authDb.query('SELECT id, email, scadenza, password_hash FROM users WHERE email = $1', [email])).rows[0];
     if (!authUser) {
       // Nuovo utente: instradalo alla pagina "Prova gratuita" (niente auto-creazione qui,
       // così sceglie nome workspace/nome/cognome ed evitiamo collisioni sul nome tenant).
@@ -590,10 +761,6 @@ router.get('/google-callback', async (req, res) => {
       console.log(`[GOOGLE_AUTH] License expired for user: ${userData.email}`);
       return res.redirect(`/license-expired.html?expiry=${licenseCheck.expiry}&email=${encodeURIComponent(licenseCheck.email)}`);
     }
-
-    console.log(`[GOOGLE_AUTH] userData after check:`, userData);
-    console.log(`[GOOGLE_AUTH] scadenza value:`, userData.scadenza);
-    console.log(`[GOOGLE_AUTH] licenseCheck:`, licenseCheck);
 
     // Ottieni il tenant dell'utente (deve esistere sempre)
     let tenants = await db.query(
@@ -638,8 +805,8 @@ router.get('/google-callback', async (req, res) => {
     );
     const userRole = roleRes.rows[0] || {};
 
-    // Genera JWT token
-    const jwtToken = jwt.sign(
+    // Token di sessione: consegnato con un cookie monouso, mai nell'URL.
+    const jwtToken = signSessionToken(
       {
         user_id: userData.id,
         email: userData.email,
@@ -649,26 +816,20 @@ router.get('/google-callback', async (req, res) => {
         id_roles: userRole.id_roles,
         role_name: userRole.role_name
       },
-      JWT_SECRET,
-      { expiresIn: '24h' }
+      authUser.password_hash
     );
 
-    // Reindirizza al dashboard con i parametri
-    const params = new URLSearchParams({
+    deliverLoginToken(req, res, jwtToken, {
       provider: 'google',
       name: buildFullName(userData),
-      email: email,
+      email: userData.email,
       picture: picture || '',
-      access_token: accessToken,
-      jwt_token: jwtToken,
-      success: 'true'
+      tenant_name: selectedTenant.name
     });
-
-    res.redirect(`/dashboard.html?${params.toString()}`);
 
   } catch (error) {
     console.error('❌ GOOGLE_CALLBACK ERROR:', error.message);
-    res.redirect(`/?error=${encodeURIComponent(error.message)}`);
+    res.redirect('/login.html?error=accesso_google_non_riuscito');
   }
 });
 
@@ -742,9 +903,10 @@ router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
     }
     const row = q.rows[0];
     // email da Projexa-Auth (stesso id)
-    const emailRes = await authDb.query('SELECT email FROM users WHERE id = $1', [user_id]);
+    const emailRes = await authDb.query('SELECT email, password_hash FROM users WHERE id = $1', [user_id]);
     const email = emailRes.rows[0] ? emailRes.rows[0].email : null;
-    const token = jwt.sign(
+    // Legato alla password dell'utente impersonato: se la cambia, il token decade.
+    const token = signSessionToken(
       {
         user_id,
         email,
@@ -754,8 +916,7 @@ router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
         id_roles: row.id_roles,
         role_name: row.role_name
       },
-      JWT_SECRET,
-      { expiresIn: '24h' }
+      emailRes.rows[0] ? emailRes.rows[0].password_hash : null
     );
     res.json({
       token,

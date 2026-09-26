@@ -1,10 +1,8 @@
 import express from 'express';
-import jwt from 'jsonwebtoken';
-import bcrypt from 'bcrypt';
-import crypto from 'crypto';
 import db from '../config/database.js';
 import authDb from '../config/authDatabase.js';
-import JWT_SECRET from '../config/jwt.js';
+import { signSessionToken } from '../config/session.js';
+import { checkOAuthState, deliverLoginToken } from '../config/oauthLogin.js';
 
 const router = express.Router();
 
@@ -49,6 +47,12 @@ router.get('/microsoft-callback', async (req, res) => {
     const { code, error, error_description } = req.query;
 
     console.log('[MICROSOFT_AUTH] Callback received');
+
+    // "state" del login (anti login-CSRF): deve coincidere con il cookie impostato all'avvio
+    if (!checkOAuthState(req, res)) {
+      console.warn('[MICROSOFT_AUTH] state mancante o non valido: accesso rifiutato');
+      return res.redirect('/login.html?error=sessione_login_non_valida');
+    }
 
     // Verifica errore da Microsoft
     if (error) {
@@ -116,7 +120,7 @@ router.get('/microsoft-callback', async (req, res) => {
     console.log(`[MICROSOFT_AUTH] User: ${email}, Name: ${displayName}`);
 
     // === STEP 3: Cerca l'utente su Projexa-Auth. ===
-    let authUser = (await authDb.query('SELECT id, email, scadenza FROM users WHERE email = $1', [email])).rows[0];
+    let authUser = (await authDb.query('SELECT id, email, scadenza, password_hash FROM users WHERE email = $1', [email])).rows[0];
     if (!authUser) {
       // Nuovo utente: instradalo alla pagina "Prova gratuita" (niente auto-creazione qui).
       console.log(`[MICROSOFT_AUTH] Nuovo utente, redirect a prova gratuita: ${email}`);
@@ -176,8 +180,8 @@ router.get('/microsoft-callback', async (req, res) => {
     );
     const userRole = roleRes.rows[0] || {};
 
-    // === STEP 6: Genera JWT token ===
-    const jwtToken = jwt.sign(
+    // === STEP 6: Token di sessione (legato alla password attuale) ===
+    const jwtToken = signSessionToken(
       {
         user_id: userDbData.id,
         email: email,
@@ -187,27 +191,21 @@ router.get('/microsoft-callback', async (req, res) => {
         id_roles: userRole.id_roles,
         role_name: userRole.role_name
       },
-      JWT_SECRET,
-      { expiresIn: '24h' }
+      authUser.password_hash
     );
 
-    // === STEP 7: Reindirizza al dashboard con i parametri ===
-    const params = new URLSearchParams({
+    // === STEP 7: Consegna il token con un cookie monouso (mai nell'URL) ===
+    console.log(`[MICROSOFT_AUTH] ✓ Authentication successful for ${email}`);
+    deliverLoginToken(req, res, jwtToken, {
       provider: 'microsoft',
       name: buildFullName(userDbData),
-      email: email,
-      microsoft_access_token: accessToken,
-      jwt_token: jwtToken,
-      success: 'true'
+      email,
+      tenant_name: selectedTenant.name
     });
-
-    console.log(`[MICROSOFT_AUTH] ✓ Authentication successful for ${email}, redirecting to dashboard`);
-    res.redirect(`/dashboard.html?${params.toString()}`);
 
   } catch (error) {
     console.error('❌ MICROSOFT_CALLBACK ERROR:', error.message);
-    console.error('Stack:', error.stack);
-    res.redirect(`/?error=${encodeURIComponent(error.message)}`);
+    res.redirect('/login.html?error=accesso_microsoft_non_riuscito');
   }
 });
 

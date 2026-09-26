@@ -84,3 +84,29 @@ export function buildResetPasswordEmail({ nome, resetUrl, validHours = 1 }) {
   const text = `${saluto}\n\nAbbiamo ricevuto una richiesta di reimpostazione della password del tuo account Projexa.\nApri questo link per scegliere una nuova password:\n${resetUrl}\n\nIl link è valido per ${durata} e può essere usato una sola volta.\nSe non hai richiesto tu il cambio password, ignora questa email.`;
   return { html, text };
 }
+
+// Costruisce l'email del "Magic link": accesso a Projexa senza password.
+// Il link porta a magic-link.html con un token valido pochi secondi e monouso.
+export function buildMagicLinkEmail({ nome, magicUrl, validSeconds = 60 }) {
+  const saluto = nome ? `Ciao ${nome},` : 'Ciao,';
+  const html = `
+  <div style="font-family:Arial,Helvetica,sans-serif; max-width:520px; margin:0 auto; color:#111827;">
+    <div style="text-align:center; padding:16px 0;">
+      <div style="font-size:22px; font-weight:700; color:#059669;">Projexa</div>
+    </div>
+    <div style="background:#ffffff; border:1px solid #E5E7EB; border-radius:12px; padding:24px;">
+      <p>${saluto}</p>
+      <p>Ecco il tuo <strong>link di accesso</strong> a Projexa. Clicca sul pulsante per entrare senza password:</p>
+      <div style="text-align:center; margin:28px 0;">
+        <a href="${magicUrl}" style="background:#10B981; color:#ffffff; text-decoration:none; padding:12px 24px; border-radius:8px; font-weight:700; display:inline-block;">Accedi a Projexa</a>
+      </div>
+      <p style="font-size:13px; color:#6B7280;">Se il pulsante non funziona, copia e incolla questo link nel browser:<br>
+      <a href="${magicUrl}" style="color:#059669; word-break:break-all;">${magicUrl}</a></p>
+      <p style="font-size:13px; color:#6B7280;">Il link è valido per <strong>${validSeconds} secondi</strong> e può essere usato una sola volta. Se è scaduto, richiedine uno nuovo dalla pagina di accesso.</p>
+      <p style="font-size:13px; color:#6B7280;">Se non hai richiesto tu l'accesso, ignora questa email: nessuno può entrare senza aprire questo link.</p>
+    </div>
+    <p style="text-align:center; font-size:12px; color:#9CA3AF; margin-top:16px;">© Projexa</p>
+  </div>`;
+  const text = `${saluto}\n\nEcco il tuo link di accesso a Projexa (senza password):\n${magicUrl}\n\nIl link è valido per ${validSeconds} secondi e può essere usato una sola volta.\nSe non hai richiesto tu l'accesso, ignora questa email.`;
+  return { html, text };
+}

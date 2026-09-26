@@ -427,7 +427,7 @@ router.get('/authorize-url', requireAuth, requireJiraEnabled, async (req, res) =
     if (!origin) origin = new URL(BACKEND_URL).origin; // richiesta same-origin
 
     const state = jwt.sign(
-      { uid: req.user.user_id, tid: req.user.tenant_id, email: req.user.email, origin, nonce: crypto.randomBytes(8).toString('hex') },
+      { typ: 'oauth-state', uid: req.user.user_id, tid: req.user.tenant_id, email: req.user.email, origin, nonce: crypto.randomBytes(8).toString('hex') },
       JWT_SECRET,
       { expiresIn: '10m' }
     );
@@ -478,6 +478,7 @@ router.get('/callback', async (req, res) => {
     let claims;
     try {
       claims = jwt.verify(state, JWT_SECRET);
+      if (claims.typ !== 'oauth-state') throw new Error('tipo');
     } catch {
       return res.status(400).send(callbackPage(origin, { ok: false, error: 'state non valido o scaduto' }));
     }

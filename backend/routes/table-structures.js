@@ -12,6 +12,21 @@ const router = express.Router();
 const DB_POOLS = { main: db, auth: authDb, lic: licenseDb, notif: notifDb };
 function pickDb(req) { return DB_POOLS[req.get('x-target-db')] || db; }
 
+// Database diversi dal principale: solo l'admin (id_roles = 1). Altrimenti un utente
+// qualsiasi potrebbe registrare tabelle di Projexa-Auth come "gestite" e modificarle.
+router.use((req, res, next) => {
+  const k = req.get('x-target-db');
+  if (k && k !== 'main' && DB_POOLS[k] && Number(req.user?.id_roles) !== 1) {
+    return res.status(403).json({ error: 'Database riservato all\'amministratore' });
+  }
+  // table_structures decide quali tabelle sono modificabili dal form generico:
+  // la lettura è libera, le modifiche sono dell'admin.
+  if (req.method !== 'GET' && Number(req.user?.id_roles) !== 1) {
+    return res.status(403).json({ error: 'Operazione riservata all\'amministratore' });
+  }
+  next();
+});
+
 // Get all table structures
 router.get('/', async (req, res) => {
   try {

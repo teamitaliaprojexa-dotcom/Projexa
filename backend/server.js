@@ -59,6 +59,28 @@ app.use(cors({
 }));
 
 // Header di sicurezza di base (difesa in profondità).
+app.disable('x-powered-by'); // non dichiarare che il server è Express
+
+// Content-Security-Policy: le pagine possono caricare codice e stili solo da Projexa, da
+// cdnjs (Font Awesome e librerie) e da Google (pulsante di accesso), e inviare dati solo
+// al proprio backend. 'unsafe-inline' serve perché le pagine usano script e onclick
+// inline; la politica limita comunque dove può finire un dato rubato (connect-src),
+// vieta plugin (object-src) e il cambio di <base>, e impedisce di incorniciare l'app.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://accounts.google.com",
+  "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://accounts.google.com",
+  "font-src 'self' data: https://cdnjs.cloudflare.com",
+  "img-src 'self' data: blob: https:",
+  "connect-src 'self' https://accounts.google.com",
+  "frame-src https://accounts.google.com",
+  "worker-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'"
+].join('; ');
+
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -66,6 +88,10 @@ app.use((req, res, next) => {
   // Microfono consentito solo alle pagine di Projexa (self): serve alla finestra
   // "Dispositivi audio" delle riunioni. Geolocalizzazione e fotocamera restano vietate.
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(self), camera=()');
+  res.setHeader('Content-Security-Policy', CONTENT_SECURITY_POLICY);
+  // HSTS solo su HTTPS (dietro Caddy req.secure viene da X-Forwarded-Proto): il browser
+  // userà sempre HTTPS per 180 giorni, anche se l'utente scrive http://.
+  if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
   next();
 });
 
@@ -170,10 +196,17 @@ function assertValidIdentifier(name) {
 // Sceglie il DB di destinazione in base all'header X-Target-DB.
 // Progetti Neon supportati: main=Projexa, auth=Projexa-Auth, lic=Projexa-Lic, notif=Projexa-Notif.
 // Usato da database-viewer e sql-editor per leggere/scrivere sul progetto selezionato.
+// Solo l'admin può scegliere un database diverso dal principale: Projexa-Auth contiene
+// email, password e scadenze di tutti gli utenti, e la tabella users non ha tenant_id,
+// quindi senza questo controllo un utente qualsiasi poteva cambiare la password di chiunque.
 const DB_POOLS = { main: db, auth: authDb, lic: licenseDb, notif: notifDb };
 function pickDbKey(req) {
   const k = (req && req.get && req.get('x-target-db')) || '';
-  return Object.prototype.hasOwnProperty.call(DB_POOLS, k) ? k : 'main';
+  const key = Object.prototype.hasOwnProperty.call(DB_POOLS, k) ? k : 'main';
+  if (key !== 'main' && !isAdminUser(req)) {
+    throw Object.assign(new Error('Database riservato all\'amministratore'), { statusCode: 403 });
+  }
+  return key;
 }
 function pickDb(req) { return DB_POOLS[pickDbKey(req)]; }
 
@@ -268,6 +301,78 @@ async function insertRowEncrypted(target, dbKey, tableName, values) {
 // così può leggere/scrivere/scegliere qualsiasi tenant dal database-viewer.
 function isAdminUser(req) {
   return Number(req.user?.id_roles) === 1;
+}
+
+// Tabelle di ruoli e configurazione: solo l'admin può scriverle, da qualunque endpoint
+// (form generico, import, campi collegati, griglie, reference-value, function_db).
+//   - user_tenants/roles: da qui dipende chi è admin (id_roles = 1);
+//   - table_structures: quali tabelle sono modificabili dal form generico;
+//   - kpi_tab/function_db: contengono SQL e istruzioni eseguite dal server;
+//   - tipo_valore: quali tipi di campo può configurare ciascun ruolo.
+const ROLE_PROTECTED_TABLES = new Set(['user_tenants', 'roles', 'table_structures', 'kpi_tab', 'function_db', 'tipo_valore']);
+// Anagrafiche senza tenant_id (una riga per utente / per tenant): i non admin le scrivono
+// solo con reference-value, che tocca esclusivamente la riga del login (campi del Profilo).
+const IDENTITY_TABLES = new Set(['users', 'tenants']);
+function assertCanWriteTable(req, tableName, dbKey = 'main', { ownRowOnly = false } = {}) {
+  if (dbKey !== 'main' || isAdminUser(req)) return;
+  const t = String(tableName || '').toLowerCase();
+  if (ROLE_PROTECTED_TABLES.has(t) || (IDENTITY_TABLES.has(t) && !ownRowOnly)) {
+    throw Object.assign(new Error('Operazione riservata all\'amministratore'), { statusCode: 403 });
+  }
+}
+
+// Livello del ruolo del login (numeri più bassi = più privilegi). Ruolo assente o non
+// valido = livello minimo.
+function userRoleLevel(req) {
+  const raw = req.user?.id_roles;
+  return (raw == null || String(raw).trim() === '' || !Number.isFinite(Number(raw))) ? 9999 : Number(raw);
+}
+
+// Livello richiesto da un tipo di campo (tipo_valore.id_roles): null = tutti i ruoli,
+// undefined = tipo inesistente.
+async function tipoValoreRoleLevel(code) {
+  const r = await db.query('SELECT id_roles FROM tipo_valore WHERE id_code::text = $1 LIMIT 1', [String(code).trim()]);
+  if (!r.rows[0]) return undefined;
+  return r.rows[0].id_roles == null ? null : Number(r.rows[0].id_roles);
+}
+
+// Colonne di configurazione dei campi settings/clients/projects: decidono cosa esegue il
+// server (tabella/colonna collegate, VariabDB = frammento SQL). Il menu del browser mostra
+// a ciascun ruolo solo i tipi consentiti da tipo_valore.id_roles; qui la stessa regola
+// vale anche per le chiamate dirette. Si controllano solo i valori CAMBIATI rispetto alla
+// riga esistente (original, null per una riga nuova): chi modifica il valore di un campo
+// configurato dall'admin rimanda indietro anche la sua configurazione, invariata.
+//   - tipo_valore: consentito se il ruolo arriva al livello del tipo;
+//   - VariabDB: è SQL, consentito solo a chi può configurare il tipo 15 (Accesso DB);
+//   - tabella/colonna: mai verso tabelle di ruoli/configurazione o anagrafiche.
+const FIELD_SOURCES = new Set(['settings', 'clients', 'projects']);
+const FIELD_CONFIG_KEYS = ['tipo_valore', 'tabella', 'colonna', 'VariabDB'];
+async function assertFieldConfigAllowed(req, source, data, original) {
+  if (isAdminUser(req) || !FIELD_SOURCES.has(source) || !data) return;
+  const norm = (v) => (v == null ? '' : String(v).trim());
+  const has = (k) => Object.prototype.hasOwnProperty.call(data, k);
+  const changed = FIELD_CONFIG_KEYS.filter((k) => has(k) && norm(data[k]) !== norm(original ? original[k] : null));
+  if (!changed.length) return;
+  const deny = (msg) => { throw Object.assign(new Error(msg), { statusCode: 403 }); };
+  const level = userRoleLevel(req);
+
+  const tipo = norm(has('tipo_valore') ? data.tipo_valore : original && original.tipo_valore);
+  if (tipo) {
+    const need = await tipoValoreRoleLevel(tipo);
+    if (need === undefined) throw Object.assign(new Error('Tipo di campo non valido'), { statusCode: 400 });
+    if (need !== null && need < level) deny('Tipo di campo non consentito al tuo ruolo');
+  }
+  if (changed.includes('VariabDB') && norm(data.VariabDB)) {
+    const needSql = await tipoValoreRoleLevel('15');
+    if (needSql === undefined || (needSql !== null && needSql < level)) {
+      deny('La condizione SQL (VariabDB) è riservata a chi può configurare l\'accesso al database');
+    }
+  }
+  const tab = norm(has('tabella') ? data.tabella : original && original.tabella).toLowerCase();
+  if ((changed.includes('tabella') || changed.includes('colonna')) && tab
+      && (ROLE_PROTECTED_TABLES.has(tab) || IDENTITY_TABLES.has(tab))) {
+    deny('Tabella riservata all\'amministratore');
+  }
 }
 
 // Salvataggio "grezzo" richiesto dall'editor tabelle della pagina Database: le righe
@@ -1221,6 +1326,7 @@ async function resolveGridWidgetContext(source, fieldId, req, needWrite) {
   if (!tableName) {
     throw Object.assign(new Error('Tabella non configurata'), { statusCode: 400 });
   }
+  if (needWrite) assertCanWriteTable(req, tableName);
   tableColumnsCache.delete('main:' + tableName);
   const tableColumns = await getTableColumns(tableName);
   if (tableColumns.size === 0) {
@@ -2285,6 +2391,10 @@ app.get('/api/data/:table', requireAuth, async (req, res) => {
         // "tenants" non ha tenant_id: il proprio tenant è la riga con id = tenant del login
         params.push(req.user.tenant_id);
         conditions.push(`src.id = $${params.length}`);
+      } else if (tableName === 'users') {
+        // "users" non ha tenant_id: solo gli utenti del tenant del login
+        params.push(req.user.tenant_id);
+        conditions.push(`src.id IN (SELECT user_id FROM user_tenants WHERE tenant_id = $${params.length})`);
       } else if (columns.has('tenant_id')) {
         params.push(req.user.tenant_id);
         conditions.push(`src.tenant_id = $${params.length}`);
@@ -2364,6 +2474,7 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
   try {
     const pool = pickDb(req), dbKey = pickDbKey(req);
     const tableName = assertValidIdentifier(req.params.table);
+    assertCanWriteTable(req, tableName, dbKey);
     let data = { ...req.body };
     // Ambito scelto dall'admin al salvataggio (this-tenant | all-tenants); non è una
     // colonna della tabella, va rimosso prima dell'INSERT.
@@ -2448,6 +2559,9 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
       else delete data.project_id;
     }
 
+    // Configurazione del campo (tipo, tabella, colonna, VariabDB) secondo il ruolo
+    await assertFieldConfigAllowed(req, tableName, data, null);
+
     // Le colonne generate non sono scrivibili: rimuovile dai dati in ingresso.
     const generatedColumns = await getGeneratedColumns(tableName, pool, dbKey);
     for (const g of generatedColumns) delete data[g];
@@ -2495,6 +2609,7 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
   try {
     const pool = pickDb(req), dbKey = pickDbKey(req);
     const tableName = assertValidIdentifier(req.params.table);
+    assertCanWriteTable(req, tableName, dbKey);
     const id = req.params.id;
     let data = { ...req.body };
     // Ambito scelto dall'admin al salvataggio; non è una colonna della tabella.
@@ -2553,7 +2668,7 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       where.push(`id = $1`);
       if (tableColumns.has('tenant_id') && !admin) { params.push(req.user.tenant_id); where.push(`tenant_id = $${params.length}`); }
       if (tableColumns.has('user_id') && !admin) { params.push(req.user.user_id); where.push(`user_id = $${params.length}`); }
-      const original = await pool.query(`SELECT id, argument, campo, tipo_valore, valore1, valore2, tenant_id, user_id FROM "${tableName}" WHERE ${where.join(' AND ')} LIMIT 1`, params);
+      const original = await pool.query(`SELECT id, argument, campo, tipo_valore, valore1, valore2, tenant_id, user_id, tabella, colonna, "VariabDB" FROM "${tableName}" WHERE ${where.join(' AND ')} LIMIT 1`, params);
       originalFieldRow = original.rows[0] || null;
       if (originalFieldRow && ['clients', 'projects'].includes(tableName) && originalFieldRow.argument) {
         const container = await pool.query(`SELECT campo, valore2 FROM "${tableName}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [originalFieldRow.argument, originalFieldRow.tenant_id]);
@@ -2566,6 +2681,20 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       delete data.tenant_id;
       delete data.user_id;
       delete data.client_id;
+    }
+
+    // Configurazione del campo: si controllano solo i valori cambiati rispetto alla riga.
+    // Per il confronto basta la riga del tenant (es. cliente condiviso da un collega).
+    if (FIELD_SOURCES.has(tableName) && !admin) {
+      let cfgOriginal = originalFieldRow;
+      if (!cfgOriginal) {
+        const o = await pool.query(
+          `SELECT tipo_valore, tabella, colonna, "VariabDB" FROM "${tableName}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          [id, req.user.tenant_id]
+        );
+        cfgOriginal = o.rows[0] || null;
+      }
+      await assertFieldConfigAllowed(req, tableName, data, cfgOriginal);
     }
 
     // Difesa ulteriore: accetta soltanto colonne realmente presenti nella tabella.
@@ -2715,6 +2844,7 @@ app.delete('/api/data/:table/:id', requireAuth, async (req, res) => {
   try {
     const pool = pickDb(req), dbKey = pickDbKey(req);
     const tableName = assertValidIdentifier(req.params.table);
+    assertCanWriteTable(req, tableName, dbKey);
     const id = req.params.id;
 
     if (!(await isManagedTable(tableName, pool))) {
@@ -2779,6 +2909,7 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
   try {
     const pool = pickDb(req), dbKey = pickDbKey(req);
     const tableName = assertValidIdentifier(req.params.table);
+    assertCanWriteTable(req, tableName, dbKey);
 
     if (!(await isManagedTable(tableName, pool))) {
       return res.status(404).json({ error: 'Table not found' });
@@ -2832,6 +2963,18 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
 
           const hasId = data.id !== undefined && data.id !== null && data.id !== '';
           if (!hasId) delete data.id;
+
+          // Configurazione dei campi settings/clients/projects secondo il ruolo (non admin):
+          // confronto con la riga esistente del tenant, se l'id c'è già.
+          if (FIELD_SOURCES.has(tableName) && !admin) {
+            const o = hasId
+              ? (await client.query(
+                  `SELECT tipo_valore, tabella, colonna, "VariabDB" FROM "${tableName}" WHERE id::text = $1 AND tenant_id = $2 LIMIT 1`,
+                  [String(data.id), req.user.tenant_id]
+                )).rows[0] || null
+              : null;
+            await assertFieldConfigAllowed(req, tableName, data, o);
+          }
 
           // Cifratura a riposo, coerente con quanto scrive il resto dell'applicazione.
           data = await cryptoWrite(client, dbKey, tableName, data, hasId ? data.id : null);
@@ -2913,7 +3056,9 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
 
 // Conferma (COMMIT) dell'import in sospeso per l'utente
 app.post('/api/data/import/commit', requireAuth, async (req, res) => {
-  const userKey = (req.user.user_id || req.user.email) + ':' + pickDbKey(req);
+  let dbKey;
+  try { dbKey = pickDbKey(req); } catch (e) { return res.status(e.statusCode || 400).json({ error: e.message }); }
+  const userKey = (req.user.user_id || req.user.email) + ':' + dbKey;
   const client = takePendingImport(userKey);
   if (!client) {
     return res.status(400).json({ error: 'Nessun import in sospeso da confermare' });
@@ -2930,7 +3075,9 @@ app.post('/api/data/import/commit', requireAuth, async (req, res) => {
 
 // Annulla (ROLLBACK) dell'import in sospeso per l'utente
 app.post('/api/data/import/rollback', requireAuth, async (req, res) => {
-  const userKey = (req.user.user_id || req.user.email) + ':' + pickDbKey(req);
+  let dbKey;
+  try { dbKey = pickDbKey(req); } catch (e) { return res.status(e.statusCode || 400).json({ error: e.message }); }
+  const userKey = (req.user.user_id || req.user.email) + ':' + dbKey;
   const client = takePendingImport(userKey);
   if (!client) {
     return res.status(400).json({ error: 'Nessun import in sospeso da annullare' });
@@ -3345,6 +3492,7 @@ app.post('/api/settings/argument', requireAuth, async (req, res) => {
     const colonna = ((req.body && req.body.colonna) || '').trim() || null;
     const variabDb = ((req.body && req.body.VariabDB) || '').trim() || null;
     if (!name) return res.status(400).json({ error: 'Nome argomento richiesto' });
+    await assertFieldConfigAllowed(req, 'settings', { tipo_valore: tipoValore, tabella, colonna, VariabDB: variabDb }, null);
     if (scope === 'all-tenants' && Number(req.user.id_roles) !== 1) {
       return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
     }
@@ -3380,7 +3528,7 @@ app.post('/api/settings/argument', requireAuth, async (req, res) => {
     const result = await db.query(query, params);
     res.status(201).json({ inserted: result.rowCount });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -3462,8 +3610,12 @@ app.post('/api/provisioning/new-user', requireAuth, async (req, res) => {
     const idRoles = Number(roleRow.rows[0].id_roles);
 
     // Privilegio: non si può assegnare un ruolo più privilegiato del proprio (id_roles più basso).
-    const myLevel = Number(req.user.id_roles);
-    if (Number.isFinite(myLevel) && idRoles < myLevel) {
+    // Ruolo mancante o non numerico nel token = livello minimo (prima il controllo veniva
+    // saltato e si poteva creare un utente admin). Il ruolo admin (1) resta solo all'admin.
+    const rawLevel = req.user.id_roles;
+    const myLevel = (rawLevel == null || String(rawLevel).trim() === '' || !Number.isFinite(Number(rawLevel)))
+      ? 9999 : Number(rawLevel);
+    if (!Number.isFinite(idRoles) || idRoles < myLevel || (idRoles === 1 && !isAdminUser(req))) {
       return res.status(403).json({ error: 'Non puoi assegnare un ruolo più privilegiato del tuo' });
     }
 
@@ -4531,6 +4683,7 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
     const colonna = ((req.body && req.body.colonna) || '').trim() || null;
     const variabDb = ((req.body && req.body.VariabDB) || '').trim() || null; // colonna "VariabDB"
     const valore2 = ((req.body && req.body.valore2) || '').trim() || null;   // valore iniziale (es. tipo 30)
+    await assertFieldConfigAllowed(req, req.params.source, { tipo_valore: tipoValore, tabella, colonna, VariabDB: variabDb }, null);
     const scope = (req.body && req.body.scope) || 'this';
     const tenantScope = (req.body && req.body.tenantScope) || 'this-tenant';
     const isAdminTenantScope = Number(req.user.id_roles) === 1;
@@ -4729,7 +4882,7 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -5220,6 +5373,7 @@ app.post('/api/:source(settings|clients)/execute-function', requireAuth, async (
         if (!tab || !col) continue;
         assertValidIdentifier(tab);
         assertValidIdentifier(col);
+        assertCanWriteTable(req, tab);
         // fun_tabella proviene da function_db (configurazione privilegiata, non input utente):
         // basta che la tabella/colonna esistano fisicamente (ammesse anche tabelle di sistema
         // non presenti in table_structures, es. client_shares).
@@ -5308,6 +5462,7 @@ app.post('/api/projects/close', requireAuth, async (req, res) => {
         if (!tab || !col) continue;
         assertValidIdentifier(tab);
         assertValidIdentifier(col);
+        assertCanWriteTable(req, tab);
         const tcols = await getTableColumns(tab);
         if (tcols.size === 0) throw Object.assign(new Error('Tabella inesistente: ' + tab), { statusCode: 400 });
         if (!tcols.has(col)) throw Object.assign(new Error('Colonna inesistente: ' + col), { statusCode: 400 });
@@ -5518,6 +5673,7 @@ app.post('/api/:source(settings|clients)/linked-row', requireAuth, async (req, r
     const tabella = f.rows[0].tabella;
     if (!tabella) return res.status(400).json({ error: 'tabella non impostata sul campo' });
     assertValidIdentifier(tabella);
+    assertCanWriteTable(req, tabella);
     if (!(await isManagedTable(tabella))) return res.status(404).json({ error: 'Tabella non gestita' });
 
     const cols = await getTableColumns(tabella);
@@ -5573,6 +5729,7 @@ app.delete('/api/:source(settings|clients)/linked-row', requireAuth, async (req,
     const tabella = f.rows[0].tabella;
     if (!tabella) return res.status(400).json({ error: 'tabella non impostata sul campo' });
     assertValidIdentifier(tabella);
+    assertCanWriteTable(req, tabella);
     if (!(await isManagedTable(tabella))) return res.status(404).json({ error: 'Tabella non gestita' });
 
     const cols = await getTableColumns(tabella);
@@ -5893,6 +6050,8 @@ app.put('/api/:source(settings|clients|projects)/:id/reference-value', requireAu
     // Valida gli identificatori prima di interpolarli (anti SQL injection)
     assertValidIdentifier(tabella);
     assertValidIdentifier(colonna);
+    // Consentite anche users/tenants: la scrittura tocca solo la riga del login (Profilo).
+    assertCanWriteTable(req, tabella, 'main', { ownRowOnly: true });
 
     // Contesto aggiuntivo: per "clients" risale alla riga identità (Cliente) partendo
     // dall'argument del campo; per "projects" il client_id è già in colonna sulla riga

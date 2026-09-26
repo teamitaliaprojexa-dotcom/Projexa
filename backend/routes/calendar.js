@@ -266,6 +266,7 @@ router.get('/:provider(google|outlook)/authorize-url', requireAuth, requireProvi
 
     const state = jwt.sign(
       {
+        typ: 'oauth-state', // non vale come token di sessione (e viceversa)
         uid: req.user.user_id,
         tid: req.user.tenant_id,
         provider: req.params.provider,
@@ -325,6 +326,7 @@ router.get('/:provider(google|outlook)/callback', requireProvider, async (req, r
     let claims;
     try {
       claims = jwt.verify(state, JWT_SECRET);
+      if (claims.typ !== 'oauth-state') throw new Error('tipo');
     } catch {
       return res.status(400).send(callbackPage(origin, { ok: false, provider: req.params.provider, error: 'state non valido o scaduto' }));
     }
