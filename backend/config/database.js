@@ -1,5 +1,6 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
+import { resolveDbUrl } from './dbEnv.js';
 import { withDecryption } from './cryptoPool.js';
 
 dotenv.config();
@@ -17,7 +18,7 @@ pg.types.setTypeParser(1082, (val) => val);
 
 // withDecryption: i valori cifrati ("enc:v1:...") tornano in chiaro in lettura.
 const pool = withDecryption(new Pool({
-  connectionString: process.env.DATABASE_URL
+  connectionString: resolveDbUrl('DATABASE_URL')
 }));
 
 pool.on('error', (err) => {

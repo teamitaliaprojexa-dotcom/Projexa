@@ -19,7 +19,7 @@ import ical from 'node-ical';
 import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
 import {
-  encRec, enqueueChunk, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices
+  encRec, enqueueChunk, enqueueBrowserTranscript, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices
 } from '../jobs/meetingTranscription.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -844,6 +844,28 @@ router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
     res.status(202).json({ success: true, queued: true });
   } catch (error) {
     console.error('❌ REC_MEETING_TRANSCRIBE:', error.message);
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// Modalità Browser ("modalità Trascrizione" = Browser-leggero/pesante): il testo è già
+// trascritto sul PC dell'utente; qui arrivano i segmenti (testo + orari) e il volume delle
+// tracce, MAI l'audio. Il server formatta e accoda come un blocco già trascritto.
+router.post('/meetings/managed/transcribe-browser', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    if (!Array.isArray(b.segments)) return res.status(400).json({ error: 'segments mancanti' });
+    await enqueueBrowserTranscript(req.user, idCalendar, {
+      segments: b.segments,
+      energy: b.energy || null,
+      offset: Number(b.offset_sec) || 0,
+      startLabel: b.start_label || null
+    });
+    res.status(202).json({ success: true, queued: true });
+  } catch (error) {
+    console.error('❌ REC_MEETING_TRANSCRIBE_BROWSER:', error.message);
     res.status(error.status || 500).json({ error: error.message });
   }
 });

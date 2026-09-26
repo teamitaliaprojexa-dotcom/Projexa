@@ -6190,14 +6190,18 @@
                         const html = m && !isRecordingMeeting(ev.id) ? meetingDeleteButton(ev.id) : '';
                         if (delCell.dataset.state !== html) { delCell.innerHTML = html; delCell.dataset.state = html; }
                     }
+                    // Mentre la riunione è ancora in registrazione non si mostrano né il
+                    // pulsante Recap né la lente della trascrizione (in modalità browser i
+                    // blocchi sono subito "done", quindi non basta più guardare m.pending).
+                    const recording = isRecordingMeeting(ev.id);
                     // durante una generazione in corso il pulsante "Recap…" non va sovrascritto
                     if (!manualRecapRunning.has(ev.id)) {
-                        setStatusCell(row, 'meeting-status-genrecap', m && m.has_trascrizione && !m.has_recap && !m.pending ? manualRecapButton(ev.id) : '');
+                        setStatusCell(row, 'meeting-status-genrecap', m && m.has_trascrizione && !m.has_recap && !m.pending && !recording ? manualRecapButton(ev.id) : '');
                     }
                     const queued = m && m.pending > 0
                         ? `<i class="fas fa-hourglass-half meeting-queued" title="Trascrizione in corso sul server: ${m.pending} blocc${m.pending === 1 ? 'o' : 'hi'} in coda"></i>`
                         : '';
-                    setStatusCell(row, 'meeting-status-trascrizione', (m && m.has_trascrizione ? meetingTextButton(ev, 'trascrizione', title) : '') + queued);
+                    setStatusCell(row, 'meeting-status-trascrizione', (m && m.has_trascrizione && !recording ? meetingTextButton(ev, 'trascrizione', title) : '') + queued);
                     setStatusCell(row, 'meeting-status-recap', m && m.has_recap ? meetingTextButton(ev, 'recap', title) : '');
                     // Recap appena comparso (es. generato da un'altra scheda): avviso "Recap pronto"
                     const hadRecap = recapSeen.get(ev.id);
@@ -6553,6 +6557,65 @@
             return btoa(bin);
         }
 
+        // Etichetta di sessione del primo blocco (uguale per server e browser).
+        function recStartLabel(rec) {
+            return `Registrazione del ${new Date(rec.startedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}${rec.baseOffset ? ` (ripresa da ${formatRecTime(rec.baseOffset)})` : ''}`;
+        }
+
+        // MODALITÀ BROWSER: trascrive il blocco NEL browser (Whisper via Transformers.js) e
+        // manda al server solo i segmenti di testo + il volume delle tracce (mai l'audio). Il
+        // server formatta "chi parla" e accoda come la modalità server. Un blocco alla volta,
+        // in ordine (rec.queue), così la trascrizione sta al passo con la registrazione.
+        function queueBrowserChunk(rec, mixSamples, energy, offsetSec, isFirst) {
+            const startLabel = isFirst ? recStartLabel(rec) : undefined;
+            // Int16 -> Float32 [-1,1], il formato che vuole Whisper.
+            const f32 = new Float32Array(mixSamples.length);
+            for (let i = 0; i < mixSamples.length; i++) f32[i] = mixSamples[i] / 32768;
+            rec.pending++;
+            rec.queue = rec.queue.then(async () => {
+                try {
+                    const out = await window.BrowserTranscribe.transcribe(f32, { mode: rec.transcribeMode, timestamps: true });
+                    // Transformers.js: chunks = [{ timestamp:[start,end], text }]. In assenza di
+                    // segmenti (blocco senza parlato) non si invia nulla.
+                    const segments = (out.chunks || []).map((c) => ({
+                        start: (c.timestamp && c.timestamp[0]) || 0,
+                        end: (c.timestamp && (c.timestamp[1] ?? c.timestamp[0])) || 0,
+                        text: c.text || ''
+                    })).filter((s) => s.text.trim());
+                    if (!segments.length && out.text) segments.push({ start: 0, end: 0, text: out.text });
+                    if (!segments.length) { rec.sent++; return; }
+                    for (let attempt = 1; ; attempt++) {
+                        try {
+                            const res = await fetch(`${API_URL}/calendar/meetings/managed/transcribe-browser`, {
+                                method: 'POST',
+                                headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ id_calendar: rec.eventId, segments, energy, offset_sec: offsetSec, start_label: startLabel })
+                            });
+                            const data = await res.json().catch(() => ({}));
+                            if (!res.ok) { const err = new Error(data.error || `Errore ${res.status}`); err.status = res.status; throw err; }
+                            break;
+                        } catch (e) {
+                            const temporary = !e.status || e.status === 429 || e.status >= 500;
+                            if (!temporary || attempt >= 4) throw e;
+                            rec.lastError = `${e.message} — nuovo tentativo tra ${attempt * 20} s`;
+                            updateRecStatus(rec);
+                            await new Promise((r) => setTimeout(r, attempt * 20000));
+                        }
+                    }
+                    rec.sent++;
+                    refreshMeetingStatuses();
+                    rec.lastError = '';
+                } catch (e) {
+                    rec.lastError = e.message;
+                    rec.failed = (rec.failed || 0) + 1;
+                    if ((e.status === 428 || e.status === 404) && rec.running) stopMeetingRecording(e.message);
+                } finally {
+                    rec.pending--;
+                    updateRecStatus(rec);
+                }
+            });
+        }
+
         // Invio in coda (un blocco alla volta, in ordine) al server, che trascrive in background.
         // Una sola traccia: microfono + audio di sistema mixati (una trascrizione invece di due);
         // il volume delle due tracce ogni 0,5 s (energy) permette al server di capire chi parla
@@ -6647,7 +6710,12 @@
                 const v = (micSamples ? micSamples[i] : 0) + (sysSamples ? sysSamples[i] : 0);
                 mix[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
             }
-            queueRecChunk(rec, mix, energy, offsetSec, rec.chunks++ === 0);
+            const isFirst = rec.chunks++ === 0;
+            if (rec.transcribeMode === 'Browser-leggero' || rec.transcribeMode === 'Browser-pesante') {
+                queueBrowserChunk(rec, mix, energy, offsetSec, isFirst);
+            } else {
+                queueRecChunk(rec, mix, energy, offsetSec, isFirst);
+            }
         }
 
         // Volume di una traccia (RMS, 0..1) per finestre di 0,5 s: 30 s -> 60 valori.
@@ -6667,20 +6735,28 @@
         function updateRecStatus(rec) {
             if (rec !== meetingRec) return;
             const elapsed = rec.startedAt ? (Date.now() - rec.startedAt) / 1000 : 0;
+            // In modalità browser la trascrizione avviene sul PC: l'audio non va al server,
+            // si invia solo il testo. Le etichette cambiano di conseguenza.
+            const browser = rec.transcribeMode === 'Browser-leggero' || rec.transcribeMode === 'Browser-pesante';
+            const doneVerb = browser ? 'trascritti nel browser' : 'inviati al server';
             if (rec.running) {
-                let t = `● Registrazione in corso ${formatRecTime(elapsed)} · blocchi inviati al server: ${rec.sent}`;
+                let t = `● Registrazione in corso ${formatRecTime(elapsed)} · blocchi ${doneVerb}: ${rec.sent}`;
                 if (rec.skipped) t += ` · silenzi saltati: ${rec.skipped}`;
                 if (!rec.hasSystemAudio) t += ' · solo microfono';
                 setRecStatus(rec.lastError ? `${t} · ultimo errore: ${rec.lastError}` : t, !!rec.lastError);
             } else if (rec.pending > 0) {
-                setRecStatus(`Invio degli ultimi blocchi al server… (${rec.pending}) — attendi prima di chiudere la pagina`);
+                setRecStatus(browser
+                    ? `Trascrizione degli ultimi blocchi nel browser… (${rec.pending}) — attendi prima di chiudere la pagina`
+                    : `Invio degli ultimi blocchi al server… (${rec.pending}) — attendi prima di chiudere la pagina`);
             } else if (rec.stoppedReason) {
                 setRecStatus(rec.stoppedReason, true);
             } else if (rec.failed > 0) {
-                // Blocchi non trascritti: si mostra il motivo invece di "completata".
-                setRecStatus(`Invio non riuscito per ${rec.failed} blocc${rec.failed === 1 ? 'o' : 'hi'} su ${rec.failed + rec.sent}: ${rec.lastError}`, true);
+                const verb = browser ? 'Trascrizione' : 'Invio';
+                setRecStatus(`${verb} non riuscit${browser ? 'a' : 'o'} per ${rec.failed} blocc${rec.failed === 1 ? 'o' : 'hi'} su ${rec.failed + rec.sent}: ${rec.lastError}`, true);
             } else if (rec.startedAt) {
-                setRecStatus(`Registrazione inviata al server (${rec.sent} blocchi): la trascrizione prosegue in background.`);
+                setRecStatus(browser
+                    ? `Trascrizione completata nel browser (${rec.sent} blocchi).`
+                    : `Registrazione inviata al server (${rec.sent} blocchi): la trascrizione prosegue in background.`);
             }
         }
 
@@ -6751,6 +6827,32 @@
                 const d = await r.json().catch(() => ({}));
                 if (r.ok) rec.baseOffset = Math.max(0, Number(d.offset) || 0);
             } catch (e) { /* si parte da 00:00:00 */ }
+            // Modalità di trascrizione scelta in Impostazioni (per tenant/utente).
+            // Browser-* = trascrizione nel PC dell'utente; Background (default) = sul server.
+            rec.transcribeMode = 'Background';
+            try {
+                const rm = await fetch(`${API_URL}/settings/transcription-mode`, { headers: calendarAuthHeaders() });
+                const dm = await rm.json().catch(() => ({}));
+                if (rm.ok && dm.mode) rec.transcribeMode = dm.mode;
+            } catch (e) { /* in caso di errore resta Background */ }
+            if (rec.transcribeMode === 'Browser-leggero' || rec.transcribeMode === 'Browser-pesante') {
+                if (!window.BrowserTranscribe) {
+                    rec.transcribeMode = 'Background';
+                    showNotification('Trascrizione nel browser non disponibile: uso il server.', 'info');
+                } else {
+                    // Avvia il caricamento del modello in background (i primi 30 s di audio danno
+                    // il tempo di scaricarlo/prepararlo). Se fallisce (es. "pesante" senza GPU),
+                    // si ricade sul server per questa registrazione.
+                    setRecStatus('Preparazione della trascrizione nel browser…');
+                    window.BrowserTranscribe.preloadModel(rec.transcribeMode, (p) => {
+                        if (p.status === 'progress' && p.progress) setRecStatus(`Scarico il modello di trascrizione… ${Math.round(p.progress)}%`);
+                    }).then(() => { if (rec.running) setRecStatus('In registrazione (trascrizione nel browser)…'); })
+                      .catch((e) => {
+                        rec.transcribeMode = 'Background';
+                        showNotification('Trascrizione nel browser non riuscita (' + e.message + '): uso il server.', 'info');
+                      });
+                }
+            }
             rec.hasSystemAudio = rec.display.getAudioTracks().length > 0;
             try {
                 // Il microfono non deve essere lo stesso dispositivo usato come audio di sistema.
@@ -6772,38 +6874,39 @@
             // Due tracce separate (canale 0 = microfono dell'utente, canale 1 = audio di sistema),
             // ciascuna convertita in mono 16 kHz Int16: così si sa chi sta parlando.
             rec.ctx = new (window.AudioContext || window.webkitAudioContext)();
-            const merger = rec.ctx.createChannelMerger(2);
-            if (rec.mic) rec.ctx.createMediaStreamSource(rec.mic).connect(merger, 0, 0);
-            if (rec.hasSystemAudio) rec.ctx.createMediaStreamSource(new MediaStream(rec.display.getAudioTracks())).connect(merger, 0, 1);
-            rec.processor = rec.ctx.createScriptProcessor(4096, 2, 1);
-            const ratio = rec.ctx.sampleRate / REC_SAMPLE_RATE;
             rec.bufMic = []; rec.bufSys = []; rec.bufferLen = 0; rec.flushedSamples = 0; rec.chunks = 0;
             rec.sent = 0; rec.failed = 0; rec.pending = 0; rec.lastError = ''; rec.stoppedReason = '';
             rec.queue = Promise.resolve();
-            const downsample = (input) => {
-                const outLen = Math.floor(input.length / ratio);
-                const out = new Int16Array(outLen);
-                for (let i = 0; i < outLen; i++) {
-                    const start = Math.floor(i * ratio);
-                    const end = Math.min(input.length, Math.floor((i + 1) * ratio));
-                    let sum = 0;
-                    for (let j = start; j < end; j++) sum += input[j];
-                    const v = Math.max(-1, Math.min(1, sum / Math.max(1, end - start)));
-                    out[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
-                }
-                return out;
-            };
-            rec.processor.onaudioprocess = (ev) => {
+            // Cattura su thread audio dedicato (AudioWorklet): non perde audio quando la CPU
+            // è impegnata (es. trascrizione nel browser). Sostituisce ScriptProcessorNode.
+            try {
+                await rec.ctx.audioWorklet.addModule('js/rec-worklet.js');
+            } catch (e) {
+                rec.display.getTracks().forEach((t) => t.stop());
+                if (rec.mic) rec.mic.getTracks().forEach((t) => t.stop());
+                rec.starting = false;
+                btn.disabled = false;
+                setRecStatus('Impossibile avviare la cattura audio: ' + e.message, true);
+                return;
+            }
+            const merger = rec.ctx.createChannelMerger(2);
+            if (rec.mic) rec.ctx.createMediaStreamSource(rec.mic).connect(merger, 0, 0);
+            if (rec.hasSystemAudio) rec.ctx.createMediaStreamSource(new MediaStream(rec.display.getAudioTracks())).connect(merger, 0, 1);
+            rec.node = new AudioWorkletNode(rec.ctx, 'rec-processor', {
+                numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+                channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'discrete',
+                processorOptions: { targetRate: REC_SAMPLE_RATE }
+            });
+            rec.node.port.onmessage = (ev) => {
                 if (!rec.running) return;
-                const mic = downsample(ev.inputBuffer.getChannelData(0));
-                const sys = downsample(ev.inputBuffer.getChannelData(1));
-                rec.bufMic.push(mic);
-                rec.bufSys.push(sys);
-                rec.bufferLen += mic.length;
+                const { mic, sys } = ev.data;
+                if (rec.mic) rec.bufMic.push(mic);
+                if (rec.hasSystemAudio) rec.bufSys.push(sys);
+                rec.bufferLen += (mic || sys).length;
                 flushRecBuffer(rec, false);
             };
-            merger.connect(rec.processor);
-            rec.processor.connect(rec.ctx.destination); // l'uscita è silenziosa: serve solo a far girare il nodo
+            merger.connect(rec.node);
+            rec.node.connect(rec.ctx.destination); // l'uscita è silenziosa: serve solo a far girare il nodo
 
             // Se l'utente interrompe la condivisione dal browser, la registrazione si ferma.
             rec.display.getVideoTracks().forEach((t) => t.addEventListener('ended', () => stopMeetingRecording()));
@@ -6825,14 +6928,31 @@
         async function stopMeetingRecording(reason) {
             const rec = meetingRec;
             if (!rec || !rec.running) return;
-            rec.running = false;
+            const recordedSec = rec.startedAt ? (Date.now() - rec.startedAt) / 1000 : 0;
             rec.stoppedReason = reason || '';
             clearInterval(rec.timer);
-            flushRecBuffer(rec, true); // ultimo blocco (se almeno 1 secondo)
-            try { rec.processor.disconnect(); } catch (e) { /* già scollegato */ }
-            if (rec.ctx) rec.ctx.close().catch(() => {});
+            // Smetti di catturare nuovo audio, ma tieni "running" ancora attivo per un istante
+            // così i messaggi già in coda dal worklet vengono raccolti nel buffer (onmessage
+            // li scarta se running è false). Poi si compone il blocco finale.
             if (rec.display) rec.display.getTracks().forEach((t) => t.stop());
             if (rec.mic) rec.mic.getTracks().forEach((t) => t.stop());
+            // Drena la coda: aspetta che tutti i campioni catturati dal worklet siano arrivati
+            // (il thread principale può essere occupato dalla trascrizione). Si esce quando il
+            // totale non cresce più per ~600 ms, o dopo max ~10 s. "running" resta true così
+            // onmessage continua ad accodare i campioni.
+            let last = -1, stable = 0;
+            for (let i = 0; i < 50 && stable < 3; i++) {
+                await new Promise((r) => setTimeout(r, 200));
+                const total = rec.flushedSamples + rec.bufferLen;
+                if (total === last) stable++; else { stable = 0; last = total; }
+            }
+            rec.running = false;
+            try { if (rec.node) { rec.node.port.onmessage = null; rec.node.disconnect(); } } catch (e) { /* già scollegato */ }
+            if (rec.ctx) rec.ctx.close().catch(() => {});
+            flushRecBuffer(rec, true); // ultimo blocco (se almeno 1 secondo)
+            // Diagnostica: durata registrazione vs audio effettivamente catturato. Se il
+            // secondo è molto minore del primo, si è persa cattura (es. scheda in secondo piano).
+            console.log(`[REC] durata: ${recordedSec.toFixed(1)}s · audio catturato: ${(rec.flushedSamples / REC_SAMPLE_RATE).toFixed(1)}s · blocchi: ${rec.chunks} · saltati: ${rec.skipped || 0}`);
             const ui = recUi();
             ui.stop.style.display = 'none';
             ui.dot.classList.remove('live');
@@ -14176,6 +14296,13 @@
     applyGridGrouping();
     window.applyType11GridGrouping = applyGridGrouping;
 })();
+</script>
+<!-- Trascrizione nel browser (Whisper via Transformers.js): caricata come modulo ed
+     esposta su window.BrowserTranscribe, così la usa il codice della registrazione.
+     Serve solo in modalità "Browser-*"; in "Background" non viene mai invocata. -->
+<script type="module">
+    import * as BT from './js/browser-transcribe.js';
+    window.BrowserTranscribe = BT;
 </script>
 </body>
 </html>

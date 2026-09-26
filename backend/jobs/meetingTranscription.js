@@ -255,6 +255,46 @@ export async function enqueueChunk(user, idCalendar, { mixB64, energy, micB64, s
   return r.rows[0].id;
 }
 
+// Modalità Browser: la trascrizione l'ha già fatta il PC dell'utente (Whisper nel browser).
+// Qui arrivano i SEGMENTI (testo + orari, relativi al blocco) e il volume delle due tracce.
+// Riusiamo la stessa logica del server per "chi parla" e per il formato, poi inseriamo un
+// blocco GIÀ trascritto (state='done'): flushInOrder lo accoda in ordine e il finalize farà
+// il recap, esattamente come per la modalità server. Nessun audio lascia il PC dell'utente.
+export async function enqueueBrowserTranscript(user, idCalendar, { segments, energy, offset, startLabel }) {
+  const own = await db.query(
+    `SELECT 1 FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+    [user.tenant_id, user.user_id, idCalendar]
+  );
+  if (own.rows.length === 0) { const e = new Error('Riunione non gestita con Projexa'); e.status = 404; throw e; }
+
+  const en = energy && typeof energy === 'object' ? energy : {};
+  const me = en.mic ? await speakerName(user) : '';
+  const lines = [];
+  for (const seg of (Array.isArray(segments) ? segments : [])) {
+    const start = Number(seg.start) || 0;
+    const end = Number(seg.end) || start;
+    const text = String(seg.text || '').trim();
+    if (!text) continue;
+    let who = '';
+    if (en.mic && en.system) who = avgEnergy(en.mic, start, end) >= avgEnergy(en.system, start, end) ? me : OTHERS_LABEL;
+    else if (en.mic) who = me;
+    lines.push({ start, who, text });
+  }
+  const add = formatLines(lines, Number(offset) || 0, startLabel || null);
+  if (!add.trim()) return null; // blocco senza parlato: niente da accodare
+
+  const r = await db.query(
+    `INSERT INTO rec_meeting_chunks
+       (tenant_id, user_id, user_email, id_calendar, kind, mime, offset_sec, state, result)
+     VALUES ($1, $2, $3, $4, 'audio', 'text/plain', $5, 'done', $6)
+     RETURNING id`,
+    [user.tenant_id, user.user_id, user.email ? encRec(user.email) : null, idCalendar,
+      Number(offset) || 0, encRec(add)]
+  );
+  kickTranscriptionWorker();
+  return r.rows[0].id;
+}
+
 // Fine registrazione: quando i blocchi precedenti della riunione sono trascritti, recap.
 export async function enqueueFinalize(user, idCalendar) {
   await db.query(
@@ -511,17 +551,29 @@ function stopKeepAlive() {
   keepAliveTimer = null;
 }
 
+// Rete di sicurezza: blocchi rimasti 'transcribing' orfani (processo riavviato/morto a
+// metà) rimessi in attesa, così vengono ritrascritti in fretta invece di restare appesi.
+// Sicuro: NON tocca i blocchi in carico a QUESTO worker (inflight), né quelli fermi da meno
+// di 5 minuti — sopra il tempo massimo di una trascrizione reale, così non disturba un job
+// lento o in corso su un altro server. Viene chiamata all'avvio e a ogni giro del worker.
+async function reclaimStuck() {
+  const ids = [...inflight.keys()];
+  const r = await db.query(
+    `UPDATE rec_meeting_chunks SET state = 'pending'
+      WHERE state = 'transcribing' AND next_try_at < NOW() - interval '5 minutes'
+        AND NOT (id = ANY($1::uuid[]))`,
+    [ids]
+  );
+  if (r.rowCount) console.warn(`[TRASCRIZIONE] recuperati ${r.rowCount} blocchi rimasti appesi (rimessi in coda)`);
+}
+
 async function cleanupStale() {
   const r = await db.query(
     `DELETE FROM rec_meeting_chunks WHERE created_at < NOW() - ($1 || ' hours')::interval`,
     [String(STALE_HOURS)]
   );
   if (r.rowCount) console.warn(`[TRASCRIZIONE] scartati ${r.rowCount} blocchi più vecchi di ${STALE_HOURS} ore`);
-  // Blocchi rimasti "in trascrizione" da molto (server riavviato a metà): di nuovo in attesa.
-  await db.query(
-    `UPDATE rec_meeting_chunks SET state = 'pending'
-      WHERE state = 'transcribing' AND next_try_at < NOW() - interval '15 minutes'`
-  );
+  await reclaimStuck();
 }
 
 async function runWorker() {
@@ -531,6 +583,7 @@ async function runWorker() {
   try {
     await cleanupStale();
     for (;;) {
+      await reclaimStuck(); // recupera blocchi appesi anche mentre il worker è già in esecuzione
       await flushInOrder();
 
       const urls = whisperUrls();

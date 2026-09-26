@@ -66,13 +66,17 @@ app.disable('x-powered-by'); // non dichiarare che il server è Express
 // al proprio backend. 'unsafe-inline' serve perché le pagine usano script e onclick
 // inline; la politica limita comunque dove può finire un dato rubato (connect-src),
 // vieta plugin (object-src) e il cambio di <base>, e impedisce di incorniciare l'app.
+// cdn.jsdelivr.net + huggingface: servono alla trascrizione nel browser (Transformers.js
+// e i pesi del modello scaricati dal loro CDN). 'wasm-unsafe-eval' abilita l'esecuzione
+// del WebAssembly del motore di trascrizione.
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://accounts.google.com",
+  // blob: serve al motore di trascrizione WASM (onnxruntime-web importa un modulo da un blob:).
+  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://cdnjs.cloudflare.com https://accounts.google.com https://cdn.jsdelivr.net",
   "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://accounts.google.com",
   "font-src 'self' data: https://cdnjs.cloudflare.com",
   "img-src 'self' data: blob: https:",
-  "connect-src 'self' https://accounts.google.com",
+  "connect-src 'self' https://accounts.google.com https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co",
   "frame-src https://accounts.google.com",
   "worker-src 'self' blob:",
   "object-src 'none'",
@@ -92,6 +96,14 @@ app.use((req, res, next) => {
   // HSTS solo su HTTPS (dietro Caddy req.secure viene da X-Forwarded-Proto): il browser
   // userà sempre HTTPS per 180 giorni, anche se l'utente scrive http://.
   if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+  // Isolamento cross-origin SOLO per la dashboard: abilita il multi-thread WASM della
+  // trascrizione nel browser (che altrimenti sarebbe più lenta). 'credentialless' non
+  // richiede modifiche alle risorse esterne (icone cdnjs, Google), quindi non le rompe.
+  // Le altre pagine (login, ecc.) restano senza isolamento.
+  if (req.path === '/dashboard.html' || req.path === '/') {
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+  }
   next();
 });
 
@@ -99,6 +111,18 @@ app.use((req, res, next) => {
 // l'import Qlik voucher (gruppi aggregati da file Excel di migliaia di righe)
 // o altri batch consistenti (es. import CSV). Alzato a 15mb.
 app.use(express.json({ limit: '15mb' }));
+
+// Corpo JSON malformato (o oltre il limite): il parser lancia un errore che senza questo
+// handler diventerebbe un 500 generico. Qui si risponde con un 400 chiaro.
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Richiesta troppo grande.' });
+  }
+  if (err && (err.type === 'entity.parse.failed' || err instanceof SyntaxError)) {
+    return res.status(400).json({ error: 'Corpo della richiesta non valido (JSON malformato).' });
+  }
+  next(err);
+});
 
 // Rate-limit anti brute-force sul login: max 10 tentativi per IP ogni 15 minuti.
 const loginAttempts = new Map(); // ip -> { count, first }
@@ -4616,6 +4640,24 @@ app.get('/api/settings/feature-flag', requireAuth, async (req, res) => {
   }
 });
 
+// Modalità di trascrizione scelta (campo settings "modalità Trascrizione", valore2) per
+// tenant/utente del contesto: 'Browser-leggero' | 'Browser-pesante' | 'Background' (default).
+app.get('/api/settings/transcription-mode', requireAuth, async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT valore2 FROM settings
+        WHERE tenant_id = $1 AND user_id = $2
+          AND LOWER(BTRIM(campo)) LIKE '%modalit%trascrizione%'
+        LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id]
+    );
+    const v = r.rows.length ? String(r.rows[0].valore2 || '').trim() : '';
+    res.json({ mode: v || 'Background' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/settings/preference', requireAuth, async (req, res) => {
   try {
     const argument = ((req.query && req.query.argument) || '').trim();
@@ -6605,13 +6647,14 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Error Handler
+// Error Handler: il dettaglio tecnico resta nei log del server, non va al client.
+// In sviluppo si include err.message per comodità di debug.
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).json({
-    error: 'Internal server error',
-    message: err.message
-  });
+  const status = err.statusCode || err.status || 500;
+  const body = { error: status === 400 ? 'Richiesta non valida' : 'Errore interno del server' };
+  if (process.env.NODE_ENV !== 'production') body.message = err.message;
+  res.status(status).json(body);
 });
 
 // Start server
