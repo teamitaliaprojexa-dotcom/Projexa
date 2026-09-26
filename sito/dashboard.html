@@ -264,6 +264,17 @@
             background: #f3f4f6;
         }
 
+        /* Flyout Impostazioni: la voce "Prompt AI" resta in fondo al pannello */
+        .nav-settings .settings-flyout-inner {
+            display: flex;
+            flex-direction: column;
+        }
+        #settingsFooterList {
+            margin-top: auto;
+            padding-top: 0.5rem;
+            border-top: 1px solid var(--border);
+        }
+
         .settings-flyout-title {
             font-weight: 600;
             color: var(--dark);
@@ -2744,7 +2755,6 @@
                     </div>
                 </div>
             </li>
-            <li><a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h8l1 2h4v2H3V5h4l1-2Zm-3 6h14l-1 12H6L5 9Zm4 2v7h2v-7H9Zm4 0v7h2v-7h-2Z"/></svg> <span>Archivio</span></a></li>
             <!-- Jira: visibile solo se il flag settings (campo='Jira', valore1=true) è attivo. Gestita da js/jira.js -->
             <li id="navJira" style="display: none;"><a href="#"><i class="fab fa-jira"></i> <span>Jira</span></a></li>
             <!-- Qlik: visibile solo se il flag settings (campo='Qlik', valore1=true) è attivo per il
@@ -2758,8 +2768,6 @@
             <li id="navAi_mistral" class="nav-ai" style="display: none;"><a href="#" data-ai-open="mistral" title="Mistral"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h4v4H3V3Zm14 0h4v4h-4V3ZM3 7h4v4H3V7Zm4 0h4v4H7V7Zm6 0h4v4h-4V7Zm4 0h4v4h-4V7ZM3 11h4v4H3v-4Zm6 0h6v4H9v-4Zm8 0h4v4h-4v-4ZM3 15h4v4H3v-4Zm14 0h4v4h-4v-4ZM1 19h8v2H1v-2Zm14 0h8v2h-8v-2Z"/></svg> <span>Mistral</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
             <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 3 3.8 3 6v12c0 2.2 3.5 4 9 4s9-1.8 9-4V6c0-2.2-3.5-4-9-4Zm0 2c4.6 0 7 1.4 7 2s-2.4 2-7 2-7-1.4-7-2 2.4-2 7-2Zm0 16c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V18c0 .6-2.4 2-7 2Zm0-5c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V13c0 .6-2.4 2-7 2Z"/></svg> <span>Database</span></a></li>
-            <!-- Prompt recap email: solo admin (id_roles = 1) del tenant PROJEXA -->
-            <li id="navPromptRecap" style="display: none;"><a href="prompt-editor.html" title="Prompt AI"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v.5l8 5 8-5V6H4Zm16 2.8-7.5 4.7a1 1 0 0 1-1 0L4 8.8V18h16V8.8Z"/></svg> <span>Prompt</span></a></li>
             <!-- Registrazione libera (non legata al calendario): chiede il nome e avvia la registrazione -->
             <li id="navRecord" style="border: none;"><a href="#" id="navRecordLink" title="Nuova registrazione"><svg class="sidebar-icon nav-record-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="#DC2626" stroke-width="1.8"/><rect x="9.6" y="5.6" width="4.8" height="8.2" rx="2.4" fill="#DC2626"/><path d="M7.4 11.4a4.6 4.6 0 0 0 9.2 0" fill="none" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/><path d="M12 16v2.4M9.6 18.4h4.8" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/></svg> <span>Registra</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
@@ -2804,6 +2812,11 @@
                         </div>
                         <ul id="settingsArgumentsList">
                             <li style="color: var(--text-muted); border: none;">Caricamento…</li>
+                        </ul>
+                        <!-- Prompt AI: per tutti. L'admin del tenant PROJEXA modifica anche lo standard,
+                             gli altri solo il proprio personalizzato (controllo in /api/prompts). -->
+                        <ul id="settingsFooterList">
+                            <li><a href="prompt-editor.html" style="color: inherit; text-decoration: none; display: block;">Prompt AI</a></li>
                         </ul>
                     </div>
                 </div>
@@ -6380,6 +6393,41 @@
             }
         }
 
+        // --- Email: nuova email con il testo della finestra, sul servizio del "calendario default"
+        // (settings): Google -> Gmail (web); Outlook, Apple o non impostato -> il programma di
+        // posta del computer (mailto:), cioè la finestra "Nuova email" dell'Outlook installato.
+        // Se il recap inizia con "Oggetto: ...", quella riga diventa l'oggetto dell'email.
+        // I link hanno un limite di lunghezza: se il testo è troppo lungo si copia negli appunti
+        // e si apre l'email con il solo oggetto (il testo si incolla con Ctrl+V).
+        // mailto: la soglia dipende da Windows e dal programma di posta; se Outlook taglia il
+        // testo o non si apre, abbassarla.
+        const EMAIL_URL_MAX = { google: 7000, mailto: 8000 };
+        function emailMeetingText() {
+            const modal = document.getElementById('meetingTextModal');
+            const raw = (document.getElementById('meetingTextBody').dataset.raw || '').replace(/\r\n?/g, '\n').replace(/\\n/g, '\n').trim();
+            if (!raw) { showNotification('Nessun testo da inviare', 'info'); return; }
+            let subject = `${modal.dataset.field === 'recap' ? 'Recap' : 'Trascrizione'} - ${modal.dataset.title || 'riunione'}`;
+            let body = raw;
+            const subj = /^oggetto\s*:\s*(.+)\n+/i.exec(raw);
+            if (subj) { subject = subj[1].trim(); body = raw.slice(subj[0].length).trim(); }
+
+            const kind = calendarDefaultProvider === 'google' ? 'google' : 'mailto';
+            const build = (b) => {
+                const s = encodeURIComponent(subject);
+                const t = encodeURIComponent(b);
+                if (kind === 'google') return `https://mail.google.com/mail/?view=cm&fs=1&su=${s}${b ? `&body=${t}` : ''}`;
+                return `mailto:?subject=${s}${b ? `&body=${encodeURIComponent(b.replace(/\n/g, '\r\n'))}` : ''}`;
+            };
+            let url = build(body);
+            if (url.length > EMAIL_URL_MAX[kind]) {
+                url = build('');
+                if (navigator.clipboard) navigator.clipboard.writeText(body).catch(() => {});
+                showNotification('Testo lungo: è stato copiato negli appunti, incollalo nell\'email con Ctrl+V', 'info');
+            }
+            if (kind === 'mailto') window.location.href = url;
+            else window.open(url, '_blank', 'noopener');
+        }
+
         async function openMeetingText(btn) {
             const modal = document.getElementById('meetingTextModal');
             const body = document.getElementById('meetingTextBody');
@@ -6388,6 +6436,8 @@
             modal.dataset.field = field;
             const clearBtn = document.getElementById('meetingTextClear');
             if (clearBtn) clearBtn.style.display = field === 'recap' ? 'inline-block' : 'none';
+            const emailBtn = document.getElementById('meetingTextEmail'); // Email: solo nel recap
+            if (emailBtn) emailBtn.style.display = field === 'recap' ? 'inline-block' : 'none';
             modal.dataset.title = btn.dataset.title || '';
             document.getElementById('meetingTextTitleText').textContent = `${field === 'recap' ? 'Recap' : 'Trascrizione'} — ${btn.dataset.title || ''}`;
             document.getElementById('meetingTextSub').textContent = '';
@@ -6423,6 +6473,7 @@
             document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal?.classList.contains('open')) close(); });
             document.getElementById('meetingTextDownload')?.addEventListener('click', downloadMeetingText);
             document.getElementById('meetingTextClear')?.addEventListener('click', clearMeetingRecap);
+            document.getElementById('meetingTextEmail')?.addEventListener('click', emailMeetingText);
             const fileInput = document.getElementById('meetingTextFile');
             document.getElementById('meetingTextUpload')?.addEventListener('click', () => fileInput?.click());
             fileInput?.addEventListener('change', () => {
@@ -7690,13 +7741,6 @@
             const dbNav = document.getElementById('navDatabase');
             if (dbNav) {
                 dbNav.style.display = isAdmin ? '' : 'none';
-            }
-            // Il prompt del recap vale per tutti i tenant: solo l'admin del tenant PROJEXA
-            // (il backend lo verifica comunque su /api/prompts).
-            const promptNav = document.getElementById('navPromptRecap');
-            if (promptNav) {
-                const isProjexa = String(claims.tenant_name || '').trim().toUpperCase() === 'PROJEXA';
-                promptNav.style.display = (isAdmin && isProjexa) ? '' : 'none';
             }
         }
 
@@ -13822,6 +13866,7 @@
             <div class="task-modal-footer">
                 <input id="meetingTextFile" type="file" accept=".txt,.vtt,text/plain,text/vtt" style="display: none;">
                 <button id="meetingTextUpload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer; margin-right: auto;" title="Carica un file .txt o .vtt: sostituisce il testo di questa riunione"><i class="fas fa-upload"></i> Carica file</button>
+                <button id="meetingTextEmail" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Apri una nuova email con questo testo (Outlook del computer o Gmail, secondo il calendario default)"><i class="fas fa-envelope"></i> Email</button>
                 <button id="meetingTextClear" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid #FCA5A5; border-radius: 8px; background: #FEF2F2; color: #B91C1C; cursor: pointer;" title="Cancella completamente il recap di questa riunione"><i class="fas fa-eraser"></i> Svuota</button>
                 <button id="meetingTextDownload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Scarica il testo in un file .txt"><i class="fas fa-download"></i> Scarica .txt</button>
                 <button id="meetingTextCopy" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-copy"></i> Copia testo</button>

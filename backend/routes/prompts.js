@@ -1,7 +1,10 @@
 // Editor dei prompt AI (pagina prompt-editor.html), tabella app_prompts.
-// Riservato all'admin (id_roles = 1) del tenant PROJEXA: gestisce sia il prompt standard
-// (valido per tutti) sia quelli personalizzati per tenant + utente. Il tenant si verifica
-// sul database (non solo sul nome nel token).
+// Aperto a tutti gli utenti autenticati, con due livelli:
+//   - admin (id_roles = 1) del tenant PROJEXA: prompt standard (valido per tutti) e
+//     personalizzati di qualsiasi tenant + utente;
+//   - tutti gli altri: vedono lo standard in sola lettura e gestiscono solo il proprio
+//     personalizzato (tenant + utente del contesto, presi dal token, non dalla richiesta).
+// Il tenant PROJEXA si verifica sul database (non solo sul nome nel token).
 //
 // Ambito nelle richieste: tenant_id + user_id (query string o body). Entrambi assenti =
 // riga standard.
@@ -22,14 +25,13 @@ function httpError(status, message) {
   return e;
 }
 
-async function requireProjexaAdmin(req, res, next) {
+// req.isProjexaAdmin: admin del tenant PROJEXA (gestisce standard e personalizzati di tutti)
+async function loadPromptRole(req, res, next) {
   try {
-    if (Number(req.user?.id_roles) !== 1) {
-      return res.status(403).json({ error: 'Riservato all\'amministratore di Projexa' });
-    }
-    const t = (await db.query('SELECT name FROM tenants WHERE id = $1', [req.user.tenant_id])).rows[0];
-    if (!t || String(t.name || '').trim().toUpperCase() !== 'PROJEXA') {
-      return res.status(403).json({ error: 'Riservato all\'amministratore di Projexa' });
+    req.isProjexaAdmin = false;
+    if (Number(req.user?.id_roles) === 1) {
+      const t = (await db.query('SELECT name FROM tenants WHERE id = $1', [req.user.tenant_id])).rows[0];
+      req.isProjexaAdmin = !!t && String(t.name || '').trim().toUpperCase() === 'PROJEXA';
     }
     next();
   } catch (e) {
@@ -48,12 +50,18 @@ function requireKnownFunction(req, res, next) {
 
 // Ambito dalla richiesta: { tenantId, userId } oppure entrambi null (standard).
 // Per un utente verifica che appartenga davvero a quel tenant.
-async function readScope(src) {
+// Gli utenti non admin possono indicare solo il proprio tenant + utente.
+async function readScope(src, req) {
   const tenantId = src.tenant_id ? String(src.tenant_id).trim() : '';
   const userId = src.user_id ? String(src.user_id).trim() : '';
   if (!tenantId && !userId) return { tenantId: null, userId: null };
   if (!UUID_RE.test(tenantId) || !UUID_RE.test(userId)) {
     throw httpError(400, 'Per un prompt personalizzato servono sia tenant_id sia user_id');
+  }
+  if (!req.isProjexaAdmin &&
+      (tenantId.toLowerCase() !== String(req.user.tenant_id).toLowerCase() ||
+       userId.toLowerCase() !== String(req.user.user_id).toLowerCase())) {
+    throw httpError(403, 'Puoi gestire solo il tuo prompt personalizzato');
   }
   const ok = await db.query(
     'SELECT 1 FROM user_tenants WHERE tenant_id = $1 AND user_id = $2 LIMIT 1', [tenantId, userId]
@@ -66,7 +74,27 @@ function sendError(res, e) {
   res.status(e.status || 500).json({ error: e.message });
 }
 
-router.use(requireAuth, requireProjexaAdmin);
+router.use(requireAuth, loadPromptRole);
+
+// Contesto dell'utente per l'editor: permessi e nomi di tenant e utente del login
+router.get('/contesto', async (req, res) => {
+  try {
+    const r = (await db.query(
+      `SELECT t.name AS tenant_name, u.name, u.cognome
+         FROM tenants t LEFT JOIN users u ON u.id = $2 WHERE t.id = $1`,
+      [req.user.tenant_id, req.user.user_id]
+    )).rows[0] || {};
+    res.json({
+      isProjexaAdmin: req.isProjexaAdmin,
+      tenant_id: req.user.tenant_id,
+      user_id: req.user.user_id,
+      tenant_name: r.tenant_name || null,
+      user_name: [r.name, r.cognome].filter(Boolean).join(' ') || req.user.email || null
+    });
+  } catch (e) {
+    sendError(res, e);
+  }
+});
 
 // Elenco delle funzioni con prompt modificabile
 router.get('/', (req, res) => {
@@ -76,7 +104,10 @@ router.get('/', (req, res) => {
 // Personalizzazioni esistenti di una funzione, con nomi di tenant e utente
 router.get('/:funzione/personalizzazioni', requireKnownFunction, async (req, res) => {
   try {
-    const rows = await listUserPrompts(req.funzione);
+    let rows = await listUserPrompts(req.funzione);
+    if (!req.isProjexaAdmin) {
+      rows = rows.filter((r) => String(r.tenant_id) === String(req.user.tenant_id) && String(r.user_id) === String(req.user.user_id));
+    }
     if (!rows.length) return res.json([]);
     const names = await db.query(
       `SELECT x.tenant_id, x.user_id, t.name AS tenant_name, u.name, u.cognome
@@ -103,7 +134,7 @@ router.get('/:funzione/personalizzazioni', requireKnownFunction, async (req, res
 // standard come punto di partenza (esiste: false).
 router.get('/:funzione', requireKnownFunction, async (req, res) => {
   try {
-    const { tenantId, userId } = await readScope(req.query);
+    const { tenantId, userId } = await readScope(req.query, req);
     const row = await getPromptRow(req.funzione, tenantId, userId);
     const base = { funzione: req.funzione, ...PROMPT_FUNCTIONS[req.funzione], ambito: tenantId ? 'utente' : 'standard' };
     if (row) return res.json({ ...base, esiste: true, ...row });
@@ -116,7 +147,8 @@ router.get('/:funzione', requireKnownFunction, async (req, res) => {
 
 router.put('/:funzione', requireKnownFunction, async (req, res) => {
   try {
-    const { tenantId, userId } = await readScope(req.body || {});
+    const { tenantId, userId } = await readScope(req.body || {}, req);
+    if (!tenantId && !req.isProjexaAdmin) throw httpError(403, 'Il prompt standard lo modifica solo l\'amministratore di Projexa');
     const testo = typeof req.body?.testo === 'string' ? req.body.testo.replace(/\r\n/g, '\n') : '';
     if (!testo.trim()) throw httpError(400, 'Il testo del prompt non può essere vuoto');
     if (testo.length > MAX_PROMPT_CHARS) throw httpError(400, `Il prompt supera ${MAX_PROMPT_CHARS} caratteri`);
@@ -133,7 +165,8 @@ router.put('/:funzione', requireKnownFunction, async (req, res) => {
 // Standard: ripristina il testo del file.
 router.delete('/:funzione', requireKnownFunction, async (req, res) => {
   try {
-    const { tenantId, userId } = await readScope(req.query);
+    const { tenantId, userId } = await readScope(req.query, req);
+    if (!tenantId && !req.isProjexaAdmin) throw httpError(403, 'Il prompt standard lo ripristina solo l\'amministratore di Projexa');
     const autore = req.user.email || req.user.user_id;
     if (tenantId) {
       await deleteUserPrompt(req.funzione, tenantId, userId);

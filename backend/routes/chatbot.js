@@ -87,12 +87,17 @@ async function getChatbotKey() {
 
 const chatbotModel = () => process.env.CHATBOT_GEMINI_MODEL || PROVIDERS.gemini.model;
 
-const isAccountOrLoadError = (e) =>
-  [402, 429, 500, 502, 503, 529].includes(e.upstreamStatus) || e.status === 429;
+// Piano gratuito: la quota per la cache di contesto è 0 (429 "...CachedContent...FreeTier...
+// limit=0"). Non è un limite dell'account: si passa al manuale inviato con ogni domanda.
+const isCacheQuotaError = (e) => /cachedcontent/i.test(e.message || '');
 
-// Messaggio per l'utente (il dettaglio tecnico resta nel log del server)
+const isAccountOrLoadError = (e) =>
+  !isCacheQuotaError(e) && ([402, 429, 500, 502, 503, 529].includes(e.upstreamStatus) || e.status === 429);
+
+// Messaggio per l'utente (il dettaglio tecnico resta nel log del server).
+// Niente /credit/: riconoscerebbe anche "credito" del messaggio 429 di readJson.
 function userMessage(e) {
-  if (e.upstreamStatus === 402 || /credit|billing|prepay/i.test(e.message || '')) {
+  if (e.upstreamStatus === 402 || /credits|billing|prepay/i.test(e.message || '')) {
     return 'L\'assistente non è al momento disponibile (credito del servizio AI esaurito). Avvisa l\'amministratore di Projexa.';
   }
   if ((e.status === 429 || e.upstreamStatus === 429) && /Gemini/.test(e.message || '')) {

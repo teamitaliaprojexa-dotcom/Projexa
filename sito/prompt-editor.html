@@ -52,6 +52,7 @@
         .counter { font-size: 0.8rem; color: #6b7280; align-self: center; }
         .scope { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: center; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb; font-size: 0.9rem; }
         .scope label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+        .scope label:has(input:disabled) { cursor: default; color: #6b7280; }
         .funzione-row { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: center; margin-bottom: 1rem; font-size: 0.9rem; font-weight: 600; }
         .funzione-row select { padding: 0.5rem 0.7rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.9rem; min-width: 260px; max-width: 100%; font-weight: 400; }
         .scope select { padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.88rem; min-width: 180px; max-width: 100%; }
@@ -110,7 +111,7 @@
 
         <div id="deniedCard" class="card denied" style="display: none;">
             <div><i class="fas fa-lock"></i></div>
-            <div id="deniedMsg">Pagina riservata all'amministratore di Projexa.</div>
+            <div id="deniedMsg">Pagina non disponibile.</div>
         </div>
     </div>
 
@@ -128,6 +129,10 @@
         const textEl = $('promptText');
         let savedText = '';
         let current = { esiste: false };
+        // Contesto dal backend: l'admin del tenant PROJEXA gestisce standard e personalizzati
+        // di tutti; gli altri vedono lo standard in sola lettura e gestiscono solo il proprio.
+        let ctx = { isProjexaAdmin: false };
+        const standardReadOnly = () => !ctx.isProjexaAdmin && !isUserScope();
 
         const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -172,9 +177,11 @@
         function refreshDirty() {
             const dirty = isDirty();
             const ready = scopeReady();
-            $('saveBtn').disabled = !dirty || !ready;
+            $('saveBtn').disabled = !dirty || !ready || standardReadOnly();
             $('reloadBtn').disabled = !dirty;
-            $('counter').textContent = ready
+            $('counter').textContent = standardReadOnly()
+                ? 'Sola lettura: il prompt standard lo modifica l\'amministratore di Projexa'
+                : ready
                 ? `${textEl.value.length.toLocaleString('it-IT')} caratteri${dirty ? ' · modifiche non salvate' : ''}`
                 : 'Scegli tenant e utente';
         }
@@ -184,6 +191,7 @@
             savedText = data.testo || '';
             textEl.value = savedText;
             textEl.disabled = !scopeReady();
+            textEl.readOnly = standardReadOnly();
             const user = isUserScope();
             const badge = $('origine');
             if (!scopeReady()) {
@@ -192,6 +200,9 @@
             } else if (user) {
                 badge.textContent = data.esiste ? 'prompt personalizzato dell\'utente' : 'nuovo personalizzato (parte dallo standard)';
                 badge.className = 'badge ' + (data.esiste ? 'badge-db' : 'badge-file');
+            } else if (standardReadOnly()) {
+                badge.textContent = 'prompt standard (sola lettura)';
+                badge.className = 'badge badge-file';
             } else {
                 badge.textContent = 'prompt standard (vale per chi non ha un personalizzato)';
                 badge.className = 'badge badge-db';
@@ -255,7 +266,8 @@
                 return;
             }
             lastScopeRadio = r.value;
-            const user = r.value === 'utente';
+            // Non admin: tenant e utente restano quelli del contesto, sempre bloccati
+            const user = r.value === 'utente' && ctx.isProjexaAdmin;
             $('tenantSel').disabled = !user;
             $('userSel').disabled = !user;
             await loadPrompt();
@@ -292,7 +304,7 @@
 
         $('placeholders').addEventListener('click', (ev) => {
             const ph = ev.target.getAttribute && ev.target.getAttribute('data-ph');
-            if (!ph || textEl.disabled) return;
+            if (!ph || textEl.disabled || textEl.readOnly) return;
             textEl.setRangeText(ph, textEl.selectionStart, textEl.selectionEnd, 'end');
             textEl.focus();
             refreshDirty();
@@ -307,7 +319,7 @@
                 const r = await request('PUT', `/prompts/${FUNZIONE}`, { testo: textEl.value, ...scope() });
                 render({ ...current, testo: textEl.value, esiste: true, updated_at: r.updated_at, updated_by: r.updated_by });
                 showStatus('Salvato. Vale dal prossimo utilizzo, senza riavviare nulla.', 'success');
-                loadCustomList();
+                if (ctx.isProjexaAdmin) loadCustomList();
             } catch (e) {
                 showStatus(`Errore nel salvataggio: ${e.message}`, 'error');
                 refreshDirty();
@@ -330,7 +342,7 @@
             try {
                 await request('DELETE', `/prompts/${FUNZIONE}${scopeQuery()}`);
                 await loadPrompt();
-                loadCustomList();
+                if (ctx.isProjexaAdmin) loadCustomList();
                 showStatus(user ? 'Personalizzato eliminato: l\'utente usa lo standard.' : 'Prompt standard ripristinato dal file.', 'success');
             } catch (e) {
                 showStatus(`Errore: ${e.message}`, 'error');
@@ -355,7 +367,7 @@
             url.searchParams.set('funzione', codice);
             history.replaceState(null, '', url);
             $('status').className = 'status';
-            await Promise.all([loadPrompt(), loadCustomList()]);
+            await Promise.all([loadPrompt(), ctx.isProjexaAdmin ? loadCustomList() : null]);
         }
 
         $('funzioneSel').addEventListener('change', async () => {
@@ -368,8 +380,24 @@
             }
         });
 
+        // Non admin: tenant e utente fissi (quelli del login), visibili ma non modificabili;
+        // si parte dal proprio personalizzato e l'elenco dei personalizzati non si mostra.
+        function lockToOwnScope() {
+            $('tenantSel').innerHTML = `<option value="${esc(ctx.tenant_id)}">${esc(ctx.tenant_name || 'Tenant')}</option>`;
+            $('userSel').innerHTML = `<option value="${esc(ctx.user_id)}">${esc(ctx.user_name || 'Utente')}</option>`;
+            $('tenantSel').disabled = true;
+            $('userSel').disabled = true;
+            // Ambito fisso su "Personalizzato": i pallini non si possono cambiare
+            document.querySelector('input[name="scope"][value="utente"]').checked = true;
+            document.querySelectorAll('input[name="scope"]').forEach((r) => { r.disabled = true; });
+            lastScopeRadio = 'utente';
+            document.querySelector('.custom-list').style.display = 'none';
+        }
+
         async function init() {
             try {
+                ctx = await request('GET', '/prompts/contesto');
+                if (!ctx.isProjexaAdmin) lockToOwnScope();
                 funzioni = await request('GET', '/prompts');
                 if (!funzioni.length) throw new Error('Nessuna funzione con prompt modificabile');
                 $('funzioneSel').innerHTML = funzioni
@@ -377,12 +405,12 @@
                 $('editorCard').style.display = '';
                 await Promise.all([
                     selectFunzione(funzioni.some((x) => x.funzione === FUNZIONE) ? FUNZIONE : funzioni[0].funzione),
-                    loadTenants()
+                    ctx.isProjexaAdmin ? loadTenants() : null
                 ]);
             } catch (e) {
                 if (e.status === 401) { window.location.href = 'index.html'; return; }
                 $('editorCard').style.display = 'none';
-                $('deniedMsg').textContent = e.status === 403 ? 'Pagina riservata all\'amministratore di Projexa.' : e.message;
+                $('deniedMsg').textContent = e.message;
                 $('deniedCard').style.display = '';
             }
         }
