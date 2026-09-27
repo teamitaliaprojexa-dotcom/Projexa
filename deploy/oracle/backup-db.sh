@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Backup notturno dei 4 database Neon di Projexa nell'Object Storage di Oracle.
+# Backup notturno dei 4 database Postgres di Projexa (locali sulla VM dal 2026-09-27,
+# prima su Neon) nell'Object Storage di Oracle.
 #   - pg_dump in formato "custom" (compresso, si ripristina con pg_restore);
 #   - carica in <bucket>/daily/AAAA-MM-GG/ e, il giorno 1 del mese, anche in monthly/AAAA-MM/;
 #   - conserva 30 giorni di daily e 12 mesi di monthly; sulla VM tiene gli ultimi 3 giorni.
@@ -31,8 +32,8 @@ env_value() {
   grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2- | sed -E 's/^"(.*)"$/\1/'
 }
 
-# Connessione diretta per pg_dump: Neon sconsiglia il pooler (-pooler) per i dump.
-# Con sslmode=verify-full si usano i certificati di sistema.
+# URL per pg_dump. Con il Postgres locale resta invariato; con un URL Neon si usa la
+# connessione diretta (Neon sconsiglia il pooler per i dump) e i certificati di sistema.
 dump_url() {
   local url="$1"
   url="${url/-pooler./.}"
@@ -54,8 +55,13 @@ for name in projexa auth lic notif; do
   url=$(env_value "${DBS[$name]}")
   [ -n "$url" ] || { log "ERRORE: ${DBS[$name]} mancante in $ENV_FILE"; exit 1; }
   out="$WORK/projexa_${name}_${STAMP}.dump"
-  "$PG_DUMP" --format=custom --compress=9 --no-owner --no-privileges \
-    --dbname="$(dump_url "$url")" --file="$out"
+  # Se il dump fallisce non lascia un file vuoto (come il 2026-09-27 con Neon bloccato)
+  if ! "$PG_DUMP" --format=custom --compress=9 --no-owner --no-privileges \
+      --dbname="$(dump_url "$url")" --file="$out"; then
+    rm -f "$out"
+    log "ERRORE: dump di $name fallito"
+    exit 1
+  fi
   # Controllo: l'archivio deve essere leggibile da pg_restore
   /usr/pgsql-18/bin/pg_restore --list "$out" >/dev/null
   log "$name: $(du -h "$out" | cut -f1) ($out)"

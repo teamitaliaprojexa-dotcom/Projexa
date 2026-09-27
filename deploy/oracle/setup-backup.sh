@@ -8,7 +8,7 @@ set -euo pipefail
 
 APP_DIR=/opt/projexa
 
-# Strumenti: pg_dump 18 (stessa versione di Neon) e OCI CLI
+# Strumenti: pg_dump 18 (stessa versione del server Postgres) e OCI CLI
 if [ ! -x /usr/pgsql-18/bin/pg_dump ]; then
   sudo dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-aarch64/pgdg-redhat-repo-latest.noarch.rpm || true
   sudo dnf -qy module disable postgresql || true
@@ -26,7 +26,7 @@ chmod 700 "$APP_DIR/backups"
 
 sudo tee /etc/systemd/system/projexa-backup.service >/dev/null <<UNIT
 [Unit]
-Description=Projexa - backup database Neon su Object Storage
+Description=Projexa - backup database Postgres su Object Storage
 After=network-online.target
 Wants=network-online.target
 

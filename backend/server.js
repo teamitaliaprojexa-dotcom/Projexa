@@ -23,6 +23,7 @@ import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
 import { encryptRowForWrite } from './config/crypto.js';
+import { resolveDbUrl } from './config/dbEnv.js';
 
 dotenv.config();
 
@@ -6660,7 +6661,9 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`\n🚀 Projexa API running on http://localhost:${PORT}`);
-  console.log(`📊 Database: PostgreSQL on Neon`);
+  let dbHost = '?';
+  try { dbHost = new URL(resolveDbUrl('DATABASE_URL')).host; } catch { /* URL assente o non valido */ }
+  console.log(`📊 Database: PostgreSQL su ${dbHost}`);
   console.log(`\n✓ Health check: http://localhost:${PORT}/api/health\n`);
   // Riprende i blocchi di trascrizione rimasti in coda (es. dopo un riavvio di Render)
   kickTranscriptionWorker();

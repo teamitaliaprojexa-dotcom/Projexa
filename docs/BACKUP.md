@@ -1,7 +1,7 @@
 # Backup dei database
 
 Ogni notte alle 02:30 UTC (04:30 ora italiana d'estate) la VM Oracle salva i 4 database
-Neon nell'Object Storage di Oracle (Always Free, 20 GB).
+Postgres (locali sulla VM dal 2026-09-27, vedi `docs/DATABASE.md`) nell'Object Storage di Oracle (Always Free, 20 GB).
 
 | Cosa | Dove |
 |---|---|
@@ -40,12 +40,16 @@ sudo systemctl start projexa-backup.service
      -ns axzmowo31clc -bn projexa-backup \
      --name daily/AAAA-MM-GG/projexa_projexa_AAAA-MM-GG_HHMM.dump --file restore.dump
    ```
-2. Ripristinare **in un database nuovo e vuoto** (su Neon: crea un branch o un database
-   vuoto), mai sopra quello in uso senza aver prima verificato:
+2. Ripristinare **in database nuovi e vuoti**, mai sopra quelli in uso senza aver prima
+   verificato. Per i 4 database insieme c'è `/opt/projexa/restore-db.sh AAAA-MM-GG`
+   (sorgente `deploy/oracle/restore-db.sh`), che legge i dump da `/opt/projexa/backups/<data>/`.
+   Per un solo database:
    ```bash
-   /usr/pgsql-18/bin/pg_restore --no-owner --no-privileges \
-     --dbname="postgresql://utente:password@host/nuovo_db?sslmode=require" restore.dump
+   sudo -u postgres createdb -O projexa projexa_prova
+   PGPASSWORD=$(cat /opt/projexa/.pg_app_password) /usr/pgsql-18/bin/pg_restore      -h 127.0.0.1 -U projexa -d projexa_prova --no-owner --no-privileges restore.dump
    ```
+   I dump fatti su Neon (fino al 2026-09-26) contengono l'estensione `pg_session_jwt` e lo
+   schema `pgrst` di Neon: vanno esclusi (`restore-db.sh` lo fa da solo).
 3. Controllare i dati, poi puntare `DATABASE_URL` (o la variabile del db ripristinato) al
    nuovo database nel `.env` del server e `pm2 reload projexa --update-env`.
 
@@ -54,3 +58,7 @@ I dati cifrati dall'applicazione restano cifrati nel backup: per leggerli serve 
 server, altrimenti il backup dei campi cifrati è inutilizzabile.
 
 Prova di ripristino eseguita il 2026-09-26: 45 tabelle, conteggi identici a Neon.
+
+
+Il 2026-09-27 il backup notturno è fallito (Neon bloccato per superamento della quota di
+traffico, dump vuoto): da allora lo script si ferma con errore senza lasciare file vuoti.
