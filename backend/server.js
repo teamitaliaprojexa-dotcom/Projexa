@@ -4641,6 +4641,49 @@ app.get('/api/settings/feature-flag', requireAuth, async (req, res) => {
   }
 });
 
+// Visibilità delle sezioni della dashboard: campi settings booleani (valore1) del
+// tenant/utente del token, in qualunque argument (nome campo senza maiuscole e senza "(*) ").
+// Se la riga non esiste la sezione resta visibile (comportamento precedente).
+// Chiave restituita → nome del campo.
+const DASHBOARD_FLAGS = {
+  chatbot: 'chat-bot projexa',
+  kpiFatturato: 'mostra kpi fatturato',
+  calendario: 'mostra calendario',
+  todo: 'mostra todolist',
+  issue: 'mostra funzione issue'
+};
+async function readDashboardFlags(user) {
+  const r = await db.query(
+    `SELECT LOWER(REGEXP_REPLACE(BTRIM(campo), '^\\(\\*\\)\\s*', '')) AS campo, valore1
+       FROM settings
+      WHERE tenant_id = $1 AND user_id = $2
+        AND LOWER(REGEXP_REPLACE(BTRIM(campo), '^\\(\\*\\)\\s*', '')) = ANY($3)`,
+    [user.tenant_id, user.user_id, Object.values(DASHBOARD_FLAGS)]
+  );
+  const flags = {};
+  for (const [key, campo] of Object.entries(DASHBOARD_FLAGS)) {
+    const row = r.rows.find(x => x.campo === campo);
+    flags[key] = row
+      ? ['true', 't', '1', 'yes', 'on'].includes(String(row.valore1 ?? '').trim().toLowerCase())
+      : true;
+  }
+  return flags;
+}
+app.get('/api/settings/dashboard-flags', requireAuth, async (req, res) => {
+  try {
+    res.json(await readDashboardFlags(req.user));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+app.get('/api/settings/chatbot-enabled', requireAuth, async (req, res) => {
+  try {
+    res.json({ enabled: (await readDashboardFlags(req.user)).chatbot });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Modalità di trascrizione scelta (campo settings "modalità Trascrizione", valore2) per
 // tenant/utente del contesto: 'Browser-leggero' | 'Browser-pesante' | 'Background' (default).
 app.get('/api/settings/transcription-mode', requireAuth, async (req, res) => {

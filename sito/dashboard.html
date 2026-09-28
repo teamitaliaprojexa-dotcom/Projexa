@@ -264,15 +264,9 @@
             background: #f3f4f6;
         }
 
-        /* Flyout Impostazioni: la voce "Prompt AI" resta in fondo al pannello */
-        .nav-settings .settings-flyout-inner {
-            display: flex;
-            flex-direction: column;
-        }
-        #settingsFooterList {
-            margin-top: auto;
-            padding-top: 0.5rem;
-            border-top: 1px solid var(--border);
+        /* Sezioni della dashboard spente da Impostazioni › Preferenze (vedi applyDashboardFlags) */
+        [data-dash-flag].dash-flag-off {
+            display: none !important;
         }
 
         .settings-flyout-title {
@@ -2742,7 +2736,7 @@
                     </div>
                 </div>
             </li>
-            <li><a href="issue.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1.1 15.5h-2.2v-2.2h2.2v2.2Zm0-4.2h-2.2V6.5h2.2v6.8Z"/></svg> <span>Issue</span></a></li>
+            <li id="navIssue" data-dash-flag="issue"><a href="issue.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1.1 15.5h-2.2v-2.2h2.2v2.2Zm0-4.2h-2.2V6.5h2.2v6.8Z"/></svg> <span>Issue</span></a></li>
             <li class="nav-projects" style="position: relative;">
                 <a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5.5C2 4.7 2.7 4 3.5 4h6l2 2h9c.8 0 1.5.7 1.5 1.5v11c0 .8-.7 1.5-1.5 1.5h-17C2.7 20 2 19.3 2 18.5v-13Z"/></svg> <span>Progetti clienti</span></a>
                 <div class="settings-flyout">
@@ -2813,11 +2807,6 @@
                         <ul id="settingsArgumentsList">
                             <li style="color: var(--text-muted); border: none;">Caricamento…</li>
                         </ul>
-                        <!-- Prompt AI: per tutti. L'admin del tenant PROJEXA modifica anche lo standard,
-                             gli altri solo il proprio personalizzato (controllo in /api/prompts). -->
-                        <ul id="settingsFooterList">
-                            <li><a href="prompt-editor.html" style="color: inherit; text-decoration: none; display: block;">Prompt AI</a></li>
-                        </ul>
                     </div>
                 </div>
             </li>
@@ -2857,6 +2846,12 @@
                     </label>
                     <button id="detailCloseBtn" type="button" title="Chiudi" style="display: none; flex: 0 0 auto; width: 26px; height: 26px; background: #e5e7eb; border: none; border-radius: 6px; font-size: 1rem; line-height: 1; cursor: pointer;">✕</button>
                 </div>
+            </div>
+            <!-- Prompt AI: solo nel dettaglio Impostazioni "AI Intelligenza Artificiale". Per tutti:
+                 l'admin del tenant PROJEXA modifica anche lo standard, gli altri solo il proprio
+                 personalizzato (controllo in /api/prompts). -->
+            <div id="settingsPromptAiWrap" style="display: none; margin-bottom: 0.75rem;">
+                <a href="prompt-editor.html" style="display: inline-flex; align-items: center; gap: 6px; padding: 0.35rem 0.75rem; background: var(--primary); color: white; border-radius: 6px; font-weight: 600; font-size: 0.8rem; text-decoration: none;"><i class="fas fa-envelope-open-text"></i> Prompt AI</a>
             </div>
             <!-- Pulsanti struttura campi (Nuovo / Elimina / Rinomina), visibili solo con modifica abilitata -->
             <div id="clientEditButtons" style="display: none; gap: 0.35rem; margin-bottom: 0.75rem;">
@@ -3106,7 +3101,7 @@
             <div class="stats-grid" id="dashboardKpiGrid"></div>
 
             <!-- RIUNIONI DI OGGI - GOOGLE CALENDAR -->
-            <div style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
+            <div data-dash-flag="calendario" style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
                     <div class="section-title" style="margin: 0; position: relative;">
                         <button id="meetingsDateBtn" type="button" class="meetings-date-btn" title="Scegli il giorno delle riunioni" aria-label="Scegli il giorno delle riunioni"><i class="fas fa-calendar-alt"></i></button>
@@ -3145,7 +3140,7 @@
             </div>
 
             <!-- TO DO LIST -->
-            <div class="todo-section" style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
+            <div class="todo-section" data-dash-flag="todo" style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
                     <div class="section-title" style="margin: 0;">
                         <i class="fas fa-list-check" style="color: var(--primary);"></i>
@@ -3233,7 +3228,7 @@
             </div>
 
             <!-- KPI FATTURATO -->
-            <div style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
+            <div data-dash-flag="kpiFatturato" style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
                     <div>
                         <div class="section-title" style="margin: 0;">
@@ -5605,6 +5600,31 @@
                 }
             }, 700);
         }
+
+        // --- Toggle Impostazioni › "Chat-Bot Projexa" / "Mostra ..." (Preferenze) ---
+        // Salva subito valore1 e ricarica la pagina, così chatbot e sezioni compaiono/scompaiono
+        // all'istante. Nomi campo (minuscoli, senza "(*) ") allineati a DASHBOARD_FLAGS in server.js.
+        const DASHBOARD_FLAG_CAMPI = ['chat-bot projexa', 'mostra kpi fatturato', 'mostra calendario', 'mostra todolist', 'mostra funzione issue'];
+        document.addEventListener('change', async (e) => {
+            const toggle = e.target;
+            if (!toggle || !toggle.classList || !toggle.classList.contains('chatbot-toggle')) return;
+            const value = toggle.checked;
+            toggle.disabled = true;
+            try {
+                const res = await fetch(`${API_URL}/data/settings/${toggle.dataset.settingId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ valore1: value })
+                });
+                if (!res.ok) throw new Error(`Errore ${res.status}`);
+                location.reload();
+            } catch (err) {
+                toggle.checked = !value;
+                toggle.disabled = false;
+                clearCalendarToggleDirty(toggle);
+                showNotification('Impostazione del chatbot non salvata: ' + err.message, 'info');
+            }
+        });
 
         document.addEventListener('change', async (e) => {
             const toggle = e.target;
@@ -10517,6 +10537,37 @@
             });
         }
 
+        // Sezioni della dashboard accese/spente dai booleani di Impostazioni › Preferenze
+        // ("Mostra KPI Fatturato", "Mostra Calendario", "Mostra ToDoList", "Mostra funzione Issue"):
+        // gli elementi con data-dash-flag="<chiave>" si nascondono se il flag è false.
+        // Senza riga o con errore di rete restano visibili.
+        (async function applyDashboardFlags() {
+            try {
+                const res = await fetch(`${API_URL}/settings/dashboard-flags`, { headers: getAuthHeaders() });
+                if (!res.ok) return;
+                const flags = await res.json();
+                document.querySelectorAll('[data-dash-flag]').forEach(el => {
+                    el.classList.toggle('dash-flag-off', flags[el.dataset.dashFlag] === false);
+                });
+            } catch (e) { /* ignore */ }
+        })();
+
+        // Pulsante "Prompt AI" sotto il titolo: visibile solo nel dettaglio Impostazioni
+        // "AI Intelligenza Artificiale". Il flyout è riusato da molte viste che cambiano
+        // tutte il titolo: a ogni cambio si ricalcola la visibilità dalla vista corrente.
+        (function setupPromptAiButton() {
+            const titleEl = document.getElementById('settingsDetailTitle');
+            const wrap = document.getElementById('settingsPromptAiWrap');
+            if (!titleEl || !wrap) return;
+            const update = () => {
+                const v = currentView;
+                const show = !!v && v.kind === 'detail' && v.source === 'settings'
+                    && /intelligenza artificiale/i.test(`${v.label || ''} ${v.argument || ''}`);
+                wrap.style.display = show ? 'block' : 'none';
+            };
+            new MutationObserver(update).observe(titleEl, { childList: true, characterData: true, subtree: true });
+        })();
+
         // Apre il flyout di dettaglio per la sorgente indicata (settings o clients),
         // filtrando per l'argument/cliente selezionato.
         // silent = true: ridisegno "invisibile" dello stesso dettaglio (es. cambio di
@@ -12114,9 +12165,14 @@
                 const calKey = (currentDetailSource === 'settings' && !detailReorderMode) ? calendarProviderFromCampo(row.campo) : null;
                 // Impostazioni › AI: il toggle di ChatGPT/Claude/Gemini collega (chiave API) o scollega
                 const aiKey = (!calKey && currentDetailSource === 'settings' && !detailReorderMode) ? aiProviderFromCampo(row.campo) : null;
+                // Impostazioni › "Chat-Bot Projexa" e "Mostra ..." di Preferenze: salvano subito e
+                // ricaricano la pagina (mostrano/nascondono chatbot e sezioni della dashboard)
+                const isChatbotFlag = !calKey && !aiKey && currentDetailSource === 'settings' && !detailReorderMode
+                    && DASHBOARD_FLAG_CAMPI.includes(String(row.campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase());
                 const calAttrs = calKey ? ` class="calendar-toggle" data-cal-provider="${calKey}"`
                     : (aiKey === 'copilot' ? ' disabled title="Copilot non disponibile: non ha un\'API pubblica"'
-                    : (aiKey ? ` class="ai-toggle" data-ai-provider="${aiKey}"` : ''));
+                    : (aiKey ? ` class="ai-toggle" data-ai-provider="${aiKey}"`
+                    : (isChatbotFlag ? ' class="chatbot-toggle"' : '')));
                 input = `<label class="toggle-switch"><input type="checkbox"${calAttrs} data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>`;
                 if (calKey) {
                     input += `<span class="calendar-conn" data-cal-provider="${calKey}"></span>`;

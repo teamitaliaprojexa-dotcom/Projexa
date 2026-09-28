@@ -42,8 +42,24 @@ backup, vedi `docs/BACKUP.md`).
 
 ## Staging
 
-I branch di staging (`STAGING_*`) sono ancora su Neon, negli stessi progetti: finché la quota
-del progetto non si azzera (inizio del mese successivo) anche lo staging è bloccato.
+Lo staging è la **vecchia produzione su Neon** (4 progetti). In locale: `STAGING_*` nel
+`backend/.env` e avvio con `APP_ENV=staging` (`ZZ-avvia staging.bat`). Neon è bloccato per
+quota fino al reset mensile (~1° ottobre 2026).
+
+**Copia notturna produzione → staging** (predisposta, timer **spento**):
+- script `/opt/projexa/sync-staging.sh` (sorgente `deploy/oracle/sync-staging.sh`), servizio e
+  timer `projexa-sync-staging` alle 03:30 UTC, installati da `deploy/oracle/setup-sync-staging.sh`;
+- URL di destinazione in `/opt/projexa/staging-sync.env` (permessi 600), mai nel `.env` di produzione;
+- sovrascrive i dati di staging (`pg_restore --clean`, una transazione per database); rifiuta
+  qualunque destinazione che non sia un host `*.neon.tech`.
+
+```bash
+sudo systemctl enable --now projexa-sync-staging.timer    # attivare
+sudo systemctl start projexa-sync-staging.service         # una copia subito
+journalctl -u projexa-sync-staging.service -n 30 -o cat   # esito
+```
+
+Traffico Neon: una copia completa è di pochi MB, trascurabile rispetto ai 5 GB/mese del piano gratuito.
 
 ## Backup
 

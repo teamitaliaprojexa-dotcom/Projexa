@@ -4,7 +4,7 @@
 # Uso: lasciare aperta questa finestra mentre si usa il backend in locale (Ctrl+C per chiudere).
 param(
   [string]$Key = "$env:USERPROFILE\.ssh\ssh-key-2026-09-25.key",
-  [string]$VmHost = "80.225.86.153",
+  [string]$VmHost = "129.152.0.49",
   [int]$LocalPort = 15432
 )
 Write-Host "Tunnel Postgres: 127.0.0.1:$LocalPort -> $VmHost (Ctrl+C per chiudere)"

@@ -321,6 +321,22 @@
         });
     }
 
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-    else init();
+    // Il chatbot compare solo se in Impostazioni "Chat-Bot Projexa" è attivo (senza la riga
+    // resta visibile). Se il controllo fallisce (rete/server) lo si mostra comunque.
+    async function start() {
+        if (!localStorage.getItem('authToken')) return;
+        try {
+            const res = await fetch(`${API_URL}/settings/chatbot-enabled`, {
+                headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || ''}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.enabled === false) return;
+            }
+        } catch { /* ignore */ }
+        init();
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
 })();
