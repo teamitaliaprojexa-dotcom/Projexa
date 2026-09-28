@@ -403,6 +403,101 @@ export async function askAiProvider(userId, providerName, prompt) {
 }
 
 // ==========================================
+// RECAP PROJEXA: MODELLI LOCALI, GRATUITI (nessuna chiave API)
+// ==========================================
+//
+// Voci del campo "AI generazione e-mail recap" (lookup_values, vedi
+// Supporto/CreaDB/recap_projexa_locale.sql):
+//   "Recap Projexa (lento)"          -> Ollama sulla VM (OLLAMA_URL, OLLAMA_RECAP_MODEL): gira
+//                                       in background, anche a pagina chiusa, ma è lento
+//                                       (2 core condivisi con Whisper);
+//   "Recap Projexa (Browser-Medio)"  -> modello nel browser dell'utente (WebLLM + WebGPU,
+//   "Recap Projexa (Browser-Alto)"      sito/js/browser-recap.js): la trascrizione non esce dal PC.
+// Il recap "Browser" non si può fare sul server: lo genera la dashboard.
+const LOCAL_RECAP_MODES = {
+  'recap projexa (lento)': 'server',
+  'recap projexa (browser-medio)': 'browser',
+  'recap projexa (browser-alto)': 'browser'
+};
+
+// 'server' | 'browser' | null (AI con chiave API)
+export function localRecapMode(providerName) {
+  return LOCAL_RECAP_MODES[String(providerName || '').trim().toLowerCase()] || null;
+}
+
+// Istruzioni per riassumere un pezzo di trascrizione troppo lunga (usate anche dal browser).
+export const RECAP_CHUNK_PROMPT = `Questo è un pezzo ({{N}} di {{TOT}}) della trascrizione di una riunione.
+Scrivi appunti sintetici in italiano, in testo semplice: argomenti trattati, decisioni prese, azioni (chi, cosa, entro quando), numeri e date citati.
+Usa solo informazioni presenti nel testo, senza introduzioni né commenti.
+
+Trascrizione:
+{{TESTO}}`;
+
+const OLLAMA_CHARS_PER_TOKEN = 3;      // stima prudente per l'italiano
+const OLLAMA_MAX_CTX = 32768;          // oltre si riassume a pezzi
+const OLLAMA_OUTPUT_TOKENS = 1500;
+const OLLAMA_CHUNK_CHARS = 24000;      // ~8.000 token per pezzo
+
+async function ollamaGenerate(prompt, numCtx, numPredict) {
+  const base = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+  const model = process.env.OLLAMA_RECAP_MODEL || 'qwen2.5:7b';
+  let response;
+  try {
+    response = await fetch(`${base}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, prompt, stream: false, options: { num_ctx: numCtx, num_predict: numPredict, temperature: 0.3 } }),
+      // Su CPU una riunione lunga può richiedere decine di minuti.
+      signal: AbortSignal.timeout(Number(process.env.OLLAMA_TIMEOUT_MS) || 2 * 60 * 60 * 1000)
+    });
+  } catch (error) {
+    const reason = error.name === 'TimeoutError' ? 'tempo di attesa scaduto' : ((error.cause && error.cause.code) || error.message);
+    throw httpError(503, `Recap Projexa: modello locale non raggiungibile (${reason})`);
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw httpError(502, `Recap Projexa: ${data.error || `errore ${response.status}`}`);
+  const secs = (Number(data.total_duration) || 0) / 1e9;
+  console.log(`[RECAP] Ollama ${model}: ${data.prompt_eval_count || '?'} token letti, ${data.eval_count || '?'} scritti in ${Math.round(secs)}s`);
+  return { text: String(data.response || '').trim(), model };
+}
+
+const ctxFor = (chars, outTokens) =>
+  Math.min(OLLAMA_MAX_CTX, Math.max(4096, Math.ceil((chars / OLLAMA_CHARS_PER_TOKEN + outTokens + 512) / 1024) * 1024));
+
+// Recap con Ollama. buildPrompt(testo) restituisce il prompt completo (prompt RECAP_EMAIL
+// con il testo al posto di {{TRASCRIZIONE}}). Se la trascrizione non sta nel contesto, prima
+// si riassume a pezzi e il recap si scrive dagli appunti.
+export async function askOllamaRecap(buildPrompt, transcript) {
+  let text = transcript;
+  const overhead = (await buildPrompt('')).length;
+  if ((overhead + text.length) / OLLAMA_CHARS_PER_TOKEN + OLLAMA_OUTPUT_TOKENS > OLLAMA_MAX_CTX) {
+    const pieces = splitText(text, OLLAMA_CHUNK_CHARS);
+    const notes = [];
+    for (let i = 0; i < pieces.length; i++) {
+      const p = RECAP_CHUNK_PROMPT.replace('{{N}}', i + 1).replace('{{TOT}}', pieces.length).replace('{{TESTO}}', pieces[i]);
+      notes.push((await ollamaGenerate(p, ctxFor(p.length, 1000), 1000)).text);
+    }
+    text = `(Appunti ricavati dalla trascrizione, riassunta a pezzi)\n\n${notes.join('\n\n')}`;
+  }
+  const prompt = await buildPrompt(text);
+  const result = await ollamaGenerate(prompt, ctxFor(prompt.length, OLLAMA_OUTPUT_TOKENS), OLLAMA_OUTPUT_TOKENS);
+  return { text: result.text, label: 'Recap Projexa', model: result.model };
+}
+
+// Divide il testo in pezzi di circa maxChars, tagliando a fine riga.
+export function splitText(text, maxChars) {
+  const pieces = [];
+  let cur = '';
+  for (const line of String(text).split('\n')) {
+    if (cur && cur.length + line.length + 1 > maxChars) { pieces.push(cur); cur = ''; }
+    cur += (cur ? '\n' : '') + line;
+    while (cur.length > maxChars) { pieces.push(cur.slice(0, maxChars)); cur = cur.slice(maxChars); }
+  }
+  if (cur.trim()) pieces.push(cur);
+  return pieces;
+}
+
+// ==========================================
 // NUOVI TENTATIVI SU ERRORI TEMPORANEI DEL FORNITORE
 // ==========================================
 //

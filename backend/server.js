@@ -13,13 +13,13 @@ import authRoutes from './routes/auth.js';
 import microsoftOAuthRoutes from './routes/microsoft-oauth.js';
 import tableStructuresRoutes from './routes/table-structures.js';
 import calendarRoutes from './routes/calendar.js';
-import aiRoutes from './routes/ai.js';
+import aiRoutes, { localRecapMode } from './routes/ai.js';
 import jiraRoutes from './routes/jira.js';
 import cryptoMigrationRoutes from './routes/crypto-migration.js';
 import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
-import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
+import { kickTranscriptionWorker, recapProviderName } from './jobs/meetingTranscription.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
 import { encryptRowForWrite } from './config/crypto.js';
@@ -70,6 +70,8 @@ app.disable('x-powered-by'); // non dichiarare che il server è Express
 // cdn.jsdelivr.net + huggingface: servono alla trascrizione nel browser (Transformers.js
 // e i pesi del modello scaricati dal loro CDN). 'wasm-unsafe-eval' abilita l'esecuzione
 // del WebAssembly del motore di trascrizione.
+// raw.githubusercontent.com: motore WebAssembly del modello del "Recap Projexa Browser"
+// (WebLLM, repository mlc-ai/binary-mlc-llm-libs); i pesi arrivano da huggingface.
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   // blob: serve al motore di trascrizione WASM (onnxruntime-web importa un modulo da un blob:).
@@ -77,7 +79,7 @@ const CONTENT_SECURITY_POLICY = [
   "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://accounts.google.com",
   "font-src 'self' data: https://cdnjs.cloudflare.com",
   "img-src 'self' data: blob: https:",
-  "connect-src 'self' https://accounts.google.com https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co",
+  "connect-src 'self' https://accounts.google.com https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com",
   "frame-src https://accounts.google.com",
   "worker-src 'self' blob:",
   "object-src 'none'",
@@ -5380,6 +5382,18 @@ app.get('/api/settings/transcription-mode', requireAuth, async (req, res) => {
     );
     const v = r.rows.length ? String(r.rows[0].valore2 || '').trim() : '';
     res.json({ mode: v || 'Background' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// AI del recap (campo settings "AI generazione e-mail recap", valore2) per tenant/utente del
+// contesto. local: 'server' = Recap Projexa (lento) sulla VM, 'browser' = Recap Projexa
+// Browser-Medio/Alto (lo genera la dashboard), null = AI con chiave API.
+app.get('/api/settings/recap-mode', requireAuth, async (req, res) => {
+  try {
+    const provider = await recapProviderName(req.user);
+    res.json({ provider, local: localRecapMode(provider) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

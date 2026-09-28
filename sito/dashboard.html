@@ -6229,35 +6229,100 @@
         // Visibile se la riunione ha la trascrizione ma non ancora il recap: avvia la stessa
         // generazione del recap automatico (AI scelta in Impostazioni › AI, prompt
         // backend/prompts/recap_email.txt, risultato cifrato in rec_meeting.recap).
+        // Recap Projexa (Impostazioni › AI, voci "Recap Projexa ..."): "lento" gira sul server
+        // in coda (la griglia mostra la clessidra); Browser-Medio/Alto gira qui, con il modello
+        // nel browser (js/browser-recap.js), e il recap si salva come un file caricato.
         const manualRecapRunning = new Set();
+        const recapProgress = new Map();   // id riunione -> stato del recap nel browser
+        const autoBrowserRecap = new Set(); // riunioni registrate qui: recap nel browser a trascrizione finita
 
         function manualRecapButton(eventId) {
             const running = manualRecapRunning.has(eventId);
-            return `<button type="button" class="meeting-genrecap-btn" data-event-id="${escapeHtml(eventId || '')}" ${running ? 'disabled' : ''} title="Genera il recap con l'AI scelta in Impostazioni › AI">${running ? '<i class="fas fa-spinner fa-spin"></i> Recap…' : 'Recap'}</button>`;
+            const title = running && recapProgress.get(eventId) ? recapProgress.get(eventId) : 'Genera il recap con l\'AI scelta in Impostazioni › AI';
+            return `<button type="button" class="meeting-genrecap-btn" data-event-id="${escapeHtml(eventId || '')}" ${running ? 'disabled' : ''} title="${escapeHtml(title)}">${running ? '<i class="fas fa-spinner fa-spin"></i> Recap…' : 'Recap'}</button>`;
         }
 
-        async function runManualRecap(btn) {
-            const eventId = btn.dataset.eventId;
+        const serverRecapIcon = '<i class="fas fa-hourglass-half meeting-queued" title="Recap Projexa in preparazione sul server: può richiedere diversi minuti, anche a pagina chiusa"></i>';
+
+        async function getRecapMode() {
+            const res = await fetch(`${API_URL}/settings/recap-mode`, { headers: calendarAuthHeaders() });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+            return data; // { provider, local: 'server' | 'browser' | null }
+        }
+
+        function setRecapProgress(eventId, text) {
+            recapProgress.set(eventId, text);
+            document.querySelectorAll(`.meeting-genrecap-btn[data-event-id="${CSS.escape(eventId)}"]`).forEach((b) => { b.title = text; });
+        }
+
+        // Recap con il modello nel browser: legge trascrizione e prompt, genera, salva.
+        async function runBrowserRecap(eventId, provider) {
+            if (!window.BrowserRecap) throw new Error('modulo del recap nel browser non caricato');
+            const res = await fetch(`${API_URL}/calendar/meetings/managed/recap-input?id_calendar=${encodeURIComponent(eventId)}`, { headers: calendarAuthHeaders() });
+            const input = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(input.error || `Errore ${res.status}`);
+            const cfg = window.BrowserRecap.MODES[String(provider).trim().toLowerCase()];
+            let notified = false;
+            const recap = await window.BrowserRecap.generateRecap(input, {
+                mode: provider,
+                onProgress: (p) => {
+                    // Primo avvio: il modello si scarica (poi resta nella cache del browser).
+                    if (!notified && p.progress < 1 && /fetch|download/i.test(p.text || '')) {
+                        notified = true;
+                        showNotification(`Recap nel browser: primo avvio, download del modello ${cfg ? cfg.label + ' (' + cfg.download + ')' : ''}. Lascia la pagina aperta.`, 'info');
+                    }
+                    setRecapProgress(eventId, `Caricamento del modello: ${Math.round((p.progress || 0) * 100)}%`);
+                },
+                onStatus: (t) => setRecapProgress(eventId, t)
+            });
+            const save = await fetch(`${API_URL}/calendar/meetings/managed/text`, {
+                method: 'PUT',
+                headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_calendar: eventId, field: 'recap', text: recap })
+            });
+            const saved = await save.json().catch(() => ({}));
+            if (!save.ok) throw new Error(saved.error || `Errore ${save.status}`);
+        }
+
+        async function startRecap(eventId, title) {
             if (!eventId || manualRecapRunning.has(eventId)) return;
             manualRecapRunning.add(eventId);
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Recap…';
+            recapProgress.delete(eventId);
+            document.querySelectorAll(`.meeting-genrecap-btn[data-event-id="${CSS.escape(eventId)}"]`).forEach((b) => {
+                b.disabled = true;
+                b.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Recap…';
+            });
             try {
-                const res = await fetch(`${API_URL}/calendar/meetings/managed/recap`, {
-                    method: 'POST',
-                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id_calendar: eventId })
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
-                showRecapReady(eventId, btn.closest('.meeting-card')?.dataset.title, data.provider);
+                const mode = await getRecapMode();
+                if (mode.local === 'browser') {
+                    await runBrowserRecap(eventId, mode.provider);
+                    showRecapReady(eventId, title, mode.provider);
+                } else {
+                    const res = await fetch(`${API_URL}/calendar/meetings/managed/recap`, {
+                        method: 'POST',
+                        headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id_calendar: eventId })
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                    if (data.queued) showNotification('Recap Projexa in preparazione sul server: può richiedere diversi minuti. Riceverai l\'avviso "Recap pronto".', 'info');
+                    else showRecapReady(eventId, title, data.provider);
+                }
             } catch (e) {
                 showNotification('Recap non generato: ' + e.message, 'info');
             } finally {
                 manualRecapRunning.delete(eventId);
+                recapProgress.delete(eventId);
+                document.querySelectorAll(`.meeting-genrecap-btn[data-event-id="${CSS.escape(eventId)}"]`).forEach((b) => {
+                    if (b.disabled) { b.disabled = false; b.textContent = 'Recap'; }
+                });
                 refreshMeetingStatuses(); // sparisce il pulsante, compare la lente in "Recap"
-                if (btn.isConnected && btn.disabled) { btn.disabled = false; btn.textContent = 'Recap'; }
             }
+        }
+
+        function runManualRecap(btn) {
+            return startRecap(btn.dataset.eventId, btn.closest('.meeting-card')?.dataset.title);
         }
 
         // === RIUNIONE IMMINENTE: la riga pulsa da 2 minuti prima a 30 secondi dopo l'inizio ===
@@ -6319,7 +6384,13 @@
                     const recording = isRecordingMeeting(ev.id);
                     // durante una generazione in corso il pulsante "Recap…" non va sovrascritto
                     if (!manualRecapRunning.has(ev.id)) {
-                        setStatusCell(row, 'meeting-status-genrecap', m && m.has_trascrizione && !m.has_recap && !m.pending && !recording ? manualRecapButton(ev.id) : '');
+                        const canRecap = m && m.has_trascrizione && !m.has_recap && !m.pending && !recording;
+                        setStatusCell(row, 'meeting-status-genrecap', m && m.recap_running && !m.has_recap ? serverRecapIcon : (canRecap ? manualRecapButton(ev.id) : ''));
+                        // Recap nel browser a fine registrazione (riunione registrata da questa pagina)
+                        if (canRecap && !m.recap_running && autoBrowserRecap.has(ev.id)) {
+                            autoBrowserRecap.delete(ev.id);
+                            startRecap(ev.id, title);
+                        }
                     }
                     const queued = m && m.pending > 0
                         ? `<i class="fas fa-hourglass-half meeting-queued" title="Trascrizione in corso sul server: ${m.pending} blocc${m.pending === 1 ? 'o' : 'hi'} in coda"></i>`
@@ -7132,8 +7203,15 @@
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                // Recap Projexa Browser: il server non fa il recap, lo farà questa pagina quando
+                // la trascrizione è completa (aggiornamento della griglia).
+                let browserRecap = false;
+                try { browserRecap = (await getRecapMode()).local === 'browser'; } catch (e) { /* vale il recap del server */ }
+                if (browserRecap) autoBrowserRecap.add(rec.eventId);
                 if (rec === meetingRec) {
-                    setRecStatus(`Registrazione inviata al server (${rec.sent} blocchi). Trascrizione e recap proseguono in background: puoi chiudere la pagina.`);
+                    setRecStatus(browserRecap
+                        ? `Registrazione inviata al server (${rec.sent} blocchi). Il recap si genera in questo browser a trascrizione finita: lascia la pagina aperta.`
+                        : `Registrazione inviata al server (${rec.sent} blocchi). Trascrizione e recap proseguono in background: puoi chiudere la pagina.`);
                 }
             } catch (e) {
                 if (rec === meetingRec) setRecStatus(`Blocchi inviati, ma il recap automatico non è stato prenotato (${e.message}): usa il pulsante "Recap" a trascrizione finita.`, true);
@@ -7178,9 +7256,10 @@
                 }
                 recUi().box.style.display = 'none';
             });
-            // Chiudere o ricaricare la pagina durante la registrazione interromperebbe la trascrizione.
+            // Chiudere o ricaricare la pagina durante la registrazione interromperebbe la
+            // trascrizione; durante un recap nel browser lo interromperebbe.
             window.addEventListener('beforeunload', (e) => {
-                if (meetingRec && (meetingRec.running || meetingRec.pending > 0)) {
+                if ((meetingRec && (meetingRec.running || meetingRec.pending > 0)) || recapProgress.size > 0) {
                     e.preventDefault();
                     e.returnValue = '';
                 }
@@ -14701,6 +14780,12 @@
 <script type="module">
     import * as BT from './js/browser-transcribe.js';
     window.BrowserTranscribe = BT;
+</script>
+<!-- Recap nel browser (Recap Projexa Browser-Medio/Alto): window.BrowserRecap. La libreria
+     WebLLM e il modello si scaricano solo al primo recap, non all'apertura della pagina. -->
+<script type="module">
+    import * as BR from './js/browser-recap.js';
+    window.BrowserRecap = BR;
 </script>
 </body>
 </html>

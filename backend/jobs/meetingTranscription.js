@@ -23,7 +23,7 @@
 import db from '../config/database.js';
 import { getPromptFor } from '../config/prompts.js';
 import { encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js';
-import { transcribeAudio, askAiProvider, whisperUrls } from '../routes/ai.js';
+import { transcribeAudio, askAiProvider, whisperUrls, localRecapMode, askOllamaRecap, RECAP_CHUNK_PROMPT } from '../routes/ai.js';
 
 export const NOME_PROGRAMMA = 'meetingTranscription';
 
@@ -187,16 +187,8 @@ async function buildRecapPrompt(user, vars) {
   return tpl.replace(/\{\{(TRASCRIZIONE|OGGETTO|DATA|UTENTE)\}\}/g, (m, k) => vars[k] || '');
 }
 
-// user: { tenant_id, user_id, email }. Restituisce { provider, model, length }.
-export async function generateRecap(user, idCalendar) {
-  const row = (await db.query(
-    `SELECT trascrizione, oggetto, data_calendar, orario_calendar FROM rec_meeting
-      WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
-    [user.tenant_id, user.user_id, idCalendar]
-  )).rows[0];
-  if (!row) throw httpError(404, 'Riunione non gestita con Projexa');
-  if (!row.trascrizione || !row.trascrizione.trim()) throw httpError(400, 'Nessuna trascrizione da cui generare il recap');
-
+// AI scelta nel campo "AI generazione e-mail recap" (settings.valore2), '' se non scelta.
+export async function recapProviderName(user) {
   const setting = (await db.query(
     `SELECT valore2 FROM settings
       WHERE tenant_id = $1 AND user_id = $2
@@ -204,18 +196,80 @@ export async function generateRecap(user, idCalendar) {
       LIMIT 1`,
     [user.tenant_id, user.user_id]
   )).rows[0];
-  const providerName = setting && setting.valore2 ? String(setting.valore2).trim() : '';
-  if (!providerName) throw httpError(400, 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"');
+  return setting && setting.valore2 ? String(setting.valore2).trim() : '';
+}
 
+async function recapSource(user, idCalendar) {
+  const row = (await db.query(
+    `SELECT trascrizione, oggetto, data_calendar, orario_calendar FROM rec_meeting
+      WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+    [user.tenant_id, user.user_id, idCalendar]
+  )).rows[0];
+  if (!row) throw httpError(404, 'Riunione non gestita con Projexa');
+  if (!row.trascrizione || !row.trascrizione.trim()) throw httpError(400, 'Nessuna trascrizione da cui generare il recap');
   const data = row.data_calendar ? String(row.data_calendar).split('-').reverse().join('/') : '';
-  const prompt = await buildRecapPrompt(user, {
-    TRASCRIZIONE: row.trascrizione.trim(),
-    OGGETTO: row.oggetto || '',
-    DATA: [data, row.orario_calendar ? String(row.orario_calendar).slice(0, 5) : ''].filter(Boolean).join(' '),
-    UTENTE: await speakerName(user)
-  });
+  return {
+    transcript: row.trascrizione.trim(),
+    vars: {
+      OGGETTO: row.oggetto || '',
+      DATA: [data, row.orario_calendar ? String(row.orario_calendar).slice(0, 5) : ''].filter(Boolean).join(' '),
+      UTENTE: await speakerName(user)
+    }
+  };
+}
 
-  const result = await askAiProvider(user.user_id, providerName, prompt);
+// Recap "Browser" (Recap Projexa Browser-Medio/Alto): il server non chiama nessuna AI, passa
+// alla dashboard trascrizione e prompt; il modello gira nel browser e il recap torna con
+// PUT /meetings/managed/text. Nel prompt restano da sostituire {{TRASCRIZIONE}} e, per i
+// pezzi, {{N}} {{TOT}} {{TESTO}}.
+export async function getRecapInput(user, idCalendar) {
+  const { transcript, vars } = await recapSource(user, idCalendar);
+  let template = (await getPromptFor('RECAP_EMAIL', user)).testo;
+  if (!template.includes('{{TRASCRIZIONE}}')) template += '\n\nTrascrizione:\n{{TRASCRIZIONE}}';
+  template = template.replace(/\{\{(OGGETTO|DATA|UTENTE)\}\}/g, (m, k) => vars[k] || '');
+  return { template, transcript, chunk_prompt: RECAP_CHUNK_PROMPT };
+}
+
+// Recap sul server in corso (Recap Projexa lento: può durare molti minuti): la dashboard mostra
+// la clessidra invece del pulsante "Recap".
+const recapRunning = new Set(); // "tenant|utente|id_calendar"
+const recapKey = (user, idCalendar) => `${user.tenant_id}|${user.user_id}|${idCalendar}`;
+
+export async function recapInProgress(user, ids) {
+  const out = new Set(ids.filter((id) => recapRunning.has(recapKey(user, id))));
+  try {
+    const r = await db.query(
+      `SELECT DISTINCT id_calendar FROM rec_meeting_chunks
+        WHERE tenant_id = $1 AND user_id = $2 AND kind = 'finalize' AND id_calendar = ANY($3::text[])`,
+      [user.tenant_id, user.user_id, ids]
+    );
+    for (const x of r.rows) out.add(x.id_calendar);
+  } catch (e) { /* tabella della coda non ancora creata */ }
+  return out;
+}
+
+// user: { tenant_id, user_id, email }. Restituisce { provider, model, length }.
+export async function generateRecap(user, idCalendar) {
+  const providerName = await recapProviderName(user);
+  if (!providerName) throw httpError(400, 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"');
+  const local = localRecapMode(providerName);
+  if (local === 'browser') {
+    const e = httpError(409, `"${providerName}" genera il recap nel browser: usa il pulsante "Recap" della dashboard`);
+    e.code = 'BROWSER_RECAP';
+    throw e;
+  }
+  const { transcript, vars } = await recapSource(user, idCalendar);
+
+  let result;
+  const key = recapKey(user, idCalendar);
+  recapRunning.add(key);
+  try {
+    result = local === 'server'
+      ? await askOllamaRecap((text) => buildRecapPrompt(user, { ...vars, TRASCRIZIONE: text }), transcript)
+      : await askAiProvider(user.user_id, providerName, await buildRecapPrompt(user, { ...vars, TRASCRIZIONE: transcript }));
+  } finally {
+    recapRunning.delete(key);
+  }
   const recap = String(result.text || '').trim();
   if (!recap) throw httpError(502, `${result.label} non ha restituito alcun testo`);
 
@@ -383,6 +437,11 @@ async function processFinalize(job) {
     );
     if (t.rows[0] && t.rows[0].has_tr) await generateRecap(user, job.id_calendar);
   } catch (error) {
+    // Recap Projexa Browser: lo genera la dashboard quando vede la trascrizione completa.
+    if (error.code === 'BROWSER_RECAP') {
+      console.log(`[RECAP] ${job.id_calendar}: recap affidato al browser dell'utente`);
+      return;
+    }
     const attempts = (Number(job.attempts) || 0) + 1;
     if (isTemporary(error) && attempts < 10) {
       await db.query(

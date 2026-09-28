@@ -19,8 +19,10 @@ import ical from 'node-ical';
 import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
 import {
-  encRec, enqueueChunk, enqueueBrowserTranscript, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices
+  encRec, enqueueChunk, enqueueBrowserTranscript, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices,
+  recapProviderName, recapInProgress, getRecapInput
 } from '../jobs/meetingTranscription.js';
+import { localRecapMode } from './ai.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
 import { isAllowedOrigin } from '../config/origins.js';
@@ -748,8 +750,9 @@ router.post('/meetings/managed/status', requireAuth, async (req, res) => {
       : [];
     const map = await getManagedMeetings(req.user, ids);
     const pending = await pendingChunks(req.user, ids);
+    const recapRunning = await recapInProgress(req.user, ids);
     const out = {};
-    for (const [id, row] of map) out[id] = { ...row, pending: pending.get(id) || 0 };
+    for (const [id, row] of map) out[id] = { ...row, pending: pending.get(id) || 0, recap_running: recapRunning.has(id) };
     res.json({ meetings: out });
   } catch (error) {
     console.error('❌ REC_MEETING_STATUS:', error.message);
@@ -916,10 +919,30 @@ router.post('/meetings/managed/recap', requireAuth, async (req, res) => {
   try {
     const idCalendar = String((req.body && req.body.id_calendar) || '').trim();
     if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    // Recap Projexa (lento): troppi minuti per una richiesta HTTP, va nella coda in background
+    // (stessa strada del recap automatico); la griglia mostra la clessidra e poi "Recap pronto".
+    const providerName = await recapProviderName(req.user);
+    if (localRecapMode(providerName) === 'server') {
+      await enqueueFinalize(req.user, idCalendar);
+      return res.status(202).json({ success: true, queued: true, provider: providerName });
+    }
     const result = await generateRecap(req.user, idCalendar);
     res.json({ success: true, ...result });
   } catch (error) {
     console.error('❌ REC_MEETING_RECAP:', error.message);
+    res.status(error.status || 500).json({ error: error.message, code: error.code });
+  }
+});
+
+// Recap Projexa Browser: trascrizione e prompt per il modello che gira nel browser
+// (sito/js/browser-recap.js). Il recap torna con PUT /meetings/managed/text (field=recap).
+router.get('/meetings/managed/recap-input', requireAuth, async (req, res) => {
+  try {
+    const idCalendar = String(req.query.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    res.json(await getRecapInput(req.user, idCalendar));
+  } catch (error) {
+    console.error('❌ REC_MEETING_RECAP_INPUT:', error.message);
     res.status(error.status || 500).json({ error: error.message });
   }
 });
