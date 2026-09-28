@@ -339,6 +339,62 @@ function assertCanWriteTable(req, tableName, dbKey = 'main', { ownRowOnly = fals
   }
 }
 
+// ---------- Permesso di scrittura per riga (colonna id_roles_write) ----------
+// Una riga è modificabile solo se il suo id_roles_write coincide con l'id_roles del
+// contesto (login o impersonificazione). L'Admin (id_roles = 1) modifica sempre tutto.
+// id_roles_write vuoto = sola lettura. Il valore può contenere più ruoli separati da
+// virgola/punto e virgola (colonna varchar su settings/clients/projects).
+// Le tabelle senza la colonna non hanno questa restrizione.
+function roleWriteList(value) {
+  return value == null ? [] : String(value).split(/[;,\s]+/).map((s) => s.trim()).filter(Boolean);
+}
+function contextRole(req) {
+  const raw = req.user?.id_roles;
+  return (raw == null || String(raw).trim() === '' || !Number.isFinite(Number(raw))) ? null : String(Number(raw));
+}
+function canWriteRow(req, idRolesWrite) {
+  if (isAdminUser(req)) return true;
+  const role = contextRole(req);
+  return role != null && roleWriteList(idRolesWrite).includes(role);
+}
+const READ_ONLY_ERROR = 'Sola lettura: il tuo ruolo non può modificare questo elemento';
+// Verifica che tutte le righe indicate siano modificabili; altrimenti errore 403.
+async function assertRowsWritable(req, pool, tableName, ids, tableColumns = null) {
+  if (isAdminUser(req)) return;
+  const cols = tableColumns || await getTableColumns(tableName, pool);
+  if (!cols.has('id_roles_write')) return;
+  const list = [...new Set((ids || []).map((x) => String(x || '').trim()).filter(Boolean))];
+  if (!list.length) return;
+  const r = await pool.query(
+    `SELECT id, id_roles_write FROM "${assertValidIdentifier(tableName)}" WHERE id::text = ANY($1::text[])`,
+    [list]
+  );
+  if (r.rows.some((row) => !canWriteRow(req, row.id_roles_write))) {
+    throw Object.assign(new Error(READ_ONLY_ERROR), { statusCode: 403 });
+  }
+}
+// Condizione SQL da aggiungere alle UPDATE/DELETE massive: limita alle righe modificabili.
+// Per l'admin (o tabelle senza colonna) non aggiunge nulla. alias = 'f.' o ''.
+function roleWriteSql(req, params, alias = '', tableColumns = null) {
+  if (isAdminUser(req) || (tableColumns && !tableColumns.has('id_roles_write'))) return '';
+  params.push(contextRole(req) || '#nessun-ruolo#'); // ruolo assente: nessuna riga corrisponde
+  return ` AND $${params.length} = ANY(regexp_split_to_array(btrim(COALESCE(${alias}id_roles_write::text, '')), '[;,[:space:]]+'))`;
+}
+// Valore di id_roles_write per le righe nuove: il ruolo di chi le crea.
+function roleWriteValue(req) {
+  return contextRole(req);
+}
+// Nuova riga: id_roles_write = ruolo del creatore (l'admin può indicarne uno esplicito).
+function stampRoleWrite(req, data, tableColumns) {
+  if (!tableColumns.has('id_roles_write')) return;
+  const explicit = data.id_roles_write != null && String(data.id_roles_write).trim() !== '';
+  if (!(isAdminUser(req) && explicit)) data.id_roles_write = roleWriteValue(req);
+}
+// Riga esistente: solo l'admin può cambiare id_roles_write (evita di "promuoversi").
+function stripRoleWrite(req, data) {
+  if (!isAdminUser(req)) delete data.id_roles_write;
+}
+
 // Livello del ruolo del login (numeri più bassi = più privilegi). Ruolo assente o non
 // valido = livello minimo.
 function userRoleLevel(req) {
@@ -900,12 +956,9 @@ app.post('/api/dashboard/rubrica', requireAuth, async (req, res) => {
         option: { value: String(duplicate.id), label: duplicate.nominativo, name: duplicate.nominativo, email: String(duplicate.email || '').trim() }
       });
     }
-    const result = await insertRowEncrypted(db, 'main', 'rubrica', {
-      tenant_id: req.user.tenant_id,
-      user_id: req.user.user_id,
-      nominativo,
-      email
-    });
+    const rubricaRow = { tenant_id: req.user.tenant_id, user_id: req.user.user_id, nominativo, email };
+    stampRoleWrite(req, rubricaRow, await getTableColumns('rubrica')); // modificabile dal ruolo del creatore
+    const result = await insertRowEncrypted(db, 'main', 'rubrica', rubricaRow);
     res.status(201).json({ option: { value: String(result.rows[0].id), label: nominativo, name: nominativo, email } });
   } catch (error) {
     if (error.code === '23505') return res.status(409).json({ error: "L'email è già in rubrica" });
@@ -930,6 +983,8 @@ app.post('/api/dashboard/tasks', requireAuth, async (req, res) => {
     if (metadata.some(column => column.column_name === 'created_by')) {
       data.created_by = req.user.user_id;
     }
+    // Nuova task: modificabile dal ruolo di chi la crea.
+    stampRoleWrite(req, data, new Set(metadata.map(column => column.column_name)));
 
     const encrypted = await cryptoWrite(db, 'main', 'tasks', data);
     const columns = Object.keys(encrypted);
@@ -960,6 +1015,8 @@ app.put('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Il titolo della task e\' obbligatorio' });
     }
     await validateDashboardTaskRelations(data, req);
+    stripRoleWrite(req, data);
+    await assertRowsWritable(req, db, 'tasks', [taskId]);
     const encrypted = await cryptoWrite(db, 'main', 'tasks', data, taskId);
     const columns = Object.keys(encrypted);
     if (columns.length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
@@ -1058,7 +1115,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
 
     const clientColumn = source === 'projects' ? 'client_id' : 'NULL::uuid AS client_id';
     const configResult = await db.query(
-      `SELECT id, argument, tabella, colonna, tipo_valore, "VariabDB" AS variabdb, tenant_id, user_id, ${clientColumn}
+      `SELECT id, argument, tabella, colonna, tipo_valore, "VariabDB" AS variabdb, tenant_id, user_id, id_roles_write, ${clientColumn}
        FROM "${source}"
        WHERE id = $1 AND tenant_id = $2 AND tipo_valore::text IN ('11', '13')
        LIMIT 1`,
@@ -1201,6 +1258,9 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     if (tableColumns.has('id') && !selectedColumns.includes('id')) {
       selectExpressions.push('src.id AS id');
     }
+    // Permesso per riga: letto a parte e trasformato in __can_write (vedi sotto).
+    const hasRoleWrite = tableColumns.has('id_roles_write');
+    if (hasRoleWrite) selectExpressions.push('src.id_roles_write AS "__roles_write"');
 
     for (const column of selectedColumns) {
       const fk = fkByColumn.get(column);
@@ -1291,8 +1351,16 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     // (sola lettura, il frontend nasconde Nuova riga/Modifica/Elimina in quel caso).
     // lockedColumns = colonne configurate tra parentesi: visibili ma non modificabili.
     // editOnly = c'è almeno una colonna tra parentesi -> la griglia offre solo Modifica.
+    // __can_write: la riga è modificabile dal ruolo del contesto (id_roles_write).
+    // canWriteField: il campo griglia stesso (riga settings/clients/projects) è modificabile.
+    const rows = result.rows.map((row) => {
+      const out = { ...row, __can_write: hasRoleWrite ? canWriteRow(req, row.__roles_write) : true };
+      delete out.__roles_write;
+      return out;
+    });
     res.json({
-      rows: result.rows,
+      rows,
+      canWriteField: canWriteRow(req, config.id_roles_write),
       columns: selectedColumns,
       isView,
       lockedColumns: selectedColumns.filter(c => columnsSpec.locked.has(c)),
@@ -1524,6 +1592,8 @@ app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth,
     if (tableColumns.has('user_id')) data.user_id = effectiveUserId;
     if (tableColumns.has('client_id') && clientId) data.client_id = clientId;
     if (tableColumns.has('project_id') && source === 'projects') data.project_id = config.argument;
+    // Nuova riga: modificabile dal ruolo di chi la crea.
+    stampRoleWrite(req, data, tableColumns);
 
     data = await cryptoWrite(db, 'main', tableName, data);
 
@@ -1619,6 +1689,10 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/rows', requireAuth,
       return conditions;
     };
 
+    // Permesso per riga: tutte le righe modificate o da chiudere devono essere modificabili.
+    await assertRowsWritable(req, db, tableName,
+      [...changes.map((c) => c && c.rowId), ...expireRowIds], tableColumns);
+
     client = await db.connect();
     await client.query('BEGIN');
     let updated = 0;
@@ -1645,6 +1719,7 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/rows', requireAuth,
       if (Object.prototype.hasOwnProperty.call(data, 'project_id')) {
         await validateGridProjectSelection(client, data.project_id, req.user, clientId);
       }
+      stripRoleWrite(req, data);
       data = await cryptoWrite(client, 'main', tableName, data, rowId);
       const columns = Object.keys(data).map(assertValidIdentifier);
       if (!columns.length) continue;
@@ -1714,6 +1789,7 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/expire', requireAut
     if (!tableColumns.has('id') || !tableColumns.has('scadenza')) {
       return res.status(400).json({ error: `La tabella ${tableName} deve contenere le colonne id e scadenza` });
     }
+    await assertRowsWritable(req, db, tableName, rowIds, tableColumns);
 
     const paramsArr = [rowIds];
     const conditions = ['id::text = ANY($1::text[])'];
@@ -1773,6 +1849,8 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, 
     if (Object.prototype.hasOwnProperty.call(data, 'project_id')) {
       await validateGridProjectSelection(db, data.project_id, req.user, clientId);
     }
+    stripRoleWrite(req, data);
+    await assertRowsWritable(req, db, tableName, [rowId], tableColumns);
     data = await cryptoWrite(db, 'main', tableName, data, rowId);
 
     const columns = Object.keys(data).map(assertValidIdentifier);
@@ -1813,6 +1891,7 @@ app.delete('/api/:source(settings|clients|projects)/grid-widget/row', requireAut
     if (ctx.editOnly) {
       return res.status(403).json({ error: 'Griglia in sola modifica: eliminazione non consentita' });
     }
+    await assertRowsWritable(req, db, tableName, [rowId], tableColumns);
 
     const conditions = ['id = $1'];
     const paramsArr = [rowId];
@@ -1879,14 +1958,22 @@ app.get('/api/projects/gantt-activity', requireAuth, async (req, res) => {
     const fieldId = String(req.query.fieldId || '').trim();
     const ctx = await resolveGanttContext(fieldId, req, false);
     const result = await db.query(
-      `SELECT id, ${GANTT_COLUMNS.map(c => `"${c}"`).join(', ')}
+      `SELECT *
        FROM ${GANTT_TABLE}
        WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3 AND project_id = $4
        ORDER BY ordinamento1 NULLS LAST, ordinamento2 NULLS FIRST,
                 ordinamento3 NULLS FIRST, ordinamento4 NULLS FIRST, created_at`,
       [ctx.tenantId, ctx.userId, ctx.clientId, ctx.projectId]
     );
-    res.json({ rows: result.rows, context: { clientId: ctx.clientId, projectId: ctx.projectId } });
+    // Il Gantt si modifica come un unico albero: se anche una sola attività non è
+    // modificabile dal ruolo del contesto (id_roles_write), la pagina va in sola lettura.
+    const canWrite = result.rows.every((r) => !('id_roles_write' in r) || canWriteRow(req, r.id_roles_write));
+    const rows = result.rows.map((r) => {
+      const out = { id: r.id };
+      for (const c of GANTT_COLUMNS) out[c] = r[c];
+      return out;
+    });
+    res.json({ rows, canWrite, context: { clientId: ctx.clientId, projectId: ctx.projectId } });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -1907,6 +1994,10 @@ app.post('/api/projects/gantt-activity/batch', requireAuth, async (req, res) => 
     for (const id of deletes) {
       if (!UUID_RE.test(String(id))) return res.status(400).json({ error: 'Id da eliminare non valido' });
     }
+    // Permesso per riga: le righe esistenti da modificare/eliminare devono essere modificabili.
+    const ganttColumns = await getTableColumns(GANTT_TABLE);
+    await assertRowsWritable(req, db, GANTT_TABLE,
+      [...deletes, ...updates.map((u) => String(u?.id || '')).filter((x) => UUID_RE.test(x))], ganttColumns);
 
     const idMap = {};
     // Dipendenza verso una riga nuova: se l'id temporaneo non è ancora stato
@@ -1944,6 +2035,7 @@ app.post('/api/projects/gantt-activity/batch', requireAuth, async (req, res) => 
         data.user_id = ctx.userId;
         data.client_id = ctx.clientId;
         data.project_id = ctx.projectId;
+        stampRoleWrite(req, data, ganttColumns);
         data = await cryptoWrite(client, 'main', GANTT_TABLE, data);
         const columns = Object.keys(data);
         const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
@@ -1965,6 +2057,7 @@ app.post('/api/projects/gantt-activity/batch', requireAuth, async (req, res) => 
         if (Object.prototype.hasOwnProperty.call(data, 'dipendenza')) {
           data.dipendenza = resolveDep(data.dipendenza, rowId);
         }
+        stripRoleWrite(req, data);
         data = await cryptoWrite(client, 'main', GANTT_TABLE, data, rowId);
         const columns = Object.keys(data);
         if (columns.length === 0) continue;
@@ -2057,6 +2150,11 @@ app.post('/api/projects/gantt-activity/copy', requireAuth, async (req, res) => {
        RETURNING id`,
       [ctx.tenantId, ctx.userId, ctx.clientId, ctx.projectId, sourceProjectId]
     );
+    // Righe copiate: modificabili dal ruolo di chi copia.
+    if (result.rows.length && (await getTableColumns(GANTT_TABLE)).has('id_roles_write')) {
+      await db.query(`UPDATE ${GANTT_TABLE} SET id_roles_write = $1 WHERE id = ANY($2::uuid[])`,
+        [roleWriteValue(req), result.rows.map((r) => r.id)]);
+    }
     res.json({ copied: result.rows.length });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
@@ -2530,6 +2628,8 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
     if (!rawColumns) {
       if (tableColumns.has('tenant_id')) data.tenant_id = req.user.tenant_id;
       if (tableColumns.has('user_id')) data.user_id = req.user.user_id;
+      // Nuova riga: modificabile dal ruolo di chi la crea.
+      stampRoleWrite(req, data, tableColumns);
     }
 
     // Quando un utente non admin crea un record-struttura (settings/clients/projects),
@@ -2700,6 +2800,10 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       delete data.user_id;
       delete data.client_id;
     }
+    // Permesso per riga: la riga deve essere modificabile dal ruolo del contesto, e solo
+    // l'admin può cambiare id_roles_write.
+    stripRoleWrite(req, data);
+    await assertRowsWritable(req, pool, tableName, [id], tableColumns);
 
     // Configurazione del campo: si controllano solo i valori cambiati rispetto alla riga.
     // Per il confronto basta la riga del tenant (es. cliente condiviso da un collega).
@@ -2826,6 +2930,8 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
             pParams.push(originalFieldRow.argument);
             where += ` AND argument = $${pParams.length}`;
           }
+          // La propagazione tocca solo le righe modificabili dal ruolo del contesto.
+          where += roleWriteSql(req, pParams, '', tableColumns);
           await pool.query(`UPDATE "${tableName}" SET ${setClause} WHERE ${where}`, pParams);
         }
       } catch (e) {
@@ -2879,6 +2985,7 @@ app.delete('/api/data/:table/:id', requireAuth, async (req, res) => {
     // Isolamento multi-tenant: i non-admin cancellano solo i record del proprio
     // tenant; gli admin possono cancellare record di qualsiasi tenant.
     const tableColumns = await getTableColumns(tableName, pool, dbKey);
+    await assertRowsWritable(req, pool, tableName, [id], tableColumns);
     let query = `DELETE FROM "${tableName}" WHERE id = $1 RETURNING *`;
     const values = [id];
     if (tableColumns.has('tenant_id') && !isAdminUser(req)) {
@@ -2981,6 +3088,20 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
 
           const hasId = data.id !== undefined && data.id !== null && data.id !== '';
           if (!hasId) delete data.id;
+
+          // Permesso per riga (non admin): una riga esistente deve essere modificabile; una
+          // riga nuova prende il ruolo di chi importa. id_roles_write non è importabile.
+          if (!admin && tableColumns.has('id_roles_write')) {
+            const existing = hasId
+              ? (await client.query(`SELECT id_roles_write FROM "${tableName}" WHERE id::text = $1 LIMIT 1`, [String(data.id)])).rows[0]
+              : null;
+            if (existing && !canWriteRow(req, existing.id_roles_write)) {
+              errors.push({ row: i + 1, error: READ_ONLY_ERROR });
+              continue;
+            }
+            if (existing) delete data.id_roles_write;
+            else data.id_roles_write = roleWriteValue(req);
+          }
 
           // Configurazione dei campi settings/clients/projects secondo il ruolo (non admin):
           // confronto con la riga esistente del tenant, se l'id c'è già.
@@ -3361,6 +3482,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
             if (componentiCols.has('scadenza')) {
               newComponentData.scadenza = '2099-12-31';
             }
+            stampRoleWrite(req, newComponentData, componentiCols); // modificabile dal ruolo di chi importa
             const insertResult = await insertRowEncrypted(client, 'main', 'proj_componenti', newComponentData);
             const newComponent = insertResult.rows[0];
             inserted += insertResult.rowCount;
@@ -3533,15 +3655,16 @@ app.post('/api/settings/argument', requireAuth, async (req, res) => {
     // Riga "segnaposto" per far comparire l'argomento (campo NULL = nascosta in visualizzazione).
     // Ora porta anche tipo_valore/tabella/colonna/VariabDB scelti nel form.
     let query, params;
+    // id_roles_write = ruolo di chi crea l'argomento (permesso di modifica per riga).
     if (scope === 'all-tenants') {
-      query = `INSERT INTO settings (argument, tenant_id, user_id, ordinamento, id_roles, tipo_valore, tabella, colonna, "VariabDB")
-               SELECT $1, ut.tenant_id, ut.user_id, $2, $3::smallint, $4, $5, $6, $7 FROM user_tenants ut`;
-      params = [argName, newOrd, idRoles, tipoValore, tabella, colonna, variabDb];
+      query = `INSERT INTO settings (argument, tenant_id, user_id, ordinamento, id_roles, tipo_valore, tabella, colonna, "VariabDB", id_roles_write)
+               SELECT $1, ut.tenant_id, ut.user_id, $2, $3::smallint, $4, $5, $6, $7, $8 FROM user_tenants ut`;
+      params = [argName, newOrd, idRoles, tipoValore, tabella, colonna, variabDb, roleWriteValue(req)];
     } else {
-      query = `INSERT INTO settings (argument, tenant_id, user_id, ordinamento, id_roles, tipo_valore, tabella, colonna, "VariabDB")
-               SELECT $1, ut.tenant_id, ut.user_id, $2, $4::smallint, $5, $6, $7, $8
+      query = `INSERT INTO settings (argument, tenant_id, user_id, ordinamento, id_roles, tipo_valore, tabella, colonna, "VariabDB", id_roles_write)
+               SELECT $1, ut.tenant_id, ut.user_id, $2, $4::smallint, $5, $6, $7, $8, $9
                FROM user_tenants ut WHERE ut.tenant_id = $3`;
-      params = [argName, newOrd, req.user.tenant_id, idRoles, tipoValore, tabella, colonna, variabDb];
+      params = [argName, newOrd, req.user.tenant_id, idRoles, tipoValore, tabella, colonna, variabDb, roleWriteValue(req)];
     }
     const result = await db.query(query, params);
     res.status(201).json({ inserted: result.rowCount });
@@ -3720,6 +3843,16 @@ app.delete('/api/settings/argument', requireAuth, async (req, res) => {
       query = `DELETE FROM settings WHERE argument = $1 AND tenant_id = $2`;
       params = [name, req.user.tenant_id];
     }
+    // Argomento con righe in sola lettura per il ruolo del contesto: non si elimina.
+    if (!isAdminUser(req)) {
+      const lockParams = [name, req.user.tenant_id];
+      const writable = roleWriteSql(req, lockParams).replace(/^ AND /, '');
+      const locked = await db.query(
+        `SELECT 1 FROM settings WHERE argument = $1 AND tenant_id = $2 AND NOT (${writable}) LIMIT 1`,
+        lockParams
+      );
+      if (locked.rows.length) return res.status(403).json({ error: READ_ONLY_ERROR });
+    }
     const result = await db.query(query, params);
     res.json({ deleted: result.rowCount });
   } catch (error) {
@@ -3752,6 +3885,16 @@ app.put('/api/settings/argument/rename', requireAuth, async (req, res) => {
     } else {
       query = `UPDATE settings SET argument = $1 WHERE argument = $2 AND tenant_id = $3`;
       params = [finalNew, oldName, req.user.tenant_id];
+    }
+    // Argomento con righe in sola lettura per il ruolo del contesto: non si rinomina.
+    if (!isAdminUser(req)) {
+      const lockParams = [oldName, req.user.tenant_id];
+      const writable = roleWriteSql(req, lockParams).replace(/^ AND /, '');
+      const locked = await db.query(
+        `SELECT 1 FROM settings WHERE argument = $1 AND tenant_id = $2 AND NOT (${writable}) LIMIT 1`,
+        lockParams
+      );
+      if (locked.rows.length) return res.status(403).json({ error: READ_ONLY_ERROR });
     }
     const result = await db.query(query, params);
     res.json({ updated: result.rowCount, argument: finalNew });
@@ -4206,6 +4349,12 @@ app.post('/api/clients', requireAuth, async (req, res) => {
     if (srcId) {
       await deepCopyClientTree(client, req.user.tenant_id, req.user.user_id, srcId, newClient.id);
     }
+    // Tutte le righe del nuovo cliente (master_id = id cliente, compilato dal trigger) e gli
+    // eventuali progetti copiati: modificabili dal ruolo di chi crea il cliente.
+    await client.query('UPDATE clients SET id_roles_write = $1 WHERE master_id = $2', [roleWriteValue(req), newClient.id]);
+    await client.query('UPDATE projects SET id_roles_write = $1 WHERE client_id = $2 AND tenant_id = $3',
+      [roleWriteValue(req), newClient.id, req.user.tenant_id]);
+    newClient.id_roles_write = roleWriteValue(req);
 
     await client.query('COMMIT');
     res.status(201).json(newClient);
@@ -4361,6 +4510,10 @@ app.post('/api/projects', requireAuth, async (req, res) => {
     if (srcId) {
       await deepCopyProjectTree(client, req.user.tenant_id, req.user.user_id, clientId, srcId, newProject.id);
     }
+    // Tutte le righe del nuovo progetto (master_id = id progetto, compilato dal trigger):
+    // modificabili dal ruolo di chi crea il progetto.
+    await client.query('UPDATE projects SET id_roles_write = $1 WHERE master_id = $2', [roleWriteValue(req), newProject.id]);
+    newProject.id_roles_write = roleWriteValue(req);
 
     await client.query('COMMIT');
     res.status(201).json(newProject);
@@ -4770,6 +4923,18 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
       return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
     }
     const kind = (req.body && req.body.kind) || 'custom';
+    // Tutte le INSERT del nuovo campo passano da qui: le righe create diventano
+    // modificabili dal ruolo di chi crea il campo (id_roles_write).
+    const insertField = async (sql, params) => {
+      const text = /\bRETURNING\b/i.test(sql) ? sql : `${sql} RETURNING id`;
+      const r = await db.query(text, params);
+      const ids = r.rows.map((row) => row.id).filter(Boolean);
+      if (ids.length) {
+        await db.query(`UPDATE "${source}" SET id_roles_write = $1 WHERE id = ANY($2::uuid[])`, [roleWriteValue(req), ids]);
+        r.rows.forEach((row) => { if ('id_roles_write' in row) row.id_roles_write = roleWriteValue(req); });
+      }
+      return r;
+    };
     // Contenitore dello scope 'all': 'Cliente' al top-level, oppure il campo del Nodo Padre.
     const containerCampo = ((req.body && req.body.containerCampo) || 'Cliente').trim() || 'Cliente';
     // id_roles del nuovo campo (visibilità per ruolo); vuoto/assente = NULL (nessuna restrizione).
@@ -4781,6 +4946,9 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
     if (scope === 'this' && !clientId) {
       return res.status(400).json({ error: 'clientId richiesto' });
     }
+    // Aggiungere un campo a un cliente/progetto/Nodo Padre modifica quell'oggetto:
+    // il contenitore deve essere modificabile dal ruolo del contesto.
+    if (EAV_UUID_RE.test(clientId)) await assertRowsWritable(req, db, source, [clientId]);
 
     // 'standard' consentito solo a id_roles <= 20; altrimenti campo custom.
     const roleLevel = Number(req.user.id_roles);
@@ -4845,7 +5013,7 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
                         $${pRoles}::smallint${clientIdSel}
                  FROM ${j.froms.join(', ')}
                  WHERE ${conds.join(' AND ')}`;
-      const result = await db.query(q, params);
+      const result = await insertField(q, params);
       return res.status(201).json({ inserted: result.rowCount });
     }
 
@@ -4874,7 +5042,7 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
              SELECT DISTINCT $1, $2, $3, $4, $5, $9, $10, s.tenant_id, s.user_id, $6::integer, $8::smallint FROM settings s WHERE s.argument = $1 AND s.tenant_id = $7`;
         p = [clientId, campo, tipoValore, tabella, colonna, newOrd, req.user.tenant_id, idRoles, variabDb, valore2];
       }
-      const result = await db.query(q, p);
+      const result = await insertField(q, p);
       return res.status(201).json({ inserted: result.rowCount });
     }
 
@@ -4904,7 +5072,7 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
         WHERE c.campo = $9${whereValue}`;
       const params = [campo, tipoValore, tabella, colonna, variabDb, valore2, bandBase, idRoles, rootCampo];
       if (scope === 'this' && containerValue != null) params.push(containerValue);
-      const result = await db.query(q, params);
+      const result = await insertField(q, params);
       return res.status(201).json({ inserted: result.rowCount });
     }
 
@@ -4925,7 +5093,7 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
       // contenitore sorgente (c.client_id), che lo possiede già.
       const clientIdCol = source === 'projects' ? ', client_id' : '';
       const clientIdSel = source === 'projects' ? ', c.client_id' : '';
-      const result = await db.query(
+      const result = await insertField(
         `INSERT INTO "${source}" (argument, campo, tipo_valore, tabella, colonna, "VariabDB", valore2, tenant_id, user_id, ordinamento, id_roles${clientIdCol})
          SELECT c.id::text, $1, $2, $3, $4, $10, $11, $5, $6, $7, $9::smallint${clientIdSel}
          FROM "${source}" c
@@ -4946,7 +5114,7 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
 
     // Progetti: il nuovo campo porta anche client_id (scope tenant+user+client).
     if (source === 'projects') {
-      const result = await db.query(
+      const result = await insertField(
         `INSERT INTO projects (argument, campo, tipo_valore, tabella, colonna, "VariabDB", valore2, tenant_id, user_id, ordinamento, id_roles, client_id)
          VALUES ($1, $2, $3, $4, $5, $10, $11, $6, $7, $8, $9, $12) RETURNING *`,
         [clientId, campo, tipoValore, tabella, colonna, req.user.tenant_id, req.user.user_id, newOrd, idRoles, variabDb, valore2, projClientId]
@@ -4954,7 +5122,7 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
       return res.status(201).json(result.rows[0]);
     }
 
-    const result = await db.query(
+    const result = await insertField(
       `INSERT INTO "${source}" (argument, campo, tipo_valore, tabella, colonna, "VariabDB", valore2, tenant_id, user_id, ordinamento, id_roles)
        VALUES ($1, $2, $3, $4, $5, $10, $11, $6, $7, $8, $9) RETURNING *`,
       [clientId, campo, tipoValore, tabella, colonna, req.user.tenant_id, req.user.user_id, newOrd, idRoles, variabDb, valore2]
@@ -5021,6 +5189,8 @@ app.post('/api/:source(settings|clients|projects)/delete-fields', requireAuth, a
                WHERE campo = ANY($1::text[]) AND argument = $2 AND tenant_id = $3 AND user_id = $4 ${ordGuard}`;
       params = [campos, clientId, req.user.tenant_id, req.user.user_id];
     }
+    // Solo i campi modificabili dal ruolo del contesto (id_roles_write).
+    query += roleWriteSql(req, params, /"\s+f\s+USING/.test(query) ? 'f.' : '');
     const result = await db.query(query, params);
     res.json({ deleted: result.rowCount });
   } catch (error) {
@@ -5106,6 +5276,8 @@ app.post('/api/:source(settings|clients|projects)/rename-fields', requireAuth, a
                  WHERE campo = $2 AND tenant_id = $3 AND user_id = $4${custGuard}`;
         params = [newName, oldName, req.user.tenant_id, req.user.user_id];
       }
+      // Solo i campi modificabili dal ruolo del contesto (id_roles_write).
+      query += roleWriteSql(req, params, /"\s+f\s+SET/.test(query) ? 'f.' : '');
       const result = await db.query(query, params);
       updated += result.rowCount;
     }
@@ -5216,6 +5388,8 @@ app.post('/api/:source(settings|clients|projects)/reorder-fields', requireAuth, 
         query = `UPDATE "${source}" SET ${set} WHERE argument = $${n + 1} AND campo = $${n + 2} AND tenant_id = $${n + 3}`;
         params = [...head, argument, campo, req.user.tenant_id];
       }
+      // Solo i campi modificabili dal ruolo del contesto (id_roles_write).
+      query += roleWriteSql(req, params, /"\s+f\s+SET/.test(query) ? 'f.' : '');
       const r = await db.query(query, params);
       updated += r.rowCount;
     }
@@ -5517,6 +5691,8 @@ app.post('/api/projects/close', requireAuth, async (req, res) => {
   const clientId = ((req.body && req.body.clientId) || '').trim();
   if (!projectId) return res.status(400).json({ error: 'projectId richiesto' });
   try {
+    // Chiudere il progetto lo modifica: la riga del progetto deve essere modificabile.
+    await assertRowsWritable(req, db, 'projects', [projectId]);
     const codIstruzione = 3;
     const funzione = 'Chiudi Progetto';
 
@@ -5594,6 +5770,12 @@ app.post('/api/projects/reopen', requireAuth, async (req, res) => {
   if (!projectId) return res.status(400).json({ error: 'projectId richiesto' });
   if (!clientId) return res.status(400).json({ error: 'clientId richiesto' });
 
+  try {
+    // Riaprire il progetto lo modifica: la riga del progetto deve essere modificabile.
+    await assertRowsWritable(req, db, 'projects', [projectId]);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ error: error.message });
+  }
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -5771,6 +5953,8 @@ app.post('/api/:source(settings|clients)/linked-row', requireAuth, async (req, r
       const clientIdColumn = cols.has('client_id') ? 'client_id' : cols.has('id_cliente') ? 'id_cliente' : null;
       if (clientIdColumn) data[clientIdColumn] = clientId;
     }
+    // Nuova riga: modificabile dal ruolo di chi la crea.
+    stampRoleWrite(req, data, cols);
 
     data = await cryptoWrite(db, 'main', tabella, data);
 
@@ -5812,6 +5996,7 @@ app.delete('/api/:source(settings|clients)/linked-row', requireAuth, async (req,
     if (!(await isManagedTable(tabella))) return res.status(404).json({ error: 'Tabella non gestita' });
 
     const cols = await getTableColumns(tabella);
+    await assertRowsWritable(req, db, tabella, [rowId], cols);
     const conds = ['id = $1'];
     const params = [rowId];
     if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
@@ -6001,8 +6186,19 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
     // da un utente privilegiato, non input dell'utente finale), viene aggiunta in AND dopo
     // i filtri di contesto — utile quando la tabella di riferimento ha altre dimensioni
     // (es. anno, cod_billing, ecc.) oltre a tenant/user/client/project.
+    // Contenitore (cliente/progetto/Nodo Padre): se non è modificabile dal ruolo del
+    // contesto, il browser nasconde aggiungi/elimina/rinomina/sposta campi.
+    let containerWritable = true;
+    if (EAV_UUID_RE.test(String(argument))) {
+      const c = await db.query(`SELECT id_roles_write FROM "${table}" WHERE id = $1 LIMIT 1`, [argument]);
+      if (c.rows[0]) containerWritable = canWriteRow(req, c.rows[0].id_roles_write);
+    }
+    res.set('X-Can-Write-Container', containerWritable ? '1' : '0');
+
     const rows = result.rows;
     for (const row of rows) {
+      // Permesso per riga: il campo è modificabile solo se id_roles_write = ruolo del contesto.
+      row.__can_write = canWriteRow(req, row.id_roles_write);
       if (Number(row.tipo_valore) === 4 && row.tabella && row.colonna) {
         try {
           assertValidIdentifier(row.tabella);
@@ -6121,6 +6317,8 @@ app.put('/api/:source(settings|clients|projects)/:id/reference-value', requireAu
     }
 
     const row = s.rows[0];
+    // Permesso per riga: il campo deve essere modificabile dal ruolo del contesto.
+    if (!canWriteRow(req, row.id_roles_write)) return res.status(403).json({ error: READ_ONLY_ERROR });
     const { tabella, colonna } = row;
     if (!tabella || !colonna) {
       return res.status(400).json({ error: 'Tabella o colonna non definite per questa impostazione' });
@@ -6543,8 +6741,8 @@ app.post('/api/issue', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'Cliente non accessibile' });
     }
     
-    // Imposta i valori di default
-    if (!data.id_roles_write) data.id_roles_write = id_roles;
+    // Imposta i valori di default. id_roles_write = ruolo di chi crea (l'admin può indicarlo).
+    if (!data.id_roles_write || !isAdminUser(req)) data.id_roles_write = id_roles;
     if (!data.id_roles) data.id_roles = 70; // default role
     if (!data.visibilita) data.visibilita = 'Interna';
     if (!data.categoria) data.categoria = 'Richiesta';
@@ -6605,10 +6803,12 @@ app.put('/api/issue/:id', requireAuth, async (req, res) => {
     
     const issue = issueResult.rows[0];
     
-    // Verifica permessi: può modificare solo se id_roles <= id_roles_write
-    if (id_roles > issue.id_roles_write) {
+    // Permesso per riga: stessa regola di tutte le tabelle (id_roles_write = ruolo del
+    // contesto, Admin sempre); solo l'admin può cambiare id_roles_write.
+    if (!canWriteRow(req, issue.id_roles_write)) {
       return res.status(403).json({ error: 'Non hai i permessi per modificare questa issue' });
     }
+    stripRoleWrite(req, data);
     
     // Stringhe vuote diventano NULL
     for (const k of Object.keys(data)) {
@@ -6663,8 +6863,8 @@ app.delete('/api/issue/:id', requireAuth, async (req, res) => {
     
     const issue = issueResult.rows[0];
     
-    // Verifica permessi: può eliminare solo se id_roles <= id_roles_write
-    if (id_roles > issue.id_roles_write) {
+    // Permesso per riga: stessa regola di tutte le tabelle (id_roles_write = ruolo del contesto).
+    if (!canWriteRow(req, issue.id_roles_write)) {
       return res.status(403).json({ error: 'Non hai i permessi per eliminare questa issue' });
     }
     

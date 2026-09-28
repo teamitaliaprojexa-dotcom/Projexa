@@ -431,7 +431,9 @@
         const pageLabel = urlParams.get('label') || 'Gantt';
         // mode=view (pulsante "Visualizza" della dashboard): sola lettura. Niente pulsanti
         // di modifica e, soprattutto, nessun salvataggio verso il server.
-        const readOnly = urlParams.get('mode') === 'view';
+        // Diventa sola lettura anche se il server segnala attività non modificabili dal
+        // ruolo del contesto (id_roles_write), vedi loadData.
+        let readOnly = urlParams.get('mode') === 'view';
         if (readOnly) document.body.classList.add('gantt-readonly');
 
         function getAuthHeaders() {
@@ -1397,6 +1399,11 @@
         async function loadData() {
             try {
                 const payload = await api(`/projects/gantt-activity?fieldId=${encodeURIComponent(fieldId)}`);
+                if (payload.canWrite === false && !readOnly) {
+                    readOnly = true;
+                    document.body.classList.add('gantt-readonly');
+                    showToast('Attività in sola lettura per il tuo ruolo');
+                }
                 buildTree(Array.isArray(payload.rows) ? payload.rows : []);
                 // Modello: preferenza salvata, altrimenti la profondità dei dati (min 2)
                 let deepest = 0;

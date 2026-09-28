@@ -893,9 +893,13 @@ class IssueManager {
         return this.userRole && this.userRole <= 70;
     }
 
+    // Stessa regola del server: modificabile se id_roles_write coincide con il ruolo del
+    // contesto (anche più ruoli separati da virgola); l'Admin (1) sempre; vuoto = sola lettura.
     canModifyRow(issue) {
         if (!this.userRole) return false;
-        return this.userRole <= issue.id_roles_write;
+        if (Number(this.userRole) === 1) return true;
+        return String(issue.id_roles_write == null ? '' : issue.id_roles_write)
+            .split(/[;,\s]+/).filter(Boolean).includes(String(Number(this.userRole)));
     }
 
     showError(message) {

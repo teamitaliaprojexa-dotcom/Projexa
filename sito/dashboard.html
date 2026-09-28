@@ -264,6 +264,10 @@
             background: #f3f4f6;
         }
 
+        /* Campo in sola lettura per il ruolo (id_roles_write), vedi markReadOnlyDetailFields */
+        .field-lock { font-size: 0.65rem; color: var(--text-muted); margin-left: 4px; }
+        .type11-grid-table tr.type11-row-readonly td { color: var(--text-muted); }
+
         /* Sezioni della dashboard spente da Impostazioni › Preferenze (vedi applyDashboardFlags) */
         [data-dash-flag].dash-flag-off {
             display: none !important;
@@ -772,6 +776,7 @@
            e la cella mostra solo l'icona che apre la pagina in una nuova scheda. */
         .type11-grid-table th.type11-col-link,
         .type11-grid-table td.type11-col-link { width: 1%; padding-left: 0.4rem; padding-right: 0.4rem; }
+        .type11-grid-table td.type11-col-text { text-align: center; }
         .type11-grid-table th.type11-expire-col,
         .type11-grid-table td.type11-expire-col {
             width: 38px;
@@ -2552,13 +2557,31 @@
             display: flex;
             align-items: baseline;
             gap: 0.5rem;
+            width: 100%;
             margin: 0.9rem 0 0.2rem;
             padding: 0 0 0.3rem 0.4rem;
+            background: none;
+            border: none;
             border-bottom: 2px solid var(--primary);
             color: var(--primary);
+            font: inherit;
             font-weight: 700;
             font-size: 0.95rem;
+            text-align: left;
+            cursor: pointer;
         }
+        .meeting-day-arrow {
+            font-size: 0.6rem;
+            align-self: center;
+            transition: transform 0.15s;
+        }
+        .meeting-day-sep.open .meeting-day-arrow { transform: rotate(90deg); }
+        .meeting-day-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+        .meeting-day-group[hidden] { display: none; }
         .meeting-day-sep small {
             color: var(--text-muted);
             font-weight: 500;
@@ -5855,6 +5878,18 @@
             }
         }
 
+        // Gruppo "Domani" dell'elenco riunioni: chiuso all'apertura della pagina.
+        let meetingsTomorrowOpen = false;
+        document.addEventListener('click', (e) => {
+            const sep = e.target.closest && e.target.closest('#meetingsContainer .meeting-day-sep');
+            if (!sep) return;
+            meetingsTomorrowOpen = !meetingsTomorrowOpen;
+            sep.classList.toggle('open', meetingsTomorrowOpen);
+            sep.setAttribute('aria-expanded', String(meetingsTomorrowOpen));
+            const group = sep.nextElementSibling;
+            if (group && group.classList.contains('meeting-day-group')) group.hidden = !meetingsTomorrowOpen;
+        });
+
         // Renderizza le riunioni nella UI
         function updateMeetingsUI(meetings) {
             const container = document.getElementById('meetingsContainer');
@@ -5909,9 +5944,11 @@
                 const tomorrow = meetings.filter(m => startOf(m) >= endOfToday);
                 body = today.map(meeting => createMeetingCard(meeting)).join('');
                 if (tomorrow.length) {
+                    // Gruppo "Domani" chiuso all'apertura: la freccia lo apre/chiude (stato
+                    // conservato negli aggiornamenti automatici dell'elenco).
                     const label = endOfToday.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
-                    body += `<div class="meeting-day-sep"><span>Domani</span> <small>${escapeHtml(label)}</small></div>`
-                        + tomorrow.map(meeting => createMeetingCard(meeting)).join('');
+                    body += `<button type="button" class="meeting-day-sep${meetingsTomorrowOpen ? ' open' : ''}" aria-expanded="${meetingsTomorrowOpen}"><i class="fas fa-chevron-right meeting-day-arrow"></i><span>Domani</span> <small>${escapeHtml(label)} · ${tomorrow.length} riunion${tomorrow.length === 1 ? 'e' : 'i'}</small></button>`
+                        + `<div class="meeting-day-group"${meetingsTomorrowOpen ? '' : ' hidden'}>${tomorrow.map(meeting => createMeetingCard(meeting)).join('')}</div>`;
                 }
             }
             container.innerHTML = header + body;
@@ -6517,6 +6554,8 @@
             if (clearBtn) clearBtn.style.display = field === 'recap' ? 'inline-block' : 'none';
             const emailBtn = document.getElementById('meetingTextEmail'); // Email: solo nel recap
             if (emailBtn) emailBtn.style.display = field === 'recap' ? 'inline-block' : 'none';
+            const uploadBtn = document.getElementById('meetingTextUpload'); // nascosto in sola lettura
+            if (uploadBtn) uploadBtn.style.display = '';
             modal.dataset.title = btn.dataset.title || '';
             document.getElementById('meetingTextTitleText').textContent = `${field === 'recap' ? 'Recap' : 'Trascrizione'} — ${btn.dataset.title || ''}`;
             document.getElementById('meetingTextSub').textContent = '';
@@ -6536,6 +6575,37 @@
                 body.innerHTML = `<p class="meeting-text-empty" style="color:#B91C1C;">${escapeHtml(e.message)}</p>`;
             }
         }
+
+        // Lente delle griglie tipo 11 (colonne trascrizione/recap): mostra il testo già letto
+        // dalla griglia nella stessa finestra, in sola lettura (restano Copia e Scarica).
+        function openGridText(btn) {
+            const modal = document.getElementById('meetingTextModal');
+            const body = document.getElementById('meetingTextBody');
+            const field = btn.dataset.textColumn === 'recap' ? 'recap' : 'trascrizione';
+            const row = btn.closest('tr');
+            const title = row && row.cells[0] ? row.cells[0].textContent.trim() : '';
+            modal.dataset.eventId = '';
+            modal.dataset.field = field;
+            modal.dataset.title = title;
+            ['meetingTextUpload', 'meetingTextClear', 'meetingTextEmail'].forEach((id) => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+            document.getElementById('meetingTextTitleText').textContent = `${field === 'recap' ? 'Recap' : 'Trascrizione'}${title ? ' — ' + title : ''}`;
+            const text = btn.dataset.text || '';
+            const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+            document.getElementById('meetingTextSub').textContent = words ? `${words} parole` : '';
+            body.dataset.raw = text;
+            body.innerHTML = formatMeetingText(text);
+            modal.classList.add('open');
+        }
+        document.addEventListener('click', (e) => {
+            const b = e.target.closest && e.target.closest('.type11-text-btn');
+            if (!b) return;
+            e.preventDefault();
+            e.stopPropagation();
+            openGridText(b);
+        }, true);
 
         function initMeetingText() {
             document.getElementById('meetingsContainer')?.addEventListener('click', (e) => {
@@ -10703,6 +10773,10 @@
                     return;
                 }
                 let rows = await res.json();
+                // Permesso di scrittura (id_roles_write): contenitore e singoli campi.
+                currentDetailCanWriteContainer = res.headers.get('X-Can-Write-Container') !== '0';
+                currentDetailReadOnlyIds = new Set((Array.isArray(rows) ? rows : [])
+                    .filter(r => r.__can_write === false).map(r => String(r.id)));
                 // Nasconde le righe "segnaposto" senza campo (usate solo per far comparire l'argomento vuoto)
                 if (Array.isArray(rows)) rows = rows.filter(r => r.campo != null && String(r.campo).trim() !== '');
                 // Rileva il valore del campo booleano "Gestione a HH": stessa regola già usata
@@ -10873,6 +10947,7 @@
                         const sb = document.getElementById('settingsDetailSaveBar'); if (sb) sb.style.display = 'block';
                     });
                 });
+                markReadOnlyDetailFields(listEl);
                 applyDetailMode();
                 if (silentState) {
                     // Griglie: stesso stato aperto/chiuso di prima.
@@ -10899,6 +10974,32 @@
         // Applica la modalità corrente (view/edit/delete/rename) al flyout di dettaglio:
         // abilita/disabilita i valori, mostra/nasconde toggle, pulsanti e barre.
         // Vale sia per Clienti che per Impostazioni.
+        // === PERMESSO DI SCRITTURA (id_roles_write) ===
+        // Un campo è modificabile solo se il suo id_roles_write coincide con l'id_roles del
+        // contesto (l'Admin sempre). "Abilita modifica" abilita solo i campi modificabili;
+        // gli altri restano in sola lettura con un lucchetto. Se il contenitore (cliente,
+        // progetto, Nodo Padre) non è modificabile, spariscono aggiungi/elimina/rinomina/sposta.
+        // Il server applica comunque le stesse regole.
+        let currentDetailCanWriteContainer = true;
+        let currentDetailReadOnlyIds = new Set();
+        function markReadOnlyDetailFields(listEl) {
+            if (!listEl || !currentDetailReadOnlyIds.size) return;
+            listEl.querySelectorAll('[data-setting-id]').forEach(inp => {
+                if (currentDetailReadOnlyIds.has(String(inp.dataset.settingId))) inp.dataset.readonly = '1';
+            });
+            listEl.querySelectorAll('[data-row-id]').forEach(rowEl => {
+                if (!currentDetailReadOnlyIds.has(String(rowEl.dataset.rowId))) return;
+                rowEl.classList.add('field-readonly');
+                rowEl.querySelectorAll('.field-del-check').forEach(c => { c.disabled = true; c.style.visibility = 'hidden'; });
+                rowEl.querySelectorAll('.field-rename').forEach(i => { i.disabled = true; });
+                // Lucchetto solo sui campi con un valore (non su nodi, collegamenti, griglie)
+                const label = rowEl.querySelector('[data-setting-id]') ? rowEl.querySelector('.campo-label') : null;
+                if (label && !rowEl.querySelector('.field-lock')) {
+                    label.insertAdjacentHTML('beforeend', ' <i class="fas fa-lock field-lock" title="Sola lettura per il tuo ruolo"></i>');
+                }
+            });
+        }
+
         function applyDetailMode() {
             let mode = clientDetailMode;
             const listEl = document.getElementById('settingsDetailList');
@@ -10916,7 +11017,8 @@
             // Valori modificabili solo in 'edit'
             if (listEl) {
                 const disabled = closedProject || (mode !== 'edit');
-                listEl.querySelectorAll('[data-setting-id]').forEach(inp => { inp.disabled = disabled; });
+                // Campi in sola lettura per il ruolo (id_roles_write): restano disabilitati.
+                listEl.querySelectorAll('[data-setting-id]').forEach(inp => { inp.disabled = disabled || inp.dataset.readonly === '1'; });
             }
 
             // Toggle "Abilita modifica"
@@ -10928,7 +11030,7 @@
             // "Chiudi Progetto": solo nel dettaglio progetto, e solo con modifica abilitata.
             const closeProjectBtn = document.getElementById('closeProjectBtn');
             if (closeProjectBtn) {
-                closeProjectBtn.style.display = (currentDetailSource === 'projects' && !closedProject && mode !== 'view') ? 'inline-flex' : 'none';
+                closeProjectBtn.style.display = (currentDetailSource === 'projects' && !closedProject && mode !== 'view' && currentDetailCanWriteContainer) ? 'inline-flex' : 'none';
             }
 
             const reopenProjectBtn = document.getElementById('reopenProjectBtn');
@@ -10940,14 +11042,14 @@
 
             // Pulsanti +/Elimina/Rinomina: visibili con modifica abilitata
             const editButtons = document.getElementById('clientEditButtons');
-            if (editButtons) editButtons.style.display = (!closedProject && mode !== 'view') ? 'flex' : 'none';
+            if (editButtons) editButtons.style.display = (!closedProject && mode !== 'view' && currentDetailCanWriteContainer) ? 'flex' : 'none';
 
             // Fuori dalla modalità 'edit' il riordino non ha senso: azzeralo.
             if (mode !== 'edit') detailReorderMode = false;
             // Pulsante "sposta" (riordino): visibile solo in 'edit', evidenziato se attivo.
             const reorderBtn = document.getElementById('clientReorderBtn');
             if (reorderBtn) {
-                reorderBtn.style.display = (mode === 'edit') ? 'inline-flex' : 'none';
+                reorderBtn.style.display = (mode === 'edit' && currentDetailCanWriteContainer) ? 'inline-flex' : 'none';
                 reorderBtn.style.outline = detailReorderMode ? '2px solid #065F46' : 'none';
             }
 
@@ -11323,8 +11425,21 @@
             return Math.max(minimum, Math.min(maximum, calculated));
         }
 
+        // === COLONNE DI TESTO LUNGO (trascrizione / recap delle riunioni) ===
+        // In griglia al posto del testo c'è una piccola lente: il clic apre il testo nella
+        // stessa finestra usata dall'elenco riunioni (sola lettura).
+        const TYPE11_TEXT_VIEW_COLUMNS = ['trascrizione', 'recap'];
+        function isType11TextViewColumn(column) {
+            return TYPE11_TEXT_VIEW_COLUMNS.includes(String(column || '').trim().toLowerCase());
+        }
+
         // Contenuto HTML (già messo in sicurezza) di una cella in visualizzazione.
         function type11CellHtml(value, column) {
+            if (isType11TextViewColumn(column)) {
+                const text = value == null ? '' : String(value);
+                if (!text.trim()) return '';
+                return `<button type="button" class="meeting-text-btn type11-text-btn" data-text-column="${escapeHtml(String(column).toLowerCase())}" data-text="${escapeHtml(text)}" title="Visualizza ${escapeHtml(String(column).toLowerCase())}" aria-label="Visualizza ${escapeHtml(String(column).toLowerCase())}"><i class="fas fa-search"></i></button>`;
+            }
             const url = type11UrlValue(value);
             if (!url) return escapeHtml(formatType11Cell(value, column));
             return `<a class="type11-cell-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(url)}"><i class="fas fa-globe"></i></a>`;
@@ -11867,7 +11982,8 @@
                 // Colonne di soli indirizzi web: si stringono al minimo e mostrano
                 // l'icona al posto del link per esteso (vedi type11CellHtml).
                 const linkColumns = type11LinkColumns(records, visibleColumns);
-                const linkClass = column => (linkColumns.has(column) ? ' class="type11-col-link"' : '');
+                const linkClass = column => (linkColumns.has(column) ? ' class="type11-col-link"'
+                    : (isType11TextViewColumn(column) ? ' class="type11-col-text"' : ''));
 
                 const projectDisplayValue = (record, column) => {
                     const rawProjectId = type11GridRawValue(record, column);
@@ -11882,12 +11998,12 @@
                 // Larghezze allargate/ristrette a mano dall'utente (bordo destro dell'intestazione):
                 // salvate nel browser per griglia e colonna, hanno la precedenza su quelle automatiche.
                 const savedWidths = type11LoadColumnWidths(fieldId);
-                const columnWidths = visibleColumns.map((column, index) => savedWidths[column] || type11PreferredColumnWidth(
+                const columnWidths = visibleColumns.map((column, index) => savedWidths[column] || (isType11TextViewColumn(column) && !editing ? 110 : type11PreferredColumnWidth(
                     column,
                     records.map(record => displayedValue(record, column)),
                     linkColumns.has(column),
                     index === 0
-                ));
+                )));
                 const colgroup = '<colgroup>'
                     + columnWidths.map(width => `<col style="width:${width}px; min-width:${width}px; max-width:${width}px;">`).join('')
                     + (canExpire ? '<col style="width:44px; min-width:44px; max-width:44px;">' : '')
@@ -11902,17 +12018,21 @@
                     + `<input type="text" class="type11-filter-val" data-filter-col="${escapeHtml(column)}" placeholder="Filtra…" aria-label="Filtro ${escapeHtml(type11ColumnLabel(column))}">`
                     + `</th>`).join('')
                     + (canExpire ? '<th class="type11-filter-cell type11-expire-col"></th>' : '');
+                // Permesso per riga (id_roles_write): le righe non modificabili dal ruolo del
+                // contesto restano in sola lettura (niente modifica, eliminazione o chiusura).
+                const rowWritable = record => record.__can_write !== false;
                 const body = records.map((record, index) => {
-                    const selected = '';
+                    const selected = rowWritable(record) ? '' : ' class="type11-row-readonly" title="Riga in sola lettura per il tuo ruolo"';
                     return `<tr data-type11-index="${index}"${selected}>` + visibleColumns.map(column => {
                         if (String(column).toLowerCase() === 'project_id') {
                             const projectDescription = projectDisplayValue(record, column);
                             return `<td${linkClass(column)} title="${escapeHtml(projectDescription)}">${escapeHtml(projectDescription)}</td>`;
                         }
-                        const displayText = displayedValue(record, column);
+                        // Trascrizione/recap: niente tooltip con tutto il testo (c'è la lente)
+                        const displayText = isType11TextViewColumn(column) ? '' : displayedValue(record, column);
                         return `<td${linkClass(column)} title="${escapeHtml(displayText)}">${type11CellHtml(type11CellValue(record, column), column)}</td>`;
                     }).join('') + (canExpire
-                        ? `<td class="type11-expire-col"><input type="checkbox" class="type11-expire-check" data-row-id="${escapeHtml(record.id || '')}" aria-label="Seleziona riga" ${record.id ? '' : 'disabled'}></td>`
+                        ? `<td class="type11-expire-col"><input type="checkbox" class="type11-expire-check" data-row-id="${escapeHtml(record.id || '')}" aria-label="Seleziona riga" ${record.id && rowWritable(record) ? '' : 'disabled'}></td>`
                         : '') + '</tr>';
                 }).join('');
 
@@ -11922,7 +12042,7 @@
                 </div>` : `<div class="type11-grid-toolbar">
                     <span class="type11-grid-selection" style="color:var(--text-muted); font-size:0.8rem; flex:1;">${editOnly ? 'Modifica contemporaneamente tutte le righe' : 'Seleziona una riga per eliminarla oppure modifica tutte'}</span>
                     ${editOnly ? '' : '<button type="button" class="type11-grid-add primary">+ Nuova riga</button>'}
-                    <button type="button" class="type11-grid-edit${editOnly ? ' primary' : ''}"${records.length ? '' : ' disabled'}>Modifica tutte</button>
+                    <button type="button" class="type11-grid-edit${editOnly ? ' primary' : ''}"${records.some(rowWritable) ? '' : ' disabled'}>Modifica tutte</button>
                     ${editOnly ? '' : '<button type="button" class="type11-grid-delete danger" disabled>Elimina</button>'}
                     <button type="button" class="type11-grid-save-inline primary" style="display:none;">Salva</button>
                     <button type="button" class="type11-grid-cancel-inline" style="display:none;">Annulla</button>
@@ -12002,8 +12122,9 @@
                             tableRows.forEach(r => r.classList.remove('type11-selected'));
                             rowEl.classList.add('type11-selected');
                             selectedRow = records[Number(rowEl.dataset.type11Index)];
-                            if (selectionLabel) selectionLabel.textContent = 'Riga selezionata';
-                            if (deleteBtn) deleteBtn.disabled = !selectedRow;
+                            const selectedWritable = !!selectedRow && rowWritable(selectedRow);
+                            if (selectionLabel) selectionLabel.textContent = selectedWritable ? 'Riga selezionata' : 'Riga in sola lettura per il tuo ruolo';
+                            if (deleteBtn) deleteBtn.disabled = !selectedWritable;
                         });
                     });
 
@@ -12031,7 +12152,7 @@
                         if (editingRows.length || !records.length || !orderedMeta.length) return;
                         for (const rowEl of tableRows) {
                             const record = records[Number(rowEl.dataset.type11Index)];
-                            if (!record) continue;
+                            if (!record || !rowWritable(record)) continue; // righe in sola lettura: invariate
                             const temporaryRow = document.createElement('tr');
                             temporaryRow.innerHTML = await type11BuildInlineRowCellsHtml(
                                 orderedMeta, record, false, source, fieldId, context, editOptionsCache
