@@ -33,12 +33,15 @@ export const MODES = {
 };
 
 const CTX_TOKENS = 4096;       // contesto dei modelli WebLLM
-const CHARS_PER_TOKEN = 3;     // stima prudente per l'italiano
+// Stima iniziale caratteri per token. Le trascrizioni ne hanno meno del testo normale:
+// gli orari "[00:12:34]" su ogni riga pesano molto (Gemma conta ogni cifra come un token).
+// Se il modello rifiuta un testo troppo lungo, la stima si ricalibra sul conteggio vero.
+const CHARS_PER_TOKEN = 2.5;
 const OUT_FINAL = 900;         // token massimi del recap
 const OUT_CHUNK = 450;         // token massimi degli appunti di un pezzo
 const MARGIN = 150;
 
-const est = (s) => Math.ceil(String(s || '').length / CHARS_PER_TOKEN);
+const est = (s, cpt = CHARS_PER_TOKEN) => Math.ceil(String(s || '').length / cpt);
 // Avanzamento per l'utente: i token generati, in parole approssimate (~0,75 parole per token).
 const words = (tokens) => `circa ${Math.round(tokens * 0.75)} parole`;
 
@@ -126,7 +129,24 @@ export async function unloadModel() {
   if (worker) worker.terminate();
 }
 
+// Testo rifiutato perché supera il contesto: errore con i caratteri inviati e i token contati
+// dal modello, per ricalibrare la stima (vedi runRecap).
 async function ask(prompt, maxTokens, onToken) {
+  try {
+    return await askOnce(prompt, maxTokens, onToken);
+  } catch (e) {
+    const err = toError(e);
+    const m = /prompt tokens:\s*(\d+)/i.exec(err.message);
+    if (/ContextWindowSizeExceeded/i.test(err.message) && m) {
+      err.code = 'CONTEXT_EXCEEDED';
+      err.promptChars = prompt.length;
+      err.promptTokens = Number(m[1]);
+    }
+    throw err;
+  }
+}
+
+async function askOnce(prompt, maxTokens, onToken) {
   const stream = await _engine.chat.completions.create({
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.3,
@@ -184,17 +204,34 @@ async function runRecap(input, { mode, onProgress, onStatus } = {}) {
   status('Caricamento del modello…');
   await preloadModel(mode, onProgress);
 
+  // Se il modello rifiuta un testo troppo lungo (il controllo avviene prima che inizi a
+  // scrivere, quindi si perde poco tempo), la stima caratteri/token si ricalibra sul
+  // conteggio vero, con un 10% di margine, e si rifà la divisione in pezzi.
+  let cpt = CHARS_PER_TOKEN;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await planAndRun(input, cpt, status);
+    } catch (e) {
+      if (e.code !== 'CONTEXT_EXCEEDED' || attempt >= 3) throw e;
+      cpt = Math.min(cpt * 0.8, (e.promptChars / e.promptTokens) * 0.9);
+      console.warn(`[RECAP BROWSER] testo troppo lungo (${e.promptTokens} token): nuova stima ${cpt.toFixed(2)} caratteri/token`);
+      status('Testo più lungo del previsto: lo divido in pezzi più piccoli…');
+    }
+  }
+}
+
+async function planAndRun(input, cpt, status) {
   const template = String(input.template || '');
   const chunkPrompt = String(input.chunk_prompt || '');
-  const templateTokens = est(template.replace('{{TRASCRIZIONE}}', ''));
+  const templateTokens = est(template.replace('{{TRASCRIZIONE}}', ''), cpt);
   if (templateTokens + OUT_FINAL + MARGIN + 300 > CTX_TOKENS) {
     throw new Error('Il prompt del recap è troppo lungo per il modello nel browser');
   }
-  const fits = (text) => templateTokens + est(text) + OUT_FINAL + MARGIN <= CTX_TOKENS;
+  const fits = (text) => templateTokens + est(text, cpt) + OUT_FINAL + MARGIN <= CTX_TOKENS;
 
   let text = String(input.transcript || '').trim();
   // Troppo lunga: appunti a pezzi, ripetuto finché gli appunti non stanno nel contesto.
-  const chunkChars = (CTX_TOKENS - est(chunkPrompt) - OUT_CHUNK - MARGIN) * CHARS_PER_TOKEN;
+  const chunkChars = Math.floor((CTX_TOKENS - est(chunkPrompt, cpt) - OUT_CHUNK - MARGIN) * cpt);
   for (let level = 0; !fits(text); level++) {
     if (level >= 3) throw new Error('Trascrizione troppo lunga per il modello nel browser');
     const pieces = splitText(text, chunkChars);
