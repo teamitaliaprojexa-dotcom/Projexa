@@ -352,10 +352,18 @@ function contextRole(req) {
   const raw = req.user?.id_roles;
   return (raw == null || String(raw).trim() === '' || !Number.isFinite(Number(raw))) ? null : String(Number(raw));
 }
-function canWriteRow(req, idRolesWrite) {
+// Eccezione per la tabella settings: id_roles_write è una SOGLIA. Modifica chi ha id_roles
+// minore o uguale al valore (es. '70' -> ruoli 1..70; '90' -> tutti i ruoli fino a 90).
+const ROLE_WRITE_THRESHOLD_TABLES = new Set(['settings']);
+function canWriteRow(req, idRolesWrite, tableName = null) {
   if (isAdminUser(req)) return true;
   const role = contextRole(req);
-  return role != null && roleWriteList(idRolesWrite).includes(role);
+  if (role == null) return false;
+  const list = roleWriteList(idRolesWrite);
+  if (ROLE_WRITE_THRESHOLD_TABLES.has(String(tableName || '').toLowerCase())) {
+    return list.some((v) => /^\d+$/.test(v) && Number(role) <= Number(v));
+  }
+  return list.includes(role);
 }
 const READ_ONLY_ERROR = 'Sola lettura: il tuo ruolo non può modificare questo elemento';
 // Verifica che tutte le righe indicate siano modificabili; altrimenti errore 403.
@@ -369,16 +377,22 @@ async function assertRowsWritable(req, pool, tableName, ids, tableColumns = null
     `SELECT id, id_roles_write FROM "${assertValidIdentifier(tableName)}" WHERE id::text = ANY($1::text[])`,
     [list]
   );
-  if (r.rows.some((row) => !canWriteRow(req, row.id_roles_write))) {
+  if (r.rows.some((row) => !canWriteRow(req, row.id_roles_write, tableName))) {
     throw Object.assign(new Error(READ_ONLY_ERROR), { statusCode: 403 });
   }
 }
 // Condizione SQL da aggiungere alle UPDATE/DELETE massive: limita alle righe modificabili.
 // Per l'admin (o tabelle senza colonna) non aggiunge nulla. alias = 'f.' o ''.
-function roleWriteSql(req, params, alias = '', tableColumns = null) {
+function roleWriteSql(req, params, alias = '', tableColumns = null, tableName = null) {
   if (isAdminUser(req) || (tableColumns && !tableColumns.has('id_roles_write'))) return '';
+  const values = `regexp_split_to_array(btrim(COALESCE(${alias}id_roles_write::text, '')), '[;,[:space:]]+')`;
+  if (ROLE_WRITE_THRESHOLD_TABLES.has(String(tableName || '').toLowerCase())) {
+    // settings: soglia, id_roles del contesto <= valore
+    params.push(Number(contextRole(req)) || 999999);
+    return ` AND EXISTS (SELECT 1 FROM unnest(${values}) AS rw(v) WHERE rw.v ~ '^[0-9]+$' AND rw.v::int >= $${params.length}::int)`;
+  }
   params.push(contextRole(req) || '#nessun-ruolo#'); // ruolo assente: nessuna riga corrisponde
-  return ` AND $${params.length} = ANY(regexp_split_to_array(btrim(COALESCE(${alias}id_roles_write::text, '')), '[;,[:space:]]+'))`;
+  return ` AND $${params.length} = ANY(${values})`;
 }
 // Valore di id_roles_write per le righe nuove: il ruolo di chi le crea.
 function roleWriteValue(req) {
@@ -393,6 +407,45 @@ function stampRoleWrite(req, data, tableColumns) {
 // Riga esistente: solo l'admin può cambiare id_roles_write (evita di "promuoversi").
 function stripRoleWrite(req, data) {
   if (!isAdminUser(req)) delete data.id_roles_write;
+}
+
+// ---------- Struttura dei campi (settings/clients/projects) per i non admin ----------
+// - settings: nessuna modifica di struttura (nuovo/elimina/rinomina/sposta campo o argomento);
+//   si modificano solo i valori, se id_roles_write lo consente.
+// - clients/projects: solo sui campi custom "(*)", e l'ordinamento resta nella fascia >= 200.
+//   I campi standard (senza "(*)") non si toccano; i loro valori seguono id_roles_write.
+const CUSTOM_ORD_BASE = 200;
+const STRUCTURE_COLUMNS = ['campo', 'tipo_valore', 'tabella', 'colonna', 'VariabDB', 'ordinamento',
+  'layout_col', 'layout_span', 'id_roles', 'argument'];
+const isCustomCampo = (campo) => String(campo || '').trim().startsWith('(*)');
+function denyStructure(msg) { throw Object.assign(new Error(msg), { statusCode: 403 }); }
+function assertStructureSourceAllowed(req, source) {
+  if (!isAdminUser(req) && source === 'settings') {
+    denyStructure('Impostazioni: aggiungere, eliminare, rinominare o spostare campi è riservato all\'amministratore');
+  }
+}
+// Modifica di una riga esistente: blocca i cambi di struttura non consentiti. Le colonne di
+// struttura inviate ma invariate vengono tolte da data (così non "cambiano" per errore).
+async function assertStructureUpdateAllowed(req, pool, source, id, data) {
+  if (isAdminUser(req) || !FIELD_SOURCES.has(source)) return;
+  const r = await pool.query(`SELECT * FROM "${source}" WHERE id = $1 LIMIT 1`, [id]);
+  const original = r.rows[0];
+  if (!original) return;
+  const norm = (v) => (v == null ? '' : String(v).trim());
+  const changed = [];
+  for (const col of STRUCTURE_COLUMNS) {
+    if (!Object.prototype.hasOwnProperty.call(data, col)) continue;
+    if (norm(data[col]) === norm(original[col])) delete data[col];
+    else changed.push(col);
+  }
+  if (!changed.length) return;
+  assertStructureSourceAllowed(req, source);
+  if (!isCustomCampo(original.campo)) denyStructure('I campi standard non si possono modificare');
+  if (changed.includes('argument')) denyStructure('Spostare un campo in un altro contenitore è riservato all\'amministratore');
+  if (changed.includes('id_roles')) denyStructure('Il ruolo del campo è riservato all\'amministratore');
+  if (changed.includes('ordinamento') && !(Number(data.ordinamento) >= CUSTOM_ORD_BASE)) {
+    denyStructure(`Un campo custom resta nella zona dall'ordinamento ${CUSTOM_ORD_BASE} in poi`);
+  }
 }
 
 // Livello del ruolo del login (numeri più bassi = più privilegi). Ruolo assente o non
@@ -1354,13 +1407,13 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     // __can_write: la riga è modificabile dal ruolo del contesto (id_roles_write).
     // canWriteField: il campo griglia stesso (riga settings/clients/projects) è modificabile.
     const rows = result.rows.map((row) => {
-      const out = { ...row, __can_write: hasRoleWrite ? canWriteRow(req, row.__roles_write) : true };
+      const out = { ...row, __can_write: hasRoleWrite ? canWriteRow(req, row.__roles_write, tableName) : true };
       delete out.__roles_write;
       return out;
     });
     res.json({
       rows,
-      canWriteField: canWriteRow(req, config.id_roles_write),
+      canWriteField: canWriteRow(req, config.id_roles_write, source),
       columns: selectedColumns,
       isView,
       lockedColumns: selectedColumns.filter(c => columnsSpec.locked.has(c)),
@@ -1548,8 +1601,12 @@ app.get('/api/:source(settings|clients|projects)/grid-widget/fk-options', requir
     if (foreignColumns.has('project_id') && source === 'projects') { params.push(config.argument); conds.push(`project_id = $${params.length}`); }
     const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
 
+    // Valori usati dal browser per compilare altre colonne alla scelta dell'opzione
+    // (griglia Costi Progetto: worker_cost_id -> tariffa_gg = cost_worker, tariffa_hh = /8).
+    const extraColumns = ['cost_worker'].filter((c) => foreignColumns.has(c));
+    const extraSelect = extraColumns.map((c) => `, "${c}"`).join('');
     const result = await db.query(
-      `SELECT "${foreignColumn}" AS id, "${displayColumn}" AS display
+      `SELECT "${foreignColumn}" AS id, "${displayColumn}" AS display${extraSelect}
        FROM "${foreignTable}" ${where}
        ORDER BY "${displayColumn}" NULLS LAST
        LIMIT 200`,
@@ -2677,6 +2734,20 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
       else delete data.project_id;
     }
 
+    // Nuovo campo da non admin: vietato nelle impostazioni; in clienti/progetti è custom,
+    // nella fascia di ordinamento >= 200 e con id_roles = ruolo di chi lo crea.
+    if (FIELD_SOURCES.has(tableName) && !rawColumns && !isAdminUser(req) && dbKey === 'main') {
+      assertStructureSourceAllowed(req, tableName);
+      if (tableColumns.has('id_roles')) data.id_roles = roleWriteValue(req);
+      if (tableColumns.has('ordinamento') && !(Number(data.ordinamento) >= CUSTOM_ORD_BASE)) {
+        const m = await pool.query(
+          `SELECT MAX(ordinamento) AS m FROM "${tableName}" WHERE argument = $1 AND tenant_id = $2 AND ordinamento >= $3`,
+          [data.argument || null, req.user.tenant_id, CUSTOM_ORD_BASE]
+        );
+        data.ordinamento = m.rows[0].m != null ? Number(m.rows[0].m) + 1 : CUSTOM_ORD_BASE;
+      }
+    }
+
     // Configurazione del campo (tipo, tabella, colonna, VariabDB) secondo il ruolo
     await assertFieldConfigAllowed(req, tableName, data, null);
 
@@ -2767,6 +2838,11 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
     if (tenantScope === 'all-tenants' && !admin) {
       return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
     }
+
+    // Struttura del campo (nome, tipo, ordinamento, ...): per i non admin nessuna modifica
+    // nelle impostazioni e, in clienti/progetti, solo sui campi custom nella fascia >= 200.
+    // Le colonne di struttura invariate vengono tolte da data.
+    if (!rawColumns && dbKey === 'main') await assertStructureUpdateAllowed(req, pool, tableName, id, data);
 
     // Quando la PUT proviene dal form Aggiungi/Modifica campo, gli utenti non admin
     // possono creare/modificare solo campi custom: il prefisso '(*) ' viene imposto
@@ -2931,7 +3007,7 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
             where += ` AND argument = $${pParams.length}`;
           }
           // La propagazione tocca solo le righe modificabili dal ruolo del contesto.
-          where += roleWriteSql(req, pParams, '', tableColumns);
+          where += roleWriteSql(req, pParams, '', tableColumns, tableName);
           await pool.query(`UPDATE "${tableName}" SET ${setClause} WHERE ${where}`, pParams);
         }
       } catch (e) {
@@ -3095,7 +3171,7 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
             const existing = hasId
               ? (await client.query(`SELECT id_roles_write FROM "${tableName}" WHERE id::text = $1 LIMIT 1`, [String(data.id)])).rows[0]
               : null;
-            if (existing && !canWriteRow(req, existing.id_roles_write)) {
+            if (existing && !canWriteRow(req, existing.id_roles_write, tableName)) {
               errors.push({ row: i + 1, error: READ_ONLY_ERROR });
               continue;
             }
@@ -3621,6 +3697,7 @@ app.get('/api/settings/arguments', requireAuth, async (req, res) => {
 // Usa user_tenants per enumerare le coppie (utente, tenant).
 app.post('/api/settings/argument', requireAuth, async (req, res) => {
   try {
+    assertStructureSourceAllowed(req, 'settings'); // struttura delle impostazioni: solo admin
     const name = ((req.body && req.body.name) || '').trim();
     const scope = (req.body && req.body.scope) || 'this-tenant';
     // id_roles da associare all'argomento (visibilità); vuoto/null = nessuna restrizione.
@@ -3829,6 +3906,7 @@ app.post('/api/provisioning/new-user', requireAuth, async (req, res) => {
 // tenant ('this-tenant') o di tutti i tenant ('all-tenants', solo admin).
 app.delete('/api/settings/argument', requireAuth, async (req, res) => {
   try {
+    assertStructureSourceAllowed(req, 'settings'); // struttura delle impostazioni: solo admin
     const name = ((req.query && req.query.name) || '').trim();
     const scope = (req.query && req.query.scope) || 'this-tenant';
     if (!name) return res.status(400).json({ error: 'Nome argomento richiesto' });
@@ -3846,7 +3924,7 @@ app.delete('/api/settings/argument', requireAuth, async (req, res) => {
     // Argomento con righe in sola lettura per il ruolo del contesto: non si elimina.
     if (!isAdminUser(req)) {
       const lockParams = [name, req.user.tenant_id];
-      const writable = roleWriteSql(req, lockParams).replace(/^ AND /, '');
+      const writable = roleWriteSql(req, lockParams, '', null, 'settings').replace(/^ AND /, '');
       const locked = await db.query(
         `SELECT 1 FROM settings WHERE argument = $1 AND tenant_id = $2 AND NOT (${writable}) LIMIT 1`,
         lockParams
@@ -3856,7 +3934,7 @@ app.delete('/api/settings/argument', requireAuth, async (req, res) => {
     const result = await db.query(query, params);
     res.json({ deleted: result.rowCount });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -3865,6 +3943,7 @@ app.delete('/api/settings/argument', requireAuth, async (req, res) => {
 // Conserva la natura custom: se l'argomento originale inizia con "(*)", il nuovo mantiene il prefisso.
 app.put('/api/settings/argument/rename', requireAuth, async (req, res) => {
   try {
+    assertStructureSourceAllowed(req, 'settings'); // struttura delle impostazioni: solo admin
     const oldName = ((req.body && req.body.oldName) || '').trim();
     let newName = ((req.body && req.body.newName) || '').trim();
     const scope = (req.body && req.body.scope) || 'this-tenant';
@@ -3889,7 +3968,7 @@ app.put('/api/settings/argument/rename', requireAuth, async (req, res) => {
     // Argomento con righe in sola lettura per il ruolo del contesto: non si rinomina.
     if (!isAdminUser(req)) {
       const lockParams = [oldName, req.user.tenant_id];
-      const writable = roleWriteSql(req, lockParams).replace(/^ AND /, '');
+      const writable = roleWriteSql(req, lockParams, '', null, 'settings').replace(/^ AND /, '');
       const locked = await db.query(
         `SELECT 1 FROM settings WHERE argument = $1 AND tenant_id = $2 AND NOT (${writable}) LIMIT 1`,
         lockParams
@@ -3899,7 +3978,7 @@ app.put('/api/settings/argument/rename', requireAuth, async (req, res) => {
     const result = await db.query(query, params);
     res.json({ updated: result.rowCount, argument: finalNew });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -4144,6 +4223,30 @@ async function deepCopyClientTree(dbClient, tenantId, userId, srcArg, newArg) {
   }
 }
 
+// Copia le righe di proj_worker_cost del cliente sorgente sul nuovo cliente (copia cliente).
+// Le colonne sono lette dalla tabella: si copiano tutte tranne id, contesto e date tecniche;
+// tenant_id/user_id/client_id sono quelli del nuovo cliente, id_roles_write il ruolo di chi crea.
+async function copyClientWorkerCosts(dbClient, req, srcClientId, newClientId) {
+  const cols = await getTableColumns('proj_worker_cost');
+  if (!cols.size || !cols.has('client_id')) return 0;
+  const generated = await getGeneratedColumns('proj_worker_cost');
+  const skip = new Set(['id', 'tenant_id', 'user_id', 'client_id', 'id_roles_write', 'created_at', 'updated_at']);
+  const copyCols = [...cols].filter((c) => !skip.has(c) && !generated.has(c)).map(assertValidIdentifier);
+  const insertCols = ['tenant_id', 'user_id', 'client_id', ...copyCols];
+  const selectCols = ['$1::uuid', '$2::uuid', '$3::uuid', ...copyCols.map((c) => `src."${c}"`)];
+  const r = await dbClient.query(
+    `INSERT INTO proj_worker_cost (${insertCols.map((c) => `"${c}"`).join(', ')})
+     SELECT ${selectCols.join(', ')} FROM proj_worker_cost src WHERE src.client_id = $4::uuid
+     RETURNING id`,
+    [req.user.tenant_id, req.user.user_id, newClientId, srcClientId]
+  );
+  if (r.rowCount && cols.has('id_roles_write')) {
+    await dbClient.query('UPDATE proj_worker_cost SET id_roles_write = $1 WHERE id = ANY($2::uuid[])',
+      [roleWriteValue(req), r.rows.map((x) => x.id)]);
+  }
+  return r.rowCount;
+}
+
 // ===== Condivisione "viva" (ACL) dei clienti =====
 // Risale dalla riga (id) alla riga identità del cliente (argument='Cliente') e ne restituisce
 // { clientId, ownerUserId }, oppure null. idOrArgument = id di una qualsiasi riga dell'albero.
@@ -4348,6 +4451,9 @@ app.post('/api/clients', requireAuth, async (req, res) => {
     }
     if (srcId) {
       await deepCopyClientTree(client, req.user.tenant_id, req.user.user_id, srcId, newClient.id);
+      // Costi delle risorse (proj_worker_cost) del cliente copiato: stesse righe sul nuovo
+      // cliente, con tenant/utente di chi crea e id_roles_write = suo ruolo.
+      await copyClientWorkerCosts(client, req, srcId, newClient.id);
     }
     // Tutte le righe del nuovo cliente (master_id = id cliente, compilato dal trigger) e gli
     // eventuali progetti copiati: modificabili dal ruolo di chi crea il cliente.
@@ -4939,7 +5045,12 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
     const containerCampo = ((req.body && req.body.containerCampo) || 'Cliente').trim() || 'Cliente';
     // id_roles del nuovo campo (visibilità per ruolo); vuoto/assente = NULL (nessuna restrizione).
     const idRolesRaw = (req.body && req.body.id_roles);
-    const idRoles = (idRolesRaw === '' || idRolesRaw == null) ? null : Number(idRolesRaw);
+    // Non admin: niente nuovi campi nelle impostazioni; in clienti/progetti id_roles del
+    // campo = ruolo di chi lo crea (come id_roles_write).
+    assertStructureSourceAllowed(req, source);
+    const idRoles = !isAdminUser(req)
+      ? Number(roleWriteValue(req))
+      : ((idRolesRaw === '' || idRolesRaw == null) ? null : Number(idRolesRaw));
     if (!rawCampo) {
       return res.status(400).json({ error: 'nome campo richiesto' });
     }
@@ -5150,7 +5261,9 @@ app.post('/api/:source(settings|clients|projects)/delete-fields', requireAuth, a
     // Altrimenti solo i campi custom (nome con prefisso "(*)").
     const isAdmin = Number(req.user.id_roles) === 1;
     // Progetti: dati personali → il proprietario può eliminare qualsiasi campo (anche standard).
-    const ordGuard = (isAdmin || source === 'projects') ? '' : "AND campo LIKE '(*)%'";
+    // Non admin: nelle impostazioni nessuna eliminazione; altrove solo campi custom "(*)".
+    assertStructureSourceAllowed(req, source);
+    const ordGuard = isAdmin ? '' : "AND campo LIKE '(*)%'";
     let query, params;
     if (source === 'settings') {
       // Impostazioni: scope tenant. 'all-tenants' (tutti i tenant, solo admin) oppure
@@ -5190,11 +5303,11 @@ app.post('/api/:source(settings|clients|projects)/delete-fields', requireAuth, a
       params = [campos, clientId, req.user.tenant_id, req.user.user_id];
     }
     // Solo i campi modificabili dal ruolo del contesto (id_roles_write).
-    query += roleWriteSql(req, params, /"\s+f\s+USING/.test(query) ? 'f.' : '');
+    query += roleWriteSql(req, params, /"\s+f\s+USING/.test(query) ? 'f.' : '', null, source);
     const result = await db.query(query, params);
     res.json({ deleted: result.rowCount });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -5224,7 +5337,9 @@ app.post('/api/:source(settings|clients|projects)/rename-fields', requireAuth, a
     }
     // Guard: gli utenti normali rinominano solo i campi custom "(*)"; l'admin (id_roles=1)
     // rinomina TUTTI i campi (custom e non).
-    const custGuard = (isAdmin || source === 'projects') ? '' : " AND campo LIKE '(*)%'";
+    // Non admin: nelle impostazioni nessuna rinomina; altrove solo campi custom "(*)".
+    assertStructureSourceAllowed(req, source);
+    const custGuard = isAdmin ? '' : " AND campo LIKE '(*)%'";
     let updated = 0;
     for (const rn of renames) {
       const oldName = ((rn && rn.old) || '').trim();
@@ -5277,13 +5392,13 @@ app.post('/api/:source(settings|clients|projects)/rename-fields', requireAuth, a
         params = [newName, oldName, req.user.tenant_id, req.user.user_id];
       }
       // Solo i campi modificabili dal ruolo del contesto (id_roles_write).
-      query += roleWriteSql(req, params, /"\s+f\s+SET/.test(query) ? 'f.' : '');
+      query += roleWriteSql(req, params, /"\s+f\s+SET/.test(query) ? 'f.' : '', null, source);
       const result = await db.query(query, params);
       updated += result.rowCount;
     }
     res.json({ updated });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -5302,10 +5417,22 @@ app.post('/api/:source(settings|clients|projects)/reorder-fields', requireAuth, 
     const allTenants = (rawScope === 'all-tenants') || (tenantScope === 'all-tenants');
     // Ambito contenitore (solo clienti/progetti): 'all' = tutti i clienti/progetti.
     const containerScope = (rawScope === 'all') ? 'all' : 'this';
-    const items = (req.body && req.body.items) || [];
+    let items = (req.body && req.body.items) || [];
     if (!argument) return res.status(400).json({ error: 'argument richiesto' });
     if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'Nessun elemento' });
     const isAdmin = Number(req.user.id_roles) === 1;
+    // Non admin: nelle impostazioni nessuno spostamento; in clienti/progetti si spostano solo
+    // i campi custom "(*)", rinumerati nell'ordine ricevuto a partire da 200 (i campi
+    // standard restano dove sono).
+    assertStructureSourceAllowed(req, source);
+    if (!isAdmin) {
+      items = items
+        .filter((it) => it && isCustomCampo(it.campo))
+        .sort((a, b) => (Number(a.ordinamento) || 0) - (Number(b.ordinamento) || 0)
+          || (Number(a.layout_col) || 0) - (Number(b.layout_col) || 0))
+        .map((it, i) => ({ ...it, ordinamento: CUSTOM_ORD_BASE + i }));
+      if (!items.length) return res.json({ updated: 0 });
+    }
     if (allTenants && !isAdmin) {
       return res.status(403).json({ error: 'Solo un admin può agire su tutti i tenant' });
     }
@@ -5389,13 +5516,13 @@ app.post('/api/:source(settings|clients|projects)/reorder-fields', requireAuth, 
         params = [...head, argument, campo, req.user.tenant_id];
       }
       // Solo i campi modificabili dal ruolo del contesto (id_roles_write).
-      query += roleWriteSql(req, params, /"\s+f\s+SET/.test(query) ? 'f.' : '');
+      query += roleWriteSql(req, params, /"\s+f\s+SET/.test(query) ? 'f.' : '', null, source);
       const r = await db.query(query, params);
       updated += r.rowCount;
     }
     res.json({ updated });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -6191,14 +6318,14 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
     let containerWritable = true;
     if (EAV_UUID_RE.test(String(argument))) {
       const c = await db.query(`SELECT id_roles_write FROM "${table}" WHERE id = $1 LIMIT 1`, [argument]);
-      if (c.rows[0]) containerWritable = canWriteRow(req, c.rows[0].id_roles_write);
+      if (c.rows[0]) containerWritable = canWriteRow(req, c.rows[0].id_roles_write, table);
     }
     res.set('X-Can-Write-Container', containerWritable ? '1' : '0');
 
     const rows = result.rows;
     for (const row of rows) {
       // Permesso per riga: il campo è modificabile solo se id_roles_write = ruolo del contesto.
-      row.__can_write = canWriteRow(req, row.id_roles_write);
+      row.__can_write = canWriteRow(req, row.id_roles_write, table);
       if (Number(row.tipo_valore) === 4 && row.tabella && row.colonna) {
         try {
           assertValidIdentifier(row.tabella);
@@ -6318,7 +6445,7 @@ app.put('/api/:source(settings|clients|projects)/:id/reference-value', requireAu
 
     const row = s.rows[0];
     // Permesso per riga: il campo deve essere modificabile dal ruolo del contesto.
-    if (!canWriteRow(req, row.id_roles_write)) return res.status(403).json({ error: READ_ONLY_ERROR });
+    if (!canWriteRow(req, row.id_roles_write, table)) return res.status(403).json({ error: READ_ONLY_ERROR });
     const { tabella, colonna } = row;
     if (!tabella || !colonna) {
       return res.status(400).json({ error: 'Tabella o colonna non definite per questa impostazione' });

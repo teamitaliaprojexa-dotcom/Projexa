@@ -8776,7 +8776,8 @@
             const enabled = !!parentFormState?.edit;
             const toolbar = document.getElementById('parentFormToolbar');
             const hint = document.getElementById('parentFormActionHint');
-            toolbar?.classList.toggle('visible', enabled);
+            // Struttura dei campi: nelle Impostazioni solo l'admin (vedi canEditFieldStructure).
+            toolbar?.classList.toggle('visible', enabled && (isAdminContext() || parentFormState?.source !== 'settings'));
             const action = parentFormState?.action || 'values';
             document.getElementById('parentFormDeleteField')?.classList.toggle('active', action === 'delete');
             document.getElementById('parentFormEditField')?.classList.toggle('active', action === 'pick');
@@ -9091,17 +9092,15 @@
                 else openClientScopeModal('parent-reorder');
                 return true;
             }
-            for (const item of items) {
-                const response = await fetch(`${API_URL}/data/${parentFormState.source}/${encodeURIComponent(item.rowId)}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({
-                        ordinamento: item.ordinamento,
-                        layout_col: item.layout_col,
-                        layout_span: item.layout_span
-                    })
-                });
-                if (!response.ok) throw new Error('Errore durante il salvataggio della disposizione');
+            // Non admin: il server sposta solo i campi custom "(*)" e li rinumera dal 200.
+            const response = await fetch(`${API_URL}/${parentFormState.source}/reorder-fields`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                body: JSON.stringify({ argument: parentFormState.argument, scope: 'this', tenantScope: 'this-tenant', items })
+            });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || 'Errore durante il salvataggio della disposizione');
             }
             showNotification('Disposizione salvata', 'success');
             parentFormState.action = 'values';
@@ -9241,11 +9240,12 @@
                         response = await fetch(`${API_URL}/${parentFormState.source}/${input.dataset.settingId}/reference-value`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                            body: JSON.stringify({ value: input.value })
+                            body: JSON.stringify({ value: currencyInputValue(input) })
                         });
                     } else {
                         let value;
                         if (input.type === 'checkbox') value = input.checked;
+                        else if (input.dataset.currency === '1') { const c = currencyInputValue(input); value = c === '' ? null : Number(c); }
                         else if (input.tagName === 'SELECT' && input.multiple) {
                             value = [...input.selectedOptions].map(option => option.value).join(';');
                         } else if (input.type === 'number' || input.type === 'range') {
@@ -9380,6 +9380,11 @@
                     if (field?.dataset.rowId) {
                         event.preventDefault();
                         parentFormState.action = 'values';
+                        if (!canEditFieldStructure({ campo: field.dataset.campo })) {
+                            showNotification('Puoi modificare solo i campi custom (*)', 'info');
+                            updateParentFormToolbar();
+                            return;
+                        }
                         openParentFormFieldEditor(field);
                     }
                     return;
@@ -10982,6 +10987,18 @@
         // Il server applica comunque le stesse regole.
         let currentDetailCanWriteContainer = true;
         let currentDetailReadOnlyIds = new Set();
+
+        // Struttura dei campi (nuovo/elimina/rinomina/sposta), stesse regole del server:
+        // - Admin: tutto;
+        // - altri ruoli: nelle Impostazioni niente; in Clienti/Progetti solo i campi custom
+        //   "(*)", che restano nella zona di ordinamento dal 200 in poi.
+        function isAdminContext() { return Number(decodeJwtPayload().id_roles) === 1; }
+        function canEditStructureHere() { return isAdminContext() || currentDetailSource !== 'settings'; }
+        function canEditFieldStructure(row) {
+            if (isAdminContext()) return true;
+            if (currentDetailSource === 'settings') return false;
+            return String((row && row.campo) || '').trim().startsWith('(*)');
+        }
         function markReadOnlyDetailFields(listEl) {
             if (!listEl || !currentDetailReadOnlyIds.size) return;
             listEl.querySelectorAll('[data-setting-id]').forEach(inp => {
@@ -11042,14 +11059,14 @@
 
             // Pulsanti +/Elimina/Rinomina: visibili con modifica abilitata
             const editButtons = document.getElementById('clientEditButtons');
-            if (editButtons) editButtons.style.display = (!closedProject && mode !== 'view' && currentDetailCanWriteContainer) ? 'flex' : 'none';
+            if (editButtons) editButtons.style.display = (!closedProject && mode !== 'view' && currentDetailCanWriteContainer && canEditStructureHere()) ? 'flex' : 'none';
 
             // Fuori dalla modalità 'edit' il riordino non ha senso: azzeralo.
             if (mode !== 'edit') detailReorderMode = false;
             // Pulsante "sposta" (riordino): visibile solo in 'edit', evidenziato se attivo.
             const reorderBtn = document.getElementById('clientReorderBtn');
             if (reorderBtn) {
-                reorderBtn.style.display = (mode === 'edit' && currentDetailCanWriteContainer) ? 'inline-flex' : 'none';
+                reorderBtn.style.display = (mode === 'edit' && currentDetailCanWriteContainer && canEditStructureHere()) ? 'inline-flex' : 'none';
                 reorderBtn.style.outline = detailReorderMode ? '2px solid #065F46' : 'none';
             }
 
@@ -11098,6 +11115,48 @@
         // Se il nome tecnico termina con "_gg" o "_hh" (convenzione Gestione a HH), il suffisso
         // viene tolto dall'etichetta mostrata: la scelta di quale variante mostrare/nascondere
         // avviene a monte (vedi currentProjectManageByHoursValue), qui si toglie solo il suffisso.
+        // === CAMPI IN EURO NEL PANNELLO DI DETTAGLIO ===
+        // Riconosciuti dal nome del campo (senza "(*)" e senza suffisso _gg/_hh). A video
+        // "12.500,00 €"; al clic il campo torna un numero semplice da modificare; al salvataggio
+        // si invia il numero (currencyInputValue).
+        const DETAIL_CURRENCY_FIELDS = new Set(['importo', 'importo non scontato', 'fatturato', 'fatturato futuro', 'da fatturare']);
+        function isDetailCurrencyField(row) {
+            const name = stripGgHhSuffix(String((row && row.campo) || '').replace(/^\(\*\)\s*/, '')).trim().toLowerCase();
+            return DETAIL_CURRENCY_FIELDS.has(name);
+        }
+        function parseCurrencyText(text) {
+            let s = String(text == null ? '' : text).replace(/[€\s]/g, '');
+            if (!s) return '';
+            if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+            const n = Number(s);
+            return Number.isFinite(n) ? n : '';
+        }
+        function formatCurrencyText(value) {
+            const n = parseCurrencyText(value);
+            return n === '' ? '' : TYPE11_EUR_FORMATTER.format(n);
+        }
+        function detailCurrencyInputHtml(id, attrs, rawValue) {
+            const n = (rawValue == null || rawValue === '') ? '' : parseCurrencyText(String(rawValue));
+            return `<input type="text" inputmode="decimal" data-setting-id="${id}" ${attrs} data-currency="1" data-raw="${escapeHtml(n === '' ? '' : String(n))}" value="${escapeHtml(n === '' ? '' : TYPE11_EUR_FORMATTER.format(n))}">`;
+        }
+        // Valore da salvare: per i campi in euro il numero, altrimenti il testo così com'è.
+        function currencyInputValue(inp) {
+            if (inp.dataset.currency !== '1') return inp.value;
+            const n = parseCurrencyText(inp.value);
+            return n === '' ? '' : String(n);
+        }
+        document.addEventListener('focusin', (e) => {
+            const inp = e.target;
+            if (!inp || !inp.dataset || inp.dataset.currency !== '1' || inp.disabled) return;
+            const n = parseCurrencyText(inp.value);
+            inp.value = n === '' ? '' : String(n).replace('.', ',');
+        });
+        document.addEventListener('focusout', (e) => {
+            const inp = e.target;
+            if (!inp || !inp.dataset || inp.dataset.currency !== '1') return;
+            inp.value = formatCurrencyText(inp.value);
+        });
+
         function stripGgHhSuffix(text) {
             return String(text || '').replace(/_(gg|hh)$/i, '');
         }
@@ -11371,6 +11430,14 @@
                 }
             }
 
+            // Colonne numeriche (es. diff_hh / diff_gg): numero in formato italiano, senza €.
+            if (isType11NumberColumn(column)) {
+                const numericValue = typeof value === 'number' ? value : Number(String(value).trim().replace(',', '.'));
+                if (Number.isFinite(numericValue)) {
+                    return numericValue.toLocaleString('it-IT', { maximumFractionDigits: 2 });
+                }
+            }
+
             if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
                 // Timestamp ISO (es. una colonna DATE letta come oggetto Date e poi
                 // serializzata in JSON): mostriamo solo la parte data, non l'orario/UTC.
@@ -11445,9 +11512,28 @@
             return `<a class="type11-cell-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(url)}"><i class="fas fa-globe"></i></a>`;
         }
 
+        // Colonne mostrate come numero (non valuta) anche se il nome ricade in una regola
+        // di valuta (es. griglia Costi Progetto: diff_hh / diff_gg sono ore/giorni).
+        const TYPE11_NUMBER_COLUMNS = new Set(['diff_hh', 'diff_gg']);
+        function isType11NumberColumn(column) {
+            return TYPE11_NUMBER_COLUMNS.has(String(column || '').trim().toLowerCase());
+        }
+
+        // Colonne in euro con nome tecnico esatto: griglia Fatturazione (mesi e totale) e
+        // griglie Invoice e Costi Progetto (offerta, consuntivo, importo scontato). offerta_effort_*
+        // resta un numero (è l'effort, non un importo).
+        const TYPE11_CURRENCY_COLUMNS = new Set(['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
+            'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre', 'totale',
+            'consuntivo_hh', 'consuntivo_gg', 'importo_scontato_hh', 'importo_scontato_gg',
+            'offerta_hh', 'offerta_gg', 'offerta_diff_hh', 'offerta_diff_gg']);
+
+        // Colonne in euro, riconosciute dal nome tecnico (non dall'etichetta).
+        // Griglia Costi Progetto: offerta_hh/gg, tariffa_sc_time_spent_hh/gg, cost_time_spent_hh/gg.
         function isType11CurrencyColumn(column) {
             const technicalName = String(column || '').trim().toLowerCase();
-            return technicalName.startsWith('costo')
+            if (isType11NumberColumn(technicalName)) return false;
+            return TYPE11_CURRENCY_COLUMNS.has(technicalName)
+                || technicalName.startsWith('costo')
                 || technicalName.startsWith('cost_')
                 || technicalName.startsWith('tariffa')
                 || technicalName.startsWith('diff');
@@ -11496,6 +11582,36 @@
         // Opzioni per un campo FK della griglia: SEMPRE filtrate server-side per tenant,
         // utente, cliente e progetto del contesto corrente (vedi GET .../grid-widget/fk-options),
         // non solo per progetto come in precedenza — evita di mostrare l'intero elenco del DB.
+        // Compilazione automatica nelle righe in modifica delle griglie tipo 11: alla scelta
+        // di un valore FK, altre colonne della stessa riga prendono un valore dall'opzione.
+        // Griglia Costi Progetto (proj_worker): worker_cost_id -> proj_worker_cost.cost_worker,
+        // tariffa_gg = cost_worker, tariffa_hh = cost_worker / 8.
+        const TYPE11_FK_AUTOFILL = {
+            worker_cost_id: {
+                attr: 'costWorker',
+                targets: { tariffa_gg: v => v, tariffa_hh: v => v / 8 }
+            }
+        };
+        document.addEventListener('change', (e) => {
+            const sel = e.target;
+            if (!sel || sel.tagName !== 'SELECT' || !sel.classList.contains('type11-editor-field')) return;
+            const rule = TYPE11_FK_AUTOFILL[String(sel.dataset.col || '').toLowerCase()];
+            if (!rule) return;
+            const raw = sel.selectedOptions[0]?.dataset[rule.attr];
+            const base = raw == null || raw === '' ? NaN : Number(raw);
+            if (!Number.isFinite(base)) return;
+            const row = sel.closest('tr');
+            if (!row) return;
+            for (const [col, calc] of Object.entries(rule.targets)) {
+                const input = [...row.querySelectorAll('.type11-editor-field')].find(i => String(i.dataset.col).toLowerCase() === col);
+                if (!input || input.disabled) continue;
+                input.value = String(Math.round(calc(base) * 100) / 100);
+                // Segna la cella come modificata, come se l'avesse scritta l'utente.
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
+
         async function type11FkOptions(source, fieldId, column) {
             try {
                 const query = new URLSearchParams({ fieldId: fieldId || '', column: column || '' });
@@ -11555,7 +11671,8 @@
                     `fk:${source}:${fieldId}:${col.name}`,
                     () => type11FkOptions(source, fieldId, col.name)
                 );
-                const optionsHtml = opts.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
+                // data-cost-worker: usato per compilare le tariffe alla scelta (vedi TYPE11_FK_AUTOFILL).
+                const optionsHtml = opts.map(o => `<option value="${escapeHtml(o.id)}"${o.cost_worker != null ? ` data-cost-worker="${escapeHtml(o.cost_worker)}"` : ''} ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
                 return `<select class="type11-editor-field" data-col="${escapeHtml(col.name)}" ${dis}><option value="">-- Seleziona --</option>${optionsHtml}</select>`;
             }
             if (type === 'boolean') {
@@ -12321,7 +12438,6 @@
             // Campo custom = nome con prefisso "(*)" (vale per settings e clients)
             const isClientCustom = String(row.campo || '').startsWith('(*)');
             const mode = clientDetailMode;
-            const drag = detailReorderMode ? ' draggable="true"' : '';   // trascinabile solo in riordino
             let input;
             let extraRow = ''; // eventuale riga aggiuntiva (es. valore2 per il tipo 30)
 
@@ -12329,10 +12445,13 @@
             // tipi che fanno "return" anticipato (es. tipo 11, la griglia): altrimenti
             // quei campi non mostravano mai la checkbox di eliminazione.
             const isAdminUser = Number(decodeJwtPayload().id_roles) === 1;
-            // Nei progetti (dati personali) il proprietario può eliminare/rinominare qualsiasi campo.
-            const isProjectsDetail = (currentDetailSource === 'projects');
-            const canDelete = isClientCustom || isAdminUser || isProjectsDetail;
-            const canRename = isClientCustom || isAdminUser || isProjectsDetail;
+            // Struttura dei campi (vedi canEditFieldStructure): l'admin tutto; gli altri solo i
+            // campi custom "(*)" di clienti/progetti, mai nelle impostazioni.
+            const canStructure = canEditFieldStructure(row);
+            const canDelete = canStructure;
+            const canRename = canStructure;
+            // Trascinabile solo in riordino e solo se la struttura del campo è modificabile.
+            const drag = (detailReorderMode && canStructure) ? ' draggable="true"' : '';
             const earlyDeleteCheckbox = (mode === 'delete' && canDelete)
                 ? `<input type="checkbox" class="field-del-check" data-campo="${campo}" onclick="event.stopPropagation();" style="margin-right:8px; cursor:pointer; flex:0 0 auto;">`
                 : '';
@@ -12387,11 +12506,18 @@
                     input = `<button type="button" class="field-lens" data-lens-target="${id}" data-lens-title="${campo}" title="Apri il testo completo"><i class="fas fa-search"></i></button>${input}`;
                 }
             } else if (tipo === 3) {
-                // Numerico intero -> valore3
-                input = `<input type="number" step="1" data-setting-id="${id}" data-field="valore3" value="${escapeHtml(row.valore3 == null ? '' : row.valore3)}">`;
+                // Numerico intero -> valore3. Il DB (numeric) restituisce es. "2025.00": i valori
+                // interi si mostrano senza decimali (es. campo "Anno" dei progetti).
+                const n3 = (row.valore3 == null || row.valore3 === '') ? '' : Number(row.valore3);
+                const v3 = n3 === '' ? '' : (Number.isFinite(n3) && Number.isInteger(n3) ? String(n3) : String(row.valore3));
+                input = isDetailCurrencyField(row)
+                    ? detailCurrencyInputHtml(id, 'data-field="valore3"', row.valore3)
+                    : `<input type="number" step="1" data-setting-id="${id}" data-field="valore3" value="${escapeHtml(v3)}">`;
             } else if (tipo === 4) {
                 // Database: valore letto da tabella.colonna (risolto dal backend), con Salva + unicità
-                input = `<input type="text" data-setting-id="${id}" data-type4="1" value="${escapeHtml(row.resolved_value == null ? '' : row.resolved_value)}">`;
+                input = isDetailCurrencyField(row)
+                    ? detailCurrencyInputHtml(id, 'data-type4="1"', row.resolved_value)
+                    : `<input type="text" data-setting-id="${id}" data-type4="1" value="${escapeHtml(row.resolved_value == null ? '' : row.resolved_value)}">`;
             } else if (tipo === 5) {
                 // URL -> valore2: testo editabile + link cliccabile (icona dentro la casella)
                 const val = row.valore2 == null ? '' : row.valore2;
@@ -12539,7 +12665,7 @@
             // solo i campi custom "(*)"; per l'admin (id_roles=1) TUTTI i campi.
             const label = (mode === 'rename' && canRename)
                 ? `<input type="text" class="field-rename" data-oldcampo="${campo}" value="${campo}" style="width: 140px; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.85rem;">`
-                : `<span class="campo-label${detailReorderMode ? ' drag-handle' : ''}"${detailReorderMode ? ' draggable="true"' : ''}>${campoLabelHtml(row.campo)}</span>`;
+                : `<span class="campo-label${drag ? ' drag-handle' : ''}"${drag}>${campoLabelHtml(row.campo)}</span>`;
 
             // In ogni flyout un campo può occupare 1, 2 o 3 colonne (layout_span).
             const span = Math.max(1, Math.min(3, Number(row.layout_span) || 1));
@@ -12619,7 +12745,7 @@
                         const res = await fetch(`${API_URL}/${currentDetailSource}/${id}/reference-value`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                            body: JSON.stringify({ value: inp.value, ...(scope ? { __scope: scope, __tenantScope: tenantScopeParam } : {}) })
+                            body: JSON.stringify({ value: currencyInputValue(inp), ...(scope ? { __scope: scope, __tenantScope: tenantScopeParam } : {}) })
                         });
                         if (res.status === 409) {
                             allOk = false;
@@ -12637,6 +12763,7 @@
                         const field = inp.dataset.field;
                         let value;
                         if (inp.type === 'checkbox') value = inp.checked;
+                        else if (inp.dataset.currency === '1') { const c = currencyInputValue(inp); value = c === '' ? null : Number(c); }
                         else if (inp.tagName === 'SELECT' && inp.multiple) value = Array.from(inp.selectedOptions).map(o => o.value).join(';');
                         else if (inp.type === 'number' || inp.type === 'range') value = inp.value === '' ? null : parseInt(inp.value, 10);
                         else value = inp.value;
@@ -12708,7 +12835,24 @@
                 } else {
                     // Nessuno scope richiesto (utente non admin, oppure Progetti/dati personali):
                     // salvataggio riga per riga sul proprio tenant/utente.
-                    for (const it of items) {
+                    // Non admin: passa dal riordino del server, che sposta solo i campi custom
+                    // "(*)" e li rinumera dall'ordinamento 200 (i campi standard restano fermi).
+                    if (!isAdminContext()) {
+                        try {
+                            const res = await fetch(`${API_URL}/${currentDetailSource}/reorder-fields`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                                body: JSON.stringify({ argument: currentDetailArgument, scope: 'this', tenantScope: 'this-tenant', items })
+                            });
+                            if (res.ok) detailLayoutDirty = false;
+                            else {
+                                allOk = false;
+                                const err = await res.json().catch(() => ({}));
+                                showNotification('Errore: ' + (err.error || res.status), 'info');
+                            }
+                        } catch (e) { allOk = false; showNotification('Errore di connessione', 'info'); }
+                    }
+                    for (const it of (isAdminContext() ? items : [])) {
                         try {
                             const body = { ordinamento: it.ordinamento, layout_col: it.layout_col, layout_span: it.layout_span };
                             const res = await fetch(`${API_URL}/data/${currentDetailSource}/${it.rowId}`, {
@@ -12771,6 +12915,11 @@
             if (saveBtn) saveBtn.addEventListener('click', saveDetailChanges);
 
             // Toggle "Abilita modifica" del primo flyout: mostra la barra Aggiungi/Elimina/Rinomina.
+            // Argomenti delle Impostazioni: struttura riservata all'admin, per gli altri niente toggle.
+            if (!isAdminContext()) {
+                const listWrap = document.getElementById('settingsListEditWrap');
+                if (listWrap) listWrap.style.display = 'none';
+            }
             const listToggle = document.getElementById('settingsListEditToggle');
             const argToolbar = document.getElementById('settingsArgToolbar');
             if (listToggle) listToggle.addEventListener('change', () => {
@@ -13538,6 +13687,10 @@
                     const row = e.target.closest('[data-row-id]');
                     if (!row || !row.dataset.rowId) return;
                     tvfPickModeActive = false;
+                    if (!canEditFieldStructure({ campo: row.dataset.campo })) {
+                        showNotification('Puoi modificare solo i campi custom (*)', 'info');
+                        return;
+                    }
                     try {
                         const res = await fetch(`${API_URL}/data/${encodeURIComponent(currentDetailSource)}?id=${encodeURIComponent(row.dataset.rowId)}`, { headers: getAuthHeaders() });
                         const rows = res.ok ? await res.json() : [];
