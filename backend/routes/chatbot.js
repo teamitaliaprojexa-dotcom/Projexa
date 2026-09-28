@@ -22,7 +22,7 @@ import mammoth from 'mammoth';
 import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getIntegration } from '../config/integrations.js';
-import { PROVIDERS, callApi, readJson } from './ai.js';
+import { PROVIDERS, callApi, readJson, withAiRetry, geminiFallbackModels } from './ai.js';
 
 const router = express.Router();
 
@@ -206,27 +206,26 @@ router.post('/', requireAuth, async (req, res) => {
     const model = chatbotModel();
     const contents = toContents(req.body.storia, messaggio);
 
-    let cacheName = await getContextCache(apiKey, man, model);
-    let risposta;
-    for (let attempt = 0; ; attempt++) {
+    // Sovraccarico o limite di Gemini: nuovi tentativi e modelli alternativi (withAiRetry).
+    // La cache di contesto vale solo per il modello principale: i modelli alternativi
+    // ricevono il manuale insieme alla domanda. Anche la creazione della cache rientra
+    // nei tentativi, perché può fallire per lo stesso sovraccarico.
+    const run = async (m) => {
+      if (m !== model) return generate(apiKey, m, contents, null, man);
+      let cacheName = await getContextCache(apiKey, man, model);
       try {
-        risposta = await generate(apiKey, model, contents, cacheName, man);
-        break;
+        return await generate(apiKey, model, contents, cacheName, man);
       } catch (e) {
         // Cache scaduta o cancellata da Google: si ricrea una volta
         if (cacheName && (e.upstreamStatus === 404 || e.upstreamStatus === 403 || /cache/i.test(e.message))) {
           ctxCache.name = null;
           cacheName = await getContextCache(apiKey, man, model);
-          if (attempt < 1) continue;
-        }
-        // Gemini sovraccarico: due nuovi tentativi
-        if ([500, 502, 503, 529].includes(e.upstreamStatus) && attempt < 2) {
-          await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
-          continue;
+          return generate(apiKey, model, contents, cacheName, man);
         }
         throw e;
       }
-    }
+    };
+    const { result: risposta } = await withAiRetry(run, { label: 'Gemini', model, fallbacks: geminiFallbackModels(), profile: 'interactive' });
     res.json({ risposta });
   } catch (error) {
     console.error('❌ CHATBOT:', error.message);

@@ -369,8 +369,12 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
     const apiKey = el[`${cfg.prefix}_api_key`];
     if (!apiKey) return res.status(428).json({ error: `${cfg.label} non collegato: attivalo da Impostazioni › AI`, code: 'AI_NOT_CONNECTED' });
 
-    const result = await ASK[req.params.provider](apiKey, prompt, atts);
-    res.json({ provider: req.params.provider, model: cfg.model, text: result.text, files: result.files || [], truncated: !!result.truncated });
+    const key = req.params.provider;
+    const { result, model } = await withAiRetry(
+      (m) => (m === cfg.model ? ASK[key](apiKey, prompt, atts) : askGemini(apiKey, prompt, m, atts)),
+      { label: cfg.label, model: cfg.model, fallbacks: key === 'gemini' ? geminiFallbackModels() : [], profile: 'interactive' }
+    );
+    res.json({ provider: key, model, text: result.text, files: result.files || [], truncated: !!result.truncated });
   } catch (error) {
     console.error(`❌ AI_CHAT (${req.params.provider}):`, error.message);
     res.status(error.status || 500).json({ error: error.message });
@@ -391,41 +395,62 @@ export async function askAiProvider(userId, providerName, prompt) {
   const el = await getIntegration(userId, cfg.provider);
   const apiKey = el[`${cfg.prefix}_api_key`];
   if (!apiKey) throw httpError(428, `${cfg.label} non collegato: attivalo da Impostazioni › AI`);
-  // Errori temporanei del fornitore (sovraccarico 503/529, 500, limite 429): nuovi tentativi
-  // per circa 2 minuti (i sovraccarichi di Gemini gratuito possono durare a lungo). Per Gemini,
-  // se resta sovraccarico, tentativi con modelli alternativi (GEMINI_FALLBACK_MODEL, separati
-  // da virgola), ognuno a sua volta con qualche nuovo tentativo.
-  // Limite di richieste (429, es. quota giornaliera del piano gratuito): inutile riprovare lo
-  // stesso modello, si passa subito ai modelli alternativi. Sovraccarico (5xx): si riprova.
-  const isQuota = (e) => e.status === 429 || e.upstreamStatus === 429;
-  const isOverload = (e) => [500, 502, 503, 529].includes(e.upstreamStatus) || /overloaded|high demand|sovraccaric/i.test(e.message || '');
-  const isTemporary = (e) => isQuota(e) || isOverload(e);
-  const waits = [5000, 10000, 20000, 30000, 45000];
+  const { result, model } = await withAiRetry(
+    (m) => (m === cfg.model ? ASK[key](apiKey, prompt) : askGemini(apiKey, prompt, m)),
+    { label: cfg.label, model: cfg.model, fallbacks: key === 'gemini' ? geminiFallbackModels() : [], profile: 'background' }
+  );
+  return { text: result.text, label: cfg.label, model };
+}
+
+// ==========================================
+// NUOVI TENTATIVI SU ERRORI TEMPORANEI DEL FORNITORE
+// ==========================================
+//
+// Usato da recap (askAiProvider), finestra AI (/:provider/chat) e chatbot (routes/chatbot.js).
+// Sovraccarico (500/502/503/529, "high demand"): si riprova lo stesso modello con attese
+// crescenti. Se resta sovraccarico, o in caso di limite di richieste (429, es. quota del
+// piano gratuito: inutile riprovare lo stesso modello), si passa ai modelli alternativi
+// (per Gemini GEMINI_FALLBACK_MODEL, separati da virgola), ognuno con qualche tentativo.
+// Profili: 'background' (recap: fino a ~2 minuti sul modello principale, nessuno aspetta a
+// schermo) e 'interactive' (chat e chatbot: l'utente aspetta, attese brevi).
+const RETRY_PROFILES = {
+  background: { waits: [5000, 10000, 20000, 30000, 45000], fallbackAttempts: 3, fallbackWait: 8000 },
+  interactive: { waits: [3000, 6000], fallbackAttempts: 2, fallbackWait: 4000 }
+};
+
+export const isQuotaError = (e) => e.status === 429 || e.upstreamStatus === 429;
+export const isOverloadError = (e) => [500, 502, 503, 529].includes(e.upstreamStatus) || /overloaded|high demand|sovraccaric/i.test(e.message || '');
+
+export function geminiFallbackModels() {
+  return String(process.env.GEMINI_FALLBACK_MODEL || 'gemini-flash-latest,gemini-3.6-flash,gemini-flash-lite-latest')
+    .split(',').map((m) => m.trim()).filter(Boolean);
+}
+
+// run(model): esegue la richiesta con il modello indicato. Restituisce { result, model }.
+export async function withAiRetry(run, { label, model, fallbacks = [], profile = 'background' }) {
+  const p = RETRY_PROFILES[profile] || RETRY_PROFILES.background;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   let lastError;
-  for (let attempt = 0; attempt <= waits.length; attempt++) {
+  for (let attempt = 0; attempt <= p.waits.length; attempt++) {
     try {
-      const result = await ASK[key](apiKey, prompt);
-      return { text: result.text, label: cfg.label, model: cfg.model };
+      return { result: await run(model), model };
     } catch (error) {
       lastError = error;
-      if (!isOverload(error) || attempt === waits.length) break;
-      console.warn(`[AI] ${cfg.label} temporaneamente non disponibile (${error.upstreamStatus || error.status}), nuovo tentativo tra ${waits[attempt] / 1000}s`);
-      await new Promise((r) => setTimeout(r, waits[attempt]));
+      if (!isOverloadError(error) || attempt === p.waits.length) break;
+      console.warn(`[AI] ${label} temporaneamente non disponibile (${error.upstreamStatus || error.status}), nuovo tentativo tra ${p.waits[attempt] / 1000}s`);
+      await sleep(p.waits[attempt]);
     }
   }
-  if (key === 'gemini' && isTemporary(lastError)) {
-    const fallbacks = String(process.env.GEMINI_FALLBACK_MODEL || 'gemini-flash-latest,gemini-3.6-flash,gemini-flash-lite-latest')
-      .split(',').map((m) => m.trim()).filter((m) => m && m !== cfg.model);
-    for (const fallback of fallbacks) {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        console.warn(`[AI] Gemini ${cfg.model} sovraccarico: ripiego su ${fallback} (tentativo ${attempt + 1}/3)`);
+  if (isQuotaError(lastError) || isOverloadError(lastError)) {
+    for (const fallback of fallbacks.filter((m) => m !== model)) {
+      for (let attempt = 0; attempt < p.fallbackAttempts; attempt++) {
+        console.warn(`[AI] ${label} ${model} non disponibile: ripiego su ${fallback} (tentativo ${attempt + 1}/${p.fallbackAttempts})`);
         try {
-          const result = await askGemini(apiKey, prompt, fallback);
-          return { text: result.text, label: cfg.label, model: fallback };
+          return { result: await run(fallback), model: fallback };
         } catch (e) {
           lastError = e;
-          if (!isOverload(e)) break; // quota esaurita o altro errore: modello successivo
-          await new Promise((r) => setTimeout(r, 8000));
+          if (!isOverloadError(e)) break; // quota esaurita o altro errore: modello successivo
+          await sleep(p.fallbackWait);
         }
       }
     }
