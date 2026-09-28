@@ -5373,7 +5373,8 @@ app.get('/api/settings/chatbot-enabled', requireAuth, async (req, res) => {
 });
 
 // Modalità di trascrizione scelta (campo settings "modalità Trascrizione", valore2) per
-// tenant/utente del contesto: 'Browser-leggero' | 'Browser-pesante' | 'Background' (default).
+// tenant/utente del contesto: 'Browser-leggero' | 'Browser-pesante' | 'Background' (default)
+// | 'Background-Veloce' (sul server con whisper.cpp: per la dashboard è come Background).
 app.get('/api/settings/transcription-mode', requireAuth, async (req, res) => {
   try {
     const r = await db.query(

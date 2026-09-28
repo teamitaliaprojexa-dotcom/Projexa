@@ -6328,7 +6328,7 @@
                     else showRecapReady(eventId, title, data.provider);
                 }
             } catch (e) {
-                showNotification('Recap non generato: ' + e.message, 'info');
+                showNotification('Recap non generato: ' + ((e && e.message) || String(e)), 'info');
             } finally {
                 manualRecapRunning.delete(eventId);
                 recapProgress.delete(eventId);

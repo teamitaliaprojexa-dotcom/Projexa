@@ -161,9 +161,22 @@ function splitText(text, maxChars) {
 export async function generateRecap(input, opts = {}) {
   try {
     return await runRecap(input, opts);
+  } catch (e) {
+    throw toError(e);
   } finally {
     await unloadModel();
   }
+}
+
+// Dal Web Worker WebLLM gli errori arrivano spesso come testo semplice (non Error): senza
+// questa conversione la dashboard mostrerebbe "undefined". L'originale resta in console.
+function toError(e) {
+  console.error('[RECAP BROWSER]', e);
+  if (e instanceof Error) return e;
+  const msg = typeof e === 'string' ? e : (e && (e.message || e.error)) || (() => { try { return JSON.stringify(e); } catch { return String(e); } })();
+  const err = new Error(String(msg || 'errore sconosciuto').replace(/^Error:\s*/, ''));
+  if (e && e.code) err.code = e.code;
+  return err;
 }
 
 async function runRecap(input, { mode, onProgress, onStatus } = {}) {

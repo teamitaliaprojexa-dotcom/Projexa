@@ -7,7 +7,8 @@
 // muti non vengono inviati. Ogni blocco viene SALVATO SUBITO nella tabella
 // rec_meeting_chunks (audio cifrato) e il server lo elabora in background:
 //   1. trascrizione con Whisper: più servizi (WHISPER_URLS) lavorano IN PARALLELO, un
-//      blocco ciascuno;
+//      blocco ciascuno; chi ha "modalità Trascrizione" = Background-Veloce usa whisper.cpp
+//      (WHISPER_CPP_URL);
 //   2. il testo del blocco (già formattato, cifrato) resta in coda finché i blocchi
 //      precedenti della stessa riunione non sono pronti: viene aggiunto a
 //      rec_meeting.trascrizione sempre nell'ordine giusto;
@@ -23,7 +24,7 @@
 import db from '../config/database.js';
 import { getPromptFor } from '../config/prompts.js';
 import { encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js';
-import { transcribeAudio, askAiProvider, whisperUrls, localRecapMode, askOllamaRecap, RECAP_CHUNK_PROMPT } from '../routes/ai.js';
+import { transcribeAudio, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, RECAP_CHUNK_PROMPT } from '../routes/ai.js';
 
 export const NOME_PROGRAMMA = 'meetingTranscription';
 
@@ -507,18 +508,43 @@ async function flushInOrder() {
 
 // Prenota fino a n blocchi da trascrivere (i più vecchi), marcandoli 'transcribing'.
 // SKIP LOCKED: con più server sullo stesso database nessun blocco viene preso due volte.
-async function claimAudioJobs(n) {
+// owners (facoltativo): { keys: ['tenant|utente', ...], include: true|false } limita i blocchi
+// a quelli di questi utenti (include) o a tutti gli altri (!include). Serve a separare i
+// blocchi "Background-Veloce" (whisper.cpp) da quelli standard.
+async function claimAudioJobs(n, owners = null) {
   if (n <= 0) return [];
+  const params = [n];
+  let filter = '';
+  if (owners && (owners.include || owners.keys.length)) {
+    params.push(owners.keys);
+    filter = `AND ${owners.include ? '' : 'NOT '}((tenant_id::text || '|' || user_id::text) = ANY($2::text[]))`;
+  }
   const r = await db.query(
     `UPDATE rec_meeting_chunks SET state = 'transcribing', next_try_at = NOW()
       WHERE id IN (SELECT id FROM rec_meeting_chunks
-                    WHERE kind = 'audio' AND state = 'pending' AND next_try_at <= NOW()
+                    WHERE kind = 'audio' AND state = 'pending' AND next_try_at <= NOW() ${filter}
                     ORDER BY seq LIMIT $1
                     FOR UPDATE SKIP LOCKED)
       RETURNING *`,
-    [n]
+    params
   );
   return r.rows.sort((a, b) => Number(a.seq) - Number(b.seq));
+}
+
+// Utenti con blocchi in attesa che hanno scelto "modalità Trascrizione" = Background-Veloce
+// (whisper.cpp). Il confronto si fa qui e non in SQL perché valore2 può essere cifrato
+// (la decifratura avviene in lettura). Restituisce le chiavi 'tenant|utente'.
+async function fastOwnerKeys() {
+  const r = await db.query(
+    `SELECT DISTINCT c.tenant_id::text AS t, c.user_id::text AS u, s.valore2
+       FROM rec_meeting_chunks c
+       JOIN settings s ON s.tenant_id = c.tenant_id AND s.user_id = c.user_id
+                      AND LOWER(BTRIM(s.campo)) LIKE '%modalit%trascrizione%'
+      WHERE c.kind = 'audio' AND c.state = 'pending'`
+  );
+  return [...new Set(r.rows
+    .filter((x) => String(x.valore2 || '').trim().toLowerCase() === 'background-veloce')
+    .map((x) => `${x.t}|${x.u}`))];
 }
 
 async function hasPendingJobs() {
@@ -584,7 +610,7 @@ const inflight = new Map();   // id blocco -> promise della trascrizione
 // arriva il primo blocco. Usa lo stesso controllo della coda (urlReady), quindi non ripete
 // la richiesta se un servizio risulta già pronto o è in corso di verifica.
 export function warmWhisperServices() {
-  for (const url of whisperUrls()) urlReady(url);
+  for (const url of [...whisperUrls(), ...whisperCppUrls()]) urlReady(url);
 }
 
 // Rete di sicurezza: blocchi rimasti 'transcribing' orfani (processo riavviato/morto a
@@ -622,16 +648,25 @@ async function runWorker() {
       await flushInOrder();
 
       const urls = whisperUrls();
-      if (urls.length) {
-        // Un blocco per ogni servizio Whisper libero e raggiungibile: lavorano in parallelo.
-        const free = urls.filter((u) => !busyUrls.has(u) && urlReady(u));
-        const jobs = await claimAudioJobs(free.length);
-        jobs.forEach((job, i) => {
+      const cppUrls = whisperCppUrls();
+      if (urls.length || cppUrls.length) {
+        const start = (jobs, free) => jobs.forEach((job, i) => {
           const url = free[i];
           busyUrls.add(url);
           const p = processAudioJob(job, url).finally(() => { busyUrls.delete(url); inflight.delete(job.id); });
           inflight.set(job.id, p);
         });
+        // Background-Veloce: i blocchi di chi l'ha scelto vanno a whisper.cpp. Se whisper.cpp
+        // non è configurato o non risponde, vanno ai servizi standard (nessun blocco resta fermo).
+        const cppOn = cppUrls.some((u) => busyUrls.has(u) || urlReady(u));
+        const fastKeys = cppOn ? await fastOwnerKeys() : [];
+        if (fastKeys.length) {
+          const freeCpp = cppUrls.filter((u) => !busyUrls.has(u) && urlReady(u));
+          start(await claimAudioJobs(freeCpp.length, { keys: fastKeys, include: true }), freeCpp);
+        }
+        // Un blocco per ogni servizio Whisper libero e raggiungibile: lavorano in parallelo.
+        const free = urls.filter((u) => !busyUrls.has(u) && urlReady(u));
+        start(await claimAudioJobs(free.length, { keys: fastKeys, include: false }), free);
       } else {
         // Nessun servizio configurato: i blocchi vengono chiusi con una nota (non restano in coda).
         const orphan = await claimAudioJobs(50);

@@ -559,7 +559,8 @@ export async function withAiRetry(run, { label, model, fallbacks = [], profile =
 //
 // La trascrizione NON usa le AI a pagamento/cloud dell'utente: la fa il servizio
 // "Projexa Whisper" (cartella whisper-service, Python + faster-whisper, gratuito),
-// in esecuzione sulla VM come servizio separato (systemd projexa-whisper@800N). Qui si inoltra il blocco WAV e si ricevono
+// in esecuzione sulla VM come servizio separato (systemd projexa-whisper@800N) oppure, per
+// chi ha scelto "Background-Veloce", whisper.cpp (WHISPER_CPP_URL). Qui si inoltra il blocco WAV e si ricevono
 // le frasi con l'orario di inizio. Configurazione: WHISPER_URL e WHISPER_API_KEY.
 // Restituisce { segments: [{ start, text }], provider }.
 // Indirizzi dei servizi Whisper: WHISPER_URLS (più servizi, separati da virgola, usati in
@@ -570,10 +571,52 @@ export function whisperUrls() {
   return [...new Set(list)];
 }
 
+// Modalità "Background-Veloce": whisper.cpp sulla VM (systemd projexa-whisper-cpp,
+// deploy/oracle/setup-whisper-cpp.sh), stesso modello large-v3-turbo ma motore ottimizzato
+// per CPU ARM. Indirizzi: WHISPER_CPP_URLS (più servizi, separati da virgola) oppure
+// WHISPER_CPP_URL. Solo su 127.0.0.1: il servizio non ha chiave.
+export function whisperCppUrls() {
+  const list = String(process.env.WHISPER_CPP_URLS || process.env.WHISPER_CPP_URL || '')
+    .split(',').map((u) => u.trim().replace(/\/+$/, '')).filter(Boolean);
+  return [...new Set(list)];
+}
+
+// Blocco WAV su whisper.cpp (endpoint /inference, risposta verbose_json con i segmenti).
+async function transcribeAudioCpp(base, audioBuffer, mime) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const form = new FormData();
+      form.append('file', new Blob([audioBuffer], { type: mime || 'audio/wav' }), 'blocco.wav');
+      form.append('response_format', 'verbose_json');
+      const data = await readJson(await callApi(`${base}/inference`, {
+        method: 'POST',
+        body: form,
+        timeoutMs: 600000
+      }, 'Whisper.cpp'), 'Whisper.cpp');
+      if (data.error) {
+        const err = httpError(502, `Whisper.cpp: ${String(data.error).slice(0, 200)}`);
+        err.upstreamStatus = 500;
+        throw err;
+      }
+      const segments = (Array.isArray(data.segments) ? data.segments : [])
+        .map((x) => ({ start: Number(x.start) || 0, end: Number(x.end) || Number(x.start) || 0, text: String(x.text || '').trim() }))
+        .filter((x) => x.text);
+      return { segments, provider: 'Whisper.cpp large-v3-turbo' };
+    } catch (error) {
+      const temporary = [429, 500, 502, 503, 504].includes(error.upstreamStatus) || (error.status === 502 && !error.upstreamStatus);
+      if (!temporary || attempt >= 3) throw error;
+      console.warn(`[AI] Trascrizione Whisper.cpp (${base}): errore temporaneo (${error.upstreamStatus || error.message}), nuovo tentativo ${attempt + 1}/3`);
+      await new Promise((r) => setTimeout(r, attempt === 1 ? 5000 : 15000));
+    }
+  }
+}
+
 // baseUrl: servizio da usare (la coda assegna ogni blocco a un servizio); di default il primo.
+// Se baseUrl è un servizio whisper.cpp (WHISPER_CPP_URLS) la richiesta segue il suo formato.
 // Restituisce { segments: [{ start, end, text }], provider }.
 export async function transcribeAudio(userId, audioBuffer, mime, baseUrl = null) {
   const base = String(baseUrl || whisperUrls()[0] || '').replace(/\/+$/, '');
+  if (base && whisperCppUrls().includes(base)) return transcribeAudioCpp(base, audioBuffer, mime);
   if (!base || !process.env.WHISPER_API_KEY) {
     // 428: il browser ferma subito la registrazione invece di riprovare.
     throw httpError(428, 'Servizio di trascrizione non configurato sul server (WHISPER_URLS / WHISPER_URL / WHISPER_API_KEY)');
