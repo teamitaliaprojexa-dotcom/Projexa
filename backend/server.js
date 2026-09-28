@@ -19,6 +19,7 @@ import cryptoMigrationRoutes from './routes/crypto-migration.js';
 import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
+import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
 import { kickTranscriptionWorker, recapProviderName } from './jobs/meetingTranscription.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
@@ -183,6 +184,8 @@ app.use('/api/jira', jiraRoutes);
 app.use('/api/integrazioni', integrazioniRoutes);
 // Editor dei prompt AI (prompt-editor.html): solo admin del tenant PROJEXA.
 app.use('/api/prompts', promptsRoutes);
+// Monitor della VM (vm-monitor.html): solo admin del tenant PROJEXA.
+app.use('/api/vm-monitor', vmMonitorRoutes);
 // Assistente "Projexa" della dashboard (Gemini + Manuale Utente): tutti gli utenti.
 app.use('/api/chatbot', chatbotRoutes);
 // Migrazione Crypto (database-viewer): riservata agli amministratori.
@@ -7479,6 +7482,8 @@ app.listen(PORT, () => {
   console.log(`\n✓ Health check: http://localhost:${PORT}/api/health\n`);
   // Riprende i blocchi di trascrizione rimasti in coda (es. dopo un riavvio del server)
   kickTranscriptionWorker();
+  // Monitor della VM (vm-monitor.html): storico di CPU/memoria/rete dall'avvio (solo Linux).
+  startVmSampler();
 });
 
 // Graceful shutdown

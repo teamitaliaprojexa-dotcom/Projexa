@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - Monitor VM</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --ink: #1f2937; --ink2: #4b5563; --muted: #6b7280; --line: #e5e7eb; --grid: #f0f1f3;
+            --surface: #ffffff; --bg: #f5f5f5;
+            --s1: #2563EB; --s2: #D97706;
+            --good: #047857; --warn: #B45309; --bad: #B91C1C;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; background: var(--bg); color: var(--ink); }
+        .container { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+        header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+        h1 { font-size: 1.6rem; color: #3B82F6; }
+        .sub { font-size: 0.85rem; color: var(--muted); margin-top: 0.2rem; }
+        .btn { padding: 0.55rem 1rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; background: #e5e7eb; color: var(--ink); }
+        .btn:hover { background: #d1d5db; }
+        .toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+        .seg { display: inline-flex; background: #e5e7eb; border-radius: 8px; padding: 3px; }
+        .seg button { border: none; background: transparent; padding: 0.35rem 0.9rem; border-radius: 6px; font-size: 0.85rem; font-weight: 600; color: var(--ink2); cursor: pointer; }
+        .seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+        .updated { font-size: 0.8rem; color: var(--muted); }
+        .card { background: var(--surface); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 1rem 1.1rem; }
+        .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.75rem; margin-bottom: 0.75rem; }
+        .tile .label { font-size: 0.78rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+        .tile .value { font-size: 1.7rem; font-weight: 700; margin-top: 0.2rem; font-variant-numeric: tabular-nums; }
+        .tile .detail { font-size: 0.8rem; color: var(--ink2); margin-top: 0.15rem; }
+        .meter { height: 6px; background: var(--grid); border-radius: 3px; margin-top: 0.5rem; overflow: hidden; }
+        .meter > span { display: block; height: 100%; background: var(--s1); border-radius: 3px; }
+        .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 0.75rem; margin-bottom: 0.75rem; }
+        .charts { grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); }
+        @media (max-width: 960px) { .charts { grid-template-columns: 1fr; } }
+        h2 { font-size: 0.95rem; color: var(--ink); margin-bottom: 0.2rem; }
+        .chart-sub { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.4rem; }
+        .chart { position: relative; }
+        .chart svg { display: block; width: 100%; height: 190px; }
+        .tip { position: absolute; pointer-events: none; background: #111827; color: #fff; font-size: 0.78rem; padding: 0.4rem 0.55rem; border-radius: 6px; white-space: nowrap; display: none; z-index: 2; font-variant-numeric: tabular-nums; }
+        .tip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+        .legend { display: flex; gap: 1rem; font-size: 0.8rem; color: var(--ink2); margin-bottom: 0.3rem; }
+        .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        th { text-align: left; font-size: 0.75rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.35rem 0.4rem; border-bottom: 1px solid var(--line); }
+        td { padding: 0.4rem; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+        td.num, th.num { text-align: right; }
+        .st { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600; font-size: 0.8rem; }
+        .st.good { color: var(--good); } .st.warn { color: var(--warn); } .st.bad { color: var(--bad); }
+        .idle { display: flex; gap: 0.8rem; align-items: flex-start; }
+        .idle i { font-size: 1.3rem; margin-top: 0.15rem; }
+        .idle p { font-size: 0.85rem; color: var(--ink2); margin-top: 0.25rem; line-height: 1.45; }
+        .denied { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+        .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; }
+        .empty { font-size: 0.85rem; color: var(--muted); padding: 2.5rem 0; text-align: center; }
+        @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } .tile .value { font-size: 1.4rem; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1><i class="fas fa-server"></i> Monitor VM</h1>
+                <div class="sub" id="hostInfo">&nbsp;</div>
+            </div>
+            <a class="btn" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
+        </header>
+
+        <div id="content" style="display: none;">
+            <div class="toolbar">
+                <div class="seg" id="rangeSel" role="group" aria-label="Intervallo dei grafici">
+                    <button type="button" data-range="1h" class="on">1 ora</button>
+                    <button type="button" data-range="6h">6 ore</button>
+                    <button type="button" data-range="24h">24 ore</button>
+                </div>
+                <span class="updated" id="updated"></span>
+            </div>
+
+            <div class="tiles" id="tiles"></div>
+
+            <div class="card" style="margin-bottom: 0.75rem;" id="idleCard"></div>
+
+            <div class="grid2 charts">
+                <div class="card">
+                    <h2>CPU</h2>
+                    <div class="chart-sub">% di utilizzo di tutti i core</div>
+                    <div class="chart" id="chartCpu"></div>
+                </div>
+                <div class="card">
+                    <h2>Memoria</h2>
+                    <div class="chart-sub">% di RAM in uso (esclusa la cache, che il sistema libera quando serve)</div>
+                    <div class="chart" id="chartMem"></div>
+                </div>
+                <div class="card">
+                    <h2>Rete</h2>
+                    <div class="legend"><span><span class="sw" style="background: var(--s1)"></span>Ricevuti</span><span><span class="sw" style="background: var(--s2)"></span>Inviati</span></div>
+                    <div class="chart" id="chartNet"></div>
+                </div>
+                <div class="card">
+                    <h2>Swap</h2>
+                    <div class="chart-sub">% del file di swap in uso (memoria spostata su disco)</div>
+                    <div class="chart" id="chartSwap"></div>
+                </div>
+            </div>
+
+            <div class="grid2">
+                <div class="card">
+                    <h2 style="margin-bottom: 0.5rem;">Processi (per RAM)</h2>
+                    <table><thead><tr><th>Processo</th><th class="num">RAM</th><th class="num">CPU</th></tr></thead><tbody id="procBody"></tbody></table>
+                    <div class="chart-sub" style="margin-top: 0.5rem;">CPU degli ultimi 15 s, su un core (100% = un core pieno, la VM ne ha due).</div>
+                </div>
+                <div class="card">
+                    <h2 style="margin-bottom: 0.5rem;">Servizi</h2>
+                    <table><tbody id="svcBody"></tbody></table>
+                </div>
+                <div class="card">
+                    <h2 style="margin-bottom: 0.5rem;">Database</h2>
+                    <table><thead><tr><th>Database</th><th class="num">Dimensione</th></tr></thead><tbody id="dbBody"></tbody></table>
+                    <h2 style="margin: 1rem 0 0.5rem;">Coda di trascrizione</h2>
+                    <table><tbody id="queueBody"></tbody></table>
+                </div>
+            </div>
+        </div>
+
+        <div id="deniedCard" class="card denied" style="display: none;">
+            <div><i class="fas fa-lock"></i></div>
+            <div id="deniedMsg">Pagina non disponibile.</div>
+        </div>
+    </div>
+
+    <script>
+        // Stesso criterio delle altre pagine: l'API è sulla stessa origine.
+        const API_URL = location.origin + '/api';
+        const REFRESH_MS = 15000;
+        const $ = (id) => document.getElementById(id);
+        let range = '1h';
+        let last = null;
+        let timer = null;
+
+        if (!localStorage.getItem('authToken')) window.location.href = 'index.html';
+
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        function bytes(n) {
+            if (n == null) return '–';
+            const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let i = 0; let v = Number(n);
+            while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+            return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1).replace('.', ',')} ${u[i]}`;
+        }
+        const rate = (n) => `${bytes(n)}/s`;
+        const pct = (n, d = 1) => n == null ? '–' : `${Number(n).toFixed(d).replace('.', ',')}%`;
+        const hhmm = (t) => new Date(t).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+        function duration(sec) {
+            const d = Math.floor(sec / 86400); const h = Math.floor((sec % 86400) / 3600); const m = Math.floor((sec % 3600) / 60);
+            return d ? `${d} g ${h} h` : h ? `${h} h ${m} min` : `${m} min`;
+        }
+
+        // ------------------------------------------------------------------
+        // Grafico a linee in SVG: un asse, griglia leggera, crosshair con tooltip.
+        // series: [{ key, label, color }]; fmt formatta i valori; max fisso (100 per le %)
+        // oppure calcolato dai dati.
+        // ------------------------------------------------------------------
+        function lineChart(el, points, series, { fmt, max = null }) {
+            if (!points.length) {
+                el.innerHTML = '<div class="empty">Dati in raccolta: il primo punto arriva entro 15 secondi dall\'avvio del server.</div>';
+                return;
+            }
+            const W = Math.max(280, el.clientWidth);
+            const H = 190; const L = 44; const R = 8; const T = 8; const B = 22;
+            const top = max ?? niceMax(Math.max(...points.flatMap((p) => series.map((s) => p[s.key]))));
+            const t0 = points[0].t; const t1 = points[points.length - 1].t;
+            const x = (t) => L + (t1 === t0 ? (W - L - R) : (t - t0) / (t1 - t0) * (W - L - R));
+            const y = (v) => T + (1 - Math.min(v, top) / top) * (H - T - B);
+            let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(series.map((s) => s.label).join(', '))}">`;
+            for (let i = 0; i <= 4; i++) {
+                const v = top * i / 4; const yy = y(v);
+                svg += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" stroke="var(--grid)" stroke-width="1"/>`;
+                svg += `<text x="${L - 6}" y="${yy + 4}" text-anchor="end" font-size="10" fill="var(--muted)">${esc(fmt(v, true))}</text>`;
+            }
+            const ticks = 4;
+            for (let i = 0; i <= ticks; i++) {
+                const t = t0 + (t1 - t0) * i / ticks;
+                svg += `<text x="${x(t)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === ticks ? 'end' : 'middle'}" font-size="10" fill="var(--muted)">${hhmm(t)}</text>`;
+            }
+            for (const s of series) {
+                const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p[s.key]).toFixed(1)}`).join('');
+                if (series.length === 1) {
+                    svg += `<path d="${d}L${x(t1)},${y(0)}L${x(t0)},${y(0)}Z" fill="${s.color}" opacity="0.08"/>`;
+                }
+                svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+            }
+            svg += `<line class="xh" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3" style="display:none"/>`;
+            svg += series.map((s) => `<circle class="dot" data-k="${s.key}" r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2" style="display:none"/>`).join('');
+            svg += `<rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/></svg><div class="tip"></div>`;
+            el.innerHTML = svg;
+
+            const svgEl = el.querySelector('svg'); const tip = el.querySelector('.tip');
+            const xh = el.querySelector('.xh'); const dots = el.querySelectorAll('.dot');
+            svgEl.addEventListener('mousemove', (ev) => {
+                const r = svgEl.getBoundingClientRect();
+                const mx = (ev.clientX - r.left) * (W / r.width);
+                let best = 0;
+                for (let i = 1; i < points.length; i++) if (Math.abs(x(points[i].t) - mx) < Math.abs(x(points[best].t) - mx)) best = i;
+                const p = points[best]; const px = x(p.t);
+                xh.setAttribute('x1', px); xh.setAttribute('x2', px); xh.style.display = '';
+                dots.forEach((c) => { c.setAttribute('cx', px); c.setAttribute('cy', y(p[c.dataset.k])); c.style.display = ''; });
+                tip.innerHTML = `<div style="opacity:.75;margin-bottom:2px">${new Date(p.t).toLocaleTimeString('it-IT')}</div>` +
+                    series.map((s) => `<div><span class="sw" style="background:${s.color}"></span>${esc(s.label)}: <b>${esc(fmt(p[s.key]))}</b></div>`).join('');
+                tip.style.display = 'block';
+                const left = px * (r.width / W);
+                tip.style.left = `${Math.min(left + 12, r.width - tip.offsetWidth - 4)}px`;
+                tip.style.top = '6px';
+            });
+            svgEl.addEventListener('mouseleave', () => { tip.style.display = 'none'; xh.style.display = 'none'; dots.forEach((c) => { c.style.display = 'none'; }); });
+        }
+        function niceMax(v) {
+            if (!(v > 0)) return 1;
+            const p = Math.pow(10, Math.floor(Math.log10(v)));
+            for (const m of [1, 2, 2.5, 5, 10]) if (v <= m * p) return m * p;
+            return 10 * p;
+        }
+
+        // ------------------------------------------------------------------
+        function stateBadge(state) {
+            if (state === 'active') return '<span class="st good"><i class="fas fa-circle-check"></i> Attivo</span>';
+            if (state === 'activating' || state === 'reloading') return '<span class="st warn"><i class="fas fa-circle-half-stroke"></i> In avvio</span>';
+            if (state === 'inactive') return '<span class="st warn"><i class="fas fa-circle-pause"></i> Fermo</span>';
+            return `<span class="st bad"><i class="fas fa-circle-xmark"></i> ${esc(state === 'failed' ? 'Errore' : state)}</span>`;
+        }
+
+        function tile(label, value, detail, meter) {
+            return `<div class="card tile"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div>` +
+                (detail ? `<div class="detail">${esc(detail)}</div>` : '') +
+                (meter != null ? `<div class="meter"><span style="width:${Math.max(0, Math.min(100, meter)).toFixed(1)}%"></span></div>` : '') + '</div>';
+        }
+
+        function render(d) {
+            $('hostInfo').textContent = `${d.host} · ${d.cpus} core · acceso da ${duration(d.uptime)}`;
+            const m = d.memory; const used = m.total - m.available;
+            const disk = d.disk;
+            $('tiles').innerHTML = [
+                tile('CPU', d.now ? pct(d.now.cpu) : '–', `carico medio ${d.load.map((v) => v.toFixed(2).replace('.', ',')).join(' · ')}`, d.now ? d.now.cpu : null),
+                tile('Memoria', bytes(used), `di ${bytes(m.total)} · cache ${bytes(m.cache)}`, m.total ? 100 * used / m.total : null),
+                tile('Swap', bytes(m.swapUsed), `di ${bytes(m.swapTotal)}`, m.swapTotal ? 100 * m.swapUsed / m.swapTotal : null),
+                tile('Disco', disk ? bytes(disk.used) : '–', disk ? `di ${bytes(disk.total)} · liberi ${bytes(disk.free)}` : '', disk ? 100 * disk.used / disk.total : null),
+                tile('Rete', d.now ? rate(d.now.rx + d.now.tx) : '–', d.now ? `↓ ${rate(d.now.rx)} · ↑ ${rate(d.now.tx)}` : '', null)
+            ].join('');
+
+            // Rischio di recupero Oracle (Always Free): CPU p95, rete e memoria tutte sotto il 20%.
+            const idle = d.idle;
+            if (idle.cpuP95 == null || idle.memNow == null) {
+                $('idleCard').innerHTML = '<div class="idle"><i class="fas fa-hourglass-half" style="color: var(--muted)"></i><div><h2>Inattività Oracle Always Free</h2><p>Dati in raccolta.</p></div></div>';
+            } else {
+            const low = idle.cpuP95 != null && idle.cpuP95 < idle.threshold && idle.memNow != null && idle.memNow < idle.threshold;
+            const icon = low ? '<i class="fas fa-triangle-exclamation" style="color: var(--warn)"></i>' : '<i class="fas fa-circle-check" style="color: var(--good)"></i>';
+            $('idleCard').innerHTML = `<div class="idle">${icon}<div><h2>Inattività Oracle Always Free: ${low ? 'attenzione' : 'nessun rischio'}</h2>` +
+                `<p>Oracle può recuperare la VM se per 7 giorni CPU (95° percentile), rete e memoria restano tutte sotto il ${idle.threshold}%. ` +
+                `Ora: CPU 95° percentile <b>${pct(idle.cpuP95)}</b>, memoria <b>${pct(idle.memNow)}</b>` +
+                ` (su ${idle.hours < 1 ? Math.round(idle.hours * 60) + ' minuti' : idle.hours.toFixed(1).replace('.', ',') + ' ore'} di dati: lo storico riparte a ogni riavvio del backend). ` +
+                (low ? 'Basta che uno dei tre valori superi la soglia per evitare il recupero.'
+                    : `${idle.memNow >= idle.threshold ? 'La memoria' : 'La CPU'} sopra la soglia basta a evitare il recupero.`) + '</p></div></div>';
+            }
+
+            const pts = d.series;
+            lineChart($('chartCpu'), pts, [{ key: 'cpu', label: 'CPU', color: 'var(--s1)' }], { fmt: (v, axis) => pct(v, axis ? 0 : 1), max: 100 });
+            lineChart($('chartMem'), pts, [{ key: 'mem', label: 'Memoria', color: 'var(--s1)' }], { fmt: (v, axis) => pct(v, axis ? 0 : 1), max: 100 });
+            lineChart($('chartNet'), pts, [{ key: 'rx', label: 'Ricevuti', color: 'var(--s1)' }, { key: 'tx', label: 'Inviati', color: 'var(--s2)' }], { fmt: (v) => rate(v) });
+            lineChart($('chartSwap'), pts, [{ key: 'swap', label: 'Swap', color: 'var(--s1)' }], { fmt: (v, axis) => pct(v, axis ? 0 : 1), max: 100 });
+
+            $('procBody').innerHTML = d.processes.map((p) => `<tr><td>${esc(p.name)}${p.count > 1 ? ` <span style="color:var(--muted)">×${p.count}</span>` : ''}</td><td class="num">${bytes(p.rss)}</td><td class="num">${pct(p.cpu)}</td></tr>`).join('')
+                || '<tr><td colspan="3" style="color:var(--muted)">Dati in raccolta…</td></tr>';
+            $('svcBody').innerHTML = d.services.map((s) => `<tr><td>${esc(s.label)}</td><td class="num">${stateBadge(s.state)}</td></tr>`).join('');
+            $('dbBody').innerHTML = d.databases.map((x) => `<tr><td>${esc(x.name)}</td><td class="num">${bytes(x.bytes)}</td></tr>`).join('')
+                || '<tr><td colspan="2" style="color:var(--muted)">Non disponibile</td></tr>';
+            const q = d.queue;
+            $('queueBody').innerHTML = q
+                ? `<tr><td>Blocchi in attesa</td><td class="num">${q.pending}</td></tr><tr><td>In trascrizione</td><td class="num">${q.transcribing}</td></tr><tr><td>Recap in coda</td><td class="num">${q.recap}</td></tr>`
+                : '<tr><td style="color:var(--muted)">Non disponibile</td></tr>';
+            $('updated').textContent = `Aggiornato alle ${new Date().toLocaleTimeString('it-IT')} · ogni 15 s`;
+        }
+
+        async function load() {
+            try {
+                const r = await fetch(`${API_URL}/vm-monitor/status?range=${range}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` } });
+                const d = await r.json().catch(() => ({}));
+                if (r.status === 401) { window.location.href = 'index.html'; return; }
+                if (!r.ok) {
+                    $('content').style.display = 'none';
+                    $('deniedCard').style.display = '';
+                    $('deniedMsg').textContent = d.error || `Errore ${r.status}`;
+                    if (r.status === 403) { clearInterval(timer); timer = null; }
+                    return;
+                }
+                $('deniedCard').style.display = 'none';
+                $('content').style.display = '';
+                last = d;
+                render(d);
+            } catch (e) {
+                $('updated').textContent = `Aggiornamento non riuscito (${e.message}): nuovo tentativo tra 15 s`;
+            }
+        }
+
+        $('rangeSel').addEventListener('click', (ev) => {
+            const b = ev.target.closest('button[data-range]');
+            if (!b || b.dataset.range === range) return;
+            range = b.dataset.range;
+            $('rangeSel').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+            load();
+        });
+        let resizeT = null;
+        window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (last) render(last); }, 150); });
+        // In una scheda nascosta non si aggiorna (nessun carico inutile).
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+        load();
+        timer = setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+    </script>
+</body>
+</html>
