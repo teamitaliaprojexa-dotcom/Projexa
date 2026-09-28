@@ -1,0 +1,1579 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reporting - Projexa</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Esportazione Excel (stessa libreria già usata dalla dashboard) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Grafici (stessa libreria già usata dalla dashboard per il KPI Fatturato) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --primary: #3B82F6;
+            --primary-dark: #1E40AF;
+            --secondary: #10B981;
+            --danger: #EF4444;
+            --dark: #1F2937;
+            --light: #F9FAFB;
+            --border: #E5E7EB;
+            --text-muted: #6B7280;
+            --radius: 8px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            color: var(--dark);
+            line-height: 1.6;
+            background: var(--light);
+            padding: 1.5rem;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            background: white;
+            padding: 0.75rem;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+        }
+        .header h1 { font-size: 1.2rem; display: flex; align-items: center; gap: 0.5rem; }
+        .header h1 i { color: var(--primary); }
+
+        .btn {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            padding: 0.5rem 1rem; border-radius: var(--radius); font-size: 0.9rem;
+            border: 1px solid var(--border); background: white; color: var(--dark);
+            cursor: pointer; text-decoration: none;
+        }
+        .btn:hover { background: #F3F4F6; }
+
+        .panel {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 2rem;
+        }
+        .state { text-align: center; color: var(--text-muted); padding: 3rem 1rem; }
+        .state i { font-size: 2.5rem; opacity: 0.35; margin-bottom: 1rem; display: block; }
+
+        /* Layout: barra di sinistra + area principale */
+        .layout { display: flex; gap: 1rem; align-items: flex-start; }
+        .side {
+            flex: 0 0 270px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 0.5rem;
+            max-height: calc(100vh - 7rem);
+            overflow-y: auto;
+        }
+        .layout .panel { flex: 1 1 auto; min-width: 0; }
+        .side-btn {
+            width: 100%;
+            display: flex; align-items: center; gap: 0.5rem;
+            padding: 0.55rem 0.7rem;
+            border: none; border-radius: 6px;
+            background: transparent; color: var(--dark);
+            font: inherit; font-weight: 600; font-size: 0.92rem;
+            cursor: pointer; text-align: left;
+        }
+        .side-btn:hover { background: #F3F4F6; }
+        .side-btn.open { background: #EFF6FF; color: var(--primary-dark); }
+        .side-btn + .field-list + .side-btn, .field-list + .side-btn { margin-top: 0.25rem; }
+        .side-btn .arrow { margin-left: auto; font-size: 0.65rem; transition: transform 0.15s; }
+        .side-btn.open .arrow { transform: rotate(90deg); }
+        /* Elenco dei campi aperto sotto "Clienti": ogni campo è un riquadro con il suo bordo */
+        .field-list {
+            list-style: none;
+            display: flex; flex-direction: column; gap: 0.3rem;
+            padding: 0.35rem 0.25rem 0.5rem 0.9rem;
+        }
+        .field-list[hidden] { display: none; }
+        .field-list li {
+            display: flex; align-items: center; gap: 0.4rem;
+            padding: 0.3rem 0.6rem;
+            font-size: 0.85rem;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+        .field-list li:hover { border-color: var(--primary); background: #F8FAFF; }
+        /* Messaggi e legenda: senza bordo */
+        .field-list li.muted, .field-list li.legend {
+            border: none; background: transparent;
+        }
+        /* Nodo Padre (es. Fatturazione): riquadro come i campi, evidenziato, con i suoi
+           campi rientrati sotto */
+        .field-list li.group {
+            font-weight: 600; color: var(--dark);
+            background: #F3F4F6;
+        }
+        .field-list li.group i { color: var(--text-muted); font-size: 0.8rem; }
+        .field-list li.group:hover { border-color: var(--border); background: #F3F4F6; }
+        .field-list li.child { margin-left: 0.9rem; }
+        .field-list li.muted { color: var(--text-muted); font-style: italic; }
+        .custom-dot {
+            width: 7px; height: 7px; border-radius: 50%; background: var(--secondary);
+            flex: 0 0 auto;
+        }
+        .field-list li.legend { font-size: 0.72rem; color: var(--text-muted); padding: 0 0.2rem 0.1rem; }
+
+        /* Campo già aggiunto come colonna */
+        .field-list li.field-item { cursor: pointer; }
+        .field-list li.field-item.selected { border-color: var(--primary); background: #EFF6FF; color: var(--primary-dark); }
+        .field-list li.field-item.selected::after { content: '\2713'; margin-left: auto; font-size: 0.8rem; }
+
+        /* Griglia: riga di intestazione colonne + righe dei dati */
+        .layout .panel { padding: 1rem; overflow: hidden; }
+        .grid-toolbar { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.6rem; font-size: 0.82rem; color: var(--text-muted); }
+        .grid-toolbar span { flex: 1; }
+        .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
+        /* Griglia scorrevole in orizzontale e in verticale quando supera lo spazio disponibile;
+           l'intestazione resta fissa in alto durante lo scorrimento verticale. */
+        .grid-wrap {
+            overflow: auto;
+            max-width: 100%;
+            max-height: calc(100vh - 11rem);
+            border: 1px solid var(--border); border-radius: 8px;
+        }
+        .report-grid th[draggable="true"] { cursor: grab; user-select: none; }
+        .report-grid th.dragging { opacity: 0.5; }
+        .report-grid th.drop-before { box-shadow: inset 3px 0 0 #FDE68A; }
+        .report-grid th.drop-after { box-shadow: inset -3px 0 0 #FDE68A; }
+        .report-grid { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; font-size: 0.85rem; }
+        .report-grid th {
+            position: sticky; top: 0; z-index: 1;
+            background: linear-gradient(135deg, #6B7A99, #8B9BBB); color: white;
+            font-weight: 600; text-align: left; white-space: nowrap;
+            padding: 0.55rem 0.7rem; border-right: 1px solid rgba(255,255,255,0.25);
+        }
+        .report-grid th:last-child { border-right: none; }
+        .report-grid th.placeholder-col { font-style: italic; font-weight: 500; opacity: 0.85; }
+        .th-label { display: inline-block; max-width: 240px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+        /* Etichetta dell'area della colonna: C = clienti, P = progetti */
+        .th-area {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 16px; height: 16px; border-radius: 4px; margin-right: 0.35rem;
+            font-size: 0.65rem; font-weight: 700; vertical-align: middle;
+            background: #DBEAFE; color: #1E40AF;
+        }
+        /* Colori delle sigle per area (C clienti, P progetti, tabelle dettaglio) */
+        .report-grid th.col-projects .th-area { background: #D1FAE5; color: #065F46; }
+        .report-grid th.col-quotazioni .th-area, .report-grid th.col-fatturazione .th-area, .report-grid th.col-costi .th-area { background: #FEF3C7; color: #92400E; }
+        .report-grid th.col-contatti .th-area, .report-grid th.col-licenze .th-area { background: #EDE9FE; color: #5B21B6; }
+        .report-grid th.col-issue .th-area, .report-grid th.col-tktjira .th-area, .report-grid th.col-todo .th-area { background: #FCE7F3; color: #9D174D; }
+        .th-area { width: auto; min-width: 16px; padding: 0 3px; }
+        .grid-toolbar .warn { color: #B45309; }
+        /* Riga dei filtri sotto le intestazioni (resta fissa con l'intestazione) */
+        .report-grid tr.filter-row th {
+            top: 38px; background: #E8ECF3; padding: 0.3rem 0.4rem; border-right: 1px solid #D6DCE6;
+        }
+        .col-filter {
+            width: 100%; min-width: 90px; padding: 0.25rem 0.45rem; font-size: 0.78rem;
+            border: 1px solid #CBD2DD; border-radius: 5px; background: white; color: var(--dark);
+        }
+        .col-filter:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
+        .col-filter:not(:placeholder-shown) { border-color: var(--primary); background: #F8FAFF; }
+        .filter-wrap { display: flex; align-items: center; gap: 4px; }
+        .val-filter-btn {
+            flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px;
+            height: 24px; padding: 0 6px; border: 1px solid #CBD2DD; border-radius: 5px;
+            background: white; color: var(--text-muted); cursor: pointer; font-size: 0.7rem;
+        }
+        .val-filter-btn:hover { border-color: var(--primary); color: var(--primary); }
+        .val-filter-btn.active { background: var(--primary); border-color: var(--primary); color: white; }
+        .val-filter-btn span { font-weight: 700; }
+
+        /* Finestra della selezione multipla dei valori */
+        .value-popup {
+            position: fixed; z-index: 50; width: 260px; max-height: 360px;
+            display: flex; flex-direction: column; gap: 0.35rem; padding: 0.6rem;
+            background: white; border: 1px solid var(--border); border-radius: 8px;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18); font-size: 0.82rem;
+        }
+        .vp-head { font-weight: 600; }
+        .vp-search { padding: 0.3rem 0.5rem; border: 1px solid #CBD2DD; border-radius: 5px; font-size: 0.8rem; }
+        .vp-list { overflow-y: auto; flex: 1 1 auto; min-height: 40px; border-top: 1px solid var(--border); padding-top: 0.25rem; }
+        .vp-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0.25rem; border-radius: 4px; cursor: pointer; }
+        .vp-item:hover { background: #F3F4F6; }
+        .vp-item span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .vp-item small { color: var(--text-muted); }
+        .vp-item[hidden] { display: none; }
+        .vp-empty { color: var(--text-muted); padding: 0.4rem; font-style: italic; }
+        .vp-foot { display: flex; justify-content: space-between; gap: 0.5rem; border-top: 1px solid var(--border); padding-top: 0.4rem; }
+
+        /* Freccia di ordinamento: chiara se la colonna non è ordinata, piena se lo è */
+        .th-sort {
+            margin-left: 0.35rem; border: none; background: transparent; color: white;
+            opacity: 0.45; cursor: pointer; font-size: 0.7rem; padding: 0 2px; vertical-align: middle;
+        }
+        .th-sort:hover { opacity: 0.85; }
+        .th-sort.active { opacity: 1; color: #FDE68A; }
+        .th-remove {
+            margin-left: 0.5rem; border: none; background: rgba(255,255,255,0.2); color: white;
+            width: 18px; height: 18px; border-radius: 50%; cursor: pointer; line-height: 1; font-size: 0.8rem;
+        }
+        .th-remove:hover { background: rgba(255,255,255,0.4); }
+        .report-grid td {
+            padding: 0.45rem 0.7rem; border-bottom: 1px solid var(--border); border-right: 1px solid #F1F2F4;
+            max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .report-grid tbody tr:nth-child(even) td { background: #FAFBFC; }
+        .report-grid tbody tr:hover td { background: #EFF6FF; }
+        .report-grid td.grid-hint { white-space: normal; max-width: none; color: var(--text-muted); text-align: center; padding: 2.5rem 1rem; }
+        .report-grid td.grid-hint i { margin-right: 0.4rem; }
+
+        /* Schede Tabella / Grafici */
+        .tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border); margin-bottom: 0.8rem; }
+        .tabs[hidden] { display: none; }
+        .tab {
+            display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem;
+            border: none; border-bottom: 3px solid transparent; background: transparent;
+            font: inherit; font-weight: 600; font-size: 0.9rem; color: var(--text-muted); cursor: pointer;
+        }
+        .tab:hover { color: var(--dark); }
+        .tab.active { color: var(--primary-dark); border-bottom-color: var(--primary); }
+        .tab-count:not(:empty) { background: #DBEAFE; color: #1E40AF; border-radius: 999px; padding: 0 0.45rem; font-size: 0.72rem; }
+
+        /* Grafici */
+        .charts-toolbar { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.8rem; font-size: 0.82rem; color: var(--text-muted); }
+        .charts-toolbar span { flex: 1; }
+        .charts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 1rem; }
+        .chart-card { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; background: white; display: flex; flex-direction: column; min-width: 0; }
+        .chart-card.wide { grid-column: 1 / -1; }
+        .chart-head { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem; }
+        .chart-head h3 { flex: 1; font-size: 0.92rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .chart-head button { border: none; background: transparent; color: var(--text-muted); cursor: pointer; padding: 2px 5px; border-radius: 4px; }
+        .chart-head button:hover { background: #F3F4F6; color: var(--dark); }
+        .chart-box { position: relative; height: 300px; display: flex; flex-direction: column; }
+        .chart-canvas-wrap { position: relative; flex: 1 1 auto; min-height: 0; }
+        .chart-total { flex: 0 0 auto; text-align: center; font-size: 0.85rem; color: var(--dark); padding-top: 0.35rem; }
+        .chart-total strong { color: var(--primary-dark); font-size: 0.95rem; }
+        .chart-total-parts { display: block; font-size: 0.75rem; color: var(--text-muted); }
+        .chart-msg { color: var(--text-muted); text-align: center; padding: 3rem 1rem; font-size: 0.85rem; }
+        .kpi-box { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 300px; }
+        .kpi-value { font-size: 2.6rem; font-weight: 700; color: var(--primary-dark); }
+        .kpi-label { color: var(--text-muted); font-size: 0.85rem; }
+
+        /* Grafico a schermo intero */
+        .chart-fullscreen {
+            position: fixed; inset: 0; z-index: 70; background: rgba(15, 23, 42, 0.55);
+            display: flex; flex-direction: column; padding: 2vh 2vw;
+        }
+        .chart-fullscreen .cf-head {
+            display: flex; align-items: center; gap: 0.75rem; background: white;
+            padding: 0.7rem 1rem; border-radius: 10px 10px 0 0; border-bottom: 1px solid var(--border);
+        }
+        .chart-fullscreen .cf-head h3 { flex: 1; font-size: 1.05rem; }
+        .chart-fullscreen .cf-box { position: relative; flex: 1 1 auto; background: white; border-radius: 0 0 10px 10px; padding: 1rem; min-height: 0; display: flex; flex-direction: column; }
+        .chart-fullscreen .chart-total { font-size: 1rem; }
+        .chart-fullscreen .cf-box .kpi-box { height: 100%; }
+        .chart-fullscreen .cf-box .kpi-value { font-size: 5rem; }
+
+        /* Finestra di configurazione del grafico */
+        .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+        .modal-backdrop[hidden] { display: none; }
+        .modal { background: white; border-radius: 10px; width: 560px; max-width: 100%; max-height: 92vh; overflow-y: auto; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.8rem; }
+        .modal h2 { font-size: 1.1rem; }
+        .fld { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; font-weight: 600; color: var(--dark); }
+        .fld input, .fld select { font: inherit; font-weight: 400; padding: 0.4rem 0.55rem; border: 1px solid #CBD2DD; border-radius: 6px; }
+        .chart-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 0.4rem; }
+        .chart-type {
+            display: flex; flex-direction: column; align-items: center; gap: 0.3rem; padding: 0.55rem 0.3rem;
+            border: 1px solid var(--border); border-radius: 8px; background: white; cursor: pointer;
+            font: inherit; font-size: 0.75rem; font-weight: 500; color: var(--dark);
+        }
+        .chart-type i { font-size: 1.2rem; color: var(--text-muted); }
+        .chart-type:hover { border-color: var(--primary); }
+        .chart-type.selected { border-color: var(--primary); background: #EFF6FF; color: var(--primary-dark); }
+        .chart-type.selected i { color: var(--primary); }
+        .val-row { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.35rem; }
+        .val-row select { flex: 1 1 auto; min-width: 0; }
+        .val-row select.agg { flex: 0 0 130px; }
+        .val-row button { border: none; background: transparent; color: var(--text-muted); cursor: pointer; }
+        .val-row button:hover { color: var(--danger); }
+        .cfg-hint { font-size: 0.75rem; color: var(--text-muted); }
+        /* Caselle Attivi / Non attivi in cima all'elenco dei campi di un'area */
+        .field-list li.status-row {
+            border: none; background: #F3F4F6; gap: 0.9rem; font-size: 0.8rem; padding: 0.35rem 0.6rem;
+        }
+        .field-list li.status-row:hover { background: #F3F4F6; border: none; }
+        .status-row label { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+        .cfg-flags { display: flex; flex-wrap: wrap; gap: 1.2rem; font-weight: 400; }
+        .cfg-flags label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+        .cfg-flags label[hidden] { display: none; }
+        .modal-foot { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+        /* Intestazione: azioni del report a destra */
+        .header-actions { margin-left: auto; display: flex; gap: 0.5rem; }
+        .header-actions[hidden] { display: none; }
+        .btn-primary { background: var(--primary); border-color: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .report-name { font-size: 0.9rem; font-weight: 500; color: var(--text-muted); margin-left: 0.3rem; }
+        .report-name:not(:empty)::before { content: '› '; }
+
+        /* I miei Report: voce del report + cestino */
+        .field-list li.report-item { cursor: pointer; }
+        .field-list li.report-item.current { border-color: var(--primary); background: #EFF6FF; color: var(--primary-dark); }
+        .report-item span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .report-del { border: none; background: transparent; color: var(--text-muted); cursor: pointer; padding: 0 2px; }
+        .report-del:hover { color: var(--danger); }
+
+        @media (max-width: 760px) {
+            .header { flex-wrap: wrap; }
+            .layout { flex-direction: column; }
+            .side { flex-basis: auto; width: 100%; max-height: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a href="dashboard.html" class="btn" title="Torna alla dashboard"><i class="fas fa-arrow-left"></i> Dashboard</a>
+        <h1><i class="fas fa-chart-column"></i> Reporting <span class="report-name" id="currentReportName"></span></h1>
+        <!-- Azioni sul report corrente: salva (chiede il nome) e scarica i dati mostrati -->
+        <div class="header-actions" id="headerActions" hidden>
+            <button type="button" class="btn btn-primary" id="btnSaveReport" title="Salva il report (colonne, ordinamento e filtri)"><i class="fas fa-floppy-disk"></i> Salva</button>
+            <button type="button" class="btn" id="btnExcel" title="Scarica le righe mostrate in Excel"><i class="fas fa-file-excel" style="color:#16A34A;"></i> Excel</button>
+            <button type="button" class="btn" id="btnCsv" title="Scarica le righe mostrate in CSV"><i class="fas fa-file-csv" style="color:#2563EB;"></i> CSV</button>
+        </div>
+    </div>
+
+    <div class="layout">
+        <!-- Barra di sinistra: aree del reporting. Ogni area apre sotto l'elenco dei suoi campi. -->
+        <!-- Pulsanti delle aree e relativi elenchi di campi: generati da AREAS (script) -->
+        <nav class="side" id="reportingSide" hidden></nav>
+
+        <main class="panel">
+            <!-- Schede: Tabella (griglia dei dati) e Grafici (costruiti sulle colonne della tabella) -->
+            <div class="tabs" id="reportTabs" role="tablist" hidden>
+                <button type="button" class="tab active" role="tab" data-tab="table" aria-selected="true"><i class="fas fa-table"></i> Tabella</button>
+                <button type="button" class="tab" role="tab" data-tab="charts" aria-selected="false"><i class="fas fa-chart-pie"></i> Grafici <span class="tab-count" id="chartsCount"></span></button>
+            </div>
+            <div id="reportingContent">
+                <div class="state"><i class="fas fa-spinner fa-spin"></i>Caricamento…</div>
+            </div>
+            <div id="chartsPane" hidden></div>
+        </main>
+
+        <!-- Finestra di configurazione di un grafico -->
+        <div class="modal-backdrop" id="chartModal" hidden>
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="chartModalTitle">
+                <h2 id="chartModalTitle">Nuovo grafico</h2>
+                <label class="fld">Titolo
+                    <input type="text" id="cfgTitle" placeholder="(facoltativo)">
+                </label>
+                <div class="fld">Tipo di grafico
+                    <div class="chart-types" id="cfgTypes"></div>
+                </div>
+                <label class="fld" id="cfgCategoryWrap">Categoria (asse X / fette)
+                    <select id="cfgCategory"></select>
+                </label>
+                <label class="fld" id="cfgSplitWrap">Dividi per (una serie per ogni valore, es. Anno)
+                    <select id="cfgSplit"></select>
+                    <span class="cfg-hint" id="cfgSplitHint" hidden>Con "Dividi per" si usa un solo valore: le serie sono i valori della colonna scelta.</span>
+                </label>
+                <div class="fld" id="cfgValuesWrap">Valori
+                    <div id="cfgValues"></div>
+                    <button type="button" class="btn btn-sm" id="cfgAddValue"><i class="fas fa-plus"></i> Aggiungi valore</button>
+                </div>
+                <label class="fld" id="cfgLimitWrap">Mostra al massimo
+                    <select id="cfgLimit">
+                        <option value="10">10 categorie</option><option value="20" selected>20 categorie</option>
+                        <option value="50">50 categorie</option><option value="0">tutte</option>
+                    </select>
+                </label>
+                <div class="fld">Aspetto
+                    <div class="cfg-flags">
+                        <label id="cfgGridWrap"><input type="checkbox" id="cfgGrid" checked> Mostra griglia</label>
+                        <label><input type="checkbox" id="cfgLabels"> Etichette sui valori</label>
+                        <label id="cfgTotalWrap"><input type="checkbox" id="cfgTotal"> Mostra totale</label>
+                    </div>
+                </div>
+                <p class="cfg-hint">I grafici usano le righe della scheda Tabella, con i filtri applicati.</p>
+                <div class="modal-foot">
+                    <button type="button" class="btn" id="cfgCancel">Annulla</button>
+                    <button type="button" class="btn btn-primary" id="cfgSave"><i class="fas fa-check"></i> Salva grafico</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // === MODULO REPORTING ===
+        // Pagina aperta dal pulsante "Reporting" della barra laterale della dashboard.
+        // Visibile solo se in Impostazioni › Preferenze "Mostra Reporting" è attivo
+        // (flag "reporting" di GET /api/settings/dashboard-flags, vedi server.js).
+        const API_URL = location.origin + '/api';
+        const content = document.getElementById('reportingContent');
+
+        function authHeaders() {
+            const token = localStorage.getItem('authToken');
+            return token ? { Authorization: `Bearer ${token}` } : {};
+        }
+
+        function showState(icon, text) {
+            content.innerHTML = `<div class="state"><i class="fas ${icon}"></i>${text}</div>`;
+        }
+
+        async function init() {
+            if (!localStorage.getItem('authToken')) {
+                window.location.href = 'login.html';
+                return;
+            }
+            try {
+                const res = await fetch(`${API_URL}/settings/dashboard-flags`, { headers: authHeaders() });
+                if (res.status === 401 || res.status === 403) { window.location.href = 'login.html'; return; }
+                const flags = res.ok ? await res.json() : {};
+                if (flags.reporting !== true) {
+                    showState('fa-lock', 'Il modulo Reporting non è attivo.<br>Attivalo da Impostazioni › Preferenze › "Mostra Reporting".');
+                    return;
+                }
+                document.getElementById('reportingSide').hidden = false;
+                document.getElementById('headerActions').hidden = false;
+                document.getElementById('reportTabs').hidden = false;
+                renderGrid();
+            } catch (e) {
+                showState('fa-triangle-exclamation', 'Errore di connessione');
+            }
+        }
+
+        function esc(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // === AREE (barra di sinistra) ===
+        // Ogni area ha il suo elenco di campi e la sua griglia (colonne salvate per area):
+        //   clients  -> una riga per cliente   (GET /api/reporting/fields|data/clients)
+        //   projects -> una riga per progetto  (GET /api/reporting/fields|data/projects)
+        // I Nodi Padre (tipo 0) compaiono come intestazione con i loro campi rientrati sotto.
+        // tag = sigla mostrata sulle intestazioni di colonna; table = tabella dettaglio (non EAV),
+        // legata al cliente (e al progetto, se ha project_id) da tenant_id + user_id + client_id.
+        const AREAS = {
+            clients: { label: 'Clienti', icon: 'fa-building', tag: 'C' },
+            projects: { label: 'Progetti', icon: 'fa-diagram-project', tag: 'P' },
+            quotazioni: { label: 'Quotazioni', icon: 'fa-file-invoice-dollar', tag: 'Q', table: true },
+            contatti: { label: 'Contatti', icon: 'fa-address-book', tag: 'Ct', table: true, noExpiry: true }, // senza scadenza
+            issue: { label: 'Issue', icon: 'fa-circle-exclamation', tag: 'I', table: true },
+            licenze: { label: 'Licenze', icon: 'fa-key', tag: 'L', table: true },
+            fatturazione: { label: 'Fatturazione Anno/mese', icon: 'fa-calendar-days', tag: 'F', table: true },
+            costi: { label: 'Costi Progetto', icon: 'fa-coins', tag: 'CP', table: true },
+            tktjira: { label: 'Tkt Jira', icon: 'fa-ticket', tag: 'J', table: true },
+            todo: { label: 'To do List', icon: 'fa-list-check', tag: 'T', table: true }
+        };
+        Object.entries(AREAS).forEach(([area, cfg]) => { cfg.btnId = 'btn-' + area; cfg.listId = 'fields-' + area; });
+        document.getElementById('reportingSide').innerHTML =
+            // "I miei Report": report salvati dall'utente (tabella reporting), in cima alla barra.
+            `<button type="button" class="side-btn" id="btnMyReports" aria-expanded="false" aria-controls="myReportsList">
+                <i class="fas fa-star"></i> I miei Report <i class="fas fa-chevron-right arrow"></i>
+            </button>
+            <ul class="field-list" id="myReportsList" hidden></ul>` +
+            Object.entries(AREAS).map(([area, cfg]) =>
+            `<button type="button" class="side-btn" id="${cfg.btnId}" data-area="${area}" aria-expanded="false" aria-controls="${cfg.listId}">
+                <i class="fas ${cfg.icon}"></i> ${cfg.label} <i class="fas fa-chevron-right arrow"></i>
+            </button>
+            <ul class="field-list" id="${cfg.listId}" data-area="${area}" hidden></ul>`).join('');
+        const areaLoaded = {};
+
+        async function loadAreaFields(area) {
+            const list = document.getElementById(AREAS[area].listId);
+            list.innerHTML = '<li class="muted">Caricamento…</li>';
+            try {
+                const url = AREAS[area].table ? `${API_URL}/reporting/table-fields/${area}` : `${API_URL}/reporting/fields/${area}`;
+                const res = await fetch(url, { headers: authHeaders() });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                const fields = Array.isArray(data) ? data : [];
+                if (!fields.length) { list.innerHTML = '<li class="muted">Nessun campo</li>'; return; }
+                // Ogni campo porta la sua chiave tecnica: il clic lo aggiunge come colonna.
+                const item = (f, cls = '') => `<li class="field-item ${cls}" tabindex="0" role="button" data-area="${area}"`
+                    + ` data-key="${esc(f.key)}" data-parent-key="${esc(f.parentKey || '')}" data-parent-label="${esc(f.parent || '')}" data-label="${esc(f.campo)}"`
+                    + ` title="${esc((f.custom ? 'Campo custom' : 'Campo standard') + ' – clic per aggiungerlo alla griglia o, se già scelto (✓), per toglierlo')}">`
+                    + `${f.custom ? '<span class="custom-dot"></span>' : ''}${esc(f.campo)}</li>`;
+                // I Nodi Padre (tipo 0) non compaiono: i loro campi si mostrano come gli altri,
+                // nella posizione del nodo (il server manda il nodo solo per l'ordine).
+                const children = new Map();
+                fields.filter(f => f.parent && !f.group).forEach(f => {
+                    if (!children.has(f.parent)) children.set(f.parent, []);
+                    children.get(f.parent).push(f);
+                });
+                // Caselle Attivi / Non attivi dell'area (vedi areaStatus).
+                let html = AREAS[area].noExpiry ? '' : `<li class="status-row" data-area="${area}">
+                        <label><input type="checkbox" class="st-active" ${statusOf(area).active ? 'checked' : ''}> Attivi</label>
+                        <label><input type="checkbox" class="st-inactive" ${statusOf(area).inactive ? 'checked' : ''}> Non attivi</label>
+                    </li>`;
+                html += '<li class="legend"><span class="custom-dot"></span> = campo custom</li>';
+                for (const f of fields.filter(x => !x.parent)) {
+                    if (f.group) (children.get(f.campo) || []).forEach(ch => { html += item(ch); });
+                    else html += item(f);
+                }
+                list.innerHTML = html;
+                areaLoaded[area] = true;
+                markSelectedFields();
+            } catch (e) {
+                list.innerHTML = `<li class="muted">${esc(e.message)}</li>`;
+            }
+        }
+
+        // === ATTIVI / NON ATTIVI per area ===
+        // Attivi = scadenza vuota o da oggi in poi (default); Non attivi = scadenza passata;
+        // entrambe = tutti. Almeno una casella resta sempre spuntata. Salvato con il report.
+        let areaStatus = {};
+        try { const s = JSON.parse(localStorage.getItem('reportingStatus') || 'null'); if (s && typeof s === 'object') areaStatus = s; } catch (e) { /* ignore */ }
+        function saveStatus() { try { localStorage.setItem('reportingStatus', JSON.stringify(areaStatus)); } catch (e) { /* ignore */ } }
+        function statusOf(area) {
+            const s = areaStatus[area] || {};
+            return { active: s.active !== false, inactive: s.inactive === true };
+        }
+        function syncStatusBoxes() {
+            document.querySelectorAll('.status-row').forEach(row => {
+                const s = statusOf(row.dataset.area);
+                row.querySelector('.st-active').checked = s.active;
+                row.querySelector('.st-inactive').checked = s.inactive;
+            });
+        }
+        document.getElementById('reportingSide').addEventListener('change', (e) => {
+            const row = e.target.closest && e.target.closest('.status-row');
+            if (!row) return;
+            const active = row.querySelector('.st-active');
+            const inactive = row.querySelector('.st-inactive');
+            if (!active.checked && !inactive.checked) e.target.checked = true; // mai nessuna delle due
+            areaStatus[row.dataset.area] = { active: active.checked, inactive: inactive.checked };
+            saveStatus();
+            if (gridColumns.some(c => c.area === row.dataset.area)) loadGridData();
+        });
+
+        // Clic su un'area: apre/chiude il suo elenco di campi.
+        Object.entries(AREAS).forEach(([area, cfg]) => {
+            document.getElementById(cfg.btnId).addEventListener('click', () => {
+                const btn = document.getElementById(cfg.btnId);
+                const list = document.getElementById(cfg.listId);
+                const open = list.hidden;
+                list.hidden = !open;
+                btn.classList.toggle('open', open);
+                btn.setAttribute('aria-expanded', String(open));
+                if (open && !areaLoaded[area]) loadAreaFields(area);
+            });
+            const list = document.getElementById(cfg.listId);
+            list.addEventListener('click', (e) => {
+                const li = e.target.closest('.field-item');
+                if (li) addColumn(li);
+            });
+            list.addEventListener('keydown', (e) => {
+                const li = e.target.closest('.field-item');
+                if (li && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); addColumn(li); }
+            });
+        });
+
+        // === GRIGLIA UNICA (area di destra) ===
+        // Colonne dei clienti e dei progetti insieme, legate da tenant_id + user_id + client_id
+        // (GET /api/reporting/data). Solo colonne clienti = una riga per cliente; con colonne
+        // progetto = una riga per progetto (i clienti senza progetti compaiono una volta).
+        // Ogni colonna ricorda la sua area; le colonne scelte restano salvate nel browser.
+        const COLS_KEY = 'reportingColumns';
+        const readJson = (k) => { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return Array.isArray(v) ? v : null; } catch (e) { return null; } };
+        let gridColumns = readJson(COLS_KEY);
+        if (!gridColumns) {
+            // Versioni precedenti: colonne salvate per area -> unite in un'unica griglia.
+            gridColumns = [
+                ...(readJson('reportingColumns:clients') || readJson('reportingClientiColumns') || []).map(c => ({ ...c, area: 'clients' })),
+                ...(readJson('reportingColumns:projects') || []).map(c => ({ ...c, area: 'projects' }))
+            ];
+        }
+        gridColumns = gridColumns.filter(c => c && c.key).map(c => ({ ...c, area: AREAS[c.area] ? c.area : 'clients' }))
+            // "Cliente" dell'area Progetti non esiste più: il nome si prende da Clienti › Nome Cliente.
+            .filter(c => !(c.area === 'projects' && c.key === '__cliente'));
+        let gridRows = [];
+        let gridTruncated = 0;
+
+        function saveColumns() {
+            try { localStorage.setItem(COLS_KEY, JSON.stringify(gridColumns)); } catch (e) { /* ignore */ }
+        }
+        const colId = c => `${c.area}\u0001${c.parentKey || ''}\u0001${c.key}`;
+
+        function markSelectedFields() {
+            const chosen = new Set(gridColumns.map(colId));
+            document.querySelectorAll('.field-item').forEach(li => {
+                li.classList.toggle('selected', chosen.has(`${li.dataset.area}\u0001${li.dataset.parentKey || ''}\u0001${li.dataset.key}`));
+            });
+        }
+
+        function renderGrid() {
+            if (!gridColumns.length) {
+                content.innerHTML = `<div class="grid-wrap"><table class="report-grid">
+                    <thead><tr><th class="placeholder-col">Intestazione colonne</th></tr></thead>
+                    <tbody><tr><td class="grid-hint"><i class="fas fa-hand-pointer"></i>
+                        Apri <strong>Clienti</strong> o <strong>Progetti</strong> nella barra di sinistra e clicca sui campi
+                        da aggiungere come colonne. Clienti e progetti si uniscono per cliente: con almeno una colonna
+                        dei progetti compare una riga per progetto.</td></tr></tbody>
+                </table></div>`;
+                return;
+            }
+            const sortIndex = gridColumns.findIndex(c => colId(c) === gridSort.colId);
+            const head = gridColumns.map((c, i) => {
+                const areaLabel = AREAS[c.area].label;
+                const tip = `${areaLabel} › ${c.parentLabel ? c.parentLabel + ' › ' : ''}${c.label}`;
+                // Una sola piccola freccia: ↑ crescente, ↓ decrescente, chiara se la colonna non è ordinata.
+                const sorted = i === sortIndex;
+                const arrow = sorted && gridSort.dir === 'desc' ? 'fa-arrow-down' : 'fa-arrow-up';
+                const sortTip = sorted ? (gridSort.dir === 'asc' ? 'Ordinata crescente: clic per decrescente' : 'Ordinata decrescente: clic per crescente') : 'Ordina crescente';
+                return `<th draggable="true" data-col-index="${i}" class="col-${c.area}" title="${esc(tip)} – trascina per spostare">
+                    <span class="th-area" title="${esc(areaLabel)}">${esc(AREAS[c.area].tag)}</span>
+                    <span class="th-label">${esc(c.label)}</span>
+                    <button type="button" class="th-sort${sorted ? ' active' : ''}" data-col-index="${i}" title="${sortTip}" aria-label="${esc(sortTip)} – ${esc(c.label)}"><i class="fas ${arrow}"></i></button>
+                    <button type="button" class="th-remove" data-col-index="${i}" title="Togli la colonna" aria-label="Togli la colonna ${esc(c.label)}">×</button>
+                </th>`;
+            }).join('');
+            // Riga dei filtri, una casella per colonna (vedi FILTRI).
+            const filterRow = gridColumns.map((c, i) => {
+                const picked = gridValueFilters[colId(c)];
+                const nPicked = Array.isArray(picked) ? picked.length : 0;
+                return `<th class="filter-cell"><div class="filter-wrap">
+                    <input type="text" class="col-filter" data-col-index="${i}" value="${esc(gridFilters[colId(c)] || '')}"
+                        placeholder="Filtra…" title="Contiene il testo. Per numeri e date anche > < >= <= = (es. >2025)"
+                        aria-label="Filtro ${esc(c.label)}">
+                    <button type="button" class="val-filter-btn${nPicked ? ' active' : ''}" data-col-index="${i}"
+                        title="${nPicked ? `${nPicked} valori scelti` : 'Scegli i valori (selezione multipla)'}"
+                        aria-label="Scegli i valori di ${esc(c.label)}"><i class="fas fa-filter"></i>${nPicked ? `<span>${nPicked}</span>` : ''}</button>
+                </div></th>`;
+            }).join('');
+            content.innerHTML = `<div class="grid-toolbar">
+                    <span id="gridCount"></span>
+                    <button type="button" class="btn btn-sm" id="gridClearFilters"><i class="fas fa-filter-circle-xmark"></i> Togli filtri</button>
+                    <button type="button" class="btn btn-sm" id="gridClear"><i class="fas fa-eraser"></i> Svuota griglia</button>
+                </div>
+                <div class="grid-wrap"><table class="report-grid"><thead><tr>${head}</tr><tr class="filter-row">${filterRow}</tr></thead><tbody id="gridBody"></tbody></table></div>`;
+            renderBody();
+        }
+
+        // Solo le righe (e il contatore): usato mentre si scrive nei filtri, così le caselle
+        // non vengono ricreate e non si perde il punto in cui si sta scrivendo.
+        function renderBody() {
+            const tbody = document.getElementById('gridBody');
+            if (!tbody) return;
+            const sortIndex = gridColumns.findIndex(c => colId(c) === gridSort.colId);
+            const rows = sortedRows(sortIndex).filter(rowMatchesFilters);
+            tbody.innerHTML = rows.length
+                ? rows.map(r => `<tr>${r.values.map(v => `<td title="${esc(v)}">${esc(v)}</td>`).join('')}</tr>`).join('')
+                : `<tr><td class="grid-hint" colspan="${gridColumns.length}">${gridRows.length ? 'Nessuna riga corrisponde ai filtri' : 'Nessun dato'}</td></tr>`;
+            const active = activeFilterCount();
+            const count = document.getElementById('gridCount');
+            if (count) count.innerHTML = `${active ? `${rows.length} di ${gridRows.length}` : gridRows.length} rig${(active ? rows.length : gridRows.length) === 1 ? 'a' : 'he'}`
+                + ` · ${gridColumns.length} colonn${gridColumns.length === 1 ? 'a' : 'e'}`
+                + (active ? ` · <strong>${active} filtr${active === 1 ? 'o' : 'i'}</strong>` : '')
+                + (gridTruncated ? ` · <strong class="warn">mostrate solo le prime ${gridTruncated} righe: aggiungi filtri o togli colonne</strong>` : '');
+            const clearBtn = document.getElementById('gridClearFilters');
+            if (clearBtn) clearBtn.hidden = !active;
+        }
+
+        // === FILTRI PER COLONNA ===
+        // Casella sotto ogni intestazione. Di base "contiene" (senza maiuscole/minuscole).
+        // Con > < >= <= = davanti si confronta come numero o data (es. ">2025", "<=50%",
+        // ">=01/01/2026"). "=" senza numero o data = valore identico; "vuoto" = celle vuote.
+        // Più filtri insieme valgono tutti (AND). I filtri restano salvati nel browser.
+        let gridFilters = {};
+        try { const f = JSON.parse(localStorage.getItem('reportingFilters') || 'null'); if (f && typeof f === 'object') gridFilters = f; } catch (e) { /* ignore */ }
+        function saveFilters() { try { localStorage.setItem('reportingFilters', JSON.stringify(gridFilters)); } catch (e) { /* ignore */ } }
+        function activeFilterCount() {
+            return gridColumns.filter(c => String(gridFilters[colId(c)] || '').trim()
+                || (Array.isArray(gridValueFilters[colId(c)]) && gridValueFilters[colId(c)].length)).length;
+        }
+
+        // Filtro a selezione multipla (imbuto): valori spuntati per colonna. Una riga passa se il
+        // valore della cella è tra quelli scelti; "(vuoto)" = cella vuota. Si somma al "contiene".
+        const EMPTY_VALUE = '__VUOTO__'; // segnaposto delle celle vuote (sicuro negli attributi HTML)
+        let gridValueFilters = {};
+        try { const f = JSON.parse(localStorage.getItem('reportingValueFilters') || 'null'); if (f && typeof f === 'object') gridValueFilters = f; } catch (e) { /* ignore */ }
+        function saveValueFilters() { try { localStorage.setItem('reportingValueFilters', JSON.stringify(gridValueFilters)); } catch (e) { /* ignore */ } }
+        const valueToken = v => { const s = String(v == null ? '' : v).trim(); return s ? s : EMPTY_VALUE; };
+
+        let valuePopup = null;
+        function closeValuePopup() { if (valuePopup) { valuePopup.remove(); valuePopup = null; } }
+        function openValuePopup(btn) {
+            closeValuePopup();
+            const index = Number(btn.dataset.colIndex);
+            const col = gridColumns[index];
+            const id = colId(col);
+            // Valori presenti nella colonna, tra le righe che passano gli ALTRI filtri (come Excel).
+            const others = gridRows.filter(r => gridColumns.every((c, i) => i === index
+                || (cellMatches(r.values[i], gridFilters[colId(c)]) && valueAllowed(r.values[i], gridValueFilters[colId(c)]))));
+            const counts = new Map();
+            others.forEach(r => { const t = valueToken(r.values[index]); counts.set(t, (counts.get(t) || 0) + 1); });
+            const values = [...counts.keys()].sort((a, b) => {
+                if (a === EMPTY_VALUE) return 1; if (b === EMPTY_VALUE) return -1;
+                const va = sortValue(a), vb = sortValue(b);
+                if (va.n != null && vb.n != null) return va.n - vb.n;
+                return a.localeCompare(b, 'it', { sensitivity: 'base', numeric: true });
+            });
+            const picked = new Set(Array.isArray(gridValueFilters[id]) ? gridValueFilters[id] : []);
+            valuePopup = document.createElement('div');
+            valuePopup.className = 'value-popup';
+            valuePopup.innerHTML = `<div class="vp-head">${esc(col.label)}</div>
+                <input type="text" class="vp-search" placeholder="Cerca valore…">
+                <label class="vp-item vp-all"><input type="checkbox" class="vp-all-check"> <em>Seleziona tutti</em></label>
+                <div class="vp-list">${values.map(v => `<label class="vp-item" data-text="${esc(v === EMPTY_VALUE ? '(vuoto)' : v).toLowerCase()}">
+                    <input type="checkbox" value="${esc(v)}" ${picked.has(v) ? 'checked' : ''}>
+                    <span>${v === EMPTY_VALUE ? '<em>(vuoto)</em>' : esc(v)}</span><small>${counts.get(v)}</small></label>`).join('') || '<div class="vp-empty">Nessun valore</div>'}</div>
+                <div class="vp-foot"><button type="button" class="btn btn-sm vp-clear">Nessun filtro</button><button type="button" class="btn btn-sm vp-close">Chiudi</button></div>`;
+            document.body.appendChild(valuePopup);
+            const r = btn.getBoundingClientRect();
+            valuePopup.style.top = `${Math.min(window.innerHeight - valuePopup.offsetHeight - 8, r.bottom + 4)}px`;
+            valuePopup.style.left = `${Math.max(8, Math.min(window.innerWidth - valuePopup.offsetWidth - 8, r.right - valuePopup.offsetWidth))}px`;
+
+            const boxes = () => [...valuePopup.querySelectorAll('.vp-list input[type="checkbox"]')];
+            const allCheck = valuePopup.querySelector('.vp-all-check');
+            const syncAll = () => { const b = boxes().filter(x => !x.closest('.vp-item').hidden); allCheck.checked = b.length > 0 && b.every(x => x.checked); };
+            const apply = () => {
+                const sel = boxes().filter(x => x.checked).map(x => x.value);
+                if (sel.length) gridValueFilters[id] = sel; else delete gridValueFilters[id];
+                saveValueFilters();
+                const cellBtn = content.querySelector(`.val-filter-btn[data-col-index="${index}"]`);
+                if (cellBtn) {
+                    cellBtn.classList.toggle('active', sel.length > 0);
+                    cellBtn.innerHTML = `<i class="fas fa-filter"></i>${sel.length ? `<span>${sel.length}</span>` : ''}`;
+                    cellBtn.title = sel.length ? `${sel.length} valori scelti` : 'Scegli i valori (selezione multipla)';
+                }
+                renderBody();
+                syncAll();
+            };
+            syncAll();
+            valuePopup.addEventListener('change', (e) => {
+                if (e.target === allCheck) boxes().forEach(x => { if (!x.closest('.vp-item').hidden) x.checked = allCheck.checked; });
+                apply();
+            });
+            valuePopup.querySelector('.vp-search').addEventListener('input', (e) => {
+                const q = e.target.value.trim().toLowerCase();
+                valuePopup.querySelectorAll('.vp-list .vp-item').forEach(l => { l.hidden = q && !l.dataset.text.includes(q); });
+                syncAll();
+            });
+            valuePopup.querySelector('.vp-clear').addEventListener('click', () => { boxes().forEach(x => { x.checked = false; }); apply(); });
+            valuePopup.querySelector('.vp-close').addEventListener('click', closeValuePopup);
+            valuePopup.querySelector('.vp-search').focus();
+        }
+        function valueAllowed(value, picked) {
+            return !Array.isArray(picked) || !picked.length || picked.includes(valueToken(value));
+        }
+        document.addEventListener('mousedown', (e) => {
+            if (valuePopup && !valuePopup.contains(e.target) && !(e.target.closest && e.target.closest('.val-filter-btn'))) closeValuePopup();
+        });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeValuePopup(); });
+        window.addEventListener('resize', closeValuePopup);
+        function cellMatches(value, filter) {
+            const f = String(filter || '').trim();
+            if (!f) return true;
+            const text = String(value == null ? '' : value);
+            if (f.toLowerCase() === 'vuoto') return !text.trim();
+            const m = /^(>=|<=|>|<|=)\s*(.*)$/.exec(f);
+            if (m) {
+                const target = sortValue(m[2]);
+                const v = sortValue(text);
+                if (target && target.n != null) {
+                    if (!v || v.n == null) return false;
+                    return m[1] === '>' ? v.n > target.n : m[1] === '<' ? v.n < target.n
+                        : m[1] === '>=' ? v.n >= target.n : m[1] === '<=' ? v.n <= target.n : v.n === target.n;
+                }
+                if (m[1] === '=') return text.trim().toLowerCase() === m[2].trim().toLowerCase();
+            }
+            return text.toLowerCase().includes(f.toLowerCase());
+        }
+        function rowMatchesFilters(row) {
+            return gridColumns.every((c, i) => cellMatches(row.values[i], gridFilters[colId(c)])
+                && valueAllowed(row.values[i], gridValueFilters[colId(c)]));
+        }
+        content.addEventListener('input', (e) => {
+            const inp = e.target.closest && e.target.closest('.col-filter');
+            if (!inp) return;
+            const id = colId(gridColumns[Number(inp.dataset.colIndex)]);
+            if (inp.value.trim()) gridFilters[id] = inp.value; else delete gridFilters[id];
+            saveFilters();
+            renderBody();
+        });
+        // Nelle caselle dei filtri il trascinamento della colonna non deve partire.
+        content.addEventListener('mousedown', (e) => {
+            if (e.target.closest && e.target.closest('.col-filter')) e.stopPropagation();
+        }, true);
+
+        // === ORDINAMENTO PER COLONNA ===
+        // Clic sulla freccia dell'intestazione: crescente, poi decrescente, poi di nuovo crescente.
+        // Riconosce numeri in formato italiano (1.234,5), percentuali e date (GG/MM/AAAA o
+        // AAAA-MM-GG); il resto si confronta come testo. Le celle vuote vanno sempre in fondo.
+        let gridSort = { colId: null, dir: 'asc' };
+        try { const s = JSON.parse(localStorage.getItem('reportingSort') || 'null'); if (s && s.colId) gridSort = s; } catch (e) { /* ignore */ }
+        function saveSort() { try { localStorage.setItem('reportingSort', JSON.stringify(gridSort)); } catch (e) { /* ignore */ } }
+
+        function sortValue(v) {
+            const s = String(v == null ? '' : v).trim();
+            if (!s) return null;
+            let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+            if (m) return { n: Date.UTC(+m[1], +m[2] - 1, +m[3]) };
+            m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+            if (m) return { n: Date.UTC(+m[3], +m[2] - 1, +m[1]) };
+            const num = s.replace(/[%€\s]/g, '');
+            if (/^-?[\d.]*\d(,\d+)?$/.test(num) || /^-?\d+(\.\d+)?$/.test(num)) {
+                const n = Number(num.includes(',') ? num.replace(/\./g, '').replace(',', '.') : (/^-?\d{1,3}(\.\d{3})+$/.test(num) ? num.replace(/\./g, '') : num));
+                if (Number.isFinite(n)) return { n };
+            }
+            return { t: s };
+        }
+        function sortedRows(sortIndex) {
+            if (sortIndex < 0) return gridRows;
+            const dir = gridSort.dir === 'desc' ? -1 : 1;
+            return gridRows.map((r, i) => ({ r, i, v: sortValue(r.values[sortIndex]) })).sort((a, b) => {
+                if (a.v === null || b.v === null) return (a.v === null) - (b.v === null) || a.i - b.i; // vuote in fondo
+                let c;
+                if (a.v.n != null && b.v.n != null) c = a.v.n - b.v.n;
+                else if (a.v.n != null) c = -1;          // numeri prima del testo
+                else if (b.v.n != null) c = 1;
+                else c = a.v.t.localeCompare(b.v.t, 'it', { sensitivity: 'base', numeric: true });
+                return c * dir || a.i - b.i;
+            }).map(x => x.r);
+        }
+
+        let loadSeq = 0;
+        async function loadGridData() {
+            if (!gridColumns.length) { gridRows = []; renderGrid(); return; }
+            const seq = ++loadSeq;
+            try {
+                const q = encodeURIComponent(JSON.stringify(gridColumns.map(c => ({ area: c.area, key: c.key, parentKey: c.parentKey || null }))));
+                const st = encodeURIComponent(JSON.stringify(Object.fromEntries(Object.keys(AREAS).map(a => [a, statusOf(a)]))));
+                const res = await fetch(`${API_URL}/reporting/data?fields=${q}&status=${st}`, { headers: authHeaders() });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                if (seq !== loadSeq) return; // nel frattempo le colonne sono cambiate
+                gridRows = Array.isArray(data.rows) ? data.rows : [];
+                // Troppe combinazioni di righe: il server si ferma al massimo e lo segnala.
+                gridTruncated = data.truncated ? (data.maxRows || gridRows.length) : 0;
+                renderGrid();
+                refreshChartsIfVisible();
+            } catch (e) {
+                showState('fa-triangle-exclamation', esc(e.message));
+            }
+        }
+
+        function addColumn(li) {
+            const col = { area: li.dataset.area, key: li.dataset.key, parentKey: li.dataset.parentKey || null, label: li.dataset.label };
+            // Nome del Nodo Padre del campo (solo per il suggerimento sull'intestazione di colonna).
+            if (li.dataset.parentLabel) col.parentLabel = li.dataset.parentLabel;
+            // Clic su un campo già scelto (✓): la colonna viene tolta dalla griglia.
+            const existing = gridColumns.findIndex(c => colId(c) === colId(col));
+            if (existing >= 0) gridColumns.splice(existing, 1);
+            else gridColumns.push(col);
+            saveColumns();
+            markSelectedFields();
+            loadGridData();
+        }
+
+        content.addEventListener('click', (e) => {
+            const valBtn = e.target.closest('.val-filter-btn');
+            if (valBtn) {
+                if (valuePopup && valuePopup.dataset.colIndex === valBtn.dataset.colIndex) { closeValuePopup(); return; }
+                openValuePopup(valBtn);
+                if (valuePopup) valuePopup.dataset.colIndex = valBtn.dataset.colIndex;
+                return;
+            }
+            const sortBtn = e.target.closest('.th-sort');
+            if (sortBtn) {
+                const id = colId(gridColumns[Number(sortBtn.dataset.colIndex)]);
+                gridSort = { colId: id, dir: gridSort.colId === id && gridSort.dir === 'asc' ? 'desc' : 'asc' };
+                saveSort();
+                renderGrid();
+                return;
+            }
+            if (e.target.closest('#gridClearFilters')) {
+                gridFilters = {};
+                gridValueFilters = {};
+                saveFilters();
+                saveValueFilters();
+                closeValuePopup();
+                renderGrid();
+                return;
+            }
+            const rm = e.target.closest('.th-remove');
+            if (rm) {
+                gridColumns.splice(Number(rm.dataset.colIndex), 1);
+                saveColumns();
+                markSelectedFields();
+                loadGridData();
+                return;
+            }
+            if (e.target.closest('#gridClear')) {
+                gridColumns = [];
+                saveColumns();
+                markSelectedFields();
+                setCurrentReport(null); // griglia vuota = nuovo report (Salva chiederà un nome nuovo)
+                loadGridData();
+            }
+        });
+
+        // Spostamento colonne: si trascina l'intestazione e si rilascia su un'altra colonna
+        // (a sinistra o a destra della sua metà). I dati già caricati si riordinano senza
+        // rileggerli dal server; il nuovo ordine resta salvato.
+        let dragFrom = null;
+        const clearDropMarks = () => content.querySelectorAll('.report-grid th').forEach(th => th.classList.remove('drop-before', 'drop-after', 'dragging'));
+        content.addEventListener('dragstart', (e) => {
+            const th = e.target.closest && e.target.closest('.report-grid th[data-col-index]');
+            if (!th) return;
+            dragFrom = Number(th.dataset.colIndex);
+            th.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            try { e.dataTransfer.setData('text/plain', String(dragFrom)); } catch (err) { /* ignore */ }
+        });
+        content.addEventListener('dragover', (e) => {
+            const th = e.target.closest && e.target.closest('.report-grid th[data-col-index]');
+            if (!th || dragFrom == null) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const rect = th.getBoundingClientRect();
+            const after = e.clientX > rect.left + rect.width / 2;
+            content.querySelectorAll('.report-grid th').forEach(x => { if (x !== th) x.classList.remove('drop-before', 'drop-after'); });
+            th.classList.toggle('drop-after', after);
+            th.classList.toggle('drop-before', !after);
+        });
+        content.addEventListener('drop', (e) => {
+            const th = e.target.closest && e.target.closest('.report-grid th[data-col-index]');
+            if (!th || dragFrom == null) return;
+            e.preventDefault();
+            const rect = th.getBoundingClientRect();
+            let to = Number(th.dataset.colIndex) + (e.clientX > rect.left + rect.width / 2 ? 1 : 0);
+            const from = dragFrom;
+            dragFrom = null;
+            if (to > from) to -= 1; // l'elemento tolto sposta di uno quelli successivi
+            if (to === from) { clearDropMarks(); return; }
+            const move = (arr) => { const [x] = arr.splice(from, 1); arr.splice(to, 0, x); };
+            move(gridColumns);
+            gridRows.forEach(r => move(r.values));
+            saveColumns();
+            renderGrid();
+        });
+        content.addEventListener('dragend', () => { dragFrom = null; clearDropMarks(); });
+
+        // === I MIEI REPORT (tabella reporting) ===
+        // Salva = definizione del report (colonne, ordinamento, filtri) con un nome. Aprendo un
+        // report la griglia si ricostruisce e i dati vengono riletti aggiornati dal server.
+        let currentReport = null; // { id, name }
+        try { currentReport = JSON.parse(localStorage.getItem('reportingCurrent') || 'null'); } catch (e) { currentReport = null; }
+        function setCurrentReport(rep) {
+            currentReport = rep;
+            try { localStorage.setItem('reportingCurrent', JSON.stringify(rep)); } catch (e) { /* ignore */ }
+            document.getElementById('currentReportName').textContent = rep ? rep.name : '';
+            document.querySelectorAll('#myReportsList .report-item').forEach(li => li.classList.toggle('current', !!rep && li.dataset.id === String(rep.id)));
+        }
+        let myReportsLoaded = false;
+        async function loadMyReports() {
+            const list = document.getElementById('myReportsList');
+            list.innerHTML = '<li class="muted">Caricamento…</li>';
+            try {
+                const res = await fetch(`${API_URL}/reporting/reports`, { headers: authHeaders() });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                list.innerHTML = (Array.isArray(data) && data.length)
+                    ? data.map(r => `<li class="report-item" tabindex="0" role="button" data-id="${esc(r.id)}" data-name="${esc(r.nome_report)}" title="Apri il report">
+                        <i class="fas fa-table"></i><span>${esc(r.nome_report)}</span>
+                        <button type="button" class="report-del" title="Elimina il report" aria-label="Elimina il report ${esc(r.nome_report)}"><i class="fas fa-trash"></i></button></li>`).join('')
+                    : '<li class="muted">Nessun report salvato: crea una griglia e premi Salva</li>';
+                myReportsLoaded = true;
+                setCurrentReport(currentReport);
+            } catch (e) {
+                list.innerHTML = `<li class="muted">${esc(e.message)}</li>`;
+            }
+        }
+        function openMyReports() {
+            const btn = document.getElementById('btnMyReports');
+            const list = document.getElementById('myReportsList');
+            list.hidden = false;
+            btn.classList.add('open');
+            btn.setAttribute('aria-expanded', 'true');
+        }
+        document.getElementById('btnMyReports').addEventListener('click', () => {
+            const btn = document.getElementById('btnMyReports');
+            const list = document.getElementById('myReportsList');
+            const open = list.hidden;
+            list.hidden = !open;
+            btn.classList.toggle('open', open);
+            btn.setAttribute('aria-expanded', String(open));
+            if (open && !myReportsLoaded) loadMyReports();
+        });
+
+        async function openReport(id) {
+            try {
+                const res = await fetch(`${API_URL}/reporting/reports/${encodeURIComponent(id)}`, { headers: authHeaders() });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                const rep = data.report || {};
+                gridColumns = (Array.isArray(rep.columns) ? rep.columns : []).filter(c => c && c.key && AREAS[c.area]);
+                gridSort = rep.sort && rep.sort.colId ? rep.sort : { colId: null, dir: 'asc' };
+                gridFilters = rep.filters && typeof rep.filters === 'object' ? rep.filters : {};
+                gridValueFilters = rep.valueFilters && typeof rep.valueFilters === 'object' ? rep.valueFilters : {};
+                charts = Array.isArray(rep.charts) ? rep.charts : [];
+                areaStatus = rep.status && typeof rep.status === 'object' ? rep.status : {};
+                saveColumns(); saveSort(); saveFilters(); saveValueFilters(); saveCharts(); saveStatus();
+                syncStatusBoxes();
+                updateChartsCount();
+                closeValuePopup();
+                setCurrentReport({ id: data.id, name: data.nome_report });
+                markSelectedFields();
+                gridRows = [];
+                loadGridData();
+            } catch (e) {
+                alert('Report non aperto: ' + e.message);
+            }
+        }
+        document.getElementById('myReportsList').addEventListener('click', async (e) => {
+            const li = e.target.closest('.report-item');
+            if (!li) return;
+            if (e.target.closest('.report-del')) {
+                if (!confirm(`Eliminare il report "${li.dataset.name}"?`)) return;
+                const res = await fetch(`${API_URL}/reporting/reports/${encodeURIComponent(li.dataset.id)}`, { method: 'DELETE', headers: authHeaders() });
+                if (!res.ok) { const d = await res.json().catch(() => ({})); alert('Report non eliminato: ' + (d.error || res.status)); return; }
+                if (currentReport && String(currentReport.id) === li.dataset.id) setCurrentReport(null);
+                loadMyReports();
+                return;
+            }
+            openReport(li.dataset.id);
+        });
+        document.getElementById('myReportsList').addEventListener('keydown', (e) => {
+            const li = e.target.closest('.report-item');
+            if (li && (e.key === 'Enter' || e.key === ' ') && !e.target.closest('.report-del')) { e.preventDefault(); openReport(li.dataset.id); }
+        });
+
+        async function saveReport() {
+            if (!gridColumns.length) { alert('Aggiungi almeno una colonna prima di salvare il report.'); return; }
+            const name = (prompt('Nome del report da salvare:', currentReport ? currentReport.name : '') || '').trim();
+            if (!name) return;
+            const body = { nome_report: name, report: { columns: gridColumns, sort: gridSort, filters: gridFilters, valueFilters: gridValueFilters, charts, status: areaStatus } };
+            const post = (overwrite) => fetch(`${API_URL}/reporting/reports`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                body: JSON.stringify({ ...body, overwrite })
+            });
+            try {
+                let res = await post(false);
+                if (res.status === 409) {
+                    if (!confirm(`Esiste già un report "${name}". Vuoi sovrascriverlo?`)) return;
+                    res = await post(true);
+                }
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                setCurrentReport({ id: data.id, name: data.nome_report || name });
+                openMyReports();
+                await loadMyReports();
+            } catch (e) {
+                alert('Report non salvato: ' + e.message);
+            }
+        }
+        document.getElementById('btnSaveReport').addEventListener('click', saveReport);
+
+        // === DOWNLOAD (Excel / CSV) ===
+        // Si scaricano le righe mostrate: stesso ordinamento e stessi filtri della griglia.
+        function visibleTable() {
+            const sortIndex = gridColumns.findIndex(c => colId(c) === gridSort.colId);
+            const headers = gridColumns.map(c => c.label);
+            const rows = sortedRows(sortIndex).filter(rowMatchesFilters).map(r => r.values.map(v => (v == null ? '' : String(v))));
+            return { headers, rows };
+        }
+        function exportFileName(ext) {
+            const base = (currentReport && currentReport.name) || 'Reporting';
+            const d = new Date();
+            const pad = n => String(n).padStart(2, '0');
+            return `${base.replace(/[\\/:*?"<>|]+/g, ' ').trim()} ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.${ext}`;
+        }
+        function downloadBlob(blob, name) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = name;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+        // Numeri in formato italiano ("1.234,5", "75%") scritti in Excel come veri numeri.
+        function excelCell(v) {
+            const s = String(v).trim();
+            if (/^-?\d{1,3}(\.\d{3})*(,\d+)?$/.test(s) || /^-?\d+(,\d+)?$/.test(s)) return Number(s.replace(/\./g, '').replace(',', '.'));
+            return v;
+        }
+        document.getElementById('btnExcel').addEventListener('click', () => {
+            if (!gridColumns.length) { alert('La griglia è vuota.'); return; }
+            if (typeof XLSX === 'undefined') { alert('Libreria Excel non disponibile: controlla la connessione e ricarica la pagina.'); return; }
+            const { headers, rows } = visibleTable();
+            const ws = XLSX.utils.aoa_to_sheet([headers, ...rows.map(r => r.map(excelCell))]);
+            ws['!cols'] = headers.map((h, i) => ({ wch: Math.min(50, Math.max(String(h).length, ...rows.slice(0, 200).map(r => String(r[i] || '').length)) + 2) }));
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Report');
+            XLSX.writeFile(wb, exportFileName('xlsx'));
+        });
+        // CSV con ";" e BOM UTF-8: si apre correttamente con Excel in italiano.
+        document.getElementById('btnCsv').addEventListener('click', () => {
+            if (!gridColumns.length) { alert('La griglia è vuota.'); return; }
+            const { headers, rows } = visibleTable();
+            const q = v => { const s = String(v); return /[";\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+            const csv = [headers, ...rows].map(r => r.map(q).join(';')).join('\r\n');
+            downloadBlob(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), exportFileName('csv'));
+        });
+
+        // === GRAFICI (scheda "Grafici") ===
+        // Ogni grafico usa le righe della scheda Tabella (con ordinamento e filtri applicati):
+        // una colonna come categoria (asse X o fette) e uno o più valori, ciascuno con la sua
+        // aggregazione (conteggio righe, somma, media, minimo, massimo). I grafici restano
+        // salvati nel browser e dentro il report quando si preme Salva.
+        const CHART_TYPES = [
+            { id: 'bar', label: 'Barre verticali', icon: 'fa-chart-column' },
+            { id: 'barh', label: 'Barre orizzontali', icon: 'fa-chart-bar' },
+            { id: 'stacked', label: 'Barre impilate', icon: 'fa-layer-group' },
+            { id: 'line', label: 'Linee', icon: 'fa-chart-line' },
+            { id: 'area', label: 'Area', icon: 'fa-chart-area' },
+            { id: 'pie', label: 'Torta', icon: 'fa-chart-pie', single: true, noSplit: true },
+            { id: 'doughnut', label: 'Ciambella', icon: 'fa-circle-notch', single: true, noSplit: true },
+            { id: 'polar', label: 'Area polare', icon: 'fa-bullseye', single: true, noSplit: true },
+            { id: 'radar', label: 'Radar', icon: 'fa-spider' },
+            { id: 'kpi', label: 'Numero (KPI)', icon: 'fa-hashtag', single: true, noCategory: true, noSplit: true }
+        ];
+        const AGGS = [
+            { id: 'count', label: 'Conteggio righe' }, { id: 'sum', label: 'Somma' }, { id: 'avg', label: 'Media' },
+            { id: 'min', label: 'Minimo' }, { id: 'max', label: 'Massimo' }
+        ];
+        const PALETTE = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#EC4899', '#84CC16',
+            '#F97316', '#6366F1', '#14B8A6', '#A855F7', '#0EA5E9', '#EAB308', '#64748B'];
+        let charts = [];
+        try { const c = JSON.parse(localStorage.getItem('reportingCharts') || 'null'); if (Array.isArray(c)) charts = c; } catch (e) { /* ignore */ }
+        function saveCharts() { try { localStorage.setItem('reportingCharts', JSON.stringify(charts)); } catch (e) { /* ignore */ } }
+        const chartInstances = new Map();
+        let activeTab = 'table';
+
+        // --- Schede ---
+        function setTab(tab) {
+            activeTab = tab;
+            document.querySelectorAll('#reportTabs .tab').forEach(b => {
+                const on = b.dataset.tab === tab;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-selected', String(on));
+            });
+            content.hidden = tab !== 'table';
+            document.getElementById('chartsPane').hidden = tab !== 'charts';
+            if (tab === 'charts') renderCharts();
+        }
+        document.getElementById('reportTabs').addEventListener('click', (e) => {
+            const b = e.target.closest('.tab');
+            if (b) setTab(b.dataset.tab);
+        });
+        function updateChartsCount() { document.getElementById('chartsCount').textContent = charts.length ? String(charts.length) : ''; }
+        // Richiamato quando cambiano dati o filtri della tabella.
+        function refreshChartsIfVisible() { if (activeTab === 'charts') renderCharts(); }
+
+        // --- Calcolo dei dati di un grafico ---
+        const labelOf = (id) => { const c = gridColumns.find(x => colId(x) === id); return c ? c.label : null; };
+        function aggregate(nums, agg, count) {
+            if (agg === 'count') return count;
+            if (!nums.length) return null;
+            if (agg === 'sum') return nums.reduce((a, b) => a + b, 0);
+            if (agg === 'avg') return nums.reduce((a, b) => a + b, 0) / nums.length;
+            if (agg === 'min') return Math.min(...nums);
+            return Math.max(...nums);
+        }
+        function chartData(cfg) {
+            const rows = visibleTable().rows;
+            const idx = (id) => gridColumns.findIndex(c => colId(c) === id);
+            const values = (cfg.values || []).filter(v => v.agg === 'count' || idx(v.col) >= 0);
+            const missing = (cfg.values || []).some(v => v.agg !== 'count' && idx(v.col) < 0)
+                || (cfg.type !== 'kpi' && idx(cfg.category) < 0);
+            if (missing) return { error: 'Una colonna del grafico non è più nella tabella: modifica il grafico.' };
+            const num = (s) => { const v = sortValue(s); return v && v.n != null ? v.n : null; };
+            const catIdx = idx(cfg.category);
+            const t = CHART_TYPES.find(x => x.id === cfg.type) || {};
+            const splitIdx = cfg.split && !t.noSplit ? idx(cfg.split) : -1;
+            if (cfg.split && !t.noSplit && splitIdx < 0) return { error: 'La colonna "Dividi per" non è più nella tabella: modifica il grafico.' };
+            const byCatAsc = (a, b) => {
+                const va = sortValue(a), vb = sortValue(b);
+                if (va && vb && va.n != null && vb.n != null) return va.n - vb.n;
+                return a.localeCompare(b, 'it', { numeric: true, sensitivity: 'base' });
+            };
+            // "Dividi per": un valore solo, una serie per ogni valore della colonna scelta
+            // (es. categoria Cliente, valore Somma di Offerta gg, serie = Anno 2025, 2026, …).
+            if (splitIdx >= 0 && values.length) {
+                const v = values[0];
+                const cell = new Map(); // "categoria\u0001serie" -> righe
+                const catTotals = new Map();
+                const serieKeys = new Set();
+                rows.forEach(r => {
+                    const c = String(r[catIdx] || '').trim() || '(vuoto)';
+                    const s = String(r[splitIdx] || '').trim() || '(vuoto)';
+                    serieKeys.add(s);
+                    const k = c + '\u0001' + s;
+                    if (!cell.has(k)) cell.set(k, []);
+                    cell.get(k).push(r);
+                    if (!catTotals.has(c)) catTotals.set(c, []);
+                    catTotals.get(c).push(r);
+                });
+                const valueOf = (list) => {
+                    if (!list || !list.length) return null;
+                    const nums = v.agg === 'count' ? [] : list.map(r => num(r[idx(v.col)])).filter(n => n != null);
+                    return aggregate(nums, v.agg, list.length);
+                };
+                let cats = [...catTotals.keys()];
+                if (['line', 'area', 'radar'].includes(cfg.type)) cats.sort(byCatAsc);
+                else cats.sort((a, b) => (valueOf(catTotals.get(b)) || 0) - (valueOf(catTotals.get(a)) || 0));
+                const all = cats.length;
+                const limit = Number(cfg.limit) || 0;
+                if (limit && cats.length > limit) cats = cats.slice(0, limit);
+                const series = [...serieKeys].sort(byCatAsc);
+                const what = `${AGGS.find(a => a.id === v.agg).label}${v.agg === 'count' ? '' : ' di ' + (labelOf(v.col) || '')}`;
+                return {
+                    labels: cats,
+                    datasets: series.map(s => ({
+                        label: `${labelOf(cfg.split)} ${s}`,
+                        data: cats.map(c => { const x = valueOf(cell.get(c + '\u0001' + s)); return x == null ? 0 : Math.round(x * 100) / 100; })
+                    })),
+                    valueLabel: what,
+                    truncated: limit && all > limit ? all : 0
+                };
+            }
+            // Raggruppa le righe per categoria (celle vuote = "(vuoto)").
+            const groups = new Map();
+            rows.forEach(r => {
+                const key = cfg.type === 'kpi' ? 'Totale' : (String(r[catIdx] || '').trim() || '(vuoto)');
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(r);
+            });
+            let cats = [...groups.keys()];
+            const series = values.map(v => cats.map(k => {
+                const list = groups.get(k);
+                const nums = v.agg === 'count' ? [] : list.map(r => num(r[idx(v.col)])).filter(n => n != null);
+                return aggregate(nums, v.agg, list.length);
+            }));
+            // Ordine: linee/area/radar per categoria crescente, gli altri per valore decrescente.
+            let order = cats.map((_, i) => i);
+            if (['line', 'area', 'radar'].includes(cfg.type)) {
+                order.sort((a, b) => {
+                    const va = sortValue(cats[a]), vb = sortValue(cats[b]);
+                    if (va && vb && va.n != null && vb.n != null) return va.n - vb.n;
+                    return cats[a].localeCompare(cats[b], 'it', { numeric: true, sensitivity: 'base' });
+                });
+            } else if (series.length) {
+                order.sort((a, b) => (series[0][b] || 0) - (series[0][a] || 0));
+            }
+            const limit = Number(cfg.limit) || 0;
+            if (limit && order.length > limit) order = order.slice(0, limit);
+            return {
+                labels: order.map(i => cats[i]),
+                datasets: values.map((v, s) => ({
+                    label: `${AGGS.find(a => a.id === v.agg).label}${v.agg === 'count' ? '' : ' di ' + (labelOf(v.col) || '')}`,
+                    data: order.map(i => series[s][i] == null ? 0 : Math.round(series[s][i] * 100) / 100)
+                })),
+                truncated: limit && cats.length > limit ? cats.length : 0
+            };
+        }
+
+        // --- Disegno ---
+        const fmtNum = (n) => Number(n).toLocaleString('it-IT', { maximumFractionDigits: 2 });
+        // Etichette sui valori: scrive il numero accanto a ogni barra/punto e dentro ogni fetta
+        // (i valori 0 si saltano; nelle barre impilate il numero sta al centro del pezzo).
+        function valueLabelsPlugin(cfg) {
+            return {
+                id: 'valueLabels',
+                afterDatasetsDraw(chart) {
+                    const ctx = chart.ctx;
+                    const single = ['pie', 'doughnut', 'polar'].includes(cfg.type);
+                    ctx.save();
+                    ctx.font = '600 11px -apple-system, "Segoe UI", Roboto, sans-serif';
+                    chart.data.datasets.forEach((ds, di) => {
+                        const meta = chart.getDatasetMeta(di);
+                        if (meta.hidden) return;
+                        meta.data.forEach((el, k) => {
+                            const v = Number(ds.data[k]);
+                            if (!v) return;
+                            const text = fmtNum(v);
+                            let x, y;
+                            if (single) {
+                                ({ x, y } = el.tooltipPosition());
+                                ctx.fillStyle = '#fff';
+                                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                            } else if (cfg.type === 'stacked') {
+                                ({ x, y } = el.getCenterPoint());
+                                ctx.fillStyle = '#fff';
+                                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                            } else if (cfg.type === 'barh') {
+                                x = el.x + 4; y = el.y;
+                                ctx.fillStyle = '#374151';
+                                ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+                            } else {
+                                x = el.x; y = el.y - 4;
+                                ctx.fillStyle = '#374151';
+                                ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+                            }
+                            ctx.fillText(text, x, y);
+                        });
+                    });
+                    ctx.restore();
+                }
+            };
+        }
+
+        // Totale: somma dei valori VISIBILI (se nascondi una serie o una fetta dalla legenda il
+        // totale si aggiorna). Scritto sotto il grafico; nella ciambella anche al centro.
+        // Con più serie mostra anche il totale di ciascuna.
+        function totalPlugin(cfg, footer) {
+            const visibleTotals = (chart) => {
+                const single = ['pie', 'doughnut', 'polar'].includes(cfg.type);
+                return chart.data.datasets.map((ds, di) => {
+                    if (!chart.isDatasetVisible(di)) return null;
+                    const sum = ds.data.reduce((acc, v, k) => acc + ((single && !chart.getDataVisibility(k)) ? 0 : (Number(v) || 0)), 0);
+                    return { label: ds.label, sum };
+                }).filter(Boolean);
+            };
+            return {
+                id: 'chartTotal',
+                afterUpdate(chart) {
+                    if (!footer) return;
+                    const totals = visibleTotals(chart);
+                    const all = totals.reduce((a, t) => a + t.sum, 0);
+                    footer.innerHTML = `Totale: <strong>${esc(fmtNum(all))}</strong>`
+                        + (totals.length > 1 ? `<span class="chart-total-parts">${totals.map(t => `${esc(t.label)}: ${esc(fmtNum(t.sum))}`).join(' · ')}</span>` : '');
+                },
+                afterDraw(chart) {
+                    if (cfg.type !== 'doughnut') return;
+                    const all = visibleTotals(chart).reduce((a, t) => a + t.sum, 0);
+                    const meta = chart.getDatasetMeta(0);
+                    const arc = meta && meta.data[0];
+                    if (!arc) return;
+                    const ctx = chart.ctx;
+                    ctx.save();
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    ctx.fillStyle = '#6B7280'; ctx.font = '500 11px -apple-system, "Segoe UI", Roboto, sans-serif';
+                    ctx.fillText('Totale', arc.x, arc.y - 11);
+                    ctx.fillStyle = '#1E40AF'; ctx.font = '700 15px -apple-system, "Segoe UI", Roboto, sans-serif';
+                    ctx.fillText(fmtNum(all), arc.x, arc.y + 8);
+                    ctx.restore();
+                }
+            };
+        }
+
+        // Distrugge i grafici della pagina (non quello eventualmente aperto a schermo intero).
+        function destroyCharts() {
+            chartInstances.forEach((ch, key) => { if (key !== 'full') { ch.destroy(); chartInstances.delete(key); } });
+        }
+        function renderCharts() {
+            updateChartsCount();
+            const pane = document.getElementById('chartsPane');
+            destroyCharts();
+            const noTable = !gridColumns.length;
+            pane.innerHTML = `<div class="charts-toolbar">
+                    <span>${charts.length} grafic${charts.length === 1 ? 'o' : 'i'} · dati: ${visibleTable().rows.length} righe della Tabella (filtri inclusi)</span>
+                    <button type="button" class="btn btn-sm btn-primary" id="chartAdd"${noTable ? ' disabled' : ''}><i class="fas fa-plus"></i> Nuovo grafico</button>
+                </div>` + (noTable
+                ? '<div class="state"><i class="fas fa-table"></i>Prima aggiungi delle colonne nella scheda Tabella: i grafici usano i suoi dati.</div>'
+                : charts.length
+                    ? `<div class="charts-grid">${charts.map((c, i) => `<div class="chart-card${c.wide ? ' wide' : ''}" data-chart-index="${i}">
+                        <div class="chart-head"><h3 title="${esc(chartTitle(c))}">${esc(chartTitle(c))}</h3>
+                            <button type="button" data-act="full" title="Schermo intero"><i class="fas fa-up-right-and-down-left-from-center"></i></button>
+                            <button type="button" data-act="wide" title="${c.wide ? 'Riduci alla larghezza normale' : 'Allarga a tutta la riga'}"><i class="fas ${c.wide ? 'fa-compress' : 'fa-arrows-left-right'}"></i></button>
+                            <button type="button" data-act="edit" title="Modifica"><i class="fas fa-pen"></i></button>
+                            <button type="button" data-act="delete" title="Elimina"><i class="fas fa-trash"></i></button>
+                        </div><div class="chart-box" id="chart-box-${i}"></div></div>`).join('')}</div>`
+                    : '<div class="state"><i class="fas fa-chart-pie"></i>Nessun grafico: premi <strong>Nuovo grafico</strong>, scegli il tipo e le colonne.</div>');
+            if (noTable) return;
+            if (typeof Chart === 'undefined') {
+                pane.querySelectorAll('.chart-box').forEach(b => { b.innerHTML = '<div class="chart-msg">Libreria grafici non disponibile: ricarica la pagina.</div>'; });
+                return;
+            }
+            charts.forEach((cfg, i) => drawChart(cfg, document.getElementById(`chart-box-${i}`), i));
+        }
+        function chartTitle(c) {
+            if (c.title) return c.title;
+            const t = CHART_TYPES.find(x => x.id === c.type);
+            const v = (c.values || [])[0];
+            const what = v ? (v.agg === 'count' ? 'Conteggio' : `${AGGS.find(a => a.id === v.agg).label} ${labelOf(v.col) || ''}`) : '';
+            const split = c.split && t && !t.noSplit && labelOf(c.split) ? ` e ${labelOf(c.split)}` : '';
+            return `${what}${c.type === 'kpi' ? '' : ' per ' + (labelOf(c.category) || '?') + split} (${t ? t.label : ''})`;
+        }
+        function drawChart(cfg, box, i) {
+            const d = chartData(cfg);
+            if (d.error) { box.innerHTML = `<div class="chart-msg">${esc(d.error)}</div>`; return; }
+            if (cfg.type === 'kpi') {
+                const v = d.datasets[0] ? d.datasets[0].data[0] : 0;
+                box.innerHTML = `<div class="kpi-box"><div class="kpi-value">${esc(fmtNum(v || 0))}</div><div class="kpi-label">${esc(d.datasets[0] ? d.datasets[0].label : '')}</div></div>`;
+                return;
+            }
+            if (!d.labels.length) { box.innerHTML = '<div class="chart-msg">Nessun dato con i filtri attuali.</div>'; return; }
+            box.innerHTML = '<div class="chart-canvas-wrap"><canvas></canvas></div>'
+                + (cfg.total ? '<div class="chart-total"></div>' : '')
+                + (d.truncated ? `<div class="chart-msg" style="padding:0.2rem;">Mostrate ${d.labels.length} categorie su ${d.truncated}</div>` : '');
+            const single = ['pie', 'doughnut', 'polar'].includes(cfg.type);
+            const type = { barh: 'bar', stacked: 'bar', area: 'line', polar: 'polarArea' }[cfg.type] || cfg.type;
+            const datasets = d.datasets.map((ds, s) => {
+                const color = PALETTE[s % PALETTE.length];
+                if (single) return { ...ds, backgroundColor: d.labels.map((_, k) => PALETTE[k % PALETTE.length] + (cfg.type === 'polar' ? 'B3' : '')), borderColor: '#fff', borderWidth: 1 };
+                if (type === 'line' || type === 'radar') {
+                    return { ...ds, borderColor: color, backgroundColor: color + (cfg.type === 'area' || type === 'radar' ? '33' : ''), fill: cfg.type === 'area' || type === 'radar', tension: 0.25, pointRadius: 3 };
+                }
+                return { ...ds, backgroundColor: color, borderRadius: 4 };
+            });
+            const options = {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: single || datasets.length > 1, position: single ? 'right' : 'top' },
+                    tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtNum(ctx.parsed && typeof ctx.parsed === 'object' ? (cfg.type === 'barh' ? ctx.parsed.x : (ctx.parsed.y ?? ctx.parsed.r)) : ctx.parsed)}` } }
+                }
+            };
+            const showGrid = cfg.grid !== false;
+            if (!single && type !== 'radar') {
+                options.indexAxis = cfg.type === 'barh' ? 'y' : 'x';
+                options.scales = {
+                    x: { stacked: cfg.type === 'stacked', ticks: { autoSkip: true, maxRotation: 45 }, grid: { display: showGrid } },
+                    y: { stacked: cfg.type === 'stacked', beginAtZero: true, grid: { display: showGrid } }
+                };
+            } else if (type === 'radar') {
+                options.scales = { r: { beginAtZero: true, grid: { display: showGrid }, angleLines: { display: showGrid } } };
+            }
+            if (cfg.labels) {
+                // Spazio per le etichette in cima/in fondo alle barre.
+                options.layout = { padding: { top: 18, right: cfg.type === 'barh' ? 60 : 12 } };
+            }
+            chartInstances.set(i, new Chart(box.querySelector('canvas'), {
+                type, data: { labels: d.labels, datasets }, options,
+                plugins: [
+                    ...(cfg.labels ? [valueLabelsPlugin(cfg)] : []),
+                    ...(cfg.total ? [totalPlugin(cfg, box.querySelector('.chart-total'))] : [])
+                ]
+            }));
+        }
+        document.getElementById('chartsPane').addEventListener('click', (e) => {
+            if (e.target.closest('#chartAdd')) { openChartModal(null); return; }
+            const btn = e.target.closest('.chart-head button');
+            if (!btn) return;
+            const i = Number(btn.closest('.chart-card').dataset.chartIndex);
+            if (btn.dataset.act === 'full') openChartFullscreen(i);
+            else if (btn.dataset.act === 'edit') openChartModal(i);
+            else if (btn.dataset.act === 'wide') { charts[i].wide = !charts[i].wide; saveCharts(); renderCharts(); }
+            else if (btn.dataset.act === 'delete' && confirm('Eliminare questo grafico?')) { charts.splice(i, 1); saveCharts(); renderCharts(); }
+        });
+
+        // --- Schermo intero: il grafico si apre grande sopra la pagina (Esc o × per chiudere) ---
+        let fullChart = null;
+        function closeChartFullscreen() {
+            if (fullChart) { fullChart.destroy(); fullChart = null; }
+            const ov = document.getElementById('chartFullscreen');
+            if (ov) ov.remove();
+            chartInstances.delete('full');
+        }
+        function openChartFullscreen(i) {
+            closeChartFullscreen();
+            const cfg = charts[i];
+            const ov = document.createElement('div');
+            ov.id = 'chartFullscreen';
+            ov.className = 'chart-fullscreen';
+            ov.innerHTML = `<div class="cf-head"><h3>${esc(chartTitle(cfg))}</h3>
+                    <button type="button" class="btn btn-sm" id="cfClose" title="Chiudi (Esc)"><i class="fas fa-xmark"></i> Chiudi</button></div>
+                <div class="cf-box" id="cfBox"></div>`;
+            document.body.appendChild(ov);
+            ov.querySelector('#cfClose').addEventListener('click', closeChartFullscreen);
+            ov.addEventListener('click', (e) => { if (e.target === ov) closeChartFullscreen(); });
+            drawChart(cfg, ov.querySelector('#cfBox'), 'full');
+            fullChart = chartInstances.get('full') || null;
+        }
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeChartFullscreen(); });
+
+        // --- Finestra di configurazione ---
+        let editingChart = null; // indice del grafico in modifica, null = nuovo
+        let cfgType = 'bar';
+        const modal = document.getElementById('chartModal');
+        const colOptions = (selected, numericFirst) => gridColumns.map(c => {
+            const id = colId(c);
+            return `<option value="${esc(id)}"${id === selected ? ' selected' : ''}>${esc(AREAS[c.area].tag)} · ${esc(c.label)}</option>`;
+        }).join('');
+        function valueRowHtml(v) {
+            return `<div class="val-row">
+                <select class="agg">${AGGS.map(a => `<option value="${a.id}"${a.id === v.agg ? ' selected' : ''}>${a.label}</option>`).join('')}</select>
+                <select class="col"${v.agg === 'count' ? ' disabled' : ''}>${colOptions(v.col)}</select>
+                <button type="button" title="Togli questo valore" aria-label="Togli questo valore"><i class="fas fa-xmark"></i></button>
+            </div>`;
+        }
+        function syncModalForType() {
+            const t = CHART_TYPES.find(x => x.id === cfgType);
+            document.querySelectorAll('#cfgTypes .chart-type').forEach(b => b.classList.toggle('selected', b.dataset.type === cfgType));
+            document.getElementById('cfgCategoryWrap').hidden = !!t.noCategory;
+            document.getElementById('cfgLimitWrap').hidden = !!t.noCategory;
+            document.getElementById('cfgSplitWrap').hidden = !!t.noSplit;
+            // Griglia: solo per i grafici con assi (non torta/ciambella/area polare/KPI).
+            document.getElementById('cfgGridWrap').hidden = !!t.single;
+            // Totale: il KPI è già un numero solo.
+            document.getElementById('cfgTotalWrap').hidden = cfgType === 'kpi';
+            // Torta, ciambella, area polare, KPI e "Dividi per" attivo: un solo valore.
+            const splitOn = !t.noSplit && !!document.getElementById('cfgSplit').value;
+            const oneValue = t.single || splitOn;
+            document.getElementById('cfgSplitHint').hidden = !splitOn;
+            const rows = [...document.querySelectorAll('#cfgValues .val-row')];
+            rows.forEach((r, k) => { if (oneValue && k > 0) r.remove(); });
+            document.getElementById('cfgAddValue').hidden = oneValue;
+        }
+        function openChartModal(index) {
+            if (!gridColumns.length) return;
+            editingChart = index;
+            const c = index == null
+                ? { type: 'bar', category: colId(gridColumns[0]), values: [{ agg: 'count', col: colId(gridColumns[0]) }], limit: 20 }
+                : JSON.parse(JSON.stringify(charts[index]));
+            cfgType = c.type;
+            document.getElementById('chartModalTitle').textContent = index == null ? 'Nuovo grafico' : 'Modifica grafico';
+            document.getElementById('cfgTitle').value = c.title || '';
+            document.getElementById('cfgTypes').innerHTML = CHART_TYPES.map(t =>
+                `<button type="button" class="chart-type" data-type="${t.id}"><i class="fas ${t.icon}"></i>${t.label}</button>`).join('');
+            document.getElementById('cfgCategory').innerHTML = colOptions(c.category);
+            document.getElementById('cfgSplit').innerHTML = '<option value="">— nessuna suddivisione —</option>' + colOptions(c.split || '');
+            document.getElementById('cfgValues').innerHTML = (c.values && c.values.length ? c.values : [{ agg: 'count', col: colId(gridColumns[0]) }]).map(valueRowHtml).join('');
+            document.getElementById('cfgLimit').value = String(c.limit == null ? 20 : c.limit);
+            document.getElementById('cfgGrid').checked = c.grid !== false;
+            document.getElementById('cfgLabels').checked = !!c.labels;
+            document.getElementById('cfgTotal').checked = !!c.total;
+            syncModalForType();
+            modal.hidden = false;
+        }
+        function closeChartModal() { modal.hidden = true; }
+        document.getElementById('cfgTypes').addEventListener('click', (e) => {
+            const b = e.target.closest('.chart-type');
+            if (b) { cfgType = b.dataset.type; syncModalForType(); }
+        });
+        document.getElementById('cfgSplit').addEventListener('change', syncModalForType);
+        document.getElementById('cfgAddValue').addEventListener('click', () => {
+            document.getElementById('cfgValues').insertAdjacentHTML('beforeend', valueRowHtml({ agg: 'sum', col: colId(gridColumns[gridColumns.length - 1]) }));
+        });
+        document.getElementById('cfgValues').addEventListener('change', (e) => {
+            if (e.target.classList.contains('agg')) e.target.parentElement.querySelector('select.col').disabled = e.target.value === 'count';
+        });
+        document.getElementById('cfgValues').addEventListener('click', (e) => {
+            const b = e.target.closest('button');
+            if (b && document.querySelectorAll('#cfgValues .val-row').length > 1) b.closest('.val-row').remove();
+        });
+        document.getElementById('cfgCancel').addEventListener('click', closeChartModal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) closeChartModal(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.hidden) closeChartModal(); });
+        document.getElementById('cfgSave').addEventListener('click', () => {
+            const cfg = {
+                type: cfgType,
+                title: document.getElementById('cfgTitle').value.trim(),
+                category: document.getElementById('cfgCategory').value,
+                split: CHART_TYPES.find(x => x.id === cfgType).noSplit ? '' : document.getElementById('cfgSplit').value,
+                values: [...document.querySelectorAll('#cfgValues .val-row')].map(r => ({ agg: r.querySelector('.agg').value, col: r.querySelector('.col').value })),
+                limit: Number(document.getElementById('cfgLimit').value) || 0,
+                grid: document.getElementById('cfgGrid').checked,
+                labels: document.getElementById('cfgLabels').checked,
+                total: document.getElementById('cfgTotal').checked
+            };
+            if (editingChart != null) cfg.wide = charts[editingChart].wide;
+            if (editingChart == null) charts.push(cfg); else charts[editingChart] = cfg;
+            saveCharts();
+            closeChartModal();
+            renderCharts();
+        });
+
+        init().then(() => {
+            if (document.getElementById('reportingSide').hidden) return;
+            setCurrentReport(currentReport);
+            markSelectedFields();
+            updateChartsCount();
+            if (gridColumns.length) loadGridData();
+        });
+    </script>
+</body>
+</html>

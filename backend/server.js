@@ -4902,8 +4902,11 @@ const DASHBOARD_FLAGS = {
   kpiFatturato: 'mostra kpi fatturato',
   calendario: 'mostra calendario',
   todo: 'mostra todolist',
-  issue: 'mostra funzione issue'
+  issue: 'mostra funzione issue',
+  reporting: 'mostra reporting'
 };
+// Flag che senza riga in settings valgono false (moduli nuovi, da attivare esplicitamente).
+const DASHBOARD_FLAGS_DEFAULT_OFF = new Set(['reporting']);
 async function readDashboardFlags(user) {
   const r = await db.query(
     `SELECT LOWER(REGEXP_REPLACE(BTRIM(campo), '^\\(\\*\\)\\s*', '')) AS campo, valore1
@@ -4917,7 +4920,7 @@ async function readDashboardFlags(user) {
     const row = r.rows.find(x => x.campo === campo);
     flags[key] = row
       ? ['true', 't', '1', 'yes', 'on'].includes(String(row.valore1 ?? '').trim().toLowerCase())
-      : true;
+      : !DASHBOARD_FLAGS_DEFAULT_OFF.has(key);
   }
   return flags;
 }
@@ -4928,6 +4931,434 @@ app.get('/api/settings/dashboard-flags', requireAuth, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// === MODULO REPORTING (sito/reporting.html) ===
+// Aree del reporting: tabella EAV e riga identità (radice) di ogni elemento.
+//   clients  -> un cliente per riga   (argument = campo = 'Cliente')
+//   projects -> un progetto per riga  (argument = campo = 'Progetto', con client_id)
+// Tutto disponibile solo con "Mostra Reporting" attivo, per tenant + utente del contesto.
+const REPORTING_AREAS = {
+  clients: { root: 'Cliente', firstFields: [{ campo: 'Nome Cliente', key: 'Cliente' }] },
+  // Il nome del cliente si prende dall'area Clienti ("Nome Cliente"): la griglia unisce le
+  // due aree per client_id.
+  projects: { root: 'Progetto', firstFields: [{ campo: 'Nome Progetto', key: 'Progetto' }] }
+};
+// Esclusi i tipi che non sono dati da riportare: griglie/Gantt (11, 13), espressioni (12),
+// Nodo Padre (0, resta solo come intestazione dei suoi campi), collegamenti (20), accesso
+// DB/funzioni (15, 16), password (40), riferimento a tabella (4), flag+testo (14), routine (50).
+const REPORTING_EXCLUDED_TYPES = new Set(['11', '13', '12', '0', '20', '15', '16', '40', '4', '14', '50']);
+
+// Tabelle "dettaglio" del reporting: tabelle normali (una riga per record) legate al cliente
+// da tenant_id + user_id + client_id e, se hanno project_id, anche al progetto.
+const REPORTING_TABLES = {
+  quotazioni: { table: 'cl_quotazioni', label: 'Quotazioni' },
+  contatti: { table: 'contacts', label: 'Contatti' },
+  issue: { table: 'issue', label: 'Issue' },
+  licenze: { table: 'licenze_app', label: 'Licenze' },
+  fatturazione: { table: 'proj_anno_fatt', label: 'Fatturazione Anno/mese' },
+  costi: { table: 'proj_worker', label: 'Costi Progetto' },
+  tktjira: { table: 'task_app', label: 'Tkt Jira' },
+  todo: { table: 'tasks', label: 'To do List' }
+};
+// Colonne tecniche mai mostrate come campi.
+const REPORTING_HIDDEN_COLUMNS = new Set(['id', 'tenant_id', 'user_id', 'client_id', 'project_id', 'id_roles',
+  'id_roles_write', 'crypto', 'master_id', 'created_at', 'updated_at', 'update_by', 'updated_by', 'created_by',
+  // validità della riga: usate solo per filtrare i record attivi, non come dati del report
+  'scadenza', 'data_inizio']);
+// Campi/colonne di appoggio ("appo…", anche "apppo…", maiuscole o minuscole): mai mostrati.
+const isReportingAppoName = (name) => /^app+o/i.test(String(name || '').replace(/^\(\*\)\s*/, '').trim());
+// Colonna descrittiva di una tabella collegata (FK): stessa scelta delle griglie tipo 11.
+const REPORTING_FK_DISPLAY = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2'];
+
+// Colonne utilizzabili di una tabella dettaglio: [{ name, type, fk: { table, column, display } }].
+async function reportingTableColumns(area) {
+  const t = REPORTING_TABLES[area].table;
+  const cols = (await db.query(
+    `SELECT column_name, data_type FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position`,
+    [t]
+  )).rows;
+  const fks = (await db.query(
+    `SELECT kcu.column_name, ccu.table_name AS ft, ccu.column_name AS fc
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+       JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+      WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' AND tc.table_name = $1`,
+    [t]
+  )).rows;
+  const out = [];
+  for (const c of cols) {
+    if (REPORTING_HIDDEN_COLUMNS.has(c.column_name) || isReportingAppoName(c.column_name)) continue;
+    const fk = fks.find((x) => x.column_name === c.column_name);
+    let fkInfo = null;
+    if (fk) {
+      const fcols = await getTableColumns(fk.ft);
+      const display = [...fcols].find((n) => /^desc_/i.test(n)) || REPORTING_FK_DISPLAY.find((n) => fcols.has(n));
+      if (display) fkInfo = { table: fk.ft, column: fk.fc, display };
+    }
+    out.push({ name: c.column_name, type: c.data_type, fk: fkInfo });
+  }
+  return { table: t, columns: out, all: new Set(cols.map((c) => c.column_name)) };
+}
+// Etichetta leggibile dal nome tecnico: "data_richiesta" -> "Data richiesta".
+const reportingColumnLabel = (name) => {
+  const s = String(name).replace(/_/g, ' ').trim();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
+
+// Campi (colonne) di una tabella dettaglio.
+app.get('/api/reporting/table-fields/:area', requireAuth, async (req, res) => {
+  try {
+    await assertReportingEnabled(req);
+    if (!REPORTING_TABLES[req.params.area]) return res.status(404).json({ error: 'Area non trovata' });
+    const { columns } = await reportingTableColumns(req.params.area);
+    res.json(columns.map((c) => ({ campo: reportingColumnLabel(c.name), key: c.name, custom: false, group: false, parent: null, parentKey: null })));
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+async function assertReportingEnabled(req) {
+  if (!(await readDashboardFlags(req.user)).reporting) {
+    throw Object.assign(new Error('Modulo Reporting non attivo'), { statusCode: 403 });
+  }
+}
+function reportingRoleLevel(req) {
+  const role = Number(req.user.id_roles);
+  return Number.isFinite(role) ? role : 9999;
+}
+
+// Campi disponibili (standard e custom "(*)") dell'area, con la stessa visibilità per ruolo
+// del dettaglio (id_roles NULL o >= ruolo, anche per il Nodo Padre che li contiene). Un campo
+// compare una volta sola anche se esiste in più elementi. parent = nome del Nodo Padre.
+app.get('/api/reporting/fields/:source(clients|projects)', requireAuth, async (req, res) => {
+  try {
+    await assertReportingEnabled(req);
+    const source = req.params.source;
+    const area = REPORTING_AREAS[source];
+    const r = await db.query(
+      `SELECT CASE WHEN p.argument = $4 THEN NULL ELSE p.campo END AS parent,
+              f.campo, f.tipo_valore, MIN(f.ordinamento) AS ordinamento
+         FROM "${source}" f
+         JOIN "${source}" p ON p.id::text = f.argument
+        WHERE f.tenant_id = $1 AND f.user_id = $2
+          AND f.campo IS NOT NULL AND BTRIM(f.campo) <> '' AND f.argument <> $4
+          -- Visibilità per ruolo (id_roles più basso = più privilegi): es. ruolo 70 vede
+          -- i campi 70/80/90 e quelli senza id_roles, non i 69. Vale anche per il Nodo Padre.
+          AND (f.id_roles IS NULL OR f.id_roles >= $3)
+          AND (p.argument = $4 OR p.id_roles IS NULL OR p.id_roles >= $3)
+        GROUP BY 1, 2, 3
+        ORDER BY MIN(f.ordinamento) NULLS LAST, 2`,
+      [req.user.tenant_id, req.user.user_id, reportingRoleLevel(req), area.root]
+    );
+    const first = area.firstFields.map((f) => ({ ...f, custom: false, tipo_valore: '2', group: false, parent: null, parentKey: null }));
+    res.json(first.concat(r.rows
+      .filter((x) => String(x.tipo_valore).trim() === '0' || !REPORTING_EXCLUDED_TYPES.has(String(x.tipo_valore).trim()))
+      .filter((x) => !isReportingAppoName(x.campo)) // campi di appoggio "appo…"
+      .map((x) => ({
+        campo: String(x.campo).replace(/^\(\*\)\s*/, ''),
+        custom: isCustomCampo(x.campo),
+        tipo_valore: x.tipo_valore,
+        // group = Nodo Padre: il browser lo mostra solo come intestazione, se ha campi visibili
+        group: String(x.tipo_valore).trim() === '0',
+        parent: x.parent ? String(x.parent).replace(/^\(\*\)\s*/, '') : null,
+        // Chiave tecnica per leggere i dati: nome reale del campo e del suo Nodo Padre.
+        key: String(x.campo),
+        parentKey: x.parent ? String(x.parent) : null
+      }))));
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Valori dei campi scelti per gli elementi indicati (clienti o progetti): Map
+// "<id elemento>\u0001<nodo padre>\u0001<campo>" -> valore da mostrare. Stessa visibilità per
+// ruolo dell'elenco campi. Valore per tipo: 1 = valore1 (Sì/No); 3/30/31 = valore3 (numero);
+// 8 = valore3 (%); altri = valore2. I numeri interi senza ".00", i decimali in formato italiano.
+const reportingCellKey = (itemId, parent, campo) => `${itemId}\u0001${parent || ''}\u0001${campo}`;
+async function reportingValues(req, source, ids, keys) {
+  const values = new Map();
+  if (!ids.length || !keys.length) return values;
+  const root = REPORTING_AREAS[source].root;
+  const r = await db.query(
+    `SELECT f.master_id, f.campo, CASE WHEN p.argument = $6 THEN NULL ELSE p.campo END AS parent,
+            f.tipo_valore, f.valore1, f.valore2, f.valore3
+       FROM "${source}" f
+       JOIN "${source}" p ON p.id::text = f.argument
+      WHERE f.tenant_id = $1 AND f.user_id = $2 AND f.master_id = ANY($3::uuid[])
+        AND f.argument <> $6 AND f.campo = ANY($4::text[])
+        AND (f.id_roles IS NULL OR f.id_roles >= $5)
+        AND (p.argument = $6 OR p.id_roles IS NULL OR p.id_roles >= $5)`,
+    [req.user.tenant_id, req.user.user_id, ids, keys, reportingRoleLevel(req), root]
+  );
+  const fmtNumber = (n) => {
+    if (n == null || n === '') return '';
+    const x = Number(n);
+    if (!Number.isFinite(x)) return String(n);
+    return Number.isInteger(x) ? String(x) : x.toLocaleString('it-IT', { maximumFractionDigits: 2 });
+  };
+  for (const v of r.rows) {
+    const t = String(v.tipo_valore).trim();
+    let val;
+    if (t === '1') val = (v.valore1 === true || v.valore1 === 't' || v.valore1 === 'true') ? 'Sì' : 'No';
+    else if (t === '8') val = v.valore3 == null || v.valore3 === '' ? '' : `${fmtNumber(v.valore3)}%`; // percentuale
+    else if (t === '3' || t === '30' || t === '31') val = fmtNumber(v.valore3);
+    else val = v.valore2;
+    values.set(reportingCellKey(v.master_id, v.parent, v.campo), val == null ? '' : val);
+  }
+  return values;
+}
+
+// Dati della griglia unica: colonne di clienti, progetti e tabelle dettaglio insieme, legate
+// dalla chiave comune tenant_id + user_id + client_id (e project_id per le tabelle che lo hanno,
+// quando nella griglia ci sono colonne dei progetti). fields = JSON [{ area, key, parentKey }].
+// Le righe si combinano (prodotto) per cliente/progetto: es. 3 quotazioni × 2 contatti = 6
+// righe per quel cliente. Per ogni area si mostrano gli elementi attivi (scadenza vuota o futura), i non
+// attivi (scadenza passata) o entrambi, secondo le caselle della pagina (status); sempre visibili
+// al ruolo (id_roles); le righe con tutte le celle vuote vengono scartate.
+// Chiavi speciali: 'Cliente' / 'Progetto' = nome del cliente / progetto.
+const REPORTING_MAX_ROWS = 5000;
+app.get('/api/reporting/data', requireAuth, async (req, res) => {
+  try {
+    await assertReportingEnabled(req);
+    let fields = [];
+    try { fields = JSON.parse(String(req.query.fields || '[]')); } catch (e) { fields = []; }
+    fields = (Array.isArray(fields) ? fields : [])
+      .filter((f) => f && (REPORTING_AREAS[f.area] || REPORTING_TABLES[f.area]) && typeof f.key === 'string' && f.key.trim())
+      .slice(0, 60)
+      .map((f) => ({ area: f.area, key: f.key, parentKey: f.parentKey ? String(f.parentKey) : null }));
+    const withProjects = fields.some((f) => f.area === 'projects');
+    const role = reportingRoleLevel(req);
+    // Stato per area (caselle "Attivi" / "Non attivi"): status = JSON { area: { active, inactive } }.
+    // Default: solo attivi (scadenza vuota o da oggi in poi); non attivi = scadenza passata.
+    let status = {};
+    try { status = JSON.parse(String(req.query.status || '{}')) || {}; } catch (e) { status = {}; }
+    const expiryCond = (area, col) => {
+      const s = status[area] || {};
+      const active = s.active !== false;
+      const inactive = s.inactive === true;
+      if (active && inactive) return '';
+      if (inactive) return ` AND ${col} < CURRENT_DATE`;
+      return ` AND (${col} IS NULL OR ${col} >= CURRENT_DATE)`;
+    };
+
+    const clients = sortByName((await db.query(
+      `SELECT id, valore2 AS name FROM clients
+        WHERE argument = 'Cliente' AND campo = 'Cliente' AND tenant_id = $1 AND user_id = $2
+          ${expiryCond('clients', 'scadenza')}`,
+      [req.user.tenant_id, req.user.user_id]
+    )).rows);
+    const clientIds = clients.map((c) => c.id);
+    const projects = withProjects
+      ? sortByName((await db.query(
+        `SELECT id, valore2 AS name, client_id FROM projects
+          WHERE argument = 'Progetto' AND campo = 'Progetto' AND tenant_id = $1 AND user_id = $2
+            ${expiryCond('projects', 'scadenza')}`,
+        [req.user.tenant_id, req.user.user_id]
+      )).rows)
+      : [];
+    const groupBy = (list, key) => {
+      const m = new Map();
+      list.forEach((x) => { const k = String(x[key]); if (!m.has(k)) m.set(k, []); m.get(k).push(x); });
+      return m;
+    };
+    const projectsByClient = groupBy(projects, 'client_id');
+
+    // Valori EAV di clienti e progetti.
+    const keysOf = (area) => fields.filter((f) => f.area === area && !['Cliente', 'Progetto'].includes(f.key)).map((f) => f.key);
+    const clientValues = await reportingValues(req, 'clients', clientIds, keysOf('clients'));
+    const projectValues = await reportingValues(req, 'projects', projects.map((p) => p.id), keysOf('projects'));
+
+    // Tabelle dettaglio scelte: righe attive e visibili, raggruppate per cliente e per progetto.
+    const fmtNumber = (n) => {
+      if (n == null || n === '') return '';
+      const x = Number(n);
+      if (!Number.isFinite(x)) return String(n);
+      return Number.isInteger(x) ? String(x) : x.toLocaleString('it-IT', { maximumFractionDigits: 2 });
+    };
+    const fmtCell = (v, type) => {
+      if (v == null || v === '') return '';
+      if (typeof v === 'boolean' || type === 'boolean') return (v === true || v === 't' || v === 'true') ? 'Sì' : 'No';
+      if (v instanceof Date || type === 'date') {
+        const d = v instanceof Date ? v : new Date(v);
+        if (Number.isNaN(d.getTime())) return String(v);
+        const pad = (x) => String(x).padStart(2, '0');
+        return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+      }
+      if (['numeric', 'integer', 'smallint', 'bigint', 'double precision', 'real'].includes(type)) return fmtNumber(v);
+      return String(v);
+    };
+    const tables = [];
+    for (const area of [...new Set(fields.filter((f) => REPORTING_TABLES[f.area]).map((f) => f.area))]) {
+      const info = await reportingTableColumns(area);
+      const wanted = fields.filter((f) => f.area === area).map((f) => info.columns.find((c) => c.name === f.key)).filter(Boolean);
+      const selects = [];
+      const joins = [];
+      wanted.forEach((c, i) => {
+        assertValidIdentifier(c.name);
+        if (c.fk) {
+          const alias = `fk${i}`;
+          joins.push(`LEFT JOIN "${assertValidIdentifier(c.fk.table)}" ${alias} ON ${alias}."${assertValidIdentifier(c.fk.column)}" = d."${c.name}"`);
+          selects.push(`${alias}."${assertValidIdentifier(c.fk.display)}" AS "${c.name}"`);
+        } else {
+          selects.push(`d."${c.name}"`);
+        }
+      });
+      const hasProject = info.all.has('project_id');
+      const params = [req.user.tenant_id, req.user.user_id, clientIds];
+      const conds = ['d.tenant_id = $1', 'd.user_id = $2', 'd.client_id = ANY($3::uuid[])'];
+      if (info.all.has('scadenza')) {
+        const cond = expiryCond(area, 'd.scadenza').replace(/^ AND /, '');
+        if (cond) conds.push(cond);
+      }
+      if (info.all.has('id_roles')) { params.push(role); conds.push(`(d.id_roles IS NULL OR d.id_roles >= $${params.length})`); }
+      const rows = clientIds.length ? (await db.query(
+        `SELECT d.client_id${hasProject ? ', d.project_id' : ''}${selects.length ? ', ' + selects.join(', ') : ''}
+           FROM "${info.table}" d ${joins.join(' ')}
+          WHERE ${conds.join(' AND ')}`,
+        params
+      )).rows : [];
+      const types = new Map(wanted.map((c) => [c.name, c.fk ? 'text' : c.type]));
+      tables.push({
+        area,
+        // Con colonne dei progetti, le tabelle che hanno project_id si legano al progetto.
+        byProject: withProjects && hasProject,
+        byClientRows: groupBy(rows, 'client_id'),
+        byProjectRows: hasProject ? groupBy(rows.filter((r) => r.project_id), 'project_id') : new Map(),
+        fmt: (row, key) => (row && Object.prototype.hasOwnProperty.call(row, key) ? fmtCell(row[key], types.get(key)) : '')
+      });
+    }
+
+    const cell = (f, client, project, detail) => {
+      if (f.area === 'clients') {
+        if (f.key === 'Cliente') return client.name || '';
+        return clientValues.get(reportingCellKey(client.id, f.parentKey, f.key)) ?? '';
+      }
+      if (f.area === 'projects') {
+        if (!project) return '';
+        if (f.key === 'Progetto') return project.name || '';
+        return projectValues.get(reportingCellKey(project.id, f.parentKey, f.key)) ?? '';
+      }
+      const t = tables.find((x) => x.area === f.area);
+      return t ? t.fmt(detail[f.area], f.key) : '';
+    };
+
+    const rows = [];
+    let truncated = false;
+    outer:
+    for (const c of clients) {
+      const projs = withProjects ? (projectsByClient.get(String(c.id)) || []) : [];
+      for (const p of (projs.length ? projs : [null])) {
+        // Righe di ogni tabella dettaglio per questo cliente/progetto ([null] = nessuna riga).
+        const lists = tables.map((t) => {
+          const list = t.byProject
+            ? (p ? (t.byProjectRows.get(String(p.id)) || []) : [])
+            : (t.byClientRows.get(String(c.id)) || []);
+          return list.length ? list : [null];
+        });
+        // Prodotto delle righe delle tabelle dettaglio.
+        let combos = [{}];
+        tables.forEach((t, i) => {
+          const next = [];
+          combos.forEach((combo) => lists[i].forEach((r) => next.push({ ...combo, [t.area]: r })));
+          combos = next;
+        });
+        for (const detail of combos) {
+          const values = fields.map((f) => cell(f, c, p, detail));
+          if (!values.some((v) => String(v).trim() !== '')) continue; // riga tutta vuota
+          rows.push({ clientId: c.id, projectId: p ? p.id : null, values });
+          if (rows.length >= REPORTING_MAX_ROWS) { truncated = true; break outer; }
+        }
+      }
+    }
+    res.json({ rows, truncated, maxRows: REPORTING_MAX_ROWS });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// --- Report salvati ("I miei Report", tabella reporting: Supporto/CreaDB/reporting.sql) ---
+// report = definizione JSON { columns, sort, filters, valueFilters }: i dati si ricalcolano a
+// ogni apertura con /api/reporting/data. Sempre e solo i report del tenant + utente del contesto.
+const REPORT_MAX_JSON = 200 * 1024;
+app.get('/api/reporting/reports', requireAuth, async (req, res) => {
+  try {
+    await assertReportingEnabled(req);
+    const r = await db.query(
+      'SELECT id, nome_report FROM reporting WHERE tenant_id = $1 AND user_id = $2',
+      [req.user.tenant_id, req.user.user_id]
+    );
+    res.json(r.rows.sort((a, b) => String(a.nome_report).localeCompare(String(b.nome_report), 'it', { sensitivity: 'base' })));
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+app.get('/api/reporting/reports/:id', requireAuth, async (req, res) => {
+  try {
+    await assertReportingEnabled(req);
+    const r = await db.query(
+      'SELECT id, nome_report, report FROM reporting WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3',
+      [String(req.params.id), req.user.tenant_id, req.user.user_id]
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'Report non trovato' });
+    let report = {};
+    try { report = JSON.parse(r.rows[0].report || '{}'); } catch (e) { report = {}; }
+    res.json({ id: r.rows[0].id, nome_report: r.rows[0].nome_report, report });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+// Salva: nome nuovo = nuovo report; nome già usato = 409, a meno di overwrite:true (sovrascrive).
+app.post('/api/reporting/reports', requireAuth, async (req, res) => {
+  try {
+    await assertReportingEnabled(req);
+    const nome = String((req.body && req.body.nome_report) || '').trim().slice(0, 255);
+    if (!nome) return res.status(400).json({ error: 'Nome del report richiesto' });
+    const def = req.body && req.body.report;
+    if (!def || typeof def !== 'object' || !Array.isArray(def.columns) || !def.columns.length) {
+      return res.status(400).json({ error: 'Il report non ha colonne' });
+    }
+    const json = JSON.stringify({
+      columns: def.columns, sort: def.sort || null, filters: def.filters || {}, valueFilters: def.valueFilters || {},
+      // grafici della scheda "Grafici" (tipo, categoria, valori/aggregazioni)
+      charts: Array.isArray(def.charts) ? def.charts.slice(0, 30) : [],
+      // caselle Attivi / Non attivi per area
+      status: def.status && typeof def.status === 'object' ? def.status : {}
+    });
+    if (json.length > REPORT_MAX_JSON) return res.status(413).json({ error: 'Report troppo grande' });
+    const existing = await db.query(
+      'SELECT id FROM reporting WHERE tenant_id = $1 AND user_id = $2 AND lower(nome_report) = lower($3)',
+      [req.user.tenant_id, req.user.user_id, nome]
+    );
+    if (existing.rows[0]) {
+      if (!(req.body && req.body.overwrite === true)) {
+        return res.status(409).json({ error: 'Esiste già un report con questo nome', id: existing.rows[0].id });
+      }
+      await db.query('UPDATE reporting SET report = $1, nome_report = $2 WHERE id = $3', [json, nome, existing.rows[0].id]);
+      return res.json({ id: existing.rows[0].id, nome_report: nome, updated: true });
+    }
+    const r = await db.query(
+      'INSERT INTO reporting (tenant_id, user_id, nome_report, report) VALUES ($1, $2, $3, $4) RETURNING id',
+      [req.user.tenant_id, req.user.user_id, nome, json]
+    );
+    res.status(201).json({ id: r.rows[0].id, nome_report: nome, created: true });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+app.delete('/api/reporting/reports/:id', requireAuth, async (req, res) => {
+  try {
+    await assertReportingEnabled(req);
+    const r = await db.query(
+      'DELETE FROM reporting WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3',
+      [String(req.params.id), req.user.tenant_id, req.user.user_id]
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'Report non trovato' });
+    res.json({ deleted: true });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 app.get('/api/settings/chatbot-enabled', requireAuth, async (req, res) => {
   try {
     res.json({ enabled: (await readDashboardFlags(req.user)).chatbot });

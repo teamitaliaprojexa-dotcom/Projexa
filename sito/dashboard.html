@@ -2777,6 +2777,8 @@
                     </div>
                 </div>
             </li>
+            <!-- Reporting: nascosto finché "Mostra Reporting" (Impostazioni › Preferenze) non è attivo -->
+            <li id="navReporting" data-dash-flag="reporting" class="dash-flag-off"><a href="reporting.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10h3v10H4Zm6.5 0V4h3v16h-3ZM17 20v-7h3v7h-3Z"/></svg> <span>Reporting</span></a></li>
             <li id="navIssue" data-dash-flag="issue"><a href="issue.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1.1 15.5h-2.2v-2.2h2.2v2.2Zm0-4.2h-2.2V6.5h2.2v6.8Z"/></svg> <span>Issue</span></a></li>
             <li class="nav-projects" style="position: relative;">
                 <a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5.5C2 4.7 2.7 4 3.5 4h6l2 2h9c.8 0 1.5.7 1.5 1.5v11c0 .8-.7 1.5-1.5 1.5h-17C2.7 20 2 19.3 2 18.5v-13Z"/></svg> <span>Progetti clienti</span></a>
@@ -5643,7 +5645,7 @@
         // flyout, se uno di questi è stato modificato, la pagina si ricarica così chatbot e sezioni
         // compaiono/scompaiono subito. Nomi campo (minuscoli, senza "(*) ") allineati a
         // DASHBOARD_FLAGS in server.js.
-        const DASHBOARD_FLAG_CAMPI = ['chat-bot projexa', 'mostra kpi fatturato', 'mostra calendario', 'mostra todolist', 'mostra funzione issue'];
+        const DASHBOARD_FLAG_CAMPI = ['chat-bot projexa', 'mostra kpi fatturato', 'mostra calendario', 'mostra todolist', 'mostra funzione issue', 'mostra reporting'];
 
         document.addEventListener('change', async (e) => {
             const toggle = e.target;
