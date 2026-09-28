@@ -81,7 +81,9 @@ const CONTENT_SECURITY_POLICY = [
   "img-src 'self' data: blob: https:",
   "connect-src 'self' https://accounts.google.com https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com",
   "frame-src https://accounts.google.com",
-  "worker-src 'self' blob:",
+  // jsdelivr: il worker del recap nel browser (js/recap-worker.js) importa WebLLM da lì, e
+  // gli import dentro un worker ricadono sotto worker-src.
+  "worker-src 'self' blob: https://cdn.jsdelivr.net",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -102,8 +104,9 @@ app.use((req, res, next) => {
   // Isolamento cross-origin SOLO per la dashboard: abilita il multi-thread WASM della
   // trascrizione nel browser (che altrimenti sarebbe più lenta). 'credentialless' non
   // richiede modifiche alle risorse esterne (icone cdnjs, Google), quindi non le rompe.
-  // Le altre pagine (login, ecc.) restano senza isolamento.
-  if (req.path === '/dashboard.html' || req.path === '/') {
+  // Le altre pagine (login, ecc.) restano senza isolamento. Lo stesso isolamento va al
+  // worker del recap nel browser (js/recap-worker.js), che la dashboard avvia.
+  if (req.path === '/dashboard.html' || req.path === '/' || req.path === '/js/recap-worker.js') {
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
   }

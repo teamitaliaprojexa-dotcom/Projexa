@@ -11,8 +11,14 @@
 // Il modello ha un contesto di ~4.000 token (circa un quarto d'ora di riunione): le
 // trascrizioni più lunghe si riassumono prima a pezzi (prompt chunk_prompt del server) e il
 // recap si scrive dagli appunti.
+//
+// Per non appesantire il PC: il modello lavora in un processo separato (js/recap-worker.js),
+// così la pagina resta utilizzabile, e a recap finito viene scaricato e il processo chiuso,
+// così la RAM (diversi GB sulle schede video integrate) torna libera. gpuProfile() dice se la
+// scheda video è integrata: la dashboard sconsiglia allora Browser-Alto.
 
 const LIB_URL = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.85/+esm';
+const WORKER_URL = new URL('./recap-worker.js', import.meta.url);
 
 // Voce del campo settings (in minuscolo) -> modello WebLLM. f32: variante per le GPU senza
 // supporto "shader-f16" (più pesante). mistral-nemo non è distribuito per WebLLM: per "Alto"
@@ -33,6 +39,8 @@ const OUT_CHUNK = 450;         // token massimi degli appunti di un pezzo
 const MARGIN = 150;
 
 const est = (s) => Math.ceil(String(s || '').length / CHARS_PER_TOKEN);
+// Avanzamento per l'utente: i token generati, in parole approssimate (~0,75 parole per token).
+const words = (tokens) => `circa ${Math.round(tokens * 0.75)} parole`;
 
 export function isBrowserRecapMode(v) {
   return Object.prototype.hasOwnProperty.call(MODES, String(v || '').trim().toLowerCase());
@@ -47,20 +55,47 @@ function resolveMode(mode) {
 let _lib = null;
 let _engine = null;
 let _engineModel = null;
+let _worker = null;
 let _loading = null;
 
-async function gpuInfo() {
+// Nome della scheda video dichiarato dal browser (WebGL), es. "ANGLE (AMD, AMD Radeon 780M
+// Graphics ...)". '' se il browser lo nasconde.
+function gpuName() {
+  try {
+    const gl = document.createElement('canvas').getContext('webgl');
+    const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    return String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '');
+  } catch { return ''; }
+}
+
+// Scheda video vista dal browser: null se WebGPU non c'è. integrated = scheda integrata
+// (memoria condivisa con il PC). Dal nome: le dedicate hanno sigle come RX, GeForce/RTX,
+// Arc, Radeon Pro; le integrate "Radeon 780M / Radeon Graphics / Vega", Intel UHD/Iris,
+// Adreno, Mali. Senza nome: dal produttore (Intel non-Arc, Qualcomm, ARM = integrate).
+export async function gpuProfile() {
   try {
     if (!('gpu' in navigator)) return null;
-    const adapter = await navigator.gpu.requestAdapter();
-    return adapter ? { f16: adapter.features.has('shader-f16') } : null;
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    if (!adapter) return null;
+    const info = adapter.info || {};
+    const vendor = String(info.vendor || '').toLowerCase();
+    const arch = String(info.architecture || '').toLowerCase();
+    const name = gpuName();
+    let integrated;
+    // Intel "Arc Graphics" senza sigla è l'integrata dei Core Ultra; A770/B580 sono dedicate.
+    if (/\b(RX|RTX|GTX)\b|GeForce|Quadro|Radeon Pro|Arc(\(TM\))?\s+[AB]\d{3}/i.test(name)) integrated = false;
+    else if (/Radeon.*(\d{3}M\b|Graphics|Vega)|Intel|Iris|UHD|Adreno|Mali|Qualcomm/i.test(name)) integrated = true;
+    else integrated = (vendor === 'intel' && !/xe-hpg|xe-hpc|alchemist|battlemage/.test(arch))
+      || vendor === 'qualcomm' || vendor === 'arm';
+    return { f16: adapter.features.has('shader-f16'), vendor, architecture: arch, name, integrated };
   } catch { return null; }
 }
 
-// Scarica (la prima volta) e carica il modello. onProgress riceve { progress 0..1, text }.
+// Scarica (la prima volta) e carica il modello nel processo separato.
+// onProgress riceve { progress 0..1, text }.
 export async function preloadModel(mode, onProgress) {
   const cfg = resolveMode(mode);
-  const gpu = await gpuInfo();
+  const gpu = await gpuProfile();
   if (!gpu) {
     throw Object.assign(new Error('Il recap nel browser richiede una scheda video con WebGPU, non disponibile su questo PC/browser. Scegli un\'altra AI in Impostazioni › AI.'), { code: 'NO_WEBGPU' });
   }
@@ -69,14 +104,26 @@ export async function preloadModel(mode, onProgress) {
   if (_loading) return _loading;
   _loading = (async () => {
     _lib = _lib || await import(/* @vite-ignore */ LIB_URL);
-    if (_engine) { try { await _engine.unload(); } catch {} _engine = null; }
-    _engine = await _lib.CreateMLCEngine(model, {
+    await unloadModel();
+    _worker = new Worker(WORKER_URL, { type: 'module' });
+    _engine = await _lib.CreateWebWorkerMLCEngine(_worker, model, {
       initProgressCallback: (r) => { try { onProgress && onProgress({ progress: r.progress, text: r.text }); } catch {} }
     }, { context_window_size: CTX_TOKENS });
     _engineModel = model;
     return { model };
   })();
-  try { return await _loading; } finally { _loading = null; }
+  try { return await _loading; } catch (e) { await unloadModel(); throw e; } finally { _loading = null; }
+}
+
+// Scarica il modello e chiude il processo separato: libera RAM e memoria video.
+export async function unloadModel() {
+  const engine = _engine;
+  const worker = _worker;
+  _engine = null;
+  _engineModel = null;
+  _worker = null;
+  if (engine) { try { await engine.unload(); } catch {} }
+  if (worker) worker.terminate();
 }
 
 async function ask(prompt, maxTokens, onToken) {
@@ -110,8 +157,16 @@ function splitText(text, maxChars) {
 }
 
 // input: { template, transcript, chunk_prompt } dal server. onStatus(testo) per la dashboard.
-// Restituisce il recap (testo).
-export async function generateRecap(input, { mode, onProgress, onStatus } = {}) {
+// Restituisce il recap (testo). A recap finito (o in errore) il modello viene sempre scaricato.
+export async function generateRecap(input, opts = {}) {
+  try {
+    return await runRecap(input, opts);
+  } finally {
+    await unloadModel();
+  }
+}
+
+async function runRecap(input, { mode, onProgress, onStatus } = {}) {
   const status = (t) => { try { onStatus && onStatus(t); } catch {} };
   status('Caricamento del modello…');
   await preloadModel(mode, onProgress);
@@ -132,16 +187,18 @@ export async function generateRecap(input, { mode, onProgress, onStatus } = {}) 
     const pieces = splitText(text, chunkChars);
     const notes = [];
     for (let i = 0; i < pieces.length; i++) {
-      status(`Lettura della trascrizione: parte ${i + 1} di ${pieces.length}…`);
+      const part = `Parte ${i + 1} di ${pieces.length}`;
+      // Prima il modello legge il pezzo (nessun avanzamento visibile), poi scrive gli appunti.
+      status(`${part}: lettura della trascrizione…`);
       const p = chunkPrompt.replace('{{N}}', i + 1).replace('{{TOT}}', pieces.length).replace('{{TESTO}}', pieces[i]);
-      notes.push(await ask(p, OUT_CHUNK));
+      notes.push(await ask(p, OUT_CHUNK, (n) => { if (n % 10 === 0) status(`${part}: scrittura degli appunti… (${words(n)})`); }));
     }
     text = `(Appunti ricavati dalla trascrizione, riassunta a pezzi)\n\n${notes.join('\n\n')}`;
   }
 
-  status('Scrittura del recap…');
+  status('Recap: lettura degli appunti…');
   const recap = await ask(template.replace('{{TRASCRIZIONE}}', text), OUT_FINAL,
-    (n) => { if (n % 25 === 0) status(`Scrittura del recap… (${n} parole)`); });
+    (n) => { if (n % 10 === 0) status(`Recap: scrittura… (${words(n)})`); });
   if (!recap) throw new Error('Il modello non ha restituito alcun testo');
   return recap;
 }

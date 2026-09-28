@@ -6285,7 +6285,23 @@
             if (!save.ok) throw new Error(saved.error || `Errore ${save.status}`);
         }
 
-        async function startRecap(eventId, title) {
+        // Browser-Alto (Gemma 9B) su una scheda video integrata occupa gran parte della RAM e
+        // rallenta molto il PC: si propone Browser-Medio (dal pulsante: conferma; recap
+        // automatico: passa da solo al Medio e lo segnala).
+        const BROWSER_RECAP_MEDIO = 'Recap Projexa (Browser-Medio)';
+        async function chooseBrowserRecapMode(provider, auto) {
+            if (String(provider).trim().toLowerCase() !== 'recap projexa (browser-alto)') return provider;
+            const gpu = await window.BrowserRecap.gpuProfile();
+            if (!gpu || !gpu.integrated) return provider;
+            if (auto) {
+                showNotification('Scheda video integrata: per non rallentare il PC il recap usa Browser-Medio invece di Browser-Alto.', 'info');
+                return BROWSER_RECAP_MEDIO;
+            }
+            const useMedio = window.confirm('Questo PC ha una scheda video integrata: Browser-Alto lo rallenterà molto durante il recap.\n\nOK = usa Browser-Medio (più leggero)\nAnnulla = usa comunque Browser-Alto');
+            return useMedio ? BROWSER_RECAP_MEDIO : provider;
+        }
+
+        async function startRecap(eventId, title, auto = false) {
             if (!eventId || manualRecapRunning.has(eventId)) return;
             manualRecapRunning.add(eventId);
             recapProgress.delete(eventId);
@@ -6296,8 +6312,10 @@
             try {
                 const mode = await getRecapMode();
                 if (mode.local === 'browser') {
-                    await runBrowserRecap(eventId, mode.provider);
-                    showRecapReady(eventId, title, mode.provider);
+                    if (!window.BrowserRecap) throw new Error('modulo del recap nel browser non caricato');
+                    const provider = await chooseBrowserRecapMode(mode.provider, auto);
+                    await runBrowserRecap(eventId, provider);
+                    showRecapReady(eventId, title, provider);
                 } else {
                     const res = await fetch(`${API_URL}/calendar/meetings/managed/recap`, {
                         method: 'POST',
@@ -6389,7 +6407,7 @@
                         // Recap nel browser a fine registrazione (riunione registrata da questa pagina)
                         if (canRecap && !m.recap_running && autoBrowserRecap.has(ev.id)) {
                             autoBrowserRecap.delete(ev.id);
-                            startRecap(ev.id, title);
+                            startRecap(ev.id, title, true);
                         }
                     }
                     const queued = m && m.pending > 0
