@@ -20,6 +20,7 @@
         .sub { font-size: 0.85rem; color: var(--muted); margin-top: 0.2rem; }
         .btn { padding: 0.55rem 1rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; background: #e5e7eb; color: var(--ink); }
         .btn:hover { background: #d1d5db; }
+        .btn:disabled { opacity: 0.6; cursor: wait; }
         .toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
         .seg { display: inline-flex; background: #e5e7eb; border-radius: 8px; padding: 3px; }
         .seg button { border: none; background: transparent; padding: 0.35rem 0.9rem; border-radius: 6px; font-size: 0.85rem; font-weight: 600; color: var(--ink2); cursor: pointer; }
@@ -75,7 +76,10 @@
                     <button type="button" data-range="6h">6 ore</button>
                     <button type="button" data-range="24h">24 ore</button>
                 </div>
-                <span class="updated" id="updated"></span>
+                <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                    <span class="updated" id="updated"></span>
+                    <button type="button" class="btn" id="refreshBtn" title="Aggiorna adesso"><i class="fas fa-rotate"></i> Aggiorna</button>
+                </div>
             </div>
 
             <div class="tiles" id="tiles"></div>
@@ -308,6 +312,21 @@
             range = b.dataset.range;
             $('rangeSel').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
             load();
+        });
+        // Aggiornamento manuale: icona che gira durante la richiesta; l'aggiornamento automatico
+        // riparte da qui (il prossimo tra 15 s).
+        $('refreshBtn').addEventListener('click', async () => {
+            const b = $('refreshBtn');
+            if (b.disabled) return;
+            b.disabled = true;
+            b.querySelector('i').classList.add('fa-spin');
+            try {
+                await load();
+            } finally {
+                b.disabled = false;
+                b.querySelector('i').classList.remove('fa-spin');
+                if (timer) { clearInterval(timer); timer = setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS); }
+            }
         });
         let resizeT = null;
         window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (last) render(last); }, 150); });
