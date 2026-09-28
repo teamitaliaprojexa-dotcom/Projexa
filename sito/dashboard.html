@@ -5601,30 +5601,11 @@
             }, 700);
         }
 
-        // --- Toggle Impostazioni › "Chat-Bot Projexa" / "Mostra ..." (Preferenze) ---
-        // Salva subito valore1 e ricarica la pagina, così chatbot e sezioni compaiono/scompaiono
-        // all'istante. Nomi campo (minuscoli, senza "(*) ") allineati a DASHBOARD_FLAGS in server.js.
+        // Toggle Impostazioni "Chat-Bot Projexa" / "Mostra ..." (Preferenze): dopo il Salva del
+        // flyout, se uno di questi è stato modificato, la pagina si ricarica così chatbot e sezioni
+        // compaiono/scompaiono subito. Nomi campo (minuscoli, senza "(*) ") allineati a
+        // DASHBOARD_FLAGS in server.js.
         const DASHBOARD_FLAG_CAMPI = ['chat-bot projexa', 'mostra kpi fatturato', 'mostra calendario', 'mostra todolist', 'mostra funzione issue'];
-        document.addEventListener('change', async (e) => {
-            const toggle = e.target;
-            if (!toggle || !toggle.classList || !toggle.classList.contains('chatbot-toggle')) return;
-            const value = toggle.checked;
-            toggle.disabled = true;
-            try {
-                const res = await fetch(`${API_URL}/data/settings/${toggle.dataset.settingId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ valore1: value })
-                });
-                if (!res.ok) throw new Error(`Errore ${res.status}`);
-                location.reload();
-            } catch (err) {
-                toggle.checked = !value;
-                toggle.disabled = false;
-                clearCalendarToggleDirty(toggle);
-                showNotification('Impostazione del chatbot non salvata: ' + err.message, 'info');
-            }
-        });
 
         document.addEventListener('change', async (e) => {
             const toggle = e.target;
@@ -6050,6 +6031,56 @@
                 else if (e.key === 'Escape') closeNewRecording();
             });
         }
+
+        // Doppio clic sul titolo di una registrazione libera (righe "manual:", non quelle del
+        // calendario): modifica in linea. Invio o clic fuori salva, Esc annulla.
+        document.addEventListener('dblclick', (e) => {
+            const titleEl = e.target.closest && e.target.closest('.meeting-title[data-renamable="1"]');
+            if (!titleEl || titleEl.querySelector('input')) return;
+            const row = titleEl.closest('.meeting-card');
+            const eventId = row && row.dataset.eventId;
+            if (!eventId || !eventId.startsWith('manual:')) return;
+            e.preventDefault();
+            const oldTitle = row.dataset.title || titleEl.textContent.trim();
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.maxLength = 1000;
+            input.value = oldTitle;
+            input.style.cssText = 'width:100%; font:inherit; padding:2px 6px; border:1px solid var(--primary); border-radius:6px;';
+            titleEl.textContent = '';
+            titleEl.appendChild(input);
+            input.focus();
+            input.select();
+            let done = false;
+            const finish = async (save) => {
+                if (done) return;
+                done = true;
+                const name = input.value.trim();
+                if (!save || !name || name === oldTitle) { titleEl.textContent = oldTitle; return; }
+                titleEl.textContent = name;
+                try {
+                    const res = await fetch(`${API_URL}/calendar/meetings/manual/title`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json', ...calendarAuthHeaders() },
+                        body: JSON.stringify({ id_calendar: eventId, oggetto: name })
+                    });
+                    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Errore ${res.status}`);
+                    // Il titolo è usato anche da pulsante registrazione, lente e tooltip
+                    row.dataset.title = name;
+                    row.querySelectorAll('[data-title]').forEach(el => { el.dataset.title = name; });
+                    titleEl.title = `${name}\n(doppio clic per rinominare)`;
+                } catch (err) {
+                    titleEl.textContent = oldTitle;
+                    showNotification('Nome non salvato: ' + err.message, 'info');
+                }
+            };
+            input.addEventListener('keydown', (ev) => {
+                if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+                else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+            });
+            input.addEventListener('blur', () => finish(true));
+            input.addEventListener('click', (ev) => ev.stopPropagation());
+        });
 
         // === X ROSSA: cancella i dati Projexa della riunione (riga rec_meeting) ===
         // La riunione resta nell'elenco perché è nel calendario Outlook/Google (sola lettura).
@@ -7773,7 +7804,7 @@
                     <div class="meeting-time"><i class="fas fa-clock"></i> ${escapeHtml(timeStr)}</div>
                     ${providerBadge}
                     <div class="meeting-manage">${(meetingLink || event.manual || isRecordingMeeting(event.id)) ? `<button type="button" class="meeting-rec-btn${isRecordingMeeting(event.id) ? ' recording' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">${recButtonLabel(isRecordingMeeting(event.id))}</button>` : ''}</div>
-                    <div class="meeting-title" title="${escapeHtml(tooltip)}">${escapeHtml(title)}</div>
+                    <div class="meeting-title"${event.manual ? ' data-renamable="1"' : ''} title="${escapeHtml(event.manual ? tooltip + '\n(doppio clic per rinominare)' : tooltip)}">${escapeHtml(title)}</div>
                     <div class="meeting-status meeting-status-genrecap">${event.has_trascrizione && !event.has_recap ? manualRecapButton(event.id) : ''}</div>
                     <div class="meeting-status meeting-status-trascrizione">${event.has_trascrizione ? meetingTextButton(event, 'trascrizione', title) : ''}</div>
                     <div class="meeting-status meeting-status-recap">${event.has_recap ? meetingTextButton(event, 'recap', title) : ''}</div>
@@ -12165,14 +12196,14 @@
                 const calKey = (currentDetailSource === 'settings' && !detailReorderMode) ? calendarProviderFromCampo(row.campo) : null;
                 // Impostazioni › AI: il toggle di ChatGPT/Claude/Gemini collega (chiave API) o scollega
                 const aiKey = (!calKey && currentDetailSource === 'settings' && !detailReorderMode) ? aiProviderFromCampo(row.campo) : null;
-                // Impostazioni › "Chat-Bot Projexa" e "Mostra ..." di Preferenze: salvano subito e
+                // Impostazioni › "Chat-Bot Projexa" e "Mostra ..." di Preferenze: dopo il Salva
                 // ricaricano la pagina (mostrano/nascondono chatbot e sezioni della dashboard)
-                const isChatbotFlag = !calKey && !aiKey && currentDetailSource === 'settings' && !detailReorderMode
+                const isDashFlag = !calKey && !aiKey && currentDetailSource === 'settings'
                     && DASHBOARD_FLAG_CAMPI.includes(String(row.campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase());
                 const calAttrs = calKey ? ` class="calendar-toggle" data-cal-provider="${calKey}"`
                     : (aiKey === 'copilot' ? ' disabled title="Copilot non disponibile: non ha un\'API pubblica"'
                     : (aiKey ? ` class="ai-toggle" data-ai-provider="${aiKey}"`
-                    : (isChatbotFlag ? ' class="chatbot-toggle"' : '')));
+                    : (isDashFlag ? ' data-reload-on-save="1"' : '')));
                 input = `<label class="toggle-switch"><input type="checkbox"${calAttrs} data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>`;
                 if (calKey) {
                     input += `<span class="calendar-conn" data-cal-provider="${calKey}"></span>`;
@@ -12413,6 +12444,8 @@
             const saveBar = document.getElementById('settingsDetailSaveBar');
             if (!listEl) return;
             const dirty = listEl.querySelectorAll('[data-setting-id][data-dirty="1"]');
+            // Toggle di visibilità della dashboard (chatbot / "Mostra ..."): dopo il salvataggio ricarica
+            const reloadAfterSave = [...dirty].some(inp => inp.dataset.reloadOnSave === '1');
             let allOk = true;
             // Ambito tenant da inviare al backend. Per le Impostazioni è direttamente "scope"
             // ('this-tenant' | 'all-tenants'); per Clienti/Progetti "scope" è l'ambito
@@ -12538,6 +12571,7 @@
 
             if (allOk) {
                 if (saveBar) saveBar.style.display = 'none';
+                if (reloadAfterSave) { location.reload(); return; }
                 showNotification('Salvato', 'success');
                 applyScreenScale(); // se è cambiato il valore "schermo", riadatta subito lo zoom
                 // Aggiorna gli elenchi dei primi flyout senza refresh pagina: un cambio di valore

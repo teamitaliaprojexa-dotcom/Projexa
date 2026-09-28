@@ -717,6 +717,27 @@ router.get('/meetings/manual', requireAuth, async (req, res) => {
   }
 });
 
+// Rinomina una registrazione libera (doppio clic sul titolo in dashboard). Solo righe
+// "manual:<uuid>": le riunioni del calendario prendono il titolo dal calendario.
+router.patch('/meetings/manual/title', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
+    const oggetto = String(b.oggetto || '').trim().slice(0, 1000);
+    if (!idCalendar.startsWith('manual:')) return res.status(400).json({ error: 'Solo le registrazioni libere si possono rinominare' });
+    if (!oggetto) return res.status(400).json({ error: 'Il nome non può essere vuoto' });
+    const result = await db.query(
+      `UPDATE rec_meeting SET oggetto = $1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
+      [encRec(oggetto), req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Registrazione non trovata' });
+    res.json({ success: true, oggetto });
+  } catch (error) {
+    console.error('❌ REC_MEETING_RENAME:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Stato leggero delle riunioni a video (aggiornamento periodico della griglia, senza
 // rileggere il calendario): per ogni id_calendar indicato restituisce se la riunione è
 // gestita, se trascrizione/recap contengono testo, inviata, cliente e progetto.
