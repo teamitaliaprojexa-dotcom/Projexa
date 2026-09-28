@@ -1,4 +1,4 @@
-// Accesso alla tabella integr_tok_auth (progetto Neon "Projexa-Auth"), dove vengono
+// Accesso alla tabella integr_tok_auth (database "Projexa-Auth"), dove vengono
 // conservati i dati di autenticazione delle integrazioni esterne (Jira, ecc.).
 //
 // La tabella è in stile EAV: una riga per ogni "elemento" dell'integrazione

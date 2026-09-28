@@ -106,8 +106,8 @@ async function loadCryptoTableInfo(keepResult = false) {
     const notes = [];
     if (!d.hasKey) {
       notes.push(cryptoBox('#DC2626', '#FEF2F2',
-        '<strong>ENCRYPTION_KEY non impostata.</strong> Configurala nel file .env (locale) e ' +
-        'nelle variabili d\'ambiente su Render, poi riavvia il servizio.'));
+        '<strong>ENCRYPTION_KEY non impostata.</strong> Configurala nel file .env ' +
+        '(locale e server), poi riavvia il servizio.'));
     }
     if (!d.hasCryptoColumn) {
       notes.push(cryptoBox('#DC2626', '#FEF2F2',

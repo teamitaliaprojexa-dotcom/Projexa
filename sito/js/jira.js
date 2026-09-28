@@ -12,9 +12,7 @@
 (function () {
     'use strict';
 
-    const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-        ? location.origin
-        : (location.hostname.endsWith('github.io') ? 'https://projexa-4mix.onrender.com' : location.origin)) + '/api';
+    const API_URL = location.origin + '/api';
 
     function authHeaders(extra) {
         const token = localStorage.getItem('authToken');
@@ -259,7 +257,7 @@
     }
 
     async function onOAuthMessage(event) {
-        // Il callback è servito dal backend (Render): in produzione origine diversa dal frontend.
+        // Il callback è servito dal backend e comunica con postMessage.
         if (event.origin !== location.origin && event.origin !== new URL(API_URL).origin) return;
         const data = event.data;
         if (!data || data.source !== 'projexa-jira') return;

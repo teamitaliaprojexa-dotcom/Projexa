@@ -7,7 +7,7 @@ dotenv.config();
 
 const { Pool } = pg;
 
-// Pool verso il progetto Neon "Projexa-Auth" (autenticazione: users con email/password/scadenza).
+// Pool verso il database "Projexa-Auth" (projexa_auth) (autenticazione: users con email/password/scadenza).
 // Separato da database.js (Projexa, dominio + FK). Connection string in AUTH_DATABASE_URL.
 if (!resolveDbUrl('AUTH_DATABASE_URL')) {
   console.warn('⚠️  AUTH_DATABASE_URL non impostata: le funzioni di autenticazione falliranno finché non la configuri.');

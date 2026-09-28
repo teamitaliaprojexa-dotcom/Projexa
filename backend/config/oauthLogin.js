@@ -11,7 +11,7 @@ import crypto from 'crypto';
 
 const STATE_COOKIE = 'px_oauth_state';
 const LOGIN_COOKIE = 'px_oauth_login';
-const BACKEND_URL = () => process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
+const BACKEND_URL = () => process.env.BACKEND_URL || 'https://www.projexa.it';
 
 const PROVIDERS = {
   google: () => ({

@@ -174,7 +174,7 @@ async function migrate(req, res, mode) {
 
     if (!hasEncryptionKey()) {
       return res.status(400).json({
-        error: 'ENCRYPTION_KEY non impostata: configurala nel .env (locale) e su Render prima di migrare.'
+        error: 'ENCRYPTION_KEY non impostata: configurala nel .env (locale e server) prima di migrare.'
       });
     }
 

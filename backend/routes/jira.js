@@ -2,7 +2,7 @@
 //
 // Flusso OAuth 2.0 3LO di Atlassian con soli scope di lettura: l'app non può
 // creare né modificare nulla su Jira. I dati di autenticazione vengono salvati
-// sul progetto Neon "Projexa-Auth", tabella integr_tok_auth, una riga per elemento
+// sul database "Projexa-Auth", tabella integr_tok_auth, una riga per elemento
 // (vedi config/integrations.js) con provider_integrazione = 'Jira'.
 //
 // L'integrazione è subordinata al flag booleano in settings (campo = 'Jira',
@@ -38,7 +38,7 @@ const PAGE_SIZE = 100;
 
 const CLIENT_ID = process.env.JIRA_CLIENT_ID;
 const CLIENT_SECRET = process.env.JIRA_CLIENT_SECRET;
-const BACKEND_URL = process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
+const BACKEND_URL = process.env.BACKEND_URL || 'https://www.projexa.it';
 const REDIRECT_URI = `${BACKEND_URL}/api/jira/callback`;
 
 function isConfigured() {

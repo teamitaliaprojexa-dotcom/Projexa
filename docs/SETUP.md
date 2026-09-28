@@ -1,102 +1,67 @@
-# Projexa Setup Guide
+# Projexa - Installazione e avvio
 
-## Backend Setup
+## Backend in locale
 
-### 1. Install Dependencies
+### 1. Dipendenze
 
 ```bash
 cd backend
 npm install
 ```
 
-### 2. Create `.env` File
+### 2. File `.env`
 
-Copy from `.env.example` and update with your values:
+Copiare `backend/.env.example` in `backend/.env` e completarlo. Le voci principali:
 
+| Variabile | Uso |
+|---|---|
+| `DATABASE_URL`, `AUTH_DATABASE_URL`, `LICEN_DATABASE_URL`, `NOTIF_DATABASE_URL` | I 4 database (in locale `127.0.0.1:15432` tramite tunnel) |
+| `JWT_SECRET` | Firma dei token di sessione (obbligatoria) |
+| `ENCRYPTION_KEY` | Cifratura dei dati a riposo (vedi [CRYPTO.md](CRYPTO.md)) |
+| `BACKEND_URL`, `APP_URL` | Indirizzo pubblico, usato per callback OAuth e link nelle email |
+| `ALLOWED_ORIGINS` | Origini ammesse (CORS) |
+| `GOOGLE_*`, `MICROSOFT_*`, `JIRA_*` | Login e integrazioni |
+| `WHISPER_URL` / `WHISPER_URLS`, `WHISPER_API_KEY` | Servizio di trascrizione |
+| `APP_ENV=staging` | Usa i database di staging (`STAGING_*`), vedi [DATABASE.md](DATABASE.md) |
+
+### 3. Database
+
+I database stanno sulla VM Oracle e ascoltano solo su localhost. In locale si raggiungono con il
+tunnel SSH (lasciare aperta la finestra):
+
+```powershell
+deploy/oracle/db-tunnel.ps1
 ```
-DATABASE_URL=postgresql://user:password@host:5432/projexa
-JWT_SECRET=your-super-secret-key-change-in-production
-PORT=3001
-NODE_ENV=production
-```
 
-### 3. Setup Database
+Attenzione: in locale si lavora sui **dati di produzione**. Per le prove distruttive usare lo
+staging (`APP_ENV=staging`). Dettagli in [DATABASE.md](DATABASE.md).
 
-Create PostgreSQL database on [Neon](https://neon.tech):
+### 4. Avvio
 
 ```bash
-psql -U user -d projexa -f ../database-schema.sql
+npm start          # oppure npm run dev (riavvio automatico)
 ```
 
-### 4. Seed Database
+Il server risponde su `http://localhost:3001` e serve anche il sito (`sito/`).
 
-```bash
-npm run seed
-```
+### 5. Trascrizione (facoltativa)
 
-This creates:
-- 2 test tenants
-- 2 test users (admin@projexa.com, user@projexa.com)
-- Password: `temp123`
+Per trascrivere le riunioni in locale avviare `whisper-service/avvia_locale.bat` e impostare
+`WHISPER_URL=http://localhost:8001` nel `.env`.
 
-### 5. Start Backend
+## Frontend
 
-```bash
-npm start
-# or for development:
-npm run dev
-```
+Tutte le pagine sono in `sito/` e chiamano le API sulla stessa origine (`location.origin + '/api'`).
+Pagine principali: `login.html`, `dashboard.html`, `gantt.html`, `issue.html`,
+`database-viewer.html` / `sql-editor.html` (strumenti admin), `prompt-editor.html`.
 
-Server runs on `http://localhost:3001`
+## Produzione
 
-## Frontend Setup
+- VM Oracle Cloud, dominio `www.projexa.it` (Caddy con HTTPS automatico → Node su `127.0.0.1:3001`, PM2).
+- Deploy automatico a ogni push su `master` (`.github/workflows/deploy-oracle.yml`).
+- Script di installazione e manutenzione in `deploy/oracle/`, backup in [BACKUP.md](BACKUP.md).
 
-All files in `sito/` folder:
-- `login.html` - Login page
-- `dashboard.html` - Main dashboard
-- `projects.html` - Projects page
-- `tasks.html` - Tasks page
-- `risks.html` - Risks page
-- `database.html` - Database viewer
-- `css/style.css` - All styling
-- `js/auth.js` - Authentication logic
-- `js/data.js` - Data loading
-- `js/database.js` - Database viewer
+## Architettura multi-tenant
 
-Update API_URL in JavaScript files to match your backend.
-
-## Deployment
-
-### Backend (Render)
-
-1. Connect GitHub repo to Render
-2. Set environment variables
-3. Deploy
-
-### Frontend (GitHub Pages)
-
-Files in `sito/` auto-deploy to GitHub Pages at:
-```
-https://teamitaliaprojexa-dotcom.github.io/Projexa/sito/
-```
-
-## Test Credentials
-
-- **Email:** admin@projexa.com
-- **Password:** temp123
-- **Tenants:** Projexa Internal, Test Company
-
-## API Endpoints
-
-- `POST /api/auth/login` - Login
-- `GET /api/auth/verify` - Verify token
-- `GET /api/projects` - List projects
-- `GET /api/tasks` - List tasks
-- `GET /api/risks` - List risks
-- `GET /api/:table` - Generic table viewer
-
-## Multi-Tenant Architecture
-
-Users can belong to multiple tenants. Login shows tenant selection if user has 2+ tenants.
-
-JWT token includes `tenant_id` for data filtering.
+Un utente può appartenere a più tenant: al login, se ne ha 2 o più, sceglie quale usare.
+Il token JWT contiene `tenant_id` e `user_id`, che filtrano i dati di ogni richiesta.

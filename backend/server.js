@@ -31,7 +31,7 @@ dotenv.config();
 // aziendale installato in Windows), Node rifiuta le connessioni verso i servizi esterni
 // (es. Gemini: SELF_SIGNED_CERT_IN_CHAIN) perché usa solo i propri certificati.
 // Qui si aggiungono quelli di Windows a quelli di Node: stesso effetto di --use-system-ca,
-// senza cambiare il comando di avvio. Su Render (Linux) non si applica.
+// senza cambiare il comando di avvio. Sul server Linux non si applica.
 if (process.platform === 'win32' && typeof tls.setDefaultCACertificates === 'function') {
   try {
     tls.setDefaultCACertificates([...new Set([...tls.getCACertificates('default'), ...tls.getCACertificates('system')])]);
@@ -46,7 +46,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Dietro il proxy di Render: fidati del primo hop per ottenere l'IP reale (req.ip).
+// Dietro il reverse proxy (Caddy): fidati del primo hop per ottenere l'IP reale (req.ip).
 app.set('trust proxy', 1);
 
 // CORS ristretto: consenti le richieste same-origin (Origin assente) e solo le origini
@@ -165,13 +165,6 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Projexa API is running' });
 });
 
-// Heartbeat leggero del browser: mantiene attivo il servizio Render soltanto
-// mentre esiste una sessione autenticata. Non interroga il database e non
-// rinnova il token; un token assente o scaduto riceve 401/403 e il client si ferma.
-app.get('/api/session/heartbeat', requireAuth, (req, res) => {
-  res.status(204).end();
-});
-
 // API Routes
 app.use('/api/auth/login', loginRateLimit);
 app.use('/api/auth/register', registerRateLimit);
@@ -219,7 +212,7 @@ function assertValidIdentifier(name) {
 }
 
 // Sceglie il DB di destinazione in base all'header X-Target-DB.
-// Progetti Neon supportati: main=Projexa, auth=Projexa-Auth, lic=Projexa-Lic, notif=Projexa-Notif.
+// Database supportati: main=Projexa, auth=Projexa-Auth, lic=Projexa-Lic, notif=Projexa-Notif.
 // Usato da database-viewer e sql-editor per leggere/scrivere sul progetto selezionato.
 // Solo l'admin può scegliere un database diverso dal principale: Projexa-Auth contiene
 // email, password e scadenze di tutti gli utenti, e la tabella users non ha tenant_id,
@@ -6708,7 +6701,7 @@ app.listen(PORT, () => {
   try { dbHost = new URL(resolveDbUrl('DATABASE_URL')).host; } catch { /* URL assente o non valido */ }
   console.log(`📊 Database: PostgreSQL su ${dbHost}`);
   console.log(`\n✓ Health check: http://localhost:${PORT}/api/health\n`);
-  // Riprende i blocchi di trascrizione rimasti in coda (es. dopo un riavvio di Render)
+  // Riprende i blocchi di trascrizione rimasti in coda (es. dopo un riavvio del server)
   kickTranscriptionWorker();
 });
 

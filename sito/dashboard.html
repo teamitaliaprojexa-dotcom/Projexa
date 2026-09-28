@@ -2547,6 +2547,24 @@
         .meeting-header-title { flex: 1 1 auto; }
 
         /* Ultimo elemento della riga: occupa lo spazio restante (troncato con "…"). */
+        /* Separatore "Domani" nell'elenco riunioni (vista standard: prossime 24 ore) */
+        .meeting-day-sep {
+            display: flex;
+            align-items: baseline;
+            gap: 0.5rem;
+            margin: 0.9rem 0 0.2rem;
+            padding: 0 0 0.3rem 0.4rem;
+            border-bottom: 2px solid var(--primary);
+            color: var(--primary);
+            font-weight: 700;
+            font-size: 0.95rem;
+        }
+        .meeting-day-sep small {
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 0.8rem;
+        }
+
         .meeting-title {
             flex: 1 1 auto;
             min-width: 0;
@@ -3106,7 +3124,7 @@
                     <div class="section-title" style="margin: 0; position: relative;">
                         <button id="meetingsDateBtn" type="button" class="meetings-date-btn" title="Scegli il giorno delle riunioni" aria-label="Scegli il giorno delle riunioni"><i class="fas fa-calendar-alt"></i></button>
                         <input id="meetingsDatePicker" type="date" class="meetings-date-input" tabindex="-1" aria-hidden="true">
-                        <span id="meetingsTitle">Riunioni di Oggi</span>
+                        <span id="meetingsTitle">Riunioni</span>
                         <button id="meetingsTodayBtn" type="button" class="meetings-today-btn" style="display: none;" title="Torna alle riunioni di oggi">Oggi</button>
                     </div>
                     <div style="display: flex; gap: 1rem; align-items: center;">
@@ -3135,7 +3153,7 @@
 
                 <!-- Info riunioni -->
                 <div style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;">
-                    <span id="meetingCount">0</span> <span id="meetingCountLabel">riunioni oggi</span> • <span id="nextMeetingLabel">Prossima</span>: <span id="nextMeetingTime">--</span>
+                    <span id="meetingCount">0</span> <span id="meetingCountLabel">riunioni</span> • <span id="nextMeetingLabel">Prossima</span>: <span id="nextMeetingTime">--</span>
                 </div>
             </div>
 
@@ -5294,11 +5312,8 @@
         }
 
         // === API INTEGRATION ===
-        // In locale (localhost) usa l'origine corrente; in produzione il frontend è
-        // su GitHub Pages, quindi punta al backend Render. Stesso codice ovunque.
-        const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-          ? location.origin
-          : (location.hostname.endsWith('github.io') ? 'https://projexa-4mix.onrender.com' : location.origin)) + '/api';
+        // Il backend Node serve anche il sito: si usa l'origine corrente (locale e produzione).
+        const API_URL = location.origin + '/api';
 
         function getAuthHeaders() {
             const token = localStorage.getItem('authToken');
@@ -5739,8 +5754,8 @@
             return true;
         }
 
-        // Il popup termina sulla pagina di callback del backend (Render), che in
-        // produzione ha un'origine diversa dal frontend (GitHub Pages).
+        // Il popup termina sulla pagina di callback del backend, che invia il risultato
+        // con postMessage: si accettano solo messaggi da origini attese.
         async function onCalendarOAuthMessage(event) {
             if (event.origin !== location.origin && event.origin !== new URL(API_URL).origin) return;
             const data = event.data;
@@ -5881,7 +5896,25 @@
                     <span class="meeting-status meeting-status-recap">Recap</span>
                     <span class="meeting-assign meeting-assign-head"><span>Cliente</span><span>Progetto</span></span>
                 </div>`;
-            container.innerHTML = header + meetings.map(meeting => createMeetingCard(meeting)).join('');
+            // Vista standard (prossime 24 ore): prima le riunioni di oggi (calendario, poi
+            // registrazioni libere), poi quelle di domani sotto l'intestazione "Domani".
+            let body;
+            if (meetingsDate) {
+                body = meetings.map(meeting => createMeetingCard(meeting)).join('');
+            } else {
+                const endOfToday = new Date();
+                endOfToday.setHours(24, 0, 0, 0);
+                const startOf = (m) => new Date(m.start.dateTime || m.start.date);
+                const today = meetings.filter(m => !(startOf(m) >= endOfToday));
+                const tomorrow = meetings.filter(m => startOf(m) >= endOfToday);
+                body = today.map(meeting => createMeetingCard(meeting)).join('');
+                if (tomorrow.length) {
+                    const label = endOfToday.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+                    body += `<div class="meeting-day-sep"><span>Domani</span> <small>${escapeHtml(label)}</small></div>`
+                        + tomorrow.map(meeting => createMeetingCard(meeting)).join('');
+                }
+            }
+            container.innerHTML = header + body;
             // Tendine Cliente/Progetto sulle riunioni già gestite con Projexa
             container.querySelectorAll('.meeting-card[data-managed="1"]').forEach((row) => renderMeetingAssign(row));
             refreshMeetingStatuses(); // blocchi in coda (clessidra) e stato aggiornato
@@ -5927,11 +5960,11 @@
 
         function renderMeetingsDateUi() {
             const title = document.getElementById('meetingsTitle');
-            if (title) title.textContent = meetingsDate ? `Riunioni ${meetingsDayLabel()}` : 'Riunioni di Oggi';
+            if (title) title.textContent = meetingsDate ? `Riunioni ${meetingsDayLabel()}` : 'Riunioni';
             const today = document.getElementById('meetingsTodayBtn');
             if (today) today.style.display = meetingsDate ? 'inline-block' : 'none';
             const cl = document.getElementById('meetingCountLabel');
-            if (cl) cl.textContent = meetingsDate ? 'riunioni nel giorno' : 'riunioni oggi';
+            if (cl) cl.textContent = meetingsDate ? 'riunioni nel giorno' : 'riunioni';
             const nl = document.getElementById('nextMeetingLabel');
             if (nl) nl.textContent = meetingsDate ? 'Prima' : 'Prossima';
         }
@@ -6538,7 +6571,7 @@
         // diventa rosso "Ferma" finché è in corso. Cattura l'audio di sistema (voci degli altri,
         // da getDisplayMedia) e il microfono scelto con l'ingranaggio, li mescola, li converte
         // in WAV mono 16 kHz e ogni ~30 s invia un blocco al backend, che lo trascrive con
-        // il servizio Whisper (gratuito, su Render) e aggiunge il testo a rec_meeting.trascrizione. Il pannello in basso a
+        // il servizio Whisper (gratuito, sulla VM) e aggiunge il testo a rec_meeting.trascrizione. Il pannello in basso a
         // destra mostra solo lo stato (tempo, blocchi trascritti, errori).
         const REC_SAMPLE_RATE = 16000;
         // Blocchi da 30 s: chiudendo il browser per errore si perde al massimo mezzo minuto
@@ -14307,7 +14340,6 @@
             <div class="kpi-modal-body" id="kpiModalBody"></div>
         </div>
     </div>
-    <script src="js/render-keepalive.js"></script>
     <script src="js/privacy.js"></script>
     <script src="js/jira.js"></script>
     <script src="js/integrazioni.js"></script>

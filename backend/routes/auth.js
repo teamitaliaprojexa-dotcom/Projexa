@@ -243,7 +243,7 @@ router.post('/register', async (req, res) => {
 
     // Invia l'email di conferma iscrizione (double opt-in). Token firmato (JWT) valido 30 giorni.
     const confirmToken = jwt.sign({ uid: userId, purpose: 'signup-confirm' }, JWT_SECRET, { expiresIn: '30d' });
-    const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
+    const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://www.projexa.it';
     const confirmUrl = `${base}/prova-gratuita.html?token=${encodeURIComponent(confirmToken)}`;
     if (LOG_LINKS) console.log(`[REGISTER] Link di conferma per ${email}: ${confirmUrl}`); // solo in locale, per i test
 
@@ -437,7 +437,7 @@ router.post('/forgot-password', async (req, res) => {
       JWT_SECRET,
       { expiresIn: `${RESET_TOKEN_HOURS}h` }
     );
-    const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
+    const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://www.projexa.it';
     const resetUrl = `${base}/reset-password.html?token=${encodeURIComponent(token)}`;
     if (LOG_LINKS) console.log(`[FORGOT-PASSWORD] Link di reimpostazione per ${email}: ${resetUrl}`); // solo in locale
 
@@ -567,7 +567,7 @@ router.post('/magic-link', async (req, res) => {
       JWT_SECRET,
       { expiresIn: MAGIC_LINK_SECONDS }
     );
-    const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
+    const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://www.projexa.it';
     const magicUrl = `${base}/magic-link.html?token=${encodeURIComponent(token)}`;
     if (LOG_LINKS) console.log(`[MAGIC-LINK] Link di accesso per ${email}: ${magicUrl}`); // solo in locale
 
@@ -711,7 +711,7 @@ router.get('/google-callback', async (req, res) => {
         client_secret: process.env.GOOGLE_CLIENT_SECRET || '', // Deve essere in .env
         code: code,
         grant_type: 'authorization_code',
-        redirect_uri: `${process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com'}/api/auth/google-callback`
+        redirect_uri: `${process.env.BACKEND_URL || 'https://www.projexa.it'}/api/auth/google-callback`
       }).toString()
     });
 

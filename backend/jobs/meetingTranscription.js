@@ -16,9 +16,7 @@
 // riunione sono finiti, il server genera da solo il recap (rec_meeting.recap).
 //
 // Così la pagina si può chiudere dopo "Ferma": la coda sta nel database e riparte anche
-// dopo un riavvio del server. Su Render Free il servizio si spegnerebbe dopo 15 minuti
-// senza richieste: finché la coda non è vuota il server chiama il proprio /api/health
-// (keep-alive), poi smette.
+// dopo un riavvio del server.
 //
 // Tabella: Supporto/CreaDB/rec_meeting_chunks.sql
 // ============================================================================
@@ -32,7 +30,6 @@ export const NOME_PROGRAMMA = 'meetingTranscription';
 const OTHERS_LABEL = 'Partecipanti';
 const MAX_ATTEMPTS = 30;              // ~ alcune ore di tentativi con attese crescenti
 const STALE_HOURS = 48;               // blocchi più vecchi: scartati (non si conserva audio)
-const KEEPALIVE_MS = 5 * 60 * 1000;   // < 15 minuti di Render Free
 const IDLE_POLL_MS = 15 * 1000;       // attesa quando ci sono solo blocchi "da riprovare"
 
 // ----------------------------------------------------------------------------
@@ -404,7 +401,7 @@ async function processFinalize(job) {
 // Accoda IN ORDINE i blocchi pronti: per ogni riunione si guarda il primo della fila; se è
 // trascritto il suo testo va nella riunione e la riga si cancella, e si passa al successivo.
 // Se in testa c'è la riga "finalize" parte il recap.
-// Può esserci più di un server sullo stesso database (es. Render e un server locale): un
+// Può esserci più di un server sullo stesso database (es. la VM e un server locale): un
 // lock di transazione garantisce che uno solo alla volta faccia questo passo.
 const FLUSH_LOCK_KEY = 771010;
 const finalizing = new Map(); // id riga finalize -> promise
@@ -475,7 +472,7 @@ async function hasPendingJobs() {
 // ----------------------------------------------------------------------------
 // Un server con un servizio spento (es. un server locale senza Whisper avviato) non deve
 // "prendere" blocchi che un altro server potrebbe trascrivere. Il controllo /health ha un
-// timeout lungo perché un servizio Render Free addormentato impiega un minuto a svegliarsi.
+// timeout lungo perché dopo un riavvio il servizio impiega un po' a caricare il modello.
 const urlHealth = new Map(); // url -> { ok, until, checking }
 
 function markUrl(url, ok) {
@@ -496,8 +493,8 @@ function urlReady(url) {
   return false;
 }
 
-// Durante il risveglio di un servizio Render Free le prime richieste possono fallire
-// subito (connessione chiusa, 502/503) invece di attendere: si riprova per circa 3 minuti,
+// Mentre un servizio si avvia le prime richieste possono fallire subito (connessione
+// chiusa, 502/503) invece di attendere: si riprova per circa 3 minuti,
 // finché /health risponde e il modello risulta caricato ("ready": true).
 async function checkUrlHealth(url) {
   const deadline = Date.now() + 180000;
@@ -517,38 +514,18 @@ async function checkUrlHealth(url) {
 }
 
 // ----------------------------------------------------------------------------
-// ELABORAZIONE IN BACKGROUND + KEEP-ALIVE
+// ELABORAZIONE IN BACKGROUND
 // ----------------------------------------------------------------------------
 
 let workerRunning = false;
-let keepAliveTimer = null;
 const busyUrls = new Set();   // servizi Whisper occupati
 const inflight = new Map();   // id blocco -> promise della trascrizione
 
-// Finché la coda lavora, il server chiama il proprio indirizzo pubblico: per Render è
-// traffico in ingresso, quindi il servizio Free non si spegne a metà (anche a pagina chiusa).
-function startKeepAlive() {
-  const base = String(process.env.BACKEND_URL || '').replace(/\/+$/, '');
-  if (keepAliveTimer || !/^https:\/\//.test(base)) return;
-  keepAliveTimer = setInterval(() => {
-    fetch(`${base}/api/health`, { signal: AbortSignal.timeout(20000) }).catch(() => {});
-    // Anche i servizi Whisper restano svegli finché la coda lavora.
-    for (const url of whisperUrls()) fetch(`${url}/health`, { signal: AbortSignal.timeout(20000) }).catch(() => {});
-  }, KEEPALIVE_MS);
-}
-
-// Sveglia i servizi Whisper (Render Free si addormenta dopo 15 minuti) all'inizio di una
-// registrazione: il risveglio richiede circa un minuto, così sono pronti quando arriva il
-// primo blocco. Usa lo stesso controllo della coda (urlReady), quindi non ripete la
-// richiesta se un servizio risulta già sveglio o è in corso di verifica. Non tiene accesi
-// i servizi in modo permanente: le ore gratuite di Render sono condivise tra tutti.
+// All'inizio di una registrazione verifica i servizi Whisper, così risultano pronti quando
+// arriva il primo blocco. Usa lo stesso controllo della coda (urlReady), quindi non ripete
+// la richiesta se un servizio risulta già pronto o è in corso di verifica.
 export function warmWhisperServices() {
   for (const url of whisperUrls()) urlReady(url);
-}
-
-function stopKeepAlive() {
-  if (keepAliveTimer) clearInterval(keepAliveTimer);
-  keepAliveTimer = null;
 }
 
 // Rete di sicurezza: blocchi rimasti 'transcribing' orfani (processo riavviato/morto a
@@ -579,7 +556,6 @@ async function cleanupStale() {
 async function runWorker() {
   if (workerRunning) return;
   workerRunning = true;
-  startKeepAlive();
   try {
     await cleanupStale();
     for (;;) {
@@ -618,7 +594,6 @@ async function runWorker() {
     await Promise.allSettled([...inflight.values(), ...finalizing.values()]);
   } finally {
     workerRunning = false;
-    stopKeepAlive();
   }
 }
 

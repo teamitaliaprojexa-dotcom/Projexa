@@ -56,9 +56,7 @@
     // ---- Fallback difensivi, nel caso lo script venga caricato da solo -----
     const API_BASE = (typeof API_URL !== 'undefined' && API_URL)
         ? API_URL
-        : ((location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-            ? location.origin
-            : (location.hostname.endsWith('github.io') ? 'https://projexa-4mix.onrender.com' : location.origin)) + '/api';
+        : location.origin + '/api';
 
     function authHeaders() {
         if (typeof getAuthHeaders === 'function') return getAuthHeaders();

@@ -10,7 +10,7 @@ const router = express.Router();
 const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID;
 const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET;
 const MICROSOFT_TENANT_ID = process.env.MICROSOFT_TENANT_ID;
-const BACKEND_URL = process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
+const BACKEND_URL = process.env.BACKEND_URL || 'https://www.projexa.it';
 
 // Costruisce il nome visualizzato: name + " " + cognome (copiata da auth.js).
 // Cognome assente/vuoto => solo il nome, senza spazio finale.

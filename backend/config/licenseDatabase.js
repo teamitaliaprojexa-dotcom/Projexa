@@ -7,7 +7,7 @@ dotenv.config();
 
 const { Pool } = pg;
 
-// Pool verso il progetto Neon "Projexa-Lic" (gestione licenze).
+// Pool verso il database "Projexa-Lic" (projexa_lic) (gestione licenze).
 // Separato da database.js (Projexa) e authDatabase.js (Projexa-Auth). Connection string in LICEN_DATABASE_URL.
 if (!resolveDbUrl('LICEN_DATABASE_URL')) {
   console.warn('⚠️  LICEN_DATABASE_URL non impostata: le funzioni sulle licenze falliranno finché non la configuri.');

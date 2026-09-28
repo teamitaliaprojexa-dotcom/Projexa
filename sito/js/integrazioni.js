@@ -10,9 +10,7 @@
 (function () {
     'use strict';
 
-    const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-        ? location.origin
-        : (location.hostname.endsWith('github.io') ? 'https://projexa-4mix.onrender.com' : location.origin)) + '/api';
+    const API_URL = location.origin + '/api';
 
     function authHeaders(extra) {
         const token = localStorage.getItem('authToken');

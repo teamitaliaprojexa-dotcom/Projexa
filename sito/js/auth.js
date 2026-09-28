@@ -1,10 +1,6 @@
 // API Configuration
-// In locale (localhost) il backend Node serve anche il sito: si usa l'origine corrente.
-// In produzione il frontend è su GitHub Pages (dominio diverso), quindi si punta
-// esplicitamente al backend su Render. Stesso codice nei due ambienti.
-const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-  ? location.origin
-  : (location.hostname.endsWith('github.io') ? 'https://projexa-4mix.onrender.com' : location.origin)) + '/api';
+// Il backend Node serve anche il sito: si usa l'origine corrente (locale e produzione).
+const API_URL = location.origin + '/api';
 
 // State
 let currentUser = null;

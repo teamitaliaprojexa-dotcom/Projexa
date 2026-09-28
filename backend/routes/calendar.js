@@ -1,7 +1,7 @@
 // === INTEGRAZIONE CALENDARIO (Google Calendar + Outlook/Microsoft 365, SOLA LETTURA) ===
 //
 // Stesso schema dell'integrazione Jira (vedi routes/jira.js): OAuth 2.0 con scope di
-// sola lettura, i dati di autenticazione vengono salvati sul progetto Neon
+// sola lettura, i dati di autenticazione vengono salvati sul database
 // "Projexa-Auth", tabella integr_tok_auth, una riga per elemento (vedi
 // config/integrations.js) con tipo_integrazione = 'Calendar' e
 // provider_integrazione = 'Google' oppure 'Outlook'.
@@ -34,7 +34,7 @@ import {
 const router = express.Router();
 
 const TIPO_INTEGRAZIONE = 'Calendar';
-const BACKEND_URL = process.env.BACKEND_URL || 'https://projexa-4mix.onrender.com';
+const BACKEND_URL = process.env.BACKEND_URL || 'https://www.projexa.it';
 const MS_TENANT = process.env.MICROSOFT_TENANT_ID || 'common';
 
 // Configurazione dei due provider supportati. "prefix" è il prefisso degli elementi

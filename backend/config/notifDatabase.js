@@ -7,7 +7,7 @@ dotenv.config();
 
 const { Pool } = pg;
 
-// Pool verso il progetto Neon "Projexa-Notif" (notifiche ed invio email).
+// Pool verso il database "Projexa-Notif" (projexa_notif) (notifiche ed invio email).
 // Separato da database.js (Projexa), authDatabase.js (Projexa-Auth) e licenseDatabase.js (Projexa-Lic).
 // Connection string in NOTIF_DATABASE_URL.
 if (!resolveDbUrl('NOTIF_DATABASE_URL')) {

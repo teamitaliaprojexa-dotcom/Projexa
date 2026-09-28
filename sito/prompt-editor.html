@@ -117,9 +117,7 @@
 
     <script>
         // Stesso criterio delle altre pagine: in locale e su Oracle l'API è sulla stessa origine.
-        const API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-          ? location.origin
-          : (location.hostname.endsWith('github.io') ? 'https://projexa-4mix.onrender.com' : location.origin)) + '/api';
+        const API_URL = location.origin + '/api';
         // Funzione del prompt (tabella app_prompts): scelta dal menu "Funzione"; si può
         // aprire direttamente con ?funzione=... nell'URL (default: la prima disponibile).
         let FUNZIONE = (new URLSearchParams(location.search).get('funzione') || '').toUpperCase();

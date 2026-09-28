@@ -1,91 +1,47 @@
 # Projexa
 
-**SaaS Project Management Platform** - Multi-tenant application for project managers.
+**Piattaforma SaaS di Project Management** multi-tenant per project manager.
+
+Produzione: **https://www.projexa.it**
 
 ## Stack
 
-- **Backend:** Node.js + Express
-- **Frontend:** HTML + CSS + JavaScript (in `sito/` folder)
-- **Database:** PostgreSQL (Neon)
-- **Auth:** JWT + bcrypt
-- **Hosting:** Render (backend) + GitHub Pages (frontend)
+- **Backend:** Node.js + Express (`backend/`), serve anche il sito
+- **Frontend:** HTML + CSS + JavaScript (`sito/`), stessa origine del backend
+- **Database:** PostgreSQL 18 sulla VM (4 database: `projexa`, `projexa_auth`, `projexa_lic`, `projexa_notif`)
+- **Auth:** JWT + bcrypt, login Google / Microsoft / magic link
+- **Trascrizione riunioni:** servizio Whisper locale (`whisper-service/`)
+- **Hosting:** VM Oracle Cloud (Oracle Linux 9), Caddy (HTTPS) → Node gestito da PM2
 
-## Quick Start
-
-### 1. Setup Backend
+## Avvio in locale
 
 ```bash
 cd backend
 npm install
+npm start          # oppure: npm run dev
 ```
 
-Create `.env` file:
-```
-DATABASE_URL=postgresql://user:password@host:5432/projexa
-JWT_SECRET=your-secret-key
-PORT=3001
-NODE_ENV=production
-```
+Il `.env` si crea partendo da `backend/.env.example`. In locale i database sono quelli della VM,
+raggiunti con il tunnel SSH `deploy/oracle/db-tunnel.ps1` (porta 15432).
+Dettagli in [docs/SETUP.md](docs/SETUP.md).
 
-### 2. Setup Database
+## Deploy
 
-Run the schema:
-```bash
-psql -U user -d projexa -f ../database-schema.sql
-```
+Push sul branch `master` → GitHub Actions (`.github/workflows/deploy-oracle.yml`) copia il codice
+sulla VM, esegue `npm ci` e ricarica PM2. Script del server in `deploy/oracle/`.
 
-Seed test data (create a `backend/scripts/seed.js` file first).
+## Documentazione
 
-### 3. Start Backend
+| File | Contenuto |
+|---|---|
+| [docs/SETUP.md](docs/SETUP.md) | Installazione, avvio in locale, variabili d'ambiente |
+| [docs/DATABASE.md](docs/DATABASE.md) | Database sulla VM, tunnel, staging |
+| [docs/BACKUP.md](docs/BACKUP.md) | Backup notturno e ripristino |
+| [docs/CRYPTO.md](docs/CRYPTO.md) | Cifratura dei dati a riposo |
+| [docs/INTEGRAZIONI.md](docs/INTEGRAZIONI.md) | Integrazioni esterne |
+| [docs/JIRA.md](docs/JIRA.md) | Integrazione Jira |
 
-```bash
-npm start
-# or for development:
-npm run dev
-```
+## Architettura multi-tenant
 
-### 4. Frontend
-
-All frontend files are in `sito/` folder:
-- `index.html` - Login page
-- `dashboard.html` - Main app
-- `css/style.css` - Styling
-- `js/app.js` - Client logic
-
-Update API URL in frontend files to match your backend:
-```javascript
-const API_URL = 'https://your-backend.onrender.com/api';
-```
-
-## Deployment
-
-### Backend (Render)
-1. Connect GitHub repo to Render
-2. Set environment variables in Render dashboard
-3. Deploy
-
-### Frontend (GitHub Pages)
-1. Files in `sito/` auto-deploy to GitHub Pages
-2. Access at: `https://teamitaliaprojexa-dotcom.github.io/Projexa/sito/`
-
-## Multi-Tenant Architecture
-
-- Users can belong to multiple tenants
-- Login returns list of tenants if user has 2+
-- JWT token includes `tenant_id` for filtering data
-
-## API Endpoints
-
-- `POST /api/auth/login` - User login
-- `GET /api/auth/verify` - Verify JWT token
-- `GET /api/projects` - List projects
-- `GET /api/tasks` - List tasks
-- `GET /api/risks` - List risks
-- `GET /api/:table` - Generic table viewer
-
-## Notes
-
-- All HTML files must be in `sito/` folder
-- Database schema in `database-schema.sql`
-- Backend routes in `backend/routes/`
-- Configuration in `.env` (backend only)
+- Un utente può appartenere a più tenant: al login, se ne ha 2 o più, sceglie quale usare.
+- Il token JWT contiene `tenant_id` e `user_id`, che filtrano i dati di ogni richiesta.

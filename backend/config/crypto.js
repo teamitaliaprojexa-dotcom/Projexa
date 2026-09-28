@@ -9,8 +9,8 @@
 //                 "enc:v1:" (vedi config/cryptoPool.js), quindi nessun endpoint
 //                 di lettura va modificato.
 //
-// La chiave arriva dalla variabile d'ambiente ENCRYPTION_KEY (su Render e in
-// locale nel .env). Può essere una passphrase qualsiasi: viene derivata a 32 byte
+// La chiave arriva dalla variabile d'ambiente ENCRYPTION_KEY (nel .env, sul
+// server e in locale). Può essere una passphrase qualsiasi: viene derivata a 32 byte
 // con SHA-256. INTEGR_ENC_KEY resta accettata SOLO in decifratura, per non perdere
 // i token Jira già salvati prima dell'introduzione di ENCRYPTION_KEY.
 //

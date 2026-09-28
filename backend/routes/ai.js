@@ -1,7 +1,7 @@
 // === INTEGRAZIONE AI (ChatGPT, Claude, Gemini, Mistral) ===
 //
 // Stesso schema delle integrazioni Calendar/Jira: i dati di autenticazione stanno sul
-// progetto Neon "Projexa-Auth", tabella integr_tok_auth (vedi config/integrations.js),
+// database "Projexa-Auth", tabella integr_tok_auth (vedi config/integrations.js),
 // con tipo_integrazione = 'AI' e provider_integrazione = 'ChatGPT' | 'Claude' | 'Gemini' | 'Mistral'.
 //
 // I fornitori non offrono un login OAuth per usare l'abbonamento personale (ChatGPT Plus,
@@ -24,7 +24,7 @@ const TIPO_INTEGRAZIONE = 'AI';
 const MAX_PROMPT_CHARS = 20000;
 
 // Modelli: per ChatGPT e Gemini sovrascrivibili da variabile d'ambiente, così un modello
-// ritirato dal fornitore si cambia su Render senza toccare il codice.
+// ritirato dal fornitore si cambia nel .env del server senza toccare il codice.
 export const PROVIDERS = {
   chatgpt: { provider: 'ChatGPT', label: 'ChatGPT', prefix: 'chatgpt', model: process.env.OPENAI_MODEL || 'gpt-5' },
   claude: { provider: 'Claude', label: 'Claude', prefix: 'claude', model: 'claude-opus-5' },
@@ -439,7 +439,7 @@ export async function askAiProvider(userId, providerName, prompt) {
 //
 // La trascrizione NON usa le AI a pagamento/cloud dell'utente: la fa il servizio
 // "Projexa Whisper" (cartella whisper-service, Python + faster-whisper, gratuito),
-// pubblicato su Render come servizio separato. Qui si inoltra il blocco WAV e si ricevono
+// in esecuzione sulla VM come servizio separato (systemd projexa-whisper@800N). Qui si inoltra il blocco WAV e si ricevono
 // le frasi con l'orario di inizio. Configurazione: WHISPER_URL e WHISPER_API_KEY.
 // Restituisce { segments: [{ start, text }], provider }.
 // Indirizzi dei servizi Whisper: WHISPER_URLS (più servizi, separati da virgola, usati in
@@ -477,7 +477,7 @@ export async function transcribeAudio(userId, audioBuffer, mime, baseUrl = null)
       if (!temporary || attempt >= 3) {
         // Servizio locale non avviato: messaggio con l'istruzione per avviarlo.
         if (/ECONNREFUSED/.test(error.message || '') && /localhost|127\.0\.0\.1/.test(base)) {
-          throw httpError(503, `Servizio Whisper non avviato su ${base}: avvia whisper-service/avvia_locale.bat (oppure imposta WHISPER_URL con l'indirizzo di Render)`);
+          throw httpError(503, `Servizio Whisper non avviato su ${base}: avvia whisper-service/avvia_locale.bat (oppure imposta WHISPER_URL con l'indirizzo del servizio)`);
         }
         throw error;
       }

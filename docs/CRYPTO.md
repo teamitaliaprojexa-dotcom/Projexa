@@ -7,7 +7,7 @@ in chiaro. La conversione è automatica e non richiede modifiche alle pagine.
 
 | | dove |
 |---|---|
-| Chiave | variabile d'ambiente `ENCRYPTION_KEY` (Render + `backend/.env`) |
+| Chiave | variabile d'ambiente `ENCRYPTION_KEY` (`backend/.env` del server e locale) |
 | Algoritmo | AES-256-GCM, valori con prefisso `enc:v1:` |
 | Regola | `backend/config/crypto.js` |
 | Decifratura in lettura | `backend/config/cryptoPool.js` (avvolge i 4 pool) |
@@ -129,7 +129,7 @@ Se `ENCRYPTION_KEY` cambia, i dati già cifrati non sono più leggibili.
 Procedura corretta:
 
 1. **Decripta** tutte le tabelle migrate (con la chiave vecchia ancora attiva).
-2. Cambiare `ENCRYPTION_KEY` su Render e in `backend/.env`, riavviare.
+2. Cambiare `ENCRYPTION_KEY` nel `backend/.env` del server e in quello locale, riavviare.
 3. **Crypta** di nuovo le stesse tabelle.
 
 Se la chiave è già stata cambiata, "Decripta" si ferma con un errore esplicito e
