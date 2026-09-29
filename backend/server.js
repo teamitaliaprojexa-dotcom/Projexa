@@ -4911,7 +4911,8 @@ const DASHBOARD_FLAGS = {
   calendario: 'mostra calendario',
   todo: 'mostra todolist',
   issue: 'mostra funzione issue',
-  reporting: 'mostra reporting'
+  reporting: 'mostra reporting',
+  registra: 'mostra registra'
 };
 // Flag che senza riga in settings valgono false (moduli nuovi, da attivare esplicitamente).
 const DASHBOARD_FLAGS_DEFAULT_OFF = new Set(['reporting']);

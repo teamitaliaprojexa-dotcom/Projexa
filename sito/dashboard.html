@@ -2238,6 +2238,18 @@
             border-radius: 6px;
         }
         .meeting-text-btn:hover { background: #ECFDF5; }
+        /* Icona di caricamento (trascrizione/recap vuoti): crea la riga rec_meeting col file */
+        .meeting-upload-btn {
+            border: none;
+            background: transparent;
+            color: #94A3B8;
+            cursor: pointer;
+            font-size: 0.8rem;
+            padding: 0.15rem 0.4rem;
+            border-radius: 6px;
+        }
+        .meeting-upload-btn:hover { background: #EFF6FF; color: #2563EB; }
+        .meeting-audio-progress { color: #2563EB; font-size: 0.72rem; white-space: nowrap; }
         .meeting-text-body {
             padding: 0.9rem 1.25rem 1.1rem;
             max-height: 62vh;
@@ -2677,6 +2689,19 @@
             font-weight: 600;
             cursor: pointer;
         }
+        /* "Mostra tutti" accanto al titolo Riunioni: anche le riunioni di oggi già passate */
+        .meetings-show-all {
+            margin-left: 0.75rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            cursor: pointer;
+            user-select: none;
+        }
+        .meetings-show-all input { margin: 0; cursor: pointer; }
 
         .meeting-link-empty {
             flex: 0 0 auto;
@@ -2808,7 +2833,7 @@
             <!-- Monitor della VM: solo admin del tenant PROJEXA (il server lo verifica sul database) -->
             <li id="navVmMonitor" style="display: none;"><a href="vm-monitor.html"><i class="fas fa-server"></i> <span>Monitor VM</span></a></li>
             <!-- Registrazione libera (non legata al calendario): chiede il nome e avvia la registrazione -->
-            <li id="navRecord" style="border: none;"><a href="#" id="navRecordLink" title="Nuova registrazione"><svg class="sidebar-icon nav-record-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="#DC2626" stroke-width="1.8"/><rect x="9.6" y="5.6" width="4.8" height="8.2" rx="2.4" fill="#DC2626"/><path d="M7.4 11.4a4.6 4.6 0 0 0 9.2 0" fill="none" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/><path d="M12 16v2.4M9.6 18.4h4.8" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/></svg> <span>Registra</span></a></li>
+            <li id="navRecord" data-dash-flag="registra" style="border: none;"><a href="#" id="navRecordLink" title="Nuova registrazione"><svg class="sidebar-icon nav-record-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="#DC2626" stroke-width="1.8"/><rect x="9.6" y="5.6" width="4.8" height="8.2" rx="2.4" fill="#DC2626"/><path d="M7.4 11.4a4.6 4.6 0 0 0 9.2 0" fill="none" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/><path d="M12 16v2.4M9.6 18.4h4.8" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/></svg> <span>Registra</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
                 <a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m19.4 13 .1-1-.1-1 2.1-1.6-2-3.5-2.6 1a8 8 0 0 0-1.7-1L14.8 3h-4l-.4 2.9a8 8 0 0 0-1.7 1l-2.6-1-2 3.5L6.2 11l-.1 1 .1 1-2.1 1.6 2 3.5 2.6-1a8 8 0 0 0 1.7 1l.4 2.9h4l.4-2.9a8 8 0 0 0 1.7-1l2.6 1 2-3.5L19.4 13ZM12.8 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8Z"/></svg> <span>Impostazioni</span></a>
                 <div class="settings-flyout">
@@ -3153,6 +3178,7 @@
                         <input id="meetingsDatePicker" type="date" class="meetings-date-input" tabindex="-1" aria-hidden="true">
                         <span id="meetingsTitle">Riunioni</span>
                         <button id="meetingsTodayBtn" type="button" class="meetings-today-btn" style="display: none;" title="Torna alle riunioni di oggi">Oggi</button>
+                        <label id="meetingsShowAllWrap" class="meetings-show-all" title="Spuntato: tutte le riunioni di oggi, anche quelle già passate. Tolto: solo da adesso in poi."><input id="meetingsShowAll" type="checkbox" checked> Mostra tutti</label>
                     </div>
                     <div style="display: flex; gap: 1rem; align-items: center;">
                         <button id="audioDevicesBtn" type="button" class="audio-devices-btn" title="Dispositivi audio: microfono e altoparlanti" aria-label="Dispositivi audio"><i class="fas fa-cog"></i></button>
@@ -5647,7 +5673,7 @@
         // flyout, se uno di questi è stato modificato, la pagina si ricarica così chatbot e sezioni
         // compaiono/scompaiono subito. Nomi campo (minuscoli, senza "(*) ") allineati a
         // DASHBOARD_FLAGS in server.js.
-        const DASHBOARD_FLAG_CAMPI = ['chat-bot projexa', 'mostra kpi fatturato', 'mostra calendario', 'mostra todolist', 'mostra funzione issue', 'mostra reporting'];
+        const DASHBOARD_FLAG_CAMPI = ['chat-bot projexa', 'mostra kpi fatturato', 'mostra calendario', 'mostra todolist', 'mostra funzione issue', 'mostra reporting', 'mostra registra'];
 
         document.addEventListener('change', async (e) => {
             const toggle = e.target;
@@ -5818,7 +5844,7 @@
             // riquadro vuoto). La rotellina solo quando il contenuto cambia davvero (primo
             // caricamento, cambio di calendario o di giorno).
             const container = document.getElementById('meetingsContainer');
-            const viewKey = `${key}|${meetingsDate || 'oggi'}`;
+            const viewKey = `${key}|${meetingsDate || (meetingsShowAll ? 'oggi-tutti' : 'oggi')}`;
             const sameView = container && container.dataset.view === viewKey && container.querySelector('.meeting-card, .meeting-empty');
             const syncEl = document.getElementById('lastSyncTime');
             if (sameView) {
@@ -5834,11 +5860,13 @@
             }
             if (container) container.dataset.view = viewKey;
             try {
-                // Intervallo: oggi = da adesso alle prossime 24 ore; giorno scelto con l'icona
-                // del calendario = l'intera giornata (00:00 - 24:00, ora locale).
+                // Intervallo: oggi = da adesso alle prossime 24 ore ("Mostra tutti": da
+                // mezzanotte, così compaiono anche le riunioni di oggi già passate); giorno
+                // scelto con l'icona del calendario = l'intera giornata (00:00 - 24:00, ora locale).
                 let now = new Date();
                 let tomorrow = new Date(now);
                 tomorrow.setHours(now.getHours() + 24);
+                if (!meetingsDate && meetingsShowAll) now.setHours(0, 0, 0, 0);
                 if (meetingsDate) {
                     now = new Date(`${meetingsDate}T00:00:00`);
                     tomorrow = new Date(now);
@@ -5906,7 +5934,7 @@
                 container.innerHTML = `
                     <div class="meeting-empty">
                         <i class="fas fa-calendar-check" style="font-size: 2.5rem; color: var(--light); margin-bottom: 1rem;"></i>
-                        <p style="font-size: 1rem; margin: 0; color: var(--text-muted);">${meetingsDate ? `Nessuna riunione ${meetingsDayLabel()}` : 'Nessuna riunione oggi dopo questo orario'}</p>
+                        <p style="font-size: 1rem; margin: 0; color: var(--text-muted);">${meetingsDate ? `Nessuna riunione ${meetingsDayLabel()}` : (meetingsShowAll ? 'Nessuna riunione oggi' : 'Nessuna riunione oggi dopo questo orario')}</p>
                         <p style="font-size: 0.85rem; margin-top: 0.5rem; color: var(--text-muted);">${meetingsDate ? '' : 'Hai una giornata libera! 🎉'}</p>
                     </div>
                 `;
@@ -5914,10 +5942,15 @@
                 return;
             }
 
-            // Aggiorna prossima riunione
-            const nextMeeting = meetings[0];
-            const startTime = new Date(nextMeeting.start.dateTime || nextMeeting.start.date);
-            nextMeetingTime.textContent = startTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+            // Aggiorna prossima riunione ("Mostra tutti" di oggi: la prima non ancora iniziata,
+            // non la prima della giornata)
+            const startMs = (m) => new Date(m.start.dateTime || m.start.date).getTime();
+            const nextMeeting = !meetingsDate && meetingsShowAll
+                ? meetings.filter((m) => !m.manual).sort((a, b) => startMs(a) - startMs(b)).find((m) => startMs(m) >= Date.now())
+                : meetings[0];
+            nextMeetingTime.textContent = nextMeeting
+                ? new Date(startMs(nextMeeting)).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+                : '--';
 
             // Renderizza le card
             // Riga d'intestazione allineata alle colonne delle righe riunione
@@ -5992,6 +6025,8 @@
         // === GIORNO DELLE RIUNIONI (icona calendario accanto al titolo) ===
         // null = oggi (da adesso alle prossime 24 ore); 'YYYY-MM-DD' = giorno scelto.
         let meetingsDate = null;
+        // "Mostra tutti" (vista di oggi): anche le riunioni già passate. Spuntato a ogni avvio.
+        let meetingsShowAll = true;
 
         function meetingsDayLabel() {
             if (!meetingsDate) return 'oggi';
@@ -6004,6 +6039,9 @@
             if (title) title.textContent = meetingsDate ? `Riunioni ${meetingsDayLabel()}` : 'Riunioni';
             const today = document.getElementById('meetingsTodayBtn');
             if (today) today.style.display = meetingsDate ? 'inline-block' : 'none';
+            // Giorno scelto col calendario = già l'intera giornata: il flag serve solo per oggi
+            const showAll = document.getElementById('meetingsShowAllWrap');
+            if (showAll) showAll.style.display = meetingsDate ? 'none' : 'inline-flex';
             const cl = document.getElementById('meetingCountLabel');
             if (cl) cl.textContent = meetingsDate ? 'riunioni nel giorno' : 'riunioni';
             const nl = document.getElementById('nextMeetingLabel');
@@ -6035,6 +6073,14 @@
             });
             picker?.addEventListener('change', () => { if (picker.value) setMeetingsDate(picker.value); });
             document.getElementById('meetingsTodayBtn')?.addEventListener('click', () => setMeetingsDate(null));
+            const showAll = document.getElementById('meetingsShowAll');
+            if (showAll) {
+                showAll.checked = meetingsShowAll;
+                showAll.addEventListener('change', () => {
+                    meetingsShowAll = showAll.checked;
+                    loadTodaysMeetings();
+                });
+            }
         }
 
         // === REGISTRAZIONI LIBERE (microfono rosso nella barra laterale) ===
@@ -6395,7 +6441,7 @@
                     const title = row.dataset.title || '';
                     const delCell = row.querySelector('.meeting-del-cell');
                     if (delCell) {
-                        const html = m && !isRecordingMeeting(ev.id) ? meetingDeleteButton(ev.id) : '';
+                        const html = m && !isRecordingMeeting(ev.id) && !audioFileJobs.has(ev.id) ? meetingDeleteButton(ev.id) : '';
                         if (delCell.dataset.state !== html) { delCell.innerHTML = html; delCell.dataset.state = html; }
                     }
                     // Mentre la riunione è ancora in registrazione non si mostrano né il
@@ -6415,8 +6461,18 @@
                     const queued = m && m.pending > 0
                         ? `<i class="fas fa-hourglass-half meeting-queued" title="Trascrizione in corso sul server: ${m.pending} blocc${m.pending === 1 ? 'o' : 'hi'} in coda"></i>`
                         : '';
-                    setStatusCell(row, 'meeting-status-trascrizione', (m && m.has_trascrizione && !recording ? meetingTextButton(ev, 'trascrizione', title) : '') + queued);
-                    setStatusCell(row, 'meeting-status-recap', m && m.has_recap ? meetingTextButton(ev, 'recap', title) : '');
+                    // Trascrizione/recap vuoti: icona di caricamento (crea la riga se manca).
+                    // Durante l'invio di un file audio: avanzamento al posto dell'icona.
+                    const audioJob = audioFileJobs.get(ev.id);
+                    const lensTr = m && m.has_trascrizione && !recording ? meetingTextButton(ev, 'trascrizione', title) : '';
+                    const extraTr = audioJob
+                        ? audioProgressHtml(audioJob)
+                        : (queued || (!lensTr && !recording ? meetingUploadButton('trascrizione') : ''));
+                    setStatusCell(row, 'meeting-status-trascrizione', lensTr + extraTr);
+                    const recapBusy = manualRecapRunning.has(ev.id) || (m && m.recap_running);
+                    setStatusCell(row, 'meeting-status-recap', m && m.has_recap
+                        ? meetingTextButton(ev, 'recap', title)
+                        : (recapBusy || recording || audioJob ? '' : meetingUploadButton('recap')));
                     // Recap appena comparso (es. generato da un'altra scheda): avviso "Recap pronto"
                     const hadRecap = recapSeen.get(ev.id);
                     if (m && m.has_recap && hadRecap === false) showRecapReady(ev.id, title);
@@ -6547,27 +6603,194 @@
 
         // --- Carica file: .txt così com'è, .vtt convertito; SOSTITUISCE il testo della colonna
         // (il server lo salva cifrato).
+        // Controlla e legge un file di testo (.txt / .vtt convertito): restituisce il testo.
+        function checkMeetingTextFile(file) {
+            if (!/\.(txt|vtt)$/i.test(file.name)) return 'Sono ammessi solo file .txt o .vtt';
+            if (file.size > 2 * 1024 * 1024) return 'File troppo grande (max 2 MB)';
+            return '';
+        }
+        async function readMeetingTextFile(file) {
+            let text = await file.text();
+            if (/\.vtt$/i.test(file.name) || /^﻿?WEBVTT/.test(text)) text = vttToText(text);
+            text = text.replace(/^﻿/, '').trim();
+            if (!text) throw new Error('Il file non contiene testo');
+            return text;
+        }
+        async function saveMeetingText(eventId, field, text) {
+            const res = await fetch(`${API_URL}/calendar/meetings/managed/text`, {
+                method: 'PUT',
+                headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_calendar: eventId, field, text })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+        }
+
+        // === ICONA DI CARICAMENTO NELLA GRIGLIA (trascrizione / recap ancora vuoti) ===
+        // Come "Registra", crea la riga rec_meeting della riunione (se non c'è) e poi ci salva
+        // il contenuto del file. Trascrizione: .txt/.vtt (testo) oppure audio (trascritto sul
+        // server); recap: .txt/.vtt.
+        function meetingUploadButton(field) {
+            const label = field === 'recap'
+                ? 'Carica il recap da file (.txt)'
+                : 'Carica la trascrizione da file (.txt, .vtt) oppure un audio da trascrivere (.mp3, .wav, .m4a…)';
+            return `<button type="button" class="meeting-upload-btn" data-field="${field}" title="${label}" aria-label="${label}"><i class="fas fa-upload"></i></button>`;
+        }
+
+        // Riga rec_meeting per la riunione della griglia (stessi dati del pulsante Registra).
+        function ensureManagedMeetingForRow(row) {
+            return ensureManagedMeeting({ dataset: row.dataset, closest: () => row });
+        }
+
+        let meetingUploadRow = null; // riga della griglia a cui va il file scelto
+        async function uploadFromMeetingRow(row, field, file) {
+            if (!row || !file) return;
+            const eventId = row.dataset.eventId;
+            const title = row.dataset.title || '';
+            const audio = field === 'trascrizione' && isAudioFile(file);
+            if (!audio) {
+                const err = checkMeetingTextFile(file);
+                if (err) { showNotification(field === 'trascrizione' ? err + ' (oppure un file audio)' : err, 'info'); return; }
+            }
+            try {
+                if (audio) {
+                    const err = checkAudioFileJob(eventId, file);
+                    if (err) { showNotification(err, 'info'); return; }
+                    await ensureManagedMeetingForRow(row);
+                    await transcribeAudioFile(eventId, title, file);
+                    return;
+                }
+                const text = await readMeetingTextFile(file);
+                await ensureManagedMeetingForRow(row);
+                await saveMeetingText(eventId, field, text);
+                showNotification(`${field === 'recap' ? 'Recap' : 'Trascrizione'} caricat${field === 'recap' ? 'o' : 'a'} da ${file.name}`, 'success');
+                refreshMeetingStatuses();
+            } catch (e) {
+                showNotification('Caricamento non riuscito: ' + e.message, 'info');
+            }
+        }
+
+        // === FILE AUDIO -> TRASCRIZIONE SUL SERVER (Whisper sulla VM) ===
+        // Sempre sul server, anche se in Impostazioni è scelta la trascrizione nel browser.
+        // Il browser decodifica il file (mp3, wav, m4a...), lo converte in mono 16 kHz e lo
+        // invia a blocchi di 30 s nella stessa coda della registrazione (rec_meeting_chunks):
+        // il testo si AGGIUNGE alla trascrizione, con gli orari che proseguono da quelli già
+        // presenti. A invio finito si prenota il recap automatico, come dopo "Ferma".
+        const AUDIO_FILE_MAX_BYTES = 300 * 1024 * 1024;
+        const audioFileJobs = new Map(); // eventId -> { done, total }
+
+        function isAudioFile(file) {
+            return /^audio\//.test(file.type || '') || /\.(mp3|wav|m4a|aac|ogg|oga|opus|flac|webm)$/i.test(file.name);
+        }
+
+        function checkAudioFileJob(eventId, file) {
+            if (!isAudioFile(file)) return 'Formato non supportato: scegli un file audio (.mp3, .wav, .m4a…)';
+            if (file.size > AUDIO_FILE_MAX_BYTES) return 'File audio troppo grande (max 300 MB)';
+            if (audioFileJobs.has(eventId)) return 'È già in corso l\'invio di un file audio per questa riunione';
+            if (isRecordingMeeting(eventId)) return 'Questa riunione è in registrazione: ferma prima la registrazione';
+            return '';
+        }
+
+        function audioProgressHtml(job) {
+            const pct = job.total ? Math.floor(job.done * 100 / job.total) : 0;
+            const label = job.total ? `Invio del file audio al server: ${job.done}/${job.total} blocchi` : 'Lettura del file audio…';
+            return `<span class="meeting-audio-progress" title="${label}"><i class="fas fa-spinner fa-spin"></i> ${job.total ? pct + '%' : ''}</span>`;
+        }
+
+        async function transcribeAudioFile(eventId, title, file) {
+            const job = { done: 0, total: 0 };
+            audioFileJobs.set(eventId, job);
+            refreshMeetingStatuses();
+            showNotification(`Lettura di ${file.name}…`, 'info');
+            try {
+                // Decodifica già ricampionata a 16 kHz (sample rate del contesto offline).
+                let buf;
+                try {
+                    const ctx = new OfflineAudioContext(1, 1, REC_SAMPLE_RATE);
+                    buf = await ctx.decodeAudioData(await file.arrayBuffer());
+                } catch (e) {
+                    throw new Error('il browser non riesce a leggere questo file audio');
+                }
+                const channels = [];
+                for (let c = 0; c < buf.numberOfChannels; c++) channels.push(buf.getChannelData(c));
+                const totalSamples = buf.length;
+                if (totalSamples < REC_SAMPLE_RATE) throw new Error('il file audio è troppo corto');
+                const chunkSamples = REC_SAMPLE_RATE * REC_CHUNK_SECONDS;
+                job.total = Math.ceil(totalSamples / chunkSamples);
+
+                // Gli orari proseguono da quelli già presenti nella trascrizione.
+                let baseOffset = 0;
+                try {
+                    const r = await fetch(`${API_URL}/calendar/meetings/managed/offset?id_calendar=${encodeURIComponent(eventId)}`, { headers: calendarAuthHeaders() });
+                    const d = await r.json().catch(() => ({}));
+                    if (r.ok) baseOffset = Math.max(0, Number(d.offset) || 0);
+                } catch (e) { /* si parte da 00:00:00 */ }
+
+                // Oggetto nel formato della registrazione, per riusare queueRecChunk/finalize.
+                const rec = {
+                    eventId, title, running: false, startedAt: Date.now(), baseOffset,
+                    fileLabel: `File audio ${file.name}${baseOffset ? ` (da ${formatRecTime(baseOffset)})` : ''}`,
+                    chunks: 0, sent: 0, failed: 0, pending: 0, lastError: '', queue: Promise.resolve()
+                };
+                showNotification(`Invio di ${file.name} al server per la trascrizione…`, 'info');
+                for (let i = 0; i < job.total; i++) {
+                    const from = i * chunkSamples;
+                    const len = Math.min(chunkSamples, totalSamples - from);
+                    // Mono Int16: media dei canali.
+                    const mono = new Int16Array(len);
+                    for (let j = 0; j < len; j++) {
+                        let v = 0;
+                        for (const ch of channels) v += ch[from + j];
+                        v = v / channels.length;
+                        mono[j] = v >= 1 ? 32767 : v <= -1 ? -32768 : Math.round(v * 32767);
+                    }
+                    // Nessuna distinzione microfono/partecipanti: solo il volume, per saltare i silenzi.
+                    const energy = { mic: null, system: recEnergy(mono) };
+                    if (len >= REC_SAMPLE_RATE && Math.max(0, ...energy.system) >= REC_SILENCE_RMS) {
+                        const isFirst = rec.chunks++ === 0;
+                        queueRecChunk(rec, normalizeRecTrack(mono).samples, energy, baseOffset + from / REC_SAMPLE_RATE, isFirst);
+                        await rec.queue; // un blocco alla volta: niente accumulo di audio in memoria
+                        if (rec.failed) throw new Error(rec.lastError || 'invio non riuscito');
+                    }
+                    job.done = i + 1;
+                    refreshMeetingStatuses();
+                }
+                if (!rec.sent) throw new Error('nel file non è stato trovato parlato');
+                await finalizeMeetingRecording(rec); // recap automatico a trascrizione finita
+                showNotification(`${file.name} inviato: la trascrizione prosegue sul server in background`, 'success');
+            } catch (e) {
+                showNotification(`Trascrizione di ${file.name} non avviata: ${e.message}`, 'info');
+            } finally {
+                audioFileJobs.delete(eventId);
+                refreshMeetingStatuses();
+            }
+        }
+
+        // Pulsante "Trascrivi audio" della finestra della trascrizione.
+        async function uploadMeetingAudio(file) {
+            const modal = document.getElementById('meetingTextModal');
+            if (!file || modal.dataset.field !== 'trascrizione') return;
+            const eventId = modal.dataset.eventId;
+            const err = checkAudioFileJob(eventId, file);
+            if (err) { showNotification(err, 'info'); return; }
+            const current = document.getElementById('meetingTextBody').dataset.raw || '';
+            if (current.trim() && !window.confirm('Il testo trascritto dal file audio verrà aggiunto in fondo alla trascrizione attuale. Continuare?')) return;
+            modal.classList.remove('open');
+            await transcribeAudioFile(eventId, modal.dataset.title || '', file);
+        }
+
         async function uploadMeetingText(file) {
             const modal = document.getElementById('meetingTextModal');
             const field = modal.dataset.field === 'recap' ? 'recap' : 'trascrizione';
             const label = field === 'recap' ? 'il recap' : 'la trascrizione';
             if (!file) return;
-            if (!/\.(txt|vtt)$/i.test(file.name)) { showNotification('Sono ammessi solo file .txt o .vtt', 'info'); return; }
-            if (file.size > 2 * 1024 * 1024) { showNotification('File troppo grande (max 2 MB)', 'info'); return; }
+            const err = checkMeetingTextFile(file);
+            if (err) { showNotification(err, 'info'); return; }
             const current = document.getElementById('meetingTextBody').dataset.raw || '';
             if (current.trim() && !window.confirm(`Il contenuto del file sostituirà ${label} attuale di questa riunione. Continuare?`)) return;
             try {
-                let text = await file.text();
-                if (/\.vtt$/i.test(file.name) || /^﻿?WEBVTT/.test(text)) text = vttToText(text);
-                text = text.replace(/^﻿/, '').trim();
-                if (!text) throw new Error('Il file non contiene testo');
-                const res = await fetch(`${API_URL}/calendar/meetings/managed/text`, {
-                    method: 'PUT',
-                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id_calendar: modal.dataset.eventId, field, text })
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                const text = await readMeetingTextFile(file);
+                await saveMeetingText(modal.dataset.eventId, field, text);
                 showNotification(`${field === 'recap' ? 'Recap' : 'Trascrizione'} caricat${field === 'recap' ? 'o' : 'a'} da ${file.name}`, 'success');
                 // Riapre la finestra con il testo appena salvato e aggiorna le lenti della griglia
                 openMeetingText({ dataset: { eventId: modal.dataset.eventId, field, title: modal.dataset.title } });
@@ -6649,6 +6872,8 @@
             if (emailBtn) emailBtn.style.display = field === 'recap' ? 'inline-block' : 'none';
             const uploadBtn = document.getElementById('meetingTextUpload'); // nascosto in sola lettura
             if (uploadBtn) uploadBtn.style.display = '';
+            const audioBtn = document.getElementById('meetingTextAudio'); // file audio: solo trascrizione
+            if (audioBtn) audioBtn.style.display = field === 'trascrizione' ? 'inline-block' : 'none';
             modal.dataset.title = btn.dataset.title || '';
             document.getElementById('meetingTextTitleText').textContent = `${field === 'recap' ? 'Recap' : 'Trascrizione'} — ${btn.dataset.title || ''}`;
             document.getElementById('meetingTextSub').textContent = '';
@@ -6680,7 +6905,7 @@
             modal.dataset.eventId = '';
             modal.dataset.field = field;
             modal.dataset.title = title;
-            ['meetingTextUpload', 'meetingTextClear', 'meetingTextEmail'].forEach((id) => {
+            ['meetingTextUpload', 'meetingTextAudio', 'meetingTextClear', 'meetingTextEmail'].forEach((id) => {
                 const el = document.getElementById(id);
                 if (el) el.style.display = 'none';
             });
@@ -6701,7 +6926,30 @@
         }, true);
 
         function initMeetingText() {
+            // Icona di caricamento della griglia: un input file per campo (filtri diversi)
+            const rowFile = document.createElement('input');
+            rowFile.type = 'file';
+            rowFile.style.display = 'none';
+            document.body.appendChild(rowFile);
+            rowFile.addEventListener('change', () => {
+                const f = rowFile.files && rowFile.files[0];
+                rowFile.value = '';
+                const target = meetingUploadRow;
+                meetingUploadRow = null;
+                if (target) uploadFromMeetingRow(target.row, target.field, f);
+            });
             document.getElementById('meetingsContainer')?.addEventListener('click', (e) => {
+                const up = e.target.closest && e.target.closest('.meeting-upload-btn');
+                if (up) {
+                    e.preventDefault();
+                    const field = up.dataset.field === 'recap' ? 'recap' : 'trascrizione';
+                    meetingUploadRow = { row: up.closest('.meeting-card'), field };
+                    rowFile.accept = field === 'recap'
+                        ? '.txt,.vtt,text/plain,text/vtt'
+                        : '.txt,.vtt,text/plain,text/vtt,audio/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.webm';
+                    rowFile.click();
+                    return;
+                }
                 const b = e.target.closest && e.target.closest('.meeting-text-btn');
                 if (!b) return;
                 e.preventDefault();
@@ -6722,6 +6970,13 @@
                 const f = fileInput.files && fileInput.files[0];
                 fileInput.value = ''; // permette di ricaricare lo stesso file
                 uploadMeetingText(f);
+            });
+            const audioInput = document.getElementById('meetingAudioFile');
+            document.getElementById('meetingTextAudio')?.addEventListener('click', () => audioInput?.click());
+            audioInput?.addEventListener('change', () => {
+                const f = audioInput.files && audioInput.files[0];
+                audioInput.value = '';
+                uploadMeetingAudio(f);
             });
             document.getElementById('meetingTextCopy')?.addEventListener('click', () => {
                 const raw = document.getElementById('meetingTextBody').dataset.raw || '';
@@ -6806,6 +7061,7 @@
 
         // Etichetta di sessione del primo blocco (uguale per server e browser).
         function recStartLabel(rec) {
+            if (rec.fileLabel) return rec.fileLabel; // file audio caricato
             return `Registrazione del ${new Date(rec.startedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}${rec.baseOffset ? ` (ripresa da ${formatRecTime(rec.baseOffset)})` : ''}`;
         }
 
@@ -6875,9 +7131,7 @@
                 energy_mic: energy.mic,
                 energy_system: energy.system,
                 offset_sec: offsetSec,
-                start_label: isFirst
-                    ? `Registrazione del ${new Date(rec.startedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}${rec.baseOffset ? ` (ripresa da ${formatRecTime(rec.baseOffset)})` : ''}`
-                    : undefined
+                start_label: isFirst ? recStartLabel(rec) : undefined
             };
             rec.pending++;
             rec.queue = rec.queue.then(async () => {
@@ -6931,8 +7185,8 @@
                 for (const part of parts) { out.set(part, pos); pos += part.length; }
                 return out;
             };
-            const micSamples = rec.mic ? join(rec.bufMic) : null;
-            const sysSamples = rec.hasSystemAudio ? join(rec.bufSys) : null;
+            const micRaw = rec.mic ? join(rec.bufMic) : null;
+            const sysRaw = rec.hasSystemAudio ? join(rec.bufSys) : null;
             // Gli orari continuano da quelli della sessione precedente (rec.baseOffset).
             const offsetSec = (rec.baseOffset || 0) + rec.flushedSamples / REC_SAMPLE_RATE;
             rec.flushedSamples += rec.bufferLen;
@@ -6940,16 +7194,27 @@
             rec.bufSys = [];
             rec.bufferLen = 0;
 
-            // Volume (RMS 0..1) di ogni traccia per finestre di 0,5 s.
-            const energy = { mic: micSamples ? recEnergy(micSamples) : null, system: sysSamples ? recEnergy(sysSamples) : null };
-            const loudest = Math.max(0, ...(energy.mic || []), ...(energy.system || []));
             // Blocco muto (nessuno parla): non si invia, il server non deve trascrivere nulla.
+            // Si guarda il volume ORIGINALE delle tracce, con una soglia bassa: l'audio di
+            // sistema (gli altri partecipanti) arriva spesso molto più basso del microfono.
             // L'intestazione di sessione passa al primo blocco inviato.
+            const rawEnergy = { mic: micRaw ? recEnergy(micRaw) : null, system: sysRaw ? recEnergy(sysRaw) : null };
+            const loudest = Math.max(0, ...(rawEnergy.mic || []), ...(rawEnergy.system || []));
             if (loudest < REC_SILENCE_RMS) {
                 rec.skipped = (rec.skipped || 0) + 1;
                 updateRecStatus(rec);
                 return;
             }
+            // Ogni traccia portata a un volume udibile prima del mix: senza, le voci basse degli
+            // altri partecipanti venivano scartate dal filtro dei silenzi (VAD) di Whisper.
+            const micN = micRaw ? normalizeRecTrack(micRaw) : null;
+            const sysN = sysRaw ? normalizeRecTrack(sysRaw) : null;
+            const micSamples = micN && micN.samples;
+            const sysSamples = sysN && sysN.samples;
+            // Volume (RMS 0..1) per finestre di 0,5 s, dopo la normalizzazione: il confronto
+            // microfono / audio di sistema (chi parla) non è falsato dal volume di Windows.
+            const energy = { mic: micSamples ? recEnergy(micSamples) : null, system: sysSamples ? recEnergy(sysSamples) : null };
+            console.log(`[REC] blocco ${rec.chunks + 1}: livello voce mic ${micN ? micN.level.toFixed(4) : '-'} (x${micN ? micN.gain.toFixed(1) : '-'}), sistema ${sysN ? sysN.level.toFixed(4) : '-'} (x${sysN ? sysN.gain.toFixed(1) : '-'})`);
             // Una sola traccia: microfono + audio di sistema sommati (con limitazione).
             const len = (micSamples || sysSamples).length;
             const mix = new Int16Array(len);
@@ -6967,7 +7232,28 @@
 
         // Volume di una traccia (RMS, 0..1) per finestre di 0,5 s: 30 s -> 60 valori.
         const REC_ENERGY_WINDOW = REC_SAMPLE_RATE / 2;
-        const REC_SILENCE_RMS = 0.01; // circa -40 dB: sotto questa soglia il blocco è muto
+        // Circa -50 dB: sotto questa soglia il blocco è muto. Era 0.01 (-40 dB), troppo alta:
+        // scartava interi minuti in cui parlavano solo gli altri partecipanti a volume basso.
+        const REC_SILENCE_RMS = 0.003;
+        // Normalizzazione di una traccia: il livello della voce (mediana delle finestre da 0,5 s
+        // sopra la soglia di silenzio) viene portato a REC_TARGET_RMS, amplificando al massimo
+        // REC_MAX_GAIN volte (mai abbassando), con limitazione dei picchi.
+        const REC_TARGET_RMS = 0.08;
+        const REC_MAX_GAIN = 15;
+        function normalizeRecTrack(samples) {
+            const active = recEnergy(samples).filter((v) => v >= REC_SILENCE_RMS).sort((a, b) => a - b);
+            if (!active.length) return { samples, gain: 1, level: 0 };
+            const level = active[Math.floor(active.length / 2)];
+            const gain = Math.min(REC_MAX_GAIN, Math.max(1, REC_TARGET_RMS / level));
+            if (gain < 1.05) return { samples, gain: 1, level };
+            const out = new Int16Array(samples.length);
+            for (let i = 0; i < samples.length; i++) {
+                // limitatore morbido: niente distorsione "a gradino" sui picchi amplificati
+                const x = samples[i] / 32768 * gain;
+                out[i] = Math.round(Math.tanh(x) * 32767);
+            }
+            return { samples: out, gain, level };
+        }
         function recEnergy(samples) {
             const out = [];
             for (let i = 0; i < samples.length; i += REC_ENERGY_WINDOW) {
@@ -7011,6 +7297,10 @@
             const ui = recUi();
             if (meetingRec && (meetingRec.running || meetingRec.starting)) {
                 showNotification('È già in corso la registrazione di un\'altra riunione', 'info');
+                return;
+            }
+            if (audioFileJobs.has(btn.dataset.eventId)) {
+                showNotification('È in corso l\'invio di un file audio per questa riunione: attendi che finisca', 'info');
                 return;
             }
             if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
@@ -7279,7 +7569,7 @@
             // Chiudere o ricaricare la pagina durante la registrazione interromperebbe la
             // trascrizione; durante un recap nel browser lo interromperebbe.
             window.addEventListener('beforeunload', (e) => {
-                if ((meetingRec && (meetingRec.running || meetingRec.pending > 0)) || recapProgress.size > 0) {
+                if ((meetingRec && (meetingRec.running || meetingRec.pending > 0)) || recapProgress.size > 0 || audioFileJobs.size > 0) {
                     e.preventDefault();
                     e.returnValue = '';
                 }
@@ -8001,7 +8291,7 @@
             // Una sola riga: partecipa - durata - ora - provider - gestisci con Projexa - titolo -
             // trascrizione - recap - inviata (flag da rec_meeting) - cliente/progetto
             return `
-                <div class="meeting-card" data-managed="${event.managed ? '1' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-start="${isNaN(start) ? '' : start.toISOString()}">
+                <div class="meeting-card" data-managed="${event.managed ? '1' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-start="${isNaN(start) ? '' : start.toISOString()}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">
                     <div class="meeting-del-cell">${event.managed && !isRecordingMeeting(event.id) ? meetingDeleteButton(event.id) : ''}</div>
                     ${meetingLinkBtn}
                     <div class="meeting-duration">${escapeHtml(durationStr)}</div>
@@ -8010,8 +8300,8 @@
                     <div class="meeting-manage">${(meetingLink || event.manual || isRecordingMeeting(event.id)) ? `<button type="button" class="meeting-rec-btn${isRecordingMeeting(event.id) ? ' recording' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">${recButtonLabel(isRecordingMeeting(event.id))}</button>` : ''}</div>
                     <div class="meeting-title"${event.manual ? ' data-renamable="1"' : ''} title="${escapeHtml(event.manual ? tooltip + '\n(doppio clic per rinominare)' : tooltip)}">${escapeHtml(title)}</div>
                     <div class="meeting-status meeting-status-genrecap">${event.has_trascrizione && !event.has_recap ? manualRecapButton(event.id) : ''}</div>
-                    <div class="meeting-status meeting-status-trascrizione">${event.has_trascrizione ? meetingTextButton(event, 'trascrizione', title) : ''}</div>
-                    <div class="meeting-status meeting-status-recap">${event.has_recap ? meetingTextButton(event, 'recap', title) : ''}</div>
+                    <div class="meeting-status meeting-status-trascrizione">${event.has_trascrizione ? meetingTextButton(event, 'trascrizione', title) : (isRecordingMeeting(event.id) ? '' : meetingUploadButton('trascrizione'))}</div>
+                    <div class="meeting-status meeting-status-recap">${event.has_recap ? meetingTextButton(event, 'recap', title) : meetingUploadButton('recap')}</div>
                     <div class="meeting-assign" data-event-id="${escapeHtml(event.id || '')}" data-client-id="${escapeHtml(event.client_id || '')}" data-project-id="${escapeHtml(event.project_id || '')}"></div>
                 </div>
             `;
@@ -10783,7 +11073,8 @@
         }
 
         // Sezioni della dashboard accese/spente dai booleani di Impostazioni › Preferenze
-        // ("Mostra KPI Fatturato", "Mostra Calendario", "Mostra ToDoList", "Mostra funzione Issue"):
+        // ("Mostra KPI Fatturato", "Mostra Calendario", "Mostra ToDoList", "Mostra funzione Issue",
+        // "Mostra Registra" = pulsante Registra della sidebar):
         // gli elementi con data-dash-flag="<chiave>" si nascondono se il flag è false.
         // Senza riga o con errore di rete restano visibili.
         (async function applyDashboardFlags() {
@@ -14482,7 +14773,11 @@
             <div id="meetingTextBody" class="meeting-text-body"></div>
             <div class="task-modal-footer">
                 <input id="meetingTextFile" type="file" accept=".txt,.vtt,text/plain,text/vtt" style="display: none;">
-                <button id="meetingTextUpload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer; margin-right: auto;" title="Carica un file .txt o .vtt: sostituisce il testo di questa riunione"><i class="fas fa-upload"></i> Carica file</button>
+                <input id="meetingAudioFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.webm" style="display: none;">
+                <span style="margin-right: auto; display: inline-flex; gap: 0.5rem;">
+                    <button id="meetingTextUpload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Carica un file .txt o .vtt: sostituisce il testo di questa riunione"><i class="fas fa-upload"></i> Carica file</button>
+                    <button id="meetingTextAudio" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Carica un file audio (.mp3, .wav, .m4a…): viene trascritto sul server e il testo si aggiunge alla trascrizione"><i class="fas fa-file-audio"></i> Trascrivi audio</button>
+                </span>
                 <button id="meetingTextEmail" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Apri una nuova email con questo testo (Outlook del computer o Gmail, secondo il calendario default)"><i class="fas fa-envelope"></i> Email</button>
                 <button id="meetingTextClear" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid #FCA5A5; border-radius: 8px; background: #FEF2F2; color: #B91C1C; cursor: pointer;" title="Cancella completamente il recap di questa riunione"><i class="fas fa-eraser"></i> Svuota</button>
                 <button id="meetingTextDownload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Scarica il testo in un file .txt"><i class="fas fa-download"></i> Scarica .txt</button>

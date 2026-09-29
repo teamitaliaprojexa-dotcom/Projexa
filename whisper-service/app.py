@@ -42,6 +42,9 @@ LANGUAGE = os.environ.get("WHISPER_LANGUAGE", "it")
 COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE", "int8")
 # Su istanze con una frazione di CPU (Render Free 0.1, Starter 0.5) più thread si ostacolano.
 THREADS = int(os.environ.get("WHISPER_THREADS", "1") or 1)
+# Soglia del VAD (0..1, default di faster-whisper 0.5): più bassa = tiene anche le voci
+# deboli (es. gli altri partecipanti registrati dall'audio di sistema).
+VAD_THRESHOLD = float(os.environ.get("WHISPER_VAD_THRESHOLD", "0.35") or 0.35)
 MAX_AUDIO_BYTES = 8 * 1024 * 1024
 
 app = FastAPI(title="Projexa Whisper", docs_url=None, redoc_url=None)
@@ -98,6 +101,7 @@ def _transcribe_blocking(audio: bytes):
             task="transcribe",
             beam_size=1,        # più veloce: adatto alla trascrizione "dal vivo"
             vad_filter=True,    # salta i silenzi (niente frasi inventate sul silenzio)
+            vad_parameters={"threshold": VAD_THRESHOLD, "speech_pad_ms": 500},
             condition_on_previous_text=False,
         )
         out = [

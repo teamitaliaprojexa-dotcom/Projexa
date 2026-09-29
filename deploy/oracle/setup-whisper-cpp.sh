@@ -33,6 +33,8 @@ nice cmake --build build -j"$(nproc)" --config Release --target whisper-server w
 
 # -mc 0: nessun contesto dal testo precedente (come condition_on_previous_text=False nel
 # servizio Python): evita che un'allucinazione si ripeta nei segmenti successivi.
+# --vad-threshold 0.35 (default 0.5): con 0.5 il VAD scartava le voci deboli degli altri
+# partecipanti (audio di sistema); --vad-speech-pad-ms 500: non taglia inizio/fine frase.
 sudo tee /etc/systemd/system/projexa-whisper-cpp.service >/dev/null <<UNIT
 [Unit]
 Description=Projexa Whisper.cpp (Background-Veloce, porta $PORT)
@@ -41,7 +43,7 @@ After=network.target
 [Service]
 User=$USER
 WorkingDirectory=$CPP_DIR/src
-ExecStart=$CPP_DIR/src/build/bin/whisper-server -m models/ggml-$MODEL.bin -t $(nproc) -l it -mc 0 --vad -vm models/ggml-$VAD.bin --host 127.0.0.1 --port $PORT
+ExecStart=$CPP_DIR/src/build/bin/whisper-server -m models/ggml-$MODEL.bin -t $(nproc) -l it -mc 0 --vad -vm models/ggml-$VAD.bin --vad-threshold 0.35 --vad-speech-pad-ms 500 --host 127.0.0.1 --port $PORT
 Restart=always
 RestartSec=5
 
