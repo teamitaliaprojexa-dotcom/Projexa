@@ -12,6 +12,8 @@
 //
 // Il backend fa da proxy: la chiave non torna mai al browser.
 import express from 'express';
+import http from 'http';
+import https from 'https';
 import Anthropic from '@anthropic-ai/sdk';
 import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -441,23 +443,52 @@ const OLLAMA_MAX_CTX = 32768;          // oltre si riassume a pezzi
 const OLLAMA_OUTPUT_TOKENS = 1500;
 const OLLAMA_CHUNK_CHARS = 24000;      // ~8.000 token per pezzo
 
+// POST JSON verso Ollama con il modulo http di Node, NON con fetch: fetch (undici) chiude la
+// richiesta se le intestazioni della risposta non arrivano entro 5 minuti
+// (UND_ERR_HEADERS_TIMEOUT), e Ollama con stream:false risponde solo a recap finito, che su
+// CPU richiede decine di minuti. Ogni tentativo moriva a 5 minuti e il recap non finiva mai.
+// Qui l'unico limite è timeoutMs, per l'intera richiesta.
+function ollamaPost(url, body, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const lib = u.protocol === 'https:' ? https : http;
+    const payload = Buffer.from(JSON.stringify(body));
+    const req = lib.request(u, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': payload.length }
+    }, (res) => {
+      const parts = [];
+      res.on('data', (c) => parts.push(c));
+      res.on('end', () => {
+        clearTimeout(timer);
+        let data = {};
+        try { data = JSON.parse(Buffer.concat(parts).toString('utf8') || '{}'); } catch { /* risposta non JSON */ }
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, data });
+      });
+      res.on('error', (e) => { clearTimeout(timer); reject(e); });
+    });
+    const timer = setTimeout(() => {
+      req.destroy(Object.assign(new Error('timeout'), { name: 'TimeoutError' }));
+    }, timeoutMs);
+    req.on('error', (e) => { clearTimeout(timer); reject(e); });
+    req.end(payload);
+  });
+}
+
 async function ollamaGenerate(prompt, numCtx, numPredict) {
   const base = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
   const model = process.env.OLLAMA_RECAP_MODEL || 'qwen2.5:7b';
   let response;
   try {
-    response = await fetch(`${base}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, prompt, stream: false, options: { num_ctx: numCtx, num_predict: numPredict, temperature: 0.3 } }),
+    response = await ollamaPost(`${base}/api/generate`,
+      { model, prompt, stream: false, options: { num_ctx: numCtx, num_predict: numPredict, temperature: 0.3 } },
       // Su CPU una riunione lunga può richiedere decine di minuti.
-      signal: AbortSignal.timeout(Number(process.env.OLLAMA_TIMEOUT_MS) || 2 * 60 * 60 * 1000)
-    });
+      Number(process.env.OLLAMA_TIMEOUT_MS) || 2 * 60 * 60 * 1000);
   } catch (error) {
-    const reason = error.name === 'TimeoutError' ? 'tempo di attesa scaduto' : ((error.cause && error.cause.code) || error.message);
+    const reason = error.name === 'TimeoutError' ? 'tempo di attesa scaduto' : (error.code || error.message);
     throw httpError(503, `Recap Projexa: modello locale non raggiungibile (${reason})`);
   }
-  const data = await response.json().catch(() => ({}));
+  const data = response.data || {};
   if (!response.ok) throw httpError(502, `Recap Projexa: ${data.error || `errore ${response.status}`}`);
   const secs = (Number(data.total_duration) || 0) / 1e9;
   const promptTokens = Number(data.prompt_eval_count) || 0;
