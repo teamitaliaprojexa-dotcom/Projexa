@@ -2532,6 +2532,9 @@
             flex: 0 0 auto;
             display: flex;
             gap: 0.5rem;
+            /* larghezza fissa (2 tendine da 12rem + spazio) anche quando è vuota (riunione non
+               gestita): altrimenti le colonne Trascrizione/Recap scivolano sotto Cliente/Progetto */
+            width: 24.5rem;
         }
         .meeting-assign select {
             width: 12rem;
@@ -3178,7 +3181,7 @@
                         <input id="meetingsDatePicker" type="date" class="meetings-date-input" tabindex="-1" aria-hidden="true">
                         <span id="meetingsTitle">Riunioni</span>
                         <button id="meetingsTodayBtn" type="button" class="meetings-today-btn" style="display: none;" title="Torna alle riunioni di oggi">Oggi</button>
-                        <label id="meetingsShowAllWrap" class="meetings-show-all" title="Spuntato: tutte le riunioni di oggi, anche quelle già passate. Tolto: solo da adesso in poi."><input id="meetingsShowAll" type="checkbox" checked> Mostra tutti</label>
+                        <label id="meetingsShowAllWrap" class="meetings-show-all" title="Spuntato: tutte le riunioni di oggi, anche quelle già passate. Tolto: solo da adesso in poi."><input id="meetingsShowAll" type="checkbox"> Mostra tutti</label>
                     </div>
                     <div style="display: flex; gap: 1rem; align-items: center;">
                         <button id="audioDevicesBtn" type="button" class="audio-devices-btn" title="Dispositivi audio: microfono e altoparlanti" aria-label="Dispositivi audio"><i class="fas fa-cog"></i></button>
@@ -6025,8 +6028,8 @@
         // === GIORNO DELLE RIUNIONI (icona calendario accanto al titolo) ===
         // null = oggi (da adesso alle prossime 24 ore); 'YYYY-MM-DD' = giorno scelto.
         let meetingsDate = null;
-        // "Mostra tutti" (vista di oggi): anche le riunioni già passate. Spuntato a ogni avvio.
-        let meetingsShowAll = true;
+        // "Mostra tutti" (vista di oggi): anche le riunioni già passate. Tolto a ogni avvio.
+        let meetingsShowAll = false;
 
         function meetingsDayLabel() {
             if (!meetingsDate) return 'oggi';
@@ -6800,6 +6803,34 @@
             }
         }
 
+        // --- Applica correzioni: sostituisce nel testo salvato le parole sbagliate con quelle
+        // giuste (tabella rec_correzioni, gestita in Impostazioni) e riapre il testo aggiornato.
+        async function applyMeetingCorrections() {
+            const modal = document.getElementById('meetingTextModal');
+            const field = modal.dataset.field === 'recap' ? 'recap' : 'trascrizione';
+            const btn = document.getElementById('meetingTextFix');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/apply-corrections`, {
+                    method: 'POST',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    // senza "field": corregge insieme trascrizione e recap
+                    body: JSON.stringify({ id_calendar: modal.dataset.eventId })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                if (!data.rules) { showNotification('Nessuna correzione impostata per questa riunione', 'info'); return; }
+                if (!data.count) { showNotification('Nessuna parola da correggere', 'info'); return; }
+                const c = data.counts || {};
+                showNotification(`Correzioni applicate: trascrizione ${c.trascrizione || 0}, recap ${c.recap || 0}`, 'success');
+                openMeetingText({ dataset: { eventId: modal.dataset.eventId, field, title: modal.dataset.title } });
+            } catch (e) {
+                showNotification('Correzioni non applicate: ' + e.message, 'info');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
         // --- Svuota (solo recap): cancella completamente il recap della riunione.
         async function clearMeetingRecap() {
             const modal = document.getElementById('meetingTextModal');
@@ -6872,6 +6903,8 @@
             if (emailBtn) emailBtn.style.display = field === 'recap' ? 'inline-block' : 'none';
             const uploadBtn = document.getElementById('meetingTextUpload'); // nascosto in sola lettura
             if (uploadBtn) uploadBtn.style.display = '';
+            const fixBtn = document.getElementById('meetingTextFix');
+            if (fixBtn) fixBtn.style.display = '';
             const audioBtn = document.getElementById('meetingTextAudio'); // file audio: solo trascrizione
             if (audioBtn) audioBtn.style.display = field === 'trascrizione' ? 'inline-block' : 'none';
             modal.dataset.title = btn.dataset.title || '';
@@ -6905,7 +6938,7 @@
             modal.dataset.eventId = '';
             modal.dataset.field = field;
             modal.dataset.title = title;
-            ['meetingTextUpload', 'meetingTextAudio', 'meetingTextClear', 'meetingTextEmail'].forEach((id) => {
+            ['meetingTextUpload', 'meetingTextAudio', 'meetingTextFix', 'meetingTextClear', 'meetingTextEmail'].forEach((id) => {
                 const el = document.getElementById(id);
                 if (el) el.style.display = 'none';
             });
@@ -6963,6 +6996,7 @@
             document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal?.classList.contains('open')) close(); });
             document.getElementById('meetingTextDownload')?.addEventListener('click', downloadMeetingText);
             document.getElementById('meetingTextClear')?.addEventListener('click', clearMeetingRecap);
+            document.getElementById('meetingTextFix')?.addEventListener('click', applyMeetingCorrections);
             document.getElementById('meetingTextEmail')?.addEventListener('click', emailMeetingText);
             const fileInput = document.getElementById('meetingTextFile');
             document.getElementById('meetingTextUpload')?.addEventListener('click', () => fileInput?.click());
@@ -14778,6 +14812,7 @@
                     <button id="meetingTextUpload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Carica un file .txt o .vtt: sostituisce il testo di questa riunione"><i class="fas fa-upload"></i> Carica file</button>
                     <button id="meetingTextAudio" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Carica un file audio (.mp3, .wav, .m4a…): viene trascritto sul server e il testo si aggiunge alla trascrizione"><i class="fas fa-file-audio"></i> Trascrivi audio</button>
                 </span>
+                <button id="meetingTextFix" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Applica al testo le correzioni automatiche (parole sbagliate → giuste) impostate per te e per il cliente della riunione"><i class="fas fa-spell-check"></i> Applica correzioni</button>
                 <button id="meetingTextEmail" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Apri una nuova email con questo testo (Outlook del computer o Gmail, secondo il calendario default)"><i class="fas fa-envelope"></i> Email</button>
                 <button id="meetingTextClear" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid #FCA5A5; border-radius: 8px; background: #FEF2F2; color: #B91C1C; cursor: pointer;" title="Cancella completamente il recap di questa riunione"><i class="fas fa-eraser"></i> Svuota</button>
                 <button id="meetingTextDownload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Scarica il testo in un file .txt"><i class="fas fa-download"></i> Scarica .txt</button>

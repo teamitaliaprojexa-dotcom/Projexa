@@ -1589,6 +1589,23 @@ app.get('/api/:source(settings|clients|projects)/grid-widget/fk-options', requir
       return res.status(404).json({ error: 'Tabella referenziata non gestita' });
     }
 
+    // FK verso clients (es. rec_correzioni.cliente_id): clients è EAV (una riga per ogni
+    // campo del cliente), quindi le opzioni si leggono dalla vista ele_clienti, che contiene
+    // solo le righe identità (client_id + description = nome del cliente) di tenant e utente.
+    // I nomi sono cifrati sul DB: l'ordine alfabetico si fa DOPO la decifratura del pool.
+    if (foreignTable === 'clients' && foreignColumn === 'id') {
+      const result = await db.query(
+        `SELECT client_id AS id, description AS display
+           FROM ele_clienti
+          WHERE tenant_id = $1 AND user_id = $2 AND description IS NOT NULL
+          LIMIT 500`,
+        [req.user.tenant_id, effectiveUserId]
+      );
+      const rows = stripSensitive(result.rows)
+        .sort((a, b) => String(a.display || '').localeCompare(String(b.display || ''), 'it', { sensitivity: 'base' }));
+      return res.json(rows);
+    }
+
     // Rilegge le colonne della tabella referenziata per riconoscere anche modifiche
     // appena effettuate allo schema (stessa cautela usata per la griglia principale).
     tableColumnsCache.delete('main:' + foreignTable);

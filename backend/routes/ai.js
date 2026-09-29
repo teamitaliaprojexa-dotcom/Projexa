@@ -598,9 +598,23 @@ async function transcribeAudioCpp(base, audioBuffer, mime) {
         err.upstreamStatus = 500;
         throw err;
       }
-      const segments = (Array.isArray(data.segments) ? data.segments : [])
-        .map((x) => ({ start: Number(x.start) || 0, end: Number(x.end) || Number(x.start) || 0, text: String(x.text || '').trim() }))
-        .filter((x) => x.text);
+      // whisper.cpp a volte spezza una parola tra due segmenti ("cedol" + "ini"): il pezzo
+      // che continua la parola NON inizia con uno spazio. cont = true segnala il caso, così
+      // formatLines lo incolla alla parola precedente invece di andare a capo.
+      // Se nessun segmento inizia con uno spazio, il server li ha già "ripuliti": in quel caso
+      // non si può distinguere la continuazione di una parola e non si incolla nulla.
+      const list = Array.isArray(data.segments) ? data.segments : [];
+      const hasSpaces = list.some((x) => /^\s/.test(String(x.text || '')));
+      let prevRaw = '';
+      const segments = [];
+      for (const x of list) {
+        const raw = String(x.text || '');
+        const text = raw.trim();
+        if (!text) continue;
+        const cont = hasSpaces && segments.length > 0 && !/^\s/.test(raw) && !/\s$/.test(prevRaw) && /^[\p{L}\p{N}]/u.test(text);
+        segments.push({ start: Number(x.start) || 0, end: Number(x.end) || Number(x.start) || 0, text, cont });
+        prevRaw = raw;
+      }
       return { segments, provider: 'Whisper.cpp large-v3-turbo' };
     } catch (error) {
       const temporary = [429, 500, 502, 503, 504].includes(error.upstreamStatus) || (error.status === 502 && !error.upstreamStatus);

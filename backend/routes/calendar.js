@@ -20,7 +20,7 @@ import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
 import {
   encRec, enqueueChunk, enqueueBrowserTranscript, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices,
-  recapProviderName, recapInProgress, getRecapInput
+  recapProviderName, recapInProgress, getRecapInput, loadCorrections, applyCorrections
 } from '../jobs/meetingTranscription.js';
 import { localRecapMode } from './ai.js';
 import JWT_SECRET from '../config/jwt.js';
@@ -640,14 +640,54 @@ router.put('/meetings/managed/text', requireAuth, async (req, res) => {
     if (text.length > MAX_TEXT_UPLOAD) return res.status(413).json({ error: 'Testo troppo lungo (max 2 MB)' });
     // Nome di colonna da una whitelist fissa: nessun input utente nella query.
     const col = field === 'recap' ? 'recap' : 'trascrizione';
+    // Correzioni automatiche (rec_correzioni): anche sul recap generato nel browser e sui
+    // file caricati, come sui blocchi trascritti dal server.
+    const fixed = applyCorrections(text, await loadCorrections(req.user, idCalendar)).text;
     const result = await db.query(
       `UPDATE rec_meeting SET ${col} = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
-      [encRec(text), req.user.tenant_id, req.user.user_id, idCalendar]
+      [encRec(fixed), req.user.tenant_id, req.user.user_id, idCalendar]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
     res.json({ success: true, length: text.length });
   } catch (error) {
     console.error('❌ REC_MEETING_UPLOAD:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// "Applica correzioni" (finestra della lente): applica le correzioni automatiche
+// (rec_correzioni) al testo già salvato. Senza "field" corregge INSIEME trascrizione e
+// recap (un clic, senza rigenerare il recap). Restituisce le sostituzioni fatte per campo;
+// ogni testo si riscrive (cifrato) solo se è cambiato.
+router.post('/meetings/managed/apply-corrections', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
+    const field = String(b.field || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    if (field && field !== 'trascrizione' && field !== 'recap') return res.status(400).json({ error: 'Campo non valido' });
+    const cur = await db.query(
+      `SELECT trascrizione, recap FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    const rules = await loadCorrections(req.user, idCalendar);
+    const counts = { trascrizione: 0, recap: 0 };
+    if (!rules.length) return res.json({ success: true, count: 0, counts, rules: 0 });
+    // Nomi di colonna da una whitelist fissa: nessun input utente nella query.
+    for (const col of field ? [field] : ['trascrizione', 'recap']) {
+      const { text, count } = applyCorrections(cur.rows[0][col] || '', rules);
+      counts[col] = count;
+      if (count > 0) {
+        await db.query(
+          `UPDATE rec_meeting SET ${col === 'recap' ? 'recap' : 'trascrizione'} = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
+          [encRec(text), req.user.tenant_id, req.user.user_id, idCalendar]
+        );
+      }
+    }
+    res.json({ success: true, count: counts.trascrizione + counts.recap, counts, rules: rules.length });
+  } catch (error) {
+    console.error('❌ REC_MEETING_CORRECTIONS:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

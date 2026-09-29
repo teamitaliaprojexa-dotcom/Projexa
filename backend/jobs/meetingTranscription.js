@@ -107,12 +107,47 @@ function avgEnergy(list, start, end) {
   return n ? sum / n : 0;
 }
 
+// Unione dei segmenti di Whisper in frasi leggibili: Whisper (soprattutto whisper.cpp)
+// restituisce pezzi di 2-3 parole e a volte spezza una parola a metà ("cedol" + "ini").
+// Si uniscono i pezzi consecutivi della STESSA persona finché la frase non è finita
+// (. ? ! …) e abbastanza lunga; si va a capo anche dopo una pausa lunga o oltre una
+// lunghezza massima. Un pezzo che continua una parola (cont) si incolla sempre, senza spazio.
+const LINE_MIN_CHARS = 60;    // sotto questa lunghezza si continua anche dopo il punto
+const LINE_MAX_CHARS = 320;   // oltre si va comunque a capo
+const LINE_MAX_GAP_SEC = 3;   // pausa oltre la quale inizia una nuova riga
+
+function mergeLines(lines) {
+  const out = [];
+  for (const l of lines) {
+    const text = String(l.text || '').replace(/\s*\n\s*/g, ' ').trim();
+    if (!text) continue;
+    const start = Number(l.start) || 0;
+    const end = Math.max(start, Number(l.end) || 0);
+    const last = out[out.length - 1];
+    if (last) {
+      const sentenceDone = /[.?!…]["'»”)]?$/.test(last.text) && last.text.length >= LINE_MIN_CHARS;
+      const join = l.cont || (last.who === l.who
+        && !sentenceDone
+        && start - last.end <= LINE_MAX_GAP_SEC
+        && last.text.length + text.length < LINE_MAX_CHARS);
+      if (join) {
+        const glue = l.cont || /^[.,;:!?…)»”]/.test(text) ? '' : ' ';
+        last.text += glue + text;
+        last.end = Math.max(last.end, end);
+        continue;
+      }
+    }
+    out.push({ start, end, who: l.who || '', text });
+  }
+  return out;
+}
+
 // Righe "[hh:mm:ss] Nome: testo" di un blocco, con l'intestazione di sessione se presente.
 function formatLines(lines, offset, startLabel) {
   lines.sort((a, b) => a.start - b.start);
   let add = '';
   if (startLabel) add += `\n--- ${String(startLabel).slice(0, 80)} ---\n`;
-  for (const l of lines) add += `[${hhmmss((Number(offset) || 0) + l.start)}] ${l.who ? `${l.who}: ` : ''}${l.text.replace(/\s*\n\s*/g, ' ')}\n`;
+  for (const l of mergeLines(lines)) add += `[${hhmmss((Number(offset) || 0) + l.start)}] ${l.who ? `${l.who}: ` : ''}${l.text}\n`;
   return add;
 }
 
@@ -136,27 +171,87 @@ async function transcribeJob(job, baseUrl) {
       } else if (energy.mic) {
         who = me;
       }
-      lines.push({ start: seg.start, who, text: seg.text });
+      lines.push({ start: seg.start, end: seg.end, who, text: seg.text, cont: seg.cont });
     }
   } else {
     if (job.audio_mic) {
       const me = await speakerName(user);
       const r = await transcribeAudio(user.user_id, Buffer.from(job.audio_mic, 'base64'), mime, baseUrl);
-      r.segments.forEach((x) => lines.push({ start: x.start, who: me, text: x.text }));
+      r.segments.forEach((x) => lines.push({ start: x.start, end: x.end, who: me, text: x.text, cont: x.cont }));
     }
     if (job.audio_system) {
       const r = await transcribeAudio(user.user_id, Buffer.from(job.audio_system, 'base64'), mime, baseUrl);
       const who = job.audio_mic ? OTHERS_LABEL : '';
-      r.segments.forEach((x) => lines.push({ start: x.start, who, text: x.text }));
+      r.segments.forEach((x) => lines.push({ start: x.start, end: x.end, who, text: x.text, cont: x.cont }));
     }
   }
   return formatLines(lines, job.offset_sec, job.start_label);
 }
 
+// ----------------------------------------------------------------------------
+// CORREZIONI AUTOMATICHE (tabella rec_correzioni, Supporto/CreaDB/rec_correzioni.sql)
+// ----------------------------------------------------------------------------
+//
+// Righe "errato" (varianti separate da |) -> "corretto" dell'utente: quelle senza cliente
+// valgono per tutte le riunioni, quelle con cliente_id solo per le riunioni di quel cliente.
+// Si sostituiscono parole intere, senza distinguere maiuscole/minuscole.
+
+// Una riga -> { re, corretto } (null se incompleta).
+export function correctionRule(errato, corretto) {
+  const target = String(corretto || '').trim();
+  // varianti più lunghe prima: "le ruame tabrico" prima di "le ruame"
+  const variants = String(errato || '').split('|').map((v) => v.trim()).filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  if (!target || !variants.length) return null;
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // parola intera: niente lettere/cifre subito prima o subito dopo (vale anche per le
+  // lettere accentate, a differenza di \b)
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])(?:${variants.map(esc).join('|')})(?![\\p{L}\\p{N}])`, 'giu');
+  return { re, corretto: target };
+}
+
+// Regole valide per la riunione: [{ re, corretto }]. Se la tabella non c'è (es. staging
+// non aggiornato) o la query fallisce, nessuna correzione: la trascrizione non si blocca.
+export async function loadCorrections(user, idCalendar) {
+  try {
+    const r = await db.query(
+      `SELECT c.errato, c.corretto
+         FROM rec_correzioni c
+        WHERE c.tenant_id = $1 AND c.user_id = $2
+          AND (c.scadenza IS NULL OR c.scadenza >= CURRENT_DATE)
+          AND (c.cliente_id IS NULL OR c.cliente_id = (
+                SELECT m.client_id FROM rec_meeting m
+                 WHERE m.tenant_id = $1 AND m.user_id = $2 AND m.id_calendar = $3 LIMIT 1))`,
+      [user.tenant_id, user.user_id, idCalendar]
+    );
+    return r.rows.map((row) => correctionRule(row.errato, row.corretto)).filter(Boolean);
+  } catch (e) {
+    if (!/rec_correzioni/.test(e.message || '')) console.warn('⚠️ REC_CORREZIONI:', e.message);
+    return [];
+  }
+}
+
+// Applica le regole al testo. Restituisce { text, count } (count = sostituzioni fatte).
+export function applyCorrections(text, rules) {
+  let out = String(text || '');
+  let count = 0;
+  for (const { re, corretto } of rules) {
+    out = out.replace(re, (m) => {
+      if (m === corretto) return m;
+      count++;
+      return corretto;
+    });
+  }
+  return { text: out, count };
+}
+
 // Aggiunge (cifrato) il testo di un blocco alla trascrizione della riunione.
 // q: client della transazione di flushInOrder (scrittura in ordine, sotto lock).
+// Prima di salvarlo si applicano le correzioni automatiche (rec_correzioni).
 async function appendTranscript(q, user, idCalendar, add) {
   if (!add) return;
+  // Lette dal pool, NON con q: un errore dentro la transazione la renderebbe inutilizzabile.
+  add = applyCorrections(add, await loadCorrections(user, idCalendar)).text;
   // Il testo è cifrato: si legge in chiaro (decifratura automatica), si aggiunge e si
   // riscrive tutto cifrato.
   const cur = await q.query(
@@ -209,8 +304,12 @@ async function recapSource(user, idCalendar) {
   if (!row) throw httpError(404, 'Riunione non gestita con Projexa');
   if (!row.trascrizione || !row.trascrizione.trim()) throw httpError(400, 'Nessuna trascrizione da cui generare il recap');
   const data = row.data_calendar ? String(row.data_calendar).split('-').reverse().join('/') : '';
+  // Correzioni automatiche anche sul testo passato all'AI: una correzione aggiunta dopo la
+  // trascrizione vale subito per il recap, senza dover prima correggere la trascrizione.
+  const rules = await loadCorrections(user, idCalendar);
   return {
-    transcript: row.trascrizione.trim(),
+    rules,
+    transcript: applyCorrections(row.trascrizione.trim(), rules).text,
     vars: {
       OGGETTO: row.oggetto || '',
       DATA: [data, row.orario_calendar ? String(row.orario_calendar).slice(0, 5) : ''].filter(Boolean).join(' '),
@@ -259,7 +358,7 @@ export async function generateRecap(user, idCalendar) {
     e.code = 'BROWSER_RECAP';
     throw e;
   }
-  const { transcript, vars } = await recapSource(user, idCalendar);
+  const { transcript, vars, rules } = await recapSource(user, idCalendar);
 
   let result;
   const key = recapKey(user, idCalendar);
@@ -271,7 +370,8 @@ export async function generateRecap(user, idCalendar) {
   } finally {
     recapRunning.delete(key);
   }
-  const recap = String(result.text || '').trim();
+  // e sul recap prodotto (l'AI può riscrivere a modo suo un nome già corretto)
+  const recap = applyCorrections(String(result.text || '').trim(), rules).text;
   if (!recap) throw httpError(502, `${result.label} non ha restituito alcun testo`);
 
   await db.query(
@@ -330,7 +430,7 @@ export async function enqueueBrowserTranscript(user, idCalendar, { segments, ene
     let who = '';
     if (en.mic && en.system) who = avgEnergy(en.mic, start, end) >= avgEnergy(en.system, start, end) ? me : OTHERS_LABEL;
     else if (en.mic) who = me;
-    lines.push({ start, who, text });
+    lines.push({ start, end, who, text });
   }
   const add = formatLines(lines, Number(offset) || 0, startLabel || null);
   if (!add.trim()) return null; // blocco senza parlato: niente da accodare
