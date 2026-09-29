@@ -8,9 +8,9 @@
 // per il motore WebAssembly), NON da Projexa: pesano diversi GB. Il browser li scarica una
 // volta e li tiene in cache. Serve WebGPU (scheda video): senza, errore NO_WEBGPU.
 //
-// Il modello ha un contesto di ~4.000 token (circa un quarto d'ora di riunione): le
-// trascrizioni più lunghe si riassumono prima a pezzi (prompt chunk_prompt del server) e il
-// recap si scrive dagli appunti.
+// Contesto: 8.192 token per Browser-Medio (4.096 di ripiego se la memoria video non basta),
+// 4.096 per Browser-Alto (vedi MODES). Le trascrizioni più lunghe si riassumono prima a pezzi
+// (prompt chunk_prompt del server) e il recap si scrive dagli appunti.
 //
 // Per non appesantire il PC: il modello lavora in un processo separato (js/recap-worker.js),
 // così la pagina resta utilizzabile, e a recap finito viene scaricato e il processo chiuso,
@@ -23,21 +23,28 @@ const WORKER_URL = new URL('./recap-worker.js', import.meta.url);
 // Voce del campo settings (in minuscolo) -> modello WebLLM. f32: variante per le GPU senza
 // supporto "shader-f16" (più pesante). mistral-nemo non è distribuito per WebLLM: per "Alto"
 // si usa gemma-2-9b, il modello più grande disponibile e buono in italiano.
+// ctx / outFinal: contesto (token) e lunghezza massima del recap.
+//   Medio: 8.192 / 1.500 -> una call di 30' si riassume in 2-3 pezzi e il recap completo
+//          (sezioni + "Azioni in carico", ~900 parole) non viene tagliato. Costo: ~0,5 GB di
+//          memoria video in più. Se il PC non ce la fa si ripiega su 4.096 (preloadModel).
+//   Alto:  4.096 / 900 -> Gemma 9B è già pesante sulle schede integrate.
 export const MODES = {
   'recap projexa (browser-medio)': {
-    label: 'Qwen2.5 7B', model: 'Qwen2.5-7B-Instruct-q4f16_1-MLC', f32: 'Qwen2.5-7B-Instruct-q4f32_1-MLC', download: '~4,5 GB'
+    label: 'Qwen2.5 7B', model: 'Qwen2.5-7B-Instruct-q4f16_1-MLC', f32: 'Qwen2.5-7B-Instruct-q4f32_1-MLC', download: '~4,5 GB',
+    ctx: 8192, outFinal: 1500
   },
   'recap projexa (browser-alto)': {
-    label: 'Gemma 2 9B', model: 'gemma-2-9b-it-q4f16_1-MLC', f32: 'gemma-2-9b-it-q4f32_1-MLC', download: '~5,5 GB'
+    label: 'Gemma 2 9B', model: 'gemma-2-9b-it-q4f16_1-MLC', f32: 'gemma-2-9b-it-q4f32_1-MLC', download: '~5,5 GB',
+    ctx: 4096, outFinal: 900
   }
 };
 
-const CTX_TOKENS = 4096;       // contesto dei modelli WebLLM
+const CTX_BASE = 4096;         // contesto minimo (e di ripiego) dei modelli WebLLM
+const OUT_BASE = 900;          // lunghezza massima del recap con il contesto minimo
 // Stima iniziale caratteri per token. Le trascrizioni ne hanno meno del testo normale:
 // gli orari "[00:12:34]" su ogni riga pesano molto (Gemma conta ogni cifra come un token).
 // Se il modello rifiuta un testo troppo lungo, la stima si ricalibra sul conteggio vero.
 const CHARS_PER_TOKEN = 2.5;
-const OUT_FINAL = 900;         // token massimi del recap
 const OUT_CHUNK = 450;         // token massimi degli appunti di un pezzo
 const MARGIN = 150;
 
@@ -58,6 +65,7 @@ function resolveMode(mode) {
 let _lib = null;
 let _engine = null;
 let _engineModel = null;
+let _engineCtx = CTX_BASE;     // contesto con cui il modello è stato effettivamente caricato
 let _worker = null;
 let _loading = null;
 
@@ -103,17 +111,30 @@ export async function preloadModel(mode, onProgress) {
     throw Object.assign(new Error('Il recap nel browser richiede una scheda video con WebGPU, non disponibile su questo PC/browser. Scegli un\'altra AI in Impostazioni › AI.'), { code: 'NO_WEBGPU' });
   }
   const model = gpu.f16 ? cfg.model : cfg.f32;
-  if (_engine && _engineModel === model) return { model };
+  if (_engine && _engineModel === model) return { model, ctx: _engineCtx };
   if (_loading) return _loading;
   _loading = (async () => {
     _lib = _lib || await import(/* @vite-ignore */ LIB_URL);
-    await unloadModel();
-    _worker = new Worker(WORKER_URL, { type: 'module' });
-    _engine = await _lib.CreateWebWorkerMLCEngine(_worker, model, {
-      initProgressCallback: (r) => { try { onProgress && onProgress({ progress: r.progress, text: r.text }); } catch {} }
-    }, { context_window_size: CTX_TOKENS });
-    _engineModel = model;
-    return { model };
+    const load = async (ctx) => {
+      await unloadModel();
+      _worker = new Worker(WORKER_URL, { type: 'module' });
+      _engine = await _lib.CreateWebWorkerMLCEngine(_worker, model, {
+        initProgressCallback: (r) => { try { onProgress && onProgress({ progress: r.progress, text: r.text }); } catch {} }
+      }, { context_window_size: ctx });
+      _engineModel = model;
+      _engineCtx = ctx;
+    };
+    const wanted = cfg.ctx || CTX_BASE;
+    try {
+      await load(wanted);
+    } catch (e) {
+      // Contesto ampliato non allocabile (memoria video insufficiente): si riprova con quello
+      // minimo, così il recap si fa comunque (con più pezzi e un recap più corto).
+      if (wanted <= CTX_BASE) throw e;
+      console.warn(`[RECAP BROWSER] contesto ${wanted} non disponibile su questo PC (${toError(e).message}): uso ${CTX_BASE}`);
+      await load(CTX_BASE);
+    }
+    return { model, ctx: _engineCtx };
   })();
   try { return await _loading; } catch (e) { await unloadModel(); throw e; } finally { _loading = null; }
 }
@@ -124,6 +145,7 @@ export async function unloadModel() {
   const worker = _worker;
   _engine = null;
   _engineModel = null;
+  _engineCtx = CTX_BASE;
   _worker = null;
   if (engine) { try { await engine.unload(); } catch {} }
   if (worker) worker.terminate();
@@ -202,7 +224,10 @@ function toError(e) {
 async function runRecap(input, { mode, onProgress, onStatus } = {}) {
   const status = (t) => { try { onStatus && onStatus(t); } catch {} };
   status('Caricamento del modello…');
-  await preloadModel(mode, onProgress);
+  const { ctx } = await preloadModel(mode, onProgress);
+  // Limiti del modello così come è stato caricato (contesto ampliato o di ripiego).
+  const cfg = resolveMode(mode);
+  const limits = ctx > CTX_BASE ? { ctx, outFinal: cfg.outFinal || OUT_BASE } : { ctx: CTX_BASE, outFinal: OUT_BASE };
 
   // Se il modello rifiuta un testo troppo lungo (il controllo avviene prima che inizi a
   // scrivere, quindi si perde poco tempo), la stima caratteri/token si ricalibra sul
@@ -210,7 +235,7 @@ async function runRecap(input, { mode, onProgress, onStatus } = {}) {
   let cpt = CHARS_PER_TOKEN;
   for (let attempt = 1; ; attempt++) {
     try {
-      return await planAndRun(input, cpt, status);
+      return await planAndRun(input, cpt, status, limits);
     } catch (e) {
       if (e.code !== 'CONTEXT_EXCEEDED' || attempt >= 3) throw e;
       cpt = Math.min(cpt * 0.8, (e.promptChars / e.promptTokens) * 0.9);
@@ -220,18 +245,21 @@ async function runRecap(input, { mode, onProgress, onStatus } = {}) {
   }
 }
 
-async function planAndRun(input, cpt, status) {
+async function planAndRun(input, cpt, status, { ctx, outFinal }) {
   const template = String(input.template || '');
   const chunkPrompt = String(input.chunk_prompt || '');
   const templateTokens = est(template.replace('{{TRASCRIZIONE}}', ''), cpt);
-  if (templateTokens + OUT_FINAL + MARGIN + 300 > CTX_TOKENS) {
+  if (templateTokens + outFinal + MARGIN + 300 > ctx) {
     throw new Error('Il prompt del recap è troppo lungo per il modello nel browser');
   }
-  const fits = (text) => templateTokens + est(text, cpt) + OUT_FINAL + MARGIN <= CTX_TOKENS;
+  const fits = (text) => templateTokens + est(text, cpt) + outFinal + MARGIN <= ctx;
 
-  let text = String(input.transcript || '').trim();
+  // Gli orari "[hh:mm:ss]" a inizio riga non servono al recap e costano molti token (ogni
+  // cifra è un token): tolti, restano nome di chi parla e testo (~25% di testo in meno, quindi
+  // meno pezzi da riassumere e meno dettagli persi).
+  let text = String(input.transcript || '').replace(/^\[\d{1,3}:\d{2}(?::\d{2})?\]\s*/gm, '').trim();
   // Troppo lunga: appunti a pezzi, ripetuto finché gli appunti non stanno nel contesto.
-  const chunkChars = Math.floor((CTX_TOKENS - est(chunkPrompt, cpt) - OUT_CHUNK - MARGIN) * cpt);
+  const chunkChars = Math.floor((ctx - est(chunkPrompt, cpt) - OUT_CHUNK - MARGIN) * cpt);
   for (let level = 0; !fits(text); level++) {
     if (level >= 3) throw new Error('Trascrizione troppo lunga per il modello nel browser');
     const pieces = splitText(text, chunkChars);
@@ -247,7 +275,7 @@ async function planAndRun(input, cpt, status) {
   }
 
   status('Recap: lettura degli appunti…');
-  const recap = await ask(template.replace('{{TRASCRIZIONE}}', text), OUT_FINAL,
+  const recap = await ask(template.replace('{{TRASCRIZIONE}}', text), outFinal,
     (n) => { if (n % 10 === 0) status(`Recap: scrittura… (${words(n)})`); });
   if (!recap) throw new Error('Il modello non ha restituito alcun testo');
   return recap;
