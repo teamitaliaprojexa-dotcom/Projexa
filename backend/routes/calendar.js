@@ -624,6 +624,26 @@ router.patch('/meetings/managed', requireAuth, async (req, res) => {
   }
 });
 
+// Flag "Inviata" della griglia riunioni (rec_meeting.inviata): segna la riunione come gestita
+// (recap inviato al cliente) o la riporta da gestire.
+router.patch('/meetings/managed/inviata', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    if (typeof b.inviata !== 'boolean') return res.status(400).json({ error: 'inviata deve essere true o false' });
+    const result = await db.query(
+      `UPDATE rec_meeting SET inviata = $1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
+      [b.inviata, req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    res.json({ success: true, inviata: b.inviata });
+  } catch (error) {
+    console.error('❌ REC_MEETING_INVIATA:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Caricamento di trascrizione o recap da file (.txt / .vtt, convertito in testo dal
 // browser): SOSTITUISCE il contenuto della colonna ed è scritto cifrato.
 const MAX_TEXT_UPLOAD = 2 * 1024 * 1024;

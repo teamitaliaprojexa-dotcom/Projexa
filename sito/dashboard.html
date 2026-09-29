@@ -2549,6 +2549,15 @@
         .meeting-assign select:disabled { background: #F9FAFB; color: var(--text-muted); cursor: not-allowed; }
         .meeting-assign-head > span { width: 12rem; }
 
+        /* Inviata (rec_meeting.inviata), dopo Progetto: riunione gestita / da gestire */
+        .meeting-inviata {
+            flex: 0 0 auto;
+            width: 3.6rem;
+            text-align: center;
+        }
+        .meeting-inviata input { width: 1rem; height: 1rem; cursor: pointer; accent-color: #10B981; margin: 0; vertical-align: middle; }
+        .meeting-inviata input:disabled { cursor: wait; }
+
         /* Intestazione dell'elenco: stesse colonne (e stesse larghezze) delle righe */
         .meeting-header {
             display: flex;
@@ -3815,8 +3824,30 @@
                     <div class="kpi-item-client">${client}</div>
                     ${createdAt}
                     <div class="kpi-item-description">${project}</div>
+                    ${renderKpiExtraFields(item)}
                 </div>
             `;
+        }
+
+        // Le altre colonne indicate in kpi_tab.dettaglio (es. data_calendar, oggetto): compaiono
+        // sotto cliente/progetto come "Etichetta: valore", nell'ordine della configurazione.
+        // Etichetta = alias SQL ("oggetto AS Riunione") o nome colonna con _ -> spazio.
+        // Esclusi: cliente/progetto (già sopra), created_at (ha la sua riga), colonne tecniche.
+        const KPI_ITEM_SKIP = new Set(['client_id', 'project_id', 'client', 'project', 'created_at', 'id', 'tenant_id', 'user_id', 'id_roles', 'id_roles_write', 'crypto']);
+        function renderKpiExtraFields(item) {
+            const parts = [];
+            for (const [key, raw] of Object.entries(item || {})) {
+                if (KPI_ITEM_SKIP.has(key.toLowerCase()) || key.startsWith('__') || raw == null || raw === '') continue;
+                let value = raw;
+                if (typeof raw === 'boolean') value = raw ? 'Sì' : 'No';
+                else if (/^\d{4}-\d{2}-\d{2}$/.test(String(raw))) value = String(raw).split('-').reverse().join('/');
+                else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(raw)) && !Number.isNaN(Date.parse(raw))) {
+                    value = new Date(raw).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' });
+                } else if (typeof raw === 'object') value = JSON.stringify(raw);
+                const label = key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+                parts.push(`<span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</span>`);
+            }
+            return parts.length ? `<div class="kpi-item-extra">${parts.join('')}</div>` : '';
         }
 
         // La data viene mostrata solo se created_at e' stato incluso esplicitamente
@@ -5970,6 +6001,7 @@
                     <span class="meeting-status meeting-status-trascrizione">Trascrizione</span>
                     <span class="meeting-status meeting-status-recap">Recap</span>
                     <span class="meeting-assign meeting-assign-head"><span>Cliente</span><span>Progetto</span></span>
+                    <span class="meeting-inviata">Inviata</span>
                 </div>`;
             // Vista standard (prossime 24 ore): prima le riunioni di oggi (calendario, poi
             // registrazioni libere), poi quelle di domani sotto l'intestazione "Domani".
@@ -6480,6 +6512,12 @@
                     const hadRecap = recapSeen.get(ev.id);
                     if (m && m.has_recap && hadRecap === false) showRecapReady(ev.id, title);
                     recapSeen.set(ev.id, !!(m && m.has_recap));
+                    // Inviata: casella per le gestite (non durante un salvataggio in corso)
+                    const invCell = row.querySelector('.meeting-inviata');
+                    if (invCell && !invCell.dataset.busy) {
+                        const html = m ? meetingInviataBox(ev.id, m.inviata) : '';
+                        if (invCell.dataset.state !== html) { invCell.innerHTML = html; invCell.dataset.state = html; }
+                    }
                     // Riunione diventata gestita (es. registrata da un'altra scheda): tendine Cliente/Progetto
                     if (m && row.dataset.managed !== '1') {
                         row.dataset.managed = '1';
@@ -6503,6 +6541,41 @@
         }, MEETING_STATUS_EVERY_MS);
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') refreshMeetingStatuses();
+        });
+
+        // === INVIATA (rec_meeting.inviata): riunione gestita / da gestire ===
+        // Casella solo per le riunioni gestite con Projexa (con la riga rec_meeting).
+        function meetingInviataBox(eventId, inviata) {
+            const label = inviata ? 'Gestita (recap inviato): togli la spunta per riportarla da gestire' : 'Da gestire: spunta quando il recap è stato inviato';
+            return `<input type="checkbox" class="meeting-inviata-box" data-event-id="${escapeHtml(eventId || '')}"${inviata ? ' checked' : ''} title="${label}" aria-label="${label}">`;
+        }
+
+        async function saveMeetingInviata(box) {
+            const cell = box.closest('.meeting-inviata');
+            const inviata = box.checked;
+            box.disabled = true;
+            if (cell) cell.dataset.busy = '1'; // l'aggiornamento periodico non la sovrascrive
+            try {
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/inviata`, {
+                    method: 'PATCH',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_calendar: box.dataset.eventId, inviata })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                if (cell) { cell.innerHTML = meetingInviataBox(box.dataset.eventId, inviata); cell.dataset.state = cell.innerHTML; }
+            } catch (e) {
+                box.checked = !inviata; // torna com'era
+                box.disabled = false;
+                showNotification('Stato "Inviata" non salvato: ' + e.message, 'info');
+            } finally {
+                if (cell) delete cell.dataset.busy;
+            }
+        }
+
+        document.addEventListener('change', (e) => {
+            const box = e.target.closest && e.target.closest('#meetingsContainer .meeting-inviata-box');
+            if (box) saveMeetingInviata(box);
         });
 
         // === LENTE: testo di trascrizione / recap della riunione (rec_meeting) ===
@@ -8337,6 +8410,7 @@
                     <div class="meeting-status meeting-status-trascrizione">${event.has_trascrizione ? meetingTextButton(event, 'trascrizione', title) : (isRecordingMeeting(event.id) ? '' : meetingUploadButton('trascrizione'))}</div>
                     <div class="meeting-status meeting-status-recap">${event.has_recap ? meetingTextButton(event, 'recap', title) : meetingUploadButton('recap')}</div>
                     <div class="meeting-assign" data-event-id="${escapeHtml(event.id || '')}" data-client-id="${escapeHtml(event.client_id || '')}" data-project-id="${escapeHtml(event.project_id || '')}"></div>
+                    <div class="meeting-inviata">${event.managed ? meetingInviataBox(event.id, event.inviata) : ''}</div>
                 </div>
             `;
         }
