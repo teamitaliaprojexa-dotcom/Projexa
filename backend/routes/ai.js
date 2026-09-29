@@ -433,7 +433,10 @@ Usa solo informazioni presenti nel testo, senza introduzioni né commenti.
 Trascrizione:
 {{TESTO}}`;
 
-const OLLAMA_CHARS_PER_TOKEN = 3;      // stima prudente per l'italiano
+// Stima prudente: con 3 caratteri/token il contesto risultava troppo piccolo e Ollama, invece
+// di dare errore, TAGLIAVA L'INIZIO del prompt (istruzioni + prima parte della riunione):
+// il recap parlava solo della fine della call e ignorava il formato richiesto.
+const OLLAMA_CHARS_PER_TOKEN = 2.5;
 const OLLAMA_MAX_CTX = 32768;          // oltre si riassume a pezzi
 const OLLAMA_OUTPUT_TOKENS = 1500;
 const OLLAMA_CHUNK_CHARS = 24000;      // ~8.000 token per pezzo
@@ -457,8 +460,14 @@ async function ollamaGenerate(prompt, numCtx, numPredict) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw httpError(502, `Recap Projexa: ${data.error || `errore ${response.status}`}`);
   const secs = (Number(data.total_duration) || 0) / 1e9;
-  console.log(`[RECAP] Ollama ${model}: ${data.prompt_eval_count || '?'} token letti, ${data.eval_count || '?'} scritti in ${Math.round(secs)}s`);
-  return { text: String(data.response || '').trim(), model };
+  const promptTokens = Number(data.prompt_eval_count) || 0;
+  console.log(`[RECAP] Ollama ${model}: ${promptTokens || '?'} token letti (contesto ${numCtx}), ${data.eval_count || '?'} scritti in ${Math.round(secs)}s`);
+  // Ollama non dà errore se il prompt supera num_ctx: lo accorcia all'intero contesto
+  // scartandone l'INIZIO. Prompt che lascia meno di 512 token liberi = troncato (o comunque
+  // senza spazio per la risposta).
+  const truncated = promptTokens > 0 && promptTokens >= numCtx - Math.min(numPredict, 512);
+  if (truncated) console.warn(`⚠️ [RECAP] Ollama: prompt probabilmente troncato (${promptTokens} token su contesto ${numCtx})`);
+  return { text: String(data.response || '').trim(), model, truncated };
 }
 
 const ctxFor = (chars, outTokens) =>
@@ -468,19 +477,33 @@ const ctxFor = (chars, outTokens) =>
 // con il testo al posto di {{TRASCRIZIONE}}). Se la trascrizione non sta nel contesto, prima
 // si riassume a pezzi e il recap si scrive dagli appunti.
 export async function askOllamaRecap(buildPrompt, transcript) {
-  let text = transcript;
+  // Gli orari "[hh:mm:ss]" a inizio riga non servono al recap e costano molti token
+  // (le cifre si spezzano): si tolgono, lasciando nome di chi parla e testo.
+  const plain = String(transcript || '').replace(/^\[\d{1,3}:\d{2}(?::\d{2})?\]\s*/gm, '');
   const overhead = (await buildPrompt('')).length;
-  if ((overhead + text.length) / OLLAMA_CHARS_PER_TOKEN + OLLAMA_OUTPUT_TOKENS > OLLAMA_MAX_CTX) {
-    const pieces = splitText(text, OLLAMA_CHUNK_CHARS);
+
+  // Riassunto a pezzi: appunti per ogni pezzo, poi il recap si scrive dagli appunti.
+  const fromNotes = async (pieceChars) => {
+    const pieces = splitText(plain, pieceChars);
     const notes = [];
     for (let i = 0; i < pieces.length; i++) {
       const p = RECAP_CHUNK_PROMPT.replace('{{N}}', i + 1).replace('{{TOT}}', pieces.length).replace('{{TESTO}}', pieces[i]);
       notes.push((await ollamaGenerate(p, ctxFor(p.length, 1000), 1000)).text);
     }
-    text = `(Appunti ricavati dalla trascrizione, riassunta a pezzi)\n\n${notes.join('\n\n')}`;
+    return `(Appunti ricavati dalla trascrizione, riassunta a pezzi)\n\n${notes.join('\n\n')}`;
+  };
+
+  const fits = (overhead + plain.length) / OLLAMA_CHARS_PER_TOKEN + OLLAMA_OUTPUT_TOKENS <= OLLAMA_MAX_CTX;
+  let prompt = await buildPrompt(fits ? plain : await fromNotes(OLLAMA_CHUNK_CHARS));
+  let result = await ollamaGenerate(prompt, ctxFor(prompt.length, OLLAMA_OUTPUT_TOKENS), OLLAMA_OUTPUT_TOKENS);
+  // Prompt troncato da Ollama (stima dei token sbagliata): il recap sarebbe fatto solo sulla
+  // fine della riunione e senza istruzioni. Si rifà a pezzi più piccoli.
+  if (result.truncated) {
+    console.warn('⚠️ [RECAP] Ollama: nuovo tentativo riassumendo la trascrizione a pezzi più piccoli');
+    prompt = await buildPrompt(await fromNotes(Math.floor(OLLAMA_CHUNK_CHARS / 2)));
+    result = await ollamaGenerate(prompt, ctxFor(prompt.length, OLLAMA_OUTPUT_TOKENS), OLLAMA_OUTPUT_TOKENS);
+    if (result.truncated) throw httpError(502, 'Recap Projexa: la riunione è troppo lunga per il modello locale');
   }
-  const prompt = await buildPrompt(text);
-  const result = await ollamaGenerate(prompt, ctxFor(prompt.length, OLLAMA_OUTPUT_TOKENS), OLLAMA_OUTPUT_TOKENS);
   return { text: result.text, label: 'Recap Projexa', model: result.model };
 }
 
