@@ -193,7 +193,7 @@ async function transcribeJob(job, baseUrl) {
 // ----------------------------------------------------------------------------
 //
 // Righe "errato" (varianti separate da |) -> "corretto" dell'utente: quelle senza cliente
-// valgono per tutte le riunioni, quelle con cliente_id solo per le riunioni di quel cliente.
+// valgono per tutte le riunioni, quelle con client_id solo per le riunioni di quel cliente.
 // Si sostituiscono parole intere, senza distinguere maiuscole/minuscole.
 
 // Una riga -> { re, corretto } (null se incompleta).
@@ -219,7 +219,7 @@ export async function loadCorrections(user, idCalendar) {
          FROM rec_correzioni c
         WHERE c.tenant_id = $1 AND c.user_id = $2
           AND (c.scadenza IS NULL OR c.scadenza >= CURRENT_DATE)
-          AND (c.cliente_id IS NULL OR c.cliente_id = (
+          AND (c.client_id IS NULL OR c.client_id = (
                 SELECT m.client_id FROM rec_meeting m
                  WHERE m.tenant_id = $1 AND m.user_id = $2 AND m.id_calendar = $3 LIMIT 1))`,
       [user.tenant_id, user.user_id, idCalendar]

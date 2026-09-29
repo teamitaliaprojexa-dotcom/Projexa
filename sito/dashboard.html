@@ -12129,6 +12129,10 @@
         async function type11VisibleColumnsMeta(widget, visibleColumnNames, lockedColumns) {
             const columns = await type11GridColumns(widget);
             const hidden = new Set(['id','tenant_id','user_id','client_id','scadenza','id_roles','id_roles_write']);
+            // Sotto Impostazioni non c'è un cliente aperto: client_id (es. rec_correzioni) è una
+            // normale colonna con tendina clienti; il server la verifica (gridChosenClientId).
+            const source = String(widget.dataset.gridSource || currentDetailSource || '').trim();
+            if (source === 'settings') hidden.delete('client_id');
             const locked = lockedColumns || new Set();
             const metaByName = new Map(columns.map(c => [c.name, c]));
             return visibleColumnNames

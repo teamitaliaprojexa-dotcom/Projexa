@@ -1589,7 +1589,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget/fk-options', requir
       return res.status(404).json({ error: 'Tabella referenziata non gestita' });
     }
 
-    // FK verso clients (es. rec_correzioni.cliente_id): clients è EAV (una riga per ogni
+    // FK verso clients (es. rec_correzioni.client_id sotto Impostazioni): clients è EAV (una riga per ogni
     // campo del cliente), quindi le opzioni si leggono dalla vista ele_clienti, che contiene
     // solo le righe identità (client_id + description = nome del cliente) di tenant e utente.
     // I nomi sono cifrati sul DB: l'ordine alfabetico si fa DOPO la decifratura del pool.
@@ -1673,6 +1673,8 @@ app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth,
     if (tableColumns.has('tenant_id')) data.tenant_id = req.user.tenant_id;
     if (tableColumns.has('user_id')) data.user_id = effectiveUserId;
     if (tableColumns.has('client_id') && clientId) data.client_id = clientId;
+    const chosenClient = await gridChosenClientId(db, source, ctx, req, values);
+    if (chosenClient !== undefined) data.client_id = chosenClient;
     if (tableColumns.has('project_id') && source === 'projects') data.project_id = config.argument;
     // Nuova riga: modificabile dal ruolo di chi la crea.
     stampRoleWrite(req, data, tableColumns);
@@ -1719,6 +1721,24 @@ async function validateGridProjectSelection(pool, projectId, reqUser, clientId) 
   if (result.rows.length === 0) {
     throw Object.assign(new Error('Il progetto selezionato non è valido per questo cliente'), { statusCode: 400 });
   }
+}
+
+// Griglie tipo 11 sotto Impostazioni: non c'è un cliente aperto, quindi client_id (se la
+// tabella lo ha, es. rec_correzioni) è una normale colonna scelta dall'utente con la tendina
+// clienti (fk-options -> ele_clienti). Restituisce undefined se la regola non si applica o il
+// browser non ha inviato client_id, null se l'utente l'ha svuotato, altrimenti l'id, dopo
+// aver verificato che sia un cliente del tenant/utente della griglia.
+async function gridChosenClientId(pool, source, ctx, req, values) {
+  if (source !== 'settings' || ctx.clientId || !ctx.tableColumns.has('client_id')) return undefined;
+  if (!values || !Object.prototype.hasOwnProperty.call(values, 'client_id')) return undefined;
+  const v = values.client_id == null ? '' : String(values.client_id).trim();
+  if (!v) return null;
+  const r = await pool.query(
+    'SELECT 1 FROM ele_clienti WHERE client_id::text = $1 AND tenant_id = $2 AND user_id = $3 LIMIT 1',
+    [v, req.user.tenant_id, ctx.effectiveUserId]
+  );
+  if (r.rows.length === 0) throw Object.assign(new Error('Il cliente selezionato non è valido'), { statusCode: 400 });
+  return v;
 }
 
 app.put('/api/:source(settings|clients|projects)/grid-widget/rows', requireAuth, async (req, res) => {
@@ -1801,6 +1821,8 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/rows', requireAuth,
       if (Object.prototype.hasOwnProperty.call(data, 'project_id')) {
         await validateGridProjectSelection(client, data.project_id, req.user, clientId);
       }
+      const chosenClient = await gridChosenClientId(client, source, ctx, req, inputValues);
+      if (chosenClient !== undefined) data.client_id = chosenClient;
       stripRoleWrite(req, data);
       data = await cryptoWrite(client, 'main', tableName, data, rowId);
       const columns = Object.keys(data).map(assertValidIdentifier);
@@ -1931,6 +1953,8 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, 
     if (Object.prototype.hasOwnProperty.call(data, 'project_id')) {
       await validateGridProjectSelection(db, data.project_id, req.user, clientId);
     }
+    const chosenClient = await gridChosenClientId(db, source, ctx, req, values);
+    if (chosenClient !== undefined) data.client_id = chosenClient;
     stripRoleWrite(req, data);
     await assertRowsWritable(req, db, tableName, [rowId], tableColumns);
     data = await cryptoWrite(db, 'main', tableName, data, rowId);
