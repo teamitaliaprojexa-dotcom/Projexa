@@ -24,7 +24,7 @@
 import db from '../config/database.js';
 import { getPromptFor } from '../config/prompts.js';
 import { encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js';
-import { transcribeAudio, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, RECAP_CHUNK_PROMPT } from '../routes/ai.js';
+import { transcribeAudio, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap } from '../routes/ai.js';
 
 export const NOME_PROGRAMMA = 'meetingTranscription';
 
@@ -231,6 +231,19 @@ export async function loadCorrections(user, idCalendar) {
   }
 }
 
+// Recap da incollare in un'email: via la formattazione Markdown che i modelli aggiungono anche
+// quando il prompt la vieta. **grassetto** / __grassetto__ -> testo, "### Titolo" -> "Titolo",
+// elenchi "* " o "• " -> "- " (il formato richiesto dal prompt), asterischi doppi rimasti soli
+// eliminati. Il testo non cambia in nessun altro modo.
+export function stripMarkdown(text) {
+  return String(text || '')
+    .replace(/\*\*([^*\n]+?)\*\*/g, '$1')
+    .replace(/__([^_\n]+?)__/g, '$1')
+    .replace(/^[ \t]*#{1,6}[ \t]+/gm, '')
+    .replace(/^([ \t]*)[*•][ \t]+/gm, '$1- ')
+    .replace(/\*\*/g, '');
+}
+
 // Applica le regole al testo. Restituisce { text, count } (count = sostituzioni fatte).
 export function applyCorrections(text, rules) {
   let out = String(text || '');
@@ -318,18 +331,6 @@ async function recapSource(user, idCalendar) {
   };
 }
 
-// Recap "Browser" (Recap Projexa Browser-Medio/Alto): il server non chiama nessuna AI, passa
-// alla dashboard trascrizione e prompt; il modello gira nel browser e il recap torna con
-// PUT /meetings/managed/text. Nel prompt restano da sostituire {{TRASCRIZIONE}} e, per i
-// pezzi, {{N}} {{TOT}} {{TESTO}}.
-export async function getRecapInput(user, idCalendar) {
-  const { transcript, vars } = await recapSource(user, idCalendar);
-  let template = (await getPromptFor('RECAP_EMAIL', user)).testo;
-  if (!template.includes('{{TRASCRIZIONE}}')) template += '\n\nTrascrizione:\n{{TRASCRIZIONE}}';
-  template = template.replace(/\{\{(OGGETTO|DATA|UTENTE)\}\}/g, (m, k) => vars[k] || '');
-  return { template, transcript, chunk_prompt: RECAP_CHUNK_PROMPT };
-}
-
 // Recap sul server in corso (Recap Projexa lento: può durare molti minuti): la dashboard mostra
 // la clessidra invece del pulsante "Recap".
 const recapRunning = new Set(); // "tenant|utente|id_calendar"
@@ -353,11 +354,6 @@ export async function generateRecap(user, idCalendar) {
   const providerName = await recapProviderName(user);
   if (!providerName) throw httpError(400, 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"');
   const local = localRecapMode(providerName);
-  if (local === 'browser') {
-    const e = httpError(409, `"${providerName}" genera il recap nel browser: usa il pulsante "Recap" della dashboard`);
-    e.code = 'BROWSER_RECAP';
-    throw e;
-  }
   const { transcript, vars, rules } = await recapSource(user, idCalendar);
 
   let result;
@@ -371,7 +367,7 @@ export async function generateRecap(user, idCalendar) {
     recapRunning.delete(key);
   }
   // e sul recap prodotto (l'AI può riscrivere a modo suo un nome già corretto)
-  const recap = applyCorrections(String(result.text || '').trim(), rules).text;
+  const recap = stripMarkdown(applyCorrections(String(result.text || '').trim(), rules).text).trim();
   if (!recap) throw httpError(502, `${result.label} non ha restituito alcun testo`);
 
   await db.query(
@@ -402,46 +398,6 @@ export async function enqueueChunk(user, idCalendar, { mixB64, energy, micB64, s
       Number(offset) || 0, startLabel ? encRec(String(startLabel).slice(0, 120)) : null,
       mixB64 ? encRec(mixB64) : null, energy ? JSON.stringify(energy) : null,
       micB64 ? encRec(micB64) : null, sysB64 ? encRec(sysB64) : null]
-  );
-  kickTranscriptionWorker();
-  return r.rows[0].id;
-}
-
-// Modalità Browser: la trascrizione l'ha già fatta il PC dell'utente (Whisper nel browser).
-// Qui arrivano i SEGMENTI (testo + orari, relativi al blocco) e il volume delle due tracce.
-// Riusiamo la stessa logica del server per "chi parla" e per il formato, poi inseriamo un
-// blocco GIÀ trascritto (state='done'): flushInOrder lo accoda in ordine e il finalize farà
-// il recap, esattamente come per la modalità server. Nessun audio lascia il PC dell'utente.
-export async function enqueueBrowserTranscript(user, idCalendar, { segments, energy, offset, startLabel }) {
-  const own = await db.query(
-    `SELECT 1 FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
-    [user.tenant_id, user.user_id, idCalendar]
-  );
-  if (own.rows.length === 0) { const e = new Error('Riunione non gestita con Projexa'); e.status = 404; throw e; }
-
-  const en = energy && typeof energy === 'object' ? energy : {};
-  const me = en.mic ? await speakerName(user) : '';
-  const lines = [];
-  for (const seg of (Array.isArray(segments) ? segments : [])) {
-    const start = Number(seg.start) || 0;
-    const end = Number(seg.end) || start;
-    const text = String(seg.text || '').trim();
-    if (!text) continue;
-    let who = '';
-    if (en.mic && en.system) who = avgEnergy(en.mic, start, end) >= avgEnergy(en.system, start, end) ? me : OTHERS_LABEL;
-    else if (en.mic) who = me;
-    lines.push({ start, end, who, text });
-  }
-  const add = formatLines(lines, Number(offset) || 0, startLabel || null);
-  if (!add.trim()) return null; // blocco senza parlato: niente da accodare
-
-  const r = await db.query(
-    `INSERT INTO rec_meeting_chunks
-       (tenant_id, user_id, user_email, id_calendar, kind, mime, offset_sec, state, result)
-     VALUES ($1, $2, $3, $4, 'audio', 'text/plain', $5, 'done', $6)
-     RETURNING id`,
-    [user.tenant_id, user.user_id, user.email ? encRec(user.email) : null, idCalendar,
-      Number(offset) || 0, encRec(add)]
   );
   kickTranscriptionWorker();
   return r.rows[0].id;
@@ -538,11 +494,6 @@ async function processFinalize(job) {
     );
     if (t.rows[0] && t.rows[0].has_tr) await generateRecap(user, job.id_calendar);
   } catch (error) {
-    // Recap Projexa Browser: lo genera la dashboard quando vede la trascrizione completa.
-    if (error.code === 'BROWSER_RECAP') {
-      console.log(`[RECAP] ${job.id_calendar}: recap affidato al browser dell'utente`);
-      return;
-    }
     const attempts = (Number(job.attempts) || 0) + 1;
     if (isTemporary(error) && attempts < 10) {
       await db.query(

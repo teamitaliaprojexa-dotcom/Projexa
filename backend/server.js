@@ -13,14 +13,14 @@ import authRoutes from './routes/auth.js';
 import microsoftOAuthRoutes from './routes/microsoft-oauth.js';
 import tableStructuresRoutes from './routes/table-structures.js';
 import calendarRoutes from './routes/calendar.js';
-import aiRoutes, { localRecapMode } from './routes/ai.js';
+import aiRoutes from './routes/ai.js';
 import jiraRoutes from './routes/jira.js';
 import cryptoMigrationRoutes from './routes/crypto-migration.js';
 import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
 import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
-import { kickTranscriptionWorker, recapProviderName } from './jobs/meetingTranscription.js';
+import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
 import { encryptRowForWrite } from './config/crypto.js';
@@ -68,23 +68,18 @@ app.disable('x-powered-by'); // non dichiarare che il server è Express
 // al proprio backend. 'unsafe-inline' serve perché le pagine usano script e onclick
 // inline; la politica limita comunque dove può finire un dato rubato (connect-src),
 // vieta plugin (object-src) e il cambio di <base>, e impedisce di incorniciare l'app.
-// cdn.jsdelivr.net + huggingface: servono alla trascrizione nel browser (Transformers.js
-// e i pesi del modello scaricati dal loro CDN). 'wasm-unsafe-eval' abilita l'esecuzione
-// del WebAssembly del motore di trascrizione.
-// raw.githubusercontent.com: motore WebAssembly del modello del "Recap Projexa Browser"
-// (WebLLM, repository mlc-ai/binary-mlc-llm-libs); i pesi arrivano da huggingface.
+// Dal 2026-09-29 non ci sono più modelli che girano nel browser (trascrizione Browser-leggero/
+// pesante e recap Browser-Medio/Alto eliminati): tolti jsdelivr, huggingface,
+// raw.githubusercontent, 'wasm-unsafe-eval' e blob: negli script, che servivano solo a loro.
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
-  // blob: serve al motore di trascrizione WASM (onnxruntime-web importa un modulo da un blob:).
-  "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://cdnjs.cloudflare.com https://accounts.google.com https://cdn.jsdelivr.net",
+  "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://accounts.google.com",
   "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://accounts.google.com",
   "font-src 'self' data: https://cdnjs.cloudflare.com",
   "img-src 'self' data: blob: https:",
-  "connect-src 'self' https://accounts.google.com https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com",
+  "connect-src 'self' https://accounts.google.com",
   "frame-src https://accounts.google.com",
-  // jsdelivr: il worker del recap nel browser (js/recap-worker.js) importa WebLLM da lì, e
-  // gli import dentro un worker ricadono sotto worker-src.
-  "worker-src 'self' blob: https://cdn.jsdelivr.net",
+  "worker-src 'self'",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -102,15 +97,6 @@ app.use((req, res, next) => {
   // HSTS solo su HTTPS (dietro Caddy req.secure viene da X-Forwarded-Proto): il browser
   // userà sempre HTTPS per 180 giorni, anche se l'utente scrive http://.
   if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
-  // Isolamento cross-origin SOLO per la dashboard: abilita il multi-thread WASM della
-  // trascrizione nel browser (che altrimenti sarebbe più lenta). 'credentialless' non
-  // richiede modifiche alle risorse esterne (icone cdnjs, Google), quindi non le rompe.
-  // Le altre pagine (login, ecc.) restano senza isolamento. Lo stesso isolamento va al
-  // worker del recap nel browser (js/recap-worker.js), che la dashboard avvia.
-  if (req.path === '/dashboard.html' || req.path === '/' || req.path === '/js/recap-worker.js') {
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-    res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
-  }
   next();
 });
 
@@ -5412,37 +5398,6 @@ app.delete('/api/reporting/reports/:id', requireAuth, async (req, res) => {
 app.get('/api/settings/chatbot-enabled', requireAuth, async (req, res) => {
   try {
     res.json({ enabled: (await readDashboardFlags(req.user)).chatbot });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Modalità di trascrizione scelta (campo settings "modalità Trascrizione", valore2) per
-// tenant/utente del contesto: 'Browser-leggero' | 'Browser-pesante' | 'Background' (default)
-// | 'Background-Veloce' (sul server con whisper.cpp: per la dashboard è come Background).
-app.get('/api/settings/transcription-mode', requireAuth, async (req, res) => {
-  try {
-    const r = await db.query(
-      `SELECT valore2 FROM settings
-        WHERE tenant_id = $1 AND user_id = $2
-          AND LOWER(BTRIM(campo)) LIKE '%modalit%trascrizione%'
-        LIMIT 1`,
-      [req.user.tenant_id, req.user.user_id]
-    );
-    const v = r.rows.length ? String(r.rows[0].valore2 || '').trim() : '';
-    res.json({ mode: v || 'Background' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// AI del recap (campo settings "AI generazione e-mail recap", valore2) per tenant/utente del
-// contesto. local: 'server' = Recap Projexa (lento) sulla VM, 'browser' = Recap Projexa
-// Browser-Medio/Alto (lo genera la dashboard), null = AI con chiave API.
-app.get('/api/settings/recap-mode', requireAuth, async (req, res) => {
-  try {
-    const provider = await recapProviderName(req.user);
-    res.json({ provider, local: localRecapMode(provider) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

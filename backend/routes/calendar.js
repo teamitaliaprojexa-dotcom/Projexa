@@ -19,9 +19,11 @@ import ical from 'node-ical';
 import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
 import {
-  encRec, enqueueChunk, enqueueBrowserTranscript, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices,
-  recapProviderName, recapInProgress, getRecapInput, loadCorrections, applyCorrections
+  encRec, enqueueChunk, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices,
+  recapProviderName, recapInProgress, loadCorrections, applyCorrections, stripMarkdown, speakerName
 } from '../jobs/meetingTranscription.js';
+import { parseRecapActions, parseDueDate, ownerVariants } from '../jobs/recapTasks.js';
+import { encryptRowForWrite } from '../config/crypto.js';
 import { localRecapMode } from './ai.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -662,7 +664,9 @@ router.put('/meetings/managed/text', requireAuth, async (req, res) => {
     const col = field === 'recap' ? 'recap' : 'trascrizione';
     // Correzioni automatiche (rec_correzioni): anche sul recap generato nel browser e sui
     // file caricati, come sui blocchi trascritti dal server.
-    const fixed = applyCorrections(text, await loadCorrections(req.user, idCalendar)).text;
+    let fixed = applyCorrections(text, await loadCorrections(req.user, idCalendar)).text;
+    // Recap (anche quello generato nel browser): via la formattazione Markdown.
+    if (col === 'recap') fixed = stripMarkdown(fixed).trim();
     const result = await db.query(
       `UPDATE rec_meeting SET ${col} = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
       [encRec(fixed), req.user.tenant_id, req.user.user_id, idCalendar]
@@ -693,22 +697,160 @@ router.post('/meetings/managed/apply-corrections', requireAuth, async (req, res)
     if (cur.rows.length === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
     const rules = await loadCorrections(req.user, idCalendar);
     const counts = { trascrizione: 0, recap: 0 };
-    if (!rules.length) return res.json({ success: true, count: 0, counts, rules: 0 });
+    let markdown = false; // recap ripulito dalla formattazione Markdown
     // Nomi di colonna da una whitelist fissa: nessun input utente nella query.
     for (const col of field ? [field] : ['trascrizione', 'recap']) {
-      const { text, count } = applyCorrections(cur.rows[0][col] || '', rules);
+      const original = cur.rows[0][col] || '';
+      let { text, count } = applyCorrections(original, rules);
       counts[col] = count;
-      if (count > 0) {
+      if (col === 'recap' && original.trim()) {
+        const clean = stripMarkdown(text).trim();
+        if (clean !== text.trim()) { markdown = true; text = clean; }
+      }
+      if (count > 0 || (col === 'recap' && markdown)) {
         await db.query(
           `UPDATE rec_meeting SET ${col === 'recap' ? 'recap' : 'trascrizione'} = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
           [encRec(text), req.user.tenant_id, req.user.user_id, idCalendar]
         );
       }
     }
-    res.json({ success: true, count: counts.trascrizione + counts.recap, counts, rules: rules.length });
+    res.json({ success: true, count: counts.trascrizione + counts.recap, counts, rules: rules.length, markdown });
   } catch (error) {
     console.error('❌ REC_MEETING_CORRECTIONS:', error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// "CREA TASK" DAL RECAP (finestra del recap)
+// ==========================================
+// GET: proposta dei task (righe "AZIONI IN CARICO" dei blocchi dell'utente, vedi
+// jobs/recapTasks.js), da rivedere in una finestra. POST: inserisce in tasks le righe
+// confermate. Cliente, progetto, data della call e assegnatario ("me" = contatto di rubrica
+// con l'email dell'utente) si ricavano SEMPRE qui dal database, mai dal browser.
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+async function recapTaskContext(req, idCalendar) {
+  const r = await db.query(
+    `SELECT oggetto, recap, data_calendar, client_id, project_id FROM rec_meeting
+      WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+    [req.user.tenant_id, req.user.user_id, idCalendar]
+  );
+  if (r.rows.length === 0) throw Object.assign(new Error('Riunione non gestita con Projexa'), { status: 404 });
+  const m = r.rows[0];
+  // "me": contatto di rubrica con l'email dell'utente (confronto dopo la decifratura, come
+  // il pulsante "me" dei task).
+  const myEmail = String(req.user.email || '').trim().toLowerCase();
+  let me = null;
+  if (myEmail) {
+    const rb = await db.query(
+      `SELECT id::text AS id, nominativo, email FROM rubrica
+        WHERE tenant_id = $1 AND user_id = $2 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+      [req.user.tenant_id, req.user.user_id]
+    );
+    const row = rb.rows.find((x) => String(x.email || '').trim().toLowerCase() === myEmail);
+    if (row) me = { id: row.id, name: row.nominativo || myEmail };
+  }
+  return { meeting: m, me };
+}
+
+router.get('/meetings/managed/recap-tasks', requireAuth, async (req, res) => {
+  try {
+    const idCalendar = String(req.query.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    const { meeting: m, me } = await recapTaskContext(req, idCalendar);
+    if (!m.recap || !String(m.recap).trim()) return res.status(400).json({ error: 'La riunione non ha ancora un recap' });
+    const callDate = m.data_calendar ? String(m.data_calendar).slice(0, 10) : null;
+    const variants = ownerVariants(await speakerName(req.user));
+    // Task già creati per questa riunione (stessa data di inizio): segnalati per non duplicarli.
+    const existing = new Set();
+    if (callDate) {
+      const t = await db.query(
+        `SELECT description FROM tasks WHERE tenant_id = $1 AND user_id = $2 AND data_inizio = $3::date`,
+        [req.user.tenant_id, req.user.user_id, callDate]
+      );
+      t.rows.forEach((x) => existing.add(String(x.description || '').trim().toLowerCase()));
+    }
+    const items = parseRecapActions(stripMarkdown(m.recap), variants).map((it) => ({
+      description: it.description,
+      due_date: parseDueDate(it.description, callDate),
+      exists: existing.has(it.description.trim().toLowerCase())
+    }));
+    // Nomi di cliente e progetto solo per la finestra (riga identità EAV, valore2).
+    const name = async (table, id) => {
+      if (!id) return null;
+      const x = await db.query(`SELECT valore2 FROM ${table} WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [id, req.user.tenant_id]);
+      return x.rows[0] ? x.rows[0].valore2 : null;
+    };
+    res.json({
+      titile: `${String(m.oggetto || 'Riunione').trim()} - Azioni in carico`.slice(0, 200),
+      data_inizio: callDate,
+      client: m.client_id ? { id: m.client_id, name: await name('clients', m.client_id) } : null,
+      project: m.project_id ? { id: m.project_id, name: await name('projects', m.project_id) } : null,
+      assigned_to: me,
+      owners: variants,
+      items
+    });
+  } catch (error) {
+    console.error('❌ REC_MEETING_TASKS_PREVIEW:', error.message);
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+router.post('/meetings/managed/recap-tasks', requireAuth, async (req, res) => {
+  let client;
+  try {
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    const titile = String(b.titile || '').trim().slice(0, 200);
+    if (!titile) return res.status(400).json({ error: 'Il titolo è obbligatorio' });
+    const items = (Array.isArray(b.items) ? b.items : [])
+      .map((x) => ({ description: String((x && x.description) || '').trim().slice(0, 4000), due_date: x && x.due_date ? String(x.due_date).trim() : null }))
+      .filter((x) => x.description);
+    if (!items.length) return res.status(400).json({ error: 'Nessun task da creare' });
+    if (items.length > 50) return res.status(400).json({ error: 'Al massimo 50 task per volta' });
+    if (items.some((x) => x.due_date && !DATE_RE.test(x.due_date))) return res.status(400).json({ error: 'Data di scadenza non valida' });
+
+    const { meeting: m, me } = await recapTaskContext(req, idCalendar);
+    const role = Number.isFinite(Number(req.user.id_roles)) ? Number(req.user.id_roles) : 90;
+    client = await db.connect();
+    await client.query('BEGIN');
+    for (const it of items) {
+      const row = {
+        tenant_id: req.user.tenant_id,
+        user_id: req.user.user_id,
+        client_id: m.client_id || null,
+        project_id: m.project_id || null,
+        tipo_task: 'Automatica',
+        titile,
+        description: it.description,
+        status: 'in_progress',   // "In corso"
+        priority: 'medium',      // "Media"
+        assigned_to: me ? me.id : null,
+        due_date: it.due_date || null,
+        data_inizio: m.data_calendar ? String(m.data_calendar).slice(0, 10) : null,
+        scadenza: '2099-12-31',
+        id_roles: role,
+        id_roles_write: role,
+        created_by: req.user.user_id,
+        crypto: 1
+      };
+      const { data } = await encryptRowForWrite(db, 'tasks', row);
+      const cols = Object.keys(data);
+      await client.query(
+        `INSERT INTO tasks (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')})`,
+        cols.map((c) => data[c])
+      );
+    }
+    await client.query('COMMIT');
+    res.status(201).json({ success: true, created: items.length, assigned: !!me });
+  } catch (error) {
+    if (client) { try { await client.query('ROLLBACK'); } catch { /* già chiusa */ } }
+    console.error('❌ REC_MEETING_TASKS_CREATE:', error.message);
+    res.status(error.status || 500).json({ error: error.message });
+  } finally {
+    if (client) client.release();
   }
 });
 
@@ -932,28 +1074,6 @@ router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
   }
 });
 
-// Modalità Browser ("modalità Trascrizione" = Browser-leggero/pesante): il testo è già
-// trascritto sul PC dell'utente; qui arrivano i segmenti (testo + orari) e il volume delle
-// tracce, MAI l'audio. Il server formatta e accoda come un blocco già trascritto.
-router.post('/meetings/managed/transcribe-browser', requireAuth, async (req, res) => {
-  try {
-    const b = req.body || {};
-    const idCalendar = String(b.id_calendar || '').trim();
-    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
-    if (!Array.isArray(b.segments)) return res.status(400).json({ error: 'segments mancanti' });
-    await enqueueBrowserTranscript(req.user, idCalendar, {
-      segments: b.segments,
-      energy: b.energy || null,
-      offset: Number(b.offset_sec) || 0,
-      startLabel: b.start_label || null
-    });
-    res.status(202).json({ success: true, queued: true });
-  } catch (error) {
-    console.error('❌ REC_MEETING_TRANSCRIBE_BROWSER:', error.message);
-    res.status(error.status || 500).json({ error: error.message });
-  }
-});
-
 // Fine registrazione: quando i blocchi in coda della riunione sono trascritti, il server
 // genera da solo il recap (anche a pagina chiusa).
 router.post('/meetings/managed/finalize', requireAuth, async (req, res) => {
@@ -994,18 +1114,6 @@ router.post('/meetings/managed/recap', requireAuth, async (req, res) => {
   }
 });
 
-// Recap Projexa Browser: trascrizione e prompt per il modello che gira nel browser
-// (sito/js/browser-recap.js). Il recap torna con PUT /meetings/managed/text (field=recap).
-router.get('/meetings/managed/recap-input', requireAuth, async (req, res) => {
-  try {
-    const idCalendar = String(req.query.id_calendar || '').trim();
-    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
-    res.json(await getRecapInput(req.user, idCalendar));
-  } catch (error) {
-    console.error('❌ REC_MEETING_RECAP_INPUT:', error.message);
-    res.status(error.status || 500).json({ error: error.message });
-  }
-});
 
 router.delete('/meetings/managed', requireAuth, async (req, res) => {
   try {

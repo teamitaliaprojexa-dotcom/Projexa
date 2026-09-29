@@ -408,26 +408,23 @@ export async function askAiProvider(userId, providerName, prompt) {
 // RECAP PROJEXA: MODELLI LOCALI, GRATUITI (nessuna chiave API)
 // ==========================================
 //
-// Voci del campo "AI generazione e-mail recap" (lookup_values, vedi
+// Voce del campo "AI generazione e-mail recap" (lookup_values, vedi
 // Supporto/CreaDB/recap_projexa_locale.sql):
-//   "Recap Projexa (lento)"          -> Ollama sulla VM (OLLAMA_URL, OLLAMA_RECAP_MODEL): gira
-//                                       in background, anche a pagina chiusa, ma è lento
-//                                       (2 core condivisi con Whisper);
-//   "Recap Projexa (Browser-Medio)"  -> modello nel browser dell'utente (WebLLM + WebGPU,
-//   "Recap Projexa (Browser-Alto)"      sito/js/browser-recap.js): la trascrizione non esce dal PC.
-// Il recap "Browser" non si può fare sul server: lo genera la dashboard.
+//   "Recap Projexa (lento)" -> Ollama sulla VM (OLLAMA_URL, OLLAMA_RECAP_MODEL): gira in
+//                              background, anche a pagina chiusa, ma è lento (2 core condivisi
+//                              con Whisper).
+// Le voci "Browser-Medio/Alto" (modello nel browser, WebLLM) sono state eliminate il
+// 2026-09-29: qualità bassa (contesto 4.096) e blocchi della scheda video sulle GPU integrate.
 const LOCAL_RECAP_MODES = {
-  'recap projexa (lento)': 'server',
-  'recap projexa (browser-medio)': 'browser',
-  'recap projexa (browser-alto)': 'browser'
+  'recap projexa (lento)': 'server'
 };
 
-// 'server' | 'browser' | null (AI con chiave API)
+// 'server' | null (AI con chiave API)
 export function localRecapMode(providerName) {
   return LOCAL_RECAP_MODES[String(providerName || '').trim().toLowerCase()] || null;
 }
 
-// Istruzioni per riassumere un pezzo di trascrizione troppo lunga (usate anche dal browser).
+// Istruzioni per riassumere un pezzo di trascrizione troppo lunga.
 export const RECAP_CHUNK_PROMPT = `Questo è un pezzo ({{N}} di {{TOT}}) della trascrizione di una riunione.
 Scrivi appunti sintetici in italiano, in testo semplice: argomenti trattati, decisioni prese, azioni (chi, cosa, entro quando), numeri e date citati.
 Usa solo informazioni presenti nel testo, senza introduzioni né commenti.

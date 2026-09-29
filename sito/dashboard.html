@@ -672,10 +672,11 @@
             display: none;
         }
         .type11-grid-snapshot { pointer-events: none; }
+        /* Tutte le righe visibili (nessun limite di altezza: si scorre con il pannello);
+           scorrimento orizzontale solo se le colonne non stanno nella larghezza. */
         .type11-grid-scroll {
             width: 100%;
-            max-height: 320px;
-            overflow: auto;
+            overflow-x: auto;
             padding: 1px;
         }
         .type11-grid-table {
@@ -1779,6 +1780,21 @@
         }
 
         .task-modal.open { display: flex; }
+
+        /* "Crea task" dal recap: una riga per task (includi, descrizione, scadenza, togli) */
+        .recap-tasks-body { padding: 0.9rem 1.25rem; max-height: 65vh; overflow-y: auto; }
+        .recap-tasks-meta { font-size: 0.8rem; color: var(--text-muted); margin: 0.4rem 0 0.9rem; line-height: 1.6; }
+        .recap-tasks-meta b { color: var(--dark); font-weight: 600; }
+        .recap-tasks-warn { color: #B45309; }
+        .recap-task-row { display: grid; grid-template-columns: 1.4rem minmax(0, 1fr) 9.5rem 1.8rem; gap: 0.6rem; align-items: start; padding: 0.55rem 0; border-top: 1px solid var(--border); }
+        .recap-task-row textarea { width: 100%; min-height: 2.6rem; resize: vertical; padding: 0.4rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 0.86rem; }
+        .recap-task-row input[type="date"] { width: 100%; padding: 0.35rem 0.4rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.82rem; }
+        .recap-task-row input[type="checkbox"] { margin-top: 0.7rem; width: 1rem; height: 1rem; accent-color: #10B981; }
+        .recap-task-row.off textarea, .recap-task-row.off input[type="date"] { opacity: 0.5; }
+        .recap-task-del { border: none; background: transparent; color: var(--text-muted); cursor: pointer; margin-top: 0.5rem; }
+        .recap-task-del:hover { color: #B91C1C; }
+        .recap-task-exists { display: inline-block; margin-top: 0.25rem; font-size: 0.72rem; color: #B45309; }
+        .recap-tasks-head { display: grid; grid-template-columns: 1.4rem minmax(0, 1fr) 9.5rem 1.8rem; gap: 0.6rem; font-size: 0.72rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
 
         .client-logo-action {
             display: flex;
@@ -6312,109 +6328,40 @@
         // Visibile se la riunione ha la trascrizione ma non ancora il recap: avvia la stessa
         // generazione del recap automatico (AI scelta in Impostazioni › AI, prompt
         // backend/prompts/recap_email.txt, risultato cifrato in rec_meeting.recap).
-        // Recap Projexa (Impostazioni › AI, voci "Recap Projexa ..."): "lento" gira sul server
-        // in coda (la griglia mostra la clessidra); Browser-Medio/Alto gira qui, con il modello
-        // nel browser (js/browser-recap.js), e il recap si salva come un file caricato.
+        // Recap Projexa (lento) gira sul server in coda (la griglia mostra la clessidra); le AI
+        // con chiave API rispondono subito. Il recap nel browser (Browser-Medio/Alto) è stato
+        // eliminato il 2026-09-29.
         const manualRecapRunning = new Set();
-        const recapProgress = new Map();   // id riunione -> stato del recap nel browser
-        const autoBrowserRecap = new Set(); // riunioni registrate qui: recap nel browser a trascrizione finita
 
         function manualRecapButton(eventId) {
             const running = manualRecapRunning.has(eventId);
-            const title = running && recapProgress.get(eventId) ? recapProgress.get(eventId) : 'Genera il recap con l\'AI scelta in Impostazioni › AI';
+            const title = 'Genera il recap con l\'AI scelta in Impostazioni › AI';
             return `<button type="button" class="meeting-genrecap-btn" data-event-id="${escapeHtml(eventId || '')}" ${running ? 'disabled' : ''} title="${escapeHtml(title)}">${running ? '<i class="fas fa-spinner fa-spin"></i> Recap…' : 'Recap'}</button>`;
         }
 
         const serverRecapIcon = '<i class="fas fa-hourglass-half meeting-queued" title="Recap Projexa in preparazione sul server: può richiedere diversi minuti, anche a pagina chiusa"></i>';
 
-        async function getRecapMode() {
-            const res = await fetch(`${API_URL}/settings/recap-mode`, { headers: calendarAuthHeaders() });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
-            return data; // { provider, local: 'server' | 'browser' | null }
-        }
-
-        function setRecapProgress(eventId, text) {
-            recapProgress.set(eventId, text);
-            document.querySelectorAll(`.meeting-genrecap-btn[data-event-id="${CSS.escape(eventId)}"]`).forEach((b) => { b.title = text; });
-        }
-
-        // Recap con il modello nel browser: legge trascrizione e prompt, genera, salva.
-        async function runBrowserRecap(eventId, provider) {
-            if (!window.BrowserRecap) throw new Error('modulo del recap nel browser non caricato');
-            const res = await fetch(`${API_URL}/calendar/meetings/managed/recap-input?id_calendar=${encodeURIComponent(eventId)}`, { headers: calendarAuthHeaders() });
-            const input = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(input.error || `Errore ${res.status}`);
-            const cfg = window.BrowserRecap.MODES[String(provider).trim().toLowerCase()];
-            let notified = false;
-            const recap = await window.BrowserRecap.generateRecap(input, {
-                mode: provider,
-                onProgress: (p) => {
-                    // Primo avvio: il modello si scarica (poi resta nella cache del browser).
-                    if (!notified && p.progress < 1 && /fetch|download/i.test(p.text || '')) {
-                        notified = true;
-                        showNotification(`Recap nel browser: primo avvio, download del modello ${cfg ? cfg.label + ' (' + cfg.download + ')' : ''}. Lascia la pagina aperta.`, 'info');
-                    }
-                    setRecapProgress(eventId, `Caricamento del modello: ${Math.round((p.progress || 0) * 100)}%`);
-                },
-                onStatus: (t) => setRecapProgress(eventId, t)
-            });
-            const save = await fetch(`${API_URL}/calendar/meetings/managed/text`, {
-                method: 'PUT',
-                headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id_calendar: eventId, field: 'recap', text: recap })
-            });
-            const saved = await save.json().catch(() => ({}));
-            if (!save.ok) throw new Error(saved.error || `Errore ${save.status}`);
-        }
-
-        // Browser-Alto (Gemma 9B) su una scheda video integrata occupa gran parte della RAM e
-        // rallenta molto il PC: si propone Browser-Medio (dal pulsante: conferma; recap
-        // automatico: passa da solo al Medio e lo segnala).
-        const BROWSER_RECAP_MEDIO = 'Recap Projexa (Browser-Medio)';
-        async function chooseBrowserRecapMode(provider, auto) {
-            if (String(provider).trim().toLowerCase() !== 'recap projexa (browser-alto)') return provider;
-            const gpu = await window.BrowserRecap.gpuProfile();
-            if (!gpu || !gpu.integrated) return provider;
-            if (auto) {
-                showNotification('Scheda video integrata: per non rallentare il PC il recap usa Browser-Medio invece di Browser-Alto.', 'info');
-                return BROWSER_RECAP_MEDIO;
-            }
-            const useMedio = window.confirm('Questo PC ha una scheda video integrata: Browser-Alto lo rallenterà molto durante il recap.\n\nOK = usa Browser-Medio (più leggero)\nAnnulla = usa comunque Browser-Alto');
-            return useMedio ? BROWSER_RECAP_MEDIO : provider;
-        }
-
-        async function startRecap(eventId, title, auto = false) {
+        async function startRecap(eventId, title) {
             if (!eventId || manualRecapRunning.has(eventId)) return;
             manualRecapRunning.add(eventId);
-            recapProgress.delete(eventId);
             document.querySelectorAll(`.meeting-genrecap-btn[data-event-id="${CSS.escape(eventId)}"]`).forEach((b) => {
                 b.disabled = true;
                 b.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Recap…';
             });
             try {
-                const mode = await getRecapMode();
-                if (mode.local === 'browser') {
-                    if (!window.BrowserRecap) throw new Error('modulo del recap nel browser non caricato');
-                    const provider = await chooseBrowserRecapMode(mode.provider, auto);
-                    await runBrowserRecap(eventId, provider);
-                    showRecapReady(eventId, title, provider);
-                } else {
-                    const res = await fetch(`${API_URL}/calendar/meetings/managed/recap`, {
-                        method: 'POST',
-                        headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id_calendar: eventId })
-                    });
-                    const data = await res.json().catch(() => ({}));
-                    if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
-                    if (data.queued) showNotification('Recap Projexa in preparazione sul server: può richiedere diversi minuti. Riceverai l\'avviso "Recap pronto".', 'info');
-                    else showRecapReady(eventId, title, data.provider);
-                }
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/recap`, {
+                    method: 'POST',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_calendar: eventId })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                if (data.queued) showNotification('Recap Projexa in preparazione sul server: può richiedere diversi minuti. Riceverai l\'avviso "Recap pronto".', 'info');
+                else showRecapReady(eventId, title, data.provider);
             } catch (e) {
                 showNotification('Recap non generato: ' + ((e && e.message) || String(e)), 'info');
             } finally {
                 manualRecapRunning.delete(eventId);
-                recapProgress.delete(eventId);
                 document.querySelectorAll(`.meeting-genrecap-btn[data-event-id="${CSS.escape(eventId)}"]`).forEach((b) => {
                     if (b.disabled) { b.disabled = false; b.textContent = 'Recap'; }
                 });
@@ -6480,18 +6427,13 @@
                         if (delCell.dataset.state !== html) { delCell.innerHTML = html; delCell.dataset.state = html; }
                     }
                     // Mentre la riunione è ancora in registrazione non si mostrano né il
-                    // pulsante Recap né la lente della trascrizione (in modalità browser i
-                    // blocchi sono subito "done", quindi non basta più guardare m.pending).
+                    // pulsante Recap né la lente della trascrizione (tra un blocco e l'altro
+                    // m.pending può essere 0 anche a registrazione in corso).
                     const recording = isRecordingMeeting(ev.id);
                     // durante una generazione in corso il pulsante "Recap…" non va sovrascritto
                     if (!manualRecapRunning.has(ev.id)) {
                         const canRecap = m && m.has_trascrizione && !m.has_recap && !m.pending && !recording;
                         setStatusCell(row, 'meeting-status-genrecap', m && m.recap_running && !m.has_recap ? serverRecapIcon : (canRecap ? manualRecapButton(ev.id) : ''));
-                        // Recap nel browser a fine registrazione (riunione registrata da questa pagina)
-                        if (canRecap && !m.recap_running && autoBrowserRecap.has(ev.id)) {
-                            autoBrowserRecap.delete(ev.id);
-                            startRecap(ev.id, title, true);
-                        }
                     }
                     const queued = m && m.pending > 0
                         ? `<i class="fas fa-hourglass-half meeting-queued" title="Trascrizione in corso sul server: ${m.pending} blocc${m.pending === 1 ? 'o' : 'hi'} in coda"></i>`
@@ -6747,7 +6689,7 @@
         }
 
         // === FILE AUDIO -> TRASCRIZIONE SUL SERVER (Whisper sulla VM) ===
-        // Sempre sul server, anche se in Impostazioni è scelta la trascrizione nel browser.
+        // Sempre sul server (come ogni trascrizione).
         // Il browser decodifica il file (mp3, wav, m4a...), lo converte in mono 16 kHz e lo
         // invia a blocchi di 30 s nella stessa coda della registrazione (rec_meeting_chunks):
         // il testo si AGGIUNGE alla trascrizione, con gli orari che proseguono da quelli già
@@ -6892,16 +6834,126 @@
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
-                if (!data.rules) { showNotification('Nessuna correzione impostata per questa riunione', 'info'); return; }
-                if (!data.count) { showNotification('Nessuna parola da correggere', 'info'); return; }
+                if (!data.count && !data.markdown) {
+                    showNotification(data.rules ? 'Nessuna parola da correggere' : 'Nessuna correzione impostata per questa riunione', 'info');
+                    return;
+                }
                 const c = data.counts || {};
-                showNotification(`Correzioni applicate: trascrizione ${c.trascrizione || 0}, recap ${c.recap || 0}`, 'success');
+                const parts = [];
+                if (data.count) parts.push(`correzioni: trascrizione ${c.trascrizione || 0}, recap ${c.recap || 0}`);
+                if (data.markdown) parts.push('formattazione (asterischi, #) tolta dal recap');
+                showNotification(parts.join(' · ').replace(/^./, (x) => x.toUpperCase()), 'success');
                 openMeetingText({ dataset: { eventId: modal.dataset.eventId, field, title: modal.dataset.title } });
             } catch (e) {
                 showNotification('Correzioni non applicate: ' + e.message, 'info');
             } finally {
                 if (btn) btn.disabled = false;
             }
+        }
+
+        // --- Crea task (solo recap): propone un task per ogni riga di "AZIONI IN CARICO" nei
+        // blocchi dell'utente (suo nome, "Il nostro team", "Nostro team", "TeamSystem": elenco in
+        // backend/jobs/recapTasks.js). Nella finestra si possono togliere/aggiungere righe,
+        // correggere descrizioni e scadenze e il titolo; "Salva task" inserisce in tasks.
+        let recapTasksEventId = '';
+
+        function recapTaskRowHtml(item = {}) {
+            const off = item.exists ? ' off' : '';
+            return `<div class="recap-task-row${off}">
+                <input type="checkbox" class="recap-task-on" ${item.exists ? '' : 'checked'} aria-label="Crea questo task">
+                <div>
+                    <textarea class="recap-task-desc" rows="2" placeholder="Descrizione del task">${escapeHtml(item.description || '')}</textarea>
+                    ${item.exists ? '<span class="recap-task-exists"><i class="fas fa-circle-info"></i> Già presente tra i task di questa riunione: non selezionato</span>' : ''}
+                </div>
+                <input type="date" class="recap-task-due" value="${escapeHtml(item.due_date || '')}" aria-label="Scadenza">
+                <button type="button" class="recap-task-del" title="Togli questa riga" aria-label="Togli questa riga"><i class="fas fa-trash"></i></button>
+            </div>`;
+        }
+
+        async function openRecapTasks() {
+            const textModal = document.getElementById('meetingTextModal');
+            const modal = document.getElementById('recapTasksModal');
+            const body = document.getElementById('recapTasksBody');
+            recapTasksEventId = textModal.dataset.eventId || '';
+            if (!recapTasksEventId) return;
+            body.innerHTML = '<p class="meeting-text-empty"><i class="fas fa-spinner fa-spin"></i> Lettura delle azioni in carico…</p>';
+            modal.classList.add('open');
+            try {
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/recap-tasks?id_calendar=${encodeURIComponent(recapTasksEventId)}`, { headers: calendarAuthHeaders() });
+                const d = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(d.error || `Errore ${res.status}`);
+                const dt = (v) => v ? String(v).slice(0, 10).split('-').reverse().join('/') : '—';
+                const who = d.assigned_to
+                    ? `<b>${escapeHtml(d.assigned_to.name)}</b>`
+                    : '<span class="recap-tasks-warn">non trovato in rubrica (nessun contatto con la tua email): i task resteranno senza assegnatario</span>';
+                const items = Array.isArray(d.items) ? d.items : [];
+                body.innerHTML = `
+                    <label for="recapTasksTitolo" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);">Titolo</label>
+                    <input id="recapTasksTitolo" type="text" value="${escapeHtml(d.titile || '')}" style="width: 100%; padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; margin-top: 0.2rem;">
+                    <div class="recap-tasks-meta">
+                        Cliente: <b>${escapeHtml(d.client ? d.client.name || '—' : '—')}</b> · Progetto: <b>${escapeHtml(d.project ? d.project.name || '—' : '—')}</b> ·
+                        Data inizio: <b>${dt(d.data_inizio)}</b> · Tipo: <b>Automatica</b> · Stato: <b>In corso</b> · Priorità: <b>Media</b><br>
+                        Assegnato a: ${who}
+                    </div>
+                    ${items.length ? '' : `<p class="recap-tasks-warn" style="font-size: 0.85rem;">Nessuna azione trovata nei blocchi intestati a: ${escapeHtml((d.owners || []).join(', '))}. Puoi aggiungere le righe a mano.</p>`}
+                    <div class="recap-tasks-head"><span></span><span>Descrizione</span><span>Scadenza</span><span></span></div>
+                    <div id="recapTasksRows">${items.map(recapTaskRowHtml).join('')}</div>`;
+            } catch (e) {
+                body.innerHTML = `<p class="meeting-text-empty" style="color:#B91C1C;">${escapeHtml(e.message)}</p>`;
+            }
+        }
+
+        async function saveRecapTasks() {
+            const rows = [...document.querySelectorAll('#recapTasksRows .recap-task-row')];
+            const items = rows
+                .filter((r) => r.querySelector('.recap-task-on').checked)
+                .map((r) => ({ description: r.querySelector('.recap-task-desc').value.trim(), due_date: r.querySelector('.recap-task-due').value || null }))
+                .filter((x) => x.description);
+            const titile = (document.getElementById('recapTasksTitolo')?.value || '').trim();
+            if (!titile) { showNotification('Il titolo è obbligatorio', 'info'); return; }
+            if (!items.length) { showNotification('Seleziona almeno un task con la descrizione', 'info'); return; }
+            const btn = document.getElementById('recapTasksSave');
+            btn.disabled = true;
+            try {
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/recap-tasks`, {
+                    method: 'POST',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_calendar: recapTasksEventId, titile, items })
+                });
+                const d = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(d.error || `Errore ${res.status}`);
+                document.getElementById('recapTasksModal').classList.remove('open');
+                showNotification(`${d.created === 1 ? 'Creato 1 task' : `Creati ${d.created} task`}${d.assigned ? '' : ' (senza assegnatario)'}`, 'success');
+                if (typeof loadTodoData === 'function') loadTodoData(); // aggiorna l'elenco dei task
+            } catch (e) {
+                showNotification('Task non creati: ' + e.message, 'info');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function initRecapTasks() {
+            const modal = document.getElementById('recapTasksModal');
+            const close = () => modal.classList.remove('open');
+            document.getElementById('meetingTextTasks')?.addEventListener('click', openRecapTasks);
+            document.getElementById('recapTasksClose')?.addEventListener('click', close);
+            document.getElementById('recapTasksCancel')?.addEventListener('click', close);
+            document.getElementById('recapTasksSave')?.addEventListener('click', saveRecapTasks);
+            document.getElementById('recapTasksAdd')?.addEventListener('click', () => {
+                const list = document.getElementById('recapTasksRows');
+                if (!list) return;
+                list.insertAdjacentHTML('beforeend', recapTaskRowHtml({}));
+                list.lastElementChild?.querySelector('textarea')?.focus();
+            });
+            modal?.addEventListener('click', (e) => {
+                if (e.target === modal) { close(); return; }
+                const del = e.target.closest('.recap-task-del');
+                if (del) { del.closest('.recap-task-row')?.remove(); return; }
+            });
+            modal?.addEventListener('change', (e) => {
+                const on = e.target.closest('.recap-task-on');
+                if (on) on.closest('.recap-task-row').classList.toggle('off', !on.checked);
+            });
         }
 
         // --- Svuota (solo recap): cancella completamente il recap della riunione.
@@ -6978,6 +7030,8 @@
             if (uploadBtn) uploadBtn.style.display = '';
             const fixBtn = document.getElementById('meetingTextFix');
             if (fixBtn) fixBtn.style.display = '';
+            const tasksBtn = document.getElementById('meetingTextTasks'); // Crea task: solo nel recap
+            if (tasksBtn) tasksBtn.style.display = field === 'recap' ? 'inline-block' : 'none';
             const audioBtn = document.getElementById('meetingTextAudio'); // file audio: solo trascrizione
             if (audioBtn) audioBtn.style.display = field === 'trascrizione' ? 'inline-block' : 'none';
             modal.dataset.title = btn.dataset.title || '';
@@ -7011,7 +7065,7 @@
             modal.dataset.eventId = '';
             modal.dataset.field = field;
             modal.dataset.title = title;
-            ['meetingTextUpload', 'meetingTextAudio', 'meetingTextFix', 'meetingTextClear', 'meetingTextEmail'].forEach((id) => {
+            ['meetingTextUpload', 'meetingTextAudio', 'meetingTextFix', 'meetingTextTasks', 'meetingTextClear', 'meetingTextEmail'].forEach((id) => {
                 const el = document.getElementById(id);
                 if (el) el.style.display = 'none';
             });
@@ -7166,64 +7220,10 @@
             return btoa(bin);
         }
 
-        // Etichetta di sessione del primo blocco (uguale per server e browser).
+        // Etichetta di sessione del primo blocco.
         function recStartLabel(rec) {
             if (rec.fileLabel) return rec.fileLabel; // file audio caricato
             return `Registrazione del ${new Date(rec.startedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}${rec.baseOffset ? ` (ripresa da ${formatRecTime(rec.baseOffset)})` : ''}`;
-        }
-
-        // MODALITÀ BROWSER: trascrive il blocco NEL browser (Whisper via Transformers.js) e
-        // manda al server solo i segmenti di testo + il volume delle tracce (mai l'audio). Il
-        // server formatta "chi parla" e accoda come la modalità server. Un blocco alla volta,
-        // in ordine (rec.queue), così la trascrizione sta al passo con la registrazione.
-        function queueBrowserChunk(rec, mixSamples, energy, offsetSec, isFirst) {
-            const startLabel = isFirst ? recStartLabel(rec) : undefined;
-            // Int16 -> Float32 [-1,1], il formato che vuole Whisper.
-            const f32 = new Float32Array(mixSamples.length);
-            for (let i = 0; i < mixSamples.length; i++) f32[i] = mixSamples[i] / 32768;
-            rec.pending++;
-            rec.queue = rec.queue.then(async () => {
-                try {
-                    const out = await window.BrowserTranscribe.transcribe(f32, { mode: rec.transcribeMode, timestamps: true });
-                    // Transformers.js: chunks = [{ timestamp:[start,end], text }]. In assenza di
-                    // segmenti (blocco senza parlato) non si invia nulla.
-                    const segments = (out.chunks || []).map((c) => ({
-                        start: (c.timestamp && c.timestamp[0]) || 0,
-                        end: (c.timestamp && (c.timestamp[1] ?? c.timestamp[0])) || 0,
-                        text: c.text || ''
-                    })).filter((s) => s.text.trim());
-                    if (!segments.length && out.text) segments.push({ start: 0, end: 0, text: out.text });
-                    if (!segments.length) { rec.sent++; return; }
-                    for (let attempt = 1; ; attempt++) {
-                        try {
-                            const res = await fetch(`${API_URL}/calendar/meetings/managed/transcribe-browser`, {
-                                method: 'POST',
-                                headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ id_calendar: rec.eventId, segments, energy, offset_sec: offsetSec, start_label: startLabel })
-                            });
-                            const data = await res.json().catch(() => ({}));
-                            if (!res.ok) { const err = new Error(data.error || `Errore ${res.status}`); err.status = res.status; throw err; }
-                            break;
-                        } catch (e) {
-                            const temporary = !e.status || e.status === 429 || e.status >= 500;
-                            if (!temporary || attempt >= 4) throw e;
-                            rec.lastError = `${e.message} — nuovo tentativo tra ${attempt * 20} s`;
-                            updateRecStatus(rec);
-                            await new Promise((r) => setTimeout(r, attempt * 20000));
-                        }
-                    }
-                    rec.sent++;
-                    refreshMeetingStatuses();
-                    rec.lastError = '';
-                } catch (e) {
-                    rec.lastError = e.message;
-                    rec.failed = (rec.failed || 0) + 1;
-                    if ((e.status === 428 || e.status === 404) && rec.running) stopMeetingRecording(e.message);
-                } finally {
-                    rec.pending--;
-                    updateRecStatus(rec);
-                }
-            });
         }
 
         // Invio in coda (un blocco alla volta, in ordine) al server, che trascrive in background.
@@ -7330,11 +7330,7 @@
                 mix[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
             }
             const isFirst = rec.chunks++ === 0;
-            if (rec.transcribeMode === 'Browser-leggero' || rec.transcribeMode === 'Browser-pesante') {
-                queueBrowserChunk(rec, mix, energy, offsetSec, isFirst);
-            } else {
-                queueRecChunk(rec, mix, energy, offsetSec, isFirst);
-            }
+            queueRecChunk(rec, mix, energy, offsetSec, isFirst);
         }
 
         // Volume di una traccia (RMS, 0..1) per finestre di 0,5 s: 30 s -> 60 valori.
@@ -7375,28 +7371,19 @@
         function updateRecStatus(rec) {
             if (rec !== meetingRec) return;
             const elapsed = rec.startedAt ? (Date.now() - rec.startedAt) / 1000 : 0;
-            // In modalità browser la trascrizione avviene sul PC: l'audio non va al server,
-            // si invia solo il testo. Le etichette cambiano di conseguenza.
-            const browser = rec.transcribeMode === 'Browser-leggero' || rec.transcribeMode === 'Browser-pesante';
-            const doneVerb = browser ? 'trascritti nel browser' : 'inviati al server';
             if (rec.running) {
-                let t = `● Registrazione in corso ${formatRecTime(elapsed)} · blocchi ${doneVerb}: ${rec.sent}`;
+                let t = `● Registrazione in corso ${formatRecTime(elapsed)} · blocchi inviati al server: ${rec.sent}`;
                 if (rec.skipped) t += ` · silenzi saltati: ${rec.skipped}`;
                 if (!rec.hasSystemAudio) t += ' · solo microfono';
                 setRecStatus(rec.lastError ? `${t} · ultimo errore: ${rec.lastError}` : t, !!rec.lastError);
             } else if (rec.pending > 0) {
-                setRecStatus(browser
-                    ? `Trascrizione degli ultimi blocchi nel browser… (${rec.pending}) — attendi prima di chiudere la pagina`
-                    : `Invio degli ultimi blocchi al server… (${rec.pending}) — attendi prima di chiudere la pagina`);
+                setRecStatus(`Invio degli ultimi blocchi al server… (${rec.pending}) — attendi prima di chiudere la pagina`);
             } else if (rec.stoppedReason) {
                 setRecStatus(rec.stoppedReason, true);
             } else if (rec.failed > 0) {
-                const verb = browser ? 'Trascrizione' : 'Invio';
-                setRecStatus(`${verb} non riuscit${browser ? 'a' : 'o'} per ${rec.failed} blocc${rec.failed === 1 ? 'o' : 'hi'} su ${rec.failed + rec.sent}: ${rec.lastError}`, true);
+                setRecStatus(`Invio non riuscito per ${rec.failed} blocc${rec.failed === 1 ? 'o' : 'hi'} su ${rec.failed + rec.sent}: ${rec.lastError}`, true);
             } else if (rec.startedAt) {
-                setRecStatus(browser
-                    ? `Trascrizione completata nel browser (${rec.sent} blocchi).`
-                    : `Registrazione inviata al server (${rec.sent} blocchi): la trascrizione prosegue in background.`);
+                setRecStatus(`Registrazione inviata al server (${rec.sent} blocchi): la trascrizione prosegue in background.`);
             }
         }
 
@@ -7471,32 +7458,9 @@
                 const d = await r.json().catch(() => ({}));
                 if (r.ok) rec.baseOffset = Math.max(0, Number(d.offset) || 0);
             } catch (e) { /* si parte da 00:00:00 */ }
-            // Modalità di trascrizione scelta in Impostazioni (per tenant/utente).
-            // Browser-* = trascrizione nel PC dell'utente; Background (default) = sul server.
-            rec.transcribeMode = 'Background';
-            try {
-                const rm = await fetch(`${API_URL}/settings/transcription-mode`, { headers: calendarAuthHeaders() });
-                const dm = await rm.json().catch(() => ({}));
-                if (rm.ok && dm.mode) rec.transcribeMode = dm.mode;
-            } catch (e) { /* in caso di errore resta Background */ }
-            if (rec.transcribeMode === 'Browser-leggero' || rec.transcribeMode === 'Browser-pesante') {
-                if (!window.BrowserTranscribe) {
-                    rec.transcribeMode = 'Background';
-                    showNotification('Trascrizione nel browser non disponibile: uso il server.', 'info');
-                } else {
-                    // Avvia il caricamento del modello in background (i primi 30 s di audio danno
-                    // il tempo di scaricarlo/prepararlo). Se fallisce (es. "pesante" senza GPU),
-                    // si ricade sul server per questa registrazione.
-                    setRecStatus('Preparazione della trascrizione nel browser…');
-                    window.BrowserTranscribe.preloadModel(rec.transcribeMode, (p) => {
-                        if (p.status === 'progress' && p.progress) setRecStatus(`Scarico il modello di trascrizione… ${Math.round(p.progress)}%`);
-                    }).then(() => { if (rec.running) setRecStatus('In registrazione (trascrizione nel browser)…'); })
-                      .catch((e) => {
-                        rec.transcribeMode = 'Background';
-                        showNotification('Trascrizione nel browser non riuscita (' + e.message + '): uso il server.', 'info');
-                      });
-                }
-            }
+            // La trascrizione avviene sempre sul server (Background o Background-Veloce, scelti
+            // in Impostazioni e applicati dalla coda): la trascrizione nel browser
+            // (Browser-leggero/pesante) è stata eliminata il 2026-09-29.
             rec.hasSystemAudio = rec.display.getAudioTracks().length > 0;
             try {
                 // Il microfono non deve essere lo stesso dispositivo usato come audio di sistema.
@@ -7522,7 +7486,7 @@
             rec.sent = 0; rec.failed = 0; rec.pending = 0; rec.lastError = ''; rec.stoppedReason = '';
             rec.queue = Promise.resolve();
             // Cattura su thread audio dedicato (AudioWorklet): non perde audio quando la CPU
-            // è impegnata (es. trascrizione nel browser). Sostituisce ScriptProcessorNode.
+            // è impegnata. Sostituisce ScriptProcessorNode.
             try {
                 await rec.ctx.audioWorklet.addModule('js/rec-worklet.js');
             } catch (e) {
@@ -7620,15 +7584,8 @@
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
-                // Recap Projexa Browser: il server non fa il recap, lo farà questa pagina quando
-                // la trascrizione è completa (aggiornamento della griglia).
-                let browserRecap = false;
-                try { browserRecap = (await getRecapMode()).local === 'browser'; } catch (e) { /* vale il recap del server */ }
-                if (browserRecap) autoBrowserRecap.add(rec.eventId);
                 if (rec === meetingRec) {
-                    setRecStatus(browserRecap
-                        ? `Registrazione inviata al server (${rec.sent} blocchi). Il recap si genera in questo browser a trascrizione finita: lascia la pagina aperta.`
-                        : `Registrazione inviata al server (${rec.sent} blocchi). Trascrizione e recap proseguono in background: puoi chiudere la pagina.`);
+                    setRecStatus(`Registrazione inviata al server (${rec.sent} blocchi). Trascrizione e recap proseguono in background: puoi chiudere la pagina.`);
                 }
             } catch (e) {
                 if (rec === meetingRec) setRecStatus(`Blocchi inviati, ma il recap automatico non è stato prenotato (${e.message}): usa il pulsante "Recap" a trascrizione finita.`, true);
@@ -7673,10 +7630,10 @@
                 }
                 recUi().box.style.display = 'none';
             });
-            // Chiudere o ricaricare la pagina durante la registrazione interromperebbe la
-            // trascrizione; durante un recap nel browser lo interromperebbe.
+            // Chiudere o ricaricare la pagina durante la registrazione (o l'invio di un file
+            // audio) interromperebbe l'invio dei blocchi da trascrivere.
             window.addEventListener('beforeunload', (e) => {
-                if ((meetingRec && (meetingRec.running || meetingRec.pending > 0)) || recapProgress.size > 0 || audioFileJobs.size > 0) {
+                if ((meetingRec && (meetingRec.running || meetingRec.pending > 0)) || audioFileJobs.size > 0) {
                     e.preventDefault();
                     e.returnValue = '';
                 }
@@ -12733,9 +12690,11 @@
                     let editingRows = [];      // tutte le <tr> attualmente modificabili
                     let editingIsNew = false;
 
-                    const setToolbarEditingState = (isEditingNow) => {
+                    // keepAdd: durante l'inserimento "+ Nuova riga" resta visibile, così si
+                    // aggiungono più righe e si salvano tutte insieme.
+                    const setToolbarEditingState = (isEditingNow, keepAdd = false) => {
                         if (selectionLabel) selectionLabel.style.display = isEditingNow ? 'none' : '';
-                        if (addBtn) addBtn.style.display = isEditingNow ? 'none' : '';
+                        if (addBtn) addBtn.style.display = isEditingNow && !keepAdd ? 'none' : '';
                         if (editBtn) editBtn.style.display = isEditingNow ? 'none' : '';
                         if (deleteBtn) deleteBtn.style.display = isEditingNow ? 'none' : '';
                         if (saveBtn) saveBtn.style.display = isEditingNow ? '' : 'none';
@@ -12755,9 +12714,10 @@
                     });
 
                     // "+ Nuova riga": aggiunge una riga vuota direttamente in cima alla griglia,
-                    // con le stesse colonne visibili, pronta per l'inserimento inline.
+                    // con le stesse colonne visibili, pronta per l'inserimento inline. Si può
+                    // premere più volte: "Salva" inserisce tutte le righe nuove compilate.
                     addBtn?.addEventListener('click', async () => {
-                        if (editingRows.length || !orderedMeta.length) return;
+                        if ((editingRows.length && !editingIsNew) || !orderedMeta.length) return;
                         const tbody = widget.querySelector('.type11-grid-table tbody');
                         if (!tbody) return;
                         tbody.querySelector('.type11-empty-row')?.remove(); // via il placeholder "Nessun dato"
@@ -12767,9 +12727,10 @@
                             + (canExpire ? '<td class="type11-expire-col"></td>' : '');
                         tbody.insertBefore(tr, tbody.firstChild);
                         attachType11RubricaSearch(tr);
-                        editingRows = [tr];
+                        editingRows.push(tr);
                         editingIsNew = true;
-                        setToolbarEditingState(true);
+                        setToolbarEditingState(true, true);
+                        tr.querySelector('.type11-editor-field:not([disabled])')?.focus();
                     });
 
                     // "Modifica tutte": rende contemporaneamente editabili tutte le righe
@@ -12816,16 +12777,46 @@
                         try {
                             let response;
                             if (editingIsNew) {
-                                const values = {};
-                                editingRows[0].querySelectorAll('.type11-editor-field').forEach(input => {
-                                    if (input.disabled) return;
-                                    values[input.dataset.col] = input.type === 'checkbox' ? input.checked : input.value;
-                                });
-                                response = await fetch(`${API_URL}/${gridSource}/grid-widget/row`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                                    body: JSON.stringify({ fieldId: widget.dataset.gridFieldId, values })
-                                });
+                                // Righe nuove: una richiesta per riga, in ordine (dall'ultima aggiunta
+                                // in basso alla prima). Le righe lasciate vuote si ignorano. Se una riga
+                                // dà errore ci si ferma: quelle già salvate spariscono dall'elenco e le
+                                // altre restano da correggere.
+                                const pending = [...editingRows].reverse().map(row => {
+                                    const values = {};
+                                    let filled = false;
+                                    row.querySelectorAll('.type11-editor-field').forEach(input => {
+                                        if (input.disabled) return;
+                                        const v = input.type === 'checkbox' ? input.checked : input.value;
+                                        values[input.dataset.col] = v;
+                                        if (v === true || (typeof v === 'string' && v.trim() !== '')) filled = true;
+                                    });
+                                    return { row, values, filled };
+                                }).filter(item => item.filled);
+                                if (!pending.length) {
+                                    showNotification('Compila almeno una riga prima di salvare', 'info');
+                                    return;
+                                }
+                                let saved = 0;
+                                for (const item of pending) {
+                                    const res = await fetch(`${API_URL}/${gridSource}/grid-widget/row`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                                        body: JSON.stringify({ fieldId: widget.dataset.gridFieldId, values: item.values })
+                                    });
+                                    const data = await res.json().catch(() => ({}));
+                                    if (!res.ok) {
+                                        showNotification(`${saved ? `Salvate ${saved} righe. ` : ''}Errore sulla riga successiva: ${data.error || res.status}`, 'info');
+                                        if (saved) type11DataChanged(widget);
+                                        return;
+                                    }
+                                    saved++;
+                                    item.row.remove();
+                                    editingRows = editingRows.filter(r => r !== item.row);
+                                }
+                                await loadType11Grid(widget);
+                                type11DataChanged(widget);
+                                showNotification(saved === 1 ? 'Salvato' : `Salvate ${saved} righe`, 'success');
+                                return;
                             } else {
                                 const changedRows = editingRows.filter(row => row.dataset.type11Dirty === '1').map(row => {
                                     const values = {};
@@ -14840,6 +14831,7 @@
             initAudioDevices();
             initMeetingRecorder();
             initMeetingText();
+            initRecapTasks();
             initMeetingsDate();
             initNewRecording();
             await loadTenantHeaderLogo();
@@ -14893,6 +14885,7 @@
                 <button id="meetingTextFix" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Applica al testo le correzioni automatiche (parole sbagliate → giuste) impostate per te e per il cliente della riunione"><i class="fas fa-spell-check"></i> Applica correzioni</button>
                 <button id="meetingTextEmail" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Apri una nuova email con questo testo (Outlook del computer o Gmail, secondo il calendario default)"><i class="fas fa-envelope"></i> Email</button>
                 <button id="meetingTextClear" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid #FCA5A5; border-radius: 8px; background: #FEF2F2; color: #B91C1C; cursor: pointer;" title="Cancella completamente il recap di questa riunione"><i class="fas fa-eraser"></i> Svuota</button>
+                <button id="meetingTextTasks" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid #10B981; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;" title="Crea i task dalle tue righe di &quot;AZIONI IN CARICO&quot; (li rivedi prima di salvarli)"><i class="fas fa-list-check"></i> Crea task</button>
                 <button id="meetingTextDownload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Scarica il testo in un file .txt"><i class="fas fa-download"></i> Scarica .txt</button>
                 <button id="meetingTextCopy" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-copy"></i> Copia testo</button>
                 <button id="meetingTextDone" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;">Chiudi</button>
@@ -14916,6 +14909,22 @@
         </div>
     </div>
     <div id="recapToasts" class="recap-toasts" aria-live="polite"></div>
+    <!-- "Crea task" dal recap: anteprima modificabile dei task, poi inserimento in tasks -->
+    <div id="recapTasksModal" class="task-modal" style="z-index: 820;" role="dialog" aria-modal="true" aria-labelledby="recapTasksTitle">
+        <div class="task-modal-card" style="width: min(920px, 96vw);">
+            <div class="task-modal-header">
+                <h3 id="recapTasksTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-list-check" style="color: #10B981;"></i> Crea task dalle azioni in carico</h3>
+                <button id="recapTasksClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="recapTasksBody" class="recap-tasks-body"></div>
+            <div class="task-modal-footer">
+                <button id="recapTasksAdd" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer; margin-right: auto;"><i class="fas fa-plus"></i> Aggiungi riga</button>
+                <button id="recapTasksCancel" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
+                <button id="recapTasksSave" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-check"></i> Salva task</button>
+            </div>
+        </div>
+    </div>
+
     <div id="meetingRecorder" class="meeting-recorder" role="region" aria-label="Registrazione riunione" style="display: none;">
         <div class="meeting-recorder-head">
             <span class="meeting-recorder-dot" id="meetingRecorderDot"></span>
@@ -15206,19 +15215,6 @@
     applyGridGrouping();
     window.applyType11GridGrouping = applyGridGrouping;
 })();
-</script>
-<!-- Trascrizione nel browser (Whisper via Transformers.js): caricata come modulo ed
-     esposta su window.BrowserTranscribe, così la usa il codice della registrazione.
-     Serve solo in modalità "Browser-*"; in "Background" non viene mai invocata. -->
-<script type="module">
-    import * as BT from './js/browser-transcribe.js';
-    window.BrowserTranscribe = BT;
-</script>
-<!-- Recap nel browser (Recap Projexa Browser-Medio/Alto): window.BrowserRecap. La libreria
-     WebLLM e il modello si scaricano solo al primo recap, non all'apertura della pagina. -->
-<script type="module">
-    import * as BR from './js/browser-recap.js';
-    window.BrowserRecap = BR;
 </script>
 </body>
 </html>
