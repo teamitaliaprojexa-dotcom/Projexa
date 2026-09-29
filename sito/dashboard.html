@@ -2274,6 +2274,47 @@
             line-height: 1.55;
             color: var(--dark);
         }
+        /* Finestra trascrizione/recap: comandi in una barra verticale a sinistra, a destra
+           dati dell'email, barra di formattazione e testo (modificabile nel recap). */
+        .mt-card { width: min(1120px, 96vw); max-height: 92vh; display: flex; flex-direction: column; }
+        .mt-card .task-modal-header { gap: 0.75rem; }
+        .mt-dirty { margin-left: auto; font-size: 0.75rem; color: #B45309; white-space: nowrap; }
+        .mt-dirty i { font-size: 0.5rem; vertical-align: middle; }
+        .mt-layout { display: flex; min-height: 0; flex: 1 1 auto; }
+        .mt-side { flex: 0 0 158px; display: flex; flex-direction: column; gap: 0.4rem; padding: 0.8rem 0.65rem; background: #F8FAFC; border-right: 1px solid var(--border); overflow-y: auto; }
+        .mt-side-fill { flex: 1 1 auto; }
+        .mt-btn { display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left; padding: 0.5rem 0.65rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); font-size: 0.82rem; cursor: pointer; }
+        .mt-btn i { width: 1rem; text-align: center; }
+        .mt-btn:hover { background: #F1F5F9; }
+        .mt-btn:disabled { opacity: 0.55; cursor: default; }
+        .mt-btn.mt-primary { background: #2563EB; border-color: #2563EB; color: white; font-weight: 600; }
+        .mt-btn.mt-primary:hover { background: #1D4ED8; }
+        .mt-btn.mt-green { background: #10B981; border-color: #10B981; color: white; font-weight: 600; }
+        .mt-btn.mt-green:hover { background: #059669; }
+        .mt-btn.mt-danger { background: #FEF2F2; border-color: #FCA5A5; color: #B91C1C; }
+        .mt-btn.mt-close { justify-content: center; background: #10B981; border-color: #10B981; color: white; font-weight: 600; }
+        .mt-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; padding: 0.6rem 0 0; }
+        .mt-main > #meetingTextSub { padding: 0 1.25rem; }
+        .mt-main .meeting-text-body { flex: 1 1 auto; max-height: none; min-height: 12rem; }
+        .mt-email { display: grid; grid-template-columns: 2.2rem minmax(0, 1fr); gap: 0.35rem 0.5rem; align-items: center; padding: 0.55rem 1.25rem 0.2rem; }
+        .mt-email label { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); }
+        .mt-email input { width: 100%; padding: 0.35rem 0.55rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; }
+        .mt-rte { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem; margin: 0.55rem 1.25rem 0; padding: 0.3rem 0.4rem; border: 1px solid var(--border); border-radius: 8px; background: #F8FAFC; }
+        .mt-rte button, .mt-rte-color { display: inline-flex; align-items: center; justify-content: center; gap: 0.15rem; min-width: 1.9rem; height: 1.9rem; padding: 0 0.3rem; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--dark); cursor: pointer; font-size: 0.82rem; }
+        .mt-rte button:hover, .mt-rte-color:hover { background: white; border-color: var(--border); }
+        .mt-rte select { height: 1.9rem; padding: 0 0.3rem; border: 1px solid var(--border); border-radius: 6px; background: white; font-size: 0.8rem; max-width: 8.5rem; }
+        .mt-rte-color input[type="color"] { width: 1.1rem; height: 1.1rem; padding: 0; border: none; background: none; cursor: pointer; }
+        .mt-rte-sep { width: 1px; align-self: stretch; margin: 0.2rem 0.25rem; background: var(--border); }
+        .meeting-text-body[contenteditable="true"] { margin: 0.55rem 1.25rem 1rem; padding: 0.8rem 1rem; border: 1px solid var(--border); border-radius: 8px; outline: none; font-family: Aptos, Calibri, 'Segoe UI', Arial, sans-serif; font-size: 11pt; }
+        .meeting-text-body[contenteditable="true"]:focus { border-color: #93C5FD; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12); }
+        .meeting-text-body[contenteditable="true"] blockquote { margin: 0.3rem 0 0.3rem 1rem; padding-left: 0.7rem; border-left: 3px solid #CBD5E1; color: #475569; }
+        .meeting-text-body[contenteditable="true"] ul, .meeting-text-body[contenteditable="true"] ol { margin: 0.2rem 0; padding-left: 1.6rem; }
+        @media (max-width: 760px) {
+            .mt-layout { flex-direction: column; }
+            .mt-side { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; border-right: none; border-bottom: 1px solid var(--border); }
+            .mt-btn { width: auto; }
+            .mt-side-fill { display: none; }
+        }
         .meeting-text-section {
             margin: 0.9rem 0 0.5rem;
             padding-bottom: 0.3rem;
@@ -6573,7 +6614,8 @@
         // eventuali "\n" scritti come testo trasformati in veri a capo e fine riga Windows.
         function downloadMeetingText() {
             const modal = document.getElementById('meetingTextModal');
-            const raw = document.getElementById('meetingTextBody').dataset.raw || '';
+            // Recap in modifica: il testo come appare adesso (anche se non ancora salvato).
+            const raw = isRecapEditing() ? getRecapPlain() : (document.getElementById('meetingTextBody').dataset.raw || '');
             if (!raw.trim()) { showNotification('Nessun testo da scaricare', 'info'); return; }
             const text = raw.replace(/\r\n?/g, '\n').replace(/\\n/g, '\n').trim().replace(/\n/g, '\r\n') + '\r\n';
             const kind = modal.dataset.field === 'recap' ? 'Recap' : 'Trascrizione';
@@ -6823,6 +6865,8 @@
         async function applyMeetingCorrections() {
             const modal = document.getElementById('meetingTextModal');
             const field = modal.dataset.field === 'recap' ? 'recap' : 'trascrizione';
+            // Recap modificato e non salvato: prima si salva, così le correzioni partono dal testo attuale.
+            if (isRecapEditing() && mtDirty && !(await saveRecapEdit(true))) return;
             const btn = document.getElementById('meetingTextFix');
             if (btn) btn.disabled = true;
             try {
@@ -6876,6 +6920,8 @@
             const body = document.getElementById('recapTasksBody');
             recapTasksEventId = textModal.dataset.eventId || '';
             if (!recapTasksEventId) return;
+            // Recap modificato e non salvato: i task si leggono dal recap salvato, quindi prima si salva.
+            if (isRecapEditing() && mtDirty && !(await saveRecapEdit(true))) return;
             body.innerHTML = '<p class="meeting-text-empty"><i class="fas fa-spinner fa-spin"></i> Lettura delle azioni in carico…</p>';
             modal.classList.add('open');
             try {
@@ -6989,31 +7035,240 @@
         // e si apre l'email con il solo oggetto (il testo si incolla con Ctrl+V).
         // mailto: la soglia dipende da Windows e dal programma di posta; se Outlook taglia il
         // testo o non si apre, abbassarla.
+        // Destinatari (A, Cc): i campi in alto nel recap. Il testo formattato non può passare dal
+        // link (mailto/Gmail accettano solo testo semplice): se il recap ha formattazione, l'email
+        // si apre con destinatari e oggetto e il testo formattato va negli appunti (Ctrl+V).
         const EMAIL_URL_MAX = { google: 7000, mailto: 8000 };
-        function emailMeetingText() {
+        async function emailMeetingText() {
             const modal = document.getElementById('meetingTextModal');
-            const raw = (document.getElementById('meetingTextBody').dataset.raw || '').replace(/\r\n?/g, '\n').replace(/\\n/g, '\n').trim();
+            const editing = isRecapEditing();
+            if (editing && mtDirty && !(await saveRecapEdit(true))) return;
+            const raw = (editing ? getRecapPlain() : (document.getElementById('meetingTextBody').dataset.raw || ''))
+                .replace(/\r\n?/g, '\n').replace(/\\n/g, '\n').trim();
             if (!raw) { showNotification('Nessun testo da inviare', 'info'); return; }
             let subject = `${modal.dataset.field === 'recap' ? 'Recap' : 'Trascrizione'} - ${modal.dataset.title || 'riunione'}`;
             let body = raw;
             const subj = /^oggetto\s*:\s*(.+)\n+/i.exec(raw);
             if (subj) { subject = subj[1].trim(); body = raw.slice(subj[0].length).trim(); }
+            const list = (id) => mtEmailList(document.getElementById(id)?.value);
+            const to = editing ? list('meetingEmailTo') : [];
+            const cc = editing ? list('meetingEmailCc') : [];
+            const from = editing ? String(document.getElementById('meetingEmailFrom')?.value || '').trim() : '';
+            const html = editing ? recapHtmlWithoutSubject() : '';
+            const formatted = !!html && /<(b|strong|i|em|u|s|strike|del|font|ul|ol|li|blockquote|sub|sup|h[1-6]|a)\b|style\s*=/i.test(html);
 
             const kind = calendarDefaultProvider === 'google' ? 'google' : 'mailto';
             const build = (b) => {
                 const s = encodeURIComponent(subject);
-                const t = encodeURIComponent(b);
-                if (kind === 'google') return `https://mail.google.com/mail/?view=cm&fs=1&su=${s}${b ? `&body=${t}` : ''}`;
-                return `mailto:?subject=${s}${b ? `&body=${encodeURIComponent(b.replace(/\n/g, '\r\n'))}` : ''}`;
+                if (kind === 'google') {
+                    return `https://mail.google.com/mail/?view=cm&fs=1${from ? `&authuser=${encodeURIComponent(from)}` : ''}`
+                        + `${to.length ? `&to=${encodeURIComponent(to.join(','))}` : ''}${cc.length ? `&cc=${encodeURIComponent(cc.join(','))}` : ''}`
+                        + `&su=${s}${b ? `&body=${encodeURIComponent(b)}` : ''}`;
+                }
+                const q = [cc.length ? `cc=${encodeURIComponent(cc.join(';'))}` : '', `subject=${s}`,
+                    b ? `body=${encodeURIComponent(b.replace(/\n/g, '\r\n'))}` : ''].filter(Boolean).join('&');
+                return `mailto:${to.map(encodeURIComponent).join(';')}?${q}`;
             };
-            let url = build(body);
-            if (url.length > EMAIL_URL_MAX[kind]) {
+            let url;
+            if (formatted) {
+                // Testo con formattazione: negli appunti come HTML (e testo), corpo dell'email vuoto.
                 url = build('');
-                if (navigator.clipboard) navigator.clipboard.writeText(body).catch(() => {});
-                showNotification('Testo lungo: è stato copiato negli appunti, incollalo nell\'email con Ctrl+V', 'info');
+                const wrapped = `<div style="font-family: Aptos, Calibri, Arial, sans-serif; font-size: 11pt;">${html}</div>`;
+                try {
+                    await navigator.clipboard.write([new ClipboardItem({
+                        'text/html': new Blob([wrapped], { type: 'text/html' }),
+                        'text/plain': new Blob([body], { type: 'text/plain' })
+                    })]);
+                    showNotification('Testo formattato copiato: nel corpo dell\'email premi Ctrl+V', 'info');
+                } catch (e) {
+                    url = build(body);
+                    showNotification('Formattazione non copiabile in questo browser: l\'email contiene il testo semplice', 'info');
+                }
+            } else {
+                url = build(body);
+                if (url.length > EMAIL_URL_MAX[kind]) {
+                    url = build('');
+                    if (navigator.clipboard) navigator.clipboard.writeText(body).catch(() => {});
+                    showNotification('Testo lungo: è stato copiato negli appunti, incollalo nell\'email con Ctrl+V', 'info');
+                }
             }
             if (kind === 'mailto') window.location.href = url;
             else window.open(url, '_blank', 'noopener');
+        }
+
+        // === RECAP MODIFICABILE (finestra del recap) ===
+        // Il recap si modifica direttamente nella finestra, con la barra di formattazione (come
+        // in Outlook/Word). "Salva" scrive il testo semplice (colonna recap: Crea task,
+        // correzioni, .txt), la versione formattata (recap_html) e i dati dell'email.
+        let mtDirty = false;
+        let mtRange = null; // ultima selezione nel testo (le tendine della barra la farebbero perdere)
+
+        function isRecapEditing() {
+            const body = document.getElementById('meetingTextBody');
+            return document.getElementById('meetingTextModal').dataset.field === 'recap' && body.isContentEditable;
+        }
+
+        function setMtDirty(v) {
+            mtDirty = !!v;
+            const ind = document.getElementById('meetingTextDirty');
+            if (ind) ind.style.display = mtDirty ? '' : 'none';
+            const save = document.getElementById('meetingTextSave');
+            if (save) save.disabled = !mtDirty;
+        }
+
+        function mtUserEmail() {
+            try { return String(JSON.parse(localStorage.getItem('user') || '{}').email || '').trim(); } catch (e) { return ''; }
+        }
+
+        function mtEmailList(v) {
+            return [...new Set(String(v || '').split(/[;,\n]+/).map((x) => x.trim()).filter((x) => /@/.test(x)))];
+        }
+
+        // Pulizia dell'HTML (anche incollato da Word/Outlook): solo tag e stili di formattazione
+        // del testo; via script, eventi, immagini, link non http/mailto.
+        const MT_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'DEL', 'SPAN', 'FONT', 'P', 'DIV', 'BR', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'SUB', 'SUP', 'H1', 'H2', 'H3', 'H4', 'A', 'HR']);
+        const MT_DROP = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'BASE', 'FORM', 'INPUT', 'BUTTON', 'TEXTAREA', 'SELECT', 'SVG', 'MATH', 'TEMPLATE', 'NOSCRIPT', 'IMG', 'VIDEO', 'AUDIO']);
+        const MT_STYLE = /^(color|background|background-color|font-size|font-family|font-weight|font-style|text-decoration|text-decoration-line|text-align|margin-left|padding-left|vertical-align)$/i;
+        function sanitizeRecapHtml(html) {
+            const doc = new DOMParser().parseFromString(`<div>${html || ''}</div>`, 'text/html');
+            const root = doc.body.firstElementChild;
+            const walk = (node) => {
+                [...node.childNodes].forEach((ch) => {
+                    if (ch.nodeType === 8) { ch.remove(); return; }
+                    if (ch.nodeType !== 1) return;
+                    const tag = ch.tagName.toUpperCase();
+                    if (MT_DROP.has(tag)) { ch.remove(); return; }
+                    walk(ch);
+                    if (!MT_TAGS.has(tag)) { ch.replaceWith(...ch.childNodes); return; }
+                    [...ch.attributes].forEach((a) => {
+                        const n = a.name.toLowerCase();
+                        if (n === 'style') {
+                            const kept = String(a.value).split(';').map((d) => d.trim()).filter((d) => {
+                                const i = d.indexOf(':');
+                                return i > 0 && MT_STYLE.test(d.slice(0, i).trim()) && !/url\(|expression|javascript/i.test(d.slice(i + 1));
+                            });
+                            if (kept.length) ch.setAttribute('style', kept.join('; ')); else ch.removeAttribute('style');
+                        } else if (tag === 'FONT' && ['color', 'face', 'size'].includes(n)) {
+                            /* attributi del tag <font> (colore, carattere, dimensione): restano */
+                        } else if (tag === 'A' && n === 'href' && /^(https?:|mailto:)/i.test(String(a.value).trim())) {
+                            /* link sicuri: restano */
+                        } else if (n !== 'align') {
+                            ch.removeAttribute(a.name);
+                        }
+                    });
+                    if (tag === 'A') { ch.setAttribute('target', '_blank'); ch.setAttribute('rel', 'noopener'); }
+                });
+            };
+            walk(root);
+            return root.innerHTML;
+        }
+
+        // Recap in testo semplice -> righe dell'editor (una riga di testo = un blocco).
+        function plainToEditorHtml(text) {
+            return String(text || '').replace(/\r\n?/g, '\n').replace(/\\n/g, '\n').trim().split('\n')
+                .map((l) => `<div>${l.trim() ? escapeHtml(l) : '<br>'}</div>`).join('');
+        }
+
+        function getRecapPlain() {
+            const body = document.getElementById('meetingTextBody');
+            return String(body.innerText || '').replace(/ /g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+        }
+
+        // HTML del recap senza la prima riga "Oggetto: ..." (diventa l'oggetto dell'email).
+        function recapHtmlWithoutSubject() {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = sanitizeRecapHtml(document.getElementById('meetingTextBody').innerHTML);
+            const first = [...tmp.childNodes].find((n) => (n.textContent || '').trim());
+            if (first && /^\s*oggetto\s*:/i.test(first.textContent || '')) {
+                let next = first.nextSibling;
+                first.remove();
+                while (next && !(next.textContent || '').trim()) { const n = next.nextSibling; next.remove(); next = n; }
+            }
+            return tmp.innerHTML;
+        }
+
+        async function saveRecapEdit(silent = false) {
+            const modal = document.getElementById('meetingTextModal');
+            const body = document.getElementById('meetingTextBody');
+            const text = getRecapPlain();
+            if (!text) { showNotification('Il recap è vuoto: per cancellarlo usa "Svuota"', 'info'); return false; }
+            const btn = document.getElementById('meetingTextSave');
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch(`${API_URL}/calendar/meetings/managed/recap-edit`, {
+                    method: 'PUT',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id_calendar: modal.dataset.eventId,
+                        text,
+                        html: sanitizeRecapHtml(body.innerHTML),
+                        mittente: document.getElementById('meetingEmailFrom')?.value || '',
+                        email_a: mtEmailList(document.getElementById('meetingEmailTo')?.value).join('; '),
+                        email_cc: mtEmailList(document.getElementById('meetingEmailCc')?.value).join('; ')
+                    })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                body.dataset.raw = text;
+                setMtDirty(false);
+                if (!silent) showNotification('Recap salvato', 'success');
+                return true;
+            } catch (e) {
+                showNotification('Recap non salvato: ' + e.message, 'info');
+                if (btn) btn.disabled = !mtDirty;
+                return false;
+            }
+        }
+
+        // Mostra/nasconde gli strumenti del recap (dati email, formattazione, Salva).
+        function setRecapTools(on) {
+            document.getElementById('meetingEmailFields').style.display = on ? '' : 'none';
+            document.getElementById('meetingRteBar').style.display = on ? '' : 'none';
+            document.getElementById('meetingTextSave').style.display = on ? '' : 'none';
+            const body = document.getElementById('meetingTextBody');
+            body.contentEditable = on ? 'true' : 'false';
+            if (!on) body.removeAttribute('contenteditable');
+            setMtDirty(false);
+        }
+
+        function initRecapEditor() {
+            const body = document.getElementById('meetingTextBody');
+            const bar = document.getElementById('meetingRteBar');
+            body.addEventListener('input', () => { if (isRecapEditing()) setMtDirty(true); });
+            ['meetingEmailFrom', 'meetingEmailTo', 'meetingEmailCc'].forEach((id) =>
+                document.getElementById(id)?.addEventListener('input', () => setMtDirty(true)));
+            document.addEventListener('selectionchange', () => {
+                const sel = window.getSelection();
+                if (sel && sel.rangeCount && body.contains(sel.anchorNode) && isRecapEditing()) mtRange = sel.getRangeAt(0).cloneRange();
+            });
+            const restore = () => {
+                body.focus();
+                if (mtRange) { const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(mtRange); }
+            };
+            const run = (cmd, value) => {
+                if (!isRecapEditing()) return;
+                restore();
+                document.execCommand('styleWithCSS', false, true);
+                document.execCommand(cmd, false, value);
+                setMtDirty(true);
+            };
+            // I pulsanti non devono togliere la selezione al testo.
+            bar.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+            bar.addEventListener('click', (e) => {
+                const b = e.target.closest('button[data-rte]');
+                if (!b) return;
+                run(b.dataset.rte, b.dataset.value || null);
+            });
+            bar.querySelectorAll('select[data-rte]').forEach((s) => s.addEventListener('change', () => {
+                if (s.value) run(s.dataset.rte, s.value);
+                s.value = '';
+            }));
+            bar.querySelectorAll('input[type="color"][data-rte]').forEach((c) => c.addEventListener('input', () => run(c.dataset.rte, c.value)));
+            document.getElementById('meetingTextSave')?.addEventListener('click', () => saveRecapEdit(false));
+            // Ctrl+S dentro la finestra del recap: salva.
+            document.getElementById('meetingTextModal').addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && isRecapEditing()) { e.preventDefault(); if (mtDirty) saveRecapEdit(false); }
+            });
         }
 
         async function openMeetingText(btn) {
@@ -7022,21 +7277,19 @@
             const field = btn.dataset.field === 'recap' ? 'recap' : 'trascrizione';
             modal.dataset.eventId = btn.dataset.eventId || '';
             modal.dataset.field = field;
-            const clearBtn = document.getElementById('meetingTextClear');
-            if (clearBtn) clearBtn.style.display = field === 'recap' ? 'inline-block' : 'none';
-            const emailBtn = document.getElementById('meetingTextEmail'); // Email: solo nel recap
-            if (emailBtn) emailBtn.style.display = field === 'recap' ? 'inline-block' : 'none';
-            const uploadBtn = document.getElementById('meetingTextUpload'); // nascosto in sola lettura
-            if (uploadBtn) uploadBtn.style.display = '';
-            const fixBtn = document.getElementById('meetingTextFix');
-            if (fixBtn) fixBtn.style.display = '';
-            const tasksBtn = document.getElementById('meetingTextTasks'); // Crea task: solo nel recap
-            if (tasksBtn) tasksBtn.style.display = field === 'recap' ? 'inline-block' : 'none';
-            const audioBtn = document.getElementById('meetingTextAudio'); // file audio: solo trascrizione
-            if (audioBtn) audioBtn.style.display = field === 'trascrizione' ? 'inline-block' : 'none';
+            // Pulsanti della barra a sinistra: '' = visibile (stile della classe), 'none' = nascosto.
+            const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+            const isRecap = field === 'recap';
+            show('meetingTextClear', isRecap);
+            show('meetingTextEmail', isRecap);     // Email: solo nel recap
+            show('meetingTextUpload', true);
+            show('meetingTextFix', true);
+            show('meetingTextTasks', isRecap);     // Crea task: solo nel recap
+            show('meetingTextAudio', !isRecap);    // file audio: solo trascrizione
             modal.dataset.title = btn.dataset.title || '';
-            document.getElementById('meetingTextTitleText').textContent = `${field === 'recap' ? 'Recap' : 'Trascrizione'} — ${btn.dataset.title || ''}`;
+            document.getElementById('meetingTextTitleText').textContent = `${isRecap ? 'Recap' : 'Trascrizione'} — ${btn.dataset.title || ''}`;
             document.getElementById('meetingTextSub').textContent = '';
+            setRecapTools(false);
             body.innerHTML = '<p class="meeting-text-empty"><i class="fas fa-spinner fa-spin"></i> Caricamento…</p>';
             body.dataset.raw = '';
             modal.classList.add('open');
@@ -7045,7 +7298,20 @@
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
                 body.dataset.raw = data.text || '';
-                body.innerHTML = formatMeetingText(data.text);
+                if (isRecap) {
+                    // Recap: modificabile. Versione formattata se salvata, altrimenti il testo.
+                    // Mittente = il tuo account; A = partecipanti della riunione (dal calendario),
+                    // se non già salvati.
+                    const me = mtUserEmail();
+                    const people = (meetingPeople.get(String(modal.dataset.eventId)) || []).filter((m) => m !== me.toLowerCase());
+                    document.getElementById('meetingEmailFrom').value = data.mittente || me;
+                    document.getElementById('meetingEmailTo').value = data.email_a || people.join('; ');
+                    document.getElementById('meetingEmailCc').value = data.email_cc || '';
+                    body.innerHTML = data.html ? sanitizeRecapHtml(data.html) : plainToEditorHtml(data.text);
+                    setRecapTools(true);
+                } else {
+                    body.innerHTML = formatMeetingText(data.text);
+                }
                 const when = [data.data ? new Date(data.data + 'T00:00:00').toLocaleDateString('it-IT') : '', data.orario ? String(data.orario).slice(0, 5) : ''].filter(Boolean).join(' ');
                 const words = (data.text || '').trim() ? (data.text.trim().split(/\s+/).length) : 0;
                 document.getElementById('meetingTextSub').textContent = [when, words ? `${words} parole` : ''].filter(Boolean).join(' · ');
@@ -7069,6 +7335,7 @@
                 const el = document.getElementById(id);
                 if (el) el.style.display = 'none';
             });
+            setRecapTools(false); // sola lettura: niente modifica, formattazione, dati email
             document.getElementById('meetingTextTitleText').textContent = `${field === 'recap' ? 'Recap' : 'Trascrizione'}${title ? ' — ' + title : ''}`;
             const text = btn.dataset.text || '';
             const words = text.trim() ? text.trim().split(/\s+/).length : 0;
@@ -7116,7 +7383,13 @@
                 openMeetingText(b);
             });
             const modal = document.getElementById('meetingTextModal');
-            const close = () => modal.classList.remove('open');
+            // Chiusura: con modifiche al recap non salvate si chiede conferma.
+            const close = () => {
+                if (mtDirty && !window.confirm('Ci sono modifiche non salvate al recap. Chiudere senza salvarle?')) return;
+                setRecapTools(false);
+                modal.classList.remove('open');
+            };
+            initRecapEditor();
             document.getElementById('meetingTextClose')?.addEventListener('click', close);
             document.getElementById('meetingTextDone')?.addEventListener('click', close);
             modal?.addEventListener('click', (e) => { if (e.target === modal) close(); });
@@ -7139,7 +7412,22 @@
                 audioInput.value = '';
                 uploadMeetingAudio(f);
             });
-            document.getElementById('meetingTextCopy')?.addEventListener('click', () => {
+            document.getElementById('meetingTextCopy')?.addEventListener('click', async () => {
+                // Recap: copia anche la formattazione (si incolla così in Outlook/Word).
+                if (isRecapEditing()) {
+                    const plain = getRecapPlain();
+                    const html = `<div style="font-family: Aptos, Calibri, Arial, sans-serif; font-size: 11pt;">${sanitizeRecapHtml(document.getElementById('meetingTextBody').innerHTML)}</div>`;
+                    try {
+                        await navigator.clipboard.write([new ClipboardItem({
+                            'text/html': new Blob([html], { type: 'text/html' }),
+                            'text/plain': new Blob([plain], { type: 'text/plain' })
+                        })]);
+                        showNotification('Testo copiato (con la formattazione)', 'success');
+                    } catch (e) {
+                        navigator.clipboard?.writeText(plain).then(() => showNotification('Testo copiato', 'success')).catch(() => {});
+                    }
+                    return;
+                }
                 const raw = document.getElementById('meetingTextBody').dataset.raw || '';
                 if (raw && navigator.clipboard) navigator.clipboard.writeText(raw).then(() => showNotification('Testo copiato', 'success')).catch(() => {});
             });
@@ -8305,6 +8593,9 @@
             return { label: 'Altra piattaforma', name: 'Altro', icon: '<i class="fas fa-video" style="color: #6B7280;"></i>' };
         }
 
+        // id riunione -> email di organizzatore e partecipanti (dal calendario), per l'email del recap
+        const meetingPeople = new Map();
+
         // Crea una singola card per la riunione
         function createMeetingCard(event) {
             const start = new Date(event.start.dateTime || event.start.date);
@@ -8334,6 +8625,12 @@
             const title = event.summary || 'Riunione senza titolo';
             // Google usa già { email, displayName, self } per organizer: stesso formato.
             const org = event.organizer || {};
+            // Email di organizzatore e partecipanti: destinatari proposti per l'email del recap.
+            if (event.id) {
+                const mails = [org.email, ...(event.attendees || []).map((a) => a.email || a.emailAddress?.address)]
+                    .map((m) => String(m || '').trim()).filter((m) => /@/.test(m));
+                meetingPeople.set(String(event.id), [...new Set(mails.map((m) => m.toLowerCase()))]);
+            }
             const orgText = org.displayName && org.email ? `${org.displayName} <${org.email}>` : (org.displayName || org.email || '');
             let tooltip = title;
             if (orgText) tooltip += `\nOrganizzatore: ${orgText}`;
@@ -14868,27 +15165,71 @@
         });
     </script>
     <div id="meetingTextModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="meetingTextTitle">
-        <div class="task-modal-card" style="width: min(820px, 96vw);">
+        <div class="task-modal-card mt-card">
             <div class="task-modal-header">
                 <h3 id="meetingTextTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem; min-width: 0;"><i class="fas fa-search" style="color: #10B981;"></i> <span id="meetingTextTitleText">Trascrizione</span></h3>
+                <span id="meetingTextDirty" class="mt-dirty" style="display: none;"><i class="fas fa-circle"></i> Modifiche non salvate</span>
                 <button id="meetingTextClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
             </div>
-            <div id="meetingTextSub" style="padding: 0.6rem 1.25rem 0; font-size: 0.8rem; color: var(--text-muted);"></div>
-            <div id="meetingTextBody" class="meeting-text-body"></div>
-            <div class="task-modal-footer">
-                <input id="meetingTextFile" type="file" accept=".txt,.vtt,text/plain,text/vtt" style="display: none;">
-                <input id="meetingAudioFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.webm" style="display: none;">
-                <span style="margin-right: auto; display: inline-flex; gap: 0.5rem;">
-                    <button id="meetingTextUpload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Carica un file .txt o .vtt: sostituisce il testo di questa riunione"><i class="fas fa-upload"></i> Carica file</button>
-                    <button id="meetingTextAudio" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Carica un file audio (.mp3, .wav, .m4a…): viene trascritto sul server e il testo si aggiunge alla trascrizione"><i class="fas fa-file-audio"></i> Trascrivi audio</button>
-                </span>
-                <button id="meetingTextFix" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Applica al testo le correzioni automatiche (parole sbagliate → giuste) impostate per te e per il cliente della riunione"><i class="fas fa-spell-check"></i> Applica correzioni</button>
-                <button id="meetingTextEmail" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Apri una nuova email con questo testo (Outlook del computer o Gmail, secondo il calendario default)"><i class="fas fa-envelope"></i> Email</button>
-                <button id="meetingTextClear" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid #FCA5A5; border-radius: 8px; background: #FEF2F2; color: #B91C1C; cursor: pointer;" title="Cancella completamente il recap di questa riunione"><i class="fas fa-eraser"></i> Svuota</button>
-                <button id="meetingTextTasks" type="button" style="display: none; padding: 0.6rem 1rem; border: 1px solid #10B981; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;" title="Crea i task dalle tue righe di &quot;AZIONI IN CARICO&quot; (li rivedi prima di salvarli)"><i class="fas fa-list-check"></i> Crea task</button>
-                <button id="meetingTextDownload" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;" title="Scarica il testo in un file .txt"><i class="fas fa-download"></i> Scarica .txt</button>
-                <button id="meetingTextCopy" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-copy"></i> Copia testo</button>
-                <button id="meetingTextDone" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;">Chiudi</button>
+            <div class="mt-layout">
+                <!-- Barra dei comandi, a sinistra -->
+                <div class="mt-side" role="toolbar" aria-label="Comandi">
+                    <input id="meetingTextFile" type="file" accept=".txt,.vtt,text/plain,text/vtt" style="display: none;">
+                    <input id="meetingAudioFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.webm" style="display: none;">
+                    <button id="meetingTextSave" type="button" class="mt-btn mt-primary" style="display: none;" title="Salva il recap modificato, con la formattazione e i destinatari dell'email"><i class="fas fa-floppy-disk"></i> Salva</button>
+                    <button id="meetingTextEmail" type="button" class="mt-btn" style="display: none;" title="Apri una nuova email con destinatari, oggetto e testo (Outlook del computer o Gmail, secondo il calendario default)"><i class="fas fa-envelope"></i> Email</button>
+                    <button id="meetingTextTasks" type="button" class="mt-btn mt-green" style="display: none;" title="Crea i task dalle tue righe di &quot;AZIONI IN CARICO&quot; (li rivedi prima di salvarli)"><i class="fas fa-list-check"></i> Crea task</button>
+                    <button id="meetingTextFix" type="button" class="mt-btn" title="Applica al testo le correzioni automatiche (parole sbagliate → giuste) impostate per te e per il cliente della riunione"><i class="fas fa-spell-check"></i> Applica correzioni</button>
+                    <button id="meetingTextUpload" type="button" class="mt-btn" title="Carica un file .txt o .vtt: sostituisce il testo di questa riunione"><i class="fas fa-upload"></i> Carica file</button>
+                    <button id="meetingTextAudio" type="button" class="mt-btn" style="display: none;" title="Carica un file audio (.mp3, .wav, .m4a…): viene trascritto sul server e il testo si aggiunge alla trascrizione"><i class="fas fa-file-audio"></i> Trascrivi audio</button>
+                    <button id="meetingTextDownload" type="button" class="mt-btn" title="Scarica il testo in un file .txt"><i class="fas fa-download"></i> Scarica .txt</button>
+                    <button id="meetingTextCopy" type="button" class="mt-btn" title="Copia il testo (con la formattazione) negli appunti"><i class="fas fa-copy"></i> Copia testo</button>
+                    <button id="meetingTextClear" type="button" class="mt-btn mt-danger" style="display: none;" title="Cancella completamente il recap di questa riunione"><i class="fas fa-eraser"></i> Svuota</button>
+                    <span class="mt-side-fill"></span>
+                    <button id="meetingTextDone" type="button" class="mt-btn mt-close">Chiudi</button>
+                </div>
+                <div class="mt-main">
+                    <div id="meetingTextSub" style="font-size: 0.8rem; color: var(--text-muted);"></div>
+                    <!-- Dati dell'email (solo recap) -->
+                    <div id="meetingEmailFields" class="mt-email" style="display: none;">
+                        <label for="meetingEmailFrom">Da</label>
+                        <input id="meetingEmailFrom" type="email" placeholder="tua@email.it" title="Mittente. Con Gmail sceglie l'account; con Outlook l'email parte dall'account impostato in Outlook">
+                        <label for="meetingEmailTo">A</label>
+                        <input id="meetingEmailTo" type="text" placeholder="destinatari separati da ;">
+                        <label for="meetingEmailCc">Cc</label>
+                        <input id="meetingEmailCc" type="text" placeholder="copia conoscenza, separati da ;">
+                    </div>
+                    <!-- Formattazione (solo recap) -->
+                    <div id="meetingRteBar" class="mt-rte" style="display: none;" role="toolbar" aria-label="Formattazione del testo">
+                        <select data-rte="fontName" title="Carattere"><option value="">Carattere</option><option>Aptos</option><option>Calibri</option><option>Arial</option><option>Segoe UI</option><option>Verdana</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option></select>
+                        <select data-rte="fontSize" title="Dimensione"><option value="">Dim.</option><option value="1">8</option><option value="2">10</option><option value="3">12</option><option value="4">14</option><option value="5">18</option><option value="6">24</option><option value="7">36</option></select>
+                        <span class="mt-rte-sep"></span>
+                        <button type="button" data-rte="bold" title="Grassetto (Ctrl+B)"><i class="fas fa-bold"></i></button>
+                        <button type="button" data-rte="italic" title="Corsivo (Ctrl+I)"><i class="fas fa-italic"></i></button>
+                        <button type="button" data-rte="underline" title="Sottolineato (Ctrl+U)"><i class="fas fa-underline"></i></button>
+                        <button type="button" data-rte="strikeThrough" title="Barrato"><i class="fas fa-strikethrough"></i></button>
+                        <label class="mt-rte-color" title="Evidenziatore"><i class="fas fa-highlighter"></i><input type="color" data-rte="hiliteColor" value="#fff59d"></label>
+                        <label class="mt-rte-color" title="Colore del testo"><i class="fas fa-font"></i><input type="color" data-rte="foreColor" value="#c00000"></label>
+                        <button type="button" data-rte="subscript" title="Pedice"><i class="fas fa-subscript"></i></button>
+                        <button type="button" data-rte="superscript" title="Apice"><i class="fas fa-superscript"></i></button>
+                        <span class="mt-rte-sep"></span>
+                        <button type="button" data-rte="insertUnorderedList" title="Elenco puntato"><i class="fas fa-list-ul"></i></button>
+                        <button type="button" data-rte="insertOrderedList" title="Elenco numerato"><i class="fas fa-list-ol"></i></button>
+                        <button type="button" data-rte="outdent" title="Riduci rientro"><i class="fas fa-outdent"></i></button>
+                        <button type="button" data-rte="indent" title="Aumenta rientro"><i class="fas fa-indent"></i></button>
+                        <button type="button" data-rte="formatBlock" data-value="blockquote" title="Citazione"><i class="fas fa-quote-right"></i></button>
+                        <span class="mt-rte-sep"></span>
+                        <button type="button" data-rte="justifyLeft" title="Allinea a sinistra"><i class="fas fa-align-left"></i></button>
+                        <button type="button" data-rte="justifyCenter" title="Centra"><i class="fas fa-align-center"></i></button>
+                        <button type="button" data-rte="justifyRight" title="Allinea a destra"><i class="fas fa-align-right"></i></button>
+                        <button type="button" data-rte="justifyFull" title="Giustifica"><i class="fas fa-align-justify"></i></button>
+                        <span class="mt-rte-sep"></span>
+                        <button type="button" data-rte="undo" title="Annulla (Ctrl+Z)"><i class="fas fa-rotate-left"></i></button>
+                        <button type="button" data-rte="redo" title="Ripeti (Ctrl+Y)"><i class="fas fa-rotate-right"></i></button>
+                        <button type="button" data-rte="removeFormat" title="Cancella formattazione"><i class="fas fa-text-slash"></i></button>
+                    </div>
+                    <div id="meetingTextBody" class="meeting-text-body"></div>
+                </div>
             </div>
         </div>
     </div>

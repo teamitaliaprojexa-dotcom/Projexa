@@ -244,6 +244,19 @@ export function stripMarkdown(text) {
     .replace(/\*\*/g, '');
 }
 
+// Come applyCorrections, ma su un recap formattato (HTML): si correggono solo i pezzi di
+// testo tra un tag e l'altro, mai i nomi dei tag o gli attributi (stili, colori...).
+export function applyCorrectionsHtml(html, rules) {
+  let count = 0;
+  const out = String(html || '').split(/(<[^>]*>)/).map((part) => {
+    if (!part || part.startsWith('<')) return part;
+    const r = applyCorrections(part, rules);
+    count += r.count;
+    return r.text;
+  }).join('');
+  return { html: out, count };
+}
+
 // Applica le regole al testo. Restituisce { text, count } (count = sostituzioni fatte).
 export function applyCorrections(text, rules) {
   let out = String(text || '');
@@ -371,7 +384,8 @@ export async function generateRecap(user, idCalendar) {
   if (!recap) throw httpError(502, `${result.label} non ha restituito alcun testo`);
 
   await db.query(
-    `UPDATE rec_meeting SET recap = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
+    // recap_html = NULL: un recap rigenerato sostituisce anche la versione modificata a mano.
+    `UPDATE rec_meeting SET recap = $1, recap_html = NULL, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
     [encRec(recap), user.tenant_id, user.user_id, idCalendar]
   );
   console.log(`[RECAP] ✓ Recap generato con ${result.label} per la riunione ${idCalendar}`);

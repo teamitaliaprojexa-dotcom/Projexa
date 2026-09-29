@@ -20,7 +20,7 @@ import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
 import {
   encRec, enqueueChunk, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices,
-  recapProviderName, recapInProgress, loadCorrections, applyCorrections, stripMarkdown, speakerName
+  recapProviderName, recapInProgress, loadCorrections, applyCorrections, applyCorrectionsHtml, stripMarkdown, speakerName
 } from '../jobs/meetingTranscription.js';
 import { parseRecapActions, parseDueDate, ownerVariants } from '../jobs/recapTasks.js';
 import { encryptRowForWrite } from '../config/crypto.js';
@@ -667,8 +667,10 @@ router.put('/meetings/managed/text', requireAuth, async (req, res) => {
     let fixed = applyCorrections(text, await loadCorrections(req.user, idCalendar)).text;
     // Recap (anche quello generato nel browser): via la formattazione Markdown.
     if (col === 'recap') fixed = stripMarkdown(fixed).trim();
+    // Un recap nuovo (file caricato) sostituisce anche l'eventuale versione formattata.
     const result = await db.query(
-      `UPDATE rec_meeting SET ${col} = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
+      `UPDATE rec_meeting SET ${col} = $1, crypto = 1${col === 'recap' ? ', recap_html = NULL' : ''}
+        WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
       [encRec(fixed), req.user.tenant_id, req.user.user_id, idCalendar]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
@@ -691,11 +693,21 @@ router.post('/meetings/managed/apply-corrections', requireAuth, async (req, res)
     if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
     if (field && field !== 'trascrizione' && field !== 'recap') return res.status(400).json({ error: 'Campo non valido' });
     const cur = await db.query(
-      `SELECT trascrizione, recap FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      `SELECT trascrizione, recap, recap_html FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
       [req.user.tenant_id, req.user.user_id, idCalendar]
     );
     if (cur.rows.length === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
     const rules = await loadCorrections(req.user, idCalendar);
+    // Recap modificato a mano (formattato): le correzioni valgono anche lì.
+    if ((!field || field === 'recap') && cur.rows[0].recap_html && rules.length) {
+      const h = applyCorrectionsHtml(cur.rows[0].recap_html, rules);
+      if (h.count > 0) {
+        await db.query(
+          `UPDATE rec_meeting SET recap_html = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
+          [encRec(h.html), req.user.tenant_id, req.user.user_id, idCalendar]
+        );
+      }
+    }
     const counts = { trascrizione: 0, recap: 0 };
     let markdown = false; // recap ripulito dalla formattazione Markdown
     // Nomi di colonna da una whitelist fissa: nessun input utente nella query.
@@ -861,7 +873,7 @@ router.delete('/meetings/managed/recap', requireAuth, async (req, res) => {
     const idCalendar = String((req.body && req.body.id_calendar) || req.query.id_calendar || '').trim();
     if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
     const result = await db.query(
-      `UPDATE rec_meeting SET recap = NULL WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3`,
+      `UPDATE rec_meeting SET recap = NULL, recap_html = NULL WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3`,
       [req.user.tenant_id, req.user.user_id, idCalendar]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
@@ -972,15 +984,65 @@ router.get('/meetings/managed/text', requireAuth, async (req, res) => {
     if (field !== 'trascrizione' && field !== 'recap') return res.status(400).json({ error: 'Campo non valido' });
     // Nome di colonna da una whitelist fissa: nessun input utente nella query.
     const result = await db.query(
-      `SELECT ${field === 'recap' ? 'recap' : 'trascrizione'} AS testo, oggetto, data_calendar, orario_calendar
+      `SELECT ${field === 'recap' ? 'recap' : 'trascrizione'} AS testo, oggetto, data_calendar, orario_calendar,
+              recap_html, mittente, email_a, email_cc
          FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
       [req.user.tenant_id, req.user.user_id, idCalendar]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
     const r = result.rows[0];
-    res.json({ text: r.testo || '', oggetto: r.oggetto || '', data: r.data_calendar, orario: r.orario_calendar });
+    const out = { text: r.testo || '', oggetto: r.oggetto || '', data: r.data_calendar, orario: r.orario_calendar };
+    // Recap: versione formattata (se modificata a mano) e dati dell'email.
+    if (field === 'recap') {
+      out.html = r.recap_html || '';
+      out.mittente = r.mittente || '';
+      out.email_a = r.email_a || '';
+      out.email_cc = r.email_cc || '';
+    }
+    res.json(out);
   } catch (error) {
     console.error('❌ REC_MEETING_TEXT:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Salvataggio del recap modificato nella finestra del recap: testo semplice (colonna recap,
+// usato da Crea task, correzioni, .txt), versione formattata (recap_html, già ripulita dal
+// browser; qui si tolgono comunque script, eventi e link javascript:) e dati dell'email
+// (mittente, A, Cc). Le correzioni automatiche NON si applicano: è un testo scelto a mano.
+const MAX_RECAP_HTML = 1024 * 1024;
+const cleanEmails = (v) => String(v || '').split(/[;,\n]+/).map((x) => x.trim()).filter(Boolean).slice(0, 100).join('; ').slice(0, 4000);
+
+function scrubHtml(html) {
+  return String(html || '')
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta|base|form|input|button|textarea|select)\b[\s\S]*?(<\s*\/\s*\1\s*>|$)/gi, '')
+    .replace(/<\s*(script|style|iframe|object|embed|link|meta|base|form|input|button|textarea|select)\b[^>]*\/?>/gi, '')
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/(href|src)\s*=\s*("|')\s*(javascript|data|vbscript):[^"']*\2/gi, '$1="#"');
+}
+
+router.put('/meetings/managed/recap-edit', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    const text = String(b.text == null ? '' : b.text).replace(/\r\n?/g, '\n').trim();
+    const html = scrubHtml(b.html).trim();
+    if (!text) return res.status(400).json({ error: 'Il recap è vuoto: per cancellarlo usa "Svuota"' });
+    if (text.length > MAX_TEXT_UPLOAD || html.length > MAX_RECAP_HTML) return res.status(413).json({ error: 'Recap troppo lungo' });
+    const mittente = String(b.mittente || '').trim().slice(0, 320);
+    const result = await db.query(
+      `UPDATE rec_meeting
+          SET recap = $1, recap_html = $2, mittente = $3, email_a = $4, email_cc = $5, crypto = 1
+        WHERE tenant_id = $6 AND user_id = $7 AND id_calendar = $8`,
+      [encRec(text), html ? encRec(html) : null, mittente ? encRec(mittente) : null,
+        encRec(cleanEmails(b.email_a)) || null, encRec(cleanEmails(b.email_cc)) || null,
+        req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('❌ REC_MEETING_RECAP_EDIT:', error.message);
     res.status(500).json({ error: error.message });
   }
 });

@@ -250,7 +250,7 @@ const TABLE_COLUMN_ALLOWLIST = {
   projects: new Set(['valore2']),
   issue: new Set(['richiedente', 'descrizione', 'owner', 'note']),
   // Riunioni registrate/trascritte (routes/calendar.js)
-  rec_meeting: new Set(['oggetto', 'mittente', 'trascrizione', 'recap'])
+  rec_meeting: new Set(['oggetto', 'mittente', 'trascrizione', 'recap', 'recap_html', 'email_a', 'email_cc'])
 };
 
 // Decide se una colonna è cifrabile e, in caso contrario, perché (serve alla UI).
