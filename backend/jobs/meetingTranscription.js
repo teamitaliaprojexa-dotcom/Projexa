@@ -417,6 +417,23 @@ export async function enqueueChunk(user, idCalendar, { mixB64, energy, micB64, s
   return r.rows[0].id;
 }
 
+// Blocchi persi nel browser (invio non riuscito dopo tutti i tentativi): arrivano come note
+// con l'invio successivo e vanno in coda PRIMA di quel blocco, già "trascritte" (state 'done',
+// nessun audio). Così nella trascrizione resta la riga "(blocco audio non trascritto…)" nel
+// punto giusto invece di un buco senza spiegazione.
+export async function enqueueLostNotes(user, idCalendar, notes) {
+  for (const n of (Array.isArray(notes) ? notes : []).slice(0, 50)) {
+    const offset = Math.max(0, Number(n && n.offset_sec) || 0);
+    const text = lostChunkNote({ offset_sec: offset }, String((n && n.reason) || 'invio non riuscito'));
+    await db.query(
+      `INSERT INTO rec_meeting_chunks (tenant_id, user_id, user_email, id_calendar, kind, offset_sec, state, result)
+       VALUES ($1, $2, $3, $4, 'audio', $5, 'done', $6)`,
+      [user.tenant_id, user.user_id, user.email ? encRec(user.email) : null, idCalendar, offset, encRec(text)]
+    );
+  }
+  kickTranscriptionWorker();
+}
+
 // Fine registrazione: quando i blocchi precedenti della riunione sono trascritti, recap.
 export async function enqueueFinalize(user, idCalendar) {
   await db.query(
@@ -452,7 +469,7 @@ export async function queuedEndOffset(user, idCalendar) {
         WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND kind = 'audio'`,
       [user.tenant_id, user.user_id, idCalendar]
     );
-    return r.rows[0].m == null ? -1 : Number(r.rows[0].m) + 30; // + durata di un blocco
+    return r.rows[0].m == null ? -1 : Number(r.rows[0].m) + 35; // + durata massima di un blocco (taglio in pausa: 25-35 s)
   } catch (e) {
     return -1;
   }

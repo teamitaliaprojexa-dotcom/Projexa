@@ -7740,38 +7740,18 @@
             };
             rec.pending++;
             rec.queue = rec.queue.then(async () => {
-                const body = JSON.stringify(payload);
                 try {
-                    // Errori temporanei (AI sovraccarica, rete): il blocco non va perso, si
-                    // rimanda dopo 20 s, 40 s e 60 s mantenendo l'ordine dei blocchi.
-                    for (let attempt = 1; ; attempt++) {
-                        try {
-                            const res = await fetch(`${API_URL}/calendar/meetings/managed/transcribe`, {
-                                method: 'POST',
-                                headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
-                                body
-                            });
-                            const data = await res.json().catch(() => ({}));
-                            if (!res.ok) {
-                                const err = new Error(data.error || `Errore ${res.status}`);
-                                err.status = res.status;
-                                throw err;
-                            }
-                            break;
-                        } catch (e) {
-                            const temporary = !e.status || e.status === 429 || e.status >= 500;
-                            if (!temporary || attempt >= 4) throw e;
-                            rec.lastError = `${e.message} — nuovo tentativo tra ${attempt * 20} s`;
-                            updateRecStatus(rec);
-                            await new Promise((r) => setTimeout(r, attempt * 20000));
-                        }
-                    }
+                    await postRecChunk(rec, payload);
                     rec.sent++;
                     refreshMeetingStatuses(); // mostra subito la lente "Trascrizione"
                     rec.lastError = '';
                 } catch (e) {
                     rec.lastError = e.message;
                     rec.failed = (rec.failed || 0) + 1;
+                    // Blocco perso: la nota parte con il prossimo invio riuscito e finisce nella
+                    // trascrizione nel punto giusto (prima non restava traccia: buchi muti).
+                    if (!rec.lostNotes) rec.lostNotes = [];
+                    rec.lostNotes.push({ offset_sec: offsetSec, reason: `invio al server non riuscito: ${e.message}` });
                     // Nessuna AI per trascrivere o riunione non più gestita: inutile continuare.
                     if ((e.status === 428 || e.status === 404) && rec.running) stopMeetingRecording(e.message);
                 } finally {
@@ -7781,23 +7761,144 @@
             });
         }
 
+        // Invio di un blocco (o delle sole note dei blocchi persi, payload senza audio).
+        // Le note dei blocchi persi in precedenza viaggiano con l'invio: il server le mette in
+        // coda PRIMA di questo blocco, così restano nell'ordine giusto.
+        // Errori temporanei (server sovraccarico, rete assente): il blocco non va perso, si
+        // riprova per circa 10 minuti (20 s, 40 s, poi ogni 60 s) mantenendo l'ordine dei blocchi.
+        const REC_SEND_ATTEMPTS = 12;
+        async function postRecChunk(rec, payload) {
+            const notes = (rec.lostNotes || []).slice();
+            const body = JSON.stringify(notes.length ? { ...payload, lost_notes: notes } : payload);
+            for (let attempt = 1; ; attempt++) {
+                try {
+                    const res = await fetch(`${API_URL}/calendar/meetings/managed/transcribe`, {
+                        method: 'POST',
+                        headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                        body
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        const err = new Error(data.error || `Errore ${res.status}`);
+                        err.status = res.status;
+                        throw err;
+                    }
+                    // Note consegnate: via dall'elenco (solo quelle inviate con questa richiesta).
+                    if (notes.length) rec.lostNotes.splice(0, notes.length);
+                    return;
+                } catch (e) {
+                    const temporary = !e.status || e.status === 429 || e.status >= 500;
+                    if (!temporary || attempt >= REC_SEND_ATTEMPTS) throw e;
+                    const waitSec = Math.min(attempt * 20, 60);
+                    rec.lastError = `${e.message} — nuovo tentativo tra ${waitSec} s`;
+                    updateRecStatus(rec);
+                    await new Promise((r) => setTimeout(r, waitSec * 1000));
+                }
+            }
+        }
+
+        // A fine registrazione: note di blocchi persi rimaste senza un invio successivo.
+        async function flushRecLostNotes(rec) {
+            if (!rec.lostNotes || !rec.lostNotes.length) return;
+            try {
+                await postRecChunk(rec, { id_calendar: rec.eventId, mime: 'audio/wav' });
+            } catch (e) {
+                console.warn('[REC] note dei blocchi persi non inviate:', e.message);
+            }
+        }
+
+        // Taglio dei blocchi IN UNA PAUSA: una frase tagliata a metà finiva in due blocchi
+        // trascritti separatamente (righe spezzate, parole storpiate ai bordi). Dopo
+        // REC_CHUNK_MIN_SECONDS si taglia alla prima pausa; se nessuno si ferma, a
+        // REC_CHUNK_MAX_SECONDS si taglia nel punto più silenzioso tra i due limiti.
+        const REC_CHUNK_MIN_SECONDS = 25;
+        const REC_CHUNK_MAX_SECONDS = 35;
+        const REC_PAUSE_WINDOW = REC_SAMPLE_RATE / 4; // finestre da 0,25 s
+        // Pausa: entrambe le tracce sotto questa frazione del livello della loro voce.
+        const REC_PAUSE_RATIO = 0.2;
+
+        // Campioni [from, to) di un buffer fatto di più pezzi, senza unire tutto il buffer.
+        function sliceRecParts(parts, from, to) {
+            const out = new Int16Array(Math.max(0, to - from));
+            let pos = 0;
+            for (const part of parts) {
+                const pEnd = pos + part.length;
+                if (pEnd > from && pos < to) {
+                    const a = Math.max(from, pos), b = Math.min(to, pEnd);
+                    out.set(part.subarray(a - pos, b - pos), a - from);
+                }
+                if (pEnd >= to) break;
+                pos = pEnd;
+            }
+            return out;
+        }
+
+        function recRms(samples) {
+            let sum = 0;
+            for (let i = 0; i < samples.length; i++) { const v = samples[i] / 32768; sum += v * v; }
+            return Math.sqrt(sum / Math.max(1, samples.length));
+        }
+
+        // Punto di taglio del blocco in corso (in campioni), oppure null se conviene aspettare.
+        // Le finestre vengono esaminate una volta sola (rec.pauseScanFrom) man mano che arrivano.
+        function findRecCut(rec) {
+            const minLen = REC_SAMPLE_RATE * REC_CHUNK_MIN_SECONDS;
+            const maxLen = REC_SAMPLE_RATE * REC_CHUNK_MAX_SECONDS;
+            if (rec.bufferLen < minLen) return null;
+            if (!rec.pauseScanFrom) {
+                // Primo controllo del blocco: soglia di pausa dal livello della voce della
+                // registrazione (compreso l'audio di questo blocco, utile al primo blocco).
+                const lvl = (track, parts) => {
+                    if (!parts) return null;
+                    const extra = recEnergy(sliceRecParts(parts, 0, rec.bufferLen));
+                    return Math.max(REC_SILENCE_RMS, REC_PAUSE_RATIO * recVoiceLevel(rec, track, extra));
+                };
+                rec.pauseLevels = { mic: lvl('mic', rec.mic ? rec.bufMic : null), system: lvl('system', rec.hasSystemAudio ? rec.bufSys : null) };
+                rec.pauseScanFrom = minLen;
+                rec.quietest = null;
+                rec.quietRun = 0;
+            }
+            const L = rec.pauseLevels;
+            while (rec.pauseScanFrom + REC_PAUSE_WINDOW <= Math.min(rec.bufferLen, maxLen)) {
+                const a = rec.pauseScanFrom, b = a + REC_PAUSE_WINDOW;
+                // Rumore relativo: 1 = al livello della soglia di pausa; conta la traccia più "attiva".
+                const score = Math.max(
+                    L.mic ? recRms(sliceRecParts(rec.bufMic, a, b)) / L.mic : 0,
+                    L.system ? recRms(sliceRecParts(rec.bufSys, a, b)) / L.system : 0
+                );
+                rec.pauseScanFrom = b;
+                const mid = a + REC_PAUSE_WINDOW / 2;
+                // Pausa vera = almeno 0,5 s di silenzio (due finestre di fila): un calo tra due
+                // parole non basta. Si taglia a metà della pausa.
+                rec.quietRun = score < 1 ? (rec.quietRun || 0) + 1 : 0;
+                if (rec.quietRun >= 2) return a;
+                if (!rec.quietest || score < rec.quietest.score) rec.quietest = { score, pos: mid };
+            }
+            if (rec.bufferLen >= maxLen) return rec.quietest ? rec.quietest.pos : maxLen;
+            return null;
+        }
+
         function flushRecBuffer(rec, force) {
-            const minSamples = force ? REC_SAMPLE_RATE : REC_SAMPLE_RATE * REC_CHUNK_SECONDS;
-            if (rec.bufferLen < minSamples) return;
-            const join = (parts) => {
-                const out = new Int16Array(rec.bufferLen);
-                let pos = 0;
-                for (const part of parts) { out.set(part, pos); pos += part.length; }
-                return out;
-            };
-            const micRaw = rec.mic ? join(rec.bufMic) : null;
-            const sysRaw = rec.hasSystemAudio ? join(rec.bufSys) : null;
+            let cut;
+            if (force) {
+                if (rec.bufferLen < REC_SAMPLE_RATE) return; // ultimo blocco: almeno 1 secondo
+                cut = rec.bufferLen;
+            } else {
+                cut = findRecCut(rec);
+                if (cut == null) return;
+            }
+            const buffered = rec.bufferLen;
+            const micRaw = rec.mic ? sliceRecParts(rec.bufMic, 0, cut) : null;
+            const sysRaw = rec.hasSystemAudio ? sliceRecParts(rec.bufSys, 0, cut) : null;
             // Gli orari continuano da quelli della sessione precedente (rec.baseOffset).
             const offsetSec = (rec.baseOffset || 0) + rec.flushedSamples / REC_SAMPLE_RATE;
-            rec.flushedSamples += rec.bufferLen;
-            rec.bufMic = [];
-            rec.bufSys = [];
-            rec.bufferLen = 0;
+            rec.flushedSamples += cut;
+            // L'audio dopo il taglio resta nel buffer: è l'inizio del blocco successivo.
+            rec.bufMic = rec.mic && cut < buffered ? [sliceRecParts(rec.bufMic, cut, buffered)] : [];
+            rec.bufSys = rec.hasSystemAudio && cut < buffered ? [sliceRecParts(rec.bufSys, cut, buffered)] : [];
+            rec.bufferLen = buffered - cut;
+            rec.pauseScanFrom = 0;
+            rec.quietest = null;
 
             // Blocco muto (nessuno parla): non si invia, il server non deve trascrivere nulla.
             // Si guarda il volume ORIGINALE delle tracce, con una soglia bassa: l'audio di
@@ -7812,8 +7913,11 @@
             }
             // Ogni traccia portata a un volume udibile prima del mix: senza, le voci basse degli
             // altri partecipanti venivano scartate dal filtro dei silenzi (VAD) di Whisper.
-            const micN = micRaw ? normalizeRecTrack(micRaw) : null;
-            const sysN = sysRaw ? normalizeRecTrack(sysRaw) : null;
+            // Amplificazione calcolata sulla voce di TUTTA la registrazione (non del singolo
+            // blocco): in un blocco in cui l'utente tace il microfono (rumore, eco degli altri)
+            // non viene più gonfiato fino a 15 volte, attribuendogli le frasi degli altri.
+            const micN = micRaw ? normalizeRecTrackSession(rec, 'mic', micRaw, rawEnergy.mic) : null;
+            const sysN = sysRaw ? normalizeRecTrackSession(rec, 'system', sysRaw, rawEnergy.system) : null;
             const micSamples = micN && micN.samples;
             const sysSamples = sysN && sysN.samples;
             // Volume (RMS 0..1) per finestre di 0,5 s, dopo la normalizzazione: il confronto
@@ -7841,11 +7945,15 @@
         // REC_MAX_GAIN volte (mai abbassando), con limitazione dei picchi.
         const REC_TARGET_RMS = 0.08;
         const REC_MAX_GAIN = 15;
+        // Usata per i file audio caricati (un blocco = un pezzo del file).
         function normalizeRecTrack(samples) {
             const active = recEnergy(samples).filter((v) => v >= REC_SILENCE_RMS).sort((a, b) => a - b);
             if (!active.length) return { samples, gain: 1, level: 0 };
             const level = active[Math.floor(active.length / 2)];
-            const gain = Math.min(REC_MAX_GAIN, Math.max(1, REC_TARGET_RMS / level));
+            return applyRecGain(samples, Math.min(REC_MAX_GAIN, Math.max(1, REC_TARGET_RMS / level)), level);
+        }
+
+        function applyRecGain(samples, gain, level) {
             if (gain < 1.05) return { samples, gain: 1, level };
             const out = new Int16Array(samples.length);
             for (let i = 0; i < samples.length; i++) {
@@ -7854,6 +7962,27 @@
                 out[i] = Math.round(Math.tanh(x) * 32767);
             }
             return { samples: out, gain, level };
+        }
+
+        // Livello della VOCE di una traccia su tutta la registrazione: 90° percentile delle
+        // finestre da 0,5 s non silenziose (le finestre in cui si parla davvero, non il rumore
+        // o l'eco dei momenti in cui si tace). extra = finestre non ancora nello storico.
+        const REC_LEVEL_HISTORY = 3600;   // ultime 3600 finestre = 30 minuti
+        const REC_TARGET_VOICE = 0.12;    // livello a cui portare la voce (era la mediana a 0,08)
+        function recVoiceLevel(rec, track, extra) {
+            const hist = (rec.levelHist && rec.levelHist[track]) || [];
+            const all = hist.concat((extra || []).filter((v) => v >= REC_SILENCE_RMS)).sort((a, b) => a - b);
+            return all.length ? all[Math.min(all.length - 1, Math.floor(all.length * 0.9))] : 0;
+        }
+
+        function normalizeRecTrackSession(rec, track, samples, windows) {
+            if (!rec.levelHist) rec.levelHist = { mic: [], system: [] };
+            const hist = rec.levelHist[track];
+            for (const v of windows || recEnergy(samples)) if (v >= REC_SILENCE_RMS) hist.push(v);
+            if (hist.length > REC_LEVEL_HISTORY) hist.splice(0, hist.length - REC_LEVEL_HISTORY);
+            const level = recVoiceLevel(rec, track, null);
+            if (!level) return { samples, gain: 1, level: 0 };
+            return applyRecGain(samples, Math.min(REC_MAX_GAIN, Math.max(1, REC_TARGET_VOICE / level)), level);
         }
         function recEnergy(samples) {
             const out = [];
@@ -7982,6 +8111,7 @@
             rec.ctx = new (window.AudioContext || window.webkitAudioContext)();
             rec.bufMic = []; rec.bufSys = []; rec.bufferLen = 0; rec.flushedSamples = 0; rec.chunks = 0;
             rec.sent = 0; rec.failed = 0; rec.pending = 0; rec.lastError = ''; rec.stoppedReason = '';
+            rec.levelHist = { mic: [], system: [] }; rec.pauseScanFrom = 0; rec.quietest = null; rec.lostNotes = [];
             rec.queue = Promise.resolve();
             // Cattura su thread audio dedicato (AudioWorklet): non perde audio quando la CPU
             // è impegnata. Sostituisce ScriptProcessorNode.
@@ -8065,6 +8195,7 @@
             refreshRecButtons();
             updateRecStatus(rec);
             await rec.queue;
+            await flushRecLostNotes(rec);
             updateRecStatus(rec);
             refreshMeetingStatuses(); // aggiorna le colonne Trascrizione / Recap
             // Tutti i blocchi sono in coda sul server: segnale di fine registrazione. Quando la

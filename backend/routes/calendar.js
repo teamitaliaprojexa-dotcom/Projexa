@@ -19,7 +19,7 @@ import ical from 'node-ical';
 import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
 import {
-  encRec, enqueueChunk, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices,
+  encRec, enqueueChunk, enqueueLostNotes, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices,
   recapProviderName, recapInProgress, loadCorrections, applyCorrections, applyCorrectionsHtml, stripMarkdown, speakerName
 } from '../jobs/meetingTranscription.js';
 import { parseRecapActions, parseDueDate, ownerVariants } from '../jobs/recapTasks.js';
@@ -1107,7 +1107,10 @@ router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
     const mixB64 = checkAudio(b.audio_mix);
     const micB64 = mixB64 ? null : checkAudio(b.audio_mic);
     const sysB64 = mixB64 ? null : checkAudio(b.audio_system || b.audio);
-    if (!mixB64 && !micB64 && !sysB64) return res.status(400).json({ error: 'Audio mancante' });
+    // Note dei blocchi persi nel browser: da sole (fine registrazione) o insieme a un blocco.
+    const lostNotes = Array.isArray(b.lost_notes) ? b.lost_notes : [];
+    const hasAudio = !!(mixB64 || micB64 || sysB64);
+    if (!hasAudio && !lostNotes.length) return res.status(400).json({ error: 'Audio mancante' });
     const cleanEnergy = (v) => (Array.isArray(v)
       ? v.slice(0, 1200).map((x) => Math.max(0, Math.min(1, Number(x) || 0)))
       : null);
@@ -1120,9 +1123,13 @@ router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
     if (row.rows.length === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
 
     try {
-      await enqueueChunk(req.user, idCalendar, {
-        mixB64, energy, micB64, sysB64, mime, offset: Number(b.offset_sec) || 0, startLabel: b.start_label || null
-      });
+      // Prima le note (blocchi precedenti persi), poi il blocco: l'ordine della coda è quello.
+      if (lostNotes.length) await enqueueLostNotes(req.user, idCalendar, lostNotes);
+      if (hasAudio) {
+        await enqueueChunk(req.user, idCalendar, {
+          mixB64, energy, micB64, sysB64, mime, offset: Number(b.offset_sec) || 0, startLabel: b.start_label || null
+        });
+      }
     } catch (e) {
       if (/rec_meeting_chunks/.test(e.message || '')) {
         return res.status(503).json({ error: 'Coda di trascrizione non disponibile: eseguire Supporto/CreaDB/rec_meeting_chunks.sql sul database' });
