@@ -267,6 +267,13 @@
 
         /* Campo in sola lettura per il ruolo (id_roles_write), vedi markReadOnlyDetailFields */
         .field-lock { font-size: 0.65rem; color: var(--text-muted); margin-left: 4px; }
+        /* Campi tipo 21 (Caricamenti): pulsanti "Scarica template" e "Importa" accanto all'etichetta */
+        .upload-actions { display: inline-flex; gap: 0.4rem; flex-wrap: wrap; }
+        .upload-btn { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.65rem; font-size: 0.78rem; font-weight: 600; border-radius: 6px; border: 1px solid var(--border); background: white; color: var(--dark); cursor: pointer; white-space: nowrap; }
+        .upload-btn:hover { border-color: var(--primary); color: var(--primary); }
+        .upload-btn.primary { background: var(--primary); border-color: var(--primary); color: white; }
+        .upload-btn.primary:hover { filter: brightness(0.95); color: white; }
+        .upload-btn:disabled { opacity: 0.6; cursor: default; }
         .type11-grid-table tr.type11-row-readonly td { color: var(--text-muted); }
 
         /* Sezioni della dashboard spente da Impostazioni › Preferenze (vedi applyDashboardFlags) */
@@ -2496,6 +2503,14 @@
         .meeting-recorder-status { margin: 0.5rem 0 0.25rem; font-weight: 600; }
         .meeting-recorder-status.error { color: #B91C1C; }
         .meeting-recorder-note { margin: 0 0 0.6rem; font-size: 0.75rem; color: var(--text-muted); line-height: 1.4; }
+        /* Livelli audio in tempo reale (microfono / audio della riunione) */
+        .rec-levels { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.35rem 0 0.5rem; }
+        .rec-level { display: flex; align-items: center; gap: 0.5rem; font-size: 0.72rem; color: var(--text-muted); }
+        .rec-level span { width: 4.8rem; flex: none; }
+        .rec-level-bar { flex: 1; height: 6px; border-radius: 999px; background: #F1F5F9; overflow: hidden; }
+        .rec-level-bar i { display: block; height: 100%; width: 0; border-radius: 999px; background: #10B981; transition: width 0.15s linear; }
+        .rec-level-bar i.idle { background: #CBD5E1; }
+        .meeting-recorder-warn { margin: 0 0 0.6rem; padding: 0.5rem 0.6rem; border-radius: 8px; background: #FEF2F2; color: #B91C1C; font-size: 0.75rem; line-height: 1.4; font-weight: 600; }
         .meeting-recorder-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
         .meeting-recorder-actions button { padding: 0.45rem 0.9rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.82rem; }
         .meeting-recorder-stop { background: #1F2937; color: white; }
@@ -7746,8 +7761,9 @@
         // il servizio Whisper (gratuito, sulla VM) e aggiunge il testo a rec_meeting.trascrizione. Il pannello in basso a
         // destra mostra solo lo stato (tempo, blocchi trascritti, errori).
         const REC_SAMPLE_RATE = 16000;
-        // Blocchi da 30 s: chiudendo il browser per errore si perde al massimo mezzo minuto
-        const REC_CHUNK_SECONDS = 30;
+        // File audio caricati: blocchi da 2 minuti (come la registrazione, vedi
+        // REC_CHUNK_MIN/MAX_SECONDS): meno frasi spezzate ai bordi e più contesto per Whisper.
+        const REC_CHUNK_SECONDS = 120;
         let meetingRec = null;
 
         function recUi() {
@@ -7906,8 +7922,11 @@
         // trascritti separatamente (righe spezzate, parole storpiate ai bordi). Dopo
         // REC_CHUNK_MIN_SECONDS si taglia alla prima pausa; se nessuno si ferma, a
         // REC_CHUNK_MAX_SECONDS si taglia nel punto più silenzioso tra i due limiti.
-        const REC_CHUNK_MIN_SECONDS = 25;
-        const REC_CHUNK_MAX_SECONDS = 35;
+        // Blocchi di circa 2 minuti: meno tagli (frasi spezzate ai bordi) e contesto più lungo
+        // per Whisper; chiudendo il browser per errore si perdono al massimo ~2 minuti.
+        // Limite: il server accetta blocchi fino a 8 MB (circa 4 minuti di WAV).
+        const REC_CHUNK_MIN_SECONDS = 105;
+        const REC_CHUNK_MAX_SECONDS = 135;
         const REC_PAUSE_WINDOW = REC_SAMPLE_RATE / 4; // finestre da 0,25 s
         // Pausa: entrambe le tracce sotto questa frazione del livello della loro voce.
         const REC_PAUSE_RATIO = 0.2;
@@ -8003,9 +8022,18 @@
             const loudest = Math.max(0, ...(rawEnergy.mic || []), ...(rawEnergy.system || []));
             if (loudest < REC_SILENCE_RMS) {
                 rec.skipped = (rec.skipped || 0) + 1;
+                // Nota in trascrizione (una per tratto di silenzio consecutivo): un buco non
+                // resta senza spiegazione. Se in quei minuti qualcuno parlava, l'audio della
+                // riunione non arrivava a Projexa (dispositivo di uscita / condivisione).
+                if (!rec.lastSkipped) {
+                    if (!rec.lostNotes) rec.lostNotes = [];
+                    rec.lostNotes.push({ offset_sec: offsetSec, reason: 'nessun audio catturato, né dal microfono né dalla riunione' });
+                }
+                rec.lastSkipped = true;
                 updateRecStatus(rec);
                 return;
             }
+            rec.lastSkipped = false;
             // Ogni traccia portata a un volume udibile prima del mix: senza, le voci basse degli
             // altri partecipanti venivano scartate dal filtro dei silenzi (VAD) di Whisper.
             // Amplificazione calcolata sulla voce di TUTTA la registrazione (non del singolo
@@ -8206,7 +8234,7 @@
             rec.ctx = new (window.AudioContext || window.webkitAudioContext)();
             rec.bufMic = []; rec.bufSys = []; rec.bufferLen = 0; rec.flushedSamples = 0; rec.chunks = 0;
             rec.sent = 0; rec.failed = 0; rec.pending = 0; rec.lastError = ''; rec.stoppedReason = '';
-            rec.levelHist = { mic: [], system: [] }; rec.pauseScanFrom = 0; rec.quietest = null; rec.lostNotes = [];
+            rec.levelHist = { mic: [], system: [] }; rec.pauseScanFrom = 0; rec.quietest = null; rec.lostNotes = []; rec.lastSkipped = false;
             rec.queue = Promise.resolve();
             // Cattura su thread audio dedicato (AudioWorklet): non perde audio quando la CPU
             // è impegnata. Sostituisce ScriptProcessorNode.
@@ -8234,6 +8262,7 @@
                 if (rec.mic) rec.bufMic.push(mic);
                 if (rec.hasSystemAudio) rec.bufSys.push(sys);
                 rec.bufferLen += (mic || sys).length;
+                recMonitorLevels(rec, rec.mic ? mic : null, rec.hasSystemAudio ? sys : null);
                 flushRecBuffer(rec, false);
             };
             merger.connect(rec.node);
@@ -8252,8 +8281,57 @@
             if (String(rec.eventId).startsWith('manual:')) loadTodaysMeetings();
             ui.stop.style.display = 'inline-block';
             ui.dot.classList.add('live');
+            rec.sysLastHeard = Date.now();
+            rec.sysWarned = false;
+            recShowLevels(true);
+            recSetWarning(rec.hasSystemAudio ? '' : 'Audio della riunione non condiviso: verrà trascritto solo il tuo microfono. Ferma e riavvia la registrazione attivando "Condividi anche l\'audio di sistema".');
             updateRecStatus(rec);
             if (!rec.hasSystemAudio) showNotification('Audio di sistema non condiviso: verrà trascritto solo il tuo microfono', 'info');
+        }
+
+        // --- Controllo dell'audio catturato durante la registrazione ---
+        // Barre di livello (microfono / riunione) e avviso se l'audio della riunione resta muto
+        // a lungo: è il caso in cui Teams/Meet suonano su un dispositivo che Projexa non cattura
+        // (es. cuffia diversa dall'uscita predefinita di Windows) e si perdono gli altri partecipanti.
+        const REC_SYS_SILENT_WARN_MS = 45000;
+        function recShowLevels(show) {
+            const box = document.getElementById('meetingRecorderLevels');
+            if (box) box.style.display = show ? '' : 'none';
+            if (!show) recSetWarning('');
+        }
+        function recSetWarning(text) {
+            const el = document.getElementById('meetingRecorderWarn');
+            if (!el) return;
+            el.textContent = text || '';
+            el.style.display = text ? '' : 'none';
+        }
+        function recLevelWidth(rms) {
+            // Scala in dB: -60 dB = vuota, -10 dB = piena.
+            const db = rms > 0 ? 20 * Math.log10(rms) : -100;
+            return Math.max(0, Math.min(100, (db + 60) / 50 * 100));
+        }
+        function recMonitorLevels(rec, mic, sys) {
+            const now = Date.now();
+            const micRms = mic ? recRms(mic) : 0;
+            const sysRms = sys ? recRms(sys) : 0;
+            const set = (id, rms, active) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.style.width = `${active ? recLevelWidth(rms) : 0}%`;
+                el.classList.toggle('idle', rms < REC_SILENCE_RMS);
+            };
+            set('recLevelMic', micRms, !!mic);
+            set('recLevelSys', sysRms, !!sys);
+            if (!sys) return;
+            if (sysRms >= REC_SILENCE_RMS) {
+                rec.sysLastHeard = now;
+                if (rec.sysWarned) { rec.sysWarned = false; recSetWarning(''); }
+            } else if (!rec.sysWarned && now - (rec.sysLastHeard || now) > REC_SYS_SILENT_WARN_MS) {
+                rec.sysWarned = true;
+                const msg = 'Da oltre 45 secondi non arriva audio dalla riunione. Se gli altri stanno parlando, Projexa non li sta registrando: imposta come uscita predefinita di Windows il dispositivo su cui ascolti la riunione (es. la cuffia) oppure riavvia la registrazione condividendo lo schermo intero con l\'audio di sistema.';
+                recSetWarning(msg);
+                showNotification('Non arriva audio dalla riunione: controlla il riquadro di registrazione', 'info');
+            }
         }
 
         async function stopMeetingRecording(reason) {
@@ -8280,6 +8358,7 @@
             rec.running = false;
             try { if (rec.node) { rec.node.port.onmessage = null; rec.node.disconnect(); } } catch (e) { /* già scollegato */ }
             if (rec.ctx) rec.ctx.close().catch(() => {});
+            recShowLevels(false); // via livelli e avviso sull'audio della riunione
             flushRecBuffer(rec, true); // ultimo blocco (se almeno 1 secondo)
             // Diagnostica: durata registrazione vs audio effettivamente catturato. Se il
             // secondo è molto minore del primo, si è persa cattura (es. scheda in secondo piano).
@@ -13639,6 +13718,48 @@
         }
 
         // Renderizza una riga: "campo" a sinistra, input del valore a destra in base a tipo_valore.
+        // Campi tipo 21 (Caricamenti): nome del campo -> chiave del template/import.
+        // Il template si scarica da /api/templates/<chiave>; l'importazione è quella dei
+        // voucher Qlik (js/Qlik_voucher.js) con il controllo della struttura del template.
+        const UPLOAD_FIELD_KEYS = { 'upload consuntivi': 'consuntivi' };
+        function uploadKeyFromCampo(campo) {
+            const name = String(campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
+            return UPLOAD_FIELD_KEYS[name] || null;
+        }
+
+        async function downloadUploadTemplate(key, btn) {
+            if (btn) btn.disabled = true;
+            try {
+                const res = await fetch(`${API_URL}/templates/${encodeURIComponent(key)}`, { headers: getAuthHeaders() });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || `Errore ${res.status}`);
+                }
+                const blob = await res.blob();
+                const name = (/filename="?([^";]+)"?/i.exec(res.headers.get('Content-Disposition') || '') || [])[1] || `${key}.xlsx`;
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = name;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            } catch (e) {
+                showNotification('Template non scaricato: ' + e.message, 'info');
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        function startUploadImport(key) {
+            if (window.QlikVoucher && typeof window.QlikVoucher.startTemplateImport === 'function') {
+                window.QlikVoucher.startTemplateImport(key);
+            } else {
+                showNotification('Programma di importazione non disponibile', 'info');
+            }
+        }
+
         function renderSettingRow(row) {
             const campo = escapeHtml(row.campo || '');
             const tipo = Number(row.tipo_valore);
@@ -13855,6 +13976,17 @@
                 // Routine custom: riga verde cliccabile. L'azione dipende da valore2
                 // (es. valore2='Nuovo_utente' apre il flyout di creazione utente).
                 return `<div class="settings-detail-link settings-detail-routine drag-handle" data-row-id="${id}" data-campo="${campo}" data-routine="${escapeHtml(row.valore2 == null ? '' : row.valore2)}"${drag}><span style="display:flex; align-items:center; min-width:0;">${earlyDeleteCheckbox}${campoLabelHtml(row.campo)}</span><span class="parent-arrow">›</span></div>`;
+            } else if (tipo === 21) {
+                // Caricamento da file con template (Impostazioni › Caricamenti): accanto
+                // all'etichetta "Scarica template" e "Importa". Il tipo di importazione
+                // dipende dal nome del campo (UPLOAD_FIELD_KEYS); nomi non previsti: "—".
+                const key = uploadKeyFromCampo(row.campo);
+                input = key
+                    ? `<span class="upload-actions">
+                            <button type="button" class="upload-btn" onclick="event.stopPropagation(); downloadUploadTemplate('${key}', this)" title="Scarica il file modello da compilare"><i class="fas fa-file-download"></i> Scarica template</button>
+                            <button type="button" class="upload-btn primary" onclick="event.stopPropagation(); startUploadImport('${key}')" title="Importa il file compilato"><i class="fas fa-file-upload"></i> Importa</button>
+                       </span>`
+                    : `<span style="color: var(--text-muted);" title="Caricamento non previsto per questo campo">—</span>`;
             } else if (tipo === 40) {
                 // Modifica password: riga cliccabile che apre la finestra di cambio password.
                 // La nuova password viene salvata come hash su Projexa-Auth (users.password_hash).
@@ -15689,6 +15821,13 @@
             <button id="meetingRecorderClose" type="button" aria-label="Chiudi" title="Chiudi"><i class="fas fa-times"></i></button>
         </div>
         <p id="meetingRecorderStatus" class="meeting-recorder-status"></p>
+        <!-- Livelli in tempo reale: se la barra "Riunione" resta ferma mentre gli altri parlano,
+             l'audio della riunione non arriva a Projexa (vedi avviso sotto) -->
+        <div id="meetingRecorderLevels" class="rec-levels" style="display: none;">
+            <div class="rec-level"><span>Microfono</span><div class="rec-level-bar"><i id="recLevelMic"></i></div></div>
+            <div class="rec-level"><span>Riunione</span><div class="rec-level-bar"><i id="recLevelSys"></i></div></div>
+        </div>
+        <p id="meetingRecorderWarn" class="meeting-recorder-warn" style="display: none;"></p>
         <p class="meeting-recorder-note">Informa i partecipanti che la riunione viene registrata e trascritta. Nella finestra che si apre scegli <b>Schermo intero</b> e attiva <b>Condividi anche l'audio di sistema</b>. Lascia aperta questa scheda di Projexa.</p>
         <div class="meeting-recorder-actions">
             <button id="meetingRecorderStop" type="button" class="meeting-recorder-stop" style="display: none;"><i class="fas fa-stop"></i> Ferma</button>

@@ -1,7 +1,8 @@
 // ============================================================================
 // PROGRAMMA: TRASCRIZIONE E RECAP DELLE RIUNIONI (coda sul server)
 // ----------------------------------------------------------------------------
-// La dashboard registra la riunione e invia blocchi audio WAV di ~30 s: microfono
+// La dashboard registra la riunione e invia blocchi audio WAV di ~2 minuti (chiusi in una
+// pausa del parlato): microfono
 // dell'utente e audio di sistema MIXATI in una sola traccia (audio_mix), più il volume
 // delle due tracce per finestre di 0,5 s (energy), che serve a capire chi parla. I blocchi
 // muti non vengono inviati. Ogni blocco viene SALVATO SUBITO nella tabella
@@ -469,7 +470,7 @@ export async function queuedEndOffset(user, idCalendar) {
         WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND kind = 'audio'`,
       [user.tenant_id, user.user_id, idCalendar]
     );
-    return r.rows[0].m == null ? -1 : Number(r.rows[0].m) + 35; // + durata massima di un blocco (taglio in pausa: 25-35 s)
+    return r.rows[0].m == null ? -1 : Number(r.rows[0].m) + 135; // + durata massima di un blocco (taglio in pausa: 105-135 s)
   } catch (e) {
     return -1;
   }
@@ -698,13 +699,14 @@ export function warmWhisperServices() {
 // Rete di sicurezza: blocchi rimasti 'transcribing' orfani (processo riavviato/morto a
 // metà) rimessi in attesa, così vengono ritrascritti in fretta invece di restare appesi.
 // Sicuro: NON tocca i blocchi in carico a QUESTO worker (inflight), né quelli fermi da meno
-// di 5 minuti — sopra il tempo massimo di una trascrizione reale, così non disturba un job
-// lento o in corso su un altro server. Viene chiamata all'avvio e a ogni giro del worker.
+// di 20 minuti — sopra il tempo massimo di una trascrizione reale (blocchi da ~2 minuti con
+// beam 5: fino a 15 minuti di timeout), così non disturba un job lento o in corso su un altro
+// server. Viene chiamata all'avvio e a ogni giro del worker.
 async function reclaimStuck() {
   const ids = [...inflight.keys()];
   const r = await db.query(
     `UPDATE rec_meeting_chunks SET state = 'pending'
-      WHERE state = 'transcribing' AND next_try_at < NOW() - interval '5 minutes'
+      WHERE state = 'transcribing' AND next_try_at < NOW() - interval '20 minutes'
         AND NOT (id = ANY($1::uuid[]))`,
     [ids]
   );

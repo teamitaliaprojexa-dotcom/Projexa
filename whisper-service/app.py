@@ -13,6 +13,7 @@ Variabili d'ambiente:
   WHISPER_LANGUAGE  lingua del parlato (default: it)
   WHISPER_COMPUTE   int8 (default, meno RAM) | int8_float32 | float32
   WHISPER_THREADS   thread CPU (default: 1; su istanze da 2+ CPU si può alzare)
+  WHISPER_BEAM      ampiezza della beam search (default: 5; 1 = più veloce, meno accurata)
 """
 import hmac
 import io
@@ -45,6 +46,9 @@ THREADS = int(os.environ.get("WHISPER_THREADS", "1") or 1)
 # Soglia del VAD (0..1, default di faster-whisper 0.5): più bassa = tiene anche le voci
 # deboli (es. gli altri partecipanti registrati dall'audio di sistema).
 VAD_THRESHOLD = float(os.environ.get("WHISPER_VAD_THRESHOLD", "0.35") or 0.35)
+# Ricerca del testo (beam search): 5 = più accurata (default di Whisper), circa il doppio del
+# tempo di calcolo rispetto a 1 (greedy, usato prima per la trascrizione "dal vivo").
+BEAM_SIZE = int(os.environ.get("WHISPER_BEAM", "5") or 5)
 MAX_AUDIO_BYTES = 8 * 1024 * 1024
 
 app = FastAPI(title="Projexa Whisper", docs_url=None, redoc_url=None)
@@ -99,10 +103,12 @@ def _transcribe_blocking(audio: bytes):
             samples,
             language=LANGUAGE,
             task="transcribe",
-            beam_size=1,        # più veloce: adatto alla trascrizione "dal vivo"
+            beam_size=BEAM_SIZE,
             vad_filter=True,    # salta i silenzi (niente frasi inventate sul silenzio)
             vad_parameters={"threshold": VAD_THRESHOLD, "speech_pad_ms": 500},
-            condition_on_previous_text=False,
+            # Blocchi da ~2 minuti: ogni finestra da 30 s usa il testo della precedente come
+            # contesto (nomi e termini riconosciuti meglio lungo il blocco).
+            condition_on_previous_text=True,
         )
         out = [
             {"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}

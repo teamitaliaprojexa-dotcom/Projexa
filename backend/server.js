@@ -2305,6 +2305,23 @@ app.get('/api/kpi-mbo', requireAuth, async (req, res) => {
   }
 });
 
+// ===================== TEMPLATE DI CARICAMENTO =====================
+// File modello scaricabili dai campi tipo 21 delle impostazioni (Caricamenti), es. "Upload
+// Consuntivi". Stanno in Documentazione/Template (copiata anche sulla VM dal deploy). Solo i
+// file di questo elenco: il nome non arriva mai dal browser.
+const UPLOAD_TEMPLATES = {
+  consuntivi: 'Consuntivi.xlsx'
+};
+const templatesDir = path.join(__dirname, '../Documentazione/Template');
+
+app.get('/api/templates/:key', requireAuth, (req, res) => {
+  const file = UPLOAD_TEMPLATES[String(req.params.key || '').toLowerCase()];
+  if (!file) return res.status(404).json({ error: 'Template non previsto' });
+  res.download(path.join(templatesDir, file), file, (err) => {
+    if (err && !res.headersSent) res.status(404).json({ error: 'Template non trovato sul server' });
+  });
+});
+
 // ===================== KPI GESTIONE PROGETTO =====================
 // Offerta (100%) contro tempo speso (avanzamento) dei progetti in corso (righe con scadenza >= oggi),
 // sempre per tenant_id e user_id del login. Tre livelli:

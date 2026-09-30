@@ -43,7 +43,7 @@ After=network.target
 [Service]
 User=$USER
 WorkingDirectory=$CPP_DIR/src
-ExecStart=$CPP_DIR/src/build/bin/whisper-server -m models/ggml-$MODEL.bin -t $(nproc) -l it -mc 0 --vad -vm models/ggml-$VAD.bin --vad-threshold 0.35 --vad-speech-pad-ms 500 --host 127.0.0.1 --port $PORT
+ExecStart=$CPP_DIR/src/build/bin/whisper-server -m models/ggml-$MODEL.bin -t $(nproc) -l it -bs 5 --vad -vm models/ggml-$VAD.bin --vad-threshold 0.35 --vad-speech-pad-ms 500 --host 127.0.0.1 --port $PORT
 Restart=always
 RestartSec=5
 

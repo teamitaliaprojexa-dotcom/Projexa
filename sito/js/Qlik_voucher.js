@@ -83,9 +83,40 @@
         config: null,   // { rootId, root, fields } — righe figlie di 'Qlik voucher'
         table: null,    // { columns, rows } — ultimo file importato ("insightDB" in memoria)
         lastResult: null,
-        scope: 'active'
+        scope: 'active',
+        mode: 'qlik'    // 'qlik' = file voucher Qlik; 'consuntivi' = template Consuntivi.xlsx
     };
     window.QlikVoucher = QlikVoucher;
+
+    // Importazioni che usano un TEMPLATE fisso (Impostazioni › Caricamenti, campi tipo 21):
+    // stesso programma dei voucher Qlik, ma il file deve avere esattamente la struttura del
+    // template (nome del foglio, colonne e loro ordine), altrimenti viene rifiutato.
+    // Il template si scarica da GET /api/templates/<chiave> (Documentazione/Template).
+    const TEMPLATE_IMPORTS = {
+        consuntivi: {
+            title: 'Importazione Consuntivi',
+            sheetName: 'Consuntivi',
+            columns: ['Nome Dipendente', 'Codice Commessa', 'Titolo Commessa', 'Codice Articolo', 'Ore Attivita', 'Email Dipendente']
+        }
+    };
+
+    // Avvio da un campo tipo 21: stessa scelta dell'ambito (attivi/storico) del pulsante Qlik.
+    QlikVoucher.startTemplateImport = function (key) {
+        if (!TEMPLATE_IMPORTS[key]) { notify('Importazione non prevista: ' + key, 'info'); return; }
+        QlikVoucher.mode = key;
+        showQlikScopeModal();
+    };
+
+    // null se il file rispetta il template, altrimenti il motivo del rifiuto.
+    function templateMismatch(workbook, columns, tpl) {
+        if (workbook.SheetNames.length !== 1 || workbook.SheetNames[0] !== tpl.sheetName) {
+            return `il file deve avere un solo foglio chiamato "${tpl.sheetName}"`;
+        }
+        const got = columns.slice();
+        while (got.length && !got[got.length - 1]) got.pop(); // celle vuote in coda (formattazione)
+        const same = got.length === tpl.columns.length && got.every((c, i) => c === tpl.columns[i]);
+        return same ? null : `le colonne devono essere, in quest'ordine: ${tpl.columns.join(', ')}`;
+    }
 
     // ==========================================================================
     // VISIBILITÀ DEL PULSANTE (settings.campo = 'Qlik', valore1 = true)
@@ -189,7 +220,7 @@
 
         modal.innerHTML = `
             <div style="background:white; border-radius:10px; padding:1.5rem; width:480px; max-width:92vw; box-shadow:0 10px 40px rgba(0,0,0,0.25);">
-                <h3 style="margin:0 0 0.75rem; color:#1F2937;">Aggiornamento Qlik</h3>
+                <h3 style="margin:0 0 0.75rem; color:#1F2937;">${QlikVoucher.mode === 'consuntivi' ? 'Aggiornamento Consuntivi' : 'Aggiornamento Qlik'}</h3>
                 <p style="margin:0; color:#4B5563; line-height:1.45;">Quali progetti vuoi aggiornare?</p>
                 <div style="display:flex; flex-direction:column; gap:0.65rem; margin-top:1.15rem;">
                     <button id="qlikScopeActive" type="button" style="padding:0.75rem 1rem; text-align:left; background:#3B82F6; color:white; border:none; border-radius:7px; font-weight:600; cursor:pointer;">
@@ -265,6 +296,16 @@
             return;
         }
         const columns = grid[0].map((h) => String(h == null ? '' : h).trim());
+
+        // Import da template (es. Consuntivi): struttura identica al template o niente.
+        const tpl = TEMPLATE_IMPORTS[QlikVoucher.mode];
+        if (tpl) {
+            const why = templateMismatch(workbook, columns, tpl);
+            if (why) {
+                showTemplateErrorModal(tpl, why);
+                return;
+            }
+        }
         const rows = grid.slice(1).map((cells) => {
             const obj = {};
             columns.forEach((col, idx) => { obj[col] = cells[idx] === undefined ? null : cells[idx]; });
@@ -374,6 +415,30 @@
         showQlikResultModal(QlikVoucher.lastResult);
     }
 
+    // File diverso dal template: importazione bloccata, con invito a usare l'originale.
+    function showTemplateErrorModal(tpl, why) {
+        let modal = document.getElementById('qlikTemplateErrorModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'qlikTemplateErrorModal';
+            modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:950; display:flex; align-items:center; justify-content:center;';
+            document.body.appendChild(modal);
+        }
+        modal.innerHTML = `
+            <div style="background:white; border-radius:10px; padding:1.5rem; width:480px; max-width:92vw; box-shadow:0 10px 40px rgba(0,0,0,0.25);">
+                <h3 style="margin:0 0 0.75rem; color:#B91C1C;">File non valido</h3>
+                <p style="margin:0; color:#374151; line-height:1.45;">Il file non ha la struttura del template: ${esc(why)}.</p>
+                <p style="margin:0.75rem 0 0; color:#374151; line-height:1.45;"><strong>Usa il template originale</strong> (pulsante "Scarica template"), compilalo senza modificare foglio e colonne e importalo di nuovo.</p>
+                <div style="display:flex; justify-content:flex-end; margin-top:1.25rem;">
+                    <button id="qlikTemplateErrorClose" type="button" style="padding:0.5rem 1rem; background:#3B82F6; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Chiudi</button>
+                </div>
+            </div>`;
+        modal.style.display = 'flex';
+        const close = () => { modal.style.display = 'none'; };
+        document.getElementById('qlikTemplateErrorClose').onclick = close;
+        modal.onclick = (e) => { if (e.target === modal) close(); };
+    }
+
     // ==========================================================================
     // Riepilogo import: piccola modale, sullo stile delle altre della dashboard.
     // ==========================================================================
@@ -400,7 +465,7 @@
 
         modal.innerHTML = `
             <div style="background:white; border-radius:10px; padding:1.5rem; width:460px; max-width:92vw; max-height:80vh; overflow-y:auto; box-shadow:0 10px 40px rgba(0,0,0,0.25);">
-                <h3 style="margin:0 0 0.75rem; color:#1F2937;">Importazione Qlik voucher</h3>
+                <h3 style="margin:0 0 0.75rem; color:#1F2937;">${esc((TEMPLATE_IMPORTS[QlikVoucher.mode] || {}).title || 'Importazione Qlik voucher')}</h3>
                 <p style="margin:0 0 0.45rem; font-size:0.85rem; color:#6B7280;">Ambito: <strong>${result.scope === 'history' ? 'Tutto lo storico' : 'Solo progetti attivi'}</strong></p>
                 <p style="margin:0; font-size:0.95rem;">Righe aggiornate: <strong>${result.updated}</strong> di ${result.totalGroups} gruppi.</p>
                 <p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Nuovi componenti inseriti: <strong>${result.inserted}</strong></p>
@@ -415,7 +480,7 @@
         document.getElementById('qlikResultClose').addEventListener('click', () => { modal.style.display = 'none'; });
         modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; }, { once: true });
 
-        notify(`Import Qlik completato: ${result.updated} aggiornate, ${result.inserted} inserite`, (result.updated + result.inserted) > 0 ? 'success' : 'info');
+        notify(`Import ${QlikVoucher.mode === 'qlik' ? 'Qlik' : 'Consuntivi'} completato: ${result.updated} aggiornate, ${result.inserted} inserite`, (result.updated + result.inserted) > 0 ? 'success' : 'info');
     }
 
     // ==========================================================================
@@ -426,6 +491,7 @@
         if (link) {
             link.addEventListener('click', (e) => {
                 e.preventDefault();
+                QlikVoucher.mode = 'qlik'; // file voucher Qlik: nessun controllo di template
                 showQlikScopeModal();
             });
         }

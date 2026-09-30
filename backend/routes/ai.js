@@ -639,10 +639,15 @@ async function transcribeAudioCpp(base, audioBuffer, mime) {
       const form = new FormData();
       form.append('file', new Blob([audioBuffer], { type: mime || 'audio/wav' }), 'blocco.wav');
       form.append('response_format', 'verbose_json');
+      // Qualità: beam search a 5 (WHISPER_CPP_BEAM, 1 = più veloce) e contesto attivo tra le
+      // finestre da 30 s del blocco (max_context -1 = tutto il testo precedente; il servizio
+      // sulla VM è avviato con -mc 0, qui lo si sovrascrive per ogni richiesta).
+      form.append('beam_size', String(Number(process.env.WHISPER_CPP_BEAM) || 5));
+      form.append('max_context', '-1');
       const data = await readJson(await callApi(`${base}/inference`, {
         method: 'POST',
         body: form,
-        timeoutMs: 600000
+        timeoutMs: 900000 // blocchi da ~2 minuti con beam 5: qualche minuto di calcolo
       }, 'Whisper.cpp'), 'Whisper.cpp');
       if (data.error) {
         const err = httpError(502, `Whisper.cpp: ${String(data.error).slice(0, 200)}`);
@@ -668,6 +673,13 @@ async function transcribeAudioCpp(base, audioBuffer, mime) {
       }
       return { segments, provider: 'Whisper.cpp large-v3-turbo' };
     } catch (error) {
+      // whisper.cpp con il VAD risponde 500 "basic_string::_M_construct null not valid" quando
+      // nel blocco non trova parlato (solo rumore): non è un guasto, il blocco è senza testo.
+      // Trattarlo come errore temporaneo lo farebbe riprovare per ore, bloccando la
+      // trascrizione della riunione che lo aspetta in ordine.
+      if (error.upstreamStatus === 500 && /_M_construct null/.test(error.message || '')) {
+        return { segments: [], provider: 'Whisper.cpp large-v3-turbo' };
+      }
       const temporary = [429, 500, 502, 503, 504].includes(error.upstreamStatus) || (error.status === 502 && !error.upstreamStatus);
       if (!temporary || attempt >= 3) throw error;
       console.warn(`[AI] Trascrizione Whisper.cpp (${base}): errore temporaneo (${error.upstreamStatus || error.message}), nuovo tentativo ${attempt + 1}/3`);
@@ -694,7 +706,7 @@ export async function transcribeAudio(userId, audioBuffer, mime, baseUrl = null)
         method: 'POST',
         headers: { 'X-Whisper-Key': process.env.WHISPER_API_KEY, 'Content-Type': mime || 'audio/wav' },
         body: audioBuffer,
-        timeoutMs: 600000 // su istanze lente un blocco può richiedere alcuni minuti
+        timeoutMs: 900000 // blocchi da ~2 minuti con beam 5: su CPU richiedono alcuni minuti
       }, 'Whisper'), 'Whisper');
       const segments = (Array.isArray(data.segments) ? data.segments : [])
         .map((x) => ({ start: Number(x.start) || 0, end: Number(x.end) || Number(x.start) || 0, text: String(x.text || '').trim() }))
