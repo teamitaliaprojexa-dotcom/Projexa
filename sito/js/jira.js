@@ -123,6 +123,7 @@
                 <span class="jira-spacer"></span>
                 <span class="jira-account" id="jiraAccount"></span>
                 <button type="button" class="jira-btn jira-btn-primary" id="jiraConnect">Collega account Jira</button>
+                <button type="button" class="jira-btn jira-btn-plain" id="jiraAggiornaIntegrazioni" title="Sincronizza quotazioni e task da Jira per tutti gli utenti del tenant"><i class="fas fa-rotate"></i> Aggiorna Integrazioni</button>
                 <button type="button" class="jira-btn jira-btn-danger" id="jiraDisconnect">Scollega</button>
                 <button type="button" class="jira-btn jira-btn-plain" id="jiraClose" title="Chiudi">✕</button>
             </div>
@@ -145,6 +146,7 @@
             account: root.querySelector('#jiraAccount'),
             connect: root.querySelector('#jiraConnect'),
             disconnect: root.querySelector('#jiraDisconnect'),
+            aggiorna: root.querySelector('#jiraAggiornaIntegrazioni'),
             close: root.querySelector('#jiraClose'),
             body: root.querySelector('#jiraBody'),
             count: root.querySelector('#jiraCount'),
@@ -156,6 +158,10 @@
         el.close.addEventListener('click', close);
         el.connect.addEventListener('click', startOAuth);
         el.disconnect.addEventListener('click', disconnect);
+        // Stesso comando del pulsante «Aggiorna Integrazioni» della dashboard (js/integrazioni.js).
+        el.aggiorna.addEventListener('click', function () {
+            if (window.ProjexaIntegrazioni) window.ProjexaIntegrazioni.esegui(el.aggiorna);
+        });
         el.reload.addEventListener('click', function () { loadPage(0); });
         el.filterSelect.addEventListener('change', function () {
             state.filterId = el.filterSelect.value;

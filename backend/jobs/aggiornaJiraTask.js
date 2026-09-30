@@ -13,13 +13,16 @@
 //
 // Lanciabile da riga di comando — quindi, in futuro, da uno schedulatore:
 //
-//     cd backend && node jobs/aggiornaJiraTask.js <tenant_id> <user_id>
+//     cd backend && node jobs/aggiornaJiraTask.js <tenant_id> [user_id]
+//
+// Aggiorna sempre i dati di TUTTO il tenant. Senza user_id usa la configurazione
+// Jira di un utente del tenant configurato; con user_id quella di quell'utente.
 //
 // (da lanciare dalla cartella "backend": è lì che config/database.js cerca il .env)
 // ============================================================================
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { runJiraSync } from './jiraSyncEngine.js';
+import { runJiraSync, runJiraSyncTenant } from './jiraSyncEngine.js';
 
 export const NOME_PROGRAMMA = 'aggiornaJiraTask';
 
@@ -48,8 +51,10 @@ const CONFIG = {
   campoFiltroAggiuntivo: 'Filtro aggiuntivo Task (solo agg)'
 };
 
+// ctx = { tenantId, userId?, utentePreferito?, dryRun? }: aggiorna sempre tutto il
+// tenant; userId = usa solo la configurazione di quell'utente.
 export function aggiornaJiraTask(ctx) {
-  return runJiraSync(CONFIG, ctx);
+  return ctx && ctx.userId ? runJiraSync(CONFIG, ctx) : runJiraSyncTenant(CONFIG, ctx);
 }
 
 export default aggiornaJiraTask;
@@ -59,8 +64,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const argomenti = process.argv.slice(2);
   const dryRun = argomenti.includes('--dry');
   const [tenantId, userId] = argomenti.filter((a) => !a.startsWith('--'));
-  if (!tenantId || !userId) {
-    console.error('Uso (dalla cartella backend): node jobs/aggiornaJiraTask.js <tenant_id> <user_id> [--dry]');
+  if (!tenantId) {
+    console.error('Uso (dalla cartella backend): node jobs/aggiornaJiraTask.js <tenant_id> [user_id] [--dry]');
+    console.error('  user_id = utente di cui usare configurazione e account Jira (default: il primo configurato)');
     console.error('  --dry = prova a vuoto: elabora e stampa il report senza scrivere sul database');
     process.exit(1);
   }

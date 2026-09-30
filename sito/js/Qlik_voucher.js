@@ -28,8 +28,11 @@
 //   2) Il file viene letto interamente nel browser (SheetJS) e caricato in una
 //      tabella in memoria con la STESSA struttura del file (una colonna per
 //      ogni intestazione del foglio) — QlikVoucher.table.
-//   3) Vengono lette le righe di ele_commesse (tenant_id/user_id del login)
-//      per ricavare, da ele_commesse.cod_commessa, il project_id.
+//   3) Il backend legge le righe di ele_commesse di TUTTO il tenant del login
+//      (non solo dell'utente) per ricavare, da ele_commesse.cod_commessa, il
+//      project_id: chiunque importi il file aggiorna anche i progetti degli
+//      altri utenti del tenant. Le righe nuove di proj_componenti sono intestate
+//      al proprietario del progetto.
 //   4) Le righe del file vengono raggruppate per (Email Dipendente, Codice
 //      Commessa, Titolo Commessa) sommando "Ore Attivita" (numero decimale,
 //      es. 4,50 = 4h30m).

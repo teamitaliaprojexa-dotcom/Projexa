@@ -1,12 +1,16 @@
 // === PULSANTE «AGGIORNA INTEGRAZIONI» — UI ===
 //
-// Il pulsante sta nell'intestazione della dashboard, accanto a «Nuovo Progetto».
-// Alla pressione lancia in sequenza i programmi di sincronizzazione del backend
+// Il pulsante sta nella barra in alto della pagina Jira (js/jira.js), che chiama
+// window.ProjexaIntegrazioni.esegui(pulsante). Alla pressione lancia in sequenza i programmi di sincronizzazione del backend
 // (POST /api/integrazioni/aggiorna) e mostra il riepilogo di cosa è stato letto,
 // inserito e aggiornato.
 //
-// Il pulsante compare solo se l'integrazione Jira è abilitata per l'utente
-// (flag settings campo = 'Jira'), come già avviene per la voce Jira in sidebar.
+// Il lancio vale per tutto il tenant: un solo passaggio aggiorna anche i dati degli
+// altri utenti, con la configurazione Jira di chi preme (o di un altro utente del
+// tenant configurato). Il riepilogo dice di chi è la configurazione usata.
+//
+// Il pulsante è visibile a chi apre la pagina Jira, cioè a chi ha il flag
+// settings campo = 'Jira' attivo (come la voce Jira in sidebar).
 (function () {
     'use strict';
 
@@ -64,6 +68,10 @@
         .integr-note { margin-top: 0.6rem; font-size: 0.78rem; color: #92400E;
             background: #FEF3C7; border-radius: 6px; padding: 0.45rem 0.6rem; }
         .integr-note ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+        .integr-user-box + .integr-user-box { margin-top: 0.8rem; padding-top: 0.8rem;
+            border-top: 1px dashed #E5E7EB; }
+        .integr-user { font-size: 0.85rem; font-weight: 600; color: #1F2937; margin-bottom: 0.45rem; }
+        .integr-user i { color: #6B7280; margin-right: 0.3rem; }
         .integr-err { margin-top: 0.6rem; font-size: 0.8rem; color: #B91C1C;
             background: #FEF2F2; border-radius: 6px; padding: 0.45rem 0.6rem; }
         `;
@@ -133,6 +141,9 @@
         </div>`;
     }
 
+    // Il lancio vale per tutto il tenant: per ogni programma il backend restituisce
+    // le configurazioni Jira provate (utenti[]): quella usata con i numeri e quelle
+    // scartate con il motivo (es. Jira non collegato).
     function renderProgramma(r) {
         const titolo = `<h4>${esc(r.etichetta || r.programma)}
             <span class="integr-esito ${r.ok ? 'integr-ok' : 'integr-ko'}">${r.ok ? 'ESEGUITO' : 'NON ESEGUITO'}</span></h4>`;
@@ -142,7 +153,26 @@
                 <div class="integr-err">${esc(r.errore || 'Errore non specificato')}</div></div>`;
         }
 
-        return `<div class="integr-prog">${titolo}
+        // Risposta per singolo utente (formato precedente): nessun elenco utenti.
+        if (!Array.isArray(r.utenti)) {
+            return `<div class="integr-prog">${titolo}${renderDettaglio(r)}</div>`;
+        }
+
+        const utenti = r.utenti.map(function (u) {
+            const nome = esc(u.nome || u.userId);
+            if (u.ok) {
+                return `<div class="integr-user-box"><div class="integr-user"><i class="fas fa-user-gear"></i> Tutto il tenant, con la configurazione Jira di ${nome}</div>${renderDettaglio(u.report || {})}</div>`;
+            }
+            const classe = u.saltato ? 'integr-note' : 'integr-err';
+            return `<div class="integr-user-box"><div class="integr-user"><i class="fas fa-user-slash"></i> Configurazione di ${nome} non utilizzata</div><div class="${classe}">${esc(u.errore || 'Errore non specificato')}</div></div>`;
+        }).join('');
+
+        return `<div class="integr-prog">${titolo}${utenti}</div>`;
+    }
+
+    // Numeri e avvisi della sincronizzazione di un singolo utente.
+    function renderDettaglio(r) {
+        return `
             <div style="font-size:0.8rem;color:#6B7280;margin-bottom:0.55rem;">
                 Filtro Jira: <strong>${esc(r.filtro || '—')}</strong> ·
                 clienti configurati: <strong>${esc(r.clientiConfigurati)}</strong>
@@ -162,18 +192,21 @@
                 ? `<div class="integr-err"><strong>Righe non elaborate:</strong>
                     <ul style="margin:0.3rem 0 0;padding-left:1.1rem;">
                     ${r.errori.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>`
-                : ''}
-        </div>`;
+                : ''}`;
     }
 
     // ==========================================
     // ESECUZIONE
     // ==========================================
 
-    async function esegui() {
+    // sorgente: il pulsante premuto (o l'evento del click). Lo stesso comando è
+    // disponibile nella dashboard e nella pagina Jira (js/jira.js): la rotellina
+    // compare sul pulsante che è stato premuto.
+    async function esegui(sorgente) {
         if (inCorso) return;
-        const btn = document.getElementById('btnAggiornaIntegrazioni');
+        const btn = (sorgente && sorgente.currentTarget) || (sorgente && sorgente.nodeType === 1 ? sorgente : null);
         if (!btn) return;
+        injectStyles();
 
         inCorso = true;
         const originale = btn.innerHTML;
@@ -210,40 +243,6 @@
         }
     }
 
-    // ==========================================
-    // AVVIO
-    // ==========================================
-
-    // Il pulsante ha senso solo se c'è almeno un'integrazione attiva: oggi i
-    // programmi disponibili leggono tutti da Jira, quindi si allinea al flag Jira.
-    async function refreshVisibilita() {
-        const btn = document.getElementById('btnAggiornaIntegrazioni');
-        if (!btn) return false;
-        try {
-            const response = await fetch(`${API_URL}/jira/status`, { headers: authHeaders() });
-            const status = response.ok ? await response.json() : null;
-            const attiva = !!(status && status.enabled);
-            btn.style.display = attiva ? '' : 'none';
-            return attiva;
-        } catch (e) {
-            btn.style.display = 'none';
-            return false;
-        }
-    }
-
-    async function init() {
-        const btn = document.getElementById('btnAggiornaIntegrazioni');
-        if (!btn) return;
-        injectStyles();
-        btn.addEventListener('click', esegui);
-        await refreshVisibilita();
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-
-    window.ProjexaIntegrazioni = { esegui: esegui, refreshVisibilita: refreshVisibilita };
+    // Richiamato dal pulsante della pagina Jira (js/jira.js).
+    window.ProjexaIntegrazioni = { esegui: esegui };
 })();

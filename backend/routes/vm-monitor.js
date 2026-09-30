@@ -29,7 +29,8 @@ const IDLE_THRESHOLD = 20;
 // ----------------------------------------------------------------------------
 // ACCESSO: solo admin del tenant PROJEXA
 // ----------------------------------------------------------------------------
-async function requireProjexaAdmin(req, res, next) {
+// Esportato: lo usa anche la pagina Schedulazioni job (routes/job-schedules.js).
+export async function requireProjexaAdmin(req, res, next) {
   try {
     if (Number(req.user?.id_roles) === 1) {
       const t = (await db.query('SELECT name FROM tenants WHERE id = $1', [req.user.tenant_id])).rows[0];

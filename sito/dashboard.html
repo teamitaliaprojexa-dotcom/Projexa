@@ -214,6 +214,46 @@
             fill: currentColor;
         }
 
+        /* Animazione 3D al passaggio del mouse: icona e testo "escono dallo schermo".
+           perspective(300px) + translateZ(40px) avvicina il contenuto all'osservatore
+           (ingrandimento prospettico di circa il 15%: 300 / (300 - 40)) e scale(1.1)
+           aggiunge un altro 10% (in tutto circa +26%);
+           l'ombra dritta sotto lo stacca dal fondo. La curva di uscita supera di poco il
+           valore finale e ritorna: effetto "rimbalzo" in avanti. L'icona si ingrandisce
+           dal centro, il testo verso destra (ancorato a sinistra). Si anima il contenuto e non la riga intera, che è
+           larga quanto la sidebar e uscirebbe dal bordo. */
+        .sidebar-menu a > i,
+        .sidebar-menu a > .sidebar-icon,
+        .sidebar-menu a > span {
+            transform: perspective(300px) translateZ(0) scale(1);
+            transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+                        filter 0.35s ease, text-shadow 0.35s ease;
+            will-change: transform;
+        }
+
+        .sidebar-menu a > span {
+            transform-origin: left center; /* il testo cresce verso destra */
+        }
+
+        .sidebar-menu a:hover > i,
+        .sidebar-menu a:hover > .sidebar-icon {
+            transform: perspective(300px) translateZ(40px) scale(1.1);
+            filter: drop-shadow(0 6px 4px rgba(4, 120, 87, 0.45));
+        }
+
+        .sidebar-menu a:hover > span {
+            transform: perspective(300px) translateZ(40px) scale(1.1);
+            text-shadow: 0 6px 6px rgba(4, 120, 87, 0.35);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .sidebar-menu a > i,
+            .sidebar-menu a > .sidebar-icon,
+            .sidebar-menu a > span {
+                transition: none;
+            }
+        }
+
         .sidebar-footer {
             position: absolute;
             bottom: 0;
@@ -436,6 +476,27 @@
         }
         .settings-flyout ul li.active-client:hover {
             color: #065F46;
+        }
+
+        /* Elenchi "Clienti" e "Progetti clienti": stessa animazione 3D dei pulsanti
+           della sidebar (vedi .sidebar-menu a). Si anima solo il nome, non la riga. */
+        .settings-flyout ul li[data-client-id] > .flyout-item-label {
+            display: inline-block;
+            transform-origin: left center; /* il nome cresce verso destra, non esce a sinistra */
+            transform: perspective(300px) translateZ(0) scale(1);
+            transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), text-shadow 0.35s ease;
+            will-change: transform;
+        }
+
+        .settings-flyout ul li[data-client-id]:hover > .flyout-item-label {
+            transform: perspective(300px) translateZ(40px) scale(1.1);
+            text-shadow: 0 6px 6px rgba(4, 120, 87, 0.35);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .settings-flyout ul li[data-client-id] > .flyout-item-label {
+                transition: none;
+            }
         }
 
         /* Secondo flyout: dettaglio dei campi dell'argomento selezionato */
@@ -683,6 +744,102 @@
         .settings-detail-parent:hover .parent-arrow,
         .settings-detail-link:hover .parent-arrow {
             color: #065F46;
+        }
+
+        /* Nodo Padre (tipo 0), tabella collegata (tipo 20, es. "Contatti", riconoscibile
+           da data-link-id), elenco dal database (tipo 15, es. Gestione Clienti › Rinomina)
+           e nuovo cliente (tipo 16, "Aggiungi"): solo contorno verde, senza riempimento. */
+        .settings-detail-parent,
+        .settings-detail-parent:hover,
+        .settings-detail-link[data-link-id],
+        .settings-detail-opt,
+        .settings-detail-newclient,
+        .settings-detail-link[data-link-id]:hover,
+        .settings-detail-opt:hover,
+        .settings-detail-newclient:hover {
+            background: transparent;
+        }
+        .settings-detail-parent,
+        .settings-detail-link[data-link-id],
+        .settings-detail-opt,
+        .settings-detail-newclient {
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .settings-detail-parent:hover,
+        .settings-detail-link[data-link-id]:hover,
+        .settings-detail-opt:hover,
+        .settings-detail-newclient:hover {
+            border-color: #10B981;
+            box-shadow: 0 4px 12px rgba(4, 120, 87, 0.12);
+        }
+        /* Stessa animazione 3D di sidebar, clienti e progetti sul nome del campo
+           (primo span della riga): esce in avanti e cresce verso destra. */
+        .settings-detail-parent > span:first-child,
+        .settings-detail-link[data-link-id] > span:first-child,
+        .settings-detail-opt > span:first-child,
+        .settings-detail-newclient > span:first-child {
+            transform-origin: left center;
+            transform: perspective(300px) translateZ(0) scale(1);
+            transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), text-shadow 0.35s ease;
+            will-change: transform;
+        }
+        .settings-detail-parent:hover > span:first-child,
+        .settings-detail-link[data-link-id]:hover > span:first-child,
+        .settings-detail-opt:hover > span:first-child,
+        .settings-detail-newclient:hover > span:first-child {
+            transform: perspective(300px) translateZ(40px) scale(1.1);
+            text-shadow: 0 6px 6px rgba(4, 120, 87, 0.35);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .settings-detail-parent > span:first-child,
+            .settings-detail-link[data-link-id] > span:first-child,
+        .settings-detail-opt > span:first-child,
+        .settings-detail-newclient > span:first-child {
+                transition: none;
+            }
+        }
+
+        /* Elenco progetti di un cliente: niente verde e righe non a tutta larghezza.
+           Il nome ha la stessa animazione 3D di sidebar ed elenco clienti. */
+        .settings-detail-link.proj-row {
+            width: min(520px, 100%);
+            background: #fff;
+            color: var(--dark);
+            font-weight: 500;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.55rem 0.9rem;
+            margin-bottom: 6px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .settings-detail-link.proj-row .parent-arrow {
+            color: var(--text-muted);
+        }
+        .settings-detail-link.proj-row:hover {
+            background: #fff;
+            color: var(--dark);
+            border-color: #34D399;
+            box-shadow: 0 4px 12px rgba(4, 120, 87, 0.12);
+        }
+        .settings-detail-link.proj-row:hover .parent-arrow {
+            color: #047857;
+        }
+        .settings-detail-link.proj-row > .flyout-item-label {
+            display: inline-block;
+            min-width: 0;
+            transform-origin: left center; /* il nome cresce verso destra, non esce a sinistra */
+            transform: perspective(300px) translateZ(0) scale(1);
+            transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), text-shadow 0.35s ease;
+            will-change: transform;
+        }
+        .settings-detail-link.proj-row:hover > .flyout-item-label {
+            transform: perspective(300px) translateZ(40px) scale(1.1);
+            text-shadow: 0 6px 6px rgba(4, 120, 87, 0.35);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .settings-detail-link.proj-row > .flyout-item-label {
+                transition: none;
+            }
         }
 
         .settings-detail-row input[type="text"],
@@ -3008,6 +3165,8 @@
             <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 3 3.8 3 6v12c0 2.2 3.5 4 9 4s9-1.8 9-4V6c0-2.2-3.5-4-9-4Zm0 2c4.6 0 7 1.4 7 2s-2.4 2-7 2-7-1.4-7-2 2.4-2 7-2Zm0 16c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V18c0 .6-2.4 2-7 2Zm0-5c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V13c0 .6-2.4 2-7 2Z"/></svg> <span>Database</span></a></li>
             <!-- Monitor della VM: solo admin del tenant PROJEXA (il server lo verifica sul database) -->
             <li id="navVmMonitor" style="display: none;"><a href="vm-monitor.html"><i class="fas fa-server"></i> <span>Monitor VM</span></a></li>
+            <!-- Schedulazioni job (tabella job_schedules): solo admin del tenant PROJEXA, come Monitor VM -->
+            <li id="navJobSchedules" style="display: none;"><a href="job-schedules.html"><i class="fas fa-clock-rotate-left"></i> <span>Schedulazioni</span></a></li>
             <!-- Registrazione libera (non legata al calendario): chiede il nome e avvia la registrazione -->
             <li id="navRecord" data-dash-flag="registra" style="border: none;"><a href="#" id="navRecordLink" title="Nuova registrazione"><svg class="sidebar-icon nav-record-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="#DC2626" stroke-width="1.8"/><rect x="9.6" y="5.6" width="4.8" height="8.2" rx="2.4" fill="#DC2626"/><path d="M7.4 11.4a4.6 4.6 0 0 0 9.2 0" fill="none" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/><path d="M12 16v2.4M9.6 18.4h4.8" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/></svg> <span>Registra</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
@@ -3331,12 +3490,6 @@
                     </div>
                     <button class="btn-icon">
                         <i class="fas fa-bell"></i>
-                    </button>
-                    <!-- Aggiorna Integrazioni: lancia i programmi di sincronizzazione
-                         (backend/jobs/*). Compare solo con l'integrazione Jira attiva.
-                         Gestito da js/integrazioni.js -->
-                    <button class="btn btn-secondary" id="btnAggiornaIntegrazioni" type="button" style="display: none;">
-                        <i class="fas fa-rotate"></i> Aggiorna Integrazioni
                     </button>
                 </div>
             </div>
@@ -9293,11 +9446,12 @@
             if (dbNav) {
                 dbNav.style.display = isAdmin ? '' : 'none';
             }
-            const vmNav = document.getElementById('navVmMonitor');
-            if (vmNav) {
-                const projexa = String(claims.tenant_name || '').trim().toUpperCase() === 'PROJEXA';
-                vmNav.style.display = isAdmin && projexa ? '' : 'none';
-            }
+            // Monitor VM e Schedulazioni job: solo admin del tenant PROJEXA (il server lo ricontrolla).
+            const projexa = String(claims.tenant_name || '').trim().toUpperCase() === 'PROJEXA';
+            ['navVmMonitor', 'navJobSchedules'].forEach((navId) => {
+                const nav = document.getElementById(navId);
+                if (nav) nav.style.display = isAdmin && projexa ? '' : 'none';
+            });
         }
 
         // Carica nel pannello Impostazioni gli "argument" distinti dalla tabella settings,
@@ -9716,7 +9870,7 @@
                 }
                 // Ogni voce mostra il nome ma porta con sé l'id della riga cliente,
                 // che verrà usato come "argument" per il flyout di dettaglio.
-                listEl.innerHTML = clients.map(c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}">${escapeHtml(c.name)}</li>`).join('');
+                listEl.innerHTML = clients.map(c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}"><span class="flyout-item-label">${escapeHtml(c.name)}</span></li>`).join('');
                 listEl.querySelectorAll('li[data-client-id]').forEach(li => {
                     li.addEventListener('click', () => {
                         detailNavStack = [];
@@ -9753,7 +9907,7 @@
                 if (!res.ok) { listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore</li>'; return; }
                 const clients = await res.json();
                 if (!Array.isArray(clients) || clients.length === 0) { listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Nessun cliente</li>'; return; }
-                listEl.innerHTML = clients.map(c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}">${escapeHtml(c.name)}</li>`).join('');
+                listEl.innerHTML = clients.map(c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}"><span class="flyout-item-label">${escapeHtml(c.name)}</span></li>`).join('');
                 listEl.querySelectorAll('li[data-client-id]').forEach(li => {
                     li.addEventListener('click', () => {
                         listEl.querySelectorAll('li[data-client-id]').forEach(x => x.classList.remove('active-client'));
@@ -9793,7 +9947,7 @@
                 const res = await fetch(`${API_URL}/projects/list?clientId=${encodeURIComponent(clientId)}`, { headers: getAuthHeaders() });
                 const projects = res.ok ? await res.json() : [];
                 const addBtn = `<button id="projAddBtn" type="button" style="margin-bottom:0.75rem; padding:0.4rem 0.7rem; background:#3B82F6; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">+ Nuovo progetto</button>`;
-                const rows = (projects || []).map(p => `<div class="settings-detail-link proj-row" data-proj-id="${escapeHtml(p.id)}" data-proj-name="${escapeHtml(p.name)}"><span>${escapeHtml(p.name)}</span><span class="parent-arrow">›</span></div>`).join('')
+                const rows = (projects || []).map(p => `<div class="settings-detail-link proj-row" data-proj-id="${escapeHtml(p.id)}" data-proj-name="${escapeHtml(p.name)}"><span class="flyout-item-label">${escapeHtml(p.name)}</span><span class="parent-arrow">›</span></div>`).join('')
                     || '<div style="color: var(--text-muted);">Nessun progetto</div>';
                 listEl.innerHTML = addBtn + rows;
                 listEl.querySelectorAll('.proj-row').forEach(r => r.addEventListener('click', (e) => {

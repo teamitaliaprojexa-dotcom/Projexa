@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - Schedulazioni job</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Pagina riservata all'admin del tenant PROJEXA (controllo lato server in
+         backend/routes/job-schedules.js). Monitora e modifica la tabella job_schedules. -->
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --ink: #1f2937; --ink2: #4b5563; --muted: #6b7280; --line: #e5e7eb; --grid: #f0f1f3;
+            --surface: #ffffff; --bg: #f5f5f5; --primary: #3B82F6;
+            --good: #047857; --good-bg: #D1FAE5; --warn: #B45309; --warn-bg: #FEF3C7;
+            --bad: #B91C1C; --bad-bg: #FEE2E2; --info-bg: #EFF6FF;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; background: var(--bg); color: var(--ink); }
+        .container { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+        header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+        h1 { font-size: 1.6rem; color: var(--primary); }
+        .sub { font-size: 0.85rem; color: var(--muted); margin-top: 0.2rem; }
+        .btn { padding: 0.55rem 1rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; background: #e5e7eb; color: var(--ink); font-family: inherit; }
+        .btn:hover { background: #d1d5db; }
+        .btn:disabled { opacity: 0.6; cursor: wait; }
+        .btn-primary { background: var(--primary); color: #fff; }
+        .btn-primary:hover { background: #2563EB; }
+        .btn-danger { background: var(--bad-bg); color: var(--bad); }
+        .btn-danger:hover { background: #FECACA; }
+        .btn-sm { padding: 0.35rem 0.65rem; font-size: 0.8rem; border-radius: 6px; }
+        .toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+        .updated { font-size: 0.8rem; color: var(--muted); }
+        .card { background: var(--surface); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 1rem 1.1rem; }
+        .banner { border-radius: 8px; padding: 0.7rem 0.9rem; font-size: 0.85rem; margin-bottom: 1rem; display: flex; gap: 0.6rem; align-items: flex-start; line-height: 1.45; }
+        .banner.info { background: var(--info-bg); color: #1E40AF; }
+        .banner.warn { background: var(--warn-bg); color: var(--warn); }
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        th { text-align: left; font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+        td { padding: 0.6rem 0.5rem; border-bottom: 1px solid var(--grid); vertical-align: top; font-variant-numeric: tabular-nums; }
+        tr.off td { color: var(--muted); }
+        .strong { font-weight: 600; color: var(--ink); }
+        .small { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
+        .badge { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+        .b-ok { background: var(--good-bg); color: var(--good); }
+        .b-errori, .b-saltato { background: var(--warn-bg); color: var(--warn); }
+        .b-fallito { background: var(--bad-bg); color: var(--bad); }
+        .b-run { background: var(--info-bg); color: #1D4ED8; }
+        .b-off { background: #F3F4F6; color: var(--muted); }
+        .b-late { background: var(--bad-bg); color: var(--bad); }
+        .err-lines { white-space: pre-line; color: var(--bad); }
+        .actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        .denied { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+        .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; display: block; }
+        .empty { font-size: 0.9rem; color: var(--muted); padding: 2.5rem 0; text-align: center; }
+        /* Interruttore attivo/disattivo */
+        .switch { position: relative; display: inline-block; width: 38px; height: 22px; flex: 0 0 auto; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .switch span { position: absolute; inset: 0; background: #D1D5DB; border-radius: 22px; cursor: pointer; transition: background 0.2s; }
+        .switch span::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+        .switch input:checked + span { background: #10B981; }
+        .switch input:checked + span::before { transform: translateX(16px); }
+        /* Finestre */
+        .overlay { position: fixed; inset: 0; background: rgba(17,24,39,0.45); display: none; align-items: center; justify-content: center; z-index: 50; padding: 1rem; }
+        .overlay.open { display: flex; }
+        .modal { background: #fff; border-radius: 12px; width: min(640px, 100%); max-height: 90vh; overflow: auto; box-shadow: 0 20px 50px rgba(0,0,0,0.25); }
+        .modal-head { display: flex; align-items: center; gap: 0.6rem; padding: 1rem 1.25rem; border-bottom: 1px solid var(--line); font-weight: 600; position: sticky; top: 0; background: #fff; z-index: 1; }
+        .modal-head .sp { flex: 1; }
+        .modal-close { background: none; border: none; font-size: 1.4rem; line-height: 1; color: var(--muted); cursor: pointer; }
+        .modal-body { padding: 1rem 1.25rem; }
+        .modal-foot { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0.9rem 1.25rem; border-top: 1px solid var(--line); }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem 1rem; }
+        .form-grid .full { grid-column: 1 / -1; }
+        label.lbl { display: block; font-size: 0.78rem; font-weight: 600; color: var(--ink2); margin-bottom: 0.3rem; }
+        input[type="text"], input[type="time"], input[type="number"], select, textarea { width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.88rem; font-family: inherit; color: var(--ink); background: #fff; }
+        textarea { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.8rem; min-height: 70px; }
+        .days { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        .days label { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; padding: 0.35rem 0.5rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.82rem; cursor: pointer; user-select: none; }
+        .days input { display: none; }
+        .days input:checked + span { color: #fff; }
+        .days label:has(input:checked) { background: #10B981; border-color: #10B981; color: #fff; }
+        .preview { font-size: 0.8rem; color: var(--ink2); background: #F9FAFB; border-radius: 6px; padding: 0.5rem 0.65rem; }
+        .form-err { color: var(--bad); font-size: 0.82rem; margin-top: 0.6rem; min-height: 1em; }
+        /* Report */
+        .rep-prog { border: 1px solid var(--line); border-radius: 10px; padding: 0.75rem 0.9rem; margin-bottom: 0.75rem; }
+        .rep-prog h4 { font-size: 0.92rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.45rem; }
+        .rep-user { font-size: 0.83rem; padding: 0.4rem 0; border-top: 1px dashed var(--line); }
+        .rep-user:first-of-type { border-top: none; }
+        .nums { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; color: var(--ink2); margin-top: 0.2rem; }
+        .nums b { color: var(--ink); }
+        pre.json { background: #F9FAFB; border-radius: 6px; padding: 0.6rem; font-size: 0.75rem; overflow: auto; max-height: 300px; }
+        details summary { cursor: pointer; font-size: 0.8rem; color: var(--muted); margin-top: 0.5rem; }
+        @media (max-width: 560px) { .form-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1><i class="fas fa-clock-rotate-left"></i> Schedulazioni job</h1>
+                <div class="sub">Tabella job_schedules: i job partono dallo schedulatore del server, anche a computer spento.</div>
+            </div>
+            <a class="btn" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
+        </header>
+
+        <div id="content" style="display: none;">
+            <div id="schedulerBanner"></div>
+            <div class="toolbar">
+                <button type="button" class="btn btn-primary" id="newBtn"><i class="fas fa-plus"></i> Nuova schedulazione</button>
+                <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                    <span class="updated" id="updated"></span>
+                    <button type="button" class="btn" id="refreshBtn" title="Aggiorna adesso"><i class="fas fa-rotate"></i> Aggiorna</button>
+                </div>
+            </div>
+            <div class="card">
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Attivo</th>
+                                <th>Job</th>
+                                <th>Calendario</th>
+                                <th>Prossima esecuzione</th>
+                                <th>Ultima esecuzione</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="rows"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="deniedCard" class="card denied" style="display: none;">
+            <i class="fas fa-lock"></i>
+            <div id="deniedMsg">Pagina non disponibile.</div>
+        </div>
+    </div>
+
+    <!-- Modifica / nuova schedulazione -->
+    <div class="overlay" id="editOverlay">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+            <div class="modal-head"><i class="fas fa-pen" style="color: var(--primary);"></i><span id="editTitle">Schedulazione</span><span class="sp"></span><button type="button" class="modal-close" data-close aria-label="Chiudi">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div><label class="lbl" for="fTenant">Tenant</label><select id="fTenant"></select></div>
+                    <div><label class="lbl" for="fJob">Job</label><select id="fJob"></select></div>
+                    <div class="full">
+                        <label class="lbl" for="fUtente">Configurazione Jira di (mappatura, filtri e token)</label>
+                        <select id="fUtente"></select>
+                        <div class="small">Il job aggiorna comunque i dati di <strong>tutto il tenant</strong>: qui scegli solo con quale account leggere Jira. Se questa configurazione non funziona (Jira scollegato, token scaduto) si usa un altro utente configurato e il report lo segnala.</div>
+                    </div>
+                    <div class="full"><label class="lbl" for="fDesc">Descrizione</label><input type="text" id="fDesc" maxlength="255"></div>
+                    <div class="full" style="display: flex; align-items: center; gap: 0.6rem;">
+                        <label class="switch"><input type="checkbox" id="fAttivo"><span></span></label>
+                        <label for="fAttivo" style="font-size: 0.88rem; cursor: pointer;">Schedulazione attiva</label>
+                    </div>
+                    <div class="full">
+                        <span class="lbl">Giorni</span>
+                        <div class="days" id="fGiorni"></div>
+                    </div>
+                    <div><label class="lbl" for="fInizio">Dalle</label><input type="time" id="fInizio"></div>
+                    <div><label class="lbl" for="fFine">Alle</label><input type="time" id="fFine"></div>
+                    <div><label class="lbl" for="fIntervallo">Ogni (minuti)</label><input type="number" id="fIntervallo" min="5" max="1440" step="5"></div>
+                    <div><label class="lbl" for="fTz">Fuso orario</label><input type="text" id="fTz" placeholder="Europe/Rome"></div>
+                    <div class="full"><div class="preview" id="fPreview"></div></div>
+                    <div class="full">
+                        <label class="lbl" for="fParam">Parametri (JSON, facoltativo)</label>
+                        <textarea id="fParam" placeholder='es. {"programmi": ["aggiornaJiraTask"]}'></textarea>
+                    </div>
+                </div>
+                <div class="form-err" id="fErr"></div>
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn" data-close>Annulla</button>
+                <button type="button" class="btn btn-primary" id="saveBtn"><i class="fas fa-check"></i> Salva</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Report dell'ultima esecuzione -->
+    <div class="overlay" id="repOverlay">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="repTitle">
+            <div class="modal-head"><i class="fas fa-file-lines" style="color: var(--primary);"></i><span id="repTitle">Ultima esecuzione</span><span class="sp"></span><button type="button" class="modal-close" data-close aria-label="Chiudi">&times;</button></div>
+            <div class="modal-body" id="repBody"></div>
+        </div>
+    </div>
+
+    <script>
+        // Stesso criterio delle altre pagine: l'API è sulla stessa origine.
+        const API_URL = location.origin + '/api';
+        const REFRESH_MS = 30000;
+        const RITARDO_MIN = 3; // lo schedulatore controlla ogni minuto: oltre 3 minuti è in ritardo
+        const GIORNI = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+        const $ = (id) => document.getElementById(id);
+        let dati = null;
+        let editId = null;   // null = nuova schedulazione
+        let timer = null;
+
+        if (!localStorage.getItem('authToken')) window.location.href = 'index.html';
+
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const headers = (extra) => Object.assign({ 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` }, extra || {});
+        const hhmm = (t) => String(t || '').slice(0, 5);
+
+        function dataOra(iso) {
+            if (!iso) return '–';
+            return new Date(iso).toLocaleString('it-IT', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        }
+        function traQuanto(iso) {
+            if (!iso) return '';
+            const min = Math.round((new Date(iso) - Date.now()) / 60000);
+            if (min <= 0) return 'entro un minuto';
+            if (min < 60) return `tra ${min} min`;
+            const h = Math.floor(min / 60);
+            return h < 48 ? `tra ${h} h ${min % 60} min` : `tra ${Math.round(h / 24)} giorni`;
+        }
+        function durata(ms) {
+            if (ms == null) return '';
+            const s = Math.round(ms / 1000);
+            return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+        }
+        function giorniTesto(g) {
+            const set = (g || []).map(Number).sort();
+            if (set.join() === '1,2,3,4,5') return 'Lun–Ven';
+            if (set.join() === '1,2,3,4,5,6,7') return 'Tutti i giorni';
+            return set.map((d) => GIORNI[d - 1]).join(', ');
+        }
+        function intervalloTesto(min) {
+            const n = Number(min);
+            if (n % 60 === 0) return n === 60 ? 'ogni ora' : `ogni ${n / 60} ore`;
+            return `ogni ${n} min`;
+        }
+        // Orari di esecuzione di una giornata (stessa regola dello schedulatore).
+        function slot(inizio, fine, passo) {
+            const m = (t) => { const [h, mi] = String(t || '0:0').split(':').map(Number); return (h || 0) * 60 + (mi || 0); };
+            const out = [];
+            const p = Math.max(5, Number(passo) || 60);
+            for (let t = m(inizio); t <= m(fine) && out.length < 300; t += p) {
+                out.push(`${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`);
+            }
+            return out;
+        }
+        const ESITI = { ok: ['b-ok', 'OK'], errori: ['b-errori', 'CON ERRORI'], saltato: ['b-saltato', 'SALTATO'], fallito: ['b-fallito', 'FALLITO'] };
+
+        // ------------------------------------------------------------------
+        // ELENCO
+        // ------------------------------------------------------------------
+        async function carica() {
+            try {
+                const r = await fetch(`${API_URL}/job-schedules`, { headers: headers() });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    $('content').style.display = 'none';
+                    $('deniedCard').style.display = '';
+                    $('deniedMsg').textContent = d.error || `Errore ${r.status}`;
+                    if (r.status === 403) { clearInterval(timer); timer = null; }
+                    return;
+                }
+                dati = d;
+                $('deniedCard').style.display = 'none';
+                $('content').style.display = '';
+                render();
+            } catch (e) {
+                $('updated').textContent = 'Errore di connessione: ' + e.message;
+            }
+        }
+
+        function render() {
+            $('schedulerBanner').innerHTML = dati.schedulerAttivo
+                ? `<div class="banner info"><i class="fas fa-circle-check"></i><div>Lo schedulatore di questo server è <strong>attivo</strong>: controlla le schedulazioni ogni minuto.</div></div>`
+                : `<div class="banner warn"><i class="fas fa-triangle-exclamation"></i><div>In questo backend lo schedulatore è <strong>spento</strong> (JOB_SCHEDULER_ENABLED non è true). È normale in locale: i job partono solo dal server di produzione. Le modifiche fatte qui valgono comunque, perché la tabella è la stessa.</div></div>`;
+
+            const righe = dati.schedulazioni || [];
+            if (!righe.length) {
+                $('rows').innerHTML = `<tr><td colspan="6"><div class="empty">Nessuna schedulazione. Usa «Nuova schedulazione» per crearne una.</div></td></tr>`;
+            } else {
+                $('rows').innerHTML = righe.map((s) => {
+                    const inCorso = !!s.in_esecuzione_dal;
+                    const esito = ESITI[s.ultimo_esito];
+                    const stato = inCorso
+                        ? `<span class="badge b-run"><i class="fas fa-spinner fa-spin"></i> IN ESECUZIONE</span><div class="small">dalle ${esc(dataOra(s.in_esecuzione_dal))}</div>`
+                        : s.ultima_esecuzione
+                            ? `<span class="badge ${esito ? esito[0] : 'b-off'}">${esc(esito ? esito[1] : s.ultimo_esito || '–')}</span>
+                               <div class="small">${esc(dataOra(s.ultima_esecuzione))}${s.ultima_durata_ms != null ? ' · ' + esc(durata(s.ultima_durata_ms)) : ''}</div>
+                               ${s.ultimo_errore ? `<div class="small err-lines">${esc(s.ultimo_errore)}</div>` : ''}`
+                            : '<span class="small">Mai eseguita</span>';
+                    // In ritardo: l'ora prevista è passata da più di RITARDO_MIN e il job non è
+                    // partito (server spento o schedulatore disattivato sul server).
+                    const inRitardo = s.attivo && !inCorso && s.prossima_esecuzione
+                        && Date.now() - new Date(s.prossima_esecuzione).getTime() > RITARDO_MIN * 60000;
+                    const prossima = !s.attivo
+                        ? '<span class="badge b-off">DISATTIVATA</span>'
+                        : inRitardo
+                            ? `<span class="badge b-late"><i class="fas fa-triangle-exclamation"></i> IN RITARDO</span>
+                               <div class="small">prevista ${esc(dataOra(s.prossima_esecuzione))}</div>
+                               <div class="small" style="color: var(--bad);">Non è partita: lo schedulatore del server non è attivo o il server è spento.</div>`
+                        : s.prossima_esecuzione
+                            ? `<div class="strong">${esc(dataOra(s.prossima_esecuzione))}</div><div class="small">${esc(traQuanto(s.prossima_esecuzione))}</div>`
+                            : '<span class="small">Da calcolare</span>';
+                    return `<tr class="${s.attivo ? '' : 'off'}" data-id="${esc(s.id)}">
+                        <td><label class="switch" title="Attiva / disattiva"><input type="checkbox" data-act="toggle" ${s.attivo ? 'checked' : ''}><span></span></label></td>
+                        <td><div class="strong">${esc(s.descrizione || s.job)}</div><div class="small">${esc(s.job)} · ${esc(s.tenant_name || s.tenant_id)}</div>
+                            <div class="small"><i class="fas fa-user-gear"></i> Configurazione Jira: ${s.utente_config ? esc([s.config_name, s.config_cognome].filter(Boolean).join(' ') || s.utente_config) : 'automatica (primo utente configurato)'}</div></td>
+                        <td><div>${esc(giorniTesto(s.giorni_settimana))}</div><div class="small">${esc(hhmm(s.ora_inizio))}–${esc(hhmm(s.ora_fine))} · ${esc(intervalloTesto(s.intervallo_minuti))}</div><div class="small">${esc(s.fuso_orario)}</div></td>
+                        <td>${prossima}</td>
+                        <td>${stato}</td>
+                        <td><div class="actions">
+                            <button type="button" class="btn btn-sm" data-act="edit" title="Modifica"><i class="fas fa-pen"></i></button>
+                            <button type="button" class="btn btn-sm" data-act="run" title="Esegui ora (dallo schedulatore del server, entro un minuto)" ${s.attivo && !inCorso ? '' : 'disabled'}><i class="fas fa-play"></i></button>
+                            <button type="button" class="btn btn-sm" data-act="report" title="Report dell'ultima esecuzione" ${s.ultimo_report || s.ultimo_errore ? '' : 'disabled'}><i class="fas fa-file-lines"></i></button>
+                            ${inCorso ? '<button type="button" class="btn btn-sm" data-act="unlock" title="Sblocca (se è rimasta bloccata dopo un riavvio)"><i class="fas fa-unlock"></i></button>' : ''}
+                            <button type="button" class="btn btn-sm btn-danger" data-act="delete" title="Elimina"><i class="fas fa-trash"></i></button>
+                        </div></td>
+                    </tr>`;
+                }).join('');
+            }
+            $('updated').textContent = 'Aggiornato alle ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+
+        async function chiama(metodo, url, body) {
+            const r = await fetch(`${API_URL}/job-schedules${url}`, {
+                method: metodo,
+                headers: headers(body ? { 'Content-Type': 'application/json' } : {}),
+                body: body ? JSON.stringify(body) : undefined
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+            return d;
+        }
+
+        $('rows').addEventListener('click', async (e) => {
+            const el = e.target.closest('[data-act]');
+            if (!el) return;
+            const tr = el.closest('tr[data-id]');
+            const s = (dati.schedulazioni || []).find((x) => x.id === tr.dataset.id);
+            if (!s) return;
+            const act = el.dataset.act;
+            try {
+                if (act === 'toggle') {
+                    await chiama('PUT', `/${s.id}`, { attivo: el.checked });
+                    await carica();
+                } else if (act === 'edit') {
+                    apriModifica(s);
+                } else if (act === 'run') {
+                    if (!confirm(`Eseguire adesso "${s.descrizione || s.job}"?\nLo lancia lo schedulatore del server entro un minuto.`)) return;
+                    await chiama('POST', `/${s.id}/esegui-ora`);
+                    await carica();
+                } else if (act === 'report') {
+                    apriReport(s);
+                } else if (act === 'unlock') {
+                    if (!confirm('Sbloccare la schedulazione? Fallo solo se il job non sta davvero girando (es. il server è stato riavviato a metà).')) return;
+                    await chiama('POST', `/${s.id}/sblocca`);
+                    await carica();
+                } else if (act === 'delete') {
+                    if (!confirm(`Eliminare definitivamente la schedulazione "${s.descrizione || s.job}"?`)) return;
+                    await chiama('DELETE', `/${s.id}`);
+                    await carica();
+                }
+            } catch (err) {
+                alert(err.message);
+                carica();
+            }
+        });
+
+        // ------------------------------------------------------------------
+        // MODIFICA / NUOVA
+        // ------------------------------------------------------------------
+        $('fGiorni').innerHTML = GIORNI.map((g, i) => `<label><input type="checkbox" value="${i + 1}"><span>${g}</span></label>`).join('');
+
+        function aggiornaAnteprima() {
+            const orari = slot($('fInizio').value, $('fFine').value, $('fIntervallo').value);
+            const giorni = [...$('fGiorni').querySelectorAll('input:checked')].map((x) => Number(x.value));
+            $('fPreview').innerHTML = !giorni.length
+                ? 'Scegli almeno un giorno.'
+                : !orari.length
+                    ? 'Nessun orario: controlla la fascia oraria.'
+                    : `<i class="fas fa-calendar-check" style="color: #10B981;"></i> ${esc(giorniTesto(giorni))} alle ${esc(orari.join(', '))} <span style="color: var(--muted);">(${orari.length} esecuzioni al giorno)</span>`;
+        }
+        ['fInizio', 'fFine', 'fIntervallo'].forEach((id) => $(id).addEventListener('input', aggiornaAnteprima));
+        $('fGiorni').addEventListener('change', aggiornaAnteprima);
+
+        // Utenti del tenant scelto, con lo stato Jira accanto al nome.
+        function riempiUtenti(tenantId, selezionato) {
+            const utenti = (dati.utenti || []).filter((u) => u.tenant_id === tenantId);
+            const stato = (u) => u.mappatura && u.collegato ? 'Jira configurato e collegato'
+                : u.mappatura ? 'mappatura presente, Jira NON collegato'
+                : u.collegato ? 'Jira collegato, senza mappatura'
+                : 'senza configurazione Jira';
+            $('fUtente').innerHTML = `<option value="">Automatica (primo utente configurato)</option>` +
+                utenti.map((u) => `<option value="${esc(u.user_id)}">${esc(u.nome)} — ${esc(stato(u))}</option>`).join('');
+            $('fUtente').value = selezionato && utenti.some((u) => u.user_id === selezionato) ? selezionato : '';
+        }
+        $('fTenant').addEventListener('change', () => riempiUtenti($('fTenant').value, $('fUtente').value));
+
+        function apriModifica(s) {
+            editId = s ? s.id : null;
+            $('editTitle').textContent = s ? 'Modifica schedulazione' : 'Nuova schedulazione';
+            $('fTenant').innerHTML = (dati.tenants || []).map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
+            $('fJob').innerHTML = (dati.jobs || []).map((j) => `<option value="${esc(j)}">${esc(j)}</option>`).join('');
+            $('fTenant').value = s ? s.tenant_id : ((dati.tenants || [])[0] || {}).id || '';
+            $('fJob').value = s ? s.job : (dati.jobs || [])[0] || '';
+            riempiUtenti($('fTenant').value, s ? s.utente_config : null);
+            $('fDesc').value = s ? (s.descrizione || '') : '';
+            $('fAttivo').checked = s ? !!s.attivo : true;
+            const giorni = (s ? s.giorni_settimana : [1, 2, 3, 4, 5]).map(Number);
+            $('fGiorni').querySelectorAll('input').forEach((x) => { x.checked = giorni.includes(Number(x.value)); });
+            $('fInizio').value = hhmm(s ? s.ora_inizio : '09:00');
+            $('fFine').value = hhmm(s ? s.ora_fine : '19:00');
+            $('fIntervallo').value = s ? s.intervallo_minuti : 120;
+            $('fTz').value = s ? s.fuso_orario : 'Europe/Rome';
+            $('fParam').value = s && s.parametri ? JSON.stringify(s.parametri, null, 2) : '';
+            $('fErr').textContent = '';
+            aggiornaAnteprima();
+            $('editOverlay').classList.add('open');
+        }
+
+        $('newBtn').addEventListener('click', () => apriModifica(null));
+
+        $('saveBtn').addEventListener('click', async () => {
+            const body = {
+                tenant_id: $('fTenant').value,
+                job: $('fJob').value,
+                utente_config: $('fUtente').value || null,
+                descrizione: $('fDesc').value.trim() || null,
+                attivo: $('fAttivo').checked,
+                giorni_settimana: [...$('fGiorni').querySelectorAll('input:checked')].map((x) => Number(x.value)),
+                ora_inizio: $('fInizio').value,
+                ora_fine: $('fFine').value,
+                intervallo_minuti: Number($('fIntervallo').value),
+                fuso_orario: $('fTz').value.trim() || 'Europe/Rome',
+                parametri: $('fParam').value.trim()
+            };
+            $('fErr').textContent = '';
+            if (body.ora_fine < body.ora_inizio) { $('fErr').textContent = 'L\'ora di fine deve essere successiva a quella di inizio.'; return; }
+            const btn = $('saveBtn');
+            btn.disabled = true;
+            try {
+                if (editId) await chiama('PUT', `/${editId}`, body);
+                else await chiama('POST', '', body);
+                chiudi();
+                await carica();
+            } catch (err) {
+                $('fErr').textContent = err.message;
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        // ------------------------------------------------------------------
+        // REPORT DELL'ULTIMA ESECUZIONE
+        // ------------------------------------------------------------------
+        function numeri(r) {
+            const v = (n, l) => `<span><b>${esc(n ?? 0)}</b> ${esc(l)}</span>`;
+            let html = `<div class="nums">${v(r.righeJira, 'righe Jira')}${v(r.inserite, 'inserite')}${v(r.aggiornate, 'aggiornate')}${v(r.ignorateSenzaCliente, 'senza cliente')}${v(r.ignorateScadute, 'scadute')}</div>`;
+            if (r.passaggioAggiuntivo) {
+                const p = r.passaggioAggiuntivo;
+                html += `<div class="small">Filtro aggiuntivo "${esc(p.filtro)}": ${esc(p.righeJira)} righe, ${esc(p.aggiornate)} aggiornate</div>`;
+            }
+            if (r.errori && r.errori.length) html += `<div class="small" style="color: var(--bad);">${r.errori.map(esc).join('<br>')}</div>`;
+            return html;
+        }
+
+        function apriReport(s) {
+            $('repTitle').textContent = `Ultima esecuzione — ${s.descrizione || s.job}`;
+            const esito = ESITI[s.ultimo_esito];
+            let html = `<div style="margin-bottom: 0.75rem;"><span class="badge ${esito ? esito[0] : 'b-off'}">${esc(esito ? esito[1] : s.ultimo_esito || '–')}</span>
+                <span class="small" style="margin-left: 0.4rem;">${esc(dataOra(s.ultima_esecuzione))}${s.ultima_durata_ms != null ? ' · ' + esc(durata(s.ultima_durata_ms)) : ''}</span></div>`;
+            if (s.ultimo_errore) html += `<div class="banner warn"><i class="fas fa-triangle-exclamation"></i><div style="white-space: pre-line;">${esc(s.ultimo_errore)}</div></div>`;
+            const rep = s.ultimo_report;
+            if (rep && Array.isArray(rep.risultati)) {
+                html += rep.risultati.map((p) => {
+                    const testa = `<h4>${esc(p.etichetta || p.programma)} <span class="badge ${p.ok ? 'b-ok' : 'b-fallito'}">${p.ok ? 'ESEGUITO' : 'NON ESEGUITO'}</span></h4>`;
+                    if (!p.ok) return `<div class="rep-prog">${testa}<div class="small" style="color: var(--bad);">${esc(p.errore)}</div></div>`;
+                    const utenti = Array.isArray(p.utenti)
+                        ? p.utenti.map((u) => u.ok
+                            ? `<div class="rep-user"><div class="strong"><i class="fas fa-user-gear" style="color: var(--muted);"></i> Tutto il tenant, con la configurazione Jira di ${esc(u.nome || u.userId)}</div>${numeri(u.report || {})}</div>`
+                            : `<div class="rep-user"><div class="strong"><i class="fas fa-user-slash" style="color: var(--muted);"></i> Configurazione di ${esc(u.nome || u.userId)} non utilizzata</div><div class="small" style="color: ${u.saltato ? 'var(--warn)' : 'var(--bad)'};">${esc(u.errore)}</div></div>`).join('')
+                        : numeri(p);
+                    return `<div class="rep-prog">${testa}${utenti}</div>`;
+                }).join('');
+            }
+            if (rep) html += `<details><summary>Report completo (JSON)</summary><pre class="json">${esc(JSON.stringify(rep, null, 2))}</pre></details>`;
+            $('repBody').innerHTML = html;
+            $('repOverlay').classList.add('open');
+        }
+
+        // ------------------------------------------------------------------
+        // FINESTRE E AGGIORNAMENTO AUTOMATICO
+        // ------------------------------------------------------------------
+        function chiudi() {
+            document.querySelectorAll('.overlay.open').forEach((o) => o.classList.remove('open'));
+        }
+        document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', chiudi));
+        document.querySelectorAll('.overlay').forEach((o) => o.addEventListener('click', (e) => { if (e.target === o) chiudi(); }));
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') chiudi(); });
+
+        $('refreshBtn').addEventListener('click', carica);
+        carica();
+        // Aggiornamento periodico, sospeso mentre una finestra è aperta (non perde le modifiche).
+        timer = setInterval(() => { if (!document.querySelector('.overlay.open')) carica(); }, REFRESH_MS);
+    </script>
+</body>
+</html>

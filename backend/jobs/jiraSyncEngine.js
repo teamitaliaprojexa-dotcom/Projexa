@@ -17,6 +17,16 @@
 //   4. Se il codice non esiste per quel cliente -> INSERT; se esiste ed è ancora
 //      valido (scadenza > oggi) -> UPDATE; se esiste ma è scaduto -> non si tocca.
 //
+// PERIMETRO: un lancio aggiorna i dati di TUTTO il tenant in un solo passaggio.
+//   * Configurazione di UN utente: mappatura (jira_*), filtro, filtro aggiuntivo e
+//     account Jira (token) sono quelli dell'utente indicato (userId).
+//   * Dati di TUTTO il tenant: i ticket vengono abbinati ai clienti di tutti gli
+//     utenti del tenant e le righe già presenti si cercano su tutto il tenant. Le
+//     righe nuove sono intestate al proprietario del cliente, così le vede nelle sue
+//     griglie.
+// runJiraSyncTenant (pulsante e schedulatore) sceglie di chi usare la configurazione:
+// chi lancia, se l'ha, altrimenti un altro utente del tenant configurato.
+//
 // CIFRATURA: cl_quotazioni e task_app nascono con crypto = 1, quindi i dati sul
 // database sono cifrati. La cifratura è randomizzata: NON si può cercare il codice
 // con una WHERE. I confronti si fanno quindi in memoria sulle righe lette dal pool
@@ -228,18 +238,19 @@ async function eseguiFiltro(session, jql, campi) {
 // CLIENTI
 // ----------------------------------------------------------------------------
 
-// Clienti con il nome Jira valorizzato. In clients il collegamento al cliente è
-// la colonna "argument" (contiene l'id della riga identità del cliente), che è
-// esattamente il client_id da scrivere sulla tabella di destinazione.
-async function leggiClienti(tenantId, userId, campo) {
+// Clienti di TUTTO il tenant con il nome Jira valorizzato. In clients il collegamento
+// al cliente è la colonna "argument" (contiene l'id della riga identità del cliente),
+// che è esattamente il client_id da scrivere sulla tabella di destinazione; user_id è
+// il proprietario del cliente, a cui si intestano le righe nuove.
+async function leggiClienti(tenantId, campo) {
   const { rows } = await db.query(
-    `SELECT argument, valore2 FROM clients
-      WHERE tenant_id = $1 AND user_id = $2 AND lower(campo) = lower($3)`,
-    [tenantId, userId, campo]
+    `SELECT argument, valore2, user_id FROM clients
+      WHERE tenant_id = $1 AND lower(campo) = lower($2)`,
+    [tenantId, campo]
   );
   return rows
     .filter((r) => !vuoto(r.argument) && !vuoto(r.valore2) && norm(r.valore2) !== 'null')
-    .map((r) => ({ clientId: String(r.argument), nome: String(r.valore2).trim(), chiave: norm(r.valore2) }))
+    .map((r) => ({ clientId: String(r.argument), userId: r.user_id, nome: String(r.valore2).trim(), chiave: norm(r.valore2) }))
     // Nel confronto "contenuto in" vince il nome più lungo: è il più specifico.
     .sort((a, b) => b.chiave.length - a.chiave.length);
 }
@@ -259,8 +270,8 @@ function trovaCliente(clienti, valoreJira, modo) {
 // modo diverso:
 //
 //   perChiave  cliente + codice -> riga.  Lo usa il passaggio PRINCIPALE, dove lo
-//              stesso codice su clienti diversi è una riga diversa (perimetro
-//              concordato: tenant + utente + cliente).
+//              stesso codice su clienti diversi è una riga diversa (perimetro:
+//              tenant + cliente, qualunque sia l'utente proprietario).
 //   perCodice  codice -> tutte le righe con quel codice, cliente compreso quello
 //              vuoto. Lo usa il passaggio AGGIUNTIVO, che aggiorna per solo codice
 //              Jira: una riga inserita a mano e non legata ad alcun cliente deve
@@ -269,11 +280,12 @@ function chiaveRiga(clientId, codice) {
   return `${String(clientId)}|${norm(codice)}`;
 }
 
-async function leggiEsistenti(tabella, colonnaCodice, tenantId, userId) {
+// Righe già presenti di TUTTO il tenant (di qualunque utente).
+async function leggiEsistenti(tabella, colonnaCodice, tenantId) {
   const { rows } = await db.query(
     `SELECT id, client_id, "${colonnaCodice}" AS codice, scadenza FROM "${tabella}"
-      WHERE tenant_id = $1 AND user_id = $2`,
-    [tenantId, userId]
+      WHERE tenant_id = $1`,
+    [tenantId]
   );
   const perChiave = new Map();
   const perCodice = new Map();
@@ -506,13 +518,13 @@ export async function runJiraSync(config, ctx) {
   // --- 4) Clienti e righe già presenti -------------------------------------
   // Senza clienti configurati il passaggio principale non ha nulla da abbinare, ma
   // il passaggio aggiuntivo lavora per solo codice e va eseguito lo stesso.
-  const clienti = await leggiClienti(tenantId, userId, config.campoClients);
+  const clienti = await leggiClienti(tenantId, config.campoClients);
   report.clientiConfigurati = clienti.length;
   if (clienti.length === 0) {
     report.errori.push(`Nessun cliente ha il campo "${config.campoClients}" valorizzato: il filtro principale non inserisce né aggiorna nulla`);
   }
 
-  const { perChiave, perCodice } = await leggiEsistenti(config.tabellaDestinazione, config.colonnaCodice, tenantId, userId);
+  const { perChiave, perCodice } = await leggiEsistenti(config.tabellaDestinazione, config.colonnaCodice, tenantId);
   const haUpdatedAt = colonne.has('updated_at');
 
   // Valori fissi della creazione (es. tipo = 'Jira'): solo colonne che esistono
@@ -584,7 +596,8 @@ export async function runJiraSync(config, ctx) {
         if (!esistente) {
           const nuovoId = dryRun ? null : await inserisci(config.tabellaDestinazione, {
             tenant_id: tenantId,
-            user_id: userId,
+            // Intestata al proprietario del cliente: è lui che la vede in griglia.
+            user_id: cliente.userId || userId,
             client_id: cliente.clientId,
             ...valoriInserimento,
             ...valori
@@ -689,6 +702,99 @@ export async function runJiraSync(config, ctx) {
   );
 
   return report;
+}
+
+// ----------------------------------------------------------------------------
+// ESECUZIONE PER TUTTO IL TENANT
+// ----------------------------------------------------------------------------
+
+// Utenti del tenant che hanno una mappatura configurata per il programma: sono
+// quelli di cui si può usare la configurazione (mappatura + account Jira).
+async function utentiConMappatura(tabella, tenantId) {
+  const { rows } = await db.query(
+    `SELECT DISTINCT user_id FROM "${tabella}" WHERE tenant_id = $1 AND user_id IS NOT NULL`,
+    [tenantId]
+  );
+  const ids = rows.map((r) => String(r.user_id));
+  if (ids.length === 0) return [];
+
+  // Nome e cognome solo per rendere leggibile il riepilogo: se la lettura fallisce
+  // si mostra l'id, la sincronizzazione va avanti lo stesso.
+  const nomi = new Map();
+  try {
+    const u = await db.query('SELECT id, name, cognome FROM users WHERE id = ANY($1::uuid[])', [ids]);
+    for (const r of u.rows) {
+      const nome = [r.name, r.cognome].filter((x) => !vuoto(x)).join(' ');
+      if (nome) nomi.set(String(r.id), nome);
+    }
+  } catch (e) {
+    console.warn('[SYNC JIRA] Nomi utenti non disponibili:', e.message);
+  }
+  return ids.map((id) => ({ userId: id, nome: nomi.get(id) || id }));
+}
+
+// Errori che vuol dire "la configurazione di questo utente non è utilizzabile" (Jira
+// disattivato o account non collegato), da distinguere dai veri errori.
+const CODICI_SALTATO = new Set(['JIRA_DISABLED', 'JIRA_NOT_CONNECTED', 'JIRA_REAUTH_REQUIRED']);
+
+/**
+ * Aggiorna i dati di TUTTO il tenant con UN SOLO passaggio (runJiraSync), usando la
+ * configurazione Jira di un utente del tenant:
+ *   1. quella di ctx.utentePreferito (chi ha premuto il pulsante), se ha una mappatura;
+ *   2. altrimenti, o se la sua non è utilizzabile (Jira scollegato, token scaduto,
+ *      filtro inesistente...), quella di un altro utente del tenant con una mappatura.
+ * Ci si ferma al primo utente con cui il passaggio riesce: i dati non vengono mai
+ * elaborati due volte. Le configurazioni scartate restano nel report (utenti[]) con il
+ * motivo, così un token scaduto si vede anche se l'aggiornamento è riuscito con un
+ * altro utente. Gli errori che fanno scartare una configurazione avvengono prima di
+ * qualunque scrittura, quindi il tentativo successivo riparte pulito.
+ *
+ * @param {object} ctx  { tenantId, utentePreferito?, dryRun }
+ * @returns {Promise<object>} { programma, dryRun, configurazioneDi, utenti: [...], totali }
+ */
+export async function runJiraSyncTenant(config, ctx) {
+  const { tenantId, utentePreferito } = ctx || {};
+  const dryRun = !!(ctx && ctx.dryRun);
+  if (!tenantId) throw new Error('Contesto mancante: tenant_id');
+  if (!TABELLE_MAPPATURA.has(config.tabellaMappatura)) throw new Error(`Tabella di mappatura non ammessa: ${config.tabellaMappatura}`);
+
+  const candidati = await utentiConMappatura(config.tabellaMappatura, tenantId);
+  if (candidati.length === 0) {
+    throw new Error(`Nessun utente del tenant ha una mappatura configurata in ${config.tabellaMappatura}`);
+  }
+  // Prima chi ha lanciato (se configurato), poi gli altri.
+  const preferito = (u) => (String(u.userId) === String(utentePreferito) ? 1 : 0);
+  candidati.sort((a, b) => preferito(b) - preferito(a));
+
+  const risultato = {
+    programma: config.nome,
+    dryRun,
+    configurazioneDi: null,
+    utenti: [],
+    totali: { righeJira: 0, inserite: 0, aggiornate: 0, ignorateSenzaCliente: 0, ignorateScadute: 0 }
+  };
+
+  for (const u of candidati) {
+    try {
+      const report = await runJiraSync(config, { tenantId, userId: u.userId, dryRun });
+      risultato.utenti.push({ userId: u.userId, nome: u.nome, ok: true, report });
+      risultato.configurazioneDi = u.nome;
+      for (const k of Object.keys(risultato.totali)) risultato.totali[k] += Number(report[k]) || 0;
+      if (report.passaggioAggiuntivo) risultato.totali.aggiornate += Number(report.passaggioAggiuntivo.aggiornate) || 0;
+      break; // un solo passaggio: tutto il tenant è già aggiornato
+    } catch (e) {
+      const saltato = CODICI_SALTATO.has(e.code);
+      if (!saltato) console.error(`❌ ${config.nome} [configurazione di ${u.nome}]:`, e.message);
+      risultato.utenti.push({ userId: u.userId, nome: u.nome, ok: false, saltato, errore: e.message, code: e.code || null });
+    }
+  }
+
+  // Nessuna configurazione utilizzabile: il programma non è stato eseguito.
+  if (!risultato.configurazioneDi) {
+    const motivi = risultato.utenti.map((u) => `${u.nome}: ${u.errore}`).join('; ');
+    throw Object.assign(new Error(`Nessuna configurazione Jira utilizzabile nel tenant (${motivi})`), { code: 'NESSUNA_CONFIGURAZIONE' });
+  }
+  return risultato;
 }
 
 export { norm, toDate, toNumber, coerce, trovaCliente, ancoraValida, chiaveRiga };

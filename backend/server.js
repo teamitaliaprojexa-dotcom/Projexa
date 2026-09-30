@@ -20,7 +20,9 @@ import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
 import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
+import jobSchedulesRoutes from './routes/job-schedules.js';
 import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
+import { avviaScheduler } from './jobs/scheduler.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
 import { encryptRowForWrite } from './config/crypto.js';
@@ -172,6 +174,8 @@ app.use('/api/integrazioni', integrazioniRoutes);
 app.use('/api/prompts', promptsRoutes);
 // Monitor della VM (vm-monitor.html): solo admin del tenant PROJEXA.
 app.use('/api/vm-monitor', vmMonitorRoutes);
+// Schedulazioni dei job (job-schedules.html): solo admin del tenant PROJEXA.
+app.use('/api/job-schedules', jobSchedulesRoutes);
 // Assistente "Projexa" della dashboard (Gemini + Manuale Utente): tutti gli utenti.
 app.use('/api/chatbot', chatbotRoutes);
 // Migrazione Crypto (database-viewer): riservata agli amministratori.
@@ -3519,13 +3523,18 @@ app.post('/api/data/import/rollback', requireAuth, async (req, res) => {
 // solo il riepilogo già raggruppato per (Codice Commessa, Email Dipendente),
 // con il totale ore di ciascun gruppo. L'endpoint:
 //  1) risolve ogni Codice Commessa nel project_id corrispondente, leggendo
-//     ele_commesse (stesso tenant_id/user_id del login);
+//     ele_commesse di TUTTO il tenant del login (non solo dell'utente);
 //  2) per ciascun gruppo risolto, aggiorna la riga di proj_componenti con la
 //     stessa email e lo stesso project_id:
 //       time_spent_hh = totale ore del gruppo (sovrascrive il valore precedente)
 //       time_spent_gg = time_spent_hh / 8
 // Tutto in un'unica transazione: se il salvataggio di una riga fallisce per un
 // errore imprevisto, nessuna modifica del blocco viene applicata.
+//
+// PERIMETRO: l'import vale per l'intero TENANT. Qualunque utente carichi il file,
+// aggiorna le commesse e i componenti di tutti gli utenti del tenant. Le righe
+// nuove sono intestate al PROPRIETARIO del progetto (projects.user_id), perché la
+// griglia del progetto mostra solo le righe del suo proprietario.
 // ==========================================================================
 app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
   try {
@@ -3593,7 +3602,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
       ? 'COALESCE(ec.titolo_commessa, p.valore2)'
       : 'p.valore2';
     const commesseResult = await db.query(
-      `SELECT ec.cod_commessa, ec.project_id, p.client_id,
+      `SELECT ec.cod_commessa, ec.project_id, p.client_id, p.user_id AS owner_user_id,
               ${commessaTitleExpression} AS titolo_commessa
        FROM ele_commesse ec
        JOIN projects p
@@ -3602,9 +3611,9 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
         AND p.user_id = ec.user_id
         AND p.argument = 'Progetto'
         AND p.campo = 'Progetto'
-       WHERE ec.tenant_id = $1 AND ec.user_id = $2
-         AND ec.cod_commessa = ANY($3::text[])${activeProjectFilter}`,
-      [req.user.tenant_id, req.user.user_id, codes]
+       WHERE ec.tenant_id = $1
+         AND ec.cod_commessa = ANY($2::text[])${activeProjectFilter}`,
+      [req.user.tenant_id, codes]
     );
     const normalizeCommessaTitle = (value) => String(value || '')
       .normalize('NFD')
@@ -3624,6 +3633,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
         matches.push({
           projectId: row.project_id,
           clientId: row.client_id,
+          ownerUserId: row.owner_user_id,
           titolo: row.titolo_commessa
         });
       }
@@ -3635,6 +3645,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
         codeMatches.push({
           projectId: row.project_id,
           clientId: row.client_id,
+          ownerUserId: row.owner_user_id,
           titolo: row.titolo_commessa
         });
       }
@@ -3669,22 +3680,31 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
         .map((p) => p.projectId).filter(Boolean).map(String)
     )];
     const componentIdByKey = new Map(); // "projectId\u0001email" -> id
+    // Proprietario di ogni progetto: fra righe doppie (stesso progetto ed email,
+    // utenti diversi) vince quella del proprietario, l'unica visibile in griglia.
+    const ownerByProject = new Map(
+      [...projectsByCode.values()].flatMap((matches) => matches)
+        .map((p) => [String(p.projectId), String(p.ownerUserId || '')])
+    );
     if (projectIds.length) {
       const componentiResult = await db.query(
-        `SELECT id, project_id, email FROM proj_componenti
-         WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = ANY($3::text[])`,
-        [req.user.tenant_id, req.user.user_id, projectIds]
+        `SELECT id, project_id, email, user_id FROM proj_componenti
+         WHERE tenant_id = $1 AND project_id::text = ANY($2::text[])`,
+        [req.user.tenant_id, projectIds]
       );
       for (const row of componentiResult.rows) {
         const key = String(row.project_id) + '\u0001' + String(row.email || '').trim().toLowerCase();
-        componentIdByKey.set(key, row.id);
+        const isOwner = String(row.user_id) === ownerByProject.get(String(row.project_id));
+        if (!componentIdByKey.has(key) || isOwner) componentIdByKey.set(key, row.id);
       }
     }
 
     // Risolve Codice Articolo -> UUID proj_worker_cost.id nel contesto del
     // cliente del progetto. Se una corrispondenza non esiste, il team_pro della
     // nuova riga restera' NULL.
-    const workerCostIdByKey = new Map(); // "clientId\u0001codBilling" -> UUID
+    // Chiavi: "userId\u0001clientId\u0001codBilling" (costo del proprietario del progetto,
+    // preferito) e "clientId\u0001codBilling" (qualunque utente del tenant).
+    const workerCostIdByKey = new Map();
     if (componentiCols.has('team_pro')) {
       const workerCostCols = await getTableColumns('proj_worker_cost');
       const requiredWorkerCostCols = ['id', 'tenant_id', 'user_id', 'client_id', 'cod_billing'];
@@ -3696,16 +3716,17 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
         const billingCodes = [...new Set(groups.map((group) => group.codiceArticolo).filter(Boolean))];
         if (clientIds.length > 0 && billingCodes.length > 0) {
           const workerCostsResult = await db.query(
-            `SELECT id, client_id, cod_billing
+            `SELECT id, user_id, client_id, cod_billing
              FROM proj_worker_cost
-             WHERE tenant_id = $1 AND user_id = $2
-               AND client_id::text = ANY($3::text[])
-               AND BTRIM(cod_billing::text) = ANY($4::text[])`,
-            [req.user.tenant_id, req.user.user_id, clientIds, billingCodes]
+             WHERE tenant_id = $1
+               AND client_id::text = ANY($2::text[])
+               AND BTRIM(cod_billing::text) = ANY($3::text[])`,
+            [req.user.tenant_id, clientIds, billingCodes]
           );
           for (const row of workerCostsResult.rows) {
             const key = String(row.client_id) + '\u0001' + String(row.cod_billing || '').trim();
-            workerCostIdByKey.set(key, row.id);
+            if (!workerCostIdByKey.has(key)) workerCostIdByKey.set(key, row.id);
+            workerCostIdByKey.set(String(row.user_id) + '\u0001' + key, row.id);
           }
         }
       } else {
@@ -3736,7 +3757,8 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
           if (!componentId) {
             const newComponentData = {
               tenant_id: req.user.tenant_id,
-              user_id: req.user.user_id,
+              // Intestata al proprietario del progetto: è lui che la vede in griglia.
+              user_id: project.ownerUserId || req.user.user_id,
               client_id: project.clientId,
               project_id: projectId,
               email: g.email,
@@ -3751,7 +3773,8 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
             };
             if (componentiCols.has('team_pro')) {
               const workerCostKey = String(project.clientId) + '\u0001' + g.codiceArticolo;
-              const workerCostId = workerCostIdByKey.get(workerCostKey);
+              const workerCostId = workerCostIdByKey.get(String(project.ownerUserId) + '\u0001' + workerCostKey)
+                || workerCostIdByKey.get(workerCostKey);
               // Non valorizzare esplicitamente team_pro con NULL quando non è stata
               // trovata una corrispondenza: in questo modo eventuali DEFAULT/trigger
               // della tabella possono valorizzare il campo e l'INSERT non viene
@@ -3770,7 +3793,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
             continue;
           }
           const updatedAtClause = hasUpdatedAt ? ', updated_at = CURRENT_TIMESTAMP' : '';
-          const updateParams = [g.ore, componentId, req.user.tenant_id, req.user.user_id];
+          const updateParams = [g.ore, componentId, req.user.tenant_id];
           let scadenzaRepairClause = '';
           if (componentiCols.has('scadenza')) {
             // Ogni componente interessato dall'import Qlik viene mantenuto attivo,
@@ -3785,7 +3808,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
             `UPDATE proj_componenti
              SET time_spent_hh = $1::numeric,
                  time_spent_gg = ($1::numeric) / 8.0${scadenzaRepairClause}${updatedAtClause}
-             WHERE id = $2 AND tenant_id = $3 AND user_id = $4
+             WHERE id = $2 AND tenant_id = $3
              RETURNING id`,
             updateParams
           );
@@ -3818,15 +3841,15 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
              FROM (
                SELECT project_id, team_pro, SUM(time_spent_hh) AS total_hh
                FROM proj_componenti
-               WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = ANY($3::text[])
+               WHERE tenant_id = $1 AND project_id::text = ANY($2::text[])
                  AND team_pro IS NOT NULL
                GROUP BY project_id, team_pro
              ) agg
-             WHERE pw.tenant_id = $1 AND pw.user_id = $2
+             WHERE pw.tenant_id = $1
                AND pw.project_id::text = agg.project_id::text
                AND pw.worker_cost_id::text = agg.team_pro::text
              RETURNING pw.id`,
-            [req.user.tenant_id, req.user.user_id, projectIds]
+            [req.user.tenant_id, projectIds]
           );
           workerUpdated = aggResult.rowCount;
         }
@@ -7651,6 +7674,8 @@ app.listen(PORT, () => {
   kickTranscriptionWorker();
   // Monitor della VM (vm-monitor.html): storico di CPU/memoria/rete dall'avvio (solo Linux).
   startVmSampler();
+  // Job schedulati (tabella job_schedules): attivo solo con JOB_SCHEDULER_ENABLED=true (sulla VM).
+  avviaScheduler();
 });
 
 // Graceful shutdown
