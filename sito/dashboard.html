@@ -273,6 +273,98 @@
             display: none !important;
         }
 
+        /* KPI Fatturato (70%) affiancato dal KPI MBO (30%); su schermi stretti vanno in colonna */
+        .kpi-fatt-row {
+            display: flex;
+            gap: 1.5rem;
+            align-items: stretch;
+            margin-bottom: 3rem;
+        }
+        .kpi-fatt-row .kpi-fatt-card { flex: 7 1 0; min-width: 0; }
+        .kpi-fatt-row .kpi-mbo-card { flex: 3 1 0; min-width: 0; display: flex; flex-direction: column; }
+        @media (max-width: 1100px) {
+            .kpi-fatt-row { flex-direction: column; }
+        }
+        .kpi-mbo-rings {
+            position: relative;
+            width: 100%;
+            max-width: 430px;
+            margin: 0 auto 1.5rem;
+            aspect-ratio: 1 / 1;
+        }
+        .kpi-mbo-rings svg { width: 100%; height: 100%; display: block; }
+        .kpi-mbo-rings circle.mbo-arc { transition: stroke-dasharray 0.6s ease; }
+        .kpi-mbo-center {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+        .kpi-mbo-percent { font-size: 1.9rem; font-weight: 700; color: #8B5CF6; line-height: 1; }
+        .kpi-mbo-center-label { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem; }
+        /* Tooltip sulla percentuale: solo il blocco centrale riceve il mouse, così i
+           suggerimenti degli anelli restano attivi. */
+        .kpi-mbo-center-info {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            pointer-events: auto;
+            cursor: default;
+            outline: none;
+        }
+        .kpi-mbo-tip {
+            position: absolute;
+            bottom: calc(100% + 10px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1f2937;
+            color: #fff;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            white-space: nowrap;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.15s ease;
+            z-index: 5;
+        }
+        .kpi-mbo-tip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: #1f2937;
+        }
+        .kpi-mbo-tip strong { font-weight: 700; }
+        .kpi-mbo-center-info:hover .kpi-mbo-tip,
+        .kpi-mbo-center-info:focus .kpi-mbo-tip { opacity: 1; visibility: visible; }
+        .kpi-mbo-legend { display: flex; flex-direction: column; gap: 0.55rem; margin-top: auto; }
+        .kpi-mbo-legend-rows { display: flex; flex-direction: column; gap: 0.55rem; }
+        .kpi-mbo-toggle-row { display: flex; justify-content: flex-end; }
+        .kpi-mbo-toggle {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            padding: 0.2rem 0.75rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #8B5CF6;
+            cursor: pointer;
+        }
+        .kpi-mbo-toggle:hover { background: rgba(139, 92, 246, 0.08); }
+        .kpi-mbo-legend-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+        .kpi-mbo-legend-row .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+        .kpi-mbo-legend-row .lbl { color: var(--text-muted); flex: 1; min-width: 0; }
+        .kpi-mbo-legend-row .val { font-weight: 600; color: var(--dark); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
         .settings-flyout-title {
             font-weight: 600;
             color: var(--dark);
@@ -3367,8 +3459,9 @@
                 </div>
             </div>
 
-            <!-- KPI FATTURATO -->
-            <div data-dash-flag="kpiFatturato" style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
+            <!-- KPI FATTURATO (70%) + KPI MBO (30%): il flag nasconde entrambi -->
+            <div data-dash-flag="kpiFatturato" class="kpi-fatt-row">
+            <div class="kpi-fatt-card" style="background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
                     <div>
                         <div class="section-title" style="margin: 0;">
@@ -3400,6 +3493,35 @@
                         <div style="font-size: 0.9rem; color: var(--text-muted); margin-top: 0.5rem;">Totale clienti: <span id="totalClients">0</span></div>
                     </div>
                 </div>
+            </div>
+
+            <!-- KPI MBO: anello viola = obiettivo (100%); anelli blu/verde/rosso = fatturato,
+                 fatturato futuro e da fatturare dell'anno rispetto all'obiettivo -->
+            <div class="kpi-mbo-card" style="background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                    <div class="section-title" style="margin: 0;">
+                        <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: #8B5CF6;"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14Zm0 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/></svg>
+                        MBO
+                    </div>
+                    <span style="font-size: 0.9rem; color: var(--text-muted);">Anno: <span id="mboYear">-</span></span>
+                </div>
+                <div class="kpi-mbo-rings">
+                    <svg id="mboRings" viewBox="0 0 240 240" role="img" aria-label="Avanzamento fatturato rispetto all'obiettivo MBO"></svg>
+                    <div class="kpi-mbo-center">
+                        <div class="kpi-mbo-center-info" tabindex="0">
+                            <div id="mboPercent" class="kpi-mbo-percent">-</div>
+                            <div class="kpi-mbo-center-label">dell'obiettivo</div>
+                            <div id="mboTip" class="kpi-mbo-tip" role="tooltip"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="kpi-mbo-legend">
+                    <div class="kpi-mbo-toggle-row">
+                        <button type="button" id="mboToggle" class="kpi-mbo-toggle" aria-pressed="false" onclick="toggleMboAmounts()">Mostra</button>
+                    </div>
+                    <div id="mboLegend" class="kpi-mbo-legend-rows"></div>
+                </div>
+            </div>
             </div>
 
             <!-- PROJECTS -->
@@ -4132,6 +4254,8 @@
             `;
             document.getElementById('totalClients').textContent = totalClients;
 
+            updateMboKpi(year, { fatturato: totalRevenue, futuro: totalForecast, daFatturare: totalDaFatturare });
+
             if (revenueChart) {
                 revenueChart.destroy();
             }
@@ -4236,6 +4360,85 @@
                     }
                 }
             });
+        }
+
+        // === KPI MBO ===
+        // Obiettivo (mbo.importo) del login per l'anno del KPI Fatturato; percentuale =
+        // fatturato dell'anno / obiettivo. Gli anelli interni mostrano ciascun importo
+        // rispetto all'obiettivo (anello pieno = 100%, oltre resta pieno).
+        let mboRequestSeq = 0;
+        async function updateMboKpi(year, totals) {
+            const seq = ++mboRequestSeq;
+            let importo = null;
+            try {
+                const params = new URLSearchParams();
+                if (year && year !== 'all') params.set('anno', year);
+                const res = await fetch(`${API_URL}/kpi-mbo?${params.toString()}`, { headers: getAuthHeaders() });
+                if (res.ok) importo = (await res.json()).importo;
+            } catch (e) { /* senza obiettivo: anelli vuoti */ }
+            if (seq !== mboRequestSeq) return; // risposta superata da un cambio di filtro più recente
+            renderMboKpi(year, importo, totals);
+        }
+
+        // "Mostra"/"Nascondi": gli importi partono nascosti (asterischi) a ogni caricamento;
+        // la percentuale resta sempre visibile.
+        let mboShowAmounts = false;
+        let mboLastRender = null;
+        function toggleMboAmounts() {
+            mboShowAmounts = !mboShowAmounts;
+            if (mboLastRender) renderMboKpi(...mboLastRender);
+        }
+
+        function renderMboKpi(year, importo, totals) {
+            const svg = document.getElementById('mboRings');
+            if (!svg) return;
+            mboLastRender = [year, importo, totals];
+            const toggle = document.getElementById('mboToggle');
+            if (toggle) {
+                toggle.textContent = mboShowAmounts ? 'Nascondi' : 'Mostra';
+                toggle.setAttribute('aria-pressed', String(mboShowAmounts));
+            }
+            const mbo = Number(importo) > 0 ? Number(importo) : 0;
+            const eur = (v) => mboShowAmounts
+                ? '€' + (Number(v) || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                : '€ *****';
+            // Anello grigio esterno: fatturato + fatturato futuro + da fatturare, rispetto all'obiettivo.
+            const totaleAnno = (Number(totals.fatturato) || 0) + (Number(totals.futuro) || 0) + (Number(totals.daFatturare) || 0);
+            const rings = [
+                { label: 'Totale (fatt. + futuro + da fatt.)', color: '#9CA3AF', value: totaleAnno, r: 110, w: 12 },
+                { label: 'MBO (obiettivo)', color: '#8B5CF6', value: mbo, r: 94, w: 12, full: true },
+                { label: 'Fatturato', color: '#3B82F6', value: totals.fatturato, r: 78, w: 10 },
+                { label: 'Fatturato futuro', color: '#10B981', value: totals.futuro, r: 64, w: 10 },
+                { label: 'Da fatturare', color: '#EF4444', value: totals.daFatturare, r: 50, w: 10 }
+            ];
+            svg.innerHTML = rings.map(ring => {
+                const c = 2 * Math.PI * ring.r;
+                const frac = ring.full ? (mbo > 0 ? 1 : 0) : (mbo > 0 ? Math.min(Math.max(ring.value / mbo, 0), 1) : 0);
+                const track = `<circle cx="120" cy="120" r="${ring.r}" fill="none" stroke="${ring.color}" stroke-opacity="0.15" stroke-width="${ring.w}"><title>${ring.label}: ${eur(ring.value)}</title></circle>`;
+                if (frac <= 0) return track; // niente arco: con gli estremi arrotondati resterebbe un puntino
+                return `${track}
+                        <circle class="mbo-arc" cx="120" cy="120" r="${ring.r}" fill="none" stroke="${ring.color}" stroke-width="${ring.w}"
+                                stroke-linecap="round" stroke-dasharray="${(frac * c).toFixed(2)} ${c.toFixed(2)}"
+                                transform="rotate(-90 120 120)"><title>${ring.label}: ${eur(ring.value)}</title></circle>`;
+            }).join('');
+
+            const pct = mbo > 0 ? Math.round((Number(totals.fatturato) || 0) / mbo * 100) : null;
+            document.getElementById('mboPercent').textContent = pct == null ? '-' : `${pct}%`;
+            // Tooltip: % del fatturato e % del totale (fatturato + futuro + da fatturare) sull'obiettivo.
+            const pctTot = mbo > 0 ? Math.round(totaleAnno / mbo * 100) : null;
+            const tip = document.getElementById('mboTip');
+            if (tip) {
+                tip.innerHTML = mbo > 0
+                    ? `Fatturato: <strong>${pct}%</strong> dell'obiettivo<br>Fatt. + futuro + da fatturare: <strong>${pctTot}%</strong> dell'obiettivo`
+                    : 'Obiettivo MBO non impostato';
+            }
+            document.getElementById('mboYear').textContent = year === 'all' ? 'Tutti' : year;
+            document.getElementById('mboLegend').innerHTML = rings.map(ring => `
+                <div class="kpi-mbo-legend-row">
+                    <span class="dot" style="background:${ring.color};"></span>
+                    <span class="lbl">${ring.label}</span>
+                    <span class="val">${ring.full && !mbo ? 'Non impostato' : eur(ring.value)}</span>
+                </div>`).join('');
         }
 
         // === CLIENT FILTER (selezione multipla) ===

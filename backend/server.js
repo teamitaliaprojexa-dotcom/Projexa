@@ -2285,6 +2285,26 @@ app.get('/api/kpi-fatturazione', requireAuth, async (req, res) => {
   }
 });
 
+// KPI MBO: obiettivo (mbo.importo) del login (tenant+utente) per l'anno del KPI Fatturato;
+// senza anno ("Tutto") somma tutti gli anni. importo null = nessun obiettivo impostato.
+app.get('/api/kpi-mbo', requireAuth, async (req, res) => {
+  try {
+    const anno = req.query.anno ? Number(req.query.anno) : null;
+    const conditions = ['tenant_id = $1', 'user_id = $2'];
+    const params = [req.user.tenant_id, req.user.user_id];
+    if (Number.isFinite(anno)) { params.push(anno); conditions.push(`anno = $${params.length}`); }
+    const result = await db.query(
+      `SELECT SUM(importo) AS importo FROM mbo WHERE ${conditions.join(' AND ')}`,
+      params
+    );
+    const v = result.rows[0] && result.rows[0].importo;
+    res.json({ importo: v == null ? null : Number(v) });
+  } catch (error) {
+    if (error.code === '42P01') return res.json({ importo: null }); // tabella mbo non ancora creata
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Elenco degli anni disponibili in kpi_fatturazione per il login (tenant+utente), a
 // prescindere dai filtri correnti: serve a popolare la tendina "Anno".
 app.get('/api/kpi-fatturazione/years', requireAuth, async (req, res) => {
