@@ -274,6 +274,23 @@
             display: none !important;
         }
 
+        /* KPI Fatturato: nomi dei clienti (HTML) sopra l'asse Y, con tooltip al passaggio del mouse */
+        .rev-ylabel { position: absolute; left: 0; transform: translateY(-50%); text-align: right; font-size: 12px; color: #666; cursor: default; outline: none; z-index: 2; }
+        .rev-ylabel .n { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 0; }
+        .rev-ylabel:hover .n, .rev-ylabel:focus .n { color: var(--primary); text-decoration: underline; }
+        .rev-ytip {
+            position: absolute; left: calc(100% + 12px); top: 50%; transform: translateY(-50%);
+            min-width: 240px; background: #1f2937; color: #fff; border-radius: 10px; padding: 0.6rem 0.75rem;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.25); font-size: 0.78rem; text-align: left;
+            opacity: 0; visibility: hidden; transition: opacity 0.15s ease, visibility 0.15s; z-index: 10; pointer-events: none;
+        }
+        .rev-ylabel:hover .rev-ytip, .rev-ylabel:focus .rev-ytip { opacity: 1; visibility: visible; }
+        .rev-ytip .t { font-weight: 700; margin-bottom: 0.35rem; }
+        .rev-ytip .r { display: flex; align-items: center; gap: 0.45rem; padding: 0.15rem 0; white-space: nowrap; }
+        .rev-ytip .r i { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+        .rev-ytip .r span { flex: 1; color: #e5e7eb; }
+        .rev-ytip .r b { font-variant-numeric: tabular-nums; }
+
         /* KPI Fatturato (70%) affiancato dal KPI MBO (30%); su schermi stretti vanno in colonna */
         .kpi-fatt-row {
             display: flex;
@@ -1302,6 +1319,123 @@
             margin-bottom: 2rem;
         }
 
+        /* KPI Gestione Progetto: schede per cliente, righe compatte, una barra per riga
+           (fondo verde = offerta 100%, riempimento blu = time spent, rosso oltre il 100%) */
+        .gp-card { margin-bottom: 3rem; background: white; padding: 1.75rem 2rem 2rem; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04); }
+        .gp-legend { display: flex; gap: 0.9rem; flex-wrap: wrap; font-size: 0.75rem; color: var(--text-muted); }
+        .gp-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+        .gp-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+        .gp-breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; font-size: 0.8rem; margin-bottom: 1.1rem; min-height: 1.6rem; }
+        .gp-breadcrumb a, .gp-breadcrumb span.cur { padding: 0.2rem 0.7rem; border-radius: 999px; text-decoration: none; }
+        .gp-breadcrumb a { background: #f1f5f9; color: var(--dark); cursor: pointer; }
+        .gp-breadcrumb a:hover { background: #e2e8f0; }
+        .gp-breadcrumb span.cur { background: rgba(59, 130, 246, 0.1); color: #1d4ed8; font-weight: 600; }
+        .gp-breadcrumb .sep { color: #94a3b8; }
+        .gp-empty { color: var(--text-muted); padding: 1.5rem 0; text-align: center; }
+
+        .gp-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem; }
+        /* Numero e descrizione sulla stessa riga */
+        .gp-stat { display: flex; align-items: baseline; gap: 0.6rem; border-radius: 12px; padding: 0.6rem 1rem; background: #f8fafc; border: 1px solid #eef2f7; }
+        .gp-stat .v { font-size: 1.5rem; font-weight: 700; line-height: 1.1; color: var(--dark); font-variant-numeric: tabular-nums; }
+        .gp-stat .l { font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+        /* Tooltip del riquadro: elenco degli elementi (cliente – progetto, voce o persona) */
+        .gp-stat { position: relative; cursor: default; outline: none; }
+        .gp-stat-tip {
+            position: absolute; top: calc(100% + 8px); left: 0; z-index: 30;
+            min-width: 260px; max-width: 420px; max-height: 320px; overflow-y: auto;
+            background: #1f2937; color: #fff; border-radius: 10px; padding: 0.6rem 0.75rem;
+            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.25); font-size: 0.78rem;
+            opacity: 0; visibility: hidden; transform: translateY(-4px);
+            transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+        }
+        .gp-stat:hover .gp-stat-tip, .gp-stat:focus .gp-stat-tip { opacity: 1; visibility: visible; transform: translateY(0); }
+        .gp-stat-tip .t { font-weight: 700; margin-bottom: 0.4rem; color: #e5e7eb; }
+        .gp-stat-tip ul { list-style: none; margin: 0; padding: 0; }
+        .gp-stat-tip li { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.22rem 0; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+        .gp-stat-tip li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .gp-stat-tip li b { flex: none; font-variant-numeric: tabular-nums; }
+        .gp-stat-tip li b.ok { color: #93c5fd; } .gp-stat-tip li b.over { color: #fca5a5; } .gp-stat-tip li b.zero { color: #cbd5e1; }
+        .gp-stat-tip .none { color: #cbd5e1; }
+        /* Ultimo riquadro: tooltip allineato a destra per non uscire dallo schermo */
+        .gp-summary .gp-stat:last-child .gp-stat-tip { left: auto; right: 0; }
+        .gp-stat.red { background: #fef2f2; border-color: #fee2e2; } .gp-stat.red .v { color: #dc2626; }
+        .gp-stat.blue { background: #eff6ff; border-color: #dbeafe; } .gp-stat.blue .v { color: #2563eb; }
+        .gp-stat.gray .v { color: #64748b; }
+
+        /* Schede clienti su 3 colonne; 2 su schermi medi, 1 su quelli stretti */
+        .gp-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+        @media (max-width: 1300px) { .gp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 800px) { .gp-grid { grid-template-columns: 1fr; } }
+        .gp-client { border: 1px solid #eef2f7; border-radius: 14px; background: white; overflow: hidden; transition: box-shadow 0.15s ease, border-color 0.15s ease; }
+        .gp-client:hover { box-shadow: 0 6px 18px rgba(15, 23, 42, 0.07); border-color: #e2e8f0; }
+        .gp-client-head { padding: 1rem 1.1rem 0.9rem; background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%); border-bottom: 1px solid #f1f5f9; }
+        .gp-client-top { display: flex; align-items: center; gap: 0.75rem; }
+        .gp-avatar { flex: none; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 700; color: white; font-size: 0.95rem; }
+        .gp-client-name { flex: 1; min-width: 0; }
+        .gp-client-name button { background: none; border: none; padding: 0; font: inherit; font-weight: 700; font-size: 1.19rem; color: var(--dark); cursor: pointer; text-align: left; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+        .gp-client-name button:hover { color: var(--primary); }
+        .gp-client-name small { color: var(--text-muted); font-size: 0.75rem; }
+        .gp-client-foot { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.4rem; font-variant-numeric: tabular-nums; }
+
+        .gp-rows { padding: 0.35rem 0.5rem 0.5rem; }
+        .gp-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px 58px; align-items: center; gap: 0.9rem; padding: 0.6rem; border-radius: 10px; cursor: pointer; transition: background 0.12s ease; }
+        .gp-row:hover { background: #f8fafc; }
+        .gp-row.static { cursor: default; }
+        .gp-row.static:hover { background: transparent; }
+        .gp-row-head { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+        .gp-row-title { font-size: 0.85rem; font-weight: 600; color: var(--dark); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+        .gp-compl { flex: none; font-size: 0.68rem; font-weight: 600; color: #7c3aed; background: #f5f3ff; border-radius: 999px; padding: 0.1rem 0.5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .gp-row-meta { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
+        .gp-row-meta b { font-weight: 600; }
+        .gp-row-meta .o { color: #059669; } .gp-row-meta .s { color: #2563eb; } .gp-row-meta .s.over { color: #dc2626; }
+
+        .gp-meter { position: relative; height: 8px; border-radius: 999px; background: rgba(16, 185, 129, 0.22); overflow: hidden; }
+        .gp-meter.big { height: 10px; }
+        .gp-meter > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: linear-gradient(90deg, #60a5fa, #2563eb); transition: width 0.5s ease; }
+        .gp-meter.over > span { background: linear-gradient(90deg, #f87171, #dc2626); }
+        .gp-meter.none { background: #f1f5f9; }
+
+        .gp-badge { justify-self: end; min-width: 52px; text-align: center; font-size: 0.75rem; font-weight: 700; padding: 0.22rem 0.5rem; border-radius: 999px; font-variant-numeric: tabular-nums; }
+        .gp-badge.ok { background: #eff6ff; color: #1d4ed8; }
+        .gp-badge.over { background: #fef2f2; color: #dc2626; }
+        .gp-badge.zero { background: #f1f5f9; color: #64748b; }
+        .gp-badge.big { font-size: 0.85rem; padding: 0.3rem 0.65rem; }
+        .gp-panel { border: 1px solid #eef2f7; border-radius: 14px; }
+        .gp-group-line { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; font-size: 0.8rem; color: var(--text-muted); margin: 0 0 0.75rem 0.25rem; }
+        .gp-group-line b { font-weight: 700; font-variant-numeric: tabular-nums; }
+        .gp-group-line .o { color: #059669; } .gp-group-line .s { color: #2563eb; } .gp-group-line .s.over { color: #dc2626; }
+        /* Dettaglio (voci di costo, componenti): barra più lunga (+150%) e vicina alla
+           descrizione, invece che in fondo alla riga a tutta larghezza. */
+        .gp-panel .gp-row { grid-template-columns: minmax(180px, 320px) 300px 58px; justify-content: start; gap: 1.25rem; }
+        @media (max-width: 800px) { .gp-panel .gp-row { grid-template-columns: minmax(0, 1fr) 120px 58px; } }
+
+        /* Riga dei mini KPI con il pulsante di ricalcolo sulla destra */
+        .kpi-grid-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.6rem;
+            margin-bottom: 2rem;
+        }
+        .kpi-grid-row .stats-grid { flex: 1; min-width: 0; margin-bottom: 0; }
+        .kpi-refresh-btn {
+            flex: none;
+            width: 30px;
+            height: 30px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: white;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+        }
+        .kpi-refresh-btn:hover { color: var(--primary); border-color: var(--primary); }
+        .kpi-refresh-btn:disabled { cursor: default; opacity: 0.7; }
+        .kpi-refresh-btn.loading i { animation: kpi-spin 0.8s linear infinite; }
+        @keyframes kpi-spin { to { transform: rotate(360deg); } }
+
         .stat-card {
             background: white;
             min-width: 0;
@@ -2058,56 +2192,6 @@
             gap: 0.75rem;
         }
 
-        .projects-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 3rem;
-        }
-
-        .project-card {
-            background: white;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 1.5rem;
-            transition: all 0.3s;
-            cursor: pointer;
-        }
-
-        .project-card:hover {
-            border-color: var(--primary);
-            box-shadow: 0 8px 24px rgba(59, 130, 246, 0.1);
-            transform: translateY(-2px);
-        }
-
-        .project-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: start;
-            margin-bottom: 1rem;
-        }
-
-        .project-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: var(--dark);
-            margin-bottom: 0.25rem;
-        }
-
-        .project-meta {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-        }
-
-        .project-meta-item {
-            display: flex;
-            align-items: center;
-            gap: 0.25rem;
-            font-size: 0.85rem;
-            color: var(--text-muted);
-        }
-
         .badge {
             display: inline-block;
             padding: 0.35rem 0.75rem;
@@ -2129,87 +2213,6 @@
         .badge-info {
             background: rgba(59, 130, 246, 0.1);
             color: var(--primary);
-        }
-
-        .project-progress {
-            margin-bottom: 1rem;
-        }
-
-        .progress-label {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 0.5rem;
-            font-size: 0.9rem;
-            color: var(--text-muted);
-        }
-
-        .progress-bar {
-            height: 8px;
-            background: var(--light);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
-            border-radius: 4px;
-        }
-
-        .project-footer {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-top: 1rem;
-            border-top: 1px solid var(--border);
-        }
-
-        .project-team {
-            display: flex;
-            gap: -10px;
-        }
-
-        .team-avatar {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            background: var(--light);
-            border: 2px solid white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.8rem;
-            font-weight: bold;
-            color: var(--primary);
-        }
-
-        .more-members {
-            font-size: 0.85rem;
-            color: var(--text-muted);
-        }
-
-        .project-actions {
-            display: flex;
-            gap: 0.5rem;
-        }
-
-        .project-actions button {
-            width: 32px;
-            height: 32px;
-            border: none;
-            background: var(--light);
-            border-radius: var(--radius);
-            cursor: pointer;
-            transition: all 0.3s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--text-muted);
-        }
-
-        .project-actions button:hover {
-            background: var(--primary);
-            color: white;
         }
 
         .empty-state {
@@ -2924,10 +2927,6 @@
                 margin-left: 70px;
             }
 
-            .projects-grid {
-                grid-template-columns: 1fr;
-            }
-
             .stats-grid {
                 grid-template-columns: repeat(2, 1fr);
             }
@@ -3330,7 +3329,11 @@
 
         <div class="container">
             <!-- STATS -->
-            <div class="stats-grid" id="dashboardKpiGrid"></div>
+            <!-- Mini KPI + pulsante di ricalcolo sulla destra -->
+            <div class="kpi-grid-row">
+                <div class="stats-grid" id="dashboardKpiGrid"></div>
+                <button type="button" id="kpiRefreshBtn" class="kpi-refresh-btn" title="Ricalcola i KPI" aria-label="Ricalcola i KPI" onclick="refreshDashboardKpis()"><i class="fas fa-sync-alt"></i></button>
+            </div>
 
             <!-- RIUNIONI DI OGGI - GOOGLE CALENDAR -->
             <div data-dash-flag="calendario" style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
@@ -3525,144 +3528,22 @@
             </div>
             </div>
 
-            <!-- PROJECTS -->
-            <div style="margin-bottom: 3rem;">
-                <div class="section-title">
-                    <i class="fas fa-fire" style="color: var(--primary);"></i>
-                    Progetti in corso
-                </div>
-
-                <div class="projects-grid">
-                    <!-- Project 1 -->
-                    <div class="project-card" data-client="Acme Corp">
-                        <div class="project-header">
-                            <div>
-                                <div class="project-title">Refactor Backend API</div>
-                                <div class="project-meta">
-                                    <div class="project-meta-item">
-                                        <i class="fas fa-calendar"></i> 12 giorni
-                                    </div>
-                                    <div class="project-meta-item">
-                                        <i class="fas fa-layer-group"></i> 24 task
-                                    </div>
-                                </div>
-                            </div>
-                            <span class="badge badge-success">On Track</span>
-                        </div>
-                        <div class="project-progress">
-                            <div class="progress-label">
-                                <span>Avanzamento</span>
-                                <span>68%</span>
-                            </div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: 68%;"></div>
-                            </div>
-                        </div>
-                        <div class="project-footer">
-                            <div>
-                                <div class="project-team">
-                                    <div class="team-avatar">Y</div>
-                                    <div class="team-avatar">F</div>
-                                </div>
-                            </div>
-                            <div class="project-actions">
-                                <button title="Apri">
-                                    <i class="fas fa-arrow-right"></i>
-                                </button>
-                                <button title="Menu">
-                                    <i class="fas fa-ellipsis-h"></i>
-                                </button>
-                            </div>
-                        </div>
+            <!-- KPI GESTIONE PROGETTO: offerta (100%) contro tempo speso, con dettaglio
+                 cliente › progetto › voce di costo › componenti -->
+            <div data-dash-flag="kpiGestioneProgetto" class="gp-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                    <div class="section-title" style="margin: 0;">
+                        <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--primary);"><path d="M3 5h18v2H3V5Zm0 6h12v2H3v-2Zm0 6h8v2H3v-2Zm14-3 2 2 3-3 1.4 1.4L19 18.8l-3.4-3.4L17 14Z"/></svg>
+                        Gestione Progetto
                     </div>
-
-                    <!-- Project 2 -->
-                    <div class="project-card" data-client="Tech Solutions">
-                        <div class="project-header">
-                            <div>
-                                <div class="project-title">Mobile App Redesign</div>
-                                <div class="project-meta">
-                                    <div class="project-meta-item">
-                                        <i class="fas fa-calendar"></i> 5 giorni
-                                    </div>
-                                    <div class="project-meta-item">
-                                        <i class="fas fa-layer-group"></i> 18 task
-                                    </div>
-                                </div>
-                            </div>
-                            <span class="badge badge-warning">A rischio</span>
-                        </div>
-                        <div class="project-progress">
-                            <div class="progress-label">
-                                <span>Avanzamento</span>
-                                <span>45%</span>
-                            </div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: 45%; background: linear-gradient(90deg, var(--warning) 0%, #ff9800 100%);"></div>
-                            </div>
-                        </div>
-                        <div class="project-footer">
-                            <div>
-                                <div class="project-team">
-                                    <div class="team-avatar" style="background: rgba(239, 68, 68, 0.1); color: var(--danger);">F</div>
-                                    <div class="team-avatar">M</div>
-                                </div>
-                            </div>
-                            <div class="project-actions">
-                                <button title="Apri">
-                                    <i class="fas fa-arrow-right"></i>
-                                </button>
-                                <button title="Menu">
-                                    <i class="fas fa-ellipsis-h"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Project 3 -->
-                    <div class="project-card" data-client="Global Industries">
-                        <div class="project-header">
-                            <div>
-                                <div class="project-title">Q4 Marketing Campaign</div>
-                                <div class="project-meta">
-                                    <div class="project-meta-item">
-                                        <i class="fas fa-calendar"></i> 28 giorni
-                                    </div>
-                                    <div class="project-meta-item">
-                                        <i class="fas fa-layer-group"></i> 42 task
-                                    </div>
-                                </div>
-                            </div>
-                            <span class="badge badge-info">Iniziato</span>
-                        </div>
-                        <div class="project-progress">
-                            <div class="progress-label">
-                                <span>Avanzamento</span>
-                                <span>23%</span>
-                            </div>
-                            <div class="progress-bar">
-                                <div class="progress-fill" style="width: 23%;"></div>
-                            </div>
-                        </div>
-                        <div class="project-footer">
-                            <div>
-                                <div class="project-team">
-                                    <div class="team-avatar">Y</div>
-                                    <div class="team-avatar">S</div>
-                                    <div class="team-avatar" style="font-size: 0.7rem;">+2</div>
-                                </div>
-                            </div>
-                            <div class="project-actions">
-                                <button title="Apri">
-                                    <i class="fas fa-arrow-right"></i>
-                                </button>
-                                <button title="Menu">
-                                    <i class="fas fa-ellipsis-h"></i>
-                                </button>
-                            </div>
-                        </div>
+                    <div class="gp-legend">
+                        <span><i class="gp-dot" style="background:#6ee7b7;"></i>Offerta (100%)</span>
+                        <span><i class="gp-dot" style="background:#2563eb;"></i>Time spent</span>
+                        <span><i class="gp-dot" style="background:#dc2626;"></i>Oltre l'offerta</span>
                     </div>
                 </div>
+                <div id="gpBreadcrumb" class="gp-breadcrumb"></div>
+                <div id="gpContent" class="gp-content"><div class="gp-empty">Caricamento…</div></div>
             </div>
 
         </div>
@@ -3933,6 +3814,21 @@
                 grid.innerHTML = '';
                 console.warn('[KPI DASHBOARD]', error.message);
                 showNotification('Impossibile caricare i KPI della dashboard', 'info');
+            }
+        }
+
+        // Pulsante di ricalcolo dei mini KPI: rilegge i numeri dal server (calcolati al momento),
+        // con l'icona che gira finché non arrivano.
+        async function refreshDashboardKpis() {
+            const btn = document.getElementById('kpiRefreshBtn');
+            if (!btn || btn.disabled) return;
+            btn.disabled = true;
+            btn.classList.add('loading');
+            try {
+                await loadDashboardKpis();
+            } finally {
+                btn.disabled = false;
+                btn.classList.remove('loading');
             }
         }
 
@@ -4317,30 +4213,13 @@
                                 font: { size: 12, weight: 600 }
                             }
                         },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return context.dataset.label + ': €' + context.parsed.x.toLocaleString('it-IT', {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2
-                                    });
-                                },
-                                afterLabel: function(context) {
-                                    if (context.datasetIndex === 0) {
-                                        const forecastValue = context.chart.data.datasets[1].data[context.dataIndex] || 0;
-                                        const daFattValue = context.chart.data.datasets[2].data[context.dataIndex] || 0;
-                                        return 'Fatturato Futuro: €' + Number(forecastValue).toLocaleString('it-IT', {
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 2
-                                        }) + '\nDa Fatturare: €' + Number(daFattValue).toLocaleString('it-IT', {
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 2
-                                        });
-                                    }
-                                }
-                            }
-                        }
+                        // Tooltip sulle barre disattivato: con lo zoom dell'interfaccia Chart.js
+                        // aggancia la riga sbagliata. Il dettaglio si apre sul nome del cliente
+                        // (etichette HTML di revenueYLabelsPlugin).
+                        tooltip: { enabled: false }
                     },
+                    // Solo il clic (legenda): niente evidenziazione delle barre al passaggio del mouse.
+                    events: ['click'],
                     scales: {
                         x: {
                             beginAtZero: true,
@@ -4356,12 +4235,45 @@
                         y: {
                             grid: {
                                 display: false
-                            }
+                            },
+                            // Nomi disegnati invisibili: servono solo a riservare lo spazio a
+                            // sinistra; al loro posto ci sono le etichette HTML con il tooltip.
+                            ticks: { color: 'transparent' }
                         }
                     }
-                }
+                },
+                plugins: [revenueYLabelsPlugin]
             });
         }
+
+        // Nomi dei clienti del KPI Fatturato come elementi HTML sopra il grafico, allineati alle
+        // barre con le coordinate della scala (in pixel CSS del grafico, quindi corretti anche con
+        // lo zoom dell'interfaccia). Passando il mouse sul nome si apre il tooltip con i tre valori.
+        const revenueYLabelsPlugin = {
+            id: 'revenueYLabels',
+            afterUpdate(chart) {
+                const container = chart.canvas.parentNode;
+                if (!container) return;
+                container.querySelectorAll('.rev-ylabel').forEach(el => el.remove());
+                const y = chart.scales.y;
+                const area = chart.chartArea;
+                if (!y || !area) return;
+                const eur = v => '€' + (Number(v) || 0).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const ds = chart.data.datasets;
+                const colors = ['#3B82F6', '#10B981', '#F59E0B'];
+                chart.data.labels.forEach((name, i) => {
+                    const el = document.createElement('div');
+                    el.className = 'rev-ylabel';
+                    el.tabIndex = 0;
+                    el.style.top = `${y.getPixelForValue(i)}px`;
+                    el.style.width = `${Math.max(40, area.left - 10)}px`;
+                    const rows = ds.map((d, k) => `<div class="r"><i style="background:${colors[k]};"></i><span>${escapeHtml(d.label)}</span><b>${eur(d.data[i])}</b></div>`).join('');
+                    el.innerHTML = `<span class="n">${escapeHtml(name)}</span>
+                        <div class="rev-ytip" role="tooltip"><div class="t">${escapeHtml(name)}</div>${rows}</div>`;
+                    container.appendChild(el);
+                });
+            }
+        };
 
         // === KPI MBO ===
         // Obiettivo (mbo.importo) del login per l'anno del KPI Fatturato; percentuale =
@@ -4440,6 +4352,220 @@
                     <span class="lbl">${ring.label}</span>
                     <span class="val">${ring.full && !mbo ? 'Non impostato' : eur(ring.value)}</span>
                 </div>`).join('');
+        }
+
+        // === KPI GESTIONE PROGETTO ===
+        // Livelli: 'list' (clienti/progetti, eventualmente di un solo cliente) -> 'project'
+        // (voci di costo del progetto) -> 'worker' (componenti della voce). Offerta = 100%,
+        // time spent = avanzamento; unità ore o giorni secondo "Gestione a HH" del progetto.
+        const gpState = { level: 'list', client: null, project: null, worker: null };
+        let gpRequestSeq = 0;
+
+        function gpFmt(v, hh) {
+            return `${(Number(v) || 0).toLocaleString('it-IT', { maximumFractionDigits: 2 })} ${hh ? 'h' : 'gg'}`;
+        }
+
+        // Avanzamento: pct (null = time spent senza offerta), classe del badge e barra unica
+        // (fondo verde = offerta 100%, riempimento blu = time spent, rosso oltre l'offerta).
+        function gpProgress(offerta, spent, big = false) {
+            const o = Number(offerta) || 0, s = Number(spent) || 0;
+            const pct = o > 0 ? s / o * 100 : (s > 0 ? null : 0);
+            const over = pct == null || pct > 100;
+            const width = pct == null ? 100 : Math.min(pct, 100);
+            const cls = over ? 'over' : (pct === 0 ? 'zero' : 'ok');
+            const label = pct == null ? 'n.d.' : `${Math.round(pct)}%`;
+            return {
+                pct, over, cls, label,
+                meter: `<div class="gp-meter${big ? ' big' : ''}${over ? ' over' : ''}${o > 0 ? '' : ' none'}" title="Time spent ${label} dell'offerta"><span style="width:${width}%;"></span></div>`,
+                badge: `<span class="gp-badge ${cls}${big ? ' big' : ''}">${label}</span>`
+            };
+        }
+
+        function gpRenderBreadcrumb() {
+            const el = document.getElementById('gpBreadcrumb');
+            if (!el) return;
+            const parts = [];
+            const link = (target, label) => `<a data-gp-nav="${target}">${escapeHtml(label)}</a>`;
+            const cur = (label) => `<span class="cur">${escapeHtml(label)}</span>`;
+            const atList = gpState.level === 'list';
+            parts.push(atList && !gpState.client ? cur('Tutti i clienti') : link('all', 'Tutti i clienti'));
+            if (gpState.client) parts.push(atList ? cur(gpState.client.name) : link('client', gpState.client.name));
+            if (gpState.project) parts.push(gpState.level === 'project' ? cur(gpState.project.name) : link('project', gpState.project.name));
+            if (gpState.worker && gpState.level === 'worker') parts.push(cur(gpState.worker.name));
+            el.innerHTML = parts.join('<span class="sep">›</span>');
+        }
+
+        async function loadGestioneProgetto() {
+            const content = document.getElementById('gpContent');
+            if (!content) return;
+            const seq = ++gpRequestSeq;
+            gpRenderBreadcrumb();
+            content.innerHTML = '<div class="gp-empty">Caricamento…</div>';
+            try {
+                let url;
+                if (gpState.level === 'project') {
+                    url = `${API_URL}/kpi-gestione-progetto/project/${encodeURIComponent(gpState.project.id)}`;
+                } else if (gpState.level === 'worker') {
+                    url = `${API_URL}/kpi-gestione-progetto/worker?projectId=${encodeURIComponent(gpState.project.id)}&workerCostId=${encodeURIComponent(gpState.worker.id)}`;
+                } else {
+                    const params = new URLSearchParams();
+                    // Cliente scelto nel KPI, altrimenti il filtro clienti della dashboard.
+                    (gpState.client ? [gpState.client.id] : getSelectedClientIds()).forEach(id => params.append('clientId', id));
+                    url = `${API_URL}/kpi-gestione-progetto?${params.toString()}`;
+                }
+                const res = await fetch(url, { headers: getAuthHeaders() });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore HTTP ${res.status}`);
+                if (seq !== gpRequestSeq) return; // superata da una navigazione più recente
+                content.innerHTML = gpTableHtml(Array.isArray(data) ? data : []);
+            } catch (e) {
+                if (seq !== gpRequestSeq) return;
+                content.innerHTML = `<div class="gp-empty">Impossibile caricare i dati: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        // Colore dell'iniziale del cliente: stabile per nome.
+        function gpAvatarColor(name) {
+            const palette = ['#6366f1', '#0ea5e9', '#14b8a6', '#f59e0b', '#ec4899', '#8b5cf6', '#22c55e', '#f97316'];
+            let h = 0;
+            for (const ch of String(name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+            return palette[h % palette.length];
+        }
+
+        // Riga compatta: titolo + "offerta · speso", barra, badge %.
+        // completamento (facoltativo): valore del campo "Completamento" del progetto, accanto al nome.
+        // showOfferta = false: riga di una singola persona (l'offerta è della voce, non sua).
+        function gpRowHtml(title, offerta, spent, hhOff, hhSpent, attrs, clickable = true, completamento = null, showOfferta = true) {
+            const p = gpProgress(offerta, spent);
+            const compl = completamento == null ? ''
+                : `<span class="gp-compl" title="Completamento del progetto">Completamento ${(Number(completamento) || 0).toLocaleString('it-IT', { maximumFractionDigits: 2 })}%</span>`;
+            const off = showOfferta ? `<span class="o">Offerta <b>${gpFmt(offerta, hhOff)}</b></span> · ` : '';
+            return `<div class="gp-row${clickable ? '' : ' static'}" ${attrs || ''}>
+                <div style="min-width:0;">
+                    <div class="gp-row-head"><span class="gp-row-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>${compl}</div>
+                    <div class="gp-row-meta">${off}<span class="s${p.over ? ' over' : ''}">Speso <b>${gpFmt(spent, hhSpent)}</b></span></div>
+                </div>
+                ${p.meter}
+                ${p.badge}
+            </div>`;
+        }
+
+        // Riepilogo in alto: quante righe, quante in linea, oltre l'offerta, non avviate.
+        // labelOf(item) = testo della riga nel tooltip (es. "Cliente – Progetto"), mostrato
+        // passando il mouse sul riquadro.
+        function gpSummaryHtml(list, what, labelOf) {
+            const rows = list.map(x => ({ label: labelOf ? labelOf(x) : '', p: gpProgress(x.offerta, x.time_spent) }));
+            const over = rows.filter(r => r.p.over);
+            const zero = rows.filter(r => r.p.pct === 0);
+            const running = rows.filter(r => !r.p.over && r.p.pct !== 0);
+            const tip = (items, title) => {
+                if (!labelOf) return '';
+                const body = items.length
+                    ? `<ul>${items.map(r => `<li><span>${escapeHtml(r.label)}</span><b class="${r.p.cls}">${r.p.label}</b></li>`).join('')}</ul>`
+                    : '<div class="none">Nessuno</div>';
+                return `<div class="gp-stat-tip" role="tooltip"><div class="t">${escapeHtml(title)}</div>${body}</div>`;
+            };
+            const stat = (cls, items, label) => `<div class="gp-stat${cls ? ' ' + cls : ''}" tabindex="0">
+                    <div class="v">${items.length}</div><div class="l">${label}</div>${tip(items, label)}</div>`;
+            return `<div class="gp-summary">
+                ${stat('', rows, what)}
+                ${stat('blue', running, "In linea con l'offerta")}
+                ${stat('red', over, "Oltre l'offerta")}
+                ${stat('gray', zero, 'Non ancora avviati')}
+            </div>`;
+        }
+
+        function gpTableHtml(items) {
+            if (!items.length) return '<div class="gp-empty">Nessun dato da mostrare.</div>';
+            if (gpState.level === 'list') {
+                // Una scheda per cliente con i suoi progetti; totale del cliente solo se i progetti
+                // usano la stessa unità (ore e giorni non si sommano).
+                const groups = [];
+                const byClient = new Map();
+                items.forEach(it => {
+                    const key = String(it.client_id);
+                    if (!byClient.has(key)) { const g = { id: it.client_id, name: it.client, rows: [] }; byClient.set(key, g); groups.push(g); }
+                    byClient.get(key).rows.push(it);
+                });
+                // Nessun totale per cliente: la somma di progetti diversi non è significativa.
+                const cards = groups.map(g => {
+                    const name = g.name || '(cliente non trovato)';
+                    const rows = g.rows.map(it => gpRowHtml(it.project || '(progetto non trovato)', it.offerta, it.time_spent, it.hh, it.hh,
+                        `data-gp-project="${escapeHtml(it.project_id)}" data-gp-name="${escapeHtml(it.project || '')}" data-gp-client="${escapeHtml(it.client_id)}" data-gp-client-name="${escapeHtml(it.client || '')}" title="Mostra le voci di costo"`,
+                        true, it.completamento)).join('');
+                    return `<div class="gp-client">
+                        <div class="gp-client-head">
+                            <div class="gp-client-top">
+                                <div class="gp-avatar" style="background:${gpAvatarColor(name)};">${escapeHtml(name.trim().charAt(0).toUpperCase() || '?')}</div>
+                                <div class="gp-client-name">
+                                    <button type="button" data-gp-client="${escapeHtml(g.id)}" data-gp-name="${escapeHtml(g.name || '')}" title="Mostra solo questo cliente">${escapeHtml(name)}</button>
+                                    <small>${g.rows.length} progett${g.rows.length === 1 ? 'o' : 'i'}</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="gp-rows">${rows}</div>
+                    </div>`;
+                }).join('');
+                return gpSummaryHtml(items, 'Progetti monitorati',
+                    it => `${it.client || '(cliente non trovato)'} – ${it.project || '(progetto non trovato)'}`) + `<div class="gp-grid">${cards}</div>`;
+            }
+            if (gpState.level === 'project') {
+                const rows = items.map(it => gpRowHtml(it.worker || '(voce non trovata)', it.offerta, it.time_spent, it.hh, it.hh,
+                    `data-gp-worker="${escapeHtml(it.worker_cost_id)}" data-gp-name="${escapeHtml(it.worker || '')}" data-gp-offerta="${Number(it.offerta) || 0}" data-gp-hh="${it.hh ? 1 : 0}" title="Mostra i componenti"`)).join('');
+                return gpSummaryHtml(items, 'Voci di costo', it => it.worker || '(voce non trovata)')
+                    + `<div class="gp-panel"><div class="gp-rows">${rows}</div></div>`;
+            }
+            // Componenti: il 100% è l'offerta della voce di costo scelta.
+            // L'offerta è della voce (del gruppo): si mostra una volta sola sopra l'elenco, non
+            // su ogni persona; le righe riportano solo quanto ha speso ciascuno.
+            const w = gpState.worker;
+            const rows = items.map(it => gpRowHtml(it.nominativo || '', w.offerta, it.time_spent, w.hh, it.hh, '', false, null, false)).join('');
+            const spentTot = items.reduce((s, it) => s + (Number(it.time_spent) || 0), 0);
+            const tot = gpProgress(w.offerta, spentTot);
+            const groupLine = `<div class="gp-group-line">Offerta della voce <b class="o">${gpFmt(w.offerta, w.hh)}</b>
+                · Speso dal gruppo <b class="s${tot.over ? ' over' : ''}">${gpFmt(spentTot, w.hh)}</b> ${tot.badge}</div>`;
+            return gpSummaryHtml(items.map(it => ({ offerta: w.offerta, time_spent: it.time_spent, nominativo: it.nominativo })), 'Componenti',
+                    it => it.nominativo || '')
+                + groupLine + `<div class="gp-panel"><div class="gp-rows">${rows}</div></div>`;
+        }
+
+        function initGestioneProgetto() {
+            const card = document.querySelector('.gp-card');
+            if (!card || card.dataset.bound) return;
+            card.dataset.bound = '1';
+            card.addEventListener('click', (e) => {
+                const nav = e.target.closest('[data-gp-nav]');
+                if (nav) {
+                    const t = nav.dataset.gpNav;
+                    if (t === 'all') Object.assign(gpState, { level: 'list', client: null, project: null, worker: null });
+                    else if (t === 'client') Object.assign(gpState, { level: 'list', project: null, worker: null });
+                    else if (t === 'project') Object.assign(gpState, { level: 'project', worker: null });
+                    loadGestioneProgetto();
+                    return;
+                }
+                const proj = e.target.closest('[data-gp-project]');
+                if (proj) {
+                    gpState.client = { id: proj.dataset.gpClient, name: proj.dataset.gpClientName || 'Cliente' };
+                    gpState.project = { id: proj.dataset.gpProject, name: proj.dataset.gpName || 'Progetto' };
+                    gpState.worker = null;
+                    gpState.level = 'project';
+                    loadGestioneProgetto();
+                    return;
+                }
+                const client = e.target.closest('[data-gp-client]');
+                if (client) {
+                    Object.assign(gpState, { level: 'list', client: { id: client.dataset.gpClient, name: client.dataset.gpName || 'Cliente' }, project: null, worker: null });
+                    loadGestioneProgetto();
+                    return;
+                }
+                const worker = e.target.closest('[data-gp-worker]');
+                if (worker) {
+                    gpState.worker = { id: worker.dataset.gpWorker, name: worker.dataset.gpName || 'Voce di costo', offerta: Number(worker.dataset.gpOfferta) || 0, hh: worker.dataset.gpHh === '1' };
+                    gpState.level = 'worker';
+                    loadGestioneProgetto();
+                }
+            });
+            loadGestioneProgetto();
         }
 
         // === CLIENT FILTER (selezione multipla) ===
@@ -4526,13 +4652,15 @@
         // aggiorna etichetta, progetti, to-do list e i dati KPI/fatturato dal server.
         async function onClientFilterChanged() {
             updateClientFilterLabel();
-            filterProjectsByClient(currentClientFilter);
             currentTodoPage = 10; // Reset pagina
             applyFiltersAndRender();
             const yearSelector = document.getElementById('yearSelector');
             await loadKpiFatturazione();
             updateRevenueChart(yearSelector.value);
             await loadDashboardKpis();
+            // Gestione Progetto: nuovo filtro clienti -> si torna al primo livello.
+            Object.assign(gpState, { level: 'list', client: null, project: null, worker: null });
+            loadGestioneProgetto();
             refreshProjectSearch();
         }
 
@@ -4638,25 +4766,6 @@
             });
             document.addEventListener('click', event => {
                 if (!box.contains(event.target)) closeProjectSearchResults();
-            });
-        }
-
-        function filterProjectsByClient(selectedClients) {
-            const projectCards = document.querySelectorAll('.project-card');
-
-            projectCards.forEach(card => {
-                const cardClient = card.getAttribute('data-client');
-
-                if (selectedClients.length === 0) {
-                    // Mostra tutti i progetti
-                    card.style.display = 'block';
-                } else if (selectedClients.includes(cardClient)) {
-                    // Mostra solo i progetti dei clienti selezionati
-                    card.style.display = 'block';
-                } else {
-                    // Nascondi i progetti degli altri clienti
-                    card.style.display = 'none';
-                }
             });
         }
 
@@ -5605,20 +5714,6 @@
                 syncSidebarWidthVar(wasMinimized);
             }
         }
-
-        // === PROJECT INTERACTIONS ===
-        // Stub: la funzionalità "prompt" non è ancora implementata in questa pagina.
-        // Definendola qui evitiamo il ReferenceError che bloccava i click sulle card.
-        function sendPrompt(message) {
-            console.log('[sendPrompt]', message);
-            showNotification('Funzionalità in arrivo', 'info');
-        }
-
-        document.querySelectorAll('.project-card').forEach(card => {
-            card.addEventListener('click', function() {
-                sendPrompt('Mostrami il dettaglio di un progetto: Gantt chart, rischi, action items, email recap');
-            });
-        });
 
         // === AGGIUNGI PULSANTE LOGOUT IN ALTO A DESTRA ===
         function addLogoutButton() {
@@ -15478,6 +15573,7 @@
 
             initTodoList();
             await initRevenueChart(); // carica anni disponibili + dati kpi_fatturazione filtrati
+            initGestioneProgetto();   // KPI Gestione Progetto (offerta / time spent)
             initClientFilter();
             initProjectSearch();
             initKpiCards();

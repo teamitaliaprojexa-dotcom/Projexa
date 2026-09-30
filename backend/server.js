@@ -2305,6 +2305,138 @@ app.get('/api/kpi-mbo', requireAuth, async (req, res) => {
   }
 });
 
+// ===================== KPI GESTIONE PROGETTO =====================
+// Offerta (100%) contro tempo speso (avanzamento) dei progetti in corso (righe con scadenza >= oggi),
+// sempre per tenant_id e user_id del login. Tre livelli:
+//   1. per cliente/progetto (filtro facoltativo sui clienti);
+//   2. righe di proj_worker di un progetto (voce di costo = proj_worker_cost.desc_worker);
+//   3. componenti (proj_componenti) di una voce: team_pro = worker_cost_id.
+// Unità: ore se il progetto ha "Gestione a HH" = vero (campo booleano in projects, riga con
+// argument = id del progetto), altrimenti giorni. bool_or: una sola risposta anche se il
+// campo fosse presente più volte per lo stesso progetto.
+const GP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const gpHhJoin = (alias) => `LEFT JOIN LATERAL (
+    SELECT COALESCE(bool_or(b.valore1), false) AS gestione_hh
+      FROM projects b
+     WHERE b.campo = 'Gestione a HH' AND b.argument = ${alias}.project_id::text
+       AND b.tenant_id = ${alias}.tenant_id AND b.user_id = ${alias}.user_id AND b.client_id = ${alias}.client_id
+       AND b.scadenza >= CURRENT_DATE
+  ) hh ON true`;
+const gpNum = (v) => Number(v) || 0;
+// Solo progetti con "Cod commessa" valorizzato (campo di projects con argument = id progetto).
+const gpCommessaCond = (alias) => `EXISTS (
+    SELECT 1 FROM projects k
+     WHERE k.campo = 'Cod commessa' AND k.valore2 > '' AND k.argument = ${alias}.project_id::text
+       AND k.tenant_id = ${alias}.tenant_id AND k.user_id = ${alias}.user_id
+       AND k.scadenza >= CURRENT_DATE
+  )`;
+
+app.get('/api/kpi-gestione-progetto', requireAuth, async (req, res) => {
+  try {
+    const clientIds = parseClientIdsFromQuery(req).filter((id) => GP_UUID.test(id));
+    const params = [req.user.tenant_id, req.user.user_id];
+    let clientCond = '';
+    if (clientIds.length) { params.push(clientIds); clientCond = `AND a.client_id = ANY($3::uuid[])`; }
+    const r = await db.query(
+      `SELECT a.client_id, a.project_id, hh.gestione_hh AS hh, comp.completamento,
+              SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.offerta_effort_hh, 0) ELSE COALESCE(a.offerta_effort_gg, 0) END) AS offerta,
+              SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END) AS time_spent
+         FROM proj_worker a
+         ${gpHhJoin('a')}
+         -- "Completamento" del progetto (projects.valore3), stesse regole di tenant/utente/scadenza
+         LEFT JOIN LATERAL (
+           SELECT MAX(p.valore3) AS completamento
+             FROM projects p
+            WHERE p.campo = 'Completamento' AND p.argument = a.project_id::text
+              AND p.tenant_id = a.tenant_id AND p.user_id = a.user_id
+              AND p.scadenza >= CURRENT_DATE
+         ) comp ON true
+        WHERE a.tenant_id = $1 AND a.user_id = $2 AND a.scadenza >= CURRENT_DATE
+          AND (a.offerta_effort_hh <> 0 OR a.offerta_effort_gg <> 0) ${clientCond}
+          AND ${gpCommessaCond('a')}
+        GROUP BY a.client_id, a.project_id, hh.gestione_hh, comp.completamento`,
+      params
+    );
+    const clients = await resolveClientDescriptions(r.rows.map((x) => x.client_id), req.user.tenant_id);
+    const projects = await resolveProjectDescriptions(r.rows.map((x) => x.project_id), req.user.tenant_id, req.user.user_id);
+    const items = r.rows.map((x) => ({
+      client_id: x.client_id,
+      client: clients.get(String(x.client_id)) || null,
+      project_id: x.project_id,
+      project: (projects.get(String(x.project_id)) || {}).name || null,
+      hh: !!x.hh,
+      completamento: x.completamento == null ? null : Number(x.completamento),
+      offerta: gpNum(x.offerta),
+      time_spent: gpNum(x.time_spent)
+    })).sort((a, b) => String(a.client || '').localeCompare(String(b.client || ''), 'it')
+      || String(a.project || '').localeCompare(String(b.project || ''), 'it'));
+    res.json(items);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/kpi-gestione-progetto/project/:projectId', requireAuth, async (req, res) => {
+  try {
+    const projectId = String(req.params.projectId || '');
+    if (!GP_UUID.test(projectId)) return res.status(400).json({ error: 'Progetto non valido' });
+    const r = await db.query(
+      `SELECT a.id, a.worker_cost_id, hh.gestione_hh AS hh,
+              CASE WHEN hh.gestione_hh THEN COALESCE(a.offerta_effort_hh, 0) ELSE COALESCE(a.offerta_effort_gg, 0) END AS offerta,
+              CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END AS time_spent
+         FROM proj_worker a
+         ${gpHhJoin('a')}
+        WHERE a.tenant_id = $1 AND a.user_id = $2 AND a.project_id = $3 AND a.scadenza >= CURRENT_DATE
+          AND (a.offerta_effort_hh <> 0 OR a.offerta_effort_gg <> 0)
+          AND ${gpCommessaCond('a')}`,
+      [req.user.tenant_id, req.user.user_id, projectId]
+    );
+    const costIds = [...new Set(r.rows.map((x) => x.worker_cost_id).filter(Boolean))];
+    const names = new Map();
+    if (costIds.length) {
+      const w = await db.query(
+        `SELECT id, desc_worker FROM proj_worker_cost WHERE id = ANY($1::uuid[]) AND scadenza >= CURRENT_DATE`,
+        [costIds]
+      );
+      w.rows.forEach((x) => names.set(String(x.id), x.desc_worker));
+    }
+    const items = r.rows.map((x) => ({
+      id: x.id,
+      worker_cost_id: x.worker_cost_id,
+      worker: names.get(String(x.worker_cost_id)) || null,
+      hh: !!x.hh,
+      offerta: gpNum(x.offerta),
+      time_spent: gpNum(x.time_spent)
+    })).sort((a, b) => String(a.worker || '').localeCompare(String(b.worker || ''), 'it'));
+    res.json(items);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/kpi-gestione-progetto/worker', requireAuth, async (req, res) => {
+  try {
+    const projectId = String(req.query.projectId || '');
+    const workerCostId = String(req.query.workerCostId || '');
+    if (!GP_UUID.test(projectId) || !GP_UUID.test(workerCostId)) return res.status(400).json({ error: 'Parametri non validi' });
+    const r = await db.query(
+      `SELECT c.id, c.nominativo, hh.gestione_hh AS hh,
+              CASE WHEN hh.gestione_hh THEN COALESCE(c.time_spent_hh, 0) ELSE COALESCE(c.time_spent_gg, 0) END AS time_spent
+         FROM proj_componenti c
+         ${gpHhJoin('c')}
+        WHERE c.tenant_id = $1 AND c.user_id = $2 AND c.scadenza >= CURRENT_DATE
+          AND c.team_pro = $3 AND c.project_id = $4
+          AND ${gpCommessaCond('c')}`,
+      [req.user.tenant_id, req.user.user_id, workerCostId, projectId]
+    );
+    const items = r.rows.map((x) => ({ id: x.id, nominativo: x.nominativo, hh: !!x.hh, time_spent: gpNum(x.time_spent) }))
+      .sort((a, b) => String(a.nominativo || '').localeCompare(String(b.nominativo || ''), 'it'));
+    res.json(items);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Elenco degli anni disponibili in kpi_fatturazione per il login (tenant+utente), a
 // prescindere dai filtri correnti: serve a popolare la tendina "Anno".
 app.get('/api/kpi-fatturazione/years', requireAuth, async (req, res) => {
