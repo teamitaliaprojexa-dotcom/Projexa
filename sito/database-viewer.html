@@ -6,6 +6,9 @@
   <title>Projexa - Database Viewer</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="css/style.css">
+  <!-- Scala dell'interfaccia (preferenza "Dimensioni", 100 = ridotta del 25%) -->
+  <script src="js/ui-scale.js"></script>
+  <script>document.addEventListener('DOMContentLoaded', () => window.ProjexaUiScale.init());</script>
   <style>
     .database-layout {
       display: flex;
@@ -122,7 +125,7 @@
 
   <!-- Modal for Edit/New Record -->
   <div id="recordModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
-    <div style="background: white; border-radius: 8px; padding: 2rem; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;">
+    <div style="background: white; border-radius: 8px; padding: 2rem; max-width: 500px; width: 90%; max-height: calc(80vh * var(--ui-zoom-inv, 1)); overflow-y: auto;">
       <h2 id="modalTitle">Edit Record</h2>
       <form id="recordForm" onsubmit="saveRecord(event)">
         <div id="formFields"></div>
@@ -138,7 +141,7 @@
        Il database si sceglie qui dentro (parametro "db" nelle chiamate), quindi è
        indipendente dall'ambiente selezionato in alto nella pagina. -->
   <div id="cryptoModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1100; justify-content: center; align-items: center;">
-    <div style="background: white; border-radius: 8px; padding: 2rem; max-width: 640px; width: 92%; max-height: 88vh; overflow-y: auto;">
+    <div style="background: white; border-radius: 8px; padding: 2rem; max-width: 640px; width: 92%; max-height: calc(88vh * var(--ui-zoom-inv, 1)); overflow-y: auto;">
       <h2 style="margin-top: 0;"><i class="fas fa-lock" style="color: #F59E0B;"></i> Migrazione Crypto</h2>
       <p style="color: var(--gray-600); font-size: 0.9rem; margin-top: 0;">
         Cifra i dati sul database (a video restano leggibili). Vengono trattate solo le

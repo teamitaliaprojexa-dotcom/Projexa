@@ -6,6 +6,7 @@
     <title>Projexa - Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="js/ui-scale.js"></script>
     <!-- SheetJS: lettura dei file Excel (.xlsx) caricati per l'importazione Qlik voucher -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
@@ -50,7 +51,7 @@
             left: 0;
             top: 0;
             width: 250px;
-            height: 100vh;
+            height: calc(100vh * var(--ui-zoom-inv, 1));
             background: white;
             border-right: 1px solid var(--border);
             overflow-y: auto;
@@ -228,7 +229,7 @@
             position: fixed;
             left: var(--sidebar-w);            /* bordo destro della sidebar (aperta o minimizzata) */
             top: 0;                 /* parte dall'alto come la sidebar */
-            height: 100vh;
+            height: calc(100vh * var(--ui-zoom-inv, 1));
             width: 0;
             overflow: hidden;
             transition: width 0.3s ease;
@@ -245,7 +246,7 @@
 
         .settings-flyout-inner {
             width: var(--menu-w, 300px);
-            height: 100vh;            /* alto quanto la sidebar */
+            height: calc(100vh * var(--ui-zoom-inv, 1));            /* alto quanto la sidebar */
             overflow-y: auto;
             background: white;
             border: 1px solid var(--border);
@@ -418,7 +419,7 @@
             position: fixed;
             left: calc(var(--sidebar-w) + 300px);    /* subito a destra del primo flyout (che è largo 300px di default) */
             top: 0;
-            height: 100vh;
+            height: calc(100vh * var(--ui-zoom-inv, 1));
             width: 0;
             overflow: hidden;
             transition: width 0.3s ease;
@@ -428,22 +429,22 @@
 
         /* Il secondo flyout è sempre largo quanto lo spazio rimanente della pagina
            (dal proprio bordo sinistro fino al bordo destro dello schermo). La larghezza
-           di default è calcolata dinamicamente (100vw meno lo spazio occupato a sinistra),
+           di default è calcolata dinamicamente (calc(100vw * var(--ui-zoom-inv, 1)) meno lo spazio occupato a sinistra),
            così l'animazione di apertura resta fluida. Se l'utente ridimensiona trascinando
            la maniglia, --detail-w viene impostata in px dallo script e prende il sopravvento. */
         .settings-detail-flyout.open {
-            width: var(--detail-w, calc(100vw - var(--sidebar-w) - 300px));
+            width: var(--detail-w, calc(calc(100vw * var(--ui-zoom-inv, 1)) - var(--sidebar-w) - 300px));
             pointer-events: auto;
         }
 
         /* Dettaglio progetto: attaccato alla sidebar, largo fino al bordo destro della pagina */
         .settings-detail-flyout.near-sidebar.open {
-            width: var(--detail-w, calc(100vw - var(--sidebar-w)));
+            width: var(--detail-w, calc(calc(100vw * var(--ui-zoom-inv, 1)) - var(--sidebar-w)));
         }
 
         .settings-detail-flyout-inner {
             width: 100%;
-            height: 100vh;
+            height: calc(100vh * var(--ui-zoom-inv, 1));
             display: flex;
             flex-direction: column;
             background: white;
@@ -967,7 +968,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 3vh 3vw;
+            padding: calc(3vh * var(--ui-zoom-inv, 1)) calc(3vw * var(--ui-zoom-inv, 1));
             background: rgba(15, 23, 42, 0);
             opacity: 0;
             visibility: hidden;
@@ -984,8 +985,8 @@
         .parent-form-dialog {
             --parent-zoom-x: 50%;
             --parent-zoom-y: 50%;
-            width: min(1180px, 94vw);
-            max-height: 90vh;
+            width: min(1180px, calc(94vw * var(--ui-zoom-inv, 1)));
+            max-height: calc(90vh * var(--ui-zoom-inv, 1));
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -1142,7 +1143,7 @@
             width: calc(100% - var(--sidebar-w));
             margin-left: var(--sidebar-w);
             padding: 2rem 0;
-            min-height: 100vh;
+            min-height: calc(100vh * var(--ui-zoom-inv, 1));
             min-width: 0;
             transition: width 0.3s ease, margin-left 0.3s ease;
         }
@@ -1213,7 +1214,7 @@
             position: absolute;
             top: calc(100% + 8px);
             left: 0;
-            width: min(645px, 90vw);
+            width: min(645px, calc(90vw * var(--ui-zoom-inv, 1)));
             max-height: 320px;
             overflow-y: auto;
             padding: 0.35rem;
@@ -1400,8 +1401,8 @@
             background: white;
             border-radius: 10px;
             width: 520px;
-            max-width: 92vw;
-            max-height: 80vh;
+            max-width: calc(92vw * var(--ui-zoom-inv, 1));
+            max-height: calc(80vh * var(--ui-zoom-inv, 1));
             display: flex;
             flex-direction: column;
             box-shadow: 0 10px 40px rgba(0,0,0,0.25);
@@ -1800,8 +1801,8 @@
             flex-direction: column;
             min-width: 280px;
             min-height: 130px;
-            max-width: calc(100vw - 30px);
-            max-height: calc(100vh - 30px);
+            max-width: calc(calc(100vw * var(--ui-zoom-inv, 1)) - 30px);
+            max-height: calc(calc(100vh * var(--ui-zoom-inv, 1)) - 30px);
             overflow: hidden;
             border: 1px solid var(--border);
             border-radius: 12px;
@@ -1874,7 +1875,7 @@
         .task-modal.open { display: flex; }
 
         /* "Crea task" dal recap: una riga per task (includi, descrizione, scadenza, togli) */
-        .recap-tasks-body { padding: 0.9rem 1.25rem; max-height: 65vh; overflow-y: auto; }
+        .recap-tasks-body { padding: 0.9rem 1.25rem; max-height: calc(65vh * var(--ui-zoom-inv, 1)); overflow-y: auto; }
         .recap-tasks-meta { font-size: 0.8rem; color: var(--text-muted); margin: 0.4rem 0 0.9rem; line-height: 1.6; }
         .recap-tasks-meta b { color: var(--dark); font-weight: 600; }
         .recap-tasks-warn { color: #B45309; }
@@ -1965,7 +1966,7 @@
         .client-logo-modal.open { display: flex; }
 
         .client-logo-card {
-            width: min(520px, 96vw);
+            width: min(520px, calc(96vw * var(--ui-zoom-inv, 1)));
             border-radius: 12px;
             background: white;
             box-shadow: 0 18px 50px rgba(15, 23, 42, 0.28);
@@ -1992,8 +1993,8 @@
         }
 
         .task-modal-card {
-            width: min(900px, 96vw);
-            max-height: 90vh;
+            width: min(900px, calc(96vw * var(--ui-zoom-inv, 1)));
+            max-height: calc(90vh * var(--ui-zoom-inv, 1));
             overflow: hidden;
             display: flex;
             flex-direction: column;
@@ -2360,7 +2361,7 @@
         .meeting-audio-progress { color: #2563EB; font-size: 0.72rem; white-space: nowrap; }
         .meeting-text-body {
             padding: 0.9rem 1.25rem 1.1rem;
-            max-height: 62vh;
+            max-height: calc(62vh * var(--ui-zoom-inv, 1));
             overflow: auto;
             font-size: 0.9rem;
             line-height: 1.55;
@@ -2368,7 +2369,7 @@
         }
         /* Finestra trascrizione/recap: comandi in una barra verticale a sinistra, a destra
            dati dell'email, barra di formattazione e testo (modificabile nel recap). */
-        .mt-card { width: min(1120px, 96vw); max-height: 92vh; display: flex; flex-direction: column; }
+        .mt-card { width: min(1120px, calc(96vw * var(--ui-zoom-inv, 1))); max-height: calc(92vh * var(--ui-zoom-inv, 1)); display: flex; flex-direction: column; }
         .mt-card .task-modal-header { gap: 0.75rem; }
         .mt-dirty { margin-left: auto; font-size: 0.75rem; color: #B45309; white-space: nowrap; }
         .mt-dirty i { font-size: 0.5rem; vertical-align: middle; }
@@ -2448,7 +2449,7 @@
             display: flex;
             align-items: center;
             gap: 0.7rem;
-            width: min(360px, calc(100vw - 2.5rem));
+            width: min(360px, calc(calc(100vw * var(--ui-zoom-inv, 1)) - 2.5rem));
             padding: 0.75rem 0.9rem;
             background: white;
             border: 1px solid #7DD3FC;
@@ -2474,7 +2475,7 @@
             right: 1.25rem;
             bottom: 1.25rem;
             z-index: 790;
-            width: min(360px, calc(100vw - 2.5rem));
+            width: min(360px, calc(calc(100vw * var(--ui-zoom-inv, 1)) - 2.5rem));
             padding: 0.9rem 1rem;
             background: white;
             border: 1px solid var(--border);
@@ -2533,7 +2534,7 @@
         /* Finestra AI: risposta in testo semplice con a capo preservati */
         .ai-chat-answer {
             min-height: 6rem;
-            max-height: 50vh;
+            max-height: calc(50vh * var(--ui-zoom-inv, 1));
             overflow: auto;
             padding: 0.9rem 1rem;
             border: 1px solid var(--border);
@@ -3175,7 +3176,7 @@
     <!-- z-index sopra il form centrale del Nodo Padre (.parent-form-overlay, 720): la scelta
          dell'ambito viene chiesta anche da lì e non deve finire dietro all'overlay. -->
     <div id="settingsTenantScopeModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 780; display: none; align-items: center; justify-content: center;">
-        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: 90vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: calc(90vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <h3 id="settingsTenantScopeTitle" style="margin: 0 0 0.5rem; color: var(--dark);">Argomento impostazioni</h3>
             <p id="settingsTenantScopeText" style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.25rem;">La modifica deve avvenire su questo tenant o su tutti i tenant?</p>
             <div style="display: flex; flex-direction: column; gap: 0.5rem;">
@@ -3188,7 +3189,7 @@
 
     <!-- Modale: Nuovo utente (routine tipo_valore=50, valore2='Nuovo_utente') -->
     <div id="newUserModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 650; display: none; align-items: center; justify-content: center;">
-        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 460px; max-width: 92vw; max-height: 85vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 460px; max-width: calc(92vw * var(--ui-zoom-inv, 1)); max-height: calc(85vh * var(--ui-zoom-inv, 1)); overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <div id="newUserTenant" style="font-size: 0.8rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.25rem;"></div>
             <h3 id="newUserTitle" style="margin: 0 0 1rem; color: var(--dark);">Nuovo utente</h3>
             <div id="newUserFields"></div>
@@ -3206,7 +3207,7 @@
     <!-- Modale: Modifica password (campo tipo_valore=40). La nuova password viene
          salvata come hash bcrypt su Projexa-Auth (users.password_hash). -->
     <div id="changePasswordModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 660; display: none; align-items: center; justify-content: center;">
-        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 420px; max-width: 92vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 420px; max-width: calc(92vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <div id="changePasswordUser" style="font-size: 0.8rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.25rem;"></div>
             <h3 id="changePasswordTitle" style="margin: 0 0 1rem; color: var(--dark);">Modifica password</h3>
             <div style="margin-bottom: 0.6rem;">
@@ -3240,7 +3241,7 @@
 
     <!-- Modale: tipo campo (standard / custom) — solo per id_roles <= 20 -->
     <div id="clientKindModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
-        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: 90vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: calc(90vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <h3 style="margin: 0 0 0.5rem; color: var(--dark);">Nuovo campo</h3>
             <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.25rem;">Vuoi rendere il campo standard o custom?</p>
             <div style="display: flex; flex-direction: column; gap: 0.5rem;">
@@ -3254,7 +3255,7 @@
     <!-- Modale: ambito eliminazione campi custom (tutti i clienti / solo questo) -->
     <!-- Come sopra: deve restare visibile anche sopra il form centrale del Nodo Padre. -->
     <div id="clientDeleteScopeModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 780; display: none; align-items: center; justify-content: center;">
-        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: 90vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: calc(90vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <h3 id="clientScopeTitle" style="margin: 0 0 0.5rem; color: var(--dark);">Elimina campi custom</h3>
             <p id="clientScopeText" style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.25rem;">L'eliminazione deve avvenire su tutti i clienti o solo su quello selezionato?</p>
             <div style="display: flex; flex-direction: column; gap: 0.5rem;">
@@ -3274,7 +3275,7 @@
 
     <!-- Modale selezione tenant + utente per impersonificazione -->
     <div id="impersonateModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 500; display: none; align-items: center; justify-content: center;">
-        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: 90vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: calc(90vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <h3 style="margin: 0 0 1rem; color: var(--dark);">Impersona utente</h3>
             <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Tenant</label>
             <select id="impersonateTenant" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 1rem;"></select>
@@ -5010,10 +5011,14 @@
             const text = String(value || '');
             const lines = text.split(/\r?\n/);
             const longestLine = Math.max(1, ...lines.map(line => line.length));
-            const panelWidth = Math.min(window.innerWidth - 30, Math.max(300, Math.min(900, longestLine * 7.5 + 75)));
+            // Coordinate dello schermo riportate in pixel CSS del body zoomato (js/ui-scale.js).
+            const z = window.uiZoom ? window.uiZoom() : 1;
+            const viewW = window.innerWidth / z, viewH = window.innerHeight / z;
+            const scrollX = window.scrollX / z, scrollY = window.scrollY / z;
+            const panelWidth = Math.min(viewW - 30, Math.max(300, Math.min(900, longestLine * 7.5 + 75)));
             const charsPerLine = Math.max(25, Math.floor((panelWidth - 40) / 7.5));
             const visualLines = lines.reduce((total, line) => total + Math.max(1, Math.ceil(line.length / charsPerLine)), 0);
-            const panelHeight = Math.min(window.innerHeight - 30, Math.max(145, Math.min(650, 92 + visualLines * 22)));
+            const panelHeight = Math.min(viewH - 30, Math.max(145, Math.min(650, 92 + visualLines * 22)));
 
             const panel = document.createElement('div');
             panel.className = 'description-window';
@@ -5030,12 +5035,12 @@
             descriptionWindow = panel;
 
             const triggerRect = trigger.getBoundingClientRect();
-            let left = window.scrollX + triggerRect.left;
-            let top = window.scrollY + triggerRect.bottom + 8;
-            left = Math.min(left, window.scrollX + window.innerWidth - panelWidth - 15);
-            left = Math.max(window.scrollX + 15, left);
-            if (top + panelHeight > window.scrollY + window.innerHeight - 15) {
-                top = Math.max(window.scrollY + 15, window.scrollY + triggerRect.top - panelHeight - 8);
+            let left = scrollX + triggerRect.left / z;
+            let top = scrollY + triggerRect.bottom / z + 8;
+            left = Math.min(left, scrollX + viewW - panelWidth - 15);
+            left = Math.max(scrollX + 15, left);
+            if (top + panelHeight > scrollY + viewH - 15) {
+                top = Math.max(scrollY + 15, scrollY + triggerRect.top / z - panelHeight - 8);
             }
             panel.style.left = `${left}px`;
             panel.style.top = `${top}px`;
@@ -5051,12 +5056,12 @@
                 const startTop = parseFloat(panel.style.top) || 0;
 
                 const onMove = moveEvent => {
-                    const minLeft = window.scrollX;
-                    const minTop = window.scrollY;
-                    const maxLeft = window.scrollX + window.innerWidth - panel.offsetWidth;
-                    const maxTop = window.scrollY + window.innerHeight - panel.offsetHeight;
-                    panel.style.left = `${Math.max(minLeft, Math.min(maxLeft, startLeft + moveEvent.clientX - startX))}px`;
-                    panel.style.top = `${Math.max(minTop, Math.min(maxTop, startTop + moveEvent.clientY - startY))}px`;
+                    const minLeft = window.scrollX / z;
+                    const minTop = window.scrollY / z;
+                    const maxLeft = (window.scrollX + window.innerWidth) / z - panel.offsetWidth;
+                    const maxTop = (window.scrollY + window.innerHeight) / z - panel.offsetHeight;
+                    panel.style.left = `${Math.max(minLeft, Math.min(maxLeft, startLeft + (moveEvent.clientX - startX) / z))}px`;
+                    panel.style.top = `${Math.max(minTop, Math.min(maxTop, startTop + (moveEvent.clientY - startY) / z))}px`;
                 };
                 const onUp = () => {
                     document.removeEventListener('pointermove', onMove);
@@ -5239,10 +5244,12 @@
                 onChoose(option);
             };
             const position = () => {
+                // Coordinate dello schermo -> pixel CSS del body zoomato (js/ui-scale.js).
+                const z = window.uiZoom ? window.uiZoom() : 1;
                 const rect = input.getBoundingClientRect();
-                list.style.left = rect.left + 'px';
-                list.style.top = (rect.bottom + 2) + 'px';
-                list.style.width = Math.max(rect.width, 240) + 'px';
+                list.style.left = (rect.left / z) + 'px';
+                list.style.top = (rect.bottom / z + 2) + 'px';
+                list.style.width = Math.max(rect.width / z, 240) + 'px';
             };
             const render = () => {
                 if (!input.isConnected) { list.remove(); return; }
@@ -5372,7 +5379,7 @@
                 dialog.className = 'task-modal rubrica-add-modal';
                 dialog.setAttribute('role', 'dialog');
                 dialog.setAttribute('aria-modal', 'true');
-                dialog.innerHTML = `<div class="task-modal-card" style="width: min(420px, 94vw);">
+                dialog.innerHTML = `<div class="task-modal-card" style="width: min(420px, calc(94vw * var(--ui-zoom-inv, 1)));">
                     <div class="task-modal-header">
                         <h3 style="margin: 0; font-size: 1rem; color: var(--dark);"><i class="fas fa-address-book" style="color: #10B981;"></i> Nuovo contatto in rubrica</h3>
                         <button type="button" class="rubrica-add-close" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.1rem;"><i class="fas fa-times"></i></button>
@@ -9669,38 +9676,11 @@
         // tenant_id/user_id usato dal flyout: in questo modo anche un utente non admin
         // (e l'utente attivo durante l'impersonificazione) riceve il proprio valore.
         // L'endpoint storico screen-scale resta come fallback per compatibilità.
+        // Lettura della preferenza e applicazione dello zoom in js/ui-scale.js (condiviso con
+        // reporting e database viewer): 100 = interfaccia ridotta del 25% (scala base 0,75).
         async function applyScreenScale() {
             try {
-                let pct = NaN;
-
-                const detailsUrl = `${API_URL}/settings/details?argument=${encodeURIComponent('Preferenze')}`;
-                const detailsResponse = await fetch(detailsUrl, { headers: getAuthHeaders() });
-                if (detailsResponse.ok) {
-                    const rows = await detailsResponse.json();
-                    if (Array.isArray(rows)) {
-                        const dimensionRow = rows.find(row => {
-                            const campo = String(row && row.campo || '').trim().toLowerCase();
-                            const target = String(row && row.valore2 || '').trim().toLowerCase();
-                            return Number(row && row.tipo_valore) === 30 &&
-                                (campo === 'dimensioni' || target === 'schermo');
-                        });
-                        pct = Number(dimensionRow && dimensionRow.valore3);
-                    }
-                }
-
-                if (!Number.isFinite(pct) || pct <= 0) {
-                    const fallbackResponse = await fetch(`${API_URL}/settings/screen-scale`, { headers: getAuthHeaders() });
-                    if (fallbackResponse.ok) {
-                        const fallbackData = await fallbackResponse.json();
-                        pct = Number(fallbackData && fallbackData.value);
-                    }
-                }
-
-                if (!Number.isFinite(pct) || pct <= 0) pct = 100;
-                // limiti di sicurezza per non rendere la UI inutilizzabile
-                pct = Math.max(35, Math.min(pct, 150));
-                currentUiZoom = pct / 100;
-                document.body.style.zoom = currentUiZoom;
+                currentUiZoom = window.ProjexaUiScale.apply(await window.ProjexaUiScale.readSetting());
                 adjustFixedHeightsForZoom();
             } catch (e) { /* ignore */ }
         }
@@ -9832,8 +9812,9 @@
                 const target = dialog.getBoundingClientRect();
                 const originX = originRect ? originRect.left + originRect.width / 2 : window.innerWidth / 2;
                 const originY = originRect ? originRect.top + originRect.height / 2 : window.innerHeight / 2;
-                dialog.style.setProperty('--parent-zoom-x', (originX - target.left) + 'px');
-                dialog.style.setProperty('--parent-zoom-y', (originY - target.top) + 'px');
+                const z = window.uiZoom ? window.uiZoom() : 1; // distanza in pixel CSS del body zoomato
+                dialog.style.setProperty('--parent-zoom-x', ((originX - target.left) / z) + 'px');
+                dialog.style.setProperty('--parent-zoom-y', ((originY - target.top) / z) + 'px');
                 overlay.classList.remove('measuring');
                 // Forza un nuovo ciclo di animazione anche navigando tra due nodi padre.
                 void dialog.offsetWidth;
@@ -12834,8 +12815,9 @@
                     const startWidth = parseFloat(col.style.width) || handle.closest('th').offsetWidth;
                     handle.setPointerCapture(event.pointerId);
                     handle.classList.add('active');
+                    const z = window.uiZoom ? window.uiZoom() : 1; // spostamento del mouse -> pixel CSS
                     const move = e => {
-                        setWidth(col, Math.max(40, Math.round(startWidth + e.clientX - startX)));
+                        setWidth(col, Math.max(40, Math.round(startWidth + (e.clientX - startX) / z)));
                         updateTableWidth();
                     };
                     const up = () => {
@@ -13374,7 +13356,7 @@
                 dialog.className = 'task-modal field-text-modal';
                 dialog.setAttribute('role', 'dialog');
                 dialog.setAttribute('aria-modal', 'true');
-                dialog.innerHTML = `<div class="task-modal-card" style="width: min(720px, 96vw);">
+                dialog.innerHTML = `<div class="task-modal-card" style="width: min(720px, calc(96vw * var(--ui-zoom-inv, 1)));">
                     <div class="task-modal-header">
                         <h3 style="margin: 0; font-size: 1rem; color: var(--dark);"><i class="fas fa-search" style="color: #6366F1;"></i> <span class="field-text-title"></span></h3>
                         <button type="button" class="field-text-close" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.1rem;"><i class="fas fa-times"></i></button>
@@ -14117,8 +14099,10 @@
             });
             const onMove = (e) => {
                 if (!dragging) return;
-                el.style.left = (ox + e.clientX - sx) + 'px';
-                el.style.top = (oy + e.clientY - sy) + 'px';
+                // Coordinate dello schermo -> pixel CSS del body zoomato (js/ui-scale.js).
+                const z = window.uiZoom ? window.uiZoom() : 1;
+                el.style.left = ((ox + e.clientX - sx) / z) + 'px';
+                el.style.top = ((oy + e.clientY - sy) / z) + 'px';
                 el.style.position = 'fixed';
                 el.style.margin = 0;
             };
@@ -14146,7 +14130,7 @@
             const overlay = document.createElement('div');
             overlay.style.cssText = 'position:fixed; inset:0; z-index:900; background:transparent;';
             const box = document.createElement('div');
-            box.style.cssText = 'position:fixed; top:18%; left:38%; width:380px; max-height:70vh; overflow-y:auto; background:white; border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,.28); padding:1rem; z-index:901;';
+            box.style.cssText = 'position:fixed; top:18%; left:38%; width:380px; max-height:calc(70vh * var(--ui-zoom-inv, 1)); overflow-y:auto; background:white; border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,.28); padding:1rem; z-index:901;';
             box.innerHTML = `
                 <div id="tvfHandle" style="cursor:move; font-weight:600; margin-bottom:.75rem; padding-bottom:.5rem; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
                     <span>${mode === 'add' ? 'Nuovo campo' : 'Modifica campo'}</span>
@@ -15291,10 +15275,12 @@
             let startX = 0, startW = 0, active = false;
             const onMove = (e) => {
                 if (!active) return;
+                // Calcolo in pixel dello schermo, poi riportato in pixel CSS del body zoomato.
+                const z = window.uiZoom ? window.uiZoom() : 1;
                 const left = flyoutEl.getBoundingClientRect().left;
                 let w = startW + (e.clientX - startX);
                 const maxW = window.innerWidth - left - 20;
-                w = Math.max(minW, Math.min(w, maxW));
+                w = Math.max(minW * z, Math.min(w, maxW)) / z;
                 flyoutEl.style.setProperty(varName, w + 'px');
             };
             const onUp = () => {
@@ -15437,7 +15423,7 @@
         </div>
     </div>
     <div id="newRecordingModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="newRecordingTitle">
-        <div class="task-modal-card" style="width: min(400px, 94vw);">
+        <div class="task-modal-card" style="width: min(400px, calc(94vw * var(--ui-zoom-inv, 1)));">
             <div class="task-modal-header">
                 <h3 id="newRecordingTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-microphone" style="color: #DC2626;"></i> Nuova registrazione</h3>
             </div>
@@ -15455,7 +15441,7 @@
     <div id="recapToasts" class="recap-toasts" aria-live="polite"></div>
     <!-- "Crea task" dal recap: anteprima modificabile dei task, poi inserimento in tasks -->
     <div id="recapTasksModal" class="task-modal" style="z-index: 820;" role="dialog" aria-modal="true" aria-labelledby="recapTasksTitle">
-        <div class="task-modal-card" style="width: min(920px, 96vw);">
+        <div class="task-modal-card" style="width: min(920px, calc(96vw * var(--ui-zoom-inv, 1)));">
             <div class="task-modal-header">
                 <h3 id="recapTasksTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-list-check" style="color: #10B981;"></i> Crea task dalle azioni in carico</h3>
                 <button id="recapTasksClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
@@ -15482,7 +15468,7 @@
         </div>
     </div>
     <div id="audioDevicesModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="audioDevicesTitle">
-        <div class="task-modal-card" style="width: min(520px, 94vw);">
+        <div class="task-modal-card" style="width: min(520px, calc(94vw * var(--ui-zoom-inv, 1)));">
             <div class="task-modal-header">
                 <h3 id="audioDevicesTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-headset" style="color: #4285F4;"></i> Dispositivi audio</h3>
                 <button id="audioDevicesClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
@@ -15512,7 +15498,7 @@
         </div>
     </div>
     <div id="aiKeyModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="aiKeyTitle">
-        <div class="task-modal-card" style="width: min(480px, 94vw);">
+        <div class="task-modal-card" style="width: min(480px, calc(94vw * var(--ui-zoom-inv, 1)));">
             <div class="task-modal-header">
                 <h3 id="aiKeyTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-key" style="color: #10B981;"></i> <span id="aiKeyTitleText">Collega AI</span></h3>
             </div>
@@ -15530,7 +15516,7 @@
         </div>
     </div>
     <div id="aiChatModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="aiChatTitle">
-        <div class="task-modal-card" style="width: min(760px, 96vw);">
+        <div class="task-modal-card" style="width: min(760px, calc(96vw * var(--ui-zoom-inv, 1)));">
             <div class="task-modal-header">
                 <h3 id="aiChatTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-robot" style="color: #6366F1;"></i> <span id="aiChatTitleText">AI</span> <span id="aiChatModel" style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;"></span></h3>
                 <button id="aiChatClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
@@ -15559,7 +15545,7 @@
         </div>
     </div>
     <div id="calendarOutlookChoiceModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="calendarOutlookChoiceTitle">
-        <div class="task-modal-card" style="width: min(460px, 94vw);">
+        <div class="task-modal-card" style="width: min(460px, calc(94vw * var(--ui-zoom-inv, 1)));">
             <div class="task-modal-header">
                 <h3 id="calendarOutlookChoiceTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-calendar-alt" style="color: #0078D4;"></i> Collega Outlook</h3>
             </div>
@@ -15579,7 +15565,7 @@
         </div>
     </div>
     <div id="calendarDisconnectModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="calendarDisconnectTitle">
-        <div class="task-modal-card" style="width: min(420px, 94vw);">
+        <div class="task-modal-card" style="width: min(420px, calc(94vw * var(--ui-zoom-inv, 1)));">
             <div class="task-modal-header">
                 <h3 id="calendarDisconnectTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-unlink" style="color: #B91C1C;"></i> <span id="calendarDisconnectTitleText">Scollega calendario</span></h3>
             </div>
@@ -15658,7 +15644,7 @@
     </div>
     <!-- Modale Privacy e dati personali (GDPR: export / cancellazione) -->
     <div id="privacyModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 700; display: none; align-items: center; justify-content: center;">
-        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 440px; max-width: 92vw; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
+        <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 440px; max-width: calc(92vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <h3 style="margin: 0 0 0.5rem; color: var(--dark);">Privacy e dati personali</h3>
             <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.2rem;">Puoi scaricare una copia dei tuoi dati oppure richiedere la cancellazione dell'account (diritti artt. 15, 17 e 20 GDPR).</p>
             <div style="display: flex; flex-direction: column; gap: 0.6rem;">

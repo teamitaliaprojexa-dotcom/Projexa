@@ -39,7 +39,7 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 100vh;
+  min-height: calc(100vh * var(--ui-zoom-inv, 1));
   background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
 }
 
@@ -252,7 +252,7 @@ body {
 /* Dashboard Page */
 .dashboard-page {
   display: flex;
-  min-height: 100vh;
+  min-height: calc(100vh * var(--ui-zoom-inv, 1));
 }
 
 .dashboard-container {

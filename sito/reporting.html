@@ -9,6 +9,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- Grafici (stessa libreria già usata dalla dashboard per il KPI Fatturato) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <!-- Scala dell'interfaccia (preferenza "Dimensioni", 100 = ridotta del 25%) -->
+    <script src="js/ui-scale.js"></script>
+    <script>document.addEventListener('DOMContentLoaded', () => window.ProjexaUiScale.init());</script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -70,7 +73,7 @@
             border: 1px solid var(--border);
             border-radius: var(--radius);
             padding: 0.5rem;
-            max-height: calc(100vh - 7rem);
+            max-height: calc(calc(100vh * var(--ui-zoom-inv, 1)) - 7rem);
             overflow-y: auto;
         }
         .layout .panel { flex: 1 1 auto; min-width: 0; }
@@ -139,7 +142,7 @@
         .grid-wrap {
             overflow: auto;
             max-width: 100%;
-            max-height: calc(100vh - 11rem);
+            max-height: calc(calc(100vh * var(--ui-zoom-inv, 1)) - 11rem);
             border: 1px solid var(--border); border-radius: 8px;
         }
         .report-grid th[draggable="true"] { cursor: grab; user-select: none; }
@@ -264,7 +267,7 @@
         /* Grafico a schermo intero */
         .chart-fullscreen {
             position: fixed; inset: 0; z-index: 70; background: rgba(15, 23, 42, 0.55);
-            display: flex; flex-direction: column; padding: 2vh 2vw;
+            display: flex; flex-direction: column; padding: calc(2vh * var(--ui-zoom-inv, 1)) calc(2vw * var(--ui-zoom-inv, 1));
         }
         .chart-fullscreen .cf-head {
             display: flex; align-items: center; gap: 0.75rem; background: white;
@@ -279,7 +282,7 @@
         /* Finestra di configurazione del grafico */
         .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1rem; }
         .modal-backdrop[hidden] { display: none; }
-        .modal { background: white; border-radius: 10px; width: 560px; max-width: 100%; max-height: 92vh; overflow-y: auto; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.8rem; }
+        .modal { background: white; border-radius: 10px; width: 560px; max-width: 100%; max-height: calc(92vh * var(--ui-zoom-inv, 1)); overflow-y: auto; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.8rem; }
         .modal h2 { font-size: 1.1rem; }
         .fld { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; font-weight: 600; color: var(--dark); }
         .fld input, .fld select { font: inherit; font-weight: 400; padding: 0.4rem 0.55rem; border: 1px solid #CBD2DD; border-radius: 6px; }
@@ -721,9 +724,11 @@
                     <span>${v === EMPTY_VALUE ? '<em>(vuoto)</em>' : esc(v)}</span><small>${counts.get(v)}</small></label>`).join('') || '<div class="vp-empty">Nessun valore</div>'}</div>
                 <div class="vp-foot"><button type="button" class="btn btn-sm vp-clear">Nessun filtro</button><button type="button" class="btn btn-sm vp-close">Chiudi</button></div>`;
             document.body.appendChild(valuePopup);
+            // Coordinate dello schermo -> pixel CSS del body zoomato (js/ui-scale.js).
+            const z = window.uiZoom ? window.uiZoom() : 1;
             const r = btn.getBoundingClientRect();
-            valuePopup.style.top = `${Math.min(window.innerHeight - valuePopup.offsetHeight - 8, r.bottom + 4)}px`;
-            valuePopup.style.left = `${Math.max(8, Math.min(window.innerWidth - valuePopup.offsetWidth - 8, r.right - valuePopup.offsetWidth))}px`;
+            valuePopup.style.top = `${Math.min(window.innerHeight / z - valuePopup.offsetHeight - 8, r.bottom / z + 4)}px`;
+            valuePopup.style.left = `${Math.max(8, Math.min(window.innerWidth / z - valuePopup.offsetWidth - 8, r.right / z - valuePopup.offsetWidth))}px`;
 
             const boxes = () => [...valuePopup.querySelectorAll('.vp-list input[type="checkbox"]')];
             const allCheck = valuePopup.querySelector('.vp-all-check');
