@@ -7109,6 +7109,7 @@
                 // Oggetto nel formato della registrazione, per riusare queueRecChunk/finalize.
                 const rec = {
                     eventId, title, running: false, startedAt: Date.now(), baseOffset,
+                    names: meetingNames.get(String(eventId)) || [],
                     fileLabel: `File audio ${file.name}${baseOffset ? ` (da ${formatRecTime(baseOffset)})` : ''}`,
                     chunks: 0, sent: 0, failed: 0, pending: 0, lastError: '', queue: Promise.resolve()
                 };
@@ -7846,6 +7847,8 @@
                 audio_mix: bytesToBase64(encodeWav(mixSamples, REC_SAMPLE_RATE)),
                 energy_mic: energy.mic,
                 energy_system: energy.system,
+                // Nomi dei partecipanti (calendario): il server li mette nel prompt di Whisper.
+                names: Array.isArray(rec.names) ? rec.names : [],
                 offset_sec: offsetSec,
                 start_label: isFirst ? recStartLabel(rec) : undefined
             };
@@ -8151,7 +8154,8 @@
                 showNotification('Questo browser non permette di registrare l\'audio della riunione (usa Chrome o Edge)', 'info');
                 return;
             }
-            const rec = meetingRec = { eventId: btn.dataset.eventId, title: btn.dataset.title, running: false, starting: true };
+            const rec = meetingRec = { eventId: btn.dataset.eventId, title: btn.dataset.title, running: false, starting: true,
+                names: meetingNames.get(String(btn.dataset.eventId)) || [] };
             btn.disabled = true;
             showMeetingRecorder(rec.title);
             ui.stop.style.display = 'none';
@@ -9110,6 +9114,16 @@
 
         // id riunione -> email di organizzatore e partecipanti (dal calendario), per l'email del recap
         const meetingPeople = new Map();
+        // id riunione -> nomi di organizzatore e partecipanti (dal calendario): vanno a Whisper
+        // con i blocchi audio, così scrive giusti i nomi pronunciati (prompt di trascrizione).
+        const meetingNames = new Map();
+        function personName(displayName, email) {
+            const dn = String(displayName || '').trim();
+            if (dn && !/@/.test(dn)) return dn;
+            // Solo email: "mario.rossi@..." -> "Mario Rossi"
+            const local = String(email || dn).split('@')[0] || '';
+            return local.split(/[._-]+/).filter(Boolean).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+        }
 
         // Crea una singola card per la riunione
         function createMeetingCard(event) {
@@ -9145,6 +9159,10 @@
                 const mails = [org.email, ...(event.attendees || []).map((a) => a.email || a.emailAddress?.address)]
                     .map((m) => String(m || '').trim()).filter((m) => /@/.test(m));
                 meetingPeople.set(String(event.id), [...new Set(mails.map((m) => m.toLowerCase()))]);
+                const names = [personName(org.displayName, org.email),
+                    ...(event.attendees || []).map((a) => personName(a.displayName || a.emailAddress?.name, a.email || a.emailAddress?.address))]
+                    .map((n) => n.trim()).filter(Boolean);
+                meetingNames.set(String(event.id), [...new Set(names)].slice(0, 20));
             }
             const orgText = org.displayName && org.email ? `${org.displayName} <${org.email}>` : (org.displayName || org.email || '');
             let tooltip = title;

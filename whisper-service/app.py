@@ -15,6 +15,7 @@ Variabili d'ambiente:
   WHISPER_THREADS   thread CPU (default: 1; su istanze da 2+ CPU si può alzare)
   WHISPER_BEAM      ampiezza della beam search (default: 5; 1 = più veloce, meno accurata)
 """
+import base64
 import hmac
 import io
 import os
@@ -94,7 +95,7 @@ def _wav_to_float32(audio: bytes):
     return np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def _transcribe_blocking(audio: bytes):
+def _transcribe_blocking(audio: bytes, prompt: str = ""):
     model = get_model()
     samples = _wav_to_float32(audio)
     t = time.time()
@@ -103,6 +104,8 @@ def _transcribe_blocking(audio: bytes):
             samples,
             language=LANGUAGE,
             task="transcribe",
+            # Testo "detto prima" (glossario + stile) preparato dal backend Projexa.
+            initial_prompt=prompt or None,
             beam_size=BEAM_SIZE,
             vad_filter=True,    # salta i silenzi (niente frasi inventate sul silenzio)
             vad_parameters={"threshold": VAD_THRESHOLD, "speech_pad_ms": 500},
@@ -120,7 +123,7 @@ def _transcribe_blocking(audio: bytes):
 
 
 @app.post("/transcribe")
-async def transcribe(request: Request, x_whisper_key: str = Header(default="")):
+async def transcribe(request: Request, x_whisper_key: str = Header(default=""), x_whisper_prompt: str = Header(default="")):
     if not API_KEY or not hmac.compare_digest(x_whisper_key, API_KEY):
         raise HTTPException(status_code=401, detail="Chiave non valida")
     audio = await request.body()
@@ -131,8 +134,16 @@ async def transcribe(request: Request, x_whisper_key: str = Header(default="")):
 
     # La trascrizione gira in un thread separato: il server continua a rispondere a /health
     # (altrimenti Render lo crede guasto e lo riavvia a metà lavoro).
+    # Prompt facoltativo, in base64 UTF-8 (header HTTP senza lettere accentate).
+    prompt = ""
+    if x_whisper_prompt:
+        try:
+            prompt = base64.b64decode(x_whisper_prompt).decode("utf-8")[:1000]
+        except (ValueError, UnicodeDecodeError):
+            prompt = ""
+
     try:
-        out = await run_in_threadpool(_transcribe_blocking, audio)
+        out = await run_in_threadpool(_transcribe_blocking, audio, prompt)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Audio non valido: {e}")
     return {"segments": out, "model": MODEL_NAME}

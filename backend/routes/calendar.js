@@ -1114,7 +1114,11 @@ router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
     const cleanEnergy = (v) => (Array.isArray(v)
       ? v.slice(0, 1200).map((x) => Math.max(0, Math.min(1, Number(x) || 0)))
       : null);
-    const energy = mixB64 ? { mic: cleanEnergy(b.energy_mic), system: cleanEnergy(b.energy_system) } : null;
+    // Nomi dei partecipanti (dal calendario, nel browser): servono al prompt di Whisper.
+    // Viaggiano con il volume nel JSON "energy" del blocco (nessuna colonna in più).
+    const names = (Array.isArray(b.names) ? b.names : [])
+      .map((n) => String(n || '').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean).slice(0, 20);
+    const energy = mixB64 ? { mic: cleanEnergy(b.energy_mic), system: cleanEnergy(b.energy_system), names } : null;
 
     const row = await db.query(
       `SELECT 1 FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,

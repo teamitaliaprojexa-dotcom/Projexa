@@ -91,10 +91,74 @@ function parseEnergy(raw) {
     const e = JSON.parse(raw || '{}');
     return {
       mic: Array.isArray(e.mic) && e.mic.length ? e.mic : null,
-      system: Array.isArray(e.system) && e.system.length ? e.system : null
+      system: Array.isArray(e.system) && e.system.length ? e.system : null,
+      names: Array.isArray(e.names) ? e.names.map((n) => String(n || '').trim()).filter(Boolean) : []
     };
   } catch {
-    return { mic: null, system: null };
+    return { mic: null, system: null, names: [] };
+  }
+}
+
+// ----------------------------------------------------------------------------
+// PROMPT DI WHISPER (glossario + stile)
+// ----------------------------------------------------------------------------
+// Whisper tratta il prompt come il testo detto SUBITO PRIMA del blocco: ne imita lo stile
+// (maiuscole, virgole, punti) e, quando l'audio è ambiguo, preferisce le parole che vi
+// compaiono. Contenuto: titolo della riunione, partecipanti (calendario, dal browser), cliente,
+// termini corretti di "Correzioni Termini AI" (rec_correzioni: prima quelli del cliente della
+// riunione, poi quelli senza cliente) e, per ultima, una frase fissa d'esempio per lo stile.
+// Whisper ne legge al massimo ~224 token: il testo viene tenuto entro PROMPT_MAX_CHARS,
+// togliendo per primi i termini in coda (i generici).
+const PROMPT_MAX_CHARS = 700;
+const PROMPT_STYLE = 'Buongiorno a tutti, possiamo iniziare. Allora, come dicevamo, facciamo il punto della situazione: mi sentite? Sì, perfetto.';
+
+async function buildWhisperPrompt(user, idCalendar, names) {
+  try {
+    const m = (await db.query(
+      `SELECT oggetto, client_id FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [user.tenant_id, user.user_id, idCalendar]
+    )).rows[0] || {};
+    let cliente = '';
+    if (m.client_id) {
+      const c = await db.query(
+        `SELECT valore2 FROM clients WHERE id = $1 AND tenant_id = $2 AND argument = 'Cliente' AND campo = 'Cliente' LIMIT 1`,
+        [m.client_id, user.tenant_id]
+      );
+      cliente = String((c.rows[0] && c.rows[0].valore2) || '').trim();
+    }
+    let termini = [];
+    try {
+      const t = await db.query(
+        `SELECT corretto, client_id FROM rec_correzioni
+          WHERE tenant_id = $1 AND user_id = $2
+            AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+            AND (client_id IS NULL OR client_id = $3)
+          ORDER BY (client_id IS NULL), corretto`,
+        [user.tenant_id, user.user_id, m.client_id || null]
+      );
+      termini = [...new Set(t.rows.map((r) => String(r.corretto || '').trim()).filter(Boolean))];
+    } catch (e) { /* tabella assente: nessun termine */ }
+
+    const me = await speakerName(user);
+    const persone = [...new Set([me, ...(names || [])].filter(Boolean))];
+    const head = [
+      m.oggetto ? `Riunione: ${String(m.oggetto).trim()}.` : '',
+      persone.length ? `Partecipanti: ${persone.join(', ')}.` : '',
+      cliente ? `Cliente: ${cliente}.` : ''
+    ].filter(Boolean).join(' ');
+    // Termini finché c'è spazio (i primi sono quelli del cliente).
+    const room = PROMPT_MAX_CHARS - head.length - PROMPT_STYLE.length - 20;
+    const kept = [];
+    let len = 0;
+    for (const term of termini) {
+      if (len + term.length + 2 > room) break;
+      kept.push(term);
+      len += term.length + 2;
+    }
+    return [head, kept.length ? `Si parla di: ${kept.join(', ')}.` : '', PROMPT_STYLE].filter(Boolean).join(' ');
+  } catch (e) {
+    console.warn('⚠️ PROMPT WHISPER:', e.message);
+    return PROMPT_STYLE;
   }
 }
 
@@ -164,7 +228,8 @@ async function transcribeJob(job, baseUrl) {
   if (job.audio_mix) {
     const energy = parseEnergy(job.energy);
     const me = energy.mic ? await speakerName(user) : '';
-    const r = await transcribeAudio(user.user_id, Buffer.from(job.audio_mix, 'base64'), mime, baseUrl);
+    const prompt = await buildWhisperPrompt(user, job.id_calendar, energy.names);
+    const r = await transcribeAudio(user.user_id, Buffer.from(job.audio_mix, 'base64'), mime, baseUrl, prompt);
     for (const seg of r.segments) {
       let who = '';
       if (energy.mic && energy.system) {

@@ -633,7 +633,7 @@ export function whisperCppUrls() {
 }
 
 // Blocco WAV su whisper.cpp (endpoint /inference, risposta verbose_json con i segmenti).
-async function transcribeAudioCpp(base, audioBuffer, mime) {
+async function transcribeAudioCpp(base, audioBuffer, mime, prompt = '') {
   for (let attempt = 1; ; attempt++) {
     try {
       const form = new FormData();
@@ -644,6 +644,8 @@ async function transcribeAudioCpp(base, audioBuffer, mime) {
       // sulla VM è avviato con -mc 0, qui lo si sovrascrive per ogni richiesta).
       form.append('beam_size', String(Number(process.env.WHISPER_CPP_BEAM) || 5));
       form.append('max_context', '-1');
+      // Prompt (glossario + stile, vedi buildWhisperPrompt in jobs/meetingTranscription.js).
+      if (prompt) form.append('prompt', prompt);
       const data = await readJson(await callApi(`${base}/inference`, {
         method: 'POST',
         body: form,
@@ -691,9 +693,10 @@ async function transcribeAudioCpp(base, audioBuffer, mime) {
 // baseUrl: servizio da usare (la coda assegna ogni blocco a un servizio); di default il primo.
 // Se baseUrl è un servizio whisper.cpp (WHISPER_CPP_URLS) la richiesta segue il suo formato.
 // Restituisce { segments: [{ start, end, text }], provider }.
-export async function transcribeAudio(userId, audioBuffer, mime, baseUrl = null) {
+// prompt: testo che Whisper usa come "detto prima" (glossario + stile); facoltativo.
+export async function transcribeAudio(userId, audioBuffer, mime, baseUrl = null, prompt = '') {
   const base = String(baseUrl || whisperUrls()[0] || '').replace(/\/+$/, '');
-  if (base && whisperCppUrls().includes(base)) return transcribeAudioCpp(base, audioBuffer, mime);
+  if (base && whisperCppUrls().includes(base)) return transcribeAudioCpp(base, audioBuffer, mime, prompt);
   if (!base || !process.env.WHISPER_API_KEY) {
     // 428: il browser ferma subito la registrazione invece di riprovare.
     throw httpError(428, 'Servizio di trascrizione non configurato sul server (WHISPER_URLS / WHISPER_URL / WHISPER_API_KEY)');
@@ -704,7 +707,12 @@ export async function transcribeAudio(userId, audioBuffer, mime, baseUrl = null)
     try {
       const data = await readJson(await callApi(`${base}/transcribe`, {
         method: 'POST',
-        headers: { 'X-Whisper-Key': process.env.WHISPER_API_KEY, 'Content-Type': mime || 'audio/wav' },
+        headers: {
+          'X-Whisper-Key': process.env.WHISPER_API_KEY,
+          'Content-Type': mime || 'audio/wav',
+          // Prompt in base64 (UTF-8): negli header HTTP le lettere accentate non sono ammesse.
+          ...(prompt ? { 'X-Whisper-Prompt': Buffer.from(String(prompt), 'utf8').toString('base64') } : {})
+        },
         body: audioBuffer,
         timeoutMs: 900000 // blocchi da ~2 minuti con beam 5: su CPU richiedono alcuni minuti
       }, 'Whisper'), 'Whisper');
