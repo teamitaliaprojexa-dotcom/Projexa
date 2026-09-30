@@ -9,6 +9,7 @@ import { sendMail, buildConfirmEmail, buildResetPasswordEmail, buildMagicLinkEma
 import { requireAuth } from '../middleware/auth.js';
 import { signSessionToken, verifySessionToken, forgetSessionSignature, passwordSignature } from '../config/session.js';
 import { startOAuthLogin, checkOAuthState, deliverLoginToken, takeLoginToken } from '../config/oauthLogin.js';
+import { seedSettingsFromTemplate } from '../config/settingsSeed.js';
 
 // Link con token (conferma iscrizione, reset password) nel log solo in locale: in
 // produzione chi legge i log potrebbe usarli per prendere il controllo degli account.
@@ -227,6 +228,8 @@ router.post('/register', async (req, res) => {
         'INSERT INTO user_tenants (user_id, tenant_id, role_id, id_roles) VALUES ($1, $2, $3, $4)',
         [userId, t.rows[0].id, 'Project Manager', 70]
       );
+      // Tenant nuovo: impostazioni copiate dall'utente modello del tenant PROJEXA.
+      await seedSettingsFromTemplate(client, t.rows[0].id, userId);
       await client.query('COMMIT');
     } catch (e) {
       await client.query('ROLLBACK');
@@ -789,6 +792,7 @@ router.get('/google-callback', async (req, res) => {
         'INSERT INTO user_tenants (user_id, tenant_id, role_id, id_roles) VALUES ($1, $2, $3, $4)',
         [userData.id, defaultTenant.rows[0].id, 'Project Manager', roleId]
       );
+      await seedSettingsFromTemplate(db, defaultTenant.rows[0].id, userData.id);
 
       tenants = defaultTenant;
     }

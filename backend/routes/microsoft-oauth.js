@@ -3,6 +3,7 @@ import db from '../config/database.js';
 import authDb from '../config/authDatabase.js';
 import { signSessionToken } from '../config/session.js';
 import { checkOAuthState, deliverLoginToken } from '../config/oauthLogin.js';
+import { seedSettingsFromTemplate } from '../config/settingsSeed.js';
 
 const router = express.Router();
 
@@ -164,6 +165,7 @@ router.get('/microsoft-callback', async (req, res) => {
         'INSERT INTO user_tenants (user_id, tenant_id, role_id, id_roles) VALUES ($1, $2, $3, $4)',
         [userDbData.id, defaultTenant.rows[0].id, 'Project Manager', 70]
       );
+      await seedSettingsFromTemplate(db, defaultTenant.rows[0].id, userDbData.id);
 
       tenants = defaultTenant;
     }
