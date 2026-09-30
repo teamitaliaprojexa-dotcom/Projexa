@@ -3790,7 +3790,8 @@ app.post('/api/settings/argument', requireAuth, async (req, res) => {
 // nuovo utente della propria azienda. Scrive in cascata: Projexa-Auth.users (genera l'id) ->
 // Projexa.users (stesso id) -> user_tenants (associa al tenant del creatore).
 // Colonne mai mostrate/gestite dal form (auto o sensibili).
-const NEW_USER_HIDDEN = new Set(['id', 'created_at', 'updated_at', 'updated_by', 'password_hash']);
+// crypto = marcatore di cifratura a riposo della riga, gestito dal sistema.
+const NEW_USER_HIDDEN = new Set(['id', 'created_at', 'updated_at', 'updated_by', 'password_hash', 'crypto']);
 const NEW_USER_LABELS = { email: 'Email', name: 'Nome', cognome: 'Cognome', scadenza: 'Scadenza' };
 
 // Config del form: campi editabili delle due tabelle users + ruoli selezionabili (>= al proprio) +
