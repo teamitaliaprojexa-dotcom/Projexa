@@ -2352,6 +2352,27 @@ const gpCommessaCond = (alias) => `EXISTS (
        AND k.scadenza >= CURRENT_DATE
   )`;
 
+// Progetti esclusi da Gestione Progetto e Offerte e ordini (campi di projects con argument =
+// id del progetto, valori in chiaro):
+//   - "Stato Progetto" (valore2) tra GP_STATI_ESCLUSI (minuscolo): per escluderne altri basta
+//     aggiungerli all'elenco;
+//   - "Anno" (valore3) maggiore dell'anno corrente (progetti dell'anno prossimo o successivi).
+const GP_STATI_ESCLUSI = ['annullato', 'in negoziazione'];
+const gpStatoEsclusoCond = (idExpr, alias) => `NOT EXISTS (
+    SELECT 1 FROM projects sp
+     WHERE sp.campo = 'Stato Progetto' AND sp.argument = ${idExpr}::text
+       AND sp.tenant_id = ${alias}.tenant_id AND sp.user_id = ${alias}.user_id
+       AND sp.scadenza >= CURRENT_DATE
+       AND LOWER(BTRIM(sp.valore2)) IN (${GP_STATI_ESCLUSI.map((x) => `'${x}'`).join(', ')})
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM projects an
+     WHERE an.campo = 'Anno' AND an.argument = ${idExpr}::text
+       AND an.tenant_id = ${alias}.tenant_id AND an.user_id = ${alias}.user_id
+       AND an.scadenza >= CURRENT_DATE
+       AND an.valore3 > EXTRACT(YEAR FROM CURRENT_DATE)
+  )`;
+
 app.get('/api/kpi-gestione-progetto', requireAuth, async (req, res) => {
   try {
     const clientIds = parseClientIdsFromQuery(req).filter((id) => GP_UUID.test(id));
@@ -2375,6 +2396,7 @@ app.get('/api/kpi-gestione-progetto', requireAuth, async (req, res) => {
         WHERE a.tenant_id = $1 AND a.user_id = $2 AND a.scadenza >= CURRENT_DATE
           AND (a.offerta_effort_hh <> 0 OR a.offerta_effort_gg <> 0) ${clientCond}
           AND ${gpCommessaCond('a')}
+          AND ${gpStatoEsclusoCond('a.project_id', 'a')}
         GROUP BY a.client_id, a.project_id, hh.gestione_hh, comp.completamento`,
       params
     );
@@ -2409,7 +2431,8 @@ app.get('/api/kpi-gestione-progetto/project/:projectId', requireAuth, async (req
          ${gpHhJoin('a')}
         WHERE a.tenant_id = $1 AND a.user_id = $2 AND a.project_id = $3 AND a.scadenza >= CURRENT_DATE
           AND (a.offerta_effort_hh <> 0 OR a.offerta_effort_gg <> 0)
-          AND ${gpCommessaCond('a')}`,
+          AND ${gpCommessaCond('a')}
+          AND ${gpStatoEsclusoCond('a.project_id', 'a')}`,
       [req.user.tenant_id, req.user.user_id, projectId]
     );
     const costIds = [...new Set(r.rows.map((x) => x.worker_cost_id).filter(Boolean))];
@@ -2447,7 +2470,8 @@ app.get('/api/kpi-gestione-progetto/worker', requireAuth, async (req, res) => {
          ${gpHhJoin('c')}
         WHERE c.tenant_id = $1 AND c.user_id = $2 AND c.scadenza >= CURRENT_DATE
           AND c.team_pro = $3 AND c.project_id = $4
-          AND ${gpCommessaCond('c')}`,
+          AND ${gpCommessaCond('c')}
+          AND ${gpStatoEsclusoCond('c.project_id', 'c')}`,
       [req.user.tenant_id, req.user.user_id, workerCostId, projectId]
     );
     const items = r.rows.map((x) => ({ id: x.id, nominativo: x.nominativo, hh: !!x.hh, time_spent: gpNum(x.time_spent) }))
@@ -2488,7 +2512,8 @@ app.get('/api/kpi-gestione-progetto/ordini', requireAuth, async (req, res) => {
              WHERE t.campo = 'Tipologia' AND t.argument = a.id::text
                AND t.tenant_id = a.tenant_id AND t.user_id = a.user_id AND t.scadenza >= CURRENT_DATE
                AND LOWER(BTRIM(t.valore2)) = 'previsione'
-          )`,
+          )
+          AND ${gpStatoEsclusoCond('a.id', 'a')}`,
       params
     );
     const clients = await resolveClientDescriptions(r.rows.map((x) => x.client_id), req.user.tenant_id);
