@@ -10,7 +10,7 @@ import express from 'express';
 import db from '../config/database.js';
 import authDb from '../config/authDatabase.js';
 import { requireAuth } from '../middleware/auth.js';
-import { requireProjexaAdmin } from './vm-monitor.js';
+import { requireProjexaAdmin, vmCarico } from './vm-monitor.js';
 import { calcolaProssima, NOMI_JOB, INFO_JOB, schedulerAttivo, schedulerSospeso } from '../jobs/scheduler.js';
 import { execFile } from 'child_process';
 import { statoWorker, kickTranscriptionWorker, enqueueFinalize } from '../jobs/meetingTranscription.js';
@@ -327,6 +327,37 @@ function unitaServizi() {
   return units;
 }
 
+// CPU e memoria di ogni servizio da systemd (cgroup: comprende i processi figli).
+// CPU % = tempo CPU consumato dall'ultima lettura, rispetto a tutti i core della VM;
+// alla prima lettura (o dopo un riavvio del servizio) non c'è un intervallo: null.
+const cpuPrecedente = new Map(); // unit -> { ns, t }
+function consumiUnita(units, cores) {
+  if (process.platform !== 'linux' || !units.length) return Promise.resolve(new Map());
+  return new Promise((resolve) => {
+    execFile('systemctl', ['show', ...units.map((u) => u.unit), '-p', 'Id', '-p', 'MemoryCurrent', '-p', 'CPUUsageNSec'],
+      { timeout: 5000 }, (err, stdout) => {
+        const out = new Map();
+        const ora = Date.now();
+        // Un blocco di righe "Chiave=valore" per unità, separati da una riga vuota.
+        for (const blocco of String(stdout || '').split(/\n\s*\n/)) {
+          const v = Object.fromEntries(blocco.split('\n').map((l) => l.split('=')).filter((x) => x.length >= 2).map(([k, ...r]) => [k.trim(), r.join('=').trim()]));
+          if (!v.Id) continue;
+          const unit = v.Id.replace(/\.service$/, '');
+          const mem = /^\d+$/.test(v.MemoryCurrent || '') ? Number(v.MemoryCurrent) : null;
+          const ns = /^\d+$/.test(v.CPUUsageNSec || '') ? Number(v.CPUUsageNSec) : null;
+          let cpu = null;
+          const prima = cpuPrecedente.get(unit);
+          if (ns != null && prima && ns >= prima.ns && ora > prima.t) {
+            cpu = Math.min(100, 100 * ((ns - prima.ns) / 1e6) / (ora - prima.t) / (cores || 1));
+          }
+          if (ns != null) cpuPrecedente.set(unit, { ns, t: ora });
+          out.set(unit, { mem, cpu });
+        }
+        resolve(out);
+      });
+  });
+}
+
 function statoUnita(units) {
   if (process.platform !== 'linux' || !units.length) return Promise.resolve(units.map((u) => ({ ...u, state: 'n.d.' })));
   return new Promise((resolve) => {
@@ -339,7 +370,10 @@ function statoUnita(units) {
 
 router.get('/servizi', async (req, res) => {
   try {
-    const servizi = await statoUnita(unitaServizi());
+    const carico = vmCarico();
+    const unita = unitaServizi();
+    const [statiServizi, consumi] = await Promise.all([statoUnita(unita), consumiUnita(unita, carico && carico.cores)]);
+    const servizi = statiServizi.map((x) => ({ ...x, ...(consumi.get(x.unit) || {}) }));
     const { inLavorazione, recap } = statoWorker();
     let righe = [];
     try {
@@ -398,7 +432,7 @@ router.get('/servizi', async (req, res) => {
         e.recap_in_corso = recap.has(`${e.tenant_id}|${e.user_id}|${e.id_calendar}`);
       }
     }
-    res.json({ servizi, sessioni: elenco, minAppeso: MIN_APPESO, adesso: new Date().toISOString() });
+    res.json({ servizi, vm: carico, sessioni: elenco, minAppeso: MIN_APPESO, adesso: new Date().toISOString() });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

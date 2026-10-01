@@ -22,10 +22,6 @@ const HISTORY_MAX = (24 * 60 * 60 * 1000) / SAMPLE_MS; // 24 ore
 const CLK_TCK = 100;                                   // tick al secondo di /proc (getconf CLK_TCK)
 const PAGE = 4096;
 
-// Soglia Oracle Always Free: VM A1 recuperabili se per 7 giorni CPU (95° percentile), rete e
-// memoria restano sotto il 20%.
-const IDLE_THRESHOLD = 20;
-
 // ----------------------------------------------------------------------------
 // ACCESSO: solo admin del tenant PROJEXA
 // ----------------------------------------------------------------------------
@@ -176,6 +172,16 @@ export function startVmSampler() {
   timer.unref();
 }
 
+// Carico attuale della VM (pagina Schedulazioni › Trascrizioni e recap): CPU dall'ultimo
+// campione (null finché non ce ne sono due, cioè nei primi 15 s) e memoria letta adesso.
+export function vmCarico() {
+  if (!IS_LINUX) return null;
+  startVmSampler();
+  const last = history[history.length - 1] || null;
+  const m = memInfo();
+  return { cpu: last ? last.cpu : null, memUsed: m.total - m.available, memTotal: m.total, cores: os.cpus().length };
+}
+
 // Riduce lo storico a max n punti (media per gruppo), per grafici leggeri.
 function downsample(points, n) {
   if (points.length <= n) return points;
@@ -187,12 +193,6 @@ function downsample(points, n) {
     out.push({ t: g[g.length - 1].t, cpu: avg('cpu'), mem: avg('mem'), swap: avg('swap'), rx: avg('rx'), tx: avg('tx') });
   }
   return out;
-}
-
-function percentile(values, p) {
-  if (!values.length) return null;
-  const s = [...values].sort((a, b) => a - b);
-  return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))];
 }
 
 // ----------------------------------------------------------------------------
@@ -265,7 +265,6 @@ router.get('/status', requireAuth, requireProjexaAdmin, async (req, res) => {
     const last = history[history.length - 1] || null;
     const mem = memInfo();
     const [services, databases, queue] = await Promise.all([serviceStates(serviceUnits()), databaseSizes(), transcriptionQueue()]);
-    const all = history.map((p) => p.cpu);
     res.json({
       host: os.hostname(),
       cpus: os.cpus().length,
@@ -278,12 +277,6 @@ router.get('/status', requireAuth, requireProjexaAdmin, async (req, res) => {
       sampleSeconds: SAMPLE_MS / 1000,
       historyFrom: history.length ? history[0].t : null,
       series: downsample(points, 240),
-      idle: {
-        threshold: IDLE_THRESHOLD,
-        cpuP95: percentile(all, 95),
-        memNow: last ? last.mem : null,
-        hours: history.length ? (Date.now() - history[0].t) / 3600e3 : 0
-      },
       processes: lastProcs.slice().sort((a, b) => b.rss - a.rss).slice(0, 10),
       services,
       databases,

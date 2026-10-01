@@ -587,14 +587,24 @@
 
         function renderServizi() {
             const svc = servizi.servizi || [];
+            const gb = (b) => b == null ? '–' : `${(b / 1073741824).toLocaleString('it-IT', { maximumFractionDigits: 1 })} GB`;
+            const pc = (v) => v == null ? '–' : `${v.toLocaleString('it-IT', { maximumFractionDigits: 1 })}%`;
+            // CPU e RAM per servizio (da systemd): la CPU è % di tutta la VM dall'aggiornamento precedente.
+            const consumo = (s) => (s.mem == null && s.cpu == null) ? ''
+                : `<div class="small" title="CPU: % di tutti i core della VM dall'aggiornamento precedente">CPU ${pc(s.cpu)} · RAM ${gb(s.mem)}</div>`;
+            const vm = servizi.vm;
+            const vmTile = vm ? `<div class="svc" title="Carico totale della VM (stesso dato del Monitor VM)"><i class="fas fa-server" style="color: var(--primary);"></i>
+                    <div><div class="strong">VM (${vm.cores} core)</div>
+                    <div class="small">CPU ${pc(vm.cpu)} · RAM ${gb(vm.memUsed)} di ${gb(vm.memTotal)}</div></div>
+                </div>` : '';
             $('svcList').innerHTML = svc.map(s => {
                 const on = s.state === 'active';
                 const nd = s.state === 'n.d.';
                 return `<div class="svc"><span class="dot ${nd ? 'nd' : on ? 'on' : 'off'}"></span>
-                    <div><div class="strong">${esc(s.label)}</div><div class="small">${esc(nd ? 'non disponibile qui (solo sulla VM)' : on ? 'attivo' : s.state)}</div></div>
+                    <div><div class="strong">${esc(s.label)}</div><div class="small">${esc(nd ? 'non disponibile qui (solo sulla VM)' : on ? 'attivo' : s.state)}</div>${on ? consumo(s) : ''}</div>
                     ${nd ? '' : `<button type="button" class="btn btn-sm" data-svc-restart="${esc(s.unit)}" data-svc-label="${esc(s.label)}" title="Riavvia il servizio"><i class="fas fa-rotate-right"></i></button>`}
                 </div>`;
-            }).join('');
+            }).join('') + vmTile;
 
             const sess = servizi.sessioni || [];
             if (!sess.length) {

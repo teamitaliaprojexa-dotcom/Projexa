@@ -50,9 +50,6 @@
         td.num, th.num { text-align: right; }
         .st { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600; font-size: 0.8rem; }
         .st.good { color: var(--good); } .st.warn { color: var(--warn); } .st.bad { color: var(--bad); }
-        .idle { display: flex; gap: 0.8rem; align-items: flex-start; }
-        .idle i { font-size: 1.3rem; margin-top: 0.15rem; }
-        .idle p { font-size: 0.85rem; color: var(--ink2); margin-top: 0.25rem; line-height: 1.45; }
         .denied { text-align: center; padding: 3rem 1rem; color: var(--muted); }
         .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; }
         .empty { font-size: 0.85rem; color: var(--muted); padding: 2.5rem 0; text-align: center; }
@@ -84,7 +81,6 @@
 
             <div class="tiles" id="tiles"></div>
 
-            <div class="card" style="margin-bottom: 0.75rem;" id="idleCard"></div>
 
             <div class="grid2 charts">
                 <div class="card">
@@ -251,21 +247,6 @@
                 tile('Disco', disk ? bytes(disk.used) : '–', disk ? `di ${bytes(disk.total)} · liberi ${bytes(disk.free)}` : '', disk ? 100 * disk.used / disk.total : null),
                 tile('Rete', d.now ? rate(d.now.rx + d.now.tx) : '–', d.now ? `↓ ${rate(d.now.rx)} · ↑ ${rate(d.now.tx)}` : '', null)
             ].join('');
-
-            // Rischio di recupero Oracle (Always Free): CPU p95, rete e memoria tutte sotto il 20%.
-            const idle = d.idle;
-            if (idle.cpuP95 == null || idle.memNow == null) {
-                $('idleCard').innerHTML = '<div class="idle"><i class="fas fa-hourglass-half" style="color: var(--muted)"></i><div><h2>Inattività Oracle Always Free</h2><p>Dati in raccolta.</p></div></div>';
-            } else {
-            const low = idle.cpuP95 != null && idle.cpuP95 < idle.threshold && idle.memNow != null && idle.memNow < idle.threshold;
-            const icon = low ? '<i class="fas fa-triangle-exclamation" style="color: var(--warn)"></i>' : '<i class="fas fa-circle-check" style="color: var(--good)"></i>';
-            $('idleCard').innerHTML = `<div class="idle">${icon}<div><h2>Inattività Oracle Always Free: ${low ? 'attenzione' : 'nessun rischio'}</h2>` +
-                `<p>Oracle può recuperare la VM se per 7 giorni CPU (95° percentile), rete e memoria restano tutte sotto il ${idle.threshold}%. ` +
-                `Ora: CPU 95° percentile <b>${pct(idle.cpuP95)}</b>, memoria <b>${pct(idle.memNow)}</b>` +
-                ` (su ${idle.hours < 1 ? Math.round(idle.hours * 60) + ' minuti' : idle.hours.toFixed(1).replace('.', ',') + ' ore'} di dati: lo storico riparte a ogni riavvio del backend). ` +
-                (low ? 'Basta che uno dei tre valori superi la soglia per evitare il recupero.'
-                    : `${idle.memNow >= idle.threshold ? 'La memoria' : 'La CPU'} sopra la soglia basta a evitare il recupero.`) + '</p></div></div>';
-            }
 
             const pts = d.series;
             lineChart($('chartCpu'), pts, [{ key: 'cpu', label: 'CPU', color: 'var(--s1)' }], { fmt: (v, axis) => pct(v, axis ? 0 : 1), max: 100 });
