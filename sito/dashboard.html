@@ -1520,6 +1520,7 @@
         .gp-stat-tip li b { flex: none; font-variant-numeric: tabular-nums; }
         .gp-stat-tip li b.ok { color: #93c5fd; } .gp-stat-tip li b.over { color: #fca5a5; } .gp-stat-tip li b.zero { color: #cbd5e1; }
         .gp-stat-tip .none { color: #cbd5e1; }
+        .gp-stat-tip li b.fab { color: #fdba74; }
         /* Ultimo riquadro: tooltip allineato a destra per non uscire dallo schermo */
         .gp-summary .gp-stat:last-child .gp-stat-tip { left: auto; right: 0; }
         .gp-stat.red { background: #fef2f2; border-color: #fee2e2; } .gp-stat.red .v { color: #dc2626; }
@@ -1551,7 +1552,15 @@
         .gp-compl { flex: none; font-size: 0.68rem; font-weight: 600; color: #7c3aed; background: #f5f3ff; border-radius: 999px; padding: 0.1rem 0.5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
         .gp-row-meta { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
         .gp-row-meta b { font-weight: 600; }
-        .gp-row-meta .gp-fab { color: #b45309; font-weight: 600; }
+        .gp-row-meta .gp-fab { color: #b45309; font-weight: 600; display: inline-block; border-radius: 6px; }
+        /* Zoom del 30% ripetuto e morbido per 4 s (2 pulsazioni da 2 s), solo sulla scritta */
+        .gp-row-meta .gp-fab.gp-fab-zoom { position: relative; z-index: 2; background: #fff7ed; padding: 0 4px; transform-origin: left center; animation: gpFabZoom 2s cubic-bezier(0.37, 0, 0.63, 1) 2; }
+        .gp-client:has(.gp-fab-zoom), .gp-row:has(.gp-fab-zoom), .gp-row-meta:has(.gp-fab-zoom) { overflow: visible; }
+        @keyframes gpFabZoom {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 rgba(180, 83, 9, 0); }
+            50% { transform: scale(1.3); box-shadow: 0 4px 14px rgba(180, 83, 9, 0.22); }
+        }
+        @media (prefers-reduced-motion: reduce) { .gp-row-meta .gp-fab.gp-fab-zoom { animation: none; } }
         .gp-row-meta .gp-fab i { font-size: 0.68rem; }
         .gp-row-meta .o { color: #059669; } .gp-row-meta .s { color: #2563eb; } .gp-row-meta .s.over { color: #dc2626; }
 
@@ -4811,7 +4820,20 @@
             loadOrdiniProgetto();
         }
 
-async function loadGestioneProgetto() {
+        // Zoom (30%, 4 s) delle scritte "Fabbrica: mancano …": solo se il riquadro Gestione
+        // Progetto è sullo schermo (initGestioneProgetto osserva quando ci si arriva scorrendo).
+        let gpVisibile = false;
+        function gpAnimaFabbrica() {
+            if (!gpVisibile) return;
+            document.querySelectorAll('#gpContent .gp-fab').forEach(el => {
+                el.classList.remove('gp-fab-zoom');
+                void el.offsetWidth; // riparte anche se era già animata
+                el.classList.add('gp-fab-zoom');
+                el.addEventListener('animationend', () => el.classList.remove('gp-fab-zoom'), { once: true });
+            });
+        }
+
+        async function loadGestioneProgetto({ anima = true } = {}) {
             const content = document.getElementById('gpContent');
             if (!content) return;
             const seq = ++gpRequestSeq;
@@ -4834,6 +4856,7 @@ async function loadGestioneProgetto() {
                 if (!res.ok) throw new Error(data.error || `Errore HTTP ${res.status}`);
                 if (seq !== gpRequestSeq) return; // superata da una navigazione più recente
                 content.innerHTML = gpTableHtml(Array.isArray(data) ? data : []);
+                if (anima) gpAnimaFabbrica(); // dati arrivati con il riquadro già sullo schermo
             } catch (e) {
                 if (seq !== gpRequestSeq) return;
                 content.innerHTML = `<div class="gp-empty">Impossibile caricare i dati: ${escapeHtml(e.message)}</div>`;
@@ -4854,13 +4877,20 @@ async function loadGestioneProgetto() {
         // Voce di costo "Fabbrica" (solo questa): se il tempo speso registrato è inferiore
         // all'offerta, accanto a "Speso" nella riga del progetto si indica quanto manca da
         // inserire (offerta - speso), con offerta e speso della sola Fabbrica nel tooltip.
-        function gpFabbricaMeta(it) {
+        // Quanto manca da inserire per la Fabbrica del progetto (0 = niente da segnalare).
+        function gpFabbricaManca(it) {
             const f = it.fabbrica;
-            if (!f) return '';
+            if (!f) return 0;
             const offerta = Number(f.offerta) || 0;
-            const speso = Number(f.time_spent) || 0;
-            const manca = Math.round((offerta - speso) * 100) / 100;
-            if (!(offerta > 0) || !(manca > 0)) return '';
+            const manca = Math.round((offerta - (Number(f.time_spent) || 0)) * 100) / 100;
+            return offerta > 0 && manca > 0 ? manca : 0;
+        }
+
+        function gpFabbricaMeta(it) {
+            const manca = gpFabbricaManca(it);
+            if (!manca) return '';
+            const offerta = Number(it.fabbrica.offerta) || 0;
+            const speso = Number(it.fabbrica.time_spent) || 0;
             return ` · <span class="gp-fab" title="Fabbrica: offerta ${escapeHtml(gpFmt(offerta, it.hh))}, speso ${escapeHtml(gpFmt(speso, it.hh))}">`
                 + `<i class="fas fa-triangle-exclamation"></i> Fabbrica: mancano <b>${gpFmt(manca, it.hh)}</b> da inserire</span>`;
         }
@@ -4883,7 +4913,8 @@ async function loadGestioneProgetto() {
         // Riepilogo in alto: quante righe, quante in linea, oltre l'offerta, non avviate.
         // labelOf(item) = testo della riga nel tooltip (es. "Cliente – Progetto"), mostrato
         // passando il mouse sul riquadro.
-        function gpSummaryHtml(list, what, labelOf) {
+        // extra = HTML di riquadri aggiuntivi in coda (es. "Progetti da inserire a Fabbrica").
+        function gpSummaryHtml(list, what, labelOf, extra = '') {
             const rows = list.map(x => ({ label: labelOf ? labelOf(x) : '', p: gpProgress(x.offerta, x.time_spent) }));
             const over = rows.filter(r => r.p.over);
             const zero = rows.filter(r => r.p.pct === 0);
@@ -4902,6 +4933,7 @@ async function loadGestioneProgetto() {
                 ${stat('blue', running, "In linea con l'offerta")}
                 ${stat('red', over, "Oltre l'offerta")}
                 ${stat('gray', zero, 'Non ancora avviati')}
+                ${extra}
             </div>`;
         }
 
@@ -4936,8 +4968,14 @@ async function loadGestioneProgetto() {
                         <div class="gp-rows">${rows}</div>
                     </div>`;
                 }).join('');
+                // Progetti con Fabbrica ancora da inserire (offerta Fabbrica > speso Fabbrica).
+                const daFab = items.filter(it => gpFabbricaManca(it) > 0);
+                const fabTip = `<div class="gp-stat-tip" role="tooltip"><div class="t">Progetti da inserire a Fabbrica</div>${daFab.length
+                    ? `<ul>${daFab.map(it => `<li><span>${escapeHtml(`${it.client || '(cliente non trovato)'} – ${it.project || '(progetto non trovato)'}`)}</span><b class="fab">mancano ${escapeHtml(gpFmt(gpFabbricaManca(it), it.hh))}</b></li>`).join('')}</ul>`
+                    : '<div class="none">Nessuno</div>'}</div>`;
+                const fabStat = `<div class="gp-stat amber" tabindex="0"><div class="v">${daFab.length}</div><div class="l">Progetti da inserire a Fabbrica</div>${fabTip}</div>`;
                 return gpSummaryHtml(items, 'Progetti monitorati',
-                    it => `${it.client || '(cliente non trovato)'} – ${it.project || '(progetto non trovato)'}`) + `<div class="gp-grid">${cards}</div>`;
+                    it => `${it.client || '(cliente non trovato)'} – ${it.project || '(progetto non trovato)'}`, fabStat) + `<div class="gp-grid">${cards}</div>`;
             }
             if (gpState.level === 'project') {
                 const rows = items.map(it => gpRowHtml(it.worker || '(voce non trovata)', it.offerta, it.time_spent, it.hh, it.hh,
@@ -4995,6 +5033,15 @@ async function loadGestioneProgetto() {
                     loadGestioneProgetto();
                 }
             });
+            // Il riquadro è sotto altri KPI: lo zoom parte ogni volta che entra nello schermo.
+            if ('IntersectionObserver' in window) {
+                new IntersectionObserver((entries) => {
+                    entries.forEach(en => {
+                        if (en.isIntersecting && !gpVisibile) { gpVisibile = true; gpAnimaFabbrica(); }
+                        else if (!en.isIntersecting) gpVisibile = false;
+                    });
+                }, { threshold: 0.25 }).observe(card);
+            }
             loadGestioneProgetto();
         }
 
@@ -6239,7 +6286,7 @@ async function loadGestioneProgetto() {
             });
             // Senza animazioni: lo zoom degli allarmi resta per l'apertura della pagina.
             await passo('mini KPI', () => loadDashboardKpis({ anima: false }));
-            await passo('gestione progetto', () => loadGestioneProgetto()); // resta al livello in cui sei
+            await passo('gestione progetto', () => loadGestioneProgetto({ anima: false })); // resta al livello in cui sei
             await passo('offerte e ordini', () => loadOrdiniProgetto({ anima: false }));
         }
 
