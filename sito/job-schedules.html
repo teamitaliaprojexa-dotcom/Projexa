@@ -393,7 +393,7 @@
             const jira = isJira($('fJob').value);
             $('fUtenteLbl').textContent = jira ? 'Configurazione Jira di (mappatura, filtri e token)' : 'Utente';
             $('fUtenteHint').innerHTML = jira ? HINT_JIRA
-                : 'Job di sistema: lancia uno script sulla VM e riguarda tutti i database. L'utente indica solo a chi è assegnata la schedulazione.';
+                : 'Job di sistema: lancia uno script sulla VM e riguarda tutti i database. L’utente indica solo a chi è assegnata la schedulazione.';
             if (!jira) {
                 $('fUtente').innerHTML = `<option value="">Nessuno</option>` +
                     utenti.map((u) => `<option value="${esc(u.user_id)}">${esc(u.nome)}</option>`).join('');
@@ -499,8 +499,7 @@
                 }).join('');
             }
             if (rep && Array.isArray(rep.log)) {
-                html += `<h4>Output di ${esc(rep.script || 'script')}</h4><pre class="json">${esc(rep.log.join('
-'))}</pre>`;
+                html += `<h4>Output di ${esc(rep.script || 'script')}</h4><pre class="json">${esc(rep.log.join(String.fromCharCode(10)))}</pre>`;
             }
             if (rep) html += `<details><summary>Report completo (JSON)</summary><pre class="json">${esc(JSON.stringify(rep, null, 2))}</pre></details>`;
             $('repBody').innerHTML = html;
