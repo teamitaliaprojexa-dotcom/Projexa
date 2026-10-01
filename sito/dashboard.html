@@ -8358,6 +8358,31 @@
                 setRecStatus('Riunione non salvata in Projexa: ' + e.message, true);
                 return;
             }
+            // Stessa riunione già in registrazione da un collega del tenant (stesso provider,
+            // data, orario e titolo): niente audio, la sua trascrizione verrà copiata qui e il
+            // recap partirà con le impostazioni di questo utente. Se il controllo non risponde
+            // si registra comunque.
+            try {
+                const r = await fetch(`${API_URL}/calendar/meetings/managed/claim-recording`, {
+                    method: 'POST',
+                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_calendar: rec.eventId })
+                });
+                const d = await r.json().catch(() => ({}));
+                if (r.ok && d.shared) {
+                    rec.display.getTracks().forEach((t) => t.stop());
+                    rec.starting = false;
+                    btn.disabled = false;
+                    const chi = d.by || 'Un altro utente';
+                    const msg = d.copied
+                        ? `${chi} ha già registrato questa riunione: la trascrizione è stata copiata anche per te e il recap viene generato con le tue impostazioni.`
+                        : `${chi} ha già avviato la trascrizione di questa riunione: non serve registrarla. A fine registrazione la trascrizione sarà disponibile anche per te e il recap verrà generato con le tue impostazioni.`;
+                    setRecStatus(msg);
+                    showNotification(msg, 'info');
+                    refreshMeetingStatuses();
+                    return;
+                }
+            } catch (e) { /* controllo non disponibile: si registra */ }
             // Riunione già trascritta in precedenza: gli orari riprendono da dove erano arrivati.
             rec.baseOffset = 0;
             try {

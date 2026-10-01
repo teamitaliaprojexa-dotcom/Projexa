@@ -18,6 +18,7 @@
 // ============================================================================
 import db from '../config/database.js';
 import { eseguiAggiornaIntegrazioni } from './aggiornaIntegrazioni.js';
+import { eseguiBackupDb, eseguiCopiaStaging } from './scriptVm.js';
 
 // Job schedulabili: la chiave è il valore di job_schedules.job.
 const JOBS = {
@@ -29,11 +30,22 @@ const JOBS = {
     eseguiAggiornaIntegrazioni(riga.tenant_id, {
       programmi: riga.parametri && riga.parametri.programmi,
       utentePreferito: riga.utente_config || (riga.parametri && riga.parametri.utente_config) || null
-    })
+    }),
+  // Job di sistema (script della VM, vedi scriptVm.js): riguardano tutti i database,
+  // tenant e utente_config della riga servono solo a indicare chi li "possiede".
+  backup_db: () => eseguiBackupDb(),
+  copia_staging_neon: () => eseguiCopiaStaging()
 };
 
 // Nomi dei job schedulabili (usati dalla pagina di gestione per l'elenco a discesa).
 export const NOMI_JOB = Object.keys(JOBS);
+
+// Descrizione dei job per la pagina; jira = utente_config è la configurazione Jira da usare.
+export const INFO_JOB = {
+  aggiorna_integrazioni: { etichetta: 'Aggiorna Integrazioni (Jira)', jira: true },
+  backup_db: { etichetta: 'Backup database VM su Object Storage', jira: false },
+  copia_staging_neon: { etichetta: 'Copia database VM su staging Neon', jira: false }
+};
 
 export function schedulerAttivo() {
   return String(process.env.JOB_SCHEDULER_ENABLED || '').toLowerCase() === 'true';
@@ -176,6 +188,7 @@ async function esegui(riga) {
       // Un lancio manuale sullo stesso tenant è già in corso: questo giro si salta.
       esito = e.code === 'IN_CORSO' ? 'saltato' : 'fallito';
       errore = e.message;
+      report = e.report || null;
     }
   }
 

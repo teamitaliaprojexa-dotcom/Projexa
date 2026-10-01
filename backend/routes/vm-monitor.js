@@ -210,7 +210,7 @@ function serviceUnits() {
   }
   if (whisperCppUrls().length) units.push({ unit: 'projexa-whisper-cpp', label: 'Whisper.cpp (Background-Veloce)' });
   units.push({ unit: 'ollama', label: 'Ollama (Recap lento)' });
-  units.push({ unit: 'projexa-backup.timer', label: 'Backup notturno' });
+  // Backup notturno: dal 2026-10-01 è un job dello schedulatore (pagina Schedulazioni), non più un timer.
   units.push({ unit: 'projexa-monitor.timer', label: 'Controlli di salute' });
   return units;
 }

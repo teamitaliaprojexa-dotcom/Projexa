@@ -146,9 +146,9 @@
                     <div><label class="lbl" for="fTenant">Tenant</label><select id="fTenant"></select></div>
                     <div><label class="lbl" for="fJob">Job</label><select id="fJob"></select></div>
                     <div class="full">
-                        <label class="lbl" for="fUtente">Configurazione Jira di (mappatura, filtri e token)</label>
+                        <label class="lbl" for="fUtente" id="fUtenteLbl">Configurazione Jira di (mappatura, filtri e token)</label>
                         <select id="fUtente"></select>
-                        <div class="small">Il job aggiorna comunque i dati di <strong>tutto il tenant</strong>: qui scegli solo con quale account leggere Jira. Se questa configurazione non funziona (Jira scollegato, token scaduto) si usa un altro utente configurato e il report lo segnala.</div>
+                        <div class="small" id="fUtenteHint">Il job aggiorna comunque i dati di <strong>tutto il tenant</strong>: qui scegli solo con quale account leggere Jira. Se questa configurazione non funziona (Jira scollegato, token scaduto) si usa un altro utente configurato e il report lo segnala.</div>
                     </div>
                     <div class="full"><label class="lbl" for="fDesc">Descrizione</label><input type="text" id="fDesc" maxlength="255"></div>
                     <div class="full" style="display: flex; align-items: center; gap: 0.6rem;">
@@ -241,6 +241,11 @@
             }
             return out;
         }
+        // Job di sistema (backup, copia staging): l'utente è solo il "proprietario" della riga.
+        const isJira = (job) => { const i = ((dati && dati.infoJob) || {})[job]; return !i || i.jira !== false; };
+        const etichettaJob = (job) => (((dati && dati.infoJob) || {})[job] || {}).etichetta || job;
+        const HINT_JIRA = $('fUtenteHint').innerHTML;
+
         const ESITI = { ok: ['b-ok', 'OK'], errori: ['b-errori', 'CON ERRORI'], saltato: ['b-saltato', 'SALTATO'], fallito: ['b-fallito', 'FALLITO'] };
 
         // ------------------------------------------------------------------
@@ -301,7 +306,9 @@
                     return `<tr class="${s.attivo ? '' : 'off'}" data-id="${esc(s.id)}">
                         <td><label class="switch" title="Attiva / disattiva"><input type="checkbox" data-act="toggle" ${s.attivo ? 'checked' : ''}><span></span></label></td>
                         <td><div class="strong">${esc(s.descrizione || s.job)}</div><div class="small">${esc(s.job)} · ${esc(s.tenant_name || s.tenant_id)}</div>
-                            <div class="small"><i class="fas fa-user-gear"></i> Configurazione Jira: ${s.utente_config ? esc([s.config_name, s.config_cognome].filter(Boolean).join(' ') || s.utente_config) : 'automatica (primo utente configurato)'}</div></td>
+                            <div class="small"><i class="fas fa-user-gear"></i> ${isJira(s.job)
+                                ? `Configurazione Jira: ${s.utente_config ? esc([s.config_name, s.config_cognome].filter(Boolean).join(' ') || s.utente_config) : 'automatica (primo utente configurato)'}`
+                                : `Utente: ${s.utente_config ? esc([s.config_name, s.config_cognome].filter(Boolean).join(' ') || s.utente_config) : 'nessuno'} · job di sistema`}</div></td>
                         <td><div>${esc(giorniTesto(s.giorni_settimana))}</div><div class="small">${esc(hhmm(s.ora_inizio))}–${esc(hhmm(s.ora_fine))} · ${esc(intervalloTesto(s.intervallo_minuti))}</div><div class="small">${esc(s.fuso_orario)}</div></td>
                         <td>${prossima}</td>
                         <td>${stato}</td>
@@ -383,6 +390,16 @@
         // Utenti del tenant scelto, con lo stato Jira accanto al nome.
         function riempiUtenti(tenantId, selezionato) {
             const utenti = (dati.utenti || []).filter((u) => u.tenant_id === tenantId);
+            const jira = isJira($('fJob').value);
+            $('fUtenteLbl').textContent = jira ? 'Configurazione Jira di (mappatura, filtri e token)' : 'Utente';
+            $('fUtenteHint').innerHTML = jira ? HINT_JIRA
+                : 'Job di sistema: lancia uno script sulla VM e riguarda tutti i database. L'utente indica solo a chi è assegnata la schedulazione.';
+            if (!jira) {
+                $('fUtente').innerHTML = `<option value="">Nessuno</option>` +
+                    utenti.map((u) => `<option value="${esc(u.user_id)}">${esc(u.nome)}</option>`).join('');
+                $('fUtente').value = selezionato && utenti.some((u) => u.user_id === selezionato) ? selezionato : '';
+                return;
+            }
             const stato = (u) => u.mappatura && u.collegato ? 'Jira configurato e collegato'
                 : u.mappatura ? 'mappatura presente, Jira NON collegato'
                 : u.collegato ? 'Jira collegato, senza mappatura'
@@ -392,12 +409,13 @@
             $('fUtente').value = selezionato && utenti.some((u) => u.user_id === selezionato) ? selezionato : '';
         }
         $('fTenant').addEventListener('change', () => riempiUtenti($('fTenant').value, $('fUtente').value));
+        $('fJob').addEventListener('change', () => riempiUtenti($('fTenant').value, $('fUtente').value));
 
         function apriModifica(s) {
             editId = s ? s.id : null;
             $('editTitle').textContent = s ? 'Modifica schedulazione' : 'Nuova schedulazione';
             $('fTenant').innerHTML = (dati.tenants || []).map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
-            $('fJob').innerHTML = (dati.jobs || []).map((j) => `<option value="${esc(j)}">${esc(j)}</option>`).join('');
+            $('fJob').innerHTML = (dati.jobs || []).map((j) => `<option value="${esc(j)}">${esc(etichettaJob(j))} (${esc(j)})</option>`).join('');
             $('fTenant').value = s ? s.tenant_id : ((dati.tenants || [])[0] || {}).id || '';
             $('fJob').value = s ? s.job : (dati.jobs || [])[0] || '';
             riempiUtenti($('fTenant').value, s ? s.utente_config : null);
@@ -479,6 +497,10 @@
                         : numeri(p);
                     return `<div class="rep-prog">${testa}${utenti}</div>`;
                 }).join('');
+            }
+            if (rep && Array.isArray(rep.log)) {
+                html += `<h4>Output di ${esc(rep.script || 'script')}</h4><pre class="json">${esc(rep.log.join('
+'))}</pre>`;
             }
             if (rep) html += `<details><summary>Report completo (JSON)</summary><pre class="json">${esc(JSON.stringify(rep, null, 2))}</pre></details>`;
             $('repBody').innerHTML = html;

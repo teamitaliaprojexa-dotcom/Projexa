@@ -579,10 +579,56 @@ async function processAudioJob(job, baseUrl) {
   }
 }
 
+// ----------------------------------------------------------------------------
+// TRASCRIZIONE CONDIVISA (stessa riunione registrata da più utenti del tenant)
+// ----------------------------------------------------------------------------
+// Chi preme "Registra" su una riunione che un collega sta già registrando non registra:
+// la sua riga di rec_meeting punta a quella del collega (trascrizione_da_user /
+// trascrizione_da_calendar, vedi POST /meetings/managed/claim-recording). A fine
+// registrazione del collega la trascrizione viene COPIATA sulla sua riga e il recap
+// parte con il SUO utente (prompt, AI e correzioni suoi): il recap non si copia.
+// Tabella: Supporto/CreaDB/rec_meeting_condivisa.sql
+
+// Copia la trascrizione della riga sorgente sulle righe che la condividono (o solo su
+// quella dell'utente indicato) e prenota il loro recap. Restituisce quante righe ha copiato.
+export async function copiaTrascrizioneCondivisa(source, idCalendar, soloUtente = null) {
+  const src = (await db.query(
+    `SELECT trascrizione FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+    [source.tenant_id, source.user_id, idCalendar]
+  )).rows[0];
+  if (!src || !src.trascrizione || !src.trascrizione.trim()) return 0;
+  const params = [source.tenant_id, source.user_id, idCalendar];
+  if (soloUtente) params.push(soloUtente);
+  const followers = (await db.query(
+    `SELECT user_id, id_calendar FROM rec_meeting
+      WHERE tenant_id = $1 AND trascrizione_da_user = $2 AND trascrizione_da_calendar = $3
+        ${soloUtente ? 'AND user_id = $4' : ''}`,
+    params
+  )).rows;
+  const testo = encRec(src.trascrizione);
+  for (const f of followers) {
+    await db.query(
+      `UPDATE rec_meeting SET trascrizione = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
+      [testo, source.tenant_id, f.user_id, f.id_calendar]
+    );
+    await enqueueFinalize({ tenant_id: source.tenant_id, user_id: f.user_id, email: null }, f.id_calendar);
+  }
+  if (followers.length) console.log(`[TRASCRIZIONE CONDIVISA] ${idCalendar}: copiata su ${followers.length} riunion${followers.length === 1 ? 'e' : 'i'} di altri utenti`);
+  return followers.length;
+}
+
 // Recap a fine registrazione. La riga "finalize" è già stata tolta dalla coda (sotto lock):
 // in caso di errore temporaneo viene rimessa in coda con un nuovo tentativo.
 async function processFinalize(job) {
   const user = jobUser(job);
+  // Prima la copia a chi condivide la trascrizione: non deve dipendere dall'esito del recap.
+  // Solo al primo tentativo: i nuovi tentativi riguardano solo il recap di questo utente.
+  try {
+    if (!(Number(job.attempts) > 0)) await copiaTrascrizioneCondivisa(user, job.id_calendar);
+  } catch (error) {
+    // Colonne assenti (SQL non ancora eseguito): nessuna condivisione.
+    if (error.code !== '42703') console.error(`❌ [TRASCRIZIONE CONDIVISA] ${job.id_calendar}: ${error.message}`);
+  }
   try {
     const t = await db.query(
       `SELECT (trascrizione IS NOT NULL AND BTRIM(trascrizione) <> '') AS has_tr FROM rec_meeting

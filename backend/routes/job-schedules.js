@@ -11,7 +11,7 @@ import db from '../config/database.js';
 import authDb from '../config/authDatabase.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireProjexaAdmin } from './vm-monitor.js';
-import { calcolaProssima, NOMI_JOB, schedulerAttivo } from '../jobs/scheduler.js';
+import { calcolaProssima, NOMI_JOB, INFO_JOB, schedulerAttivo } from '../jobs/scheduler.js';
 
 const router = express.Router();
 router.use(requireAuth, requireProjexaAdmin);
@@ -148,6 +148,7 @@ router.get('/', async (req, res) => {
     res.json({
       schedulazioni: await elenco(),
       jobs: NOMI_JOB,
+      infoJob: INFO_JOB,
       tenants,
       utenti: await utentiDeiTenant(),
       // Stato dello schedulatore NEL BACKEND CHE RISPONDE: in locale è di norma spento.

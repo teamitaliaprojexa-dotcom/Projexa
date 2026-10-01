@@ -1,12 +1,19 @@
 # Backup dei database
 
-Ogni notte alle 02:30 UTC (04:30 ora italiana d'estate) la VM Oracle salva i 4 database
+Ogni notte alle 04:30 (ora italiana) la VM Oracle salva i 4 database
 Postgres (locali sulla VM dal 2026-09-27, vedi `docs/DATABASE.md`) nell'Object Storage di Oracle (Always Free, 20 GB).
+
+Dal 2026-10-01 il backup e la copia notturna VM → staging Neon (`sync-staging.sh`, alle 05:30)
+li lancia lo **schedulatore del backend** (tabella `job_schedules`, job `backup_db` e
+`copia_staging_neon`, codice in `backend/jobs/scriptVm.js`): esito, durata e output si vedono
+nella pagina **Schedulazioni** (admin PROJEXA), dove si può anche usare «Esegui ora».
+I timer systemd `projexa-backup.timer` e `projexa-sync-staging.timer` vanno tenuti
+**disabilitati**, altrimenti i job girano due volte.
 
 | Cosa | Dove |
 |---|---|
 | Script | `/opt/projexa/backup-db.sh` (sorgente: `deploy/oracle/backup-db.sh`) |
-| Timer | `projexa-backup.timer` → `projexa-backup.service` (installati da `deploy/oracle/setup-backup.sh`) |
+| Avvio | schedulatore del backend, job `backup_db` (prima: timer `projexa-backup.timer`, ora disabilitato) |
 | Bucket | `projexa-backup`, namespace `axzmowo31clc`, regione eu-milan-1 |
 | Conservazione | `daily/AAAA-MM-GG/` per 30 giorni, `monthly/AAAA-MM/` (giorno 1) per 12 mesi |
 | Copia locale | `/opt/projexa/backups/` ultimi 3 giorni |
@@ -18,17 +25,15 @@ File: `projexa_<db>_<data>_<ora>.dump` con `<db>` = `projexa` (DATABASE_URL), `a
 ## Controlli
 
 ```bash
-# esito dell'ultimo backup e prossima esecuzione
-systemctl status projexa-backup.service --no-pager
-systemctl list-timers projexa-backup.timer --no-pager
-journalctl -u projexa-backup.service -n 20 -o cat
+# esito dell'ultimo backup e prossima esecuzione: pagina Schedulazioni, oppure
+pm2 logs projexa --lines 200 --nostream | grep SCHEDULER
 
 # backup presenti nel bucket
 /opt/projexa/oci-venv/bin/oci --auth instance_principal os object list \
   -ns axzmowo31clc -bn projexa-backup --query "data[].name" --output table
 
-# backup manuale immediato
-sudo systemctl start projexa-backup.service
+# backup manuale immediato (oppure «Esegui ora» nella pagina Schedulazioni)
+/opt/projexa/backup-db.sh
 ```
 
 ## Ripristino

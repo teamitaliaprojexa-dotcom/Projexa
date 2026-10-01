@@ -20,7 +20,8 @@ import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
 import {
   encRec, enqueueChunk, enqueueLostNotes, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices,
-  recapProviderName, recapInProgress, loadCorrections, applyCorrections, applyCorrectionsHtml, stripMarkdown, speakerName
+  recapProviderName, recapInProgress, loadCorrections, applyCorrections, applyCorrectionsHtml, stripMarkdown, speakerName,
+  copiaTrascrizioneCondivisa
 } from '../jobs/meetingTranscription.js';
 import { parseRecapActions, parseDueDate, ownerVariants } from '../jobs/recapTasks.js';
 import { encryptRowForWrite } from '../config/crypto.js';
@@ -589,6 +590,105 @@ router.post('/meetings/managed', requireAuth, async (req, res) => {
   }
 });
 
+// "Registra": prenota la registrazione della riunione, oppure la collega a quella di un
+// collega dello stesso tenant che la sta già registrando. Stessa riunione = stesso
+// provider, data, orario e titolo (l'id dell'evento non serve: con Outlook collegato
+// via Microsoft ogni casella ha un id diverso per la stessa riunione).
+//   - collega trovato  -> questa riga punta alla sua (trascrizione_da_*), niente audio:
+//                         a fine registrazione la trascrizione viene copiata qui e il
+//                         recap parte con l'utente di questa riga (jobs/meetingTranscription.js);
+//   - nessun collega   -> registrazione_avviata_il = adesso: da qui in poi è lui la sorgente.
+// Risposta: { shared: false } oppure { shared: true, by: 'Nome Cognome', copied: bool }.
+const normTitolo = (t) => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+router.post('/meetings/managed/claim-recording', requireAuth, async (req, res) => {
+  const idCalendar = String((req.body && req.body.id_calendar) || '').trim();
+  if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+  const { tenant_id: tenantId, user_id: userId } = req.user;
+  const client = await db.connect();
+  let source = null;
+  let copiaSubito = false;
+  try {
+    await client.query('BEGIN');
+    const me = (await client.query(
+      `SELECT oggetto, provider, data_calendar, orario_calendar, registrazione_avviata_il,
+              trascrizione_da_user, trascrizione_da_calendar
+         FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1 FOR UPDATE`,
+      [tenantId, userId, idCalendar]
+    )).rows[0];
+    if (!me) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Riunione non gestita con Projexa' }); }
+
+    // Una sola prenotazione alla volta per la stessa riunione: due "Registra" contemporanei
+    // non diventano entrambi sorgente.
+    const chiave = `${tenantId}|${normTitolo(me.provider)}|${me.data_calendar}|${me.orario_calendar}`;
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [chiave]);
+
+    // Già collegata a un collega: resta collegata finché la sua riga esiste.
+    if (me.trascrizione_da_user) {
+      const s = (await client.query(
+        `SELECT user_id, id_calendar FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+        [tenantId, me.trascrizione_da_user, me.trascrizione_da_calendar]
+      )).rows[0];
+      if (s) source = s;
+    }
+
+    // Registrazioni libere (microfono) e chi ha già registrato questa riunione: nessun controllo.
+    const libera = idCalendar.startsWith('manual:');
+    if (!source && !libera && !(me.registrazione_avviata_il && !me.trascrizione_da_user)) {
+      const candidati = (await client.query(
+        `SELECT user_id, id_calendar, oggetto FROM rec_meeting
+          WHERE tenant_id = $1 AND user_id <> $2
+            AND LOWER(COALESCE(provider, '')) = LOWER(COALESCE($3, ''))
+            AND data_calendar = $4 AND orario_calendar = $5
+            AND registrazione_avviata_il IS NOT NULL AND trascrizione_da_user IS NULL
+          ORDER BY registrazione_avviata_il`,
+        [tenantId, userId, me.provider, me.data_calendar, me.orario_calendar]
+      )).rows;
+      // Il titolo è cifrato a riposo: il confronto si fa qui, sul testo già decifrato.
+      source = candidati.find((c) => normTitolo(c.oggetto) === normTitolo(me.oggetto)) || null;
+    }
+
+    if (source) {
+      await client.query(
+        `UPDATE rec_meeting SET trascrizione_da_user = $1, trascrizione_da_calendar = $2
+          WHERE tenant_id = $3 AND user_id = $4 AND id_calendar = $5`,
+        [source.user_id, source.id_calendar, tenantId, userId, idCalendar]
+      );
+      // Registrazione del collega già finita (niente in coda): la copia si fa subito.
+      const inCoda = (await client.query(
+        `SELECT 1 FROM rec_meeting_chunks WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+        [tenantId, source.user_id, source.id_calendar]
+      )).rows.length > 0;
+      copiaSubito = !inCoda;
+    } else {
+      await client.query(
+        `UPDATE rec_meeting SET registrazione_avviata_il = COALESCE(registrazione_avviata_il, now()),
+                trascrizione_da_user = NULL, trascrizione_da_calendar = NULL
+          WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3`,
+        [tenantId, userId, idCalendar]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    client.release();
+    console.error('❌ REC_MEETING_CLAIM:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+  client.release();
+
+  if (!source) return res.json({ shared: false });
+  let copied = false;
+  if (copiaSubito) {
+    try {
+      copied = (await copiaTrascrizioneCondivisa({ tenant_id: tenantId, user_id: source.user_id }, source.id_calendar, userId)) > 0;
+    } catch (e) {
+      console.error('❌ REC_MEETING_CLAIM (copia):', e.message);
+    }
+  }
+  res.json({ shared: true, by: await speakerName({ user_id: source.user_id }), copied });
+});
+
 // Associa cliente e progetto alla riga rec_meeting della riunione (UUID o null).
 // Il progetto deve appartenere al cliente scelto (stessa regola della tendina in dashboard).
 router.patch('/meetings/managed', requireAuth, async (req, res) => {
@@ -1054,6 +1154,18 @@ router.put('/meetings/managed/recap-edit', requireAuth, async (req, res) => {
 // jobs/meetingTranscription.js: la pagina si può chiudere dopo "Ferma".
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 
+async function isTrascrizioneCondivisa(user, idCalendar) {
+  try {
+    const r = await db.query(
+      `SELECT 1 FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND trascrizione_da_user IS NOT NULL LIMIT 1`,
+      [user.tenant_id, user.user_id, idCalendar]
+    );
+    return r.rows.length > 0;
+  } catch (e) {
+    return false; // colonne non ancora create (Supporto/CreaDB/rec_meeting_condivisa.sql)
+  }
+}
+
 function checkAudio(b64) {
   if (!b64) return null;
   const s = String(b64);
@@ -1125,6 +1237,10 @@ router.post('/meetings/managed/transcribe', requireAuth, async (req, res) => {
       [req.user.tenant_id, req.user.user_id, idCalendar]
     );
     if (row.rows.length === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    // Trascrizione condivisa con un collega (claim-recording): questa riga non riceve audio.
+    if (await isTrascrizioneCondivisa(req.user, idCalendar)) {
+      return res.status(409).json({ error: 'La trascrizione di questa riunione arriva dalla registrazione di un collega' });
+    }
 
     try {
       // Prima le note (blocchi precedenti persi), poi il blocco: l'ordine della coda è quello.
