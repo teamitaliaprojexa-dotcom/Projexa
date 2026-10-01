@@ -2481,7 +2481,14 @@ app.get('/api/kpi-gestione-progetto/ordini', requireAuth, async (req, res) => {
               ${dataCampo('Ordine Ricevuto')} AS ordine_ricevuto
          FROM projects a
         WHERE a.campo = 'Progetto' AND a.tenant_id = $1 AND a.user_id = $2
-          AND a.scadenza >= CURRENT_DATE ${clientCond}`,
+          AND a.scadenza >= CURRENT_DATE ${clientCond}
+          -- Esclusi i progetti con Tipologia = "Previsione": non hanno ancora offerta/ordine reali.
+          AND NOT EXISTS (
+            SELECT 1 FROM projects t
+             WHERE t.campo = 'Tipologia' AND t.argument = a.id::text
+               AND t.tenant_id = a.tenant_id AND t.user_id = a.user_id AND t.scadenza >= CURRENT_DATE
+               AND LOWER(BTRIM(t.valore2)) = 'previsione'
+          )`,
       params
     );
     const clients = await resolveClientDescriptions(r.rows.map((x) => x.client_id), req.user.tenant_id);

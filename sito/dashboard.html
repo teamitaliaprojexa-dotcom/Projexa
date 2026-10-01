@@ -1565,22 +1565,29 @@
         .gp-badge.zero { background: #f1f5f9; color: #64748b; }
         .gp-badge.big { font-size: 0.85rem; padding: 0.3rem 0.65rem; }
         .gp-panel { border: 1px solid #eef2f7; border-radius: 14px; }
-        /* Schede del KPI: Avanzamento / Offerte e ordini */
-        .gp-tabs { display: inline-flex; gap: 0.25rem; background: #f1f5f9; border-radius: 10px; padding: 0.2rem; margin-bottom: 1rem; }
-        .gp-tabs button { border: none; background: transparent; padding: 0.4rem 0.95rem; border-radius: 8px; font: inherit; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); cursor: pointer; }
-        .gp-tabs button.active { background: white; color: var(--dark); box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08); }
+        /* KPI Offerte e ordini (stesse schede cliente di Gestione Progetto) */
+        .gpo-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0.75rem; padding: 0.6rem; border-radius: 10px; }
+        .gpo-row + .gpo-row { border-top: 1px solid #f1f5f9; border-radius: 0; }
+        .gpo-dates { display: flex; flex-wrap: wrap; gap: 0.15rem 0.7rem; font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem; font-variant-numeric: tabular-nums; }
+        .gpo-dates b { font-weight: 600; color: var(--dark); }
+        .gpo-dates .miss { color: #94a3b8; }
+        .gpo-st { text-align: right; }
+        /* Progetti DA SOLLECITARE: zoom del 20% ripetuto, lento e morbido (2 pulsazioni da 1,5 s =
+           3 secondi, curva sinusoidale) quando il riquadro entra nello schermo (initOrdiniProgetto).
+           La scheda cliente non taglia la riga ingrandita. */
+        .gpo-row.gpo-zoom { position: relative; z-index: 2; background: white; transform-origin: center; animation: gpoZoom 1.5s cubic-bezier(0.37, 0, 0.63, 1) 2; }
+        .gp-client:has(.gpo-zoom) { overflow: visible; }
+        @keyframes gpoZoom {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 rgba(220, 38, 38, 0); }
+            50% { transform: scale(1.2); box-shadow: 0 8px 24px rgba(220, 38, 38, 0.16); }
+        }
+        @media (prefers-reduced-motion: reduce) { .gpo-row.gpo-zoom { animation: none; } }
+        .gpo-link { text-decoration: none; cursor: pointer; }
+        .gpo-link:hover { color: var(--primary); text-decoration: underline; }
+        .gpo-badges { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.45rem; }
         .gp-stat.green { background: #ecfdf5; border-color: #d1fae5; } .gp-stat.green .v { color: #059669; }
         .gp-stat.amber { background: #fffbeb; border-color: #fef3c7; } .gp-stat.amber .v { color: #d97706; }
         .gp-stat.clickable { cursor: pointer; } .gp-stat.clickable.sel { box-shadow: 0 0 0 2px currentColor inset; }
-        /* Tabella offerte / ordini */
-        .gp-ord-wrap { overflow-x: auto; border: 1px solid #eef2f7; border-radius: 14px; }
-        .gp-ord { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-        .gp-ord th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); font-weight: 600; padding: 0.6rem 0.75rem; background: #f8fafc; border-bottom: 1px solid #eef2f7; white-space: nowrap; }
-        .gp-ord td { padding: 0.55rem 0.75rem; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
-        .gp-ord tr:last-child td { border-bottom: none; }
-        .gp-ord td.d { white-space: nowrap; font-variant-numeric: tabular-nums; }
-        .gp-ord td.d small { display: block; color: var(--text-muted); font-size: 0.7rem; }
-        .gp-ord .miss { color: #94a3b8; }
         .gp-ord-st { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 0.2rem 0.55rem; border-radius: 999px; white-space: nowrap; }
         .gp-ord-st.red { background: #fef2f2; color: #dc2626; } .gp-ord-st.amber { background: #fffbeb; color: #b45309; }
         .gp-ord-st.gray { background: #f1f5f9; color: #475569; } .gp-ord-st.green { background: #ecfdf5; color: #047857; }
@@ -3724,18 +3731,28 @@
                         <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--primary);"><path d="M3 5h18v2H3V5Zm0 6h12v2H3v-2Zm0 6h8v2H3v-2Zm14-3 2 2 3-3 1.4 1.4L19 18.8l-3.4-3.4L17 14Z"/></svg>
                         Gestione Progetto
                     </div>
-                    <div class="gp-legend" id="gpLegend">
+                    <div class="gp-legend">
                         <span><i class="gp-dot" style="background:#6ee7b7;"></i>Offerta (100%)</span>
                         <span><i class="gp-dot" style="background:#2563eb;"></i>Time spent</span>
                         <span><i class="gp-dot" style="background:#dc2626;"></i>Oltre l'offerta</span>
                     </div>
                 </div>
-                <div class="gp-tabs" role="tablist">
-                    <button type="button" class="active" data-gp-tab="avanzamento" role="tab">Avanzamento</button>
-                    <button type="button" data-gp-tab="ordini" role="tab">Offerte e ordini</button>
-                </div>
                 <div id="gpBreadcrumb" class="gp-breadcrumb"></div>
                 <div id="gpContent" class="gp-content"><div class="gp-empty">Caricamento…</div></div>
+            </div>
+
+            <!-- KPI OFFERTE E ORDINI: per cliente, i progetti in corso con offerta inviata e
+                 ordine ricevuto, per sapere a chi sollecitare l'ordine (serve per fatturare).
+                 Visibile insieme a Gestione Progetto (stesso interruttore delle Preferenze). -->
+            <div data-dash-flag="kpiGestioneProgetto" class="gp-card" id="gpoCard">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                    <div class="section-title" style="margin: 0;">
+                        <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--primary);"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v.5l8 5 8-5V6H4Zm16 2.85-7.47 4.67a1 1 0 0 1-1.06 0L4 8.85V18h16V8.85Z"/></svg>
+                        Offerte e ordini
+                    </div>
+                    <div class="gp-legend" id="gpoRegola"></div>
+                </div>
+                <div id="gpoContent" class="gp-content"><div class="gp-empty">Caricamento…</div></div>
             </div>
 
         </div>
@@ -4550,9 +4567,7 @@
         // Livelli: 'list' (clienti/progetti, eventualmente di un solo cliente) -> 'project'
         // (voci di costo del progetto) -> 'worker' (componenti della voce). Offerta = 100%,
         // time spent = avanzamento; unità ore o giorni secondo "Gestione a HH" del progetto.
-        // tab: 'avanzamento' (offerta / time spent) oppure 'ordini' (offerte inviate e ordini
-        // ricevuti); ordFiltro = stato scelto cliccando un riquadro della scheda ordini.
-        const gpState = { level: 'list', client: null, project: null, worker: null, tab: 'avanzamento', ordFiltro: null };
+        const gpState = { level: 'list', client: null, project: null, worker: null };
         let gpRequestSeq = 0;
 
         function gpFmt(v, hh) {
@@ -4589,14 +4604,15 @@
             el.innerHTML = parts.join('<span class="sep">›</span>');
         }
 
-        // === Scheda "Offerte e ordini" ===
+        // === KPI OFFERTE E ORDINI (riquadro sotto Gestione Progetto) ===
         // Per ogni progetto in corso: Start/End, data di invio dell'offerta e data dell'ordine del
-        // cliente (serve l'ordine per poter fatturare). Stato calcolato sulla data di oggi:
-        //   DA SOLLECITARE    offerta inviata, nessun ordine, e progetto già iniziato oppure
-        //                     offerta inviata da almeno GP_SOLLECITO_GIORNI giorni;
-        //   IN ATTESA ORDINE  offerta inviata da meno giorni, progetto non ancora iniziato;
+        // cliente (serve l'ordine per poter fatturare), raggruppati per cliente. Stato sulla data
+        // di oggi:
+        //   DA SOLLECITARE     offerta inviata, nessun ordine, e progetto già iniziato (Start <= oggi)
+        //                      oppure offerta inviata da almeno GP_SOLLECITO_GIORNI giorni;
+        //   IN ATTESA ORDINE   offerta inviata da meno giorni, progetto non ancora iniziato;
         //   OFFERTA DA INVIARE nessuna data di offerta;
-        //   ORDINE RICEVUTO   c'è la data dell'ordine.
+        //   ORDINE RICEVUTO    c'è la data dell'ordine.
         const GP_SOLLECITO_GIORNI = 15;
         const GP_ORD_STATI = {
             sollecitare: { cls: 'red', label: 'DA SOLLECITARE', tile: 'Da sollecitare', ordine: 0 },
@@ -4604,6 +4620,19 @@
             offerta: { cls: 'gray', label: 'OFFERTA DA INVIARE', tile: 'Offerta da inviare', ordine: 2 },
             ricevuto: { cls: 'green', label: 'ORDINE RICEVUTO', tile: 'Ordine ricevuto', ordine: 3 }
         };
+        const gpoState = { filtro: null, dati: null, visibile: false };
+        let gpoRequestSeq = 0;
+
+        // Zoom (3 s) dei progetti DA SOLLECITARE: solo se il riquadro è sullo schermo.
+        function gpoAnimaSolleciti() {
+            if (!gpoState.visibile) return;
+            document.querySelectorAll('#gpoContent .gpo-row[data-gpo-stato="sollecitare"]').forEach(row => {
+                row.classList.remove('gpo-zoom');
+                void row.offsetWidth; // riparte anche se era già animata
+                row.classList.add('gpo-zoom');
+                row.addEventListener('animationend', () => row.classList.remove('gpo-zoom'), { once: true });
+            });
+        }
 
         function gpOggiIso() {
             const d = new Date();
@@ -4628,7 +4657,7 @@
             }
             const giorni = gpGiorni(it.offerta_inviata, oggi);
             const inviata = `offerta inviata da ${giorni} giorn${giorni === 1 ? 'o' : 'i'}`;
-            if (iniziato) return { k: 'sollecitare', giorni, why: `progetto iniziato il ${gpDataIt(it.start)} senza ordine: fatturazione bloccata · ${inviata}` };
+            if (iniziato) return { k: 'sollecitare', giorni, why: `progetto iniziato senza ordine · ${inviata}` };
             if (giorni >= GP_SOLLECITO_GIORNI) return { k: 'sollecitare', giorni, why: inviata };
             return { k: 'attesa', giorni, why: inviata };
         }
@@ -4640,65 +4669,130 @@
             const conta = {};
             rows.forEach(r => { conta[r.st.k] = (conta[r.st.k] || 0) + 1; });
             const tiles = Object.entries(GP_ORD_STATI).map(([k, s]) =>
-                `<div class="gp-stat ${s.cls} clickable${gpState.ordFiltro === k ? ' sel' : ''}" data-gp-ord-filter="${k}" title="Mostra solo: ${escapeHtml(s.tile)} (clic di nuovo per tutti)">
+                `<div class="gp-stat ${s.cls} clickable${gpoState.filtro === k ? ' sel' : ''}" data-gpo-filter="${k}" title="Mostra solo: ${escapeHtml(s.tile)} (clic di nuovo per tutti)">
                     <span class="v">${conta[k] || 0}</span><span class="l">${escapeHtml(s.tile)}</span>
                 </div>`).join('');
             const visibili = rows
-                .filter(r => !gpState.ordFiltro || r.st.k === gpState.ordFiltro)
+                .filter(r => !gpoState.filtro || r.st.k === gpoState.filtro)
                 .sort((a, b) => GP_ORD_STATI[a.st.k].ordine - GP_ORD_STATI[b.st.k].ordine
                     || (b.st.giorni || 0) - (a.st.giorni || 0)
-                    || String(a.start || '9999').localeCompare(String(b.start || '9999'))
-                    || String(a.client || '').localeCompare(String(b.client || ''), 'it'));
-            const cella = (iso, extra = '') => iso
-                ? `<td class="d">${gpDataIt(iso)}${extra}</td>`
-                : '<td class="d"><span class="miss">—</span></td>';
-            const body = visibili.map(r => {
-                const s = GP_ORD_STATI[r.st.k];
-                const startExtra = r.start && !r.ordine_ricevuto
-                    ? `<small>${r.start <= oggi ? `iniziato da ${gpGiorni(r.start, oggi)} gg` : `tra ${gpGiorni(oggi, r.start)} gg`}</small>` : '';
-                return `<tr>
-                    <td><div class="gp-row-title">${escapeHtml(r.progetto || '(senza nome)')}</div><div class="gp-row-meta">${escapeHtml(r.client || '(cliente non trovato)')}</div></td>
-                    ${cella(r.start, startExtra)}
-                    ${cella(r.end)}
-                    ${cella(r.offerta_inviata)}
-                    ${cella(r.ordine_ricevuto)}
-                    <td><span class="gp-ord-st ${s.cls}">${s.label}</span>${r.st.why ? `<span class="gp-ord-why">${escapeHtml(r.st.why)}</span>` : ''}</td>
-                </tr>`;
+                    || String(a.start || '9999').localeCompare(String(b.start || '9999')));
+            // Un gruppo per cliente; prima i clienti con il progetto più urgente.
+            const groups = [];
+            const byClient = new Map();
+            visibili.forEach(r => {
+                const key = String(r.client_id);
+                if (!byClient.has(key)) { const g = { id: r.client_id, name: r.client, rows: [] }; byClient.set(key, g); groups.push(g); }
+                byClient.get(key).rows.push(r);
+            });
+            groups.sort((a, b) => GP_ORD_STATI[a.rows[0].st.k].ordine - GP_ORD_STATI[b.rows[0].st.k].ordine
+                || String(a.name || '').localeCompare(String(b.name || ''), 'it'));
+            const data = (label, iso, extra = '') => iso
+                ? `<span>${label} <b>${gpDataIt(iso)}</b>${extra}</span>`
+                : `<span>${label} <span class="miss">—</span></span>`;
+            const cards = groups.map(g => {
+                const name = g.name || '(cliente non trovato)';
+                const perStato = {};
+                g.rows.forEach(r => { perStato[r.st.k] = (perStato[r.st.k] || 0) + 1; });
+                const badges = Object.entries(GP_ORD_STATI).filter(([k]) => perStato[k])
+                    .map(([k, s]) => `<span class="gp-ord-st ${s.cls}">${perStato[k]} ${escapeHtml(s.tile.toLowerCase())}</span>`).join('');
+                const righe = g.rows.map(r => {
+                    const s = GP_ORD_STATI[r.st.k];
+                    const startExtra = r.start && !r.ordine_ricevuto
+                        ? ` (${r.start <= oggi ? `da ${gpGiorni(r.start, oggi)} gg` : `tra ${gpGiorni(oggi, r.start)} gg`})` : '';
+                    return `<div class="gpo-row" data-gpo-stato="${r.st.k}">
+                        <div style="min-width:0;">
+                            <div class="gp-row-head"><a class="gp-row-title gpo-link" href="#" data-gpo-project="${escapeHtml(r.project_id)}" data-gpo-client="${escapeHtml(r.client_id)}" data-gpo-name="${escapeHtml(r.progetto || '')}" title="Apri il progetto">${escapeHtml(r.progetto || '(senza nome)')}</a></div>
+                            <div class="gpo-dates">${data('Inizio', r.start, startExtra)}${data('Fine', r.end)}${data('Offerta inviata il', r.offerta_inviata)}${data('Ordine ricevuto il', r.ordine_ricevuto)}</div>
+                        </div>
+                        <div class="gpo-st"><span class="gp-ord-st ${s.cls}">${s.label}</span>${r.st.why ? `<span class="gp-ord-why">${escapeHtml(r.st.why)}</span>` : ''}</div>
+                    </div>`;
+                }).join('');
+                return `<div class="gp-client">
+                    <div class="gp-client-head">
+                        <div class="gp-client-top">
+                            <div class="gp-avatar" style="background:${gpAvatarColor(name)};">${escapeHtml(name.trim().charAt(0).toUpperCase() || '?')}</div>
+                            <div class="gp-client-name">
+                                <button type="button" style="cursor:default;">${escapeHtml(name)}</button>
+                                <small>${g.rows.length} progett${g.rows.length === 1 ? 'o' : 'i'}</small>
+                            </div>
+                        </div>
+                        <div class="gpo-badges">${badges}</div>
+                    </div>
+                    <div class="gp-rows">${righe}</div>
+                </div>`;
             }).join('');
-            return `<div class="gp-summary">${tiles}</div>
-                <div class="gp-ord-wrap"><table class="gp-ord">
-                    <thead><tr><th>Progetto</th><th>Start</th><th>End</th><th>Offerta inviata</th><th>Ordine ricevuto</th><th>Stato</th></tr></thead>
-                    <tbody>${body || '<tr><td colspan="6"><div class="gp-empty">Nessun progetto in questo stato.</div></td></tr>'}</tbody>
-                </table></div>`;
+            return `<div class="gp-summary">${tiles}</div>`
+                + (cards ? `<div class="gp-grid">${cards}</div>` : '<div class="gp-empty">Nessun progetto in questo stato.</div>');
         }
 
-        async function loadGestioneProgetto() {
+        async function loadOrdiniProgetto() {
+            const content = document.getElementById('gpoContent');
+            if (!content) return;
+            const regola = document.getElementById('gpoRegola');
+            if (regola) regola.innerHTML = `<span><i class="gp-dot" style="background:#dc2626;"></i>Da sollecitare: progetto iniziato senza ordine, oppure offerta inviata da ${GP_SOLLECITO_GIORNI}+ giorni</span>`;
+            const seq = ++gpoRequestSeq;
+            content.innerHTML = '<div class="gp-empty">Caricamento…</div>';
+            try {
+                const params = new URLSearchParams();
+                getSelectedClientIds().forEach(id => params.append('clientId', id));
+                const res = await fetch(`${API_URL}/kpi-gestione-progetto/ordini?${params.toString()}`, { headers: getAuthHeaders() });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore HTTP ${res.status}`);
+                if (seq !== gpoRequestSeq) return;
+                gpoState.dati = Array.isArray(data) ? data : [];
+                content.innerHTML = gpOrdiniHtml(gpoState.dati);
+                gpoAnimaSolleciti(); // dati arrivati con il riquadro già sullo schermo
+            } catch (e) {
+                if (seq !== gpoRequestSeq) return;
+                content.innerHTML = `<div class="gp-empty">Impossibile caricare i dati: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function initOrdiniProgetto() {
+            const card = document.getElementById('gpoCard');
+            if (!card || card.dataset.bound) return;
+            card.dataset.bound = '1';
+            card.addEventListener('click', (e) => {
+                // Riquadro di stato: filtra le schede (secondo clic = tutti).
+                const f = e.target.closest('[data-gpo-filter]');
+                if (f) {
+                    gpoState.filtro = gpoState.filtro === f.dataset.gpoFilter ? null : f.dataset.gpoFilter;
+                    const content = document.getElementById('gpoContent');
+                    if (content && gpoState.dati) content.innerHTML = gpOrdiniHtml(gpoState.dati);
+                    return;
+                }
+                // Nome del progetto: apre la scheda del progetto (come la ricerca progetti).
+                const p = e.target.closest('[data-gpo-project]');
+                if (p) {
+                    e.preventDefault();
+                    if (!p.dataset.gpoProject || !p.dataset.gpoClient) return;
+                    detailNavStack = [];
+                    currentView = null;
+                    document.querySelectorAll('#projectClientsList li[data-client-id]').forEach(li => {
+                        li.classList.toggle('active-client', li.dataset.clientId === p.dataset.gpoClient);
+                    });
+                    openProjectDetail(p.dataset.gpoProject, p.dataset.gpoName || '', p.dataset.gpoClient);
+                }
+            });
+            // Il riquadro è in fondo alla dashboard: l'animazione parte ogni volta che entra
+            // nello schermo (almeno per un quarto), non al caricamento della pagina.
+            if ('IntersectionObserver' in window) {
+                new IntersectionObserver((entries) => {
+                    entries.forEach(en => {
+                        const ora = en.isIntersecting;
+                        if (ora && !gpoState.visibile) { gpoState.visibile = true; gpoAnimaSolleciti(); }
+                        else if (!ora) gpoState.visibile = false;
+                    });
+                }, { threshold: 0.25 }).observe(card);
+            }
+            loadOrdiniProgetto();
+        }
+
+async function loadGestioneProgetto() {
             const content = document.getElementById('gpContent');
             if (!content) return;
             const seq = ++gpRequestSeq;
-            const ordini = gpState.tab === 'ordini';
-            document.querySelectorAll('.gp-tabs [data-gp-tab]').forEach(b => b.classList.toggle('active', b.dataset.gpTab === gpState.tab));
-            const legend = document.getElementById('gpLegend');
-            if (legend) legend.style.display = ordini ? 'none' : '';
-            const crumb = document.getElementById('gpBreadcrumb');
-            if (crumb) crumb.style.display = ordini ? 'none' : '';
-            if (ordini) {
-                content.innerHTML = '<div class="gp-empty">Caricamento…</div>';
-                try {
-                    const params = new URLSearchParams();
-                    getSelectedClientIds().forEach(id => params.append('clientId', id));
-                    const res = await fetch(`${API_URL}/kpi-gestione-progetto/ordini?${params.toString()}`, { headers: getAuthHeaders() });
-                    const data = await res.json().catch(() => ({}));
-                    if (!res.ok) throw new Error(data.error || `Errore HTTP ${res.status}`);
-                    if (seq !== gpRequestSeq) return;
-                    gpState.ordDati = Array.isArray(data) ? data : [];
-                    content.innerHTML = gpOrdiniHtml(gpState.ordDati);
-                } catch (e) {
-                    if (seq !== gpRequestSeq) return;
-                    content.innerHTML = `<div class="gp-empty">Impossibile caricare i dati: ${escapeHtml(e.message)}</div>`;
-                }
-                return;
-            }
             gpRenderBreadcrumb();
             content.innerHTML = '<div class="gp-empty">Caricamento…</div>';
             try {
@@ -4834,23 +4928,6 @@
             if (!card || card.dataset.bound) return;
             card.dataset.bound = '1';
             card.addEventListener('click', (e) => {
-                const tab = e.target.closest('[data-gp-tab]');
-                if (tab) {
-                    if (gpState.tab !== tab.dataset.gpTab) {
-                        gpState.tab = tab.dataset.gpTab;
-                        loadGestioneProgetto();
-                    }
-                    return;
-                }
-                // Scheda ordini: un riquadro filtra la tabella per stato (secondo clic = tutti).
-                const ordFilter = e.target.closest('[data-gp-ord-filter]');
-                if (ordFilter) {
-                    const k = ordFilter.dataset.gpOrdFilter;
-                    gpState.ordFiltro = gpState.ordFiltro === k ? null : k;
-                    const content = document.getElementById('gpContent');
-                    if (content && gpState.ordDati) content.innerHTML = gpOrdiniHtml(gpState.ordDati);
-                    return;
-                }
                 const nav = e.target.closest('[data-gp-nav]');
                 if (nav) {
                     const t = nav.dataset.gpNav;
@@ -4978,6 +5055,7 @@
             // Gestione Progetto: nuovo filtro clienti -> si torna al primo livello.
             Object.assign(gpState, { level: 'list', client: null, project: null, worker: null });
             loadGestioneProgetto();
+            loadOrdiniProgetto();
             refreshProjectSearch();
         }
 
@@ -16078,6 +16156,7 @@
             initTodoList();
             await initRevenueChart(); // carica anni disponibili + dati kpi_fatturazione filtrati
             initGestioneProgetto();   // KPI Gestione Progetto (offerta / time spent)
+            initOrdiniProgetto();     // KPI Offerte e ordini (sotto Gestione Progetto)
             initClientFilter();
             initProjectSearch();
             initKpiCards();
