@@ -2382,8 +2382,18 @@ app.get('/api/kpi-gestione-progetto', requireAuth, async (req, res) => {
     const r = await db.query(
       `SELECT a.client_id, a.project_id, hh.gestione_hh AS hh, comp.completamento,
               SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.offerta_effort_hh, 0) ELSE COALESCE(a.offerta_effort_gg, 0) END) AS offerta,
-              SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END) AS time_spent
+              SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END) AS time_spent,
+              -- Voce di costo "Fabbrica" (proj_worker_cost.desc_worker): offerta e speso a parte,
+              -- per segnalare in dashboard la Fabbrica senza tempo speso registrato.
+              BOOL_OR(LOWER(BTRIM(wc.desc_worker)) = 'fabbrica') AS ha_fabbrica,
+              SUM(CASE WHEN LOWER(BTRIM(wc.desc_worker)) = 'fabbrica' THEN
+                    CASE WHEN hh.gestione_hh THEN COALESCE(a.offerta_effort_hh, 0) ELSE COALESCE(a.offerta_effort_gg, 0) END
+                  ELSE 0 END) AS fab_offerta,
+              SUM(CASE WHEN LOWER(BTRIM(wc.desc_worker)) = 'fabbrica' THEN
+                    CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END
+                  ELSE 0 END) AS fab_spent
          FROM proj_worker a
+         LEFT JOIN proj_worker_cost wc ON wc.id = a.worker_cost_id AND wc.scadenza >= CURRENT_DATE
          ${gpHhJoin('a')}
          -- "Completamento" del progetto (projects.valore3), stesse regole di tenant/utente/scadenza
          LEFT JOIN LATERAL (
@@ -2410,7 +2420,8 @@ app.get('/api/kpi-gestione-progetto', requireAuth, async (req, res) => {
       hh: !!x.hh,
       completamento: x.completamento == null ? null : Number(x.completamento),
       offerta: gpNum(x.offerta),
-      time_spent: gpNum(x.time_spent)
+      time_spent: gpNum(x.time_spent),
+      fabbrica: x.ha_fabbrica ? { offerta: gpNum(x.fab_offerta), time_spent: gpNum(x.fab_spent) } : null
     })).sort((a, b) => String(a.client || '').localeCompare(String(b.client || ''), 'it')
       || String(a.project || '').localeCompare(String(b.project || ''), 'it'));
     res.json(items);

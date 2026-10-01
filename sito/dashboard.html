@@ -1551,6 +1551,8 @@
         .gp-compl { flex: none; font-size: 0.68rem; font-weight: 600; color: #7c3aed; background: #f5f3ff; border-radius: 999px; padding: 0.1rem 0.5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
         .gp-row-meta { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
         .gp-row-meta b { font-weight: 600; }
+        .gp-row-meta .gp-fab { color: #b45309; font-weight: 600; }
+        .gp-row-meta .gp-fab i { font-size: 0.68rem; }
         .gp-row-meta .o { color: #059669; } .gp-row-meta .s { color: #2563eb; } .gp-row-meta .s.over { color: #dc2626; }
 
         .gp-meter { position: relative; height: 8px; border-radius: 999px; background: rgba(16, 185, 129, 0.22); overflow: hidden; }
@@ -4003,7 +4005,7 @@
         }
 
         // Il caricamento iniziale esegue esclusivamente i conteggi configurati.
-        async function loadDashboardKpis() {
+        async function loadDashboardKpis({ anima = true } = {}) {
             const grid = document.getElementById('dashboardKpiGrid');
             if (!grid) return;
             try {
@@ -4020,7 +4022,7 @@
                 // rosso e, a ogni caricamento, pulsano con uno zoom morbido per 5 secondi.
                 const allarme = (kpi) => kpi.evidenzia === true && (Number(kpi.total) || 0) > 0;
                 grid.innerHTML = dashboardKpis.map((kpi, index) => `
-                    <div class="stat-card kpi-card${allarme(kpi) ? ' kpi-alert kpi-alert-zoom' : ''}" data-kpi-id="${escapeHtml(kpi.id)}"
+                    <div class="stat-card kpi-card${allarme(kpi) ? ` kpi-alert${anima ? ' kpi-alert-zoom' : ''}` : ''}" data-kpi-id="${escapeHtml(kpi.id)}"
                          role="button" tabindex="0"
                          style="grid-row: ${Number(kpi.riga) || 1}; grid-column: ${Number(kpi.colonna) || 1};">
                         <div class="kpi-main-row">
@@ -4741,7 +4743,7 @@
                 + (cards ? `<div class="gp-grid">${cards}</div>` : '<div class="gp-empty">Nessun progetto in questo stato.</div>');
         }
 
-        async function loadOrdiniProgetto() {
+        async function loadOrdiniProgetto({ anima = true } = {}) {
             const content = document.getElementById('gpoContent');
             if (!content) return;
             const regola = document.getElementById('gpoRegola');
@@ -4757,7 +4759,7 @@
                 if (seq !== gpoRequestSeq) return;
                 gpoState.dati = Array.isArray(data) ? data : [];
                 content.innerHTML = gpOrdiniHtml(gpoState.dati);
-                gpoAnimaSolleciti(); // dati arrivati con il riquadro già sullo schermo
+                if (anima) gpoAnimaSolleciti(); // dati arrivati con il riquadro già sullo schermo
             } catch (e) {
                 if (seq !== gpoRequestSeq) return;
                 content.innerHTML = `<div class="gp-empty">Impossibile caricare i dati: ${escapeHtml(e.message)}</div>`;
@@ -4844,7 +4846,16 @@ async function loadGestioneProgetto() {
         // Riga compatta: titolo + "offerta · speso", barra, badge %.
         // completamento (facoltativo): valore del campo "Completamento" del progetto, accanto al nome.
         // showOfferta = false: riga di una singola persona (l'offerta è della voce, non sua).
-        function gpRowHtml(title, offerta, spent, hhOff, hhSpent, attrs, clickable = true, completamento = null, showOfferta = true) {
+        // Voce di costo "Fabbrica" con offerta ma SENZA tempo speso registrato: segnalata accanto
+        // a "Speso" nella riga del progetto, con offerta e time spent della sola Fabbrica.
+        function gpFabbricaMeta(it) {
+            const f = it.fabbrica;
+            if (!f || !(Number(f.offerta) > 0) || Number(f.time_spent) > 0) return '';
+            return ` · <span class="gp-fab" title="La voce Fabbrica non ha ancora tempo speso registrato">`
+                + `<i class="fas fa-triangle-exclamation"></i> Fabbrica: offerta <b>${gpFmt(f.offerta, it.hh)}</b> · speso <b>${gpFmt(f.time_spent, it.hh)}</b></span>`;
+        }
+
+        function gpRowHtml(title, offerta, spent, hhOff, hhSpent, attrs, clickable = true, completamento = null, showOfferta = true, extraMeta = '') {
             const p = gpProgress(offerta, spent);
             const compl = completamento == null ? ''
                 : `<span class="gp-compl" title="Completamento del progetto">Completamento ${(Number(completamento) || 0).toLocaleString('it-IT', { maximumFractionDigits: 2 })}%</span>`;
@@ -4852,7 +4863,7 @@ async function loadGestioneProgetto() {
             return `<div class="gp-row${clickable ? '' : ' static'}" ${attrs || ''}>
                 <div style="min-width:0;">
                     <div class="gp-row-head"><span class="gp-row-title" title="${escapeHtml(title)}">${escapeHtml(title)}</span>${compl}</div>
-                    <div class="gp-row-meta">${off}<span class="s${p.over ? ' over' : ''}">Speso <b>${gpFmt(spent, hhSpent)}</b></span></div>
+                    <div class="gp-row-meta">${off}<span class="s${p.over ? ' over' : ''}">Speso <b>${gpFmt(spent, hhSpent)}</b></span>${extraMeta}</div>
                 </div>
                 ${p.meter}
                 ${p.badge}
@@ -4901,7 +4912,7 @@ async function loadGestioneProgetto() {
                     const name = g.name || '(cliente non trovato)';
                     const rows = g.rows.map(it => gpRowHtml(it.project || '(progetto non trovato)', it.offerta, it.time_spent, it.hh, it.hh,
                         `data-gp-project="${escapeHtml(it.project_id)}" data-gp-name="${escapeHtml(it.project || '')}" data-gp-client="${escapeHtml(it.client_id)}" data-gp-client-name="${escapeHtml(it.client || '')}" title="Mostra le voci di costo"`,
-                        true, it.completamento)).join('');
+                        true, it.completamento, true, gpFabbricaMeta(it))).join('');
                     return `<div class="gp-client">
                         <div class="gp-client-head">
                             <div class="gp-client-top">
@@ -6177,6 +6188,49 @@ async function loadGestioneProgetto() {
         function getAuthHeaders() {
             const token = localStorage.getItem('authToken');
             return token ? { 'Authorization': `Bearer ${token}` } : {};
+        }
+
+        // === AGGIORNAMENTO AUTOMATICO DOPO UN SALVATAGGIO ===
+        // Ogni scrittura riuscita verso il server (POST/PUT/PATCH/DELETE da qualsiasi schermata:
+        // scheda progetto, cliente, griglie, impostazioni, to-do...) ricarica i dati della
+        // dashboard: mini KPI, To-Do List, Fatturato/MBO, Gestione Progetto, Offerte e ordini.
+        // Debounce: più salvataggi ravvicinati = un solo aggiornamento, a fine raffica.
+        // Esclusi le chiamate automatiche che non sono salvataggi (polling delle riunioni,
+        // blocchi audio, chatbot/AI, accesso).
+        const AUTO_REFRESH_ESCLUSI = [
+            /\/calendar\/meetings\/managed\/(status|transcribe|offset|finalize|claim-recording)/,
+            /\/calendar\/meetings\/managed\/recap/,
+            /\/auth\//, /\/ai\//, /\/chat/
+        ];
+        let autoRefreshTimer = null;
+        (function intercettaSalvataggi() {
+            const fetchOriginale = window.fetch.bind(window);
+            window.fetch = async (input, init) => {
+                const res = await fetchOriginale(input, init);
+                try {
+                    const metodo = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+                    const url = typeof input === 'string' ? input : (input && input.url) || '';
+                    if (res.ok && metodo !== 'GET' && url.startsWith(API_URL) && !AUTO_REFRESH_ESCLUSI.some(re => re.test(url))) {
+                        clearTimeout(autoRefreshTimer);
+                        autoRefreshTimer = setTimeout(aggiornaDashboardDopoSalvataggio, 1200);
+                    }
+                } catch (e) { /* mai bloccare la risposta per l'aggiornamento */ }
+                return res;
+            };
+        })();
+
+        async function aggiornaDashboardDopoSalvataggio() {
+            const passo = async (nome, fn) => { try { await fn(); } catch (e) { console.warn('[AGGIORNAMENTO]', nome, e.message); } };
+            await passo('to-do', async () => { await loadTodoData(); applyFiltersAndRender(); });
+            await passo('fatturato', async () => {
+                await loadKpiFatturazione();
+                const ys = document.getElementById('yearSelector');
+                if (ys) updateRevenueChart(ys.value);
+            });
+            // Senza animazioni: lo zoom degli allarmi resta per l'apertura della pagina.
+            await passo('mini KPI', () => loadDashboardKpis({ anima: false }));
+            await passo('gestione progetto', () => loadGestioneProgetto()); // resta al livello in cui sei
+            await passo('offerte e ordini', () => loadOrdiniProgetto({ anima: false }));
         }
 
         // Sostituzione standard delle etichette della pagina tramite set_label.
