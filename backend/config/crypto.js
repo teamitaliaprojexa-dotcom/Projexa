@@ -241,7 +241,12 @@ const NEVER_ENCRYPT_COLUMNS = new Set([
 // users.email è la chiave del login: cifrarla impedirebbe l'accesso.
 const NEVER_ENCRYPT_BY_TABLE = {
   users: new Set(['email', 'username']),
-  tasks: new Set(['status'])
+  tasks: new Set(['status']),
+  // Numeri di versione (non sono dati personali) confrontati in SQL dal KPI "Variazione Tkt"
+  // (versione <> variazione): con la cifratura randomizzata lo stesso valore cifrato due
+  // volte risulta sempre diverso. I valori già cifrati si rimettono in chiaro con la funzione
+  // di cifratura (Decifra e poi Cifra la tabella task_app).
+  task_app: new Set(['versione', 'variazione'])
 };
 
 // Tabelle con elenco chiuso di colonne da cifrare (regola esplicita del punto 3).
