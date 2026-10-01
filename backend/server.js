@@ -2676,6 +2676,9 @@ async function getDashboardKpiRows(req, pagina = 'DASHBOARD') {
   const result = await db.query(
     `WITH scoped AS (
        SELECT id, pagina, descrizione, conteggio, dettaglio, tabella, riga, colonna,
+              -- evidenzia (Supporto/CreaDB/kpi_tab_evidenzia.sql): letta via jsonb, così se la
+              -- colonna non esiste ancora vale NULL invece di far fallire tutti i KPI.
+              (to_jsonb(kpi_tab) ->> 'evidenzia') AS evidenzia,
               CASE
                 WHEN tenant_id = $1 AND user_id = $2 THEN 1
                 WHEN tenant_id = $1 AND user_id IS NULL THEN 2
@@ -2689,7 +2692,7 @@ async function getDashboardKpiRows(req, pagina = 'DASHBOARD') {
          AND ((tenant_id = $1 AND (user_id = $2 OR user_id IS NULL))
               OR (tenant_id IS NULL AND user_id IS NULL))
      )
-     SELECT id, pagina, descrizione, conteggio, dettaglio, tabella, riga, colonna
+     SELECT id, pagina, descrizione, conteggio, dettaglio, tabella, riga, colonna, evidenzia
      FROM scoped
      WHERE scope_rank = (SELECT MIN(scope_rank) FROM scoped)
      ORDER BY riga NULLS LAST, colonna NULLS LAST, id`,
@@ -2746,7 +2749,9 @@ app.get('/api/dashboard/kpis', requireAuth, async (req, res) => {
         title: deriveKpiTitle(row),
         riga: Number(row.riga) || 1,
         colonna: Number(row.colonna) || 1,
-        total: Number(rawTotal) || 0
+        total: Number(rawTotal) || 0,
+        // kpi_tab.evidenzia = true: la dashboard lo mette in allarme (bordo rosso + zoom) se total > 0
+        evidenzia: ['true', 't', '1'].includes(String(row.evidenzia || '').toLowerCase())
       };
     }));
     res.json(kpis);
@@ -6764,7 +6769,8 @@ app.post('/api/:source(settings|clients)/linked-row', requireAuth, async (req, r
 
     const cols = await getTableColumns(tabella);
     const generated = await getGeneratedColumns(tabella);
-    const managedByServer = new Set(['id', 'tenant_id', 'user_id', 'id_cliente', 'client_id', 'created_at', 'updated_at', 'created_by']);
+    // crypto: lo decide il server (sempre 1), mai il browser: con 0 la riga non verrebbe cifrata.
+    const managedByServer = new Set(['id', 'tenant_id', 'user_id', 'id_cliente', 'client_id', 'created_at', 'updated_at', 'created_by', 'crypto']);
     let data = {};
     for (const [k, v] of Object.entries(values)) {
       if (cols.has(k) && !generated.has(k) && !managedByServer.has(k)) {
@@ -6780,6 +6786,7 @@ app.post('/api/:source(settings|clients)/linked-row', requireAuth, async (req, r
     }
     // Nuova riga: modificabile dal ruolo di chi la crea.
     stampRoleWrite(req, data, cols);
+    if (cols.has('crypto')) data.crypto = 1;
 
     data = await cryptoWrite(db, 'main', tabella, data);
 

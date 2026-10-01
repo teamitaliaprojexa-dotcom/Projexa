@@ -1701,6 +1701,16 @@
             text-align: right;
         }
 
+        /* Mini KPI di allarme (kpi_tab.evidenzia = true, es. "Variazione Tkt") con valore > 0:
+           bordo e numero rossi fissi + zoom morbido ripetuto per 5 secondi al caricamento. */
+        .kpi-card.kpi-alert { border: 2px solid #dc2626; background: #fef2f2; }
+        #dashboardKpiGrid .kpi-card.kpi-alert .stat-value, #dashboardKpiGrid .kpi-card.kpi-alert .kpi-dynamic-icon { color: #dc2626; }
+        .kpi-card.kpi-alert-zoom { position: relative; z-index: 3; animation: kpiAlertZoom 1.25s cubic-bezier(0.37, 0, 0.63, 1) 4; }
+        @keyframes kpiAlertZoom {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+            50% { transform: scale(1.2); box-shadow: 0 0 0 6px rgba(220, 38, 38, 0.18), 0 8px 22px rgba(220, 38, 38, 0.22); }
+        }
+        @media (prefers-reduced-motion: reduce) { .kpi-card.kpi-alert-zoom { animation: none; } }
         .kpi-dynamic-icon { color: var(--primary); }
         .kpi-card:nth-child(5n + 2) .kpi-dynamic-icon { color: var(--secondary); }
         .kpi-card:nth-child(5n + 3) .kpi-dynamic-icon { color: var(--warning); }
@@ -4006,8 +4016,11 @@
                     throw new Error(error.error || `Errore HTTP ${response.status}`);
                 }
                 dashboardKpis = await response.json();
+                // Mini KPI "di allarme" (kpi_tab.evidenzia = true): con valore > 0 restano bordati di
+                // rosso e, a ogni caricamento, pulsano con uno zoom morbido per 5 secondi.
+                const allarme = (kpi) => kpi.evidenzia === true && (Number(kpi.total) || 0) > 0;
                 grid.innerHTML = dashboardKpis.map((kpi, index) => `
-                    <div class="stat-card kpi-card" data-kpi-id="${escapeHtml(kpi.id)}"
+                    <div class="stat-card kpi-card${allarme(kpi) ? ' kpi-alert kpi-alert-zoom' : ''}" data-kpi-id="${escapeHtml(kpi.id)}"
                          role="button" tabindex="0"
                          style="grid-row: ${Number(kpi.riga) || 1}; grid-column: ${Number(kpi.colonna) || 1};">
                         <div class="kpi-main-row">
@@ -4018,6 +4031,8 @@
                     </div>
                 `).join('');
                 bindDynamicKpiCards();
+                grid.querySelectorAll('.kpi-alert-zoom').forEach(card =>
+                    card.addEventListener('animationend', () => card.classList.remove('kpi-alert-zoom'), { once: true }));
             } catch (error) {
                 dashboardKpis = [];
                 grid.innerHTML = '';
@@ -11718,27 +11733,36 @@ async function loadGestioneProgetto() {
         // projectId, se presente, filtra le opzioni al solo contesto del progetto corrente
         // (la tabella referenziata usa il filtro generico per colonna già supportato da
         // GET /api/data/:table; viene ignorato se la tabella non ha una colonna project_id).
-        async function linkedFkOptions(refTable, projectId) {
+        // clientId, se presente, limita le opzioni al cliente del contesto (es. "responsabile"
+        // di un contatto: solo i contatti dello stesso cliente), sulla colonna client_id o
+        // id_cliente della tabella referenziata (stessa scelta del server per linked-row).
+        async function linkedFkOptions(refTable, projectId, clientId) {
             let options = [];
             try {
                 if (refTable === 'clients') {
                     const r = await fetch(`${API_URL}/clients/names`, { headers: getAuthHeaders() });
                     if (r.ok) { const d = await r.json(); options = d.map(c => ({ id: c.id, display: c.name || ('Item ' + c.id) })); }
                 } else {
-                    const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
-                    const r = await fetch(`${API_URL}/data/${encodeURIComponent(refTable)}${query}`, { headers: getAuthHeaders() });
+                    // Stessa priorità usata lato server per le colonne FK: prima una colonna
+                    // "desc_*" (es. desc_worker), poi i nomi leggibili più comuni, altrimenti l'id.
+                    let colNames = [];
+                    try {
+                        const cr = await fetch(`${API_URL}/data/${encodeURIComponent(refTable)}/columns`, { headers: getAuthHeaders() });
+                        if (cr.ok) colNames = ((await cr.json()) || []).map(c => c.name);
+                    } catch (e) { /* ignore */ }
+                    const descCol = colNames.find(name => /^desc_/i.test(name)) || null;
+                    const query = new URLSearchParams();
+                    if (projectId) query.set('project_id', projectId);
+                    const clientCol = clientId
+                        ? (colNames.includes('client_id') ? 'client_id' : colNames.includes('id_cliente') ? 'id_cliente' : null)
+                        : null;
+                    if (clientCol) query.set(clientCol, clientId);
+                    const qs = query.toString();
+                    const r = await fetch(`${API_URL}/data/${encodeURIComponent(refTable)}${qs ? '?' + qs : ''}`, { headers: getAuthHeaders() });
                     if (r.ok) {
-                        const d = await r.json();
-                        // Stessa priorità usata lato server per le colonne FK: prima una colonna
-                        // "desc_*" (es. desc_worker), poi i nomi leggibili più comuni, altrimenti l'id.
-                        let descCol = null;
-                        try {
-                            const cr = await fetch(`${API_URL}/data/${encodeURIComponent(refTable)}/columns`, { headers: getAuthHeaders() });
-                            if (cr.ok) {
-                                const cols = await cr.json();
-                                descCol = (cols || []).map(c => c.name).find(name => /^desc_/i.test(name)) || null;
-                            }
-                        } catch (e) { /* ignore */ }
+                        let d = await r.json();
+                        // Il filtro del server è "contiene": qui si tiene solo l'uguaglianza esatta.
+                        if (clientCol) d = d.filter(row => String(row[clientCol] || '') === String(clientId));
                         options = d.map(row => ({
                             id: row.id,
                             display: (descCol ? row[descCol] : null) || row.nominativo || row.name || row.display_name || row.description || row.title || row.valore2 || ('Item ' + row.id)
@@ -11752,13 +11776,13 @@ async function loadGestioneProgetto() {
 
         // HTML di un campo del form collegato: select se FK (col.references), altrimenti text.
         // disabled = sola lettura (usato quando la modifica non è abilitata o la colonna è generata).
-        async function renderLinkedFieldHtml(col, value, className, disabled) {
+        async function renderLinkedFieldHtml(col, value, className, disabled, clientId) {
             const cls = className || 'linked-new-field';
             const dis = disabled ? 'disabled' : '';
             const style = 'flex: 1 1 0; min-width: 0; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;';
             const val = value == null ? '' : String(value);
             if (col.references) {
-                const opts = await linkedFkOptions(col.references);
+                const opts = await linkedFkOptions(col.references, null, clientId);
                 const optsHtml = opts.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
                 return `<div class="settings-detail-row"><span class="campo-label">${escapeHtml(col.name)}</span><select class="${cls}" data-col="${escapeHtml(col.name)}" ${dis} style="${style}"><option value="">-- Seleziona --</option>${optsHtml}</select></div>`;
             }
@@ -11804,7 +11828,9 @@ async function loadGestioneProgetto() {
                 const mres = await fetch(`${API_URL}/data/${encodeURIComponent(desc.tabella)}/columns`, { headers: getAuthHeaders() });
                 if (mres.ok) cols = await mres.json();
             } catch (e) { /* ignore */ }
-            const hidden = ['id', 'id_cliente', 'ordinamento', 'tenant_id', 'user_id', 'created_by', 'created_at', 'updated_at'];
+            const hidden = ['id', 'id_cliente', 'ordinamento', 'tenant_id', 'user_id', 'created_by', 'created_at', 'updated_at', 'crypto'];
+            // Dentro un cliente il client_id lo imposta il server dal contesto: non si chiede.
+            if (desc.clientId) hidden.push('client_id');
             const editable = cols.filter(c => !hidden.includes(c.name) && !c.generated);
 
             // Tenant del contesto (sola lettura), in cima al form.
@@ -11818,7 +11844,7 @@ async function loadGestioneProgetto() {
             // I campi FK (references) diventano menu a discesa dalla tabella referenziata.
             let fieldsHtml = '';
             for (const c of editable) {
-                fieldsHtml += await renderLinkedFieldHtml(c, '');
+                fieldsHtml += await renderLinkedFieldHtml(c, '', null, false, desc.clientId);
             }
             const barHtml = `<div style="display: flex; gap: 0.5rem; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;"><button id="linkedNewSave" style="flex: 1; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button><button id="linkedNewCancel" style="flex: 0 0 auto; padding: 0.6rem 0.9rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button></div>`;
             listEl.innerHTML = tenantHtml + fieldsHtml + barHtml;
@@ -11910,7 +11936,7 @@ async function loadGestioneProgetto() {
                     } catch (e) { /* ignore */ }
                 }
 
-                const hidden = ['id', 'id_cliente', 'ordinamento', 'tenant_id', 'user_id', 'created_by', 'created_at', 'updated_at'];
+                const hidden = ['id', 'id_cliente', 'ordinamento', 'tenant_id', 'user_id', 'created_by', 'created_at', 'updated_at', 'crypto'];
                 const entries = Object.entries(row).filter(([k]) => !hidden.includes(k));
                 if (entries.length === 0) { listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>'; return; }
 
@@ -11921,7 +11947,7 @@ async function loadGestioneProgetto() {
                 for (const [k, v] of entries) {
                     const meta = metaMap[k] || { name: k };
                     const readonly = !edit || meta.generated;
-                    fieldsHtml += await renderLinkedFieldHtml(meta, v, 'linked-field', readonly);
+                    fieldsHtml += await renderLinkedFieldHtml(meta, v, 'linked-field', readonly, desc.clientId);
                 }
                 const saveHtml = `<div id="linkedSaveBar" style="display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;"><button id="linkedSaveBtn" style="width: 100%; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button></div>`;
                 listEl.innerHTML = toggleHtml + fieldsHtml + saveHtml;
