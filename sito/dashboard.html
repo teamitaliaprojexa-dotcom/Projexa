@@ -1567,6 +1567,11 @@
         .gp-badge.zero { background: #f1f5f9; color: #64748b; }
         .gp-badge.big { font-size: 0.85rem; padding: 0.3rem 0.65rem; }
         .gp-panel { border: 1px solid #eef2f7; border-radius: 14px; }
+        /* Elenco progetti del cliente: matita per rinominare (più visibile al passaggio del mouse) */
+        .proj-row .flyout-item-label { flex: 1 1 auto; min-width: 0; }
+        .proj-rename-btn { flex: 0 0 auto; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 7px; margin-right: 0.35rem; border-radius: 5px; font-size: 0.78rem; opacity: 0.45; }
+        .proj-row:hover .proj-rename-btn { opacity: 1; }
+        .proj-rename-btn:hover { background: #e5e7eb; color: var(--primary); }
         /* KPI Offerte e ordini (stesse schede cliente di Gestione Progetto) */
         .gpo-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0.75rem; padding: 0.6rem; border-radius: 10px; }
         .gpo-row + .gpo-row { border-top: 1px solid #f1f5f9; border-radius: 0; }
@@ -4846,13 +4851,18 @@ async function loadGestioneProgetto() {
         // Riga compatta: titolo + "offerta · speso", barra, badge %.
         // completamento (facoltativo): valore del campo "Completamento" del progetto, accanto al nome.
         // showOfferta = false: riga di una singola persona (l'offerta è della voce, non sua).
-        // Voce di costo "Fabbrica" con offerta ma SENZA tempo speso registrato: segnalata accanto
-        // a "Speso" nella riga del progetto, con offerta e time spent della sola Fabbrica.
+        // Voce di costo "Fabbrica" (solo questa): se il tempo speso registrato è inferiore
+        // all'offerta, accanto a "Speso" nella riga del progetto si indica quanto manca da
+        // inserire (offerta - speso), con offerta e speso della sola Fabbrica nel tooltip.
         function gpFabbricaMeta(it) {
             const f = it.fabbrica;
-            if (!f || !(Number(f.offerta) > 0) || Number(f.time_spent) > 0) return '';
-            return ` · <span class="gp-fab" title="La voce Fabbrica non ha ancora tempo speso registrato">`
-                + `<i class="fas fa-triangle-exclamation"></i> Fabbrica: offerta <b>${gpFmt(f.offerta, it.hh)}</b> · speso <b>${gpFmt(f.time_spent, it.hh)}</b></span>`;
+            if (!f) return '';
+            const offerta = Number(f.offerta) || 0;
+            const speso = Number(f.time_spent) || 0;
+            const manca = Math.round((offerta - speso) * 100) / 100;
+            if (!(offerta > 0) || !(manca > 0)) return '';
+            return ` · <span class="gp-fab" title="Fabbrica: offerta ${escapeHtml(gpFmt(offerta, it.hh))}, speso ${escapeHtml(gpFmt(speso, it.hh))}">`
+                + `<i class="fas fa-triangle-exclamation"></i> Fabbrica: mancano <b>${gpFmt(manca, it.hh)}</b> da inserire</span>`;
         }
 
         function gpRowHtml(title, offerta, spent, hhOff, hhSpent, attrs, clickable = true, completamento = null, showOfferta = true, extraMeta = '') {
@@ -10268,16 +10278,40 @@ async function loadGestioneProgetto() {
                 const res = await fetch(`${API_URL}/projects/list?clientId=${encodeURIComponent(clientId)}`, { headers: getAuthHeaders() });
                 const projects = res.ok ? await res.json() : [];
                 const addBtn = `<button id="projAddBtn" type="button" style="margin-bottom:0.75rem; padding:0.4rem 0.7rem; background:#3B82F6; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">+ Nuovo progetto</button>`;
-                const rows = (projects || []).map(p => `<div class="settings-detail-link proj-row" data-proj-id="${escapeHtml(p.id)}" data-proj-name="${escapeHtml(p.name)}"><span class="flyout-item-label">${escapeHtml(p.name)}</span><span class="parent-arrow">›</span></div>`).join('')
+                const rows = (projects || []).map(p => `<div class="settings-detail-link proj-row" data-proj-id="${escapeHtml(p.id)}" data-proj-name="${escapeHtml(p.name)}"><span class="flyout-item-label">${escapeHtml(p.name)}</span><button type="button" class="proj-rename-btn" title="Rinomina il progetto" aria-label="Rinomina ${escapeHtml(p.name)}"><i class="fas fa-pen"></i></button><span class="parent-arrow">›</span></div>`).join('')
                     || '<div style="color: var(--text-muted);">Nessun progetto</div>';
                 listEl.innerHTML = addBtn + rows;
                 listEl.querySelectorAll('.proj-row').forEach(r => r.addEventListener('click', (e) => {
                     e.stopPropagation(); // evita l'handler delegato di .settings-detail-link (clienti)
+                    if (e.target.closest('.proj-rename-btn')) { renameProject(r.dataset.projId, r.dataset.projName, clientId, clientName); return; }
                     openProjectDetail(r.dataset.projId, r.dataset.projName, clientId);
                 }));
                 const ab = document.getElementById('projAddBtn');
                 if (ab) ab.addEventListener('click', () => openNewProjectForm(clientId, clientName));
             } catch (e) { listEl.innerHTML = '<div style="color: var(--text-muted);">Errore di connessione</div>'; }
+        }
+
+        // Rinomina (matita nell'elenco progetti): PUT /projects/:id/name, il server mantiene la
+        // cifratura del nome. Poi si ricarica l'elenco (e i KPI, con l'aggiornamento automatico).
+        async function renameProject(projectId, currentName, clientId, clientName) {
+            const nuovo = prompt('Nuovo nome del progetto:', currentName || '');
+            if (nuovo == null) return;
+            const name = nuovo.replace(/\s+/g, ' ').trim();
+            if (!name || name === currentName) return;
+            try {
+                const res = await fetch(`${API_URL}/projects/${encodeURIComponent(projectId)}/name`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ name })
+                });
+                if (res.ok) {
+                    showNotification('Progetto rinominato', 'success');
+                    renderProjectList(clientId, clientName);
+                } else {
+                    const e = await res.json().catch(() => ({}));
+                    showNotification('Errore: ' + (e.error || res.status), 'info');
+                }
+            } catch (e) { showNotification('Errore di connessione', 'info'); }
         }
 
         // Form "Nuovo progetto": nome + modello (progetto esistente o standard) -> POST /projects.

@@ -4895,6 +4895,30 @@ app.get('/api/projects/list', requireAuth, async (req, res) => {
 // Crea un nuovo progetto per un cliente: riga identità (argument='Progetto', campo='Progetto',
 // valore2=nome, client_id) + copia della struttura da un progetto modello scelto
 // (sourceProjectId) o, in mancanza, dal master 'PROGETTO_COPIA' del tenant PROJEXA.
+// Rinomina un progetto (pulsante matita nell'elenco "Progetti clienti"): aggiorna valore2 della
+// riga identità (argument = 'Progetto', campo = 'Progetto', id = id del progetto) del login.
+// La scrittura passa da cryptoWrite: se la riga è cifrata (crypto = 1) il nome resta cifrato.
+app.put('/api/projects/:id/name', requireAuth, async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!GP_UUID.test(id)) return res.status(400).json({ error: 'Progetto non valido' });
+    const name = String((req.body && req.body.name) || '').replace(/\s+/g, ' ').trim();
+    if (!name) return res.status(400).json({ error: 'Nome obbligatorio' });
+    if (name.length > 255) return res.status(400).json({ error: 'Nome troppo lungo (max 255 caratteri)' });
+    const data = await cryptoWrite(db, 'main', 'projects', { valore2: name }, id);
+    const r = await db.query(
+      `UPDATE projects SET valore2 = $1${data.crypto != null ? ', crypto = $5' : ''}
+        WHERE id = $2 AND tenant_id = $3 AND user_id = $4 AND argument = 'Progetto' AND campo = 'Progetto'`,
+      data.crypto != null ? [data.valore2, id, req.user.tenant_id, req.user.user_id, data.crypto]
+        : [data.valore2, id, req.user.tenant_id, req.user.user_id]
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'Progetto non trovato' });
+    res.json({ ok: true, name });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 app.post('/api/projects', requireAuth, async (req, res) => {
   const roleLevel = Number(req.user.id_roles);
   if (!Number.isFinite(roleLevel) || roleLevel > 70) {
