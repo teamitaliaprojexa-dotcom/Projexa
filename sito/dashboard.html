@@ -1565,6 +1565,26 @@
         .gp-badge.zero { background: #f1f5f9; color: #64748b; }
         .gp-badge.big { font-size: 0.85rem; padding: 0.3rem 0.65rem; }
         .gp-panel { border: 1px solid #eef2f7; border-radius: 14px; }
+        /* Schede del KPI: Avanzamento / Offerte e ordini */
+        .gp-tabs { display: inline-flex; gap: 0.25rem; background: #f1f5f9; border-radius: 10px; padding: 0.2rem; margin-bottom: 1rem; }
+        .gp-tabs button { border: none; background: transparent; padding: 0.4rem 0.95rem; border-radius: 8px; font: inherit; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); cursor: pointer; }
+        .gp-tabs button.active { background: white; color: var(--dark); box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08); }
+        .gp-stat.green { background: #ecfdf5; border-color: #d1fae5; } .gp-stat.green .v { color: #059669; }
+        .gp-stat.amber { background: #fffbeb; border-color: #fef3c7; } .gp-stat.amber .v { color: #d97706; }
+        .gp-stat.clickable { cursor: pointer; } .gp-stat.clickable.sel { box-shadow: 0 0 0 2px currentColor inset; }
+        /* Tabella offerte / ordini */
+        .gp-ord-wrap { overflow-x: auto; border: 1px solid #eef2f7; border-radius: 14px; }
+        .gp-ord { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        .gp-ord th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); font-weight: 600; padding: 0.6rem 0.75rem; background: #f8fafc; border-bottom: 1px solid #eef2f7; white-space: nowrap; }
+        .gp-ord td { padding: 0.55rem 0.75rem; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+        .gp-ord tr:last-child td { border-bottom: none; }
+        .gp-ord td.d { white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .gp-ord td.d small { display: block; color: var(--text-muted); font-size: 0.7rem; }
+        .gp-ord .miss { color: #94a3b8; }
+        .gp-ord-st { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 0.2rem 0.55rem; border-radius: 999px; white-space: nowrap; }
+        .gp-ord-st.red { background: #fef2f2; color: #dc2626; } .gp-ord-st.amber { background: #fffbeb; color: #b45309; }
+        .gp-ord-st.gray { background: #f1f5f9; color: #475569; } .gp-ord-st.green { background: #ecfdf5; color: #047857; }
+        .gp-ord-why { display: block; font-size: 0.7rem; color: var(--text-muted); margin-top: 0.2rem; }
         .gp-group-line { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; font-size: 0.8rem; color: var(--text-muted); margin: 0 0 0.75rem 0.25rem; }
         .gp-group-line b { font-weight: 700; font-variant-numeric: tabular-nums; }
         .gp-group-line .o { color: #059669; } .gp-group-line .s { color: #2563eb; } .gp-group-line .s.over { color: #dc2626; }
@@ -3704,11 +3724,15 @@
                         <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--primary);"><path d="M3 5h18v2H3V5Zm0 6h12v2H3v-2Zm0 6h8v2H3v-2Zm14-3 2 2 3-3 1.4 1.4L19 18.8l-3.4-3.4L17 14Z"/></svg>
                         Gestione Progetto
                     </div>
-                    <div class="gp-legend">
+                    <div class="gp-legend" id="gpLegend">
                         <span><i class="gp-dot" style="background:#6ee7b7;"></i>Offerta (100%)</span>
                         <span><i class="gp-dot" style="background:#2563eb;"></i>Time spent</span>
                         <span><i class="gp-dot" style="background:#dc2626;"></i>Oltre l'offerta</span>
                     </div>
+                </div>
+                <div class="gp-tabs" role="tablist">
+                    <button type="button" class="active" data-gp-tab="avanzamento" role="tab">Avanzamento</button>
+                    <button type="button" data-gp-tab="ordini" role="tab">Offerte e ordini</button>
                 </div>
                 <div id="gpBreadcrumb" class="gp-breadcrumb"></div>
                 <div id="gpContent" class="gp-content"><div class="gp-empty">Caricamento…</div></div>
@@ -4526,7 +4550,9 @@
         // Livelli: 'list' (clienti/progetti, eventualmente di un solo cliente) -> 'project'
         // (voci di costo del progetto) -> 'worker' (componenti della voce). Offerta = 100%,
         // time spent = avanzamento; unità ore o giorni secondo "Gestione a HH" del progetto.
-        const gpState = { level: 'list', client: null, project: null, worker: null };
+        // tab: 'avanzamento' (offerta / time spent) oppure 'ordini' (offerte inviate e ordini
+        // ricevuti); ordFiltro = stato scelto cliccando un riquadro della scheda ordini.
+        const gpState = { level: 'list', client: null, project: null, worker: null, tab: 'avanzamento', ordFiltro: null };
         let gpRequestSeq = 0;
 
         function gpFmt(v, hh) {
@@ -4563,10 +4589,116 @@
             el.innerHTML = parts.join('<span class="sep">›</span>');
         }
 
+        // === Scheda "Offerte e ordini" ===
+        // Per ogni progetto in corso: Start/End, data di invio dell'offerta e data dell'ordine del
+        // cliente (serve l'ordine per poter fatturare). Stato calcolato sulla data di oggi:
+        //   DA SOLLECITARE    offerta inviata, nessun ordine, e progetto già iniziato oppure
+        //                     offerta inviata da almeno GP_SOLLECITO_GIORNI giorni;
+        //   IN ATTESA ORDINE  offerta inviata da meno giorni, progetto non ancora iniziato;
+        //   OFFERTA DA INVIARE nessuna data di offerta;
+        //   ORDINE RICEVUTO   c'è la data dell'ordine.
+        const GP_SOLLECITO_GIORNI = 15;
+        const GP_ORD_STATI = {
+            sollecitare: { cls: 'red', label: 'DA SOLLECITARE', tile: 'Da sollecitare', ordine: 0 },
+            attesa: { cls: 'amber', label: 'IN ATTESA ORDINE', tile: "In attesa d'ordine", ordine: 1 },
+            offerta: { cls: 'gray', label: 'OFFERTA DA INVIARE', tile: 'Offerta da inviare', ordine: 2 },
+            ricevuto: { cls: 'green', label: 'ORDINE RICEVUTO', tile: 'Ordine ricevuto', ordine: 3 }
+        };
+
+        function gpOggiIso() {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        }
+        // Giorni da a fino a b (date AAAA-MM-GG).
+        function gpGiorni(a, b) {
+            return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
+        }
+        function gpDataIt(iso) {
+            return iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '';
+        }
+
+        function gpOrdStato(it, oggi) {
+            if (it.ordine_ricevuto) {
+                const attesa = it.offerta_inviata ? gpGiorni(it.offerta_inviata, it.ordine_ricevuto) : null;
+                return { k: 'ricevuto', why: attesa != null && attesa >= 0 ? `arrivato ${attesa} giorni dopo l'offerta` : '' };
+            }
+            const iniziato = !!it.start && it.start <= oggi;
+            if (!it.offerta_inviata) {
+                return { k: 'offerta', why: iniziato ? `progetto iniziato il ${gpDataIt(it.start)}` : '' };
+            }
+            const giorni = gpGiorni(it.offerta_inviata, oggi);
+            const inviata = `offerta inviata da ${giorni} giorn${giorni === 1 ? 'o' : 'i'}`;
+            if (iniziato) return { k: 'sollecitare', giorni, why: `progetto iniziato il ${gpDataIt(it.start)} senza ordine: fatturazione bloccata · ${inviata}` };
+            if (giorni >= GP_SOLLECITO_GIORNI) return { k: 'sollecitare', giorni, why: inviata };
+            return { k: 'attesa', giorni, why: inviata };
+        }
+
+        function gpOrdiniHtml(items) {
+            if (!items.length) return '<div class="gp-empty">Nessun progetto in corso.</div>';
+            const oggi = gpOggiIso();
+            const rows = items.map(it => ({ ...it, st: gpOrdStato(it, oggi) }));
+            const conta = {};
+            rows.forEach(r => { conta[r.st.k] = (conta[r.st.k] || 0) + 1; });
+            const tiles = Object.entries(GP_ORD_STATI).map(([k, s]) =>
+                `<div class="gp-stat ${s.cls} clickable${gpState.ordFiltro === k ? ' sel' : ''}" data-gp-ord-filter="${k}" title="Mostra solo: ${escapeHtml(s.tile)} (clic di nuovo per tutti)">
+                    <span class="v">${conta[k] || 0}</span><span class="l">${escapeHtml(s.tile)}</span>
+                </div>`).join('');
+            const visibili = rows
+                .filter(r => !gpState.ordFiltro || r.st.k === gpState.ordFiltro)
+                .sort((a, b) => GP_ORD_STATI[a.st.k].ordine - GP_ORD_STATI[b.st.k].ordine
+                    || (b.st.giorni || 0) - (a.st.giorni || 0)
+                    || String(a.start || '9999').localeCompare(String(b.start || '9999'))
+                    || String(a.client || '').localeCompare(String(b.client || ''), 'it'));
+            const cella = (iso, extra = '') => iso
+                ? `<td class="d">${gpDataIt(iso)}${extra}</td>`
+                : '<td class="d"><span class="miss">—</span></td>';
+            const body = visibili.map(r => {
+                const s = GP_ORD_STATI[r.st.k];
+                const startExtra = r.start && !r.ordine_ricevuto
+                    ? `<small>${r.start <= oggi ? `iniziato da ${gpGiorni(r.start, oggi)} gg` : `tra ${gpGiorni(oggi, r.start)} gg`}</small>` : '';
+                return `<tr>
+                    <td><div class="gp-row-title">${escapeHtml(r.progetto || '(senza nome)')}</div><div class="gp-row-meta">${escapeHtml(r.client || '(cliente non trovato)')}</div></td>
+                    ${cella(r.start, startExtra)}
+                    ${cella(r.end)}
+                    ${cella(r.offerta_inviata)}
+                    ${cella(r.ordine_ricevuto)}
+                    <td><span class="gp-ord-st ${s.cls}">${s.label}</span>${r.st.why ? `<span class="gp-ord-why">${escapeHtml(r.st.why)}</span>` : ''}</td>
+                </tr>`;
+            }).join('');
+            return `<div class="gp-summary">${tiles}</div>
+                <div class="gp-ord-wrap"><table class="gp-ord">
+                    <thead><tr><th>Progetto</th><th>Start</th><th>End</th><th>Offerta inviata</th><th>Ordine ricevuto</th><th>Stato</th></tr></thead>
+                    <tbody>${body || '<tr><td colspan="6"><div class="gp-empty">Nessun progetto in questo stato.</div></td></tr>'}</tbody>
+                </table></div>`;
+        }
+
         async function loadGestioneProgetto() {
             const content = document.getElementById('gpContent');
             if (!content) return;
             const seq = ++gpRequestSeq;
+            const ordini = gpState.tab === 'ordini';
+            document.querySelectorAll('.gp-tabs [data-gp-tab]').forEach(b => b.classList.toggle('active', b.dataset.gpTab === gpState.tab));
+            const legend = document.getElementById('gpLegend');
+            if (legend) legend.style.display = ordini ? 'none' : '';
+            const crumb = document.getElementById('gpBreadcrumb');
+            if (crumb) crumb.style.display = ordini ? 'none' : '';
+            if (ordini) {
+                content.innerHTML = '<div class="gp-empty">Caricamento…</div>';
+                try {
+                    const params = new URLSearchParams();
+                    getSelectedClientIds().forEach(id => params.append('clientId', id));
+                    const res = await fetch(`${API_URL}/kpi-gestione-progetto/ordini?${params.toString()}`, { headers: getAuthHeaders() });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.error || `Errore HTTP ${res.status}`);
+                    if (seq !== gpRequestSeq) return;
+                    gpState.ordDati = Array.isArray(data) ? data : [];
+                    content.innerHTML = gpOrdiniHtml(gpState.ordDati);
+                } catch (e) {
+                    if (seq !== gpRequestSeq) return;
+                    content.innerHTML = `<div class="gp-empty">Impossibile caricare i dati: ${escapeHtml(e.message)}</div>`;
+                }
+                return;
+            }
             gpRenderBreadcrumb();
             content.innerHTML = '<div class="gp-empty">Caricamento…</div>';
             try {
@@ -4702,6 +4834,23 @@
             if (!card || card.dataset.bound) return;
             card.dataset.bound = '1';
             card.addEventListener('click', (e) => {
+                const tab = e.target.closest('[data-gp-tab]');
+                if (tab) {
+                    if (gpState.tab !== tab.dataset.gpTab) {
+                        gpState.tab = tab.dataset.gpTab;
+                        loadGestioneProgetto();
+                    }
+                    return;
+                }
+                // Scheda ordini: un riquadro filtra la tabella per stato (secondo clic = tutti).
+                const ordFilter = e.target.closest('[data-gp-ord-filter]');
+                if (ordFilter) {
+                    const k = ordFilter.dataset.gpOrdFilter;
+                    gpState.ordFiltro = gpState.ordFiltro === k ? null : k;
+                    const content = document.getElementById('gpContent');
+                    if (content && gpState.ordDati) content.innerHTML = gpOrdiniHtml(gpState.ordDati);
+                    return;
+                }
                 const nav = e.target.closest('[data-gp-nav]');
                 if (nav) {
                     const t = nav.dataset.gpNav;

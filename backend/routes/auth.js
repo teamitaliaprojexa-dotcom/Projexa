@@ -841,6 +841,8 @@ router.get('/google-callback', async (req, res) => {
 // IMPERSONIFICAZIONE (solo admin id_roles = 1)
 // ==========================================
 
+// id_roles arriva dal database, non dal token (config/session.js), e vale 1 solo per
+// l'Admin Projexa: un admin di un cliente non può impersonare utenti di altri tenant.
 function requireAdmin(req, res, next) {
   if (Number(req.user?.id_roles) !== 1) {
     return res.status(403).json({ error: 'Operazione riservata agli amministratori' });

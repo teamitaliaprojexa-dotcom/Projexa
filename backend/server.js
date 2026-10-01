@@ -2458,6 +2458,55 @@ app.get('/api/kpi-gestione-progetto/worker', requireAuth, async (req, res) => {
   }
 });
 
+// Scheda "Offerte e ordini" del KPI Gestione Progetto: per ogni progetto in corso (riga
+// campo = 'Progetto' con scadenza >= oggi) le date Start / End / "Offerta inviata al Cliente" /
+// "Ordine Ricevuto" (campi data di projects, valore2, argument = id del progetto), per capire
+// a chi sollecitare l'ordine. Sempre per tenant_id e user_id del login; filtro clienti
+// facoltativo come la scheda Avanzamento. MAX(): una sola data anche se un campo fosse doppio.
+// Lo stato (da sollecitare, in attesa...) lo calcola la dashboard sulla data di oggi locale.
+app.get('/api/kpi-gestione-progetto/ordini', requireAuth, async (req, res) => {
+  try {
+    const clientIds = parseClientIdsFromQuery(req).filter((id) => GP_UUID.test(id));
+    const params = [req.user.tenant_id, req.user.user_id];
+    let clientCond = '';
+    if (clientIds.length) { params.push(clientIds); clientCond = 'AND a.client_id = ANY($3::uuid[])'; }
+    const dataCampo = (campo) => `(SELECT MAX(x.valore2) FROM projects x
+        WHERE x.campo = '${campo}' AND x.argument = a.id::text
+          AND x.tenant_id = a.tenant_id AND x.user_id = a.user_id AND x.scadenza >= CURRENT_DATE)`;
+    const r = await db.query(
+      `SELECT a.id AS project_id, a.client_id, a.valore2 AS progetto,
+              ${dataCampo('Start')} AS start,
+              ${dataCampo('End')} AS "end",
+              ${dataCampo('Offerta inviata al Cliente')} AS offerta_inviata,
+              ${dataCampo('Ordine Ricevuto')} AS ordine_ricevuto
+         FROM projects a
+        WHERE a.campo = 'Progetto' AND a.tenant_id = $1 AND a.user_id = $2
+          AND a.scadenza >= CURRENT_DATE ${clientCond}`,
+      params
+    );
+    const clients = await resolveClientDescriptions(r.rows.map((x) => x.client_id), req.user.tenant_id);
+    const soloData = (v) => {
+      if (v == null || String(v).trim() === '') return null;
+      const s = String(v).trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      const d = new Date(s);
+      return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+    };
+    res.json(r.rows.map((x) => ({
+      project_id: x.project_id,
+      client_id: x.client_id,
+      client: clients.get(String(x.client_id)) || null,
+      progetto: x.progetto,
+      start: soloData(x.start),
+      end: soloData(x.end),
+      offerta_inviata: soloData(x.offerta_inviata),
+      ordine_ricevuto: soloData(x.ordine_ricevuto)
+    })));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Elenco degli anni disponibili in kpi_fatturazione per il login (tenant+utente), a
 // prescindere dai filtri correnti: serve a popolare la tendina "Anno".
 app.get('/api/kpi-fatturazione/years', requireAuth, async (req, res) => {
