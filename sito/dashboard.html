@@ -12344,8 +12344,9 @@
                     inp.addEventListener('input', onEdit);
                     inp.addEventListener('change', onEdit);
                 });
-                // Tipo 14: mostra valore2 soltanto con valore1=true. Spegnendo il toggle,
-                // azzera subito il controllo e lo marca da salvare insieme al booleano.
+                // Tipo 14 (e 22, con la data): mostra valore2 soltanto con valore1=true. Spegnendo
+                // il toggle, azzera subito il controllo e lo marca da salvare insieme al booleano.
+                // Tipo 22: accendendolo con la data vuota propone la data di oggi.
                 listEl.querySelectorAll('.type14-wrap').forEach(wrap => {
                     const toggle = wrap.querySelector('.type14-toggle');
                     const alphaWrap = wrap.querySelector('.type14-alpha-wrap');
@@ -12357,6 +12358,11 @@
                     toggle.addEventListener('change', () => {
                         if (!toggle.checked) {
                             alpha.value = '';
+                            alpha.dataset.dirty = '1';
+                            if (saveBar) saveBar.style.display = 'block';
+                        } else if (alpha.dataset.type22 && !alpha.value) {
+                            const oggi = new Date();
+                            alpha.value = `${oggi.getFullYear()}-${String(oggi.getMonth() + 1).padStart(2, '0')}-${String(oggi.getDate()).padStart(2, '0')}`;
                             alpha.dataset.dirty = '1';
                             if (saveBar) saveBar.style.display = 'block';
                         }
@@ -14023,6 +14029,26 @@
                 input = `<span class="type14-wrap" style="display:flex; align-items:center; gap:10px; flex:1 1 0; min-width:0;">
                     <label class="toggle-switch"><input type="checkbox" class="type14-toggle" data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>
                     <span class="type14-alpha-wrap" style="${alphaDisplay} flex:1 1 0; min-width:0;"><input type="text" class="type14-alpha" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(row.valore2 == null ? '' : row.valore2)}" style="width:100%;"></span>
+                </span>`;
+            } else if (tipo === 22) {
+                // Come il tipo 14, ma il campo che compare col toggle acceso è una DATA (valore2,
+                // AAAA-MM-GG, con il calendario come il tipo 7). Accendendo il toggle con la data
+                // vuota si propone la data di oggi (gestito insieme al tipo 14, data-type22).
+                const enabled = (row.valore1 === true || row.valore1 === 'true' || row.valore1 === 't');
+                const checked = enabled ? 'checked' : '';
+                const alphaDisplay = enabled ? '' : 'display:none;';
+                let dateVal = '';
+                const v = row.valore2;
+                if (v) {
+                    if (/^\d{4}-\d{2}-\d{2}/.test(String(v))) dateVal = String(v).slice(0, 10);
+                    else {
+                        const d = new Date(v);
+                        if (!isNaN(d.getTime())) dateVal = d.toISOString().slice(0, 10);
+                    }
+                }
+                input = `<span class="type14-wrap" style="display:flex; align-items:center; gap:10px; flex:1 1 0; min-width:0;">
+                    <label class="toggle-switch"><input type="checkbox" class="type14-toggle" data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>
+                    <span class="type14-alpha-wrap" style="${alphaDisplay} flex:0 1 auto; min-width:0;"><input type="date" class="type14-alpha" data-type22="1" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(dateVal)}"></span>
                 </span>`;
             } else if (tipo === 2) {
                 // Alfanumerico -> valore2

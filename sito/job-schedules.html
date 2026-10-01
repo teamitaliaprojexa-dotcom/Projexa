@@ -272,9 +272,30 @@
         }
 
         function render() {
-            $('schedulerBanner').innerHTML = dati.schedulerAttivo
-                ? `<div class="banner info"><i class="fas fa-circle-check"></i><div>Lo schedulatore di questo server è <strong>attivo</strong>: controlla le schedulazioni ogni minuto.</div></div>`
-                : `<div class="banner warn"><i class="fas fa-triangle-exclamation"></i><div>In questo backend lo schedulatore è <strong>spento</strong> (JOB_SCHEDULER_ENABLED non è true). È normale in locale: i job partono solo dal server di produzione. Le modifiche fatte qui valgono comunque, perché la tabella è la stessa.</div></div>`;
+            // Interruttore generale (nel database, vale anche se la pagina è aperta in locale).
+            const pulsante = dati.schedulerSospeso
+                ? `<button type="button" class="btn btn-sm btn-primary" id="schedToggle" data-attivo="1"><i class="fas fa-play"></i> Riattiva schedulatore</button>`
+                : `<button type="button" class="btn btn-sm btn-danger" id="schedToggle" data-attivo="0"><i class="fas fa-pause"></i> Sospendi schedulatore</button>`;
+            const sospeso = dati.schedulerSospeso
+                ? `<div class="banner warn"><i class="fas fa-circle-pause"></i><div style="flex: 1;">Schedulatore <strong>SOSPESO</strong>: nessun job parte, nemmeno con «Esegui ora». Alla riattivazione le prossime esecuzioni vengono ricalcolate da quel momento (quelle perse non si recuperano).</div>${pulsante}</div>`
+                : '';
+            $('schedulerBanner').innerHTML = sospeso + (dati.schedulerAttivo
+                ? `<div class="banner info"><i class="fas fa-circle-check"></i><div style="flex: 1;">Lo schedulatore di questo server è <strong>attivo</strong>${dati.schedulerSospeso ? ', ma sospeso dall’interruttore qui sopra' : ': controlla le schedulazioni ogni minuto'}.</div>${dati.schedulerSospeso ? '' : pulsante}</div>`
+                : `<div class="banner warn"><i class="fas fa-triangle-exclamation"></i><div>In questo backend lo schedulatore è <strong>spento</strong> (JOB_SCHEDULER_ENABLED non è true). È normale in locale: i job partono solo dal server di produzione. Le modifiche fatte qui valgono comunque, perché la tabella è la stessa.</div>${dati.schedulerSospeso ? '' : pulsante}</div>`);
+            const btnSched = $('schedToggle');
+            if (btnSched) btnSched.addEventListener('click', async () => {
+                const attiva = btnSched.dataset.attivo === '1';
+                if (!confirm(attiva
+                    ? 'Riattivare lo schedulatore? Le prossime esecuzioni vengono ricalcolate da adesso.'
+                    : 'Sospendere lo schedulatore? Nessun job partirà (compresi backup notturno e copia su Neon) finché non lo riattivi.')) return;
+                btnSched.disabled = true;
+                try {
+                    await chiama('PUT', '/scheduler/stato', { attivo: attiva });
+                } catch (err) {
+                    alert(err.message);
+                }
+                carica();
+            });
 
             const righe = dati.schedulazioni || [];
             if (!righe.length) {
@@ -296,6 +317,8 @@
                         && Date.now() - new Date(s.prossima_esecuzione).getTime() > RITARDO_MIN * 60000;
                     const prossima = !s.attivo
                         ? '<span class="badge b-off">DISATTIVATA</span>'
+                        : dati.schedulerSospeso
+                            ? '<span class="badge b-off"><i class="fas fa-circle-pause"></i> SOSPESA</span><div class="small">schedulatore sospeso</div>'
                         : inRitardo
                             ? `<span class="badge b-late"><i class="fas fa-triangle-exclamation"></i> IN RITARDO</span>
                                <div class="small">prevista ${esc(dataOra(s.prossima_esecuzione))}</div>

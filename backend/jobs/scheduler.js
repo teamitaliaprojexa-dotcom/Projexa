@@ -205,10 +205,31 @@ async function esegui(riga) {
     `${errore ? ` - ${errore}` : ''}; prossima ${prossima ? prossima.toISOString() : 'nessuna'}`);
 }
 
+// Interruttore generale (tabella job_scheduler_stato, pulsante «Sospendi» della pagina
+// Schedulazioni): false = nessun job parte. Tabella assente = non sospeso.
+export async function schedulerSospeso() {
+  try {
+    const r = await db.query('SELECT attivo FROM job_scheduler_stato WHERE id = 1');
+    return r.rows.length > 0 && r.rows[0].attivo === false;
+  } catch (e) {
+    if (e.code === '42P01') return false;
+    throw e;
+  }
+}
+
+let sospensioneSegnalata = false;
+
 async function giro() {
   if (giroInCorso) return; // un job lungo non fa partire giri sovrapposti
   giroInCorso = true;
   try {
+    if (await schedulerSospeso()) {
+      if (!sospensioneSegnalata) console.log('[SCHEDULER] Sospeso dalla pagina Schedulazioni: nessun job viene eseguito');
+      sospensioneSegnalata = true;
+      return;
+    }
+    if (sospensioneSegnalata) console.log('[SCHEDULER] Riattivato');
+    sospensioneSegnalata = false;
     await impostaProssimeMancanti();
     for (let riga = await prenotaProssima(); riga; riga = await prenotaProssima()) {
       await esegui(riga);

@@ -11,7 +11,7 @@ import db from '../config/database.js';
 import authDb from '../config/authDatabase.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireProjexaAdmin } from './vm-monitor.js';
-import { calcolaProssima, NOMI_JOB, INFO_JOB, schedulerAttivo } from '../jobs/scheduler.js';
+import { calcolaProssima, NOMI_JOB, INFO_JOB, schedulerAttivo, schedulerSospeso } from '../jobs/scheduler.js';
 
 const router = express.Router();
 router.use(requireAuth, requireProjexaAdmin);
@@ -153,6 +153,8 @@ router.get('/', async (req, res) => {
       utenti: await utentiDeiTenant(),
       // Stato dello schedulatore NEL BACKEND CHE RISPONDE: in locale è di norma spento.
       schedulerAttivo: schedulerAttivo(),
+      // Interruttore generale (job_scheduler_stato): vale per tutti i server, è nel database.
+      schedulerSospeso: await schedulerSospeso(),
       adesso: new Date().toISOString()
     });
   } catch (e) {
@@ -218,6 +220,40 @@ router.put('/:id', async (req, res) => {
     res.json({ ok: true, prossima_esecuzione: prossima });
   } catch (e) {
     res.status(e.statusCode || (e.code === '23514' ? 400 : 500)).json({ error: e.message });
+  }
+});
+
+// Interruttore generale «Sospendi / Riattiva» (tabella job_scheduler_stato). Alla
+// riattivazione le prossime esecuzioni si ricalcolano da adesso: le esecuzioni perse durante
+// la sospensione non vengono recuperate tutte insieme.
+router.put('/scheduler/stato', async (req, res) => {
+  const attivo = !!(req.body && req.body.attivo);
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO job_scheduler_stato (id, attivo, modificato_il, modificato_da) VALUES (1, $1, now(), $2)
+       ON CONFLICT (id) DO UPDATE SET attivo = EXCLUDED.attivo, modificato_il = now(), modificato_da = EXCLUDED.modificato_da`,
+      [attivo, req.user.user_id || null]
+    );
+    if (attivo) {
+      await client.query('UPDATE job_schedules SET prossima_esecuzione = NULL, updated_at = now() WHERE attivo AND in_esecuzione_dal IS NULL');
+    }
+    await client.query('COMMIT');
+    if (attivo) {
+      for (const r of (await db.query('SELECT id FROM job_schedules WHERE attivo AND prossima_esecuzione IS NULL')).rows) {
+        await ricalcolaProssima(r.id);
+      }
+    }
+    console.log(`[SCHEDULER] ${attivo ? 'Riattivato' : 'Sospeso'} dalla pagina Schedulazioni (utente ${req.user.user_id})`);
+    res.json({ ok: true, attivo });
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    res.status(e.code === '42P01' ? 503 : 500).json({
+      error: e.code === '42P01' ? 'Tabella job_scheduler_stato assente: eseguire la parte finale di Supporto/CreaDB/job_schedules.sql' : e.message
+    });
+  } finally {
+    client.release();
   }
 });
 
