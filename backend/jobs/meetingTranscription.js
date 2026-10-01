@@ -800,6 +800,12 @@ let workerRunning = false;
 const busyUrls = new Set();   // servizi Whisper occupati
 const inflight = new Map();   // id blocco -> promise della trascrizione
 
+// Cosa sta lavorando DAVVERO questo server adesso (pagina Schedulazioni › Trascrizioni e recap):
+// un blocco "transcribing" che non è qui è appeso (es. server riavviato a metà).
+export function statoWorker() {
+  return { inLavorazione: new Set([...inflight.keys()].map(String)), recap: new Set(recapRunning) };
+}
+
 // All'inizio di una registrazione verifica i servizi Whisper, così risultano pronti quando
 // arriva il primo blocco. Usa lo stesso controllo della coda (urlReady), quindi non ripete
 // la richiesta se un servizio risulta già pronto o è in corso di verifica.

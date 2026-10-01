@@ -12,6 +12,9 @@ import authDb from '../config/authDatabase.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireProjexaAdmin } from './vm-monitor.js';
 import { calcolaProssima, NOMI_JOB, INFO_JOB, schedulerAttivo, schedulerSospeso } from '../jobs/scheduler.js';
+import { execFile } from 'child_process';
+import { statoWorker, kickTranscriptionWorker, enqueueFinalize } from '../jobs/meetingTranscription.js';
+import { whisperUrls, whisperCppUrls } from './ai.js';
 
 const router = express.Router();
 router.use(requireAuth, requireProjexaAdmin);
@@ -290,6 +293,176 @@ router.delete('/:id', async (req, res) => {
     if (!UUID.test(req.params.id)) return res.status(400).json({ error: 'Id non valido' });
     const r = await db.query('DELETE FROM job_schedules WHERE id = $1', [req.params.id]);
     if (!r.rowCount) return res.status(404).json({ error: 'Schedulazione non trovata' });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================================
+// TRASCRIZIONI E RECAP (coda rec_meeting_chunks, jobs/meetingTranscription.js)
+// ----------------------------------------------------------------------------
+// Non sono job a orario ma una coda che il server lavora di continuo: qui si vedono lo
+// stato dei servizi (Whisper, whisper.cpp, Ollama) e le riunioni in coda, con le azioni
+// per intervenire se qualcosa si blocca:
+//   - sblocca:  i blocchi "in trascrizione" che questo server NON sta lavorando tornano in
+//               coda subito (invece di aspettare il recupero automatico dopo 20 minuti);
+//   - riprova:  i blocchi in attesa di un nuovo tentativo ripartono adesso;
+//   - annulla:  la riunione esce dalla coda (l'audio non ancora trascritto si perde; la
+//               trascrizione già scritta resta);
+//   - recap:    rilancia il recap della riunione;
+//   - riavvia:  riavvia uno dei servizi della VM (solo quelli dell'elenco).
+// ============================================================================
+const MIN_APPESO = 10; // un blocco richiede 1-2 minuti: oltre 10 minuti "in trascrizione" è sospetto
+
+// Servizi della VM legati a trascrizione e recap (gli unici riavviabili da qui).
+function unitaServizi() {
+  const units = [];
+  for (const u of whisperUrls()) {
+    const port = /:(\d+)$/.exec(u);
+    if (port && /127\.0\.0\.1|localhost/.test(u)) units.push({ unit: `projexa-whisper@${port[1]}`, label: `Whisper Background (${port[1]})` });
+  }
+  if (whisperCppUrls().length) units.push({ unit: 'projexa-whisper-cpp', label: 'Whisper.cpp (Background-Veloce)' });
+  units.push({ unit: 'ollama', label: 'Ollama (Recap Projexa lento)' });
+  return units;
+}
+
+function statoUnita(units) {
+  if (process.platform !== 'linux' || !units.length) return Promise.resolve(units.map((u) => ({ ...u, state: 'n.d.' })));
+  return new Promise((resolve) => {
+    execFile('systemctl', ['is-active', ...units.map((u) => u.unit)], { timeout: 5000 }, (err, stdout) => {
+      const lines = String(stdout || '').trim().split('\n');
+      resolve(units.map((u, i) => ({ ...u, state: (lines[i] || 'unknown').trim() })));
+    });
+  });
+}
+
+router.get('/servizi', async (req, res) => {
+  try {
+    const servizi = await statoUnita(unitaServizi());
+    const { inLavorazione, recap } = statoWorker();
+    let righe = [];
+    try {
+      righe = (await db.query(
+        `SELECT c.id, c.tenant_id, c.user_id, c.id_calendar, c.kind, c.state, c.offset_sec, c.attempts,
+                c.last_error, c.next_try_at, c.created_at
+           FROM rec_meeting_chunks c
+          ORDER BY c.seq`
+      )).rows;
+    } catch (e) {
+      if (e.code !== '42P01') throw e; // tabella assente: nessuna coda
+    }
+    // Una riga per riunione (tenant + utente + id_calendar)
+    const sessioni = new Map();
+    const ora = Date.now();
+    for (const r of righe) {
+      const key = `${r.tenant_id}|${r.user_id}|${r.id_calendar}`;
+      if (!sessioni.has(key)) {
+        sessioni.set(key, {
+          tenant_id: r.tenant_id, user_id: r.user_id, id_calendar: r.id_calendar,
+          in_coda: 0, in_trascrizione: 0, trascritti: 0, appesi: 0, in_attesa_riprova: 0,
+          finalize: false, tentativi: 0, ultimo_errore: null, dal: r.created_at, ultimo_secondo: 0
+        });
+      }
+      const s = sessioni.get(key);
+      if (r.kind === 'finalize') { s.finalize = true; }
+      else if (r.state === 'done') s.trascritti++;
+      else if (r.state === 'transcribing') {
+        s.in_trascrizione++;
+        const lavorato = inLavorazione.has(String(r.id));
+        if (!lavorato && ora - new Date(r.next_try_at).getTime() > MIN_APPESO * 60000) s.appesi++;
+      } else {
+        s.in_coda++;
+        if (new Date(r.next_try_at).getTime() > ora) s.in_attesa_riprova++;
+      }
+      s.tentativi = Math.max(s.tentativi, Number(r.attempts) || 0);
+      if (r.last_error) s.ultimo_errore = String(r.last_error).slice(0, 300);
+      s.ultimo_secondo = Math.max(s.ultimo_secondo, Number(r.offset_sec) || 0);
+      if (new Date(r.created_at) < new Date(s.dal)) s.dal = r.created_at;
+    }
+    const elenco = [...sessioni.values()];
+    // Oggetto della riunione e nome dell'utente (oggetto cifrato: lo decifra il pool)
+    if (elenco.length) {
+      const m = await db.query(
+        `SELECT m.tenant_id, m.user_id, m.id_calendar, m.oggetto, u.name, u.cognome
+           FROM rec_meeting m LEFT JOIN users u ON u.id = m.user_id
+          WHERE (m.tenant_id, m.user_id, m.id_calendar) IN (
+                SELECT x.t::uuid, x.u::uuid, x.c FROM jsonb_to_recordset($1::jsonb) AS x(t text, u text, c text))`,
+        [JSON.stringify(elenco.map((e) => ({ t: e.tenant_id, u: e.user_id, c: e.id_calendar })))]
+      );
+      const info = new Map(m.rows.map((x) => [`${x.tenant_id}|${x.user_id}|${x.id_calendar}`, x]));
+      for (const e of elenco) {
+        const x = info.get(`${e.tenant_id}|${e.user_id}|${e.id_calendar}`) || {};
+        e.oggetto = x.oggetto || null;
+        e.utente = [x.name, x.cognome].filter(Boolean).join(' ') || null;
+        e.recap_in_corso = recap.has(`${e.tenant_id}|${e.user_id}|${e.id_calendar}`);
+      }
+    }
+    res.json({ servizi, sessioni: elenco, minAppeso: MIN_APPESO, adesso: new Date().toISOString() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Riunione su cui agire: sempre dai tre campi della chiave (validati).
+function chiaveSessione(body) {
+  const b = body || {};
+  const t = String(b.tenant_id || ''), u = String(b.user_id || ''), c = String(b.id_calendar || '').trim();
+  if (!UUID.test(t) || !UUID.test(u) || !c) throw erroreValidazione('Riunione non valida');
+  return [t, u, c];
+}
+
+router.post('/servizi/sessione/:azione', async (req, res) => {
+  try {
+    const [t, u, c] = chiaveSessione(req.body);
+    const azione = req.params.azione;
+    let n = 0;
+    if (azione === 'sblocca') {
+      const { inLavorazione } = statoWorker();
+      n = (await db.query(
+        `UPDATE rec_meeting_chunks SET state = 'pending', next_try_at = now()
+          WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND state = 'transcribing'
+            AND NOT (id::text = ANY($4::text[]))`,
+        [t, u, c, [...inLavorazione]]
+      )).rowCount;
+    } else if (azione === 'riprova') {
+      n = (await db.query(
+        `UPDATE rec_meeting_chunks SET next_try_at = now()
+          WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND state <> 'transcribing'`,
+        [t, u, c]
+      )).rowCount;
+    } else if (azione === 'annulla') {
+      n = (await db.query(
+        'DELETE FROM rec_meeting_chunks WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3',
+        [t, u, c]
+      )).rowCount;
+    } else if (azione === 'recap') {
+      await enqueueFinalize({ tenant_id: t, user_id: u, email: null }, c);
+      n = 1;
+    } else {
+      return res.status(400).json({ error: 'Azione non prevista' });
+    }
+    kickTranscriptionWorker();
+    console.log(`[SERVIZI] ${azione} su ${c} (utente ${u}): ${n} righe - da ${req.user.user_id}`);
+    res.json({ ok: true, righe: n });
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+router.post('/servizi/riavvia', async (req, res) => {
+  try {
+    const unit = String((req.body && req.body.unit) || '');
+    if (!unitaServizi().some((x) => x.unit === unit)) return res.status(400).json({ error: 'Servizio non previsto' });
+    if (process.platform !== 'linux') return res.status(501).json({ error: 'Disponibile solo sul server (VM)' });
+    await new Promise((resolve, reject) => {
+      execFile('sudo', ['-n', 'systemctl', 'restart', unit], { timeout: 60000 }, (err, stdout, stderr) => {
+        if (err) reject(new Error(String(stderr || err.message).trim() || 'riavvio non riuscito'));
+        else resolve();
+      });
+    });
+    console.log(`[SERVIZI] riavviato ${unit} da ${req.user.user_id}`);
+    kickTranscriptionWorker();
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });

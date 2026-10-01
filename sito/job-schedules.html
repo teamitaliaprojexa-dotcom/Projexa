@@ -90,6 +90,13 @@
         .nums b { color: var(--ink); }
         pre.json { background: #F9FAFB; border-radius: 6px; padding: 0.6rem; font-size: 0.75rem; overflow: auto; max-height: 300px; }
         details summary { cursor: pointer; font-size: 0.8rem; color: var(--muted); margin-top: 0.5rem; }
+        /* Trascrizioni e recap */
+        .sec-title { font-size: 1.1rem; color: var(--ink); margin: 2rem 0 0.2rem; display: flex; align-items: center; gap: 0.5rem; }
+        .sec-title i { color: var(--primary); }
+        .svc-list { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 0.9rem; }
+        .svc { background: var(--surface); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 0.55rem 0.75rem; display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; }
+        .svc .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+        .svc .dot.on { background: #10B981; } .svc .dot.off { background: #DC2626; } .svc .dot.nd { background: #9CA3AF; }
         @media (max-width: 560px) { .form-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
@@ -126,6 +133,27 @@
                             </tr>
                         </thead>
                         <tbody id="rows"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Trascrizioni e recap: coda sempre attiva sul server (non a orario) -->
+            <h2 class="sec-title"><i class="fas fa-microphone-lines"></i> Trascrizioni e recap</h2>
+            <div class="sub" style="margin-bottom: 0.75rem;">Coda delle riunioni registrate (rec_meeting_chunks) e servizi della VM che la lavorano. Si aggiorna con la pagina.</div>
+            <div class="svc-list" id="svcList"></div>
+            <div class="card">
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Riunione</th>
+                                <th>Blocchi</th>
+                                <th>Stato</th>
+                                <th>In coda dal</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="sessRows"><tr><td colspan="5"><div class="empty">Caricamento…</div></td></tr></tbody>
                     </table>
                 </div>
             </div>
@@ -266,6 +294,7 @@
                 $('deniedCard').style.display = 'none';
                 $('content').style.display = '';
                 render();
+                caricaServizi();
             } catch (e) {
                 $('updated').textContent = 'Errore di connessione: ' + e.message;
             }
@@ -538,6 +567,121 @@
         document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', chiudi));
         document.querySelectorAll('.overlay').forEach((o) => o.addEventListener('click', (e) => { if (e.target === o) chiudi(); }));
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') chiudi(); });
+
+        // ------------------------------------------------------------------
+        // TRASCRIZIONI E RECAP (coda sempre attiva: GET /job-schedules/servizi)
+        // ------------------------------------------------------------------
+        let servizi = null;
+
+        async function caricaServizi() {
+            try {
+                const r = await fetch(`${API_URL}/job-schedules/servizi`, { headers: headers() });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                servizi = d;
+                renderServizi();
+            } catch (e) {
+                $('sessRows').innerHTML = `<tr><td colspan="5"><div class="empty">Impossibile leggere la coda: ${esc(e.message)}</div></td></tr>`;
+            }
+        }
+
+        function renderServizi() {
+            const svc = servizi.servizi || [];
+            $('svcList').innerHTML = svc.map(s => {
+                const on = s.state === 'active';
+                const nd = s.state === 'n.d.';
+                return `<div class="svc"><span class="dot ${nd ? 'nd' : on ? 'on' : 'off'}"></span>
+                    <div><div class="strong">${esc(s.label)}</div><div class="small">${esc(nd ? 'non disponibile qui (solo sulla VM)' : on ? 'attivo' : s.state)}</div></div>
+                    ${nd ? '' : `<button type="button" class="btn btn-sm" data-svc-restart="${esc(s.unit)}" data-svc-label="${esc(s.label)}" title="Riavvia il servizio"><i class="fas fa-rotate-right"></i></button>`}
+                </div>`;
+            }).join('');
+
+            const sess = servizi.sessioni || [];
+            if (!sess.length) {
+                $('sessRows').innerHTML = `<tr><td colspan="5"><div class="empty"><i class="fas fa-circle-check" style="color:#10B981;"></i> Nessuna riunione in coda: trascrizioni e recap sono tutti completati.</div></td></tr>`;
+                return;
+            }
+            $('sessRows').innerHTML = sess.map(s => {
+                const tot = s.in_coda + s.in_trascrizione + s.trascritti;
+                let stato;
+                if (s.appesi) {
+                    stato = `<span class="badge b-late"><i class="fas fa-triangle-exclamation"></i> BLOCCATA</span>
+                        <div class="small" style="color: var(--bad);">${s.appesi} blocc${s.appesi === 1 ? 'o' : 'hi'} fermo da oltre ${servizi.minAppeso} minuti (es. server riavviato): usa «Sblocca».</div>`;
+                } else if (s.in_attesa_riprova) {
+                    stato = `<span class="badge b-errori">IN ATTESA DI RIPROVA</span><div class="small">tentativi: ${s.tentativi}</div>`;
+                } else if (s.in_trascrizione) {
+                    stato = '<span class="badge b-run"><i class="fas fa-spinner fa-spin"></i> IN TRASCRIZIONE</span>';
+                } else if (tot === 0 && s.finalize) {
+                    stato = s.recap_in_corso
+                        ? '<span class="badge b-run"><i class="fas fa-spinner fa-spin"></i> RECAP IN CORSO</span>'
+                        : `<span class="badge ${s.tentativi ? 'b-errori' : 'b-off'}">RECAP IN ATTESA</span>${s.tentativi ? `<div class="small">tentativi: ${s.tentativi}</div>` : ''}`;
+                } else if (s.trascritti && !s.in_coda) {
+                    stato = '<span class="badge b-run">IN ORDINAMENTO</span><div class="small">blocchi pronti, in attesa di quelli precedenti</div>';
+                } else {
+                    stato = '<span class="badge b-off">IN CODA</span>';
+                }
+                const errore = s.ultimo_errore ? `<div class="small err-lines">${esc(s.ultimo_errore)}</div>` : '';
+                const chiave = `data-t="${esc(s.tenant_id)}" data-u="${esc(s.user_id)}" data-c="${esc(s.id_calendar)}"`;
+                return `<tr ${chiave}>
+                    <td><div class="strong">${esc(s.oggetto || '(riunione senza titolo)')}</div><div class="small">${esc(s.utente || s.user_id)}</div></td>
+                    <td><div>${tot} in coda</div><div class="small">${s.trascritti} trascritti · ${s.in_trascrizione} in lavorazione · ${s.in_coda} da fare${s.finalize ? ' · recap prenotato' : ''}</div></td>
+                    <td>${stato}${errore}</td>
+                    <td><div>${esc(dataOra(s.dal))}</div></td>
+                    <td><div class="actions">
+                        <button type="button" class="btn btn-sm" data-sess="sblocca" title="Rimette in coda subito i blocchi fermi «in trascrizione»" ${s.in_trascrizione ? '' : 'disabled'}><i class="fas fa-unlock"></i></button>
+                        <button type="button" class="btn btn-sm" data-sess="riprova" title="Riprova adesso i blocchi in attesa di un nuovo tentativo" ${s.in_attesa_riprova || (s.finalize && s.tentativi) ? '' : 'disabled'}><i class="fas fa-play"></i></button>
+                        <button type="button" class="btn btn-sm" data-sess="recap" title="Rilancia il recap della riunione"><i class="fas fa-file-pen"></i></button>
+                        <button type="button" class="btn btn-sm btn-danger" data-sess="annulla" title="Toglie la riunione dalla coda (l'audio non ancora trascritto si perde)"><i class="fas fa-ban"></i></button>
+                    </div></td>
+                </tr>`;
+            }).join('');
+        }
+
+        $('sessRows').addEventListener('click', async (e) => {
+            const b = e.target.closest('[data-sess]');
+            if (!b) return;
+            const tr = b.closest('tr');
+            const az = b.dataset.sess;
+            const msg = {
+                sblocca: 'Rimettere in coda subito i blocchi fermi «in trascrizione»? Fallo solo se la riunione risulta bloccata.',
+                riprova: 'Riprovare adesso i blocchi in attesa di un nuovo tentativo?',
+                recap: 'Rilanciare il recap di questa riunione? Il recap attuale verrà sostituito.',
+                annulla: 'Togliere questa riunione dalla coda?\nL’audio non ancora trascritto andrà PERSO (la trascrizione già scritta resta). Non si può annullare.'
+            }[az];
+            if (!confirm(msg)) return;
+            b.disabled = true;
+            try {
+                const r = await fetch(`${API_URL}/job-schedules/servizi/sessione/${az}`, {
+                    method: 'POST',
+                    headers: headers({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ tenant_id: tr.dataset.t, user_id: tr.dataset.u, id_calendar: tr.dataset.c })
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+            } catch (err) {
+                alert(err.message);
+            }
+            caricaServizi();
+        });
+
+        $('svcList').addEventListener('click', async (e) => {
+            const b = e.target.closest('[data-svc-restart]');
+            if (!b) return;
+            if (!confirm(`Riavviare «${b.dataset.svcLabel}»?\nPer qualche secondo il servizio non risponde: i blocchi in lavorazione su questo servizio vengono ripresi dalla coda.`)) return;
+            b.disabled = true;
+            try {
+                const r = await fetch(`${API_URL}/job-schedules/servizi/riavvia`, {
+                    method: 'POST',
+                    headers: headers({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ unit: b.dataset.svcRestart })
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+            } catch (err) {
+                alert(err.message);
+            }
+            caricaServizi();
+        });
 
         $('refreshBtn').addEventListener('click', carica);
         carica();
