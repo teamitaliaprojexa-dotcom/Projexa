@@ -601,6 +601,29 @@
         .pp-comp-row .pp-bar { flex: 1 1 0; }
         .pp-comp-row .pp-comp-val { font-size: 0.72rem; color: #6B7280; min-width: 2.6em; text-align: right; }
         .pp-fill-comp { background: #10B981; }
+        /* Campi sì/no (tipi 1, 14, 22): in modifica l'interruttore; in visualizzazione, se il
+           valore è vero, il flag verde check-ok.png al suo posto (falso: interruttore come prima). */
+        .bool-cell { display: inline-flex; align-items: center; flex: 0 0 auto; }
+        .bool-flag { display: none; height: 30px; width: auto; margin: -6px 0; filter: drop-shadow(0 2px 3px rgba(5,150,105,0.3)); }
+        .detail-view .bool-cell:has(input:checked) .toggle-switch { display: none; }
+        .detail-view .bool-cell:has(input:checked) .bool-flag { display: inline-block; }
+        /* Tendina a scelta multipla (tipo 18): pulsante con le voci scelte come etichette e
+           pannello con le caselle che si apre sotto. */
+        .ms-dd { position: relative; display: block; }
+        .ms-dd-btn { width: 100%; min-height: 38px; display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: #fff; cursor: pointer; font: inherit; text-align: left; transition: border-color 0.15s, box-shadow 0.15s; }
+        .ms-dd-btn:hover { border-color: #93C5FD; }
+        .ms-dd.open .ms-dd-btn { border-color: var(--primary); box-shadow: 0 0 0 3px #DBEAFE; }
+        .ms-dd-chips { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+        .ms-chip { display: inline-flex; align-items: center; background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; border-radius: 999px; padding: 0.08rem 0.6rem; font-size: 0.82rem; font-weight: 600; white-space: nowrap; }
+        .ms-ph { color: var(--text-muted); font-size: 0.9rem; }
+        .ms-dd-arrow { color: var(--text-muted); font-size: 0.8rem; transition: transform 0.2s; flex: 0 0 auto; }
+        .ms-dd.open .ms-dd-arrow { transform: rotate(180deg); }
+        .ms-dd-panel { display: none; position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 60; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 28px rgba(15,23,42,0.16); padding: 0.25rem 0.75rem; max-height: 260px; overflow-y: auto; }
+        .ms-dd.open .ms-dd-panel { display: block; }
+        .ms-dd-panel .multi9-opt { padding: 7px 2px; font-size: 0.92rem; }
+        .ms-dd-panel .multi9-opt:hover { color: var(--primary); }
+        .ms-dd-empty { display: block; padding: 0.6rem 0; color: var(--text-muted); font-size: 0.85rem; }
+        .ms-chips-view { display: flex; flex-wrap: wrap; gap: 0.3rem; }
         /* Multi-selezione (tipo 9): lista verticale di checkbox con separatori */
         .multi9-opts { display: flex; flex-direction: column; }
         .multi9-opt { display: flex; align-items: center; gap: 12px; padding: 9px 2px; border-bottom: 1px solid #EEF2F7; font-size: 0.95rem; cursor: pointer; }
@@ -610,6 +633,75 @@
         .proj-stat { flex: 0 0 auto; align-self: center; min-width: 120px; background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 14px; padding: 0.8rem 1.1rem; }
         .proj-stat-label { color: #9CA3AF; font-size: 0.85rem; margin-bottom: 0.25rem; }
         .proj-stat-value { color: #1F2937; font-size: 1.6rem; font-weight: 700; line-height: 1; }
+        /* Pulsante Check List del progetto (accanto a Sottotask): card con l'immagine checklist.png
+           (riquadro con la spunta verde che esce in alto a destra) e la scritta sotto.
+           Stati (aggiornaFlagCheckList): da iniziare = immagine in grigio; in corso = immagine
+           verde e "fatte/totali" sotto la scritta; completata = immagine verde e card verde. */
+        .proj-ck { position: relative; flex: 0 0 auto; align-self: center; width: 120px; height: 88px; border: none; border-radius: 16px; cursor: pointer;
+            background: linear-gradient(145deg, #F0FDF4 0%, #ECFDF5 55%, #EEF2FF 100%); color: #14532D; font: inherit;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.3rem;
+            box-shadow: 0 4px 14px rgba(5,150,105,0.16), inset 0 0 0 1px rgba(5,150,105,0.14); transition: transform 0.18s, box-shadow 0.18s, background 0.2s; }
+        .proj-ck:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(5,150,105,0.26), inset 0 0 0 1px rgba(5,150,105,0.22); }
+        .proj-ck:hover .proj-ck-img { transform: scale(1.06) rotate(-3deg); }
+        .proj-ck:focus-visible { outline: 3px solid #86EFAC; outline-offset: 2px; }
+        .proj-ck-img { width: 50px; height: auto; display: block; transition: transform 0.2s, filter 0.2s, opacity 0.2s; filter: drop-shadow(0 3px 5px rgba(5,150,105,0.3)); }
+        .proj-ck-lbl { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.02em; line-height: 1.1; }
+        .proj-ck-cnt { font-size: 0.68rem; font-weight: 700; color: #B45309; background: #FEF3C7; border-radius: 999px; padding: 0.05rem 0.45rem; display: none; }
+        .proj-ck.da-iniziare .proj-ck-img { filter: grayscale(1); opacity: 0.55; }
+        .proj-ck.in-corso .proj-ck-cnt { display: inline-block; }
+        .proj-ck.fatta { background: linear-gradient(145deg, #DCFCE7 0%, #BBF7D0 100%); box-shadow: 0 6px 18px rgba(5,150,105,0.3), inset 0 0 0 1px rgba(5,150,105,0.3); }
+        .proj-ck.fatta .proj-ck-img { animation: projCkPop 2.6s ease-in-out infinite; }
+        @keyframes projCkPop { 0%, 85%, 100% { transform: scale(1); } 90% { transform: scale(1.12); } }
+        /* Finestra della check list del progetto: semplice, solo testo; attività rientrate */
+        .ckp-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.35); display: none; align-items: center; justify-content: center; z-index: 2500; padding: 1rem; }
+        .ckp-overlay.open { display: flex; }
+        .ckp-box { background: #fff; border-radius: 14px; width: min(720px, calc(92vw * var(--ui-zoom-inv, 1))); height: min(191vh, calc(96vh * var(--ui-zoom-inv, 1))); max-height: calc(96vh * var(--ui-zoom-inv, 1)); display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(15,23,42,0.25); }
+        .ckp-head { display: flex; align-items: center; gap: 0.75rem; padding: 0.9rem 1.2rem; border-bottom: 1px solid #E5E7EB; }
+        .ckp-head img { width: 30px; height: auto; }
+        .ckp-head h3 { margin: 0; font-size: 1.05rem; flex: 1; color: #111827; }
+        .ckp-head small { display: block; font-size: 0.78rem; color: #6B7280; font-weight: 500; }
+        .ckp-close { background: none; border: none; font-size: 1.4rem; line-height: 1; color: #6B7280; cursor: pointer; }
+        .ckp-agg { display: inline-flex; align-items: center; gap: 0.4rem; border: 1px solid #BBF7D0; background: #F0FDF4; color: #15803D; border-radius: 9px; padding: 0.4rem 0.8rem; font: inherit; font-size: 0.82rem; font-weight: 700; cursor: pointer; transition: background 0.15s; }
+        .ckp-agg:hover { background: #DCFCE7; }
+        .ckp-agg:disabled { opacity: 0.6; cursor: wait; }
+        .ckp-agg:disabled i { animation: fa-spin 1s linear infinite; }
+        .ckp-body { overflow-y: auto; padding: 0.5rem 1.2rem 1rem; }
+        .ckp-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .ckp-table th { text-align: left; font-size: 0.72rem; color: #6B7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.7rem 0.4rem 0.55rem; border-bottom: 1px solid #E5E7EB; position: sticky; top: 0; background: #fff; z-index: 2; box-shadow: 0 1px 0 #E5E7EB; }
+        .ckp-table td { padding: 0.45rem 0.4rem; border-bottom: 1px solid #F3F4F6; vertical-align: middle; color: #1F2937; }
+        .ckp-table th.c, .ckp-table td.c { text-align: center; width: 70px; }
+        .ckp-table th.d, .ckp-table td.d { width: 150px; white-space: nowrap; color: #4B5563; }
+        /* Data senza contorno: sembra testo; il bordo compare solo passando o cliccando per modificarla */
+        .ckp-date { border: 1px solid transparent; border-radius: 8px; padding: 0.25rem 0.4rem; font: inherit; font-size: 0.85rem; color: #1F2937; background: transparent; width: 100%; box-sizing: border-box; cursor: pointer; }
+        .ckp-date:hover { background: #F9FAFB; }
+        .ckp-date:focus { outline: none; border-color: #16A34A; background: #fff; box-shadow: 0 0 0 3px #DCFCE7; }
+        .ckp-table tr.padre td.desc { font-weight: 700; }
+        .ckp-table tr.figlio td.desc { padding-left: 1.8rem; }
+        .ckp-sposta { display: inline-flex; flex-direction: column; vertical-align: middle; margin-right: 0.45rem; gap: 1px; }
+        .ckp-sposta button { border: 1px solid #E5E7EB; background: #F9FAFB; color: #6B7280; width: 20px; height: 14px; border-radius: 4px; font-size: 0.55rem; line-height: 1; cursor: pointer; display: grid; place-items: center; padding: 0; }
+        .ckp-sposta button:hover:not(:disabled) { background: #EFF6FF; color: #2563EB; border-color: #BFDBFE; }
+        .ckp-sposta button:disabled { opacity: 0.3; cursor: default; }
+        .ckp-desc-wrap { display: inline-flex; align-items: center; gap: 0.45rem; overflow: visible; }
+        /* Flag della voce fatta: immagine check-ok.png, più alta della riga e libera di uscirne
+           (margini negativi: l'altezza della riga non cambia). */
+        .ckp-ok { height: 38px; width: auto; flex: 0 0 auto; margin: -14px 0 -10px 0.1rem; position: relative; z-index: 1;
+            filter: drop-shadow(0 2px 3px rgba(5,150,105,0.35)); transform-origin: 30% 80%; cursor: pointer; transition: transform 0.15s; }
+        .ckp-ok:hover { transform: scale(1.08); }
+        .ckp-ok.ro { cursor: default; }
+        .ckp-ok.ro:hover { transform: none; }
+        .ckp-ok.pop { animation: ckpPop 0.45s cubic-bezier(.34,1.56,.64,1); }
+        @keyframes ckpPop { 0% { transform: scale(0) rotate(-20deg); opacity: 0; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
+        .ckp-table input[type="checkbox"] { width: 17px; height: 17px; cursor: pointer; accent-color: #16A34A; }
+        .ckp-table input[type="checkbox"]:disabled { cursor: default; }
+        /* Niente caselle: lo stato si cambia con le icone accanto alla descrizione (X rossa =
+           da fare, flag verde = fatta). La casella resta nascosta e porta il salvataggio. */
+        .ckp-table td.c { display: none; }
+        .ckp-ko { height: 18px; width: auto; flex: 0 0 auto; cursor: pointer; padding: 3px; border-radius: 6px; transition: transform 0.15s, background 0.15s; }
+        .ckp-ko:hover { transform: scale(1.15); background: #FEF2F2; }
+        .ckp-ko.ro { cursor: default; }
+        .ckp-ko.ro:hover { transform: none; background: transparent; }
+        .ckp-empty { padding: 2rem 0.5rem; text-align: center; color: #6B7280; }
+        .ckp-foot { padding: 0.6rem 1.2rem; border-top: 1px solid #E5E7EB; font-size: 0.8rem; color: #6B7280; }
         .drag-handle { cursor: grab; }
         .drag-handle:active { cursor: grabbing; }
         /* Evidenzia in verde la label sotto il mouse quando è spostabile */
@@ -1474,6 +1566,107 @@
             color: white;
             border-color: var(--primary);
         }
+
+        /* CONFIGURATORE CHECK LIST (al posto della griglia di config_chek_list) */
+        .ckc { --ckc-primary: #4F46E5; --ckc-line: #E6EAF2; --ckc-ink2: #475569; font-size: 0.9rem; }
+        /* Barra azzurra del campo e riga tipologie/Salva restano fisse in alto scorrendo le fasi
+           (contenitore che scorre: #settingsDetailList). Il riquadro della griglia di norma ha
+           overflow hidden, che impedirebbe il position: sticky: per il configuratore no. */
+        .type11-grid-widget:has(> .ckc) { overflow: visible; }
+        .type11-grid-row:has(.ckc) .type11-bar { position: sticky; top: 0; z-index: 7; }
+        .ckc-top { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.9rem;
+            position: sticky; top: var(--ckc-sticky-top, 0px); z-index: 6; background: #fff; padding: 0.45rem 0; box-shadow: 0 8px 12px -10px rgba(15,23,42,0.25); }
+        .ckc-tabs { display: inline-flex; background: #E9ECF5; border-radius: 14px; padding: 4px; gap: 4px; flex-wrap: wrap; }
+        .ckc-tab { border: none; background: transparent; padding: 0.5rem 0.95rem; border-radius: 11px; font: inherit; font-weight: 600; font-size: 0.86rem; color: var(--ckc-ink2); cursor: pointer; display: inline-flex; align-items: center; gap: 0.45rem; }
+        .ckc-tab .n { background: rgba(15,23,42,0.08); border-radius: 999px; padding: 0.05rem 0.5rem; font-size: 0.72rem; }
+        .ckc-tab.on { background: #fff; color: var(--ckc-primary); box-shadow: 0 2px 8px rgba(15,23,42,0.08); }
+        .ckc-tab.on .n { background: #EEF2FF; color: var(--ckc-primary); }
+        .ckc-tab .dirty { width: 7px; height: 7px; border-radius: 50%; background: #F59E0B; }
+        .ckc-actions { display: flex; gap: 0.5rem; align-items: center; }
+        .ckc-right { display: flex; align-items: center; gap: 0.6rem; margin-left: auto; }
+        .ckc-info { position: relative; }
+        .ckc-info-btn { border: none; background: #EEF2FF; color: #4F46E5; width: 34px; height: 34px; border-radius: 50%; cursor: pointer; font-size: 1.05rem; display: grid; place-items: center; transition: background 0.15s; }
+        .ckc-info-btn:hover, .ckc-info.open .ckc-info-btn { background: #4F46E5; color: #fff; }
+        .ckc-info-pop { display: none; position: absolute; right: 0; top: calc(100% + 8px); width: 280px; background: #0F172A; color: #E2E8F0; border-radius: 12px; padding: 0.75rem 0.9rem; font-size: 0.84rem; line-height: 1.45; box-shadow: 0 12px 30px rgba(15,23,42,0.28); z-index: 50; gap: 0.6rem; }
+        .ckc-info-pop i { color: #FBBF24; margin-top: 0.15rem; }
+        .ckc-info-pop b { color: #fff; }
+        .ckc-info-pop::before { content: ''; position: absolute; top: -6px; right: 12px; width: 12px; height: 12px; background: #0F172A; transform: rotate(45deg); }
+        .ckc-info.open .ckc-info-pop { display: flex; }
+        .ckc-btn { border: none; border-radius: 11px; padding: 0.55rem 1rem; font: inherit; font-weight: 700; font-size: 0.85rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.45rem; }
+        .ckc-btn.primary { background: linear-gradient(135deg, #4F46E5, #6366F1); color: #fff; box-shadow: 0 4px 14px rgba(79,70,229,0.3); }
+        .ckc-btn.ghost { background: #F1F5F9; color: #0F172A; }
+        .ckc-btn.danger { background: #FEF2F2; color: #DC2626; }
+        .ckc-btn:disabled { opacity: 0.55; cursor: default; }
+        .ckc-phases { display: flex; flex-direction: column; gap: 0.5rem; }
+        .ckc-phase { --c: #7C3AED; background: #fff; border: 1px solid var(--ckc-line); border-radius: 18px; box-shadow: 0 1px 2px rgba(15,23,42,0.04); overflow: hidden; }
+        .ckc-phase.dragging { opacity: 0.45; }
+        .ckc-phase-head { display: flex; align-items: center; gap: 0.6rem; padding: 0.3rem 0.7rem; background: linear-gradient(90deg, color-mix(in srgb, var(--c) 9%, #fff), #fff 70%); border-bottom: 1px solid var(--ckc-line); }
+        .ckc-grip { color: #94A3B8; cursor: grab; padding: 0.3rem 0.35rem; border-radius: 8px; touch-action: none; user-select: none; }
+        .ckc-ghost { position: fixed; z-index: 4000; pointer-events: none; background: #0F172A; color: #fff; font-size: 0.82rem; font-weight: 600; padding: 0.4rem 0.75rem; border-radius: 10px; box-shadow: 0 10px 30px rgba(15,23,42,0.3); max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 0.45rem; }
+        .ckc-grip:hover { color: var(--ckc-ink2); background: #F1F5F9; }
+        .ckc-num { min-width: 26px; height: 26px; border-radius: 8px; font-size: 0.82rem; display: grid; place-items: center; font-weight: 800; color: #fff; background: var(--c); box-shadow: 0 4px 12px color-mix(in srgb, var(--c) 35%, transparent); }
+        .ckc-phase-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.5rem; }
+        .ckc-phase-title input, .ckc-phase-title .ro { width: 100%; border: 1px solid transparent; background: transparent; font: inherit; font-size: 0.92rem; font-weight: 700; color: #0F172A; padding: 0.15rem 0.4rem; border-radius: 7px; display: block; flex: 1; min-width: 0; }
+        .ckc-phase-title input:hover { border-color: var(--ckc-line); background: #fff; }
+        .ckc-phase-title input:focus { outline: none; border-color: #6366F1; background: #fff; box-shadow: 0 0 0 3px #E0E7FF; }
+        .ckc-meta { font-size: 0.74rem; color: var(--ckc-ink2); white-space: nowrap; display: inline-flex; align-items: center; gap: 0.4rem; }
+        .ckc-ibtn { border: none; background: transparent; width: 28px; height: 28px; border-radius: 10px; color: #94A3B8; cursor: pointer; display: grid; place-items: center; }
+        .ckc-ibtn:hover { background: #F1F5F9; color: #0F172A; }
+        .ckc-ibtn.danger:hover { background: #FEF2F2; color: #DC2626; }
+        .ckc-phase.closed .ckc-steps, .ckc-phase.closed .ckc-add-step { display: none; }
+        .ckc-phase.closed .ckc-collapse i { transform: rotate(-90deg); }
+        .ckc-steps { list-style: none; margin: 0; padding: 0.4rem 0.7rem 0.1rem 2.6rem; min-height: 8px; position: relative; }
+        .ckc-steps:empty { padding-top: 0; padding-bottom: 0; min-height: 6px; }
+        .ckc-steps:empty::before { display: none; }
+        .ckc-steps::before { content: ''; position: absolute; left: 1.5rem; top: 0.4rem; bottom: 1rem; width: 2px; background: color-mix(in srgb, var(--c) 22%, #fff); border-radius: 2px; }
+        .ckc-step { position: relative; display: flex; align-items: center; gap: 0.65rem; background: #FBFCFE; border: 1px solid var(--ckc-line); border-radius: 10px; padding: 0.22rem 0.55rem; margin-bottom: 0.3rem; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s, background 0.15s; }
+        .ckc-step::before { content: ''; position: absolute; left: -1.1rem; top: 50%; width: 0.85rem; height: 2px; background: color-mix(in srgb, var(--c) 22%, #fff); }
+        .ckc-step:hover { border-color: color-mix(in srgb, var(--c) 40%, var(--ckc-line)); background: #fff; box-shadow: 0 4px 14px rgba(15,23,42,0.06); }
+        .ckc-step.sel { border-color: #6366F1; box-shadow: 0 0 0 3px #E0E7FF; background: #fff; }
+        .ckc-step.dragging { opacity: 0.4; }
+        .ckc-step .desc { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ckc-chip { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.73rem; font-weight: 600; border-radius: 999px; padding: 0.2rem 0.6rem; white-space: nowrap; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+        .ckc-chip.ver { background: #ECFDF5; color: #059669; }
+        .ckc-chip.none { background: #F1F5F9; color: #94A3B8; }
+        .ckc-step .ckc-ibtn { width: 25px; height: 25px; border-radius: 8px; font-size: 0.85rem; }
+        .ckc-step .ckc-grip { padding: 0.2rem 0.35rem; }
+        .ckc-step .acts { display: flex; gap: 0.1rem; opacity: 0.55; transition: opacity 0.15s; }
+        .ckc-step:hover .acts, .ckc-step.sel .acts { opacity: 1; }
+        .ckc-ph { height: 31px; border: 2px dashed #A5B4FC; border-radius: 13px; background: #EEF2FF; margin-bottom: 0.5rem; list-style: none; }
+        .ckc-ph-phase { height: 40px; border: 2px dashed #A5B4FC; border-radius: 18px; background: #EEF2FF; }
+        .ckc-add-step { margin: 0.1rem 0.7rem 0.5rem 2.6rem; border: 1.5px dashed #CBD5E1; background: transparent; border-radius: 10px; padding: 0.3rem; width: calc(100% - 3.3rem); color: var(--ckc-ink2); font: inherit; font-size: 0.84rem; font-weight: 600; cursor: pointer; }
+        .ckc-add-step:hover { border-color: var(--c); color: var(--c); background: color-mix(in srgb, var(--c) 5%, #fff); }
+        .ckc-add-phase { margin-top: 0.85rem; width: 100%; border: 2px dashed #C7D2FE; background: #fff; border-radius: 18px; padding: 0.85rem; color: var(--ckc-primary); font: inherit; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
+        .ckc-add-phase:hover { background: #EEF2FF; }
+        .ckc-empty { background: #fff; border: 1px dashed #CBD5E1; border-radius: 18px; text-align: center; padding: 1.75rem; color: var(--ckc-ink2); }
+        .ckc-drawer { position: fixed; top: 0; right: 0; height: 100vh; width: min(420px, 100vw); background: #fff; box-shadow: -18px 0 50px rgba(15,23,42,0.18); transform: translateX(105%); transition: transform 0.25s ease; z-index: 3000; display: flex; flex-direction: column; font-size: 0.9rem; }
+        .ckc-drawer.open { transform: none; }
+        .ckc-scrim { position: fixed; inset: 0; background: rgba(15,23,42,0.25); opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 2990; }
+        .ckc-scrim.open { opacity: 1; pointer-events: auto; }
+        .ckc-dhead { padding: 1rem 1.2rem; border-bottom: 1px solid #E6EAF2; display: flex; align-items: center; gap: 0.75rem; }
+        .ckc-dhead h3 { margin: 0; font-size: 1rem; flex: 1; color: #0F172A; }
+        .ckc-dbody { padding: 1rem 1.2rem; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 0.95rem; }
+        .ckc-field label { display: block; font-size: 0.72rem; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.4rem; }
+        .ckc-field input, .ckc-field select, .ckc-field textarea { width: 100%; box-sizing: border-box; padding: 0.55rem 0.7rem; border: 1px solid #E6EAF2; border-radius: 11px; font: inherit; font-size: 0.9rem; background: #fff; color: #0F172A; }
+        .ckc-field input:focus, .ckc-field select:focus, .ckc-field textarea:focus { outline: none; border-color: #6366F1; box-shadow: 0 0 0 3px #E0E7FF; }
+        .ckc-field input[readonly], .ckc-field :disabled { background: #F8FAFC; color: #475569; }
+        .ckc-seg { display: flex; background: #F1F5F9; border-radius: 12px; padding: 4px; gap: 4px; }
+        .ckc-seg button { flex: 1; border: none; background: transparent; border-radius: 9px; padding: 0.5rem; font: inherit; font-size: 0.85rem; font-weight: 600; color: #475569; cursor: pointer; }
+        .ckc-seg button.on { background: #fff; color: #4F46E5; box-shadow: 0 1px 4px rgba(15,23,42,0.1); }
+        .ckc-seg button:disabled { cursor: default; }
+        .ckc-swrow { display: flex; align-items: center; justify-content: space-between; background: #F8FAFC; border: 1px solid #E6EAF2; border-radius: 12px; padding: 0.65rem 0.85rem; gap: 0.75rem; }
+        .ckc-swrow small { display: block; color: #475569; font-size: 0.76rem; }
+        .ckc-verbox { display: flex; flex-direction: column; gap: 0.85rem; border-left: 3px solid #C7D2FE; padding-left: 0.85rem; }
+        .ckc-hint { font-size: 0.75rem; color: #94A3B8; margin-top: 0.3rem; }
+        .ckc-preview { background: #0F172A; color: #E2E8F0; border-radius: 12px; padding: 0.65rem 0.85rem; font-size: 0.82rem; line-height: 1.5; }
+        .ckc-preview b { color: #A5B4FC; }
+        .ckc-dfoot { padding: 0.85rem 1.2rem; border-top: 1px solid #E6EAF2; display: flex; gap: 0.5rem; }
+        .ckc-dfoot .ckc-btn.danger { margin-left: auto; }
+
+        /* Elenco sopra la griglia tipo 11 che filtra le righe (es. Tipologia della Check List) */
+        .type11-top-filter { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.6rem; }
+        .type11-top-filter label { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 600; color: var(--dark); }
+        .type11-top-filter select { min-width: 200px; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 0.85rem; background: #fff; }
 
         /* CAMPANELLA DELLE NOTIFICHE (backend: routes/notifiche.js, jobs/notifiche.js) */
         .notif-wrap { position: relative; }
@@ -6320,7 +6513,8 @@
             /\/calendar\/meetings\/managed\/recap/,
             /\/auth\//, /\/ai\//, /\/chat/,
             /\/notifiche\//,  // campanella: segnare lette / eliminare non cambia i dati della dashboard
-            /\/gdpr\//        // richiesta di cancellazione (email al team)
+            /\/gdpr\//,       // richiesta di cancellazione (email al team)
+            /\/projects\/checklist/ // check list del progetto (spunte nella finestra)
         ];
         let autoRefreshTimer = null;
         (function intercettaSalvataggi() {
@@ -10724,8 +10918,276 @@
                 '</div></div>';
             const statCard = '<div class="proj-stat"><div class="proj-stat-label">Sottotask</div>' +
                 '<div class="proj-stat-value" id="projSubtasks">— / —</div></div>';
-            return '<div class="proj-widgets">' + progress + statCard + '</div>';
+            // Pulsante Check List del progetto: il flag parte "da iniziare" e lo aggiorna
+            // aggiornaFlagCheckList quando ci sono i dati della check list del progetto.
+            const checkListBtn = '<button type="button" class="proj-ck" id="projCheckListBtn" title="Check List del progetto">' +
+                '<img class="proj-ck-img" src="checklist.png" alt="">' +
+                '<span class="proj-ck-lbl">Check List</span><span class="proj-ck-cnt" id="projCheckListCnt"></span></button>';
+            // Stato del pulsante (fatte/totali) letto dopo che la testata è nella pagina.
+            setTimeout(() => ckpStatoProgetto(currentDetailArgument), 0);
+            return '<div class="proj-widgets">' + progress + statCard + checkListBtn + '</div>';
         }
+
+        // Stato del pulsante Check List del progetto: da iniziare (nessuna voce fatta o check list
+        // vuota: immagine grigia), in corso (immagine verde + "fatte/totali"), completata (tutte fatte).
+        function aggiornaFlagCheckList(fatte, totali) {
+            const btn = document.getElementById('projCheckListBtn');
+            const cnt = document.getElementById('projCheckListCnt');
+            if (!btn) return;
+            const f = Number(fatte) || 0, t = Number(totali) || 0;
+            btn.classList.remove('da-iniziare', 'in-corso', 'fatta');
+            if (t > 0 && f >= t) { btn.classList.add('fatta'); btn.title = 'Check List del progetto: completata'; }
+            else if (f > 0) { btn.classList.add('in-corso'); btn.title = `Check List del progetto: ${f} di ${t}`; }
+            else { btn.classList.add('da-iniziare'); btn.title = t ? `Check List del progetto: da iniziare (0 di ${t})` : 'Check List del progetto: da iniziare'; }
+            if (cnt) cnt.textContent = f > 0 && f < t ? `${f}/${t}` : '';
+        }
+        // === CHECK LIST DEL PROGETTO (pulsante nella testata della scheda progetto) ===
+        // Clic: POST /api/projects/checklist/apri (alla prima volta crea le righe di chek_list
+        // copiando la configurazione della tipologia del progetto) e apre la finestra con
+        // descrizione, Check e data. Si modifica solo Check: la data (oggi) la mette il server.
+        const ckpFmtData = (d) => d ? String(d).slice(0, 10).split('-').reverse().join('/') : '';
+        function ckpAggiornaFlagDaRighe(rows) {
+            const totali = (rows || []).length;
+            aggiornaFlagCheckList((rows || []).filter(r => r.check_ok === true).length, totali);
+        }
+        // All'apertura della scheda: solo lettura, per mostrare lo stato sul pulsante.
+        async function ckpStatoProgetto(projectId) {
+            if (!projectId) return;
+            try {
+                const r = await fetch(`${API_URL}/projects/checklist?projectId=${encodeURIComponent(projectId)}`, { headers: getAuthHeaders() });
+                if (!r.ok) return;
+                const d = await r.json();
+                if ((d.rows || []).length) ckpAggiornaFlagDaRighe(d.rows);
+            } catch (e) { /* stato non disponibile: il pulsante resta com'è */ }
+        }
+        function ckpModal() {
+            let m = document.getElementById('ckpOverlay');
+            if (m) return m;
+            document.body.insertAdjacentHTML('beforeend', `<div class="ckp-overlay" id="ckpOverlay" role="dialog" aria-modal="true" aria-labelledby="ckpTitle">
+                <div class="ckp-box">
+                    <div class="ckp-head"><img src="checklist.png" alt=""><h3 id="ckpTitle">Check List<small id="ckpSub"></small></h3><button type="button" class="ckp-agg" id="ckpAggiorna" title="Riallinea la check list a configurazione e licenze del progetto (Check e date non cambiano)"><i class="fas fa-rotate"></i> Aggiorna</button><button type="button" class="ckp-close" id="ckpClose" aria-label="Chiudi">&times;</button></div>
+                    <div class="ckp-body" id="ckpBody"></div>
+                    <div class="ckp-foot" id="ckpFoot"></div>
+                </div></div>`);
+            m = document.getElementById('ckpOverlay');
+            const chiudi = () => m.classList.remove('open');
+            document.getElementById('ckpClose').addEventListener('click', chiudi);
+            m.addEventListener('click', (e) => { if (e.target === m) chiudi(); });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && m.classList.contains('open')) chiudi(); });
+            return m;
+        }
+        function ckpDisegna(projectId, d) {
+            const rows = d.rows || [];
+            const agg = document.getElementById('ckpAggiorna');
+            if (agg) {
+                agg.style.display = d.tipologia ? '' : 'none';
+                agg.onclick = async () => {
+                    agg.disabled = true;
+                    try {
+                        const r = await fetch(`${API_URL}/projects/checklist/aggiorna`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                            body: JSON.stringify({ projectId })
+                        });
+                        const x = await r.json().catch(() => ({}));
+                        if (!r.ok) throw new Error(x.error || `Errore ${r.status}`);
+                        ckpDisegna(projectId, x);
+                        if ((x.rows || []).length) ckpAggiornaFlagDaRighe(x.rows);
+                        const e = x.esito || {};
+                        const parti = [e.aggiunte ? `${e.aggiunte} aggiunte` : '', e.aggiornate ? `${e.aggiornate} aggiornate` : '', e.chiuse ? `${e.chiuse} tolte` : '']
+                            .filter(Boolean);
+                        showNotification(parti.length ? `Check List aggiornata: ${parti.join(', ')}` : 'Check List già aggiornata', 'success');
+                    } catch (err) {
+                        showNotification('Errore: ' + err.message, 'info');
+                    } finally {
+                        agg.disabled = false;
+                    }
+                };
+            }
+            const fatte = rows.filter(r => r.check_ok === true).length;
+            document.getElementById('ckpSub').textContent = [currentDetailLabel || '', d.tipologia ? `Tipologia: ${d.tipologia}` : ''].filter(Boolean).join(' · ');
+            document.getElementById('ckpFoot').textContent = rows.length ? `${fatte} di ${rows.length} completate` : '';
+            const body = document.getElementById('ckpBody');
+            if (!rows.length) {
+                body.innerHTML = `<div class="ckp-empty">${d.tipologia
+                    ? `Nessuna check list configurata per la tipologia «${escapeHtml(d.tipologia)}» (Impostazioni › Configura Check List).`
+                    : 'Il progetto non ha una Tipologia: impostala nella scheda del progetto.'}</div>`;
+                return;
+            }
+            // Sezioni licenza per fase (padre), nell'ordine mostrato: le frecce le spostano.
+            const sezioni = new Map();
+            rows.forEach(r => {
+                if (Number(r.figlio || 0) !== 0 || !r.licenza) return;
+                const k = String(r.padre);
+                if (!sezioni.has(k)) sezioni.set(k, []);
+                if (!sezioni.get(k).includes(r.licenza)) sezioni.get(k).push(r.licenza);
+            });
+            const frecce = (r) => {
+                const elenco = sezioni.get(String(r.padre)) || [];
+                if (elenco.length < 2) return '';
+                const i = elenco.indexOf(r.licenza);
+                return `<span class="ckp-sposta"><button type="button" data-sposta="su" data-padre="${escapeHtml(r.padre)}" data-licenza="${escapeHtml(r.licenza)}" title="Sposta sopra" ${i === 0 ? 'disabled' : ''}><i class="fas fa-chevron-up"></i></button><button type="button" data-sposta="giu" data-padre="${escapeHtml(r.padre)}" data-licenza="${escapeHtml(r.licenza)}" title="Sposta sotto" ${i === elenco.length - 1 ? 'disabled' : ''}><i class="fas fa-chevron-down"></i></button></span>`;
+            };
+            // Fasi con attività: Check calcolato dal server (fatta quando lo sono tutte le attività).
+            const sezioneDi = (r) => `${r.padre}|${r.licenza || ''}`;
+            const conAttivita = new Set(rows.filter(r => Number(r.figlio || 0) > 0).map(sezioneDi));
+            body.innerHTML = `<table class="ckp-table"><tbody>${rows.map(r => {
+                const padre = Number(r.figlio || 0) === 0;
+                const auto = padre && conAttivita.has(sezioneDi(r));
+                return `<tr class="${padre ? 'padre' : 'figlio'}${auto ? ' auto' : ''}" data-id="${escapeHtml(r.id)}">
+                    <td class="desc">${padre && r.licenza ? frecce(r) : ''}${ckpCellaDesc(r, String(r.id) === ckpUltimaVoce, auto)}</td>
+                    <td class="c"><input type="checkbox" ${r.check_ok === true ? 'checked' : ''} ${r.__can_write === false ? 'disabled title="Sola lettura per il tuo ruolo"' : ''} aria-label="Check"></td>
+                    <td class="d">${ckpCellaData(r, auto)}</td></tr>`;
+            }).join('')}</tbody></table>`;
+            // Salva la voce: check_ok e, se c'è, la data scelta (altrimenti il server mette oggi).
+            const salva = async (tr, payload) => {
+                const r = await fetch(`${API_URL}/projects/checklist/${encodeURIComponent(tr.dataset.id)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ projectId, ...payload })
+                });
+                const x = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(x.error || `Errore ${r.status}`);
+                // Righe aggiornate dal server (anche lo stato delle fasi): si ridisegna tutto,
+                // con l'animazione sulla voce appena cambiata.
+                ckpUltimaVoce = tr.dataset.id;
+                const scroll = body.scrollTop;
+                ckpDisegna(projectId, { ...d, rows: x.rows || rows });
+                body.scrollTop = scroll;
+                ckpUltimaVoce = null;
+                ckpAggiornaFlagDaRighe(x.rows || rows);
+            };
+            // Clic sul flag di una voce fatta: toglie la spunta (come togliere la casella).
+            body.onclick = async (e) => {
+                const sp = e.target.closest('[data-sposta]');
+                if (sp) {
+                    const elenco = [...(sezioni.get(String(sp.dataset.padre)) || [])];
+                    const i = elenco.indexOf(sp.dataset.licenza);
+                    const j = sp.dataset.sposta === 'su' ? i - 1 : i + 1;
+                    if (i < 0 || j < 0 || j >= elenco.length) return;
+                    [elenco[i], elenco[j]] = [elenco[j], elenco[i]];
+                    body.querySelectorAll('[data-sposta]').forEach(b => { b.disabled = true; });
+                    try {
+                        const r = await fetch(`${API_URL}/projects/checklist/ordine`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                            body: JSON.stringify({ projectId, padre: Number(sp.dataset.padre), licenze: elenco })
+                        });
+                        const x = await r.json().catch(() => ({}));
+                        if (!r.ok) throw new Error(x.error || `Errore ${r.status}`);
+                        ckpDisegna(projectId, x);
+                    } catch (err) {
+                        showNotification('Errore: ' + err.message, 'info');
+                        ckpDisegna(projectId, d);
+                    }
+                    return;
+                }
+                const icona = e.target.closest('.ckp-ok, .ckp-ko');
+                if (!icona || icona.classList.contains('ro')) return;
+                const cb = icona.closest('tr[data-id]')?.querySelector('input[type="checkbox"]');
+                if (!cb || cb.disabled) return;
+                cb.checked = icona.classList.contains('ckp-ko'); // X -> fatta; flag -> da fare
+                cb.dispatchEvent(new Event('change', { bubbles: true }));
+            };
+            // onchange (non addEventListener): la finestra si riusa, un solo gestore alla volta.
+            body.onchange = async (e) => {
+                const el = e.target;
+                const tr = el.closest('tr[data-id]');
+                if (!tr) return;
+                if (el.type === 'checkbox') {
+                    el.disabled = true;
+                    try { await salva(tr, { check_ok: el.checked }); }
+                    catch (err) { el.checked = !el.checked; showNotification('Errore: ' + err.message, 'info'); }
+                    finally { el.disabled = false; }
+                } else if (el.classList.contains('ckp-date')) {
+                    // Data cambiata a mano: resta spuntata. Data svuotata: si torna a oggi.
+                    el.disabled = true;
+                    try { await salva(tr, { check_ok: true, data_check: el.value || '' }); }
+                    catch (err) { showNotification('Errore: ' + err.message, 'info'); }
+                    finally { el.disabled = false; }
+                }
+            };
+        }
+        // Descrizione con, per le voci spuntate, il badge verde con la spunta a destra
+        // (anima = true: appena spuntata, il badge compare con un piccolo rimbalzo).
+        let ckpUltimaVoce = null; // voce appena spuntata/tolta: il suo flag compare con l'animazione
+        function ckpCellaDesc(r, anima = false, auto = false) {
+            const testo = escapeHtml(r.description || '');
+            if (auto) {
+                // Fase con attività: niente X; il flag compare da solo quando sono tutte fatte.
+                return r.check_ok === true
+                    ? `<span class="ckp-desc-wrap">${testo}<img class="ckp-ok ro" src="check-ok.png" alt="Completata" title="Fase completata: tutte le attività sono fatte"></span>`
+                    : testo;
+            }
+            const ro = r.__can_write === false;
+            return r.check_ok === true
+                ? `<span class="ckp-desc-wrap">${testo}<img class="ckp-ok${anima ? ' pop' : ''}${ro ? ' ro' : ''}" src="check-ok.png" alt="Fatto" title="${ro ? 'Fatto' : 'Fatto: clic per rimetterla da fare'}"></span>`
+                : `<span class="ckp-desc-wrap">${testo}<img class="ckp-ko${anima ? ' pop' : ''}${ro ? ' ro' : ''}" src="check-ko.svg" alt="Da fare" title="${ro ? 'Da fare' : 'Da fare: clic per segnarla come fatta'}"></span>`;
+        }
+        // Cella Data: solo per le voci spuntate; modificabile (calendario) se la riga lo è.
+        function ckpCellaData(r, auto = false) {
+            if (r.check_ok !== true) return '';
+            const v = String(r.data_check || '').slice(0, 10);
+            return r.__can_write === false || auto
+                ? escapeHtml(ckpFmtData(v))
+                : `<input type="date" class="ckp-date" value="${escapeHtml(v)}" aria-label="Data">`;
+        }
+        document.addEventListener('click', async (e) => {
+            const btn = e.target.closest('#projCheckListBtn');
+            if (!btn) return;
+            const projectId = currentDetailArgument;
+            if (!projectId) return;
+            btn.disabled = true;
+            try {
+                const r = await fetch(`${API_URL}/projects/checklist/apri`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ projectId })
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                const m = ckpModal();
+                ckpDisegna(projectId, d);
+                m.classList.add('open');
+                if ((d.rows || []).length) ckpAggiornaFlagDaRighe(d.rows);
+            } catch (err) {
+                showNotification('Check List: ' + err.message, 'info');
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        // === TENDINA A SCELTA MULTIPLA (campi tipo 18) ===
+        // Etichette delle voci scelte; "Seleziona…" se nessuna.
+        function msChipsHtml(values) {
+            return (values || []).length
+                ? values.map(v => `<span class="ms-chip">${escapeHtml(v)}</span>`).join('')
+                : '<span class="ms-ph">Seleziona…</span>';
+        }
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.ms-dd-btn');
+            document.querySelectorAll('.ms-dd.open').forEach(dd => {
+                if (dd.contains(e.target)) return;
+                dd.classList.remove('open');
+                dd.querySelector('.ms-dd-btn')?.setAttribute('aria-expanded', 'false');
+            });
+            if (!btn) return;
+            const dd = btn.closest('.ms-dd');
+            const aperta = dd.classList.toggle('open');
+            btn.setAttribute('aria-expanded', aperta ? 'true' : 'false');
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            document.querySelectorAll('.ms-dd.open').forEach(dd => { dd.classList.remove('open'); dd.querySelector('.ms-dd-btn')?.setAttribute('aria-expanded', 'false'); });
+        });
+        document.addEventListener('change', (e) => {
+            const chk = e.target.closest('.ms-dd .multi9-check');
+            if (!chk) return;
+            const dd = chk.closest('.ms-dd');
+            const vals = [...dd.querySelectorAll('.multi9-check:checked')].map(c => c.value);
+            const chips = dd.querySelector('.ms-dd-chips');
+            if (chips) chips.innerHTML = msChipsHtml(vals);
+        });
 
         // Apre il secondo flyout con i dettagli (campo + valore) dell'argomento cliccato.
         // Sorgente corrente del flyout di dettaglio: 'settings' oppure 'clients'
@@ -13130,6 +13592,8 @@
                 const disabled = closedProject || (mode !== 'edit');
                 // Campi in sola lettura per il ruolo (id_roles_write): restano disabilitati.
                 listEl.querySelectorAll('[data-setting-id]').forEach(inp => { inp.disabled = disabled || inp.dataset.readonly === '1'; });
+                // Visualizzazione: i campi sì/no attivi mostrano il flag verde al posto dell'interruttore.
+                listEl.classList.toggle('detail-view', disabled);
             }
 
             // Toggle "Abilita modifica"
@@ -13544,8 +14008,11 @@
             return String(value);
         }
 
-        function type11ColumnLabel(column) {
-            return String(column);
+        // Etichetta dell'intestazione: di norma il nome della colonna; alcune tabelle ne
+        // hanno una diversa (es. config_chek_list: padre -> master), indicata dal server in
+        // columnLabels (backend/config/gridColumnRules.js).
+        function type11ColumnLabel(column, labels = null) {
+            return (labels && labels[column]) || String(column);
         }
 
         // === COLONNE CON INDIRIZZI WEB (es. cl_quotazioni.url, task_app.link_task) ===
@@ -13706,6 +14173,118 @@
             }
         });
 
+        // Elenchi "dynamic" di una riga in modifica (GET .../grid-widget/col-options).
+        // Con data-depends l'elenco dipende dal valore di un'altra colonna della stessa riga
+        // (campo_verif <- tabella_verif). Il valore attuale resta selezionato se è nell'elenco.
+        async function type11FillDynamicSelects(rowEl, source, fieldId, cache, onlyColumn = null) {
+            const selects = [...rowEl.querySelectorAll('select.type11-editor-field[data-dynamic="1"]')]
+                .filter(sel => !onlyColumn || sel.dataset.col === onlyColumn);
+            for (const sel of selects) {
+                const depCol = sel.dataset.depends || '';
+                const depInput = depCol ? [...rowEl.querySelectorAll('.type11-editor-field')].find(i => i.dataset.col === depCol) : null;
+                const dep = depInput ? depInput.value : '';
+                const current = sel.value || sel.dataset.current || '';
+                let opts = [];
+                if (!depCol || dep) {
+                    const key = `dyn:${source}:${fieldId}:${sel.dataset.col}:${dep}`;
+                    opts = await type11CachedOptions(cache, key, async () => {
+                        try {
+                            const q = new URLSearchParams({ fieldId: fieldId || '', column: sel.dataset.col, dep });
+                            const r = await fetch(`${API_URL}/${encodeURIComponent(source)}/grid-widget/col-options?${q.toString()}`, { headers: getAuthHeaders() });
+                            return r.ok ? await r.json() : [];
+                        } catch (e) { return []; }
+                    });
+                }
+                const placeholder = depCol && !dep ? '-- Scegli prima la tabella --' : '-- Seleziona --';
+                sel.innerHTML = `<option value="">${placeholder}</option>` + opts.map(o =>
+                    `<option value="${escapeHtml(o.id)}"${o.colonna ? ` data-colonna="${escapeHtml(o.colonna)}"` : ''}${o.tipo != null ? ` data-tipo="${escapeHtml(o.tipo)}"` : ''}>${escapeHtml(o.display)}</option>`).join('');
+                if (current && opts.some(o => String(o.id) === current)) sel.value = current;
+                else if (current && !depCol) {
+                    // Valore salvato che non è più nell'elenco: resta visibile, segnalato.
+                    sel.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(current)}">${escapeHtml(current)} (non più in elenco)</option>`);
+                    sel.value = current;
+                } else sel.value = '';
+                sel.dataset.current = sel.value;
+            }
+        }
+
+        // Colonne calcolate con una formula sulla stessa riga (stessa regola del server,
+        // backend/config/gridColumnRules.js): master_slave = ((padre * 10) + figlio) / 10.
+        const TYPE11_CALC = {
+            master_slave: (get) => {
+                const p = get('padre');
+                if (p === '' || !Number.isFinite(Number(p))) return '';
+                const f = get('figlio') === '' ? 0 : Number(get('figlio'));
+                if (!Number.isFinite(f)) return '';
+                return String(Math.round(((Number(p) * 10) + f) / 10 * 100) / 100);
+            }
+        };
+        document.addEventListener('input', (e) => {
+            const el = e.target;
+            if (!el || !el.classList || !el.classList.contains('type11-editor-field')) return;
+            const rowEl = el.closest('tr');
+            if (!rowEl) return;
+            const fields = [...rowEl.querySelectorAll('.type11-editor-field')];
+            const get = (col) => { const i = fields.find(x => x.dataset.col === col); return i ? String(i.value).trim() : ''; };
+            fields.filter(c => c.dataset.calc && TYPE11_CALC[c.dataset.calc]).forEach(c => { c.value = TYPE11_CALC[c.dataset.calc](get); });
+        });
+
+        // risultato_verif (e simili): con il campo scelto del tipo indicato (1 = sì/no) e un
+        // operatore compilato diventa un elenco vero/falso che salva true/false; altrimenti
+        // torna testo. Il valore attuale si conserva (vero/true, falso/false).
+        function type11UpdateBooleano(rowEl) {
+            const fields = () => [...rowEl.querySelectorAll('.type11-editor-field')];
+            for (const el of fields().filter(x => x.dataset.boolCampo)) {
+                const campo = fields().find(x => x.dataset.col === el.dataset.boolCampo);
+                const operatore = fields().find(x => x.dataset.col === el.dataset.boolOperatore);
+                const tipo = campo && campo.tagName === 'SELECT' ? (campo.selectedOptions[0]?.dataset.tipo || '') : '';
+                const serveBool = tipo === el.dataset.boolTipo && !!(operatore && String(operatore.value).trim());
+                const isSelect = el.tagName === 'SELECT';
+                if (serveBool === isSelect) continue;
+                const v = String(el.value || '').trim().toLowerCase();
+                let nuovo;
+                if (serveBool) {
+                    const cur = ['true', 'vero', 't', '1'].includes(v) ? 'true' : ['false', 'falso', 'f', '0'].includes(v) ? 'false' : '';
+                    nuovo = document.createElement('select');
+                    nuovo.innerHTML = '<option value="">-- Seleziona --</option><option value="true">vero</option><option value="false">falso</option>';
+                    nuovo.value = cur;
+                } else {
+                    nuovo = document.createElement('input');
+                    nuovo.type = 'text';
+                    nuovo.value = el.value === 'true' ? 'vero' : el.value === 'false' ? 'falso' : el.value;
+                }
+                nuovo.className = el.className;
+                for (const [k, val] of Object.entries(el.dataset)) nuovo.dataset[k] = val;
+                nuovo.disabled = el.disabled;
+                // Righe in modifica: il cambio va salvato.
+                const markDirty = () => { nuovo.dataset.dirty = '1'; rowEl.dataset.type11Dirty = '1'; };
+                nuovo.addEventListener('input', markDirty);
+                nuovo.addEventListener('change', markDirty);
+                el.replaceWith(nuovo);
+            }
+        }
+
+        // Scelte che cambiano altre colonne della stessa riga (griglie con regole per colonna):
+        // la tabella ricarica l'elenco dei campi; il campo aggiorna la colonna calcolata.
+        document.addEventListener('change', async (e) => {
+            const el = e.target;
+            if (!el || !el.classList || !el.classList.contains('type11-editor-field')) return;
+            const rowEl = el.closest('tr');
+            const widget = el.closest('[data-grid-field-id]');
+            if (!rowEl || !widget) return;
+            const dependents = [...rowEl.querySelectorAll('select[data-dynamic="1"]')].filter(sel => sel.dataset.depends === el.dataset.col);
+            for (const sel of dependents) {
+                sel.dataset.current = '';
+                await type11FillDynamicSelects(rowEl, widget.dataset.gridSource || currentDetailSource, widget.dataset.gridFieldId, widget.__type11DynCache || (widget.__type11DynCache = new Map()), sel.dataset.col);
+                sel.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            type11UpdateBooleano(rowEl);
+            if (el.tagName === 'SELECT' && el.dataset.dynamic === '1') {
+                const colonna = el.selectedOptions[0]?.dataset.colonna || '';
+                rowEl.querySelectorAll('.type11-editor-field[data-computed="1"]:not([data-calc])').forEach(c => { c.value = colonna; });
+            }
+        });
+
         async function type11FkOptions(source, fieldId, column) {
             try {
                 const query = new URLSearchParams({ fieldId: fieldId || '', column: column || '' });
@@ -13755,6 +14334,29 @@
                 );
                 const optionsHtml = opts.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
                 return `<select class="type11-editor-field" data-col="${escapeHtml(col.name)}" ${dis}><option value="">-- Seleziona progetto --</option>${optionsHtml}</select>`;
+            }
+            // Colonna che diventa vero/falso secondo altre colonne della riga (es. risultato_verif
+            // con un campo sì/no e un operatore): nasce come testo, type11UpdateBooleano la
+            // trasforma in elenco quando le condizioni ci sono.
+            if (col.booleano) {
+                return `<input class="type11-editor-field" data-col="${escapeHtml(col.name)}" data-bool-campo="${escapeHtml(col.booleano.campo)}" data-bool-operatore="${escapeHtml(col.booleano.operatore)}" data-bool-tipo="${escapeHtml(col.booleano.tipo)}" type="text" value="${escapeHtml(val)}" ${dis}>`;
+            }
+            // Colonna calcolata dal server (es. colonna_verif): visibile, non modificabile e
+            // non inviata (è disabilitata); si aggiorna a video alla scelta del campo.
+            if (col.computed) {
+                return `<input class="type11-editor-field" data-col="${escapeHtml(col.name)}" data-computed="1"${col.calc ? ` data-calc="${escapeHtml(col.calc)}"` : ''} type="text" value="${escapeHtml(val)}" disabled title="Calcolato automaticamente">`;
+            }
+            // Elenco fisso (es. tabella_verif: Clienti/Progetti, operatore_verif): si salva l'id.
+            if (Array.isArray(col.options)) {
+                const optionsHtml = col.options.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
+                return `<select class="type11-editor-field" data-col="${escapeHtml(col.name)}" ${dis}><option value="">-- Seleziona --</option>${optionsHtml}</select>`;
+            }
+            // Elenco dal database (es. tipologia, campo_verif): le opzioni le carica
+            // type11FillDynamicSelects quando la riga è nella pagina, perché possono dipendere
+            // da un'altra colonna della stessa riga (data-depends).
+            if (col.dynamic) {
+                const current = val ? `<option value="${escapeHtml(val)}" selected>${escapeHtml(val)}</option>` : '';
+                return `<select class="type11-editor-field" data-col="${escapeHtml(col.name)}" data-dynamic="1" data-depends="${escapeHtml(col.dependsOn || '')}" data-current="${escapeHtml(val)}" ${dis}><option value="">-- Seleziona --</option>${current}</select>`;
             }
             if (col.references) {
                 // Colonna FK (es. team_id -> teams.id): menu a discesa con i valori leggibili
@@ -13811,7 +14413,7 @@
             for (const col of orderedMeta) {
                 // Per le colonne FK il valore grezzo (id reale) arriva in "__raw_<colonna>":
                 // usarlo evita di riscrivere l'etichetta leggibile in una colonna uuid.
-                const value = isNew ? '' : type11GridRawValue(record, col.name);
+                const value = isNew ? (col.default ?? '') : type11GridRawValue(record, col.name);
                 // Non modificabili: colonne generate dal DB e colonne configurate tra
                 // parentesi. Gli input disabilitati non vengono nemmeno inviati al salvataggio.
                 const readonly = !!col.generated || !!col.locked;
@@ -14002,6 +14604,8 @@
         // Lo stato resta sul widget, così sopravvive al ricaricamento dopo un salvataggio.
         function type11SetupView(widget, records, columns, displayedValue) {
             const state = widget._type11View || (widget._type11View = { filters: {}, sort: null });
+            // exact = filtri a valore esatto dall'elenco sopra la griglia (es. Tipologia).
+            if (!state.exact) state.exact = {};
             const table = widget.querySelector('.type11-grid-table');
             const tbody = table && table.querySelector('tbody');
             if (!table || !tbody) return;
@@ -14023,7 +14627,8 @@
                 let shown = 0;
                 rows.forEach(row => {
                     const record = records[Number(row.dataset.type11Index)];
-                    const ok = !record || active.every(([col, val]) => type11MatchesFilter(displayedValue(record, col), val));
+                    const ok = !record || (active.every(([col, val]) => type11MatchesFilter(displayedValue(record, col), val))
+                        && Object.entries(state.exact).every(([col, val]) => !val || String(type11GridRawValue(record, col) ?? '') === String(val)));
                     row.style.display = ok ? '' : 'none';
                     if (ok) shown++;
                 });
@@ -14081,8 +14686,72 @@
                 });
             });
 
+            // Usato dall'elenco sopra la griglia (type11SetupTopFilter) per riapplicare la vista.
+            widget._type11Apply = apply;
             apply();
             requestAnimationFrame(stickFilters);
+        }
+
+        // Righe nuove e filtro sopra la griglia: con un valore scelto la colonna filtrata è
+        // bloccata su quel valore (si salva quello, vedi il Salva delle righe nuove); con
+        // «Tutte» torna modificabile.
+        function type11ApplyTopFilterToNewRow(tr, col, val) {
+            const field = [...tr.querySelectorAll('.type11-editor-field')].find(i => i.dataset.col === col);
+            if (!field) return;
+            if (val) {
+                if (field.tagName === 'SELECT' && ![...field.options].some(o => o.value === val)) {
+                    field.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(val)}">${escapeHtml(val)}</option>`);
+                }
+                field.value = val;
+                field.dataset.current = val;
+                field.disabled = true;
+                field.dataset.topFilterLocked = '1';
+                field.title = 'Valore preso dal filtro sopra la griglia';
+            } else if (field.dataset.topFilterLocked === '1') {
+                field.disabled = false;
+                delete field.dataset.topFilterLocked;
+                field.title = '';
+            }
+        }
+
+        // Elenco sopra la griglia che filtra le righe su una colonna, a valore esatto
+        // (es. Configura Check List: Tipologia). Opzioni dallo stesso elenco della colonna
+        // (GET .../grid-widget/col-options); la scelta resta dopo «Salva» e i ricaricamenti.
+        // Scelta del filtro sopra la griglia, per griglia e colonna: resta anche quando dopo un
+        // salvataggio il riquadro viene ricostruito (nuovo elemento, stato della vista perso).
+        const type11TopFilterChoice = new Map();
+
+        async function type11SetupTopFilter(widget, topFilter, source, fieldId) {
+            const box = widget.querySelector('.type11-top-filter');
+            const sel = box && box.querySelector('select');
+            if (!sel || !topFilter) return;
+            const state = widget._type11View || (widget._type11View = { filters: {}, sort: null, exact: {} });
+            if (!state.exact) state.exact = {};
+            let opts = [];
+            try {
+                const q = new URLSearchParams({ fieldId: fieldId || '', column: topFilter.column, dep: '' });
+                const r = await fetch(`${API_URL}/${encodeURIComponent(source)}/grid-widget/col-options?${q.toString()}`, { headers: getAuthHeaders() });
+                if (r.ok) opts = await r.json();
+            } catch (e) { /* elenco non disponibile: nessun filtro */ }
+            const memo = `${fieldId}|${topFilter.column}`;
+            const current = state.exact[topFilter.column] || type11TopFilterChoice.get(memo) || '';
+            // Niente «Tutte»: si lavora sempre su una tipologia; all'apertura la scelta
+            // precedente o la prima dell'elenco.
+            sel.innerHTML = opts.length
+                ? opts.map(o => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.display)}</option>`).join('')
+                : '<option value="">Nessuna tipologia</option>';
+            sel.value = opts.some(o => String(o.id) === current) ? current : (opts[0] ? String(opts[0].id) : '');
+            state.exact[topFilter.column] = sel.value;
+            if (sel.value) type11TopFilterChoice.set(memo, sel.value);
+            if (typeof widget._type11Apply === 'function') widget._type11Apply();
+            sel.addEventListener('change', () => {
+                state.exact[topFilter.column] = sel.value;
+                type11TopFilterChoice.set(memo, sel.value);
+                // Le righe nuove non ancora salvate prendono la scelta del filtro.
+                widget.querySelectorAll('tr[data-type11-new="1"]').forEach(tr =>
+                    type11ApplyTopFilterToNewRow(tr, topFilter.column, sel.value));
+                if (typeof widget._type11Apply === 'function') widget._type11Apply();
+            });
         }
 
         // Apre la pagina Gantt del campo tipo 13. readOnly = true: sola visualizzazione.
@@ -14126,6 +14795,421 @@
             others.filter(w => !busy(w)).forEach(w => loadType11Grid(w));
         }
 
+        // =====================================================================
+        // CONFIGURATORE CHECK LIST (Impostazioni › Configura Check List)
+        // ---------------------------------------------------------------------
+        // Al posto della griglia di config_chek_list: per tipologia, FASI (master, riga con
+        // slave 0) e ATTIVITÀ (slave 1..n) trascinabili. Master e slave NON si scrivono: li
+        // calcola il server dalla posizione (PUT /api/settings/checklist-config), insieme a
+        // ordinamento e colonna_verif. Modifica e trascinamento solo con «Abilita modifica».
+        // =====================================================================
+        const CKC_COLORI = ['#7C3AED', '#059669', '#EA580C', '#2563EB', '#DB2777', '#0891B2'];
+        let ckcUid = 0;
+
+        function ckcDrawer() {
+            let d = document.getElementById('ckcDrawer');
+            if (d) return d;
+            document.body.insertAdjacentHTML('beforeend', `<div class="ckc-scrim" id="ckcScrim"></div>
+                <aside class="ckc-drawer" id="ckcDrawer" aria-label="Dettaglio attività">
+                    <div class="ckc-dhead"><span class="ckc-num" id="ckcDNum" style="--c:#4F46E5"><i class="fas fa-pen" style="font-size:0.8rem"></i></span><h3 id="ckcDTitle">Attività</h3><button type="button" class="ckc-ibtn" id="ckcDClose" title="Chiudi"><i class="fas fa-xmark"></i></button></div>
+                    <div class="ckc-dbody" id="ckcDBody"></div>
+                    <div class="ckc-dfoot"><button type="button" class="ckc-btn primary" id="ckcDOk"><i class="fas fa-check"></i> Fatto</button><button type="button" class="ckc-btn danger" id="ckcDDel"><i class="fas fa-trash-can"></i> Elimina</button></div>
+                </aside>`);
+            d = document.getElementById('ckcDrawer');
+            const chiudi = () => { d.classList.remove('open'); document.getElementById('ckcScrim').classList.remove('open'); if (d._onClose) d._onClose(); };
+            d._chiudi = chiudi;
+            document.getElementById('ckcDClose').addEventListener('click', chiudi);
+            document.getElementById('ckcDOk').addEventListener('click', chiudi);
+            document.getElementById('ckcScrim').addEventListener('click', chiudi);
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && d.classList.contains('open')) chiudi(); });
+            return d;
+        }
+
+        async function loadChecklistConfigurator(widget) {
+            const fieldId = String(widget.dataset.gridFieldId || '').trim();
+            const editMode = (widget.dataset.gridEditMode || clientDetailMode) === 'edit';
+            if (!widget.querySelector('.ckc')) widget.innerHTML = '<div class="type11-grid-state">Caricamento…</div>';
+            let payload;
+            try {
+                const r = await fetch(`${API_URL}/settings/checklist-config?fieldId=${encodeURIComponent(fieldId)}`, { headers: getAuthHeaders() });
+                payload = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(payload.error || `Errore ${r.status}`);
+            } catch (e) {
+                widget.innerHTML = `<div class="type11-grid-state">${escapeHtml(e.message)}</div>`;
+                return;
+            }
+            // Come la griglia: la modifica la decide «Abilita modifica»; i permessi per riga
+            // (id_roles_write) li applica il server a ogni salvataggio e qui nascondono i comandi.
+            const editing = editMode;
+            const operatori = payload.operatori || [];
+            const opLabel = (id) => (operatori.find(o => String(o.id) === String(id)) || {}).display || '';
+            const risLabel = (r) => (r === 'true' ? 'vero' : r === 'false' ? 'falso' : (r || ''));
+            const verDa = (row) => row.campo_verif ? {
+                tabella: row.tabella_verif || '', campo: row.campo_verif, operatore: row.operatore_verif != null ? String(row.operatore_verif) : '',
+                risultato: row.risultato_verif != null ? String(row.risultato_verif) : '', colonna: row.colonna_verif || ''
+            } : null;
+
+            // Righe -> { tipologia: [fase { id, titolo, ver, canWrite, attivita: [...] }] }
+            const costruisci = () => {
+                const out = {};
+                for (const t of payload.tipologie || []) out[t] = [];
+                const perPadre = new Map();
+                for (const row of payload.rows || []) {
+                    const tip = row.tipologia == null ? '' : String(row.tipologia);
+                    if (!out[tip]) out[tip] = [];
+                    const key = `${tip}|${row.padre == null ? 'x' : row.padre}`;
+                    let fase = perPadre.get(key);
+                    if (!fase) {
+                        fase = { id: null, titolo: '', ver: null, canWrite: true, attivita: [], _padre: row.padre == null ? 99999 : Number(row.padre) };
+                        perPadre.set(key, fase);
+                        out[tip].push(fase);
+                    }
+                    if (Number(row.figlio || 0) === 0 && fase.id == null) {
+                        fase.id = row.id; fase.titolo = row.description || ''; fase.ver = verDa(row); fase.canWrite = row.__can_write !== false;
+                    } else {
+                        fase.attivita.push({ id: row.id, titolo: row.description || '', ver: verDa(row), canWrite: row.__can_write !== false, _figlio: Number(row.figlio || 0) });
+                    }
+                }
+                for (const tip of Object.keys(out)) {
+                    out[tip].sort((a, b) => a._padre - b._padre);
+                    out[tip].forEach(f => { f.uid = ++ckcUid; if (!f.titolo && f.id == null) f.titolo = '(fase senza titolo)'; f.attivita.sort((a, b) => a._figlio - b._figlio); f.attivita.forEach(a => { a.uid = ++ckcUid; }); });
+                }
+                return out;
+            };
+            const dati = costruisci();
+            const tipologieTab = Object.keys(dati);
+            const memo = `${fieldId}|tipologia`;
+            let tip = type11TopFilterChoice.get(memo);
+            if (!tipologieTab.includes(tip)) tip = tipologieTab[0] || '';
+            const sporche = new Set();
+            let selezione = null; // { fase, att }
+            const campiCache = new Map();
+            const campiDi = async (tabella) => {
+                if (!tabella) return [];
+                if (campiCache.has(tabella)) return campiCache.get(tabella);
+                let opts = [];
+                try {
+                    const q = new URLSearchParams({ fieldId, column: 'campo_verif', dep: tabella });
+                    const r = await fetch(`${API_URL}/settings/grid-widget/col-options?${q.toString()}`, { headers: getAuthHeaders() });
+                    if (r.ok) opts = await r.json();
+                } catch (e) { /* elenco non disponibile */ }
+                campiCache.set(tabella, opts);
+                return opts;
+            };
+            const fasi = () => dati[tip] || [];
+            const segna = () => { sporche.add(tip); aggiornaAzioni(); disegnaTabs(); };
+            const chip = (ver) => ver && ver.campo
+                ? `<span class="ckc-chip ver" title="Verifica automatica"><i class="fas fa-bolt"></i>${escapeHtml(ver.tabella === 'clients' ? 'Cliente' : 'Progetto')} · ${escapeHtml(ver.campo)} ${escapeHtml(opLabel(ver.operatore))} ${escapeHtml(risLabel(ver.risultato))}</span>`
+                : '<span class="ckc-chip none"><i class="far fa-circle"></i>manuale</span>';
+
+            widget.innerHTML = `<div class="ckc">
+                <div class="ckc-top"><div class="ckc-tabs"></div><div class="ckc-right"><div class="ckc-actions"></div>
+                    <div class="ckc-info"><button type="button" class="ckc-info-btn" aria-expanded="false" title="Informazioni"><i class="fas fa-circle-info"></i></button>
+                        <div class="ckc-info-pop" role="note"><i class="fas fa-lightbulb"></i><span>Impostare <b>[licenze]</b> per generare le fasi sui moduli venduti.</span></div></div></div></div>
+                <div class="ckc-phases"></div>
+                ${editing ? '<button type="button" class="ckc-add-phase"><i class="fas fa-plus"></i> Nuova fase</button>' : ''}
+            </div>`;
+            const root = widget.querySelector('.ckc');
+            // La riga tipologie si ferma subito sotto la barra azzurra (anch'essa fissa).
+            const barra = widget.closest('.type11-grid-row')?.querySelector('.type11-bar');
+            const allinea = () => root.style.setProperty('--ckc-sticky-top', (barra ? barra.offsetHeight : 0) + 'px');
+            allinea();
+            requestAnimationFrame(allinea);
+            const elTabs = root.querySelector('.ckc-tabs');
+            const elAz = root.querySelector('.ckc-actions');
+            const elFasi = root.querySelector('.ckc-phases');
+
+            function disegnaTabs() {
+                elTabs.innerHTML = tipologieTab.map(t => `<button type="button" class="ckc-tab${t === tip ? ' on' : ''}" data-tip="${escapeHtml(t)}">${escapeHtml(t || '(senza tipologia)')}<span class="n">${(dati[t] || []).length}</span>${sporche.has(t) ? '<span class="dirty" title="Modifiche non salvate"></span>' : ''}</button>`).join('')
+                    || '<span style="color:var(--text-muted);padding:0.4rem 0.6rem">Nessuna tipologia disponibile</span>';
+            }
+            function aggiornaAzioni() {
+                elAz.innerHTML = editing && sporche.size
+                    ? '<button type="button" class="ckc-btn ghost" data-ckc="annulla">Annulla</button><button type="button" class="ckc-btn primary" data-ckc="salva"><i class="fas fa-cloud-arrow-up"></i> Salva</button>'
+                    : (editing ? '<span style="font-size:0.8rem;color:var(--text-muted)"><i class="fas fa-hand-pointer"></i> Trascina fasi e attività per riordinarle</span>' : '');
+            }
+            function disegna() {
+                elFasi.innerHTML = fasi().map((f, fi) => {
+                    const c = CKC_COLORI[fi % CKC_COLORI.length];
+                    return `<section class="ckc-phase" data-fase="${f.uid}" style="--c:${c}">
+                        <div class="ckc-phase-head">
+                            ${editing ? `<span class="ckc-grip" data-drag-fase="${f.uid}" title="Trascina la fase"><i class="fas fa-grip-vertical"></i></span>` : ''}
+                            <span class="ckc-num">${fi + 1}</span>
+                            <div class="ckc-phase-title">${editing && f.canWrite
+                                ? `<input value="${escapeHtml(f.titolo)}" data-titolo-fase="${f.uid}" placeholder="Titolo della fase" maxlength="255">`
+                                : `<span class="ro">${escapeHtml(f.titolo)}</span>`}<div class="ckc-meta">${f.attivita.length} attività${f.ver && f.ver.campo ? ' · ' + chip(f.ver) : ''}</div></div>
+                            <button type="button" class="ckc-ibtn ckc-collapse" data-collapse="${f.uid}" title="Comprimi"><i class="fas fa-chevron-down"></i></button>
+                            ${editing ? `<button type="button" class="ckc-ibtn danger" data-del-fase="${f.uid}" title="Elimina fase"><i class="fas fa-trash-can"></i></button>` : ''}
+                        </div>
+                        <ul class="ckc-steps" data-steps="${f.uid}">${f.attivita.map(a => `
+                            <li class="ckc-step${selezione && selezione.att === a ? ' sel' : ''}" data-att="${a.uid}">
+                                ${editing ? '<span class="ckc-grip" title="Trascina l\'attività"><i class="fas fa-grip-vertical"></i></span>' : ''}
+                                <span class="desc" title="${escapeHtml(a.titolo)}">${escapeHtml(a.titolo)}</span>
+                                ${chip(a.ver)}
+                                ${editing && a.canWrite ? `<span class="acts"><button type="button" class="ckc-ibtn" data-edit="${a.uid}" title="Modifica"><i class="fas fa-pen"></i></button><button type="button" class="ckc-ibtn danger" data-del-att="${a.uid}" title="Elimina"><i class="fas fa-trash-can"></i></button></span>` : ''}
+                            </li>`).join('')}</ul>
+                        ${editing ? `<button type="button" class="ckc-add-step" data-add-att="${f.uid}"><i class="fas fa-plus"></i> Aggiungi attività</button>` : ''}
+                    </section>`;
+                }).join('') || `<div class="ckc-empty">Nessuna fase per questa tipologia${editing ? ': inizia con «Nuova fase».' : '.'}</div>`;
+            }
+            const trovaFase = (uid) => fasi().find(f => f.uid === Number(uid));
+            const trovaAtt = (uid) => { for (const f of fasi()) { const a = f.attivita.find(x => x.uid === Number(uid)); if (a) return { f, a }; } return {}; };
+
+            // ---- Pannello di dettaglio
+            async function apri(f, a) {
+                selezione = { fase: f, att: a };
+                root.querySelectorAll('.ckc-step').forEach(s => s.classList.toggle('sel', Number(s.dataset.att) === a.uid));
+                const d = ckcDrawer();
+                d._onClose = () => { selezione = null; root.querySelectorAll('.ckc-step.sel').forEach(s => s.classList.remove('sel')); };
+                const ro = !editing || !a.canWrite;
+                document.getElementById('ckcDTitle').textContent = `Attività della fase «${f.titolo}»`;
+                document.getElementById('ckcDDel').style.display = ro ? 'none' : '';
+                document.getElementById('ckcDDel').onclick = () => { elimina(a.uid); d._chiudi(); };
+                const body = document.getElementById('ckcDBody');
+                const disegnaDettaglio = async () => {
+                    const on = !!a.ver;
+                    const campi = on ? await campiDi(a.ver.tabella) : [];
+                    const campo = on ? campi.find(c => c.id === a.ver.campo) : null;
+                    const bool = campo && campo.tipo === '1' && a.ver.operatore;
+                    const dis = ro ? 'disabled' : '';
+                    body.innerHTML = `
+                        <div class="ckc-field"><label>Descrizione</label><textarea id="ckcFDesc" rows="2" maxlength="255" ${ro ? 'readonly' : ''}>${escapeHtml(a.titolo)}</textarea></div>
+                        <div class="ckc-field"><label>Tipo verifica</label><input value="selezione" readonly></div>
+                        <div class="ckc-swrow"><div><b>Verifica automatica</b><small>Controlla un campo del cliente o del progetto</small></div>
+                            <label class="toggle-switch"><input type="checkbox" id="ckcFVer" ${on ? 'checked' : ''} ${dis}><span class="toggle-slider"></span></label></div>
+                        ${on ? `<div class="ckc-verbox">
+                            <div class="ckc-field"><label>Dove</label><div class="ckc-seg" id="ckcFTab">
+                                <button type="button" data-v="clients" class="${a.ver.tabella === 'clients' ? 'on' : ''}" ${dis}>Clienti</button>
+                                <button type="button" data-v="projects" class="${a.ver.tabella === 'projects' ? 'on' : ''}" ${dis}>Progetti</button></div></div>
+                            <div class="ckc-field"><label>Campo</label><select id="ckcFCampo" ${dis}><option value="">${a.ver.tabella ? '-- Scegli il campo --' : '-- Scegli prima dove --'}</option>${campi.map(c => `<option value="${escapeHtml(c.id)}" ${c.id === a.ver.campo ? 'selected' : ''}>${escapeHtml(c.display)}</option>`).join('')}${a.ver.campo && !campo ? `<option selected>${escapeHtml(a.ver.campo)} (non più disponibile)</option>` : ''}</select>
+                                ${campo ? `<div class="ckc-hint">Colonna verificata: ${escapeHtml(campo.colonna)} (calcolata in automatico)</div>` : ''}</div>
+                            <div class="ckc-field"><label>Operatore</label><select id="ckcFOp" ${dis}><option value="">-- Seleziona --</option>${operatori.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === String(a.ver.operatore) ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('')}</select></div>
+                            <div class="ckc-field"><label>Risultato atteso</label>${bool
+                                ? `<div class="ckc-seg" id="ckcFRisSeg"><button type="button" data-r="true" class="${a.ver.risultato === 'true' ? 'on' : ''}" ${dis}>vero</button><button type="button" data-r="false" class="${a.ver.risultato === 'false' ? 'on' : ''}" ${dis}>falso</button></div>`
+                                : `<input id="ckcFRis" value="${escapeHtml(a.ver.risultato || '')}" placeholder="Valore atteso" ${ro ? 'readonly' : ''}>`}</div>
+                            <div class="ckc-preview">${campo
+                                ? `Spunta automatica quando <b>${a.ver.tabella === 'clients' ? 'il cliente' : 'il progetto'}</b> ha <b>${escapeHtml(campo.display)}</b> ${escapeHtml(opLabel(a.ver.operatore) || '…')} <b>${escapeHtml(risLabel(a.ver.risultato) || '…')}</b>`
+                                : 'Scegli il campo da verificare.'}</div>
+                        </div>` : ''}`;
+                    if (ro) return;
+                    const aggiornaRiga = () => { segna(); disegna(); root.querySelectorAll('.ckc-step').forEach(s => s.classList.toggle('sel', Number(s.dataset.att) === a.uid)); };
+                    body.querySelector('#ckcFDesc').addEventListener('input', (e) => { a.titolo = e.target.value; aggiornaRiga(); });
+                    body.querySelector('#ckcFVer').addEventListener('change', (e) => { a.ver = e.target.checked ? { tabella: '', campo: '', operatore: '', risultato: '' } : null; aggiornaRiga(); disegnaDettaglio(); });
+                    body.querySelector('#ckcFTab')?.addEventListener('click', (e) => { const b = e.target.closest('[data-v]'); if (!b) return; a.ver.tabella = b.dataset.v; a.ver.campo = ''; a.ver.risultato = ''; aggiornaRiga(); disegnaDettaglio(); });
+                    body.querySelector('#ckcFCampo')?.addEventListener('change', (e) => { a.ver.campo = e.target.value; a.ver.risultato = ''; aggiornaRiga(); disegnaDettaglio(); });
+                    body.querySelector('#ckcFOp')?.addEventListener('change', (e) => { a.ver.operatore = e.target.value; aggiornaRiga(); disegnaDettaglio(); });
+                    body.querySelector('#ckcFRisSeg')?.addEventListener('click', (e) => { const b = e.target.closest('[data-r]'); if (!b) return; a.ver.risultato = b.dataset.r; aggiornaRiga(); disegnaDettaglio(); });
+                    body.querySelector('#ckcFRis')?.addEventListener('input', (e) => { a.ver.risultato = e.target.value; aggiornaRiga(); });
+                };
+                await disegnaDettaglio();
+                d.classList.add('open');
+                document.getElementById('ckcScrim').classList.add('open');
+            }
+            function elimina(uid) {
+                for (const f of fasi()) f.attivita = f.attivita.filter(a => a.uid !== Number(uid));
+                segna(); disegna();
+            }
+
+            // ---- Clic e modifiche
+            // Nota informativa (icona in alto a destra): apre/chiude; si chiude anche fuori o con Esc.
+            const info = root.querySelector('.ckc-info');
+            const chiudiInfo = () => { info.classList.remove('open'); info.querySelector('.ckc-info-btn').setAttribute('aria-expanded', 'false'); };
+            info.querySelector('.ckc-info-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                const aperta = info.classList.toggle('open');
+                e.currentTarget.setAttribute('aria-expanded', aperta ? 'true' : 'false');
+            });
+            document.addEventListener('click', (e) => { if (!info.contains(e.target)) chiudiInfo(); });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape') chiudiInfo(); });
+
+            root.addEventListener('click', (e) => {
+                const t = e.target.closest('[data-tip]');
+                if (t) { tip = t.dataset.tip; type11TopFilterChoice.set(memo, tip); disegnaTabs(); disegna(); return; }
+                const az = e.target.closest('[data-ckc]');
+                if (az && az.dataset.ckc === 'annulla') { if (confirm('Annullare le modifiche non salvate?')) loadChecklistConfigurator(widget); return; }
+                if (az && az.dataset.ckc === 'salva') { salva(az); return; }
+                if (e.target.closest('.ckc-add-phase')) {
+                    if (!dati[tip]) return;
+                    const f = { uid: ++ckcUid, id: null, titolo: 'Nuova fase', ver: null, canWrite: true, attivita: [] };
+                    dati[tip].push(f); segna(); disegna();
+                    const inp = root.querySelector(`[data-titolo-fase="${f.uid}"]`);
+                    if (inp) { inp.focus(); inp.select(); inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+                    return;
+                }
+                const add = e.target.closest('[data-add-att]');
+                if (add) {
+                    const f = trovaFase(add.dataset.addAtt);
+                    const a = { uid: ++ckcUid, id: null, titolo: 'Nuova attività', ver: null, canWrite: true };
+                    f.attivita.push(a); segna(); disegna(); apri(f, a).then(() => document.getElementById('ckcFDesc')?.select());
+                    return;
+                }
+                const delA = e.target.closest('[data-del-att]');
+                if (delA) { e.stopPropagation(); elimina(delA.dataset.delAtt); return; }
+                const delF = e.target.closest('[data-del-fase]');
+                if (delF) {
+                    const f = trovaFase(delF.dataset.delFase);
+                    if (!confirm(f.attivita.length ? `Eliminare la fase «${f.titolo}» e le sue ${f.attivita.length} attività?` : `Eliminare la fase «${f.titolo}»?`)) return;
+                    dati[tip] = fasi().filter(x => x !== f); segna(); disegna(); return;
+                }
+                const col = e.target.closest('[data-collapse]');
+                if (col) { col.closest('.ckc-phase').classList.toggle('closed'); return; }
+                const step = e.target.closest('.ckc-step');
+                if (step) { const { f, a } = trovaAtt(step.dataset.att); if (a) apri(f, a); }
+            });
+            root.addEventListener('input', (e) => {
+                if (e.target.dataset.titoloFase) { trovaFase(e.target.dataset.titoloFase).titolo = e.target.value; sporche.add(tip); aggiornaAzioni(); disegnaTabs(); }
+            });
+
+            // ---- Trascinamento con il puntatore (non il drag&drop nativo del browser, che con lo
+            // zoom della pagina di ui-scale.js riconosce male le zone di rilascio). Si parte dalla
+            // maniglia ⋮⋮; il clic sulla riga resta per aprire il dettaglio.
+            let drag = null; // { tipo: 'att'|'fase', uid, el, sx, sy, attivo, fantasma }
+            const ph = document.createElement('li'); ph.className = 'ckc-ph';
+            const phF = document.createElement('div'); phF.className = 'ckc-ph-phase';
+            const zoomPagina = () => (window.uiZoom ? window.uiZoom() : 1) || 1;
+            root.addEventListener('pointerdown', (e) => {
+                if (!editing || e.button !== 0) return;
+                const grip = e.target.closest('.ckc-grip');
+                if (!grip) return;
+                const faseEl = grip.closest('[data-drag-fase]') ? grip.closest('.ckc-phase') : null;
+                const stepEl = faseEl ? null : grip.closest('.ckc-step');
+                if (!faseEl && !stepEl) return;
+                e.preventDefault(); e.stopPropagation();
+                drag = faseEl
+                    ? { tipo: 'fase', uid: Number(faseEl.dataset.fase), el: faseEl, sx: e.clientX, sy: e.clientY, attivo: false }
+                    : { tipo: 'att', uid: Number(stepEl.dataset.att), el: stepEl, sx: e.clientX, sy: e.clientY, attivo: false };
+                window.addEventListener('pointermove', muovi);
+                window.addEventListener('pointerup', rilascia);
+                window.addEventListener('pointercancel', annullaDrag);
+            });
+            function avvia(e) {
+                drag.attivo = true;
+                drag.el.classList.add('dragging');
+                document.body.style.userSelect = 'none';
+                document.body.style.cursor = 'grabbing';
+                // Etichetta che segue il puntatore
+                const testo = drag.tipo === 'fase'
+                    ? (trovaFase(drag.uid) || {}).titolo
+                    : (trovaAtt(drag.uid).a || {}).titolo;
+                const g = document.createElement('div');
+                g.className = 'ckc-ghost';
+                g.innerHTML = `<i class="fas ${drag.tipo === 'fase' ? 'fa-layer-group' : 'fa-grip-vertical'}"></i> ${escapeHtml(testo || '')}`;
+                document.body.appendChild(g);
+                drag.fantasma = g;
+                posiziona(e);
+            }
+            function posiziona(e) {
+                const z = zoomPagina();
+                if (drag.fantasma) {
+                    drag.fantasma.style.left = ((e.clientX + 14) / z) + 'px';
+                    drag.fantasma.style.top = ((e.clientY + 10) / z) + 'px';
+                }
+            }
+            function muovi(e) {
+                if (!drag) return;
+                if (!drag.attivo) {
+                    if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) < 5) return;
+                    avvia(e);
+                }
+                e.preventDefault();
+                posiziona(e);
+                // Elemento sotto il puntatore (l'etichetta non intercetta: pointer-events none).
+                const sotto = document.elementFromPoint(e.clientX, e.clientY);
+                if (!sotto || !root.contains(sotto)) return;
+                if (drag.tipo === 'att') {
+                    const ul = sotto.closest('.ckc-steps') || sotto.closest('.ckc-phase')?.querySelector('.ckc-steps');
+                    if (!ul) return;
+                    const dopo = [...ul.querySelectorAll('.ckc-step:not(.dragging)')]
+                        .find(x => { const r = x.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+                    ul.insertBefore(ph, dopo || null);
+                    ul.closest('.ckc-phase')?.classList.remove('closed');
+                } else {
+                    const dopo = [...elFasi.querySelectorAll('.ckc-phase:not(.dragging)')]
+                        .find(x => { const r = x.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+                    elFasi.insertBefore(phF, dopo || null);
+                }
+                // Scorrimento automatico vicino ai bordi del pannello che contiene la lista.
+                let scroller = root.parentElement;
+                while (scroller && scroller !== document.body) {
+                    const st = getComputedStyle(scroller);
+                    if (/(auto|scroll)/.test(st.overflowY) && scroller.scrollHeight > scroller.clientHeight) break;
+                    scroller = scroller.parentElement;
+                }
+                if (!scroller || scroller === document.body) scroller = document.scrollingElement;
+                const r = scroller === document.scrollingElement ? { top: 0, bottom: window.innerHeight } : scroller.getBoundingClientRect();
+                if (e.clientY < r.top + 40) scroller.scrollTop -= 12;
+                else if (e.clientY > r.bottom - 40) scroller.scrollTop += 12;
+            }
+            function rilascia() {
+                if (!drag) return;
+                if (drag.attivo) {
+                    if (drag.tipo === 'att' && ph.parentNode) {
+                        const dest = trovaFase(ph.parentNode.dataset.steps);
+                        const next = ph.nextElementSibling && ph.nextElementSibling.classList.contains('ckc-step') ? Number(ph.nextElementSibling.dataset.att) : null;
+                        const { f: orig, a } = trovaAtt(drag.uid);
+                        if (dest && a) {
+                            orig.attivita = orig.attivita.filter(x => x !== a);
+                            const i = next != null ? dest.attivita.findIndex(x => x.uid === next) : -1;
+                            if (i >= 0) dest.attivita.splice(i, 0, a); else dest.attivita.push(a);
+                            sporche.add(tip);
+                        }
+                    }
+                    if (drag.tipo === 'fase' && phF.parentNode) {
+                        const next = phF.nextElementSibling && phF.nextElementSibling.classList.contains('ckc-phase') ? Number(phF.nextElementSibling.dataset.fase) : null;
+                        const fz = trovaFase(drag.uid);
+                        if (fz) {
+                            dati[tip] = fasi().filter(x => x !== fz);
+                            const j = next != null ? dati[tip].findIndex(x => x.uid === next) : -1;
+                            if (j >= 0) dati[tip].splice(j, 0, fz); else dati[tip].push(fz);
+                            sporche.add(tip);
+                        }
+                    }
+                }
+                fine();
+            }
+            function annullaDrag() { fine(); }
+            function fine() {
+                window.removeEventListener('pointermove', muovi);
+                window.removeEventListener('pointerup', rilascia);
+                window.removeEventListener('pointercancel', annullaDrag);
+                const eraAttivo = drag && drag.attivo;
+                if (drag && drag.fantasma) drag.fantasma.remove();
+                document.body.style.userSelect = '';
+                document.body.style.cursor = '';
+                ph.remove(); phF.remove(); drag = null;
+                if (eraAttivo) { disegna(); disegnaTabs(); aggiornaAzioni(); }
+            }
+
+            // ---- Salvataggio: solo le tipologie modificate
+            async function salva(btn) {
+                const corpo = {};
+                for (const t of sporche) {
+                    corpo[t] = (dati[t] || []).map(f => ({
+                        id: f.id, titolo: f.titolo, ver: f.ver,
+                        attivita: f.attivita.map(a => ({ id: a.id, titolo: a.titolo, ver: a.ver && a.ver.campo ? a.ver : null }))
+                    }));
+                }
+                btn.disabled = true;
+                try {
+                    const r = await fetch(`${API_URL}/settings/checklist-config`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ fieldId, tipologie: corpo })
+                    });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                    showNotification('Check List salvata', 'success');
+                    ckcDrawer()._chiudi();
+                    await loadChecklistConfigurator(widget);
+                } catch (e) {
+                    showNotification('Errore: ' + e.message, 'info');
+                    btn.disabled = false;
+                }
+            }
+
+            disegnaTabs(); aggiornaAzioni(); disegna();
+        }
+
         // Ultima griglia disegnata per campo: mostrata durante il ricaricamento successivo
         // (es. cambio di "Abilita modifica") al posto della scritta "Caricamento griglia…".
         const type11GridSnapshots = new Map();
@@ -14143,6 +15227,11 @@
             if (!source || !fieldId) {
                 widget.innerHTML = '<div class="type11-grid-state">Contesto della griglia non disponibile</div>';
                 return;
+            }
+
+            // Configura Check List: al posto della griglia il configuratore a fasi/attività.
+            if (tableName === 'config_chek_list' && source === 'settings' && Number(widget.dataset.gridTipo) !== 13) {
+                return loadChecklistConfigurator(widget);
             }
 
             // Tipo 13 (Attività progettuale): niente griglia, solo il pulsante che apre la
@@ -14228,10 +15317,11 @@
 
                 // Freccia nell'intestazione = ordinamento; la seconda riga dell'intestazione
                 // contiene il filtro di ogni colonna ("contiene", mentre si scrive).
-                const head = visibleColumns.map(column => `<th scope="col"${linkClass(column)} title="${escapeHtml(column)}">${escapeHtml(type11ColumnLabel(column))}<button type="button" class="type11-sort-btn" data-sort-col="${escapeHtml(column)}" aria-label="Ordina per ${escapeHtml(type11ColumnLabel(column))}"></button><span class="type11-col-resizer" data-resize-col="${escapeHtml(column)}" title="Trascina per cambiare la larghezza (doppio clic: larghezza automatica)"></span></th>`).join('')
+                const columnLabels = payload.columnLabels || {};
+                const head = visibleColumns.map(column => `<th scope="col"${linkClass(column)} title="${escapeHtml(column)}">${escapeHtml(type11ColumnLabel(column, columnLabels))}<button type="button" class="type11-sort-btn" data-sort-col="${escapeHtml(column)}" aria-label="Ordina per ${escapeHtml(type11ColumnLabel(column, columnLabels))}"></button><span class="type11-col-resizer" data-resize-col="${escapeHtml(column)}" title="Trascina per cambiare la larghezza (doppio clic: larghezza automatica)"></span></th>`).join('')
                     + (canExpire ? '<th scope="col" class="type11-expire-col" title="Seleziona le righe da chiudere"><i class="fas fa-check-square" aria-hidden="true"></i></th>' : '');
                 const filterHead = visibleColumns.map(column => `<th class="type11-filter-cell">`
-                    + `<input type="text" class="type11-filter-val" data-filter-col="${escapeHtml(column)}" placeholder="Filtra…" aria-label="Filtro ${escapeHtml(type11ColumnLabel(column))}">`
+                    + `<input type="text" class="type11-filter-val" data-filter-col="${escapeHtml(column)}" placeholder="Filtra…" aria-label="Filtro ${escapeHtml(type11ColumnLabel(column, columnLabels))}">`
                     + `</th>`).join('')
                     + (canExpire ? '<th class="type11-filter-cell type11-expire-col"></th>' : '');
                 // Permesso per riga (id_roles_write): le righe non modificabili dal ruolo del
@@ -14271,8 +15361,22 @@
                 const emptyRow = records.length
                     ? ''
                     : `<tr class="type11-empty-row"><td colspan="${Math.max(visibleColumns.length + (canExpire ? 1 : 0), 1)}" class="type11-grid-state">Nessun dato</td></tr>`;
-                widget.innerHTML = `${toolbar}<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}" style="width:${tableWidth}px;">${colgroup}<thead><tr class="type11-head-row">${head}</tr><tr class="type11-filter-row">${filterHead}</tr></thead><tbody>${body}${emptyRow}</tbody></table></div><div class="type11-grid-count"></div>`;
+                // Il filtro sopra la griglia funziona anche se la sua colonna non è tra quelle
+                // visibili: il server ne manda comunque il valore in __raw_<colonna>.
+                const topFilter = payload.topFilter || null;
+                const topFilterHtml = topFilter
+                    ? `<div class="type11-top-filter"><label>${escapeHtml(topFilter.label)} <select aria-label="Filtra per ${escapeHtml(topFilter.label)}">${(() => { const v = (widget._type11View && widget._type11View.exact && widget._type11View.exact[topFilter.column]) || type11TopFilterChoice.get(`${fieldId}|${topFilter.column}`) || ''; return v ? `<option value="${escapeHtml(v)}" selected>${escapeHtml(v)}</option>` : '<option value="">Caricamento…</option>'; })()}</select></label></div>`
+                    : '';
+                widget.innerHTML = `${topFilterHtml}${toolbar}<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}" style="width:${tableWidth}px;">${colgroup}<thead><tr class="type11-head-row">${head}</tr><tr class="type11-filter-row">${filterHead}</tr></thead><tbody>${body}${emptyRow}</tbody></table></div><div class="type11-grid-count"></div>`;
+                // Scelta del filtro sopra la griglia ripristinata PRIMA di disegnare le righe.
+                if (topFilter) {
+                    const view = widget._type11View || (widget._type11View = { filters: {}, sort: null, exact: {} });
+                    if (!view.exact) view.exact = {};
+                    const remembered = type11TopFilterChoice.get(`${fieldId}|${topFilter.column}`);
+                    if (!view.exact[topFilter.column] && remembered) view.exact[topFilter.column] = remembered;
+                }
                 type11SetupView(widget, records, visibleColumns, displayedValue);
+                if (topFilter) await type11SetupTopFilter(widget, topFilter, source, fieldId);
                 // Fotografia della sola tabella (senza pulsanti) per il prossimo ricaricamento.
                 const scrollBox = widget.querySelector('.type11-grid-scroll');
                 if (scrollBox) type11GridSnapshots.set(fieldId, scrollBox.outerHTML);
@@ -14356,9 +15460,16 @@
                         tbody.querySelector('.type11-empty-row')?.remove(); // via il placeholder "Nessun dato"
                         const tr = document.createElement('tr');
                         tr.className = 'type11-editing-row';
+                        tr.dataset.type11New = '1'; // riga nuova non ancora salvata
                         tr.innerHTML = await type11BuildInlineRowCellsHtml(orderedMeta, {}, true, source, fieldId, context, editOptionsCache)
                             + (canExpire ? '<td class="type11-expire-col"></td>' : '');
                         tbody.insertBefore(tr, tbody.firstChild);
+                        await type11FillDynamicSelects(tr, source, fieldId, editOptionsCache);
+                        type11UpdateBooleano(tr);
+                        // Con un filtro sopra la griglia la nuova riga ha già quel valore, bloccato.
+                        for (const [col, val] of Object.entries((widget._type11View && widget._type11View.exact) || {})) {
+                            type11ApplyTopFilterToNewRow(tr, col, val);
+                        }
                         attachType11RubricaSearch(tr);
                         editingRows.push(tr);
                         editingIsNew = true;
@@ -14393,6 +15504,8 @@
                                 input.addEventListener('input', markDirty);
                                 input.addEventListener('change', markDirty);
                             });
+                            await type11FillDynamicSelects(rowEl, source, fieldId, editOptionsCache);
+                            type11UpdateBooleano(rowEl);
                             attachType11RubricaSearch(rowEl);
                             editingRows.push(rowEl);
                         }
@@ -14423,6 +15536,10 @@
                                         values[input.dataset.col] = v;
                                         if (v === true || (typeof v === 'string' && v.trim() !== '')) filled = true;
                                     });
+                                    // Valore del filtro sopra la griglia (es. Tipologia): si salva quello.
+                                    for (const [col, val] of Object.entries((widget._type11View && widget._type11View.exact) || {})) {
+                                        if (val) values[col] = val;
+                                    }
                                     return { row, values, filled };
                                 }).filter(item => item.filled);
                                 if (!pending.length) {
@@ -14606,6 +15723,9 @@
             }
         }
 
+        // Flag verde dei campi sì/no in visualizzazione (stessa immagine della Check List).
+        const BOOL_FLAG_HTML = '<img class="bool-flag" src="check-ok.png" alt="Sì" title="Sì">';
+
         function renderSettingRow(row) {
             const campo = escapeHtml(row.campo || '');
             const tipo = Number(row.tipo_valore);
@@ -14653,6 +15773,9 @@
                     : (aiKey ? ` class="ai-toggle" data-ai-provider="${aiKey}"`
                     : (isDashFlag ? ' data-reload-on-save="1"' : '')));
                 input = `<label class="toggle-switch"><input type="checkbox"${calAttrs} data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>`;
+                // In visualizzazione un "sì" si mostra con il flag verde (vedi .bool-cell); non per
+                // Calendar/AI, i cui interruttori collegano gli account e restano tali.
+                if (!calKey && !aiKey) input = `<span class="bool-cell">${input}${BOOL_FLAG_HTML}</span>`;
                 if (calKey) {
                     input += `<span class="calendar-conn" data-cal-provider="${calKey}"></span>`;
                     queueCalendarSettingsButtons();
@@ -14670,7 +15793,7 @@
                 const checked = enabled ? 'checked' : '';
                 const alphaDisplay = enabled ? '' : 'display:none;';
                 input = `<span class="type14-wrap" style="display:flex; align-items:center; gap:10px; flex:1 1 0; min-width:0;">
-                    <label class="toggle-switch"><input type="checkbox" class="type14-toggle" data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>
+                    <span class="bool-cell"><label class="toggle-switch"><input type="checkbox" class="type14-toggle" data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>${BOOL_FLAG_HTML}</span>
                     <span class="type14-alpha-wrap" style="${alphaDisplay} flex:1 1 0; min-width:0;"><input type="text" class="type14-alpha" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(row.valore2 == null ? '' : row.valore2)}" style="width:100%;"></span>
                 </span>`;
             } else if (tipo === 22) {
@@ -14690,7 +15813,7 @@
                     }
                 }
                 input = `<span class="type14-wrap" style="display:flex; align-items:center; gap:10px; flex:1 1 0; min-width:0;">
-                    <label class="toggle-switch"><input type="checkbox" class="type14-toggle" data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>
+                    <span class="bool-cell"><label class="toggle-switch"><input type="checkbox" class="type14-toggle" data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>${BOOL_FLAG_HTML}</span>
                     <span class="type14-alpha-wrap" style="${alphaDisplay} flex:0 1 auto; min-width:0;"><input type="date" class="type14-alpha" data-type22="1" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(dateVal)}"></span>
                 </span>`;
             } else if (tipo === 2) {
@@ -14764,10 +15887,14 @@
                 selected.forEach(s => { if (!opts.some(o => String(o) === s)) opts.push(s); }); // non perdere i selezionati fuori elenco
                 if (mode === 'edit') {
                     const boxes = opts.map(o => `<label class="multi9-opt"><input type="checkbox" class="multi9-check" value="${escapeHtml(o)}" ${selected.includes(String(o)) ? 'checked' : ''}><span>${escapeHtml(o)}</span></label>`).join('');
-                    // input nascosto (data-field=valore2) tiene i selezionati uniti da ", "; aggiornato al cambio dei checkbox.
-                    input = `<span class="multi9" style="flex:1 1 0; min-width:0;"><input type="hidden" data-setting-id="${id}" data-field="valore2" data-multi-sep=", " value="${escapeHtml(selected.join(', '))}"><span class="multi9-opts">${boxes}</span></span>`;
+                    // Tendina a scelta multipla: chiusa mostra le voci scelte come etichette, aperta
+                    // l'elenco con le caselle. L'input nascosto (data-field=valore2) tiene i selezionati
+                    // uniti da ", " e lo aggiornano i gestori di .multi9 (come prima).
+                    input = `<span class="multi9 ms-dd" style="flex:1 1 0; min-width:0;"><input type="hidden" data-setting-id="${id}" data-field="valore2" data-multi-sep=", " value="${escapeHtml(selected.join(', '))}">` +
+                        `<button type="button" class="ms-dd-btn" aria-haspopup="listbox" aria-expanded="false"><span class="ms-dd-chips">${msChipsHtml(selected)}</span><i class="fas fa-chevron-down ms-dd-arrow"></i></button>` +
+                        `<span class="ms-dd-panel" role="listbox" aria-multiselectable="true">${opts.length ? '' : '<span class="ms-dd-empty">Nessuna voce disponibile</span>'}<span class="multi9-opts">${boxes}</span></span></span>`;
                 } else {
-                    input = `<span>${escapeHtml(selected.join(', '))}</span>`;
+                    input = `<span class="ms-chips-view">${selected.length ? msChipsHtml(selected) : ''}</span>`;
                 }
             } else if (tipo === 11 || tipo === 13) {
                 // Griglia: tabella e colonne arrivano dalla riga del contesto corrente

@@ -25,6 +25,7 @@ import auditLogRoutes from './routes/audit-log.js';
 import notificheRoutes from './routes/notifiche.js';
 import auditEventiRoutes from './routes/audit-eventi.js';
 import { sendMail, buildRichiestaCancellazioneEmail, EMAIL_PROJEXA } from './config/mailer.js';
+import { regoleColonne, metaColonna, etichetteColonne, etichetteValori, opzioniColonna, applicaRegoleScrittura, ordineGriglia, filtroSopraGriglia } from './config/gridColumnRules.js';
 import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
 import { avviaScheduler } from './jobs/scheduler.js';
 import { avviaInvioAudit } from './jobs/auditShipper.js';
@@ -1357,6 +1358,12 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       selectExpressions.push(`COALESCE(${alias}."${displayColumn}"::text, src."${column}"::text) AS "${column}"`);
     }
 
+    // Colonna del filtro sopra la griglia (es. tipologia) non tra quelle visibili: si legge
+    // lo stesso, nascosta in __raw_<colonna>, così il filtro e le righe nuove funzionano.
+    const filtroSopra = filtroSopraGriglia(tableName);
+    if (filtroSopra && !selectedColumns.includes(filtroSopra.column) && tableColumns.has(filtroSopra.column)) {
+      selectExpressions.push(`src."${assertValidIdentifier(filtroSopra.column)}" AS "__raw_${filtroSopra.column}"`);
+    }
     const selectList = selectExpressions.join(', ');
     const joinClause = joins.length ? '\n       ' + joins.join('\n       ') : '';
 
@@ -1378,7 +1385,8 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     }
     const orderBy = variab.orderBy
       ? ` ${variab.orderBy}`
-      : (tableColumns.has('id') ? ' ORDER BY src.id' : '');
+      : (ordineGriglia(tableName) ? ` ORDER BY ${ordineGriglia(tableName)}`
+        : (tableColumns.has('id') ? ' ORDER BY src.id' : ''));
 
     // Tabelle con colonna project_id (es. proj_anno_fatt, proj_componenti) vanno SEMPRE
     // filtrate anche per progetto, non solo tenant/utente/cliente. Nel contesto "projects"
@@ -1418,7 +1426,8 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     const rows = result.rows.map((row) => {
       const out = { ...row, __can_write: hasRoleWrite ? canWriteRow(req, row.__roles_write, tableName) : true };
       delete out.__roles_write;
-      return out;
+      // Colonne con elenco fisso (config/gridColumnRules.js): a video l'etichetta.
+      return etichetteValori(tableName, out);
     });
     res.json({
       rows,
@@ -1427,6 +1436,10 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       isView,
       lockedColumns: selectedColumns.filter(c => columnsSpec.locked.has(c)),
       editOnly: columnsSpec.editOnly,
+      // Etichette delle intestazioni diverse dal nome della colonna (gridColumnRules.js).
+      columnLabels: etichetteColonne(tableName),
+      // Elenco sopra la griglia che filtra le righe su una colonna (es. Tipologia).
+      topFilter: filtroSopra && tableColumns.has(filtroSopra.column) ? filtroSopra : null,
       // Il frontend mostra la selezione multipla soltanto quando l'operazione
       // richiesta è realmente applicabile alla tabella della griglia tipo 11.
       canExpire: !isView && String(config.tipo_valore) === '11'
@@ -1447,7 +1460,7 @@ async function resolveGridWidgetContext(source, fieldId, req, needWrite) {
   }
   const clientColumn = source === 'projects' ? 'client_id' : 'NULL::uuid AS client_id';
   const configResult = await db.query(
-    `SELECT id, argument, tabella, colonna, tipo_valore, tenant_id, user_id, ${clientColumn}
+    `SELECT id, argument, tabella, colonna, tipo_valore, tenant_id, user_id, id_roles_write, ${clientColumn}
      FROM "${source}"
      WHERE id = $1 AND tenant_id = $2 AND tipo_valore::text IN ('11', '13')
      LIMIT 1`,
@@ -1544,8 +1557,528 @@ app.get('/api/:source(settings|clients|projects)/grid-widget/columns', requireAu
       // modificabile, quindi il form inline la mostra disabilitata come le generate.
       locked: lockedColumns.has(r.column_name),
       references: fkMap[r.column_name] || null,
-      referencesColumn: fkColMap[r.column_name] || null
+      referencesColumn: fkColMap[r.column_name] || null,
+      // Etichetta, valore predefinito, elenchi e colonne calcolate (config/gridColumnRules.js)
+      ...metaColonna(tableName, r.column_name)
     })));
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Elenchi a discesa delle colonne "dynamic" (config/gridColumnRules.js), es. Tipologia da
+// lookup_values o i campi verificabili di Clienti/Progetti. dep = valore della colonna da
+// cui l'elenco dipende, nella stessa riga. Tenant e utente sempre dal contesto della griglia.
+app.get('/api/:source(settings|clients|projects)/grid-widget/col-options', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const fieldId = String((req.query && req.query.fieldId) || '').trim();
+    const column = assertValidIdentifier(String((req.query && req.query.column) || '').trim());
+    const ctx = await resolveGridWidgetContext(source, fieldId, req, false);
+    if (!regoleColonne(ctx.tableName)) return res.status(400).json({ error: 'Nessun elenco per questa griglia' });
+    const opzioni = await opzioniColonna(db, ctx.tableName, column,
+      { tenantId: req.user.tenant_id, userId: ctx.effectiveUserId }, String((req.query && req.query.dep) || ''));
+    res.json(opzioni);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// CONFIGURATORE CHECK LIST (Impostazioni › Configura Check List, tabella config_chek_list)
+// ==========================================
+// Al posto della griglia tipo 11 la dashboard mostra fasi (master) e attività (slave)
+// trascinabili. Il browser manda la struttura completa di una o più tipologie: padre, figlio
+// e ordinamento si calcolano dalla posizione; le righe tolte si CHIUDONO (scadenza = ieri),
+// come la chiusura della griglia, non si cancellano. Stessi controlli della griglia
+// (config/gridColumnRules.js): elenchi, colonna_verif, vero/falso, tipo_verifica fisso.
+const CKC_TABELLA = 'config_chek_list';
+const CKC_COLONNE = ['id', 'tipologia', 'padre', 'figlio', 'ordinamento', 'description', 'tipo_verifica',
+  'tabella_verif', 'campo_verif', 'colonna_verif', 'operatore_verif', 'risultato_verif', 'id_roles_write'];
+
+async function ckcContesto(req, fieldId, needWrite) {
+  const ctx = await resolveGridWidgetContext('settings', fieldId, req, needWrite);
+  if (ctx.tableName !== CKC_TABELLA) {
+    throw Object.assign(new Error('Il campo non è la configurazione della Check List'), { statusCode: 400 });
+  }
+  return ctx;
+}
+
+app.get('/api/settings/checklist-config', requireAuth, async (req, res) => {
+  try {
+    const fieldId = String((req.query && req.query.fieldId) || '').trim();
+    const ctx = await ckcContesto(req, fieldId, false);
+    const r = await db.query(
+      `SELECT ${CKC_COLONNE.map((c) => `"${c}"`).join(', ')} FROM "${CKC_TABELLA}"
+        WHERE tenant_id = $1 AND user_id = $2 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+        ORDER BY tipologia NULLS LAST, padre NULLS LAST, figlio NULLS LAST, id`,
+      [req.user.tenant_id, ctx.effectiveUserId]
+    );
+    const tipologie = await opzioniColonna(db, CKC_TABELLA, 'tipologia',
+      { tenantId: req.user.tenant_id, userId: ctx.effectiveUserId });
+    res.json({
+      rows: stripSensitive(r.rows).map((x) => ({ ...x, __can_write: canWriteRow(req, x.id_roles_write, CKC_TABELLA) })),
+      tipologie: tipologie.map((t) => t.id),
+      operatori: (metaColonna(CKC_TABELLA, 'operatore_verif').options || []),
+      canWrite: canWriteRow(req, ctx.config.id_roles_write, 'settings')
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// body: { fieldId, tipologie: { "<tipologia>": [ { id?, titolo, ver?, attivita: [ { id?, titolo, ver? } ] } ] } }
+// ver = { tabella, campo, operatore, risultato } oppure null (attività manuale).
+app.put('/api/settings/checklist-config', requireAuth, async (req, res) => {
+  let client;
+  try {
+    const fieldId = String((req.body && req.body.fieldId) || '').trim();
+    const input = req.body && typeof req.body.tipologie === 'object' && !Array.isArray(req.body.tipologie) ? req.body.tipologie : null;
+    if (!input || !Object.keys(input).length) return res.status(400).json({ error: 'Nessuna modifica da salvare' });
+    const ctx = await ckcContesto(req, fieldId, true);
+    const regoleCtx = { tenantId: req.user.tenant_id, userId: ctx.effectiveUserId };
+    const valide = new Set((await opzioniColonna(db, CKC_TABELLA, 'tipologia', regoleCtx)).map((t) => t.id));
+
+    client = await db.connect();
+    await client.query('BEGIN');
+    let inserite = 0, aggiornate = 0, chiuse = 0;
+    for (const [tipologia, fasi] of Object.entries(input)) {
+      if (!Array.isArray(fasi)) throw Object.assign(new Error('Struttura non valida'), { statusCode: 400 });
+      // Righe attive attuali della tipologia (anche quelle con tipologia non più in elenco).
+      const attuali = (await client.query(
+        `SELECT * FROM "${CKC_TABELLA}" WHERE tenant_id = $1 AND user_id = $2 AND tipologia IS NOT DISTINCT FROM $3
+           AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+        [req.user.tenant_id, ctx.effectiveUserId, tipologia === '' ? null : tipologia]
+      )).rows;
+      if (!valide.has(tipologia) && !attuali.length) {
+        throw Object.assign(new Error(`Tipologia non valida: ${tipologia}`), { statusCode: 400 });
+      }
+      const perId = new Map(attuali.map((r) => [String(r.id), r]));
+
+      // Righe da scrivere: fase = figlio 0, attività = figlio 1..n; padre = posizione della fase.
+      const righe = [];
+      fasi.forEach((fase, fi) => {
+        righe.push({ id: fase.id, titolo: fase.titolo, ver: fase.ver, padre: fi + 1, figlio: 0 });
+        (Array.isArray(fase.attivita) ? fase.attivita : []).forEach((a, ai) =>
+          righe.push({ id: a.id, titolo: a.titolo, ver: a.ver, padre: fi + 1, figlio: ai + 1 }));
+      });
+      if (righe.length > 500) throw Object.assign(new Error('Al massimo 500 righe per tipologia'), { statusCode: 400 });
+
+      const tenute = new Set();
+      for (const r of righe) {
+        const titolo = String(r.titolo || '').trim();
+        if (!titolo) throw Object.assign(new Error(`Descrizione mancante (${r.padre}.${r.figlio})`), { statusCode: 400 });
+        const ver = r.ver && typeof r.ver === 'object' && r.ver.campo ? r.ver : null;
+        let data = {
+          tipologia: tipologia === '' ? null : tipologia,
+          padre: r.padre, figlio: r.figlio, description: titolo.slice(0, 255),
+          tabella_verif: ver ? String(ver.tabella || '') || null : null,
+          campo_verif: ver ? String(ver.campo || '') || null : null,
+          operatore_verif: ver && ver.operatore != null && String(ver.operatore) !== '' ? String(ver.operatore) : null,
+          risultato_verif: ver && ver.risultato != null && String(ver.risultato) !== '' ? String(ver.risultato) : null
+        };
+        const id = r.id != null && String(r.id).trim() !== '' ? String(r.id) : null;
+        const esistente = id ? perId.get(id) : null;
+        if (id && !esistente) throw Object.assign(new Error('Riga non trovata o di un\'altra tipologia'), { statusCode: 404 });
+        await applicaRegoleScrittura(client, CKC_TABELLA, data, regoleCtx, esistente || null);
+        if (esistente) {
+          // Riga invariata: non si riscrive.
+          const norm = (v) => (v == null ? '' : /^-?\d+(\.\d+)?$/.test(String(v)) ? String(Number(v)) : String(v));
+          const uguale = Object.keys(data).every((k) => norm(data[k]) === norm(esistente[k]));
+          tenute.add(id);
+          if (uguale) continue;
+          if (!canWriteRow(req, esistente.id_roles_write, CKC_TABELLA)) {
+            throw Object.assign(new Error(READ_ONLY_ERROR), { statusCode: 403 });
+          }
+          data = await cryptoWrite(client, 'main', CKC_TABELLA, data, id);
+          const cols = Object.keys(data).map(assertValidIdentifier);
+          const params = cols.map((c) => data[c]);
+          params.push(id, req.user.tenant_id, ctx.effectiveUserId);
+          await client.query(
+            `UPDATE "${CKC_TABELLA}" SET ${cols.map((c, i) => `"${c}" = $${i + 1}`).join(', ')}
+              WHERE id::text = $${params.length - 2} AND tenant_id = $${params.length - 1} AND user_id = $${params.length}`,
+            params
+          );
+          aggiornate += 1;
+        } else {
+          data.tenant_id = req.user.tenant_id;
+          data.user_id = ctx.effectiveUserId;
+          stampRoleWrite(req, data, ctx.tableColumns);
+          data = await cryptoWrite(client, 'main', CKC_TABELLA, data);
+          const cols = Object.keys(data).map(assertValidIdentifier);
+          await client.query(
+            `INSERT INTO "${CKC_TABELLA}" (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')})`,
+            cols.map((c) => data[c])
+          );
+          inserite += 1;
+        }
+      }
+      // Righe tolte nel configuratore: chiuse (scadenza = ieri), come nella griglia.
+      const daChiudere = attuali.filter((r) => !tenute.has(String(r.id)));
+      for (const r of daChiudere) {
+        if (!canWriteRow(req, r.id_roles_write, CKC_TABELLA)) throw Object.assign(new Error(READ_ONLY_ERROR), { statusCode: 403 });
+      }
+      if (daChiudere.length) {
+        const x = await client.query(
+          `UPDATE "${CKC_TABELLA}" SET scadenza = CURRENT_DATE - 1
+            WHERE id::text = ANY($1::text[]) AND tenant_id = $2 AND user_id = $3`,
+          [daChiudere.map((r) => String(r.id)), req.user.tenant_id, ctx.effectiveUserId]
+        );
+        chiuse += x.rowCount;
+      }
+    }
+    await client.query('COMMIT');
+    res.json({ inserite, aggiornate, chiuse });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    res.status(error.statusCode || 500).json({ error: error.message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// ==========================================
+// CHECK LIST DEL PROGETTO (tabella chek_list), pulsante «Check List» nella scheda progetto
+// ==========================================
+// Perimetro: tenant + utente (proprietario delle righe del progetto, come la scheda) +
+// cliente + progetto. Le righe nascono da config_chek_list (stesso tenant e utente, stessa
+// tipologia del campo «Tipologia» del progetto, valore2) con ckpSincronizza, alla prima
+// apertura e con il pulsante «Aggiorna» della finestra.
+// Fasi con «[Licenze]» nella descrizione: una copia (fase + attività) per ogni licenza del
+// campo «Licenze da attivare» del progetto, con [Licenze] sostituito dal nome della licenza.
+// Ogni riga ricorda da dove nasce (config_id + licenza): l'aggiornamento allinea padre,
+// figlio, descrizione e verifiche, aggiunge le righe nuove e chiude quelle non più previste,
+// ma NON tocca mai check_ok e data_check (le righe spuntate non previste restano com'erano).
+// Dal progetto si modifica solo check_ok: data_check = oggi quando si spunta, vuota se si toglie.
+const CKP_TABELLA = 'chek_list';
+const CKP_COLONNE_COPIATE = ['tipologia', 'padre', 'figlio', 'description', 'tipo_verifica',
+  'tabella_verif', 'colonna_verif', 'campo_verif', 'operatore_verif', 'risultato_verif',
+  'appo1_verif', 'appo2_verif', 'appo3_verif', 'appo4_verif'];
+const CKP_SEGNAPOSTO_LICENZE = /\[licenze\]/i;
+
+// Progetto del contesto: deve essere un progetto attivo dell'utente nel tenant.
+async function ckpProgetto(req, projectId, pool = db) {
+  const id = String(projectId || '').trim();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw Object.assign(new Error('Progetto non valido'), { statusCode: 400 });
+  const p = (await pool.query(
+    `SELECT id, client_id FROM projects
+      WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3 AND argument = 'Progetto' AND campo = 'Progetto' LIMIT 1`,
+    [id, req.user.tenant_id, req.user.user_id]
+  )).rows[0];
+  if (!p) throw Object.assign(new Error('Progetto non trovato'), { statusCode: 404 });
+  const t = (await pool.query(
+    `SELECT valore2 FROM projects
+      WHERE argument = $1 AND tenant_id = $2 AND user_id = $3 AND lower(btrim(campo)) IN ('tipologia', '(*) tipologia')
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+      ORDER BY id LIMIT 1`,
+    [id, req.user.tenant_id, req.user.user_id]
+  )).rows[0];
+  // Licenze del progetto (campo «Licenze da attivare», tipo 18: valori uniti da ", ").
+  const l = (await pool.query(
+    `SELECT valore2 FROM projects
+      WHERE argument = $1 AND tenant_id = $2 AND user_id = $3 AND lower(btrim(campo)) IN ('licenze da attivare', '(*) licenze da attivare')
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+      ORDER BY id LIMIT 1`,
+    [id, req.user.tenant_id, req.user.user_id]
+  )).rows[0];
+  const licenze = [...new Set(String((l && l.valore2) || '').split(',').map((x) => x.trim()).filter(Boolean))];
+  return { projectId: id, clientId: p.client_id, tipologia: t && t.valore2 ? String(t.valore2).trim() : '', licenze };
+}
+
+// Righe previste per il progetto, calcolate dalla configurazione e dalle licenze.
+// Chiave = config_id + licenza. ordinamento = padre * 100 + posizione della licenza: le copie
+// di una fase [Licenze] stanno una dopo l'altra, nell'ordine delle licenze del progetto.
+async function ckpRighePreviste(pool, req, prog) {
+  if (!prog.tipologia) return [];
+  const conf = (await pool.query(
+    `SELECT * FROM config_chek_list
+      WHERE tenant_id = $1 AND user_id = $2 AND tipologia = $3 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+      ORDER BY padre NULLS LAST, figlio NULLS LAST, id`,
+    [req.user.tenant_id, req.user.user_id, prog.tipologia]
+  )).rows;
+  // Fasi «licenze»: quelle la cui riga di fase (figlio 0) contiene [Licenze].
+  const padriLicenze = new Set(conf
+    .filter((c) => Number(c.figlio || 0) === 0 && CKP_SEGNAPOSTO_LICENZE.test(String(c.description || '')))
+    .map((c) => String(c.padre)));
+  const out = [];
+  for (const c of conf) {
+    const base = {};
+    for (const col of CKP_COLONNE_COPIATE) base[col] = c[col] ?? null;
+    base.config_id = c.id;
+    if (padriLicenze.has(String(c.padre))) {
+      // Senza licenze scelte la fase non si crea (vedi la nota del configuratore).
+      prog.licenze.forEach((lic, i) => {
+        out.push({ ...base, licenza: lic,
+          description: String(c.description || '').replace(new RegExp(CKP_SEGNAPOSTO_LICENZE.source, 'gi'), lic).slice(0, 255),
+          ordinamento: Number(c.padre || 0) * 100 + i + 1 });
+      });
+    } else {
+      out.push({ ...base, licenza: null, ordinamento: Number(c.padre || 0) * 100 });
+    }
+  }
+  return out;
+}
+
+// Allinea le righe del progetto a quelle previste (dentro una transazione con lock).
+// Restituisce { aggiunte, aggiornate, chiuse, conservate }.
+async function ckpSincronizza(client, req, prog) {
+  const previste = await ckpRighePreviste(client, req, prog);
+  const attuali = (await client.query(
+    `SELECT * FROM "${CKP_TABELLA}"
+      WHERE tenant_id = $1 AND user_id = $2 AND client_id IS NOT DISTINCT FROM $3 AND project_id = $4
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+      ORDER BY id`,
+    [req.user.tenant_id, req.user.user_id, prog.clientId, prog.projectId]
+  )).rows;
+  const chiave = (configId, licenza) => `${configId == null ? '' : configId}|${licenza || ''}`;
+  const perChiave = new Map();
+  for (const r of attuali) {
+    const k = chiave(r.config_id, r.licenza);
+    if (r.config_id != null && !perChiave.has(k)) perChiave.set(k, r);
+  }
+  const norm = (v) => (v == null ? '' : /^-?\d+(\.\d+)?$/.test(String(v)) ? String(Number(v)) : String(v));
+  const campi = [...CKP_COLONNE_COPIATE, 'ordinamento', 'config_id', 'licenza'];
+  // Ordine delle sezioni licenza: quello già salvato (anche spostato a mano dalla finestra,
+  // PUT /api/projects/checklist/ordine) vale per le sezioni esistenti; le nuove si accodano.
+  const ordSezione = new Map(); // "padre|licenza" -> ordinamento
+  for (const r of attuali) {
+    if (!r.licenza || r.ordinamento == null) continue;
+    const k = `${r.padre}|${r.licenza}`;
+    if (!ordSezione.has(k)) ordSezione.set(k, Number(r.ordinamento));
+  }
+  const prossimo = new Map(); // padre -> ultimo ordinamento usato
+  for (const [k, o] of ordSezione) {
+    const padre = k.split('|')[0];
+    if (o - Number(padre) * 100 < 50) prossimo.set(padre, Math.max(prossimo.get(padre) || Number(padre) * 100, o));
+  }
+  for (const p of previste) {
+    if (!p.licenza) continue;
+    const k = `${p.padre}|${p.licenza}`;
+    if (!ordSezione.has(k)) {
+      const n = (prossimo.get(String(p.padre)) || Number(p.padre) * 100) + 1;
+      prossimo.set(String(p.padre), n);
+      ordSezione.set(k, n);
+    }
+    p.ordinamento = ordSezione.get(k);
+  }
+  const usate = new Set();
+  const esito = { aggiunte: 0, aggiornate: 0, chiuse: 0, conservate: 0 };
+  const ruolo = isAdminUser(req) ? null : roleWriteValue(req);
+
+  for (const p of previste) {
+    const r = perChiave.get(chiave(p.config_id, p.licenza));
+    if (r) {
+      usate.add(String(r.id));
+      // Solo struttura e testi: check_ok e data_check restano quelli che sono.
+      const diversi = campi.filter((c) => norm(p[c]) !== norm(r[c]));
+      if (!diversi.length) continue;
+      const params = diversi.map((c) => p[c]);
+      params.push(r.id);
+      await client.query(
+        `UPDATE "${CKP_TABELLA}" SET ${diversi.map((c, i) => `"${c}" = $${i + 1}`).join(', ')} WHERE id = $${params.length}`,
+        params
+      );
+      esito.aggiornate += 1;
+    } else {
+      const data = { ...p, tenant_id: req.user.tenant_id, user_id: req.user.user_id, client_id: prog.clientId,
+        project_id: prog.projectId, check_ok: false, data_check: null };
+      if (ruolo != null) data.id_roles_write = ruolo;
+      const cols = Object.keys(data);
+      await client.query(
+        `INSERT INTO "${CKP_TABELLA}" (${cols.map((c) => `"${assertValidIdentifier(c)}"`).join(', ')})
+         VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')})`,
+        cols.map((c) => data[c])
+      );
+      esito.aggiunte += 1;
+    }
+  }
+  // Righe non più previste: chiuse se non spuntate; quelle con Check/data restano com'erano.
+  // Se una sezione non più prevista (es. licenza tolta) ha voci spuntate, resta aperta anche
+  // la sua riga di fase e la sezione va in fondo alle altre della stessa fase (ordinamento
+  // padre * 100 + 50 + n), così le voci conservate non si mescolano alle sezioni attuali.
+  const spuntata = (r) => r.check_ok === true || r.data_check != null;
+  const gruppo = (r) => `${r.padre}|${r.licenza || ''}`;
+  const orfane = attuali.filter((r) => !usate.has(String(r.id)));
+  const gruppiConservati = [...new Set(orfane.filter(spuntata).map(gruppo))];
+  const daChiudere = [];
+  for (const r of orfane) {
+    const g = gruppo(r);
+    const conserva = spuntata(r) || (Number(r.figlio || 0) === 0 && gruppiConservati.includes(g));
+    if (!conserva) { daChiudere.push(String(r.id)); continue; }
+    esito.conservate += 1;
+    const ord = Number(r.padre || 0) * 100 + 50 + gruppiConservati.indexOf(g);
+    if (Number(r.ordinamento) !== ord) {
+      await client.query(`UPDATE "${CKP_TABELLA}" SET ordinamento = $1 WHERE id = $2`, [ord, r.id]);
+    }
+  }
+  if (daChiudere.length) {
+    const x = await client.query(
+      `UPDATE "${CKP_TABELLA}" SET scadenza = CURRENT_DATE - 1 WHERE id::text = ANY($1::text[])`,
+      [daChiudere]
+    );
+    esito.chiuse = x.rowCount;
+  }
+  await ckpRicalcolaFasi(client, req, prog);
+  return esito;
+}
+
+// Fasi con attività: il loro Check non si mette a mano, lo calcola il server. Fatta quando
+// tutte le attività della sezione (stesso padre e stessa licenza) sono fatte; data = la più
+// recente delle attività. Fasi senza attività: Check manuale, non toccate.
+async function ckpRicalcolaFasi(pool, req, prog) {
+  await pool.query(
+    `UPDATE "${CKP_TABELLA}" p
+        SET check_ok = s.tutte, data_check = CASE WHEN s.tutte THEN s.ultima ELSE NULL END
+       FROM (SELECT padre, licenza, bool_and(COALESCE(check_ok, false)) AS tutte, max(data_check) AS ultima
+               FROM "${CKP_TABELLA}"
+              WHERE tenant_id = $1 AND user_id = $2 AND client_id IS NOT DISTINCT FROM $3 AND project_id = $4
+                AND figlio > 0 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+              GROUP BY padre, licenza) s
+      WHERE p.tenant_id = $1 AND p.user_id = $2 AND p.client_id IS NOT DISTINCT FROM $3 AND p.project_id = $4
+        AND COALESCE(p.figlio, 0) = 0 AND (p.scadenza IS NULL OR p.scadenza >= CURRENT_DATE)
+        AND p.padre IS NOT DISTINCT FROM s.padre AND p.licenza IS NOT DISTINCT FROM s.licenza
+        AND (p.check_ok IS DISTINCT FROM s.tutte
+             OR p.data_check IS DISTINCT FROM (CASE WHEN s.tutte THEN s.ultima ELSE NULL END))`,
+    [req.user.tenant_id, req.user.user_id, prog.clientId, prog.projectId]
+  );
+}
+
+async function ckpRighe(req, prog, pool = db) {
+  const r = await pool.query(
+    `SELECT id, tipologia, padre, figlio, ordinamento, description, licenza, check_ok, data_check::text AS data_check, id_roles_write
+       FROM "${CKP_TABELLA}"
+      WHERE tenant_id = $1 AND user_id = $2 AND client_id IS NOT DISTINCT FROM $3 AND project_id = $4
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+      ORDER BY ordinamento NULLS LAST, padre NULLS LAST, figlio NULLS LAST, id`,
+    [req.user.tenant_id, req.user.user_id, prog.clientId, prog.projectId]
+  );
+  return r.rows.map((x) => ({ ...x, __can_write: canWriteRow(req, x.id_roles_write, CKP_TABELLA) }));
+}
+
+// Lettura senza creare nulla (stato del pulsante all'apertura della scheda).
+app.get('/api/projects/checklist', requireAuth, async (req, res) => {
+  try {
+    const prog = await ckpProgetto(req, req.query && req.query.projectId);
+    res.json({ tipologia: prog.tipologia, licenze: prog.licenze, rows: await ckpRighe(req, prog) });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Apertura dal pulsante: se il progetto non ha ancora la check list la crea dalla configurazione.
+app.post('/api/projects/checklist/apri', requireAuth, async (req, res) => {
+  let client;
+  try {
+    client = await db.connect();
+    await client.query('BEGIN');
+    const prog = await ckpProgetto(req, req.body && req.body.projectId, client);
+    // Un'apertura alla volta per progetto: due clic ravvicinati non creano righe doppie.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`chek_list|${prog.projectId}`]);
+    let rows = await ckpRighe(req, prog, client);
+    let creata = false;
+    if (!rows.length && prog.tipologia) {
+      const esito = await ckpSincronizza(client, req, prog);
+      creata = esito.aggiunte > 0;
+      if (creata) rows = await ckpRighe(req, prog, client);
+    }
+    await client.query('COMMIT');
+    res.json({ tipologia: prog.tipologia, licenze: prog.licenze, creata, rows });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    res.status(error.statusCode || 500).json({ error: error.message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// Pulsante «Aggiorna» della finestra: riallinea la check list a configurazione e licenze
+// attuali (ckpSincronizza). Check e data non cambiano mai.
+app.post('/api/projects/checklist/aggiorna', requireAuth, async (req, res) => {
+  let client;
+  try {
+    client = await db.connect();
+    await client.query('BEGIN');
+    const prog = await ckpProgetto(req, req.body && req.body.projectId, client);
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`chek_list|${prog.projectId}`]);
+    if (!prog.tipologia) throw Object.assign(new Error('Il progetto non ha una Tipologia'), { statusCode: 400 });
+    const esito = await ckpSincronizza(client, req, prog);
+    const rows = await ckpRighe(req, prog, client);
+    await client.query('COMMIT');
+    res.json({ tipologia: prog.tipologia, licenze: prog.licenze, esito, rows });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    res.status(error.statusCode || 500).json({ error: error.message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// Ordine delle sezioni licenza di una fase, scelto dalla finestra con le frecce:
+// { projectId, padre, licenze: [ "Presenze", "Nota Spese", ... ] } nell'ordine voluto.
+// ordinamento = padre * 100 + posizione; check e date non cambiano.
+app.put('/api/projects/checklist/ordine', requireAuth, async (req, res) => {
+  let client;
+  try {
+    const padre = Number(req.body && req.body.padre);
+    const licenze = Array.isArray(req.body && req.body.licenze) ? req.body.licenze.map((x) => String(x)) : [];
+    if (!Number.isInteger(padre) || padre < 0 || !licenze.length || licenze.length > 40) {
+      return res.status(400).json({ error: 'Ordine non valido' });
+    }
+    client = await db.connect();
+    await client.query('BEGIN');
+    const prog = await ckpProgetto(req, req.body && req.body.projectId, client);
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`chek_list|${prog.projectId}`]);
+    for (let i = 0; i < licenze.length; i++) {
+      await client.query(
+        `UPDATE "${CKP_TABELLA}" SET ordinamento = $1
+          WHERE tenant_id = $2 AND user_id = $3 AND client_id IS NOT DISTINCT FROM $4 AND project_id = $5
+            AND padre = $6 AND licenza = $7 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+        [padre * 100 + i + 1, req.user.tenant_id, req.user.user_id, prog.clientId, prog.projectId, padre, licenze[i]]
+      );
+    }
+    const rows = await ckpRighe(req, prog, client);
+    await client.query('COMMIT');
+    res.json({ tipologia: prog.tipologia, licenze: prog.licenze, rows });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    res.status(error.statusCode || 500).json({ error: error.message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// Spunta di una voce: { projectId, check_ok, data_check? }. data_check: la data scelta
+// (AAAA-MM-GG) oppure oggi se spuntata senza data; vuota se la spunta si toglie.
+app.put('/api/projects/checklist/:id', requireAuth, async (req, res) => {
+  try {
+    const prog = await ckpProgetto(req, req.body && req.body.projectId);
+    const id = String(req.params.id || '').trim();
+    if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'Voce non valida' });
+    const ok = req.body && (req.body.check_ok === true || req.body.check_ok === 'true');
+    const dataScelta = String((req.body && req.body.data_check) || '').trim();
+    if (dataScelta && (!/^\d{4}-\d{2}-\d{2}$/.test(dataScelta) || Number.isNaN(Date.parse(dataScelta)))) {
+      return res.status(400).json({ error: 'Data non valida' });
+    }
+    await assertRowsWritable(req, db, CKP_TABELLA, [id]);
+    const conFigli = (await db.query(
+      `SELECT 1 FROM "${CKP_TABELLA}" p JOIN "${CKP_TABELLA}" c
+          ON c.tenant_id = p.tenant_id AND c.user_id = p.user_id AND c.project_id = p.project_id
+         AND c.padre IS NOT DISTINCT FROM p.padre AND c.licenza IS NOT DISTINCT FROM p.licenza
+         AND c.figlio > 0 AND (c.scadenza IS NULL OR c.scadenza >= CURRENT_DATE)
+        WHERE p.id::text = $1 AND COALESCE(p.figlio, 0) = 0 AND p.tenant_id = $2 AND p.user_id = $3 LIMIT 1`,
+      [id, req.user.tenant_id, req.user.user_id]
+    )).rows.length > 0;
+    if (conFigli) return res.status(400).json({ error: 'La fase si completa da sola quando tutte le sue attività sono fatte' });
+    const r = await db.query(
+      `UPDATE "${CKP_TABELLA}"
+          SET check_ok = $1, data_check = CASE WHEN $1 THEN COALESCE($7::date, CURRENT_DATE) ELSE NULL END
+        WHERE id::text = $2 AND tenant_id = $3 AND user_id = $4 AND client_id IS NOT DISTINCT FROM $5 AND project_id = $6
+        RETURNING id, check_ok, data_check::text AS data_check`,
+      [ok, id, req.user.tenant_id, req.user.user_id, prog.clientId, prog.projectId, dataScelta || null]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Voce non trovata' });
+    await ckpRicalcolaFasi(db, req, prog);
+    res.json({ ...r.rows[0], rows: await ckpRighe(req, prog) });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -1677,6 +2210,8 @@ app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth,
     const chosenClient = await gridChosenClientId(db, source, ctx, req, values);
     if (chosenClient !== undefined) data.client_id = chosenClient;
     if (tableColumns.has('project_id') && source === 'projects') data.project_id = config.argument;
+    // Valori predefiniti, elenchi e colonne calcolate della tabella (gridColumnRules.js).
+    await applicaRegoleScrittura(db, tableName, data, { tenantId: req.user.tenant_id, userId: effectiveUserId });
     // Nuova riga: modificabile dal ruolo di chi la crea.
     stampRoleWrite(req, data, tableColumns);
 
@@ -1824,6 +2359,14 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/rows', requireAuth,
       }
       const chosenClient = await gridChosenClientId(client, source, ctx, req, inputValues);
       if (chosenClient !== undefined) data.client_id = chosenClient;
+      if (regoleColonne(tableName)) {
+        const attuale = (await client.query(
+          `SELECT * FROM "${tableName}" WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`,
+          [rowId, req.user.tenant_id, effectiveUserId]
+        )).rows[0];
+        if (!attuale) throw Object.assign(new Error('Riga non trovata o non autorizzata'), { statusCode: 404 });
+        await applicaRegoleScrittura(client, tableName, data, { tenantId: req.user.tenant_id, userId: effectiveUserId }, attuale);
+      }
       stripRoleWrite(req, data);
       data = await cryptoWrite(client, 'main', tableName, data, rowId);
       const columns = Object.keys(data).map(assertValidIdentifier);
@@ -1956,6 +2499,14 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, 
     }
     const chosenClient = await gridChosenClientId(db, source, ctx, req, values);
     if (chosenClient !== undefined) data.client_id = chosenClient;
+    if (regoleColonne(tableName)) {
+      const attuale = (await db.query(
+        `SELECT * FROM "${tableName}" WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`,
+        [rowId, req.user.tenant_id, effectiveUserId]
+      )).rows[0];
+      if (!attuale) return res.status(404).json({ error: 'Riga non trovata' });
+      await applicaRegoleScrittura(db, tableName, data, { tenantId: req.user.tenant_id, userId: effectiveUserId }, attuale);
+    }
     stripRoleWrite(req, data);
     await assertRowsWritable(req, db, tableName, [rowId], tableColumns);
     data = await cryptoWrite(db, 'main', tableName, data, rowId);

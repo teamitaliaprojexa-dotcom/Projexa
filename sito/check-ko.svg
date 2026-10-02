@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Da fare">
+  <!-- X rossa a pennellata (disegno originale Projexa): due tratti curvi affusolati -->
+  <path d="M12 14 L25 8 C47 30 68 57 88 92 C64 64 41 40 12 14 Z" fill="#E11D2E"/>
+  <path d="M88 15 L77 9 C55 33 33 60 14 93 C39 67 62 43 88 15 Z" fill="#E11D2E"/>
+</svg>
