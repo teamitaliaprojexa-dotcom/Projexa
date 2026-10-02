@@ -23,6 +23,8 @@ const SCHEMA = (process.env.ORACLE_AUDIT_SCHEMA || 'AUDIT_OWNER').toUpperCase();
 let poolOracle = null;
 let giroInCorso = false;
 let ultimoErrore = '';
+let ultimoInvio = null;   // ultimo giro riuscito (anche senza righe)
+let righeInviate = 0;     // righe inviate dall'avvio del backend
 
 export function auditOracleAttivo() {
   return String(process.env.AUDIT_ORACLE_ENABLED || '').toLowerCase() === 'true';
@@ -33,16 +35,23 @@ function configurazioneMancante() {
     .filter((k) => !String(process.env[k] || '').trim());
 }
 
-async function getPoolOracle() {
-  if (poolOracle) return poolOracle;
-  poolOracle = await oracledb.createPool({
-    user: process.env.ORACLE_AUDIT_USER,
-    password: process.env.ORACLE_AUDIT_PASSWORD,
-    connectString: process.env.ORACLE_AUDIT_CONNECT,
-    poolMin: 0,
-    poolMax: 2,
-    poolTimeout: 300 // chiude le connessioni ferme da 5 minuti
-  });
+// Usato anche dalla pagina Log (routes/audit-log.js) per leggere le tabelle.
+export async function getPoolOracle() {
+  const mancanti = configurazioneMancante();
+  if (mancanti.length) {
+    throw Object.assign(new Error(`Log Oracle non configurato su questo server (mancano ${mancanti.join(', ')})`), { status: 503 });
+  }
+  // Si conserva la promessa: due richieste contemporanee non creano due pool.
+  if (!poolOracle) {
+    poolOracle = oracledb.createPool({
+      user: process.env.ORACLE_AUDIT_USER,
+      password: process.env.ORACLE_AUDIT_PASSWORD,
+      connectString: process.env.ORACLE_AUDIT_CONNECT,
+      poolMin: 0,
+      poolMax: 3,     // invio + pagina Log
+      poolTimeout: 300 // chiude le connessioni ferme da 5 minuti
+    }).catch((e) => { poolOracle = null; throw e; });
+  }
   return poolOracle;
 }
 
@@ -179,6 +188,8 @@ async function giro() {
     }
     if (ultimoErrore) console.log(`[AUDIT] Invio a Oracle ripreso (${inviate} righe inviate)`);
     ultimoErrore = '';
+    ultimoInvio = new Date();
+    righeInviate += inviate;
   } catch (e) {
     const msg = e.code === '42P01'
       ? 'tabella audit_outbox assente: eseguire Supporto/CreaDB/audit_log.sql'
@@ -190,6 +201,18 @@ async function giro() {
     giroInCorso = false;
   }
 }
+
+// Stato dell'invio per la pagina Log.
+export function statoInvioAudit() {
+  return {
+    attivo: auditOracleAttivo() && configurazioneMancante().length === 0,
+    ultimoInvio,
+    righeInviate,
+    ultimoErrore: ultimoErrore || null
+  };
+}
+
+export const SCHEMA_AUDIT = SCHEMA;
 
 export function avviaInvioAudit() {
   if (!auditOracleAttivo()) {

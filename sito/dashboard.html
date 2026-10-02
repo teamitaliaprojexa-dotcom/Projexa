@@ -3220,6 +3220,8 @@
             <li id="navVmMonitor" style="display: none;"><a href="vm-monitor.html"><i class="fas fa-server"></i> <span>Monitor VM</span></a></li>
             <!-- Schedulazioni job (tabella job_schedules): solo admin del tenant PROJEXA, come Monitor VM -->
             <li id="navJobSchedules" style="display: none;"><a href="job-schedules.html"><i class="fas fa-clock-rotate-left"></i> <span>Schedulazioni</span></a></li>
+            <!-- Log accessi e variazioni (Oracle): solo admin del tenant PROJEXA, come Monitor VM -->
+            <li id="navAuditLog" style="display: none;"><a href="audit-log.html"><i class="fas fa-clipboard-list"></i> <span>Log</span></a></li>
             <!-- Registrazione libera (non legata al calendario): chiede il nome e avvia la registrazione -->
             <li id="navRecord" data-dash-flag="registra" style="border: none;"><a href="#" id="navRecordLink" title="Nuova registrazione"><svg class="sidebar-icon nav-record-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="#DC2626" stroke-width="1.8"/><rect x="9.6" y="5.6" width="4.8" height="8.2" rx="2.4" fill="#DC2626"/><path d="M7.4 11.4a4.6 4.6 0 0 0 9.2 0" fill="none" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/><path d="M12 16v2.4M9.6 18.4h4.8" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/></svg> <span>Registra</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
@@ -9824,9 +9826,9 @@
             if (dbNav) {
                 dbNav.style.display = isAdmin ? '' : 'none';
             }
-            // Monitor VM e Schedulazioni job: solo admin del tenant PROJEXA (il server lo ricontrolla).
+            // Monitor VM, Schedulazioni job e Log: solo admin del tenant PROJEXA (il server lo ricontrolla).
             const projexa = String(claims.tenant_name || '').trim().toUpperCase() === 'PROJEXA';
-            ['navVmMonitor', 'navJobSchedules'].forEach((navId) => {
+            ['navVmMonitor', 'navJobSchedules', 'navAuditLog'].forEach((navId) => {
                 const nav = document.getElementById(navId);
                 if (nav) nav.style.display = isAdmin && projexa ? '' : 'none';
             });

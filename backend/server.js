@@ -21,6 +21,7 @@ import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
 import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
 import jobSchedulesRoutes from './routes/job-schedules.js';
+import auditLogRoutes from './routes/audit-log.js';
 import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
 import { avviaScheduler } from './jobs/scheduler.js';
 import { avviaInvioAudit } from './jobs/auditShipper.js';
@@ -177,6 +178,8 @@ app.use('/api/prompts', promptsRoutes);
 app.use('/api/vm-monitor', vmMonitorRoutes);
 // Schedulazioni dei job (job-schedules.html): solo admin del tenant PROJEXA.
 app.use('/api/job-schedules', jobSchedulesRoutes);
+// Pagina Log (audit-log.html): accessi e variazioni salvati su Oracle, solo admin del tenant PROJEXA
+app.use('/api/audit-log', auditLogRoutes);
 // Assistente "Projexa" della dashboard (Gemini + Manuale Utente): tutti gli utenti.
 app.use('/api/chatbot', chatbotRoutes);
 // Migrazione Crypto (database-viewer): riservata agli amministratori.

@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - Log</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --ink: #1f2937; --ink2: #4b5563; --muted: #6b7280; --line: #e5e7eb; --grid: #f0f1f3;
+            --surface: #ffffff; --bg: #f5f5f5; --accent: #2563EB;
+            --good: #047857; --warn: #B45309; --bad: #B91C1C;
+            --add-bg: #ECFDF5; --del-bg: #FEF2F2;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; background: var(--bg); color: var(--ink); }
+        .container { max-width: 1300px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+        header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+        h1 { font-size: 1.6rem; color: #3B82F6; }
+        .sub { font-size: 0.85rem; color: var(--muted); margin-top: 0.2rem; }
+        .btn { padding: 0.55rem 1rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; background: #e5e7eb; color: var(--ink); }
+        .btn:hover { background: #d1d5db; }
+        .btn:disabled { opacity: 0.6; cursor: wait; }
+        .btn.primary { background: var(--accent); color: #fff; }
+        .btn.primary:hover { background: #1d4ed8; }
+        .btn.small { padding: 0.3rem 0.65rem; font-size: 0.8rem; }
+        .card { background: var(--surface); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 1rem 1.1rem; }
+        .status { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; font-size: 0.85rem; color: var(--ink2); margin-bottom: 0.75rem; align-items: center; }
+        .status b { color: var(--ink); font-variant-numeric: tabular-nums; }
+        .status .bad { color: var(--bad); font-weight: 600; }
+        .status .good { color: var(--good); font-weight: 600; }
+        .seg { display: inline-flex; background: #e5e7eb; border-radius: 8px; padding: 3px; }
+        .seg button { border: none; background: transparent; padding: 0.4rem 1rem; border-radius: 6px; font-size: 0.88rem; font-weight: 600; color: var(--ink2); cursor: pointer; }
+        .seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+        .filters { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; margin: 0.75rem 0; }
+        .filters label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; color: var(--muted); font-weight: 600; }
+        .filters input, .filters select { font: inherit; font-size: 0.85rem; padding: 0.4rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; background: var(--surface); color: var(--ink); min-width: 0; }
+        .filters input[type=text] { width: 13rem; }
+        .filters select { max-width: 15rem; }
+        .chip { display: inline-flex; align-items: center; gap: 0.4rem; background: #DBEAFE; color: #1E40AF; border-radius: 999px; padding: 0.25rem 0.4rem 0.25rem 0.7rem; font-size: 0.8rem; font-weight: 600; }
+        .chip button { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 0.85rem; padding: 0 0.2rem; }
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        th { text-align: left; font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+        td { padding: 0.5rem; border-bottom: 1px solid var(--grid); vertical-align: top; }
+        tr.row { cursor: pointer; }
+        tr.row:hover td { background: #F9FAFB; }
+        tr.row.open td { background: #EFF6FF; }
+        tr.dim td { color: var(--muted); }
+        .nowrap { white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .small { font-size: 0.78rem; color: var(--muted); }
+        .badge { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; }
+        .b-ok, .b-INSERT { background: #D1FAE5; color: var(--good); }
+        .b-ko, .b-DELETE { background: #FEE2E2; color: var(--bad); }
+        .b-UPDATE { background: #FEF3C7; color: var(--warn); }
+        .link { color: var(--accent); cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
+        .detail td { background: #FAFAFA; padding: 0.75rem 1rem 1rem; }
+        .diff { width: 100%; border-collapse: collapse; font-size: 0.82rem; table-layout: fixed; }
+        .diff th { background: transparent; }
+        .diff td { border-bottom: 1px solid var(--line); word-break: break-word; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.78rem; }
+        .diff td.k { font-family: inherit; font-weight: 600; width: 18%; color: var(--ink2); }
+        .diff td.p { background: var(--del-bg); }
+        .diff td.d { background: var(--add-bg); }
+        .null { color: var(--muted); font-style: italic; }
+        .more { text-align: center; margin-top: 0.75rem; }
+        .empty { font-size: 0.88rem; color: var(--muted); padding: 2.5rem 0; text-align: center; }
+        .denied { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+        .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; }
+        .hidden { display: none !important; }
+        @media (max-width: 600px) { .filters input[type=text], .filters select { width: 100%; max-width: none; } .filters label { width: 100%; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1><i class="fas fa-clipboard-list"></i> Log</h1>
+                <div class="sub">Accessi e modifiche ai dati, salvati su Oracle (accessi 12 mesi, modifiche 24 mesi)</div>
+            </div>
+            <a class="btn" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
+        </header>
+
+        <div id="content" class="hidden">
+            <div class="status card" id="status">Caricamento…</div>
+
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                    <div class="seg" id="tabs" role="tablist">
+                        <button type="button" data-tab="accessi" class="on">Accessi</button>
+                        <button type="button" data-tab="variazioni">Modifiche ai dati</button>
+                    </div>
+                    <div id="chipBox"></div>
+                </div>
+
+                <div class="filters">
+                    <label>Periodo
+                        <select id="fPeriodo">
+                            <option value="1">Ultime 24 ore</option>
+                            <option value="7" selected>Ultimi 7 giorni</option>
+                            <option value="30">Ultimi 30 giorni</option>
+                            <option value="365">Ultimo anno</option>
+                            <option value="custom">Da / a…</option>
+                        </select>
+                    </label>
+                    <label class="custom hidden">Dal <input type="date" id="fDa"></label>
+                    <label class="custom hidden">Al <input type="date" id="fA"></label>
+                    <label>Utente
+                        <select id="fUtente"><option value="">Tutti</option></select>
+                    </label>
+
+                    <label class="t-accessi">Esito
+                        <select id="fEsito"><option value="">Tutti</option><option value="ok">Riusciti</option><option value="ko">Falliti</option></select>
+                    </label>
+                    <label class="t-accessi">Tipo
+                        <select id="fEvento">
+                            <option value="">Tutti</option>
+                            <option value="login">Login con password</option>
+                            <option value="google">Google</option>
+                            <option value="microsoft">Microsoft</option>
+                            <option value="magic_link">Link via email</option>
+                            <option value="impersonazione">Impersonazione</option>
+                            <option value="cambio_password">Cambio password</option>
+                        </select>
+                    </label>
+                    <label class="t-accessi">Cerca (email, IP, dettaglio)
+                        <input type="text" id="fCerca" placeholder="es. @gmail.com">
+                    </label>
+
+                    <label class="t-variazioni hidden">Tabella
+                        <select id="fTabella"><option value="">Tutte</option></select>
+                    </label>
+                    <label class="t-variazioni hidden">Operazione
+                        <select id="fOperazione"><option value="">Tutte</option><option value="INSERT">Inserimenti</option><option value="UPDATE">Modifiche</option><option value="DELETE">Cancellazioni</option></select>
+                    </label>
+                    <label class="t-variazioni hidden">Origine
+                        <select id="fOrigine"><option value="">Tutte</option><option value="utente">Da un utente del sito</option><option value="job">Job automatici</option><option value="sql">Fuori dal sito (SQL, script)</option></select>
+                    </label>
+
+                    <button type="button" class="btn primary" id="cercaBtn"><i class="fas fa-magnifying-glass"></i> Cerca</button>
+                </div>
+
+                <div class="table-wrap"><table id="tbl"></table></div>
+                <div class="more"><button type="button" class="btn hidden" id="moreBtn">Carica altri</button></div>
+            </div>
+        </div>
+
+        <div id="deniedCard" class="card denied hidden">
+            <div><i class="fas fa-lock"></i></div>
+            <div id="deniedMsg">Pagina non disponibile.</div>
+        </div>
+    </div>
+
+    <script>
+        // Stesso criterio delle altre pagine: l'API è sulla stessa origine.
+        const API_URL = location.origin + '/api';
+        const $ = (id) => document.getElementById(id);
+        if (!localStorage.getItem('authToken')) window.location.href = 'index.html';
+
+        const EVENTI = { login: 'Login con password', google: 'Google', microsoft: 'Microsoft', magic_link: 'Link via email', impersonazione: 'Impersonazione', cambio_password: 'Cambio password' };
+        const OPERAZIONI = { INSERT: 'Inserimento', UPDATE: 'Modifica', DELETE: 'Cancellazione' };
+        let tab = 'accessi';
+        let pag = 0;
+        let rigaFiltro = null; // { tabella, chiave } dopo "Storia di questa riga"
+        let righeCorrenti = [];
+
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const quando = (t) => new Date(t).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const headers = () => ({ 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` });
+
+        async function api(path) {
+            const r = await fetch(`${API_URL}/audit-log${path}`, { headers: headers() });
+            const d = await r.json().catch(() => ({}));
+            if (r.status === 401) { window.location.href = 'index.html'; throw new Error('Sessione scaduta'); }
+            if (!r.ok) throw Object.assign(new Error(d.error || `Errore ${r.status}`), { status: r.status });
+            return d;
+        }
+
+        function negato(msg) {
+            $('content').classList.add('hidden');
+            $('deniedCard').classList.remove('hidden');
+            $('deniedMsg').textContent = msg;
+        }
+
+        // ------------------------------------------------------------------
+        // Stato: coda locale, invio a Oracle, totali
+        // ------------------------------------------------------------------
+        async function caricaStato() {
+            try {
+                const s = await api('/stato');
+                const parti = [];
+                if (s.totali) parti.push(`Accessi registrati: <b>${s.totali.accessi.toLocaleString('it-IT')}</b>`, `Modifiche registrate: <b>${s.totali.variazioni.toLocaleString('it-IT')}</b>`);
+                if (s.coda && !s.coda.errore) {
+                    const vecchia = s.coda.piu_vecchia ? ` (la più vecchia delle ${quando(s.coda.piu_vecchia)})` : '';
+                    parti.push(`In attesa di invio: <b>${s.coda.righe}</b>${s.coda.righe ? esc(vecchia) : ''}`);
+                } else if (s.coda) parti.push(`<span class="bad">Coda: ${esc(s.coda.errore)}</span>`);
+                if (!s.invio.attivo) parti.push('<span class="bad">Invio a Oracle non attivo su questo server</span>');
+                else if (s.invio.ultimoErrore) parti.push(`<span class="bad">Invio non riuscito: ${esc(s.invio.ultimoErrore)}</span>`);
+                else if (s.invio.ultimoInvio) parti.push(`<span class="good"><i class="fas fa-circle-check"></i> Ultimo invio ${esc(new Date(s.invio.ultimoInvio).toLocaleTimeString('it-IT'))}</span>`);
+                if (s.errore) parti.push(`<span class="bad">Oracle: ${esc(s.errore)}</span>`);
+                $('status').innerHTML = parti.map((p) => `<span>${p}</span>`).join('') || 'Nessuna informazione';
+            } catch (e) {
+                if (e.status === 403) return negato(e.message);
+                $('status').innerHTML = `<span class="bad">${esc(e.message)}</span>`;
+            }
+        }
+
+        async function caricaFiltri() {
+            try {
+                const f = await api('/filtri');
+                $('fUtente').innerHTML = '<option value="">Tutti</option>' + f.utenti
+                    .map((u) => `<option value="${esc(u.id)}">${esc(u.nome)}${u.tenant.length ? ` (${esc(u.tenant.join(', '))})` : ''}</option>`).join('');
+                $('fTabella').innerHTML = '<option value="">Tutte</option>' + f.tabelle.map((t) => `<option>${esc(t)}</option>`).join('');
+            } catch (e) {
+                if (e.status === 403) negato(e.message);
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Filtri e ricerca
+        // ------------------------------------------------------------------
+        function parametri() {
+            const p = new URLSearchParams();
+            const periodo = $('fPeriodo').value;
+            if (periodo === 'custom') {
+                if ($('fDa').value) p.set('da', new Date(`${$('fDa').value}T00:00`).toISOString());
+                if ($('fA').value) { const a = new Date(`${$('fA').value}T00:00`); a.setDate(a.getDate() + 1); p.set('a', a.toISOString()); }
+            } else {
+                p.set('da', new Date(Date.now() - Number(periodo) * 24 * 3600 * 1000).toISOString());
+            }
+            if ($('fUtente').value) p.set('utente', $('fUtente').value);
+            if (tab === 'accessi') {
+                if ($('fEsito').value) p.set('esito', $('fEsito').value);
+                if ($('fEvento').value) p.set('evento', $('fEvento').value);
+                if ($('fCerca').value.trim()) p.set('cerca', $('fCerca').value.trim());
+            } else {
+                const tabella = rigaFiltro ? rigaFiltro.tabella : $('fTabella').value;
+                if (tabella) p.set('tabella', tabella);
+                if (rigaFiltro) p.set('chiave', rigaFiltro.chiave);
+                if ($('fOperazione').value) p.set('operazione', $('fOperazione').value);
+                if ($('fOrigine').value) p.set('origine', $('fOrigine').value);
+            }
+            p.set('pagina', pag);
+            return p;
+        }
+
+        async function cerca(aggiungi = false) {
+            if (!aggiungi) { pag = 0; righeCorrenti = []; }
+            const btn = aggiungi ? $('moreBtn') : $('cercaBtn');
+            btn.disabled = true;
+            if (!aggiungi) $('tbl').innerHTML = '<tbody><tr><td class="empty">Ricerca in corso…</td></tr></tbody>';
+            try {
+                const d = await api(`/${tab}?${parametri()}`);
+                righeCorrenti = righeCorrenti.concat(d.righe);
+                disegna();
+                $('moreBtn').classList.toggle('hidden', !d.altre);
+            } catch (e) {
+                if (e.status === 403) return negato(e.message);
+                $('tbl').innerHTML = `<tbody><tr><td class="empty" style="color:var(--bad)">${esc(e.message)}</td></tr></tbody>`;
+                $('moreBtn').classList.add('hidden');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function utenteCella(r) {
+            if (!r.userId) return '<span class="small">—</span>';
+            const nome = r.utente || r.email || r.userId;
+            return `${esc(nome)}${r.tenant ? `<div class="small">${esc(r.tenant)}</div>` : ''}`;
+        }
+
+        function disegna() {
+            if (!righeCorrenti.length) {
+                $('tbl').innerHTML = '<tbody><tr><td class="empty">Nessun risultato con questi filtri.</td></tr></tbody>';
+                return;
+            }
+            if (tab === 'accessi') {
+                $('tbl').innerHTML = '<thead><tr><th>Quando</th><th>Esito</th><th>Tipo</th><th>Utente</th><th>Email</th><th>IP</th><th>Dettaglio</th></tr></thead><tbody>' +
+                    righeCorrenti.map((r, i) => `<tr class="row" data-i="${i}">
+                        <td class="nowrap">${esc(quando(r.quando))}</td>
+                        <td><span class="badge b-${esc(r.esito)}">${r.esito === 'ok' ? 'OK' : 'FALLITO'}</span></td>
+                        <td>${esc(EVENTI[r.evento] || r.evento)}</td>
+                        <td>${utenteCella(r)}</td>
+                        <td>${esc(r.email || '')}</td>
+                        <td class="nowrap">${esc(r.ip || '')}</td>
+                        <td>${esc(r.dettaglio || '')}</td></tr>`).join('') + '</tbody>';
+            } else {
+                $('tbl').innerHTML = '<thead><tr><th>Quando</th><th>Operazione</th><th>Tabella</th><th>Riga</th><th>Campi</th><th>Chi</th><th>Origine</th></tr></thead><tbody>' +
+                    righeCorrenti.map((r, i) => `<tr class="row${r.soloRicifratura ? ' dim' : ''}" data-i="${i}">
+                        <td class="nowrap">${esc(quando(r.quando))}</td>
+                        <td><span class="badge b-${esc(r.operazione)}">${esc(OPERAZIONI[r.operazione] || r.operazione)}</span></td>
+                        <td>${esc(r.tabella)}</td>
+                        <td><span class="link" data-storia="${i}" title="Mostra tutte le modifiche di questa riga">${esc(r.chiave || '')}</span></td>
+                        <td>${r.soloRicifratura ? '<span class="small">nessun valore cambiato (solo ricifratura)</span>' : esc((r.campi || []).join(', '))}</td>
+                        <td>${utenteCella(r)}</td>
+                        <td class="small">${esc(r.origine || '')}</td></tr>`).join('') + '</tbody>';
+            }
+        }
+
+        function valore(v) {
+            if (v === null || v === undefined) return '<span class="null">vuoto</span>';
+            if (typeof v === 'object') return esc(JSON.stringify(v, null, 2));
+            return esc(v);
+        }
+
+        function dettaglio(r) {
+            if (tab === 'accessi') {
+                return `<div class="small"><b>Browser:</b> ${esc(r.userAgent || '—')}</div>` +
+                    (r.tenant ? `<div class="small" style="margin-top:0.3rem"><b>Spazio di lavoro:</b> ${esc(r.tenant)}</div>` : '');
+            }
+            const prima = r.prima || {};
+            const dopo = r.dopo || {};
+            const campi = r.operazione === 'UPDATE' ? (r.campi || Object.keys(dopo)) : Object.keys(r.operazione === 'DELETE' ? prima : dopo);
+            if (!campi.length) return '<div class="small">Nessun valore cambiato: il dato è stato solo riscritto (cifrato di nuovo).</div>';
+            const colonne = r.operazione === 'INSERT' ? '<th>Campo</th><th>Valore inserito</th>'
+                : r.operazione === 'DELETE' ? '<th>Campo</th><th>Valore cancellato</th>'
+                : '<th>Campo</th><th>Prima</th><th>Dopo</th>';
+            const righe = campi.map((k) => r.operazione === 'INSERT' ? `<tr><td class="k">${esc(k)}</td><td class="d">${valore(dopo[k])}</td></tr>`
+                : r.operazione === 'DELETE' ? `<tr><td class="k">${esc(k)}</td><td class="p">${valore(prima[k])}</td></tr>`
+                : `<tr><td class="k">${esc(k)}</td><td class="p">${valore(prima[k])}</td><td class="d">${valore(dopo[k])}</td></tr>`).join('');
+            return `<table class="diff"><thead><tr>${colonne}</tr></thead><tbody>${righe}</tbody></table>` +
+                (r.email ? `<div class="small" style="margin-top:0.5rem">Utente: ${esc(r.utente || '')} ${esc(r.email)}</div>` : '');
+        }
+
+        // Clic su una riga: apre/chiude il dettaglio. Clic sulla chiave: storia di quella riga.
+        $('tbl').addEventListener('click', (ev) => {
+            const storia = ev.target.closest('[data-storia]');
+            if (storia) {
+                const r = righeCorrenti[Number(storia.dataset.storia)];
+                rigaFiltro = { tabella: r.tabella, chiave: r.chiave };
+                $('fTabella').value = r.tabella;
+                aggiornaChip();
+                cerca();
+                return;
+            }
+            const tr = ev.target.closest('tr.row');
+            if (!tr) return;
+            const next = tr.nextElementSibling;
+            if (next && next.classList.contains('detail')) { next.remove(); tr.classList.remove('open'); return; }
+            const r = righeCorrenti[Number(tr.dataset.i)];
+            const det = document.createElement('tr');
+            det.className = 'detail';
+            det.innerHTML = `<td colspan="7">${dettaglio(r)}</td>`;
+            tr.after(det);
+            tr.classList.add('open');
+        });
+
+        function aggiornaChip() {
+            $('chipBox').innerHTML = rigaFiltro && tab === 'variazioni'
+                ? `<span class="chip">Storia di ${esc(rigaFiltro.tabella)} · ${esc(rigaFiltro.chiave)} <button type="button" id="chipX" title="Togli il filtro">✕</button></span>`
+                : '';
+            const x = $('chipX');
+            if (x) x.addEventListener('click', () => { rigaFiltro = null; aggiornaChip(); cerca(); });
+        }
+
+        $('tabs').addEventListener('click', (ev) => {
+            const b = ev.target.closest('button[data-tab]');
+            if (!b || b.dataset.tab === tab) return;
+            tab = b.dataset.tab;
+            $('tabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+            document.querySelectorAll('.t-accessi').forEach((el) => el.classList.toggle('hidden', tab !== 'accessi'));
+            document.querySelectorAll('.t-variazioni').forEach((el) => el.classList.toggle('hidden', tab !== 'variazioni'));
+            aggiornaChip();
+            cerca();
+        });
+        $('fPeriodo').addEventListener('change', () => {
+            document.querySelectorAll('.custom').forEach((el) => el.classList.toggle('hidden', $('fPeriodo').value !== 'custom'));
+        });
+        $('fTabella').addEventListener('change', () => { if (rigaFiltro) { rigaFiltro = null; aggiornaChip(); } });
+        $('cercaBtn').addEventListener('click', () => cerca());
+        $('fCerca').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') cerca(); });
+        $('moreBtn').addEventListener('click', () => { pag += 1; cerca(true); });
+
+        (async () => {
+            $('content').classList.remove('hidden');
+            await caricaStato();
+            if (!$('deniedCard').classList.contains('hidden')) return;
+            await caricaFiltri();
+            cerca();
+        })();
+    </script>
+</body>
+</html>
