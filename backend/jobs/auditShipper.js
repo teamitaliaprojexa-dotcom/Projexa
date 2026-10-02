@@ -14,6 +14,7 @@
 // ============================================================================
 import oracledb from 'oracledb';
 import db from '../config/database.js';
+import { decryptDeep } from '../config/crypto.js';
 
 const TICK_MS = 60 * 1000;
 const LOTTO = 500;          // righe per invio
@@ -109,8 +110,32 @@ function rigaAccesso(r) {
   };
 }
 
+// Un UPDATE che riscrive gli stessi valori cifrati produce testi cifrati diversi (IV
+// casuale): il trigger lo vede come una modifica. Qui, dove c'è la chiave, si confrontano
+// i valori decifrati e si tengono solo i campi cambiati davvero (ancora cifrati, come
+// arrivano). null = nessun cambiamento reale: la riga non viene inviata a Oracle.
+function soloCambiReali(d) {
+  if (d.operazione !== 'UPDATE' || !d.prima || !d.dopo) return d;
+  let primaChiaro;
+  let dopoChiaro;
+  try {
+    primaChiaro = decryptDeep(d.prima);
+    dopoChiaro = decryptDeep(d.dopo);
+  } catch {
+    return d; // chiave assente o valore illeggibile: si invia tutto com'è
+  }
+  const campi = (Array.isArray(d.campi) ? d.campi : Object.keys(d.dopo))
+    .filter((k) => JSON.stringify(primaChiaro[k] ?? null) !== JSON.stringify(dopoChiaro[k] ?? null));
+  if (!campi.length) return null;
+  const prima = {};
+  const dopo = {};
+  for (const k of campi) { prima[k] = d.prima[k] ?? null; dopo[k] = d.dopo[k] ?? null; }
+  return { ...d, campi, prima, dopo };
+}
+
 function rigaVariazione(r) {
-  const d = r.dati || {};
+  const d = soloCambiReali(r.dati || {});
+  if (!d) return null;
   return {
     id_coda: Number(r.id),
     quando: r.creato_il,
@@ -155,7 +180,8 @@ async function inviaLotto() {
     const conn = await (await getPoolOracle()).getConnection();
     try {
       await inserisci(conn, SQL_ACCESSI, rows.filter((r) => r.tipo === 'accesso').map(rigaAccesso), DEF_ACCESSI);
-      await inserisci(conn, SQL_VARIAZIONI, rows.filter((r) => r.tipo === 'variazione').map(rigaVariazione), DEF_VARIAZIONI);
+      await inserisci(conn, SQL_VARIAZIONI,
+        rows.filter((r) => r.tipo === 'variazione').map(rigaVariazione).filter(Boolean), DEF_VARIAZIONI);
       await conn.commit();
     } catch (e) {
       await conn.rollback().catch(() => {});

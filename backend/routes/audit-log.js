@@ -221,4 +221,41 @@ router.get('/variazioni', async (req, res) => {
   }
 });
 
+// Eliminazione manuale: passa SOLO dalla procedura AUDIT_OWNER.ELIMINA_LOG
+// (Supporto/CreaDB/oracle_audit.sql), che accetta periodi fissi, protegge sempre gli
+// ultimi 30 giorni e registra l'eliminazione in LOG_ACCESSI. Il backend non ha DELETE.
+router.post('/elimina', express.json(), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const tabella = { accessi: 'ACCESSI', variazioni: 'VARIAZIONI' }[b.tabella];
+    const modo = { vecchi: 'VECCHI', ultimi: 'ULTIMI' }[b.modo];
+    const mesi = Number(b.mesi);
+    if (!tabella || !modo || ![1, 3, 6].includes(mesi)) {
+      return res.status(400).json({ error: 'Scelta non valida' });
+    }
+    const eliminate = await conOracle(async (conn) => {
+      const r = await conn.execute(
+        `BEGIN ${SCHEMA_AUDIT}.elimina_log(:tabella, :modo, :mesi, :user_id, :email, :ip, :eliminate); END;`,
+        {
+          tabella, modo, mesi,
+          user_id: String(req.user.user_id || ''),
+          email: String(req.user.email || ''),
+          ip: req.ip || '',
+          eliminate: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
+        },
+        { autoCommit: true }
+      );
+      return r.outBinds.eliminate;
+    });
+    console.log(`[AUDIT-LOG] ${req.user.email} ha eliminato ${eliminate} log ${b.tabella} (${b.modo} ${mesi} mesi)`);
+    res.json({ eliminate });
+  } catch (e) {
+    if (/PLS-00201|ORA-06550/.test(e.message)) {
+      e.message = 'Procedura ELIMINA_LOG non presente su Oracle: eseguire la sezione 4b di Supporto/CreaDB/oracle_audit.sql';
+      e.status = 503;
+    }
+    inviaErrore(res, e);
+  }
+});
+
 export default router;

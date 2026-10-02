@@ -67,6 +67,24 @@
         .denied { text-align: center; padding: 3rem 1rem; color: var(--muted); }
         .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; }
         .hidden { display: none !important; }
+        .mod { font-size: 0.8rem; line-height: 1.45; }
+        .mod .k { font-weight: 600; color: var(--ink2); }
+        .mod .old { background: var(--del-bg); color: #991B1B; text-decoration: line-through; padding: 0 0.2rem; border-radius: 3px; }
+        .mod .new { background: var(--add-bg); color: #065F46; padding: 0 0.2rem; border-radius: 3px; }
+        .btn.danger { background: #FEE2E2; color: var(--bad); }
+        .btn.danger:hover { background: #FECACA; }
+        .btn.danger-solid { background: var(--bad); color: #fff; }
+        .btn.danger-solid:hover { background: #991B1B; }
+        .modal-bg { position: fixed; inset: 0; background: rgba(17,24,39,0.45); display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 50; }
+        .modal { background: var(--surface); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); padding: 1.25rem 1.4rem; width: 100%; max-width: 440px; }
+        .modal h2 { font-size: 1.1rem; margin-bottom: 0.75rem; }
+        .modal .opt { display: flex; flex-direction: column; gap: 0.45rem; margin: 0.4rem 0 0.9rem; }
+        .modal .opt label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; }
+        .modal .opt label.disabled { color: #9CA3AF; cursor: not-allowed; }
+        .modal .lbl { font-size: 0.75rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+        .modal .note { font-size: 0.8rem; color: var(--ink2); background: #F3F4F6; border-radius: 6px; padding: 0.5rem 0.65rem; margin-bottom: 1rem; }
+        .modal .actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+        .modal .esito { font-size: 0.85rem; margin-bottom: 0.75rem; }
         @media (max-width: 600px) { .filters input[type=text], .filters select { width: 100%; max-width: none; } .filters label { width: 100%; } }
     </style>
 </head>
@@ -89,7 +107,10 @@
                         <button type="button" data-tab="accessi" class="on">Accessi</button>
                         <button type="button" data-tab="variazioni">Modifiche ai dati</button>
                     </div>
-                    <div id="chipBox"></div>
+                    <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+                        <div id="chipBox"></div>
+                        <button type="button" class="btn danger small" id="eliminaBtn" title="Elimina i log di questa scheda"><i class="fas fa-trash-can"></i> Elimina…</button>
+                    </div>
                 </div>
 
                 <div class="filters">
@@ -120,6 +141,7 @@
                             <option value="magic_link">Link via email</option>
                             <option value="impersonazione">Impersonazione</option>
                             <option value="cambio_password">Cambio password</option>
+                            <option value="eliminazione_log">Eliminazione log</option>
                         </select>
                     </label>
                     <label class="t-accessi">Cerca (email, IP, dettaglio)
@@ -144,6 +166,29 @@
             </div>
         </div>
 
+        <div class="modal-bg hidden" id="eliminaModal" role="dialog" aria-modal="true" aria-labelledby="eliminaTitolo">
+            <div class="modal">
+                <h2 id="eliminaTitolo">Elimina log</h2>
+                <div class="lbl">Cosa eliminare</div>
+                <div class="opt">
+                    <label><input type="radio" name="eModo" value="vecchi" checked> I log più vecchi di…</label>
+                    <label><input type="radio" name="eModo" value="ultimi"> I log degli ultimi…</label>
+                </div>
+                <div class="lbl">Periodo</div>
+                <div class="opt">
+                    <label><input type="radio" name="eMesi" value="6" checked> 6 mesi</label>
+                    <label><input type="radio" name="eMesi" value="3"> 3 mesi</label>
+                    <label id="eMesi1"><input type="radio" name="eMesi" value="1"> 1 mese</label>
+                </div>
+                <div class="note" id="eNota"></div>
+                <div class="esito hidden" id="eEsito"></div>
+                <div class="actions">
+                    <button type="button" class="btn" id="eAnnulla">Annulla</button>
+                    <button type="button" class="btn danger-solid" id="eConferma"><i class="fas fa-trash-can"></i> Elimina</button>
+                </div>
+            </div>
+        </div>
+
         <div id="deniedCard" class="card denied hidden">
             <div><i class="fas fa-lock"></i></div>
             <div id="deniedMsg">Pagina non disponibile.</div>
@@ -156,7 +201,7 @@
         const $ = (id) => document.getElementById(id);
         if (!localStorage.getItem('authToken')) window.location.href = 'index.html';
 
-        const EVENTI = { login: 'Login con password', google: 'Google', microsoft: 'Microsoft', magic_link: 'Link via email', impersonazione: 'Impersonazione', cambio_password: 'Cambio password' };
+        const EVENTI = { login: 'Login con password', google: 'Google', microsoft: 'Microsoft', magic_link: 'Link via email', impersonazione: 'Impersonazione', cambio_password: 'Cambio password', eliminazione_log: 'Eliminazione log' };
         const OPERAZIONI = { INSERT: 'Inserimento', UPDATE: 'Modifica', DELETE: 'Cancellazione' };
         let tab = 'accessi';
         let pag = 0;
@@ -284,16 +329,75 @@
                         <td class="nowrap">${esc(r.ip || '')}</td>
                         <td>${esc(r.dettaglio || '')}</td></tr>`).join('') + '</tbody>';
             } else {
-                $('tbl').innerHTML = '<thead><tr><th>Quando</th><th>Operazione</th><th>Tabella</th><th>Riga</th><th>Campi</th><th>Chi</th><th>Origine</th></tr></thead><tbody>' +
-                    righeCorrenti.map((r, i) => `<tr class="row${r.soloRicifratura ? ' dim' : ''}" data-i="${i}">
-                        <td class="nowrap">${esc(quando(r.quando))}</td>
-                        <td><span class="badge b-${esc(r.operazione)}">${esc(OPERAZIONI[r.operazione] || r.operazione)}</span></td>
-                        <td>${esc(r.tabella)}</td>
-                        <td><span class="link" data-storia="${i}" title="Mostra tutte le modifiche di questa riga">${esc(r.chiave || '')}</span></td>
-                        <td>${r.soloRicifratura ? '<span class="small">nessun valore cambiato (solo ricifratura)</span>' : esc((r.campi || []).join(', '))}</td>
-                        <td>${utenteCella(r)}</td>
-                        <td class="small">${esc(r.origine || '')}</td></tr>`).join('') + '</tbody>';
+                $('tbl').innerHTML = '<thead><tr><th>Quando</th><th>Operazione</th><th>Tabella</th><th>Riga</th><th>Modifica</th><th>Chi</th><th>Origine</th></tr></thead><tbody>' +
+                    gruppi().map((g, gi) => g.righe.length === 1 ? rigaVar(g.righe[0]) : rigaGruppo(g, gi)).join('') + '</tbody>';
             }
+        }
+
+        // Righe consecutive con stesso secondo, operazione, tabella, origine e utente (es. un
+        // giro del job delle integrazioni) diventano un gruppo, che si apre con un clic.
+        function gruppi() {
+            const out = [];
+            righeCorrenti.forEach((r, i) => {
+                const chiave = [String(r.quando).slice(0, 19), r.operazione, r.tabella, r.origine, r.userId].join('|');
+                const ultimo = out[out.length - 1];
+                if (ultimo && ultimo.chiave === chiave) ultimo.righe.push({ r, i });
+                else out.push({ chiave, righe: [{ r, i }] });
+            });
+            return out;
+        }
+
+        function rigaVar({ r, i }, gi = null) {
+            const figlio = gi !== null;
+            return `<tr class="row${r.soloRicifratura ? ' dim' : ''}${figlio ? ' child hidden' : ''}" data-i="${i}"${figlio ? ` data-g="${gi}"` : ''}>
+                <td class="nowrap"${figlio ? ' style="padding-left:1.6rem"' : ''}>${esc(quando(r.quando))}</td>
+                <td><span class="badge b-${esc(r.operazione)}">${esc(OPERAZIONI[r.operazione] || r.operazione)}</span></td>
+                <td>${esc(r.tabella)}</td>
+                <td><span class="link" data-storia="${i}" title="Mostra tutte le modifiche di questa riga">${esc(r.chiave || '')}</span></td>
+                <td>${riassunto(r)}</td>
+                <td>${utenteCella(r)}</td>
+                <td class="small">${esc(r.origine || '')}</td></tr>`;
+        }
+
+        // Valore breve per la tabella (il dettaglio completo resta nel clic sulla riga).
+        function breve(v) {
+            if (v === null || v === undefined || v === '') return '<span class="null">vuoto</span>';
+            let t = typeof v === 'object' ? JSON.stringify(v) : String(v);
+            if (t.length > 60) t = t.slice(0, 57) + '…';
+            return esc(t);
+        }
+
+        // Colonna "Modifica": per gli UPDATE i campi cambiati con valore prima -> dopo.
+        const MAX_CAMPI = 3;
+        function riassunto(r) {
+            if (r.soloRicifratura) return '<span class="small">nessun valore cambiato (solo ricifratura)</span>';
+            if (r.operazione === 'INSERT') return '<span class="small">nuova riga (clic per i valori)</span>';
+            if (r.operazione === 'DELETE') return '<span class="small">riga eliminata (clic per i valori)</span>';
+            const prima = r.prima || {};
+            const dopo = r.dopo || {};
+            const campi = r.campi || Object.keys(dopo);
+            const righe = campi.slice(0, MAX_CAMPI).map((k) =>
+                `<div><span class="k">${esc(k)}:</span> <span class="old">${breve(prima[k])}</span> → <span class="new">${breve(dopo[k])}</span></div>`);
+            if (campi.length > MAX_CAMPI) righe.push(`<div class="small">e altri ${campi.length - MAX_CAMPI} campi (clic per vederli)</div>`);
+            return `<div class="mod">${righe.join('')}</div>`;
+        }
+
+        function rigaGruppo(g, gi) {
+            const r = g.righe[0].r;
+            const conCambi = g.righe.filter((x) => !x.r.soloRicifratura);
+            const campi = [...new Set(conCambi.flatMap((x) => x.r.campi || []))];
+            const riepilogo = conCambi.length
+                ? `${esc(campi.slice(0, 6).join(', '))}${campi.length > 6 ? ` e altri ${campi.length - 6}` : ''}`
+                : '<span class="small">nessun valore cambiato (solo ricifratura)</span>';
+            return `<tr class="row grp${conCambi.length ? '' : ' dim'}" data-grp="${gi}">
+                <td class="nowrap"><i class="fas fa-chevron-right" style="font-size:0.7rem;margin-right:0.35rem;color:var(--muted)"></i>${esc(quando(r.quando))}</td>
+                <td><span class="badge b-${esc(r.operazione)}">${esc(OPERAZIONI[r.operazione] || r.operazione)}</span></td>
+                <td>${esc(r.tabella)}</td>
+                <td><b>${g.righe.length} righe</b>${conCambi.length && conCambi.length < g.righe.length ? `<div class="small">${conCambi.length} con valori cambiati</div>` : ''}</td>
+                <td>${riepilogo}</td>
+                <td>${utenteCella(r)}</td>
+                <td class="small">${esc(r.origine || '')}</td></tr>` +
+                g.righe.map((x) => rigaVar(x, gi)).join('');
         }
 
         function valore(v) {
@@ -332,6 +436,17 @@
                 cerca();
                 return;
             }
+            const grp = ev.target.closest('tr.grp');
+            if (grp) {
+                const aperto = grp.classList.toggle('open');
+                grp.querySelector('.fa-chevron-right, .fa-chevron-down').className = `fas fa-chevron-${aperto ? 'down' : 'right'}`;
+                $('tbl').querySelectorAll(`tr[data-g="${grp.dataset.grp}"]`).forEach((el) => {
+                    if (el.classList.contains('detail')) { if (!aperto) el.remove(); return; }
+                    el.classList.toggle('hidden', !aperto);
+                    if (!aperto) el.classList.remove('open');
+                });
+                return;
+            }
             const tr = ev.target.closest('tr.row');
             if (!tr) return;
             const next = tr.nextElementSibling;
@@ -339,6 +454,7 @@
             const r = righeCorrenti[Number(tr.dataset.i)];
             const det = document.createElement('tr');
             det.className = 'detail';
+            if (tr.dataset.g) det.dataset.g = tr.dataset.g;
             det.innerHTML = `<td colspan="7">${dettaglio(r)}</td>`;
             tr.after(det);
             tr.classList.add('open');
@@ -369,6 +485,65 @@
         $('cercaBtn').addEventListener('click', () => cerca());
         $('fCerca').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') cerca(); });
         $('moreBtn').addEventListener('click', () => { pag += 1; cerca(true); });
+
+        // ------------------------------------------------------------------
+        // Eliminazione: la fa la procedura Oracle ELIMINA_LOG, che protegge sempre gli
+        // ultimi 30 giorni e registra chi ha eliminato cosa.
+        // ------------------------------------------------------------------
+        const scelta = (nome) => (document.querySelector(`input[name="${nome}"]:checked`) || {}).value;
+        function aggiornaNota() {
+            const modo = scelta('eModo');
+            const uno = document.querySelector('input[name="eMesi"][value="1"]');
+            // "Ultimo mese" non è possibile: gli ultimi 30 giorni sono protetti.
+            uno.disabled = modo === 'ultimi';
+            $('eMesi1').classList.toggle('disabled', uno.disabled);
+            if (uno.disabled && uno.checked) document.querySelector('input[name="eMesi"][value="3"]').checked = true;
+            const mesi = scelta('eMesi');
+            const cosa = tab === 'accessi' ? 'gli accessi' : 'le modifiche ai dati';
+            const periodo = modo === 'vecchi'
+                ? `registrati <b>prima di ${mesi} ${mesi === '1' ? 'mese' : 'mesi'} fa</b>`
+                : `registrati <b>negli ultimi ${mesi} mesi, tranne gli ultimi 30 giorni</b>`;
+            $('eNota').innerHTML = `Elimina ${cosa} ${periodo}.<br>Gli ultimi 30 giorni restano sempre protetti. ` +
+                'L&#39;eliminazione non si può annullare e viene registrata negli accessi.';
+        }
+        $('eliminaBtn').addEventListener('click', () => {
+            $('eliminaTitolo').textContent = tab === 'accessi' ? 'Elimina accessi' : 'Elimina modifiche ai dati';
+            $('eEsito').classList.add('hidden');
+            $('eConferma').disabled = false;
+            aggiornaNota();
+            $('eliminaModal').classList.remove('hidden');
+        });
+        $('eliminaModal').addEventListener('change', aggiornaNota);
+        const chiudiModal = () => $('eliminaModal').classList.add('hidden');
+        $('eAnnulla').addEventListener('click', chiudiModal);
+        $('eliminaModal').addEventListener('click', (ev) => { if (ev.target === $('eliminaModal')) chiudiModal(); });
+        document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') chiudiModal(); });
+        $('eConferma').addEventListener('click', async () => {
+            const b = $('eConferma');
+            const esito = $('eEsito');
+            b.disabled = true;
+            try {
+                const r = await fetch(`${API_URL}/audit-log/elimina`, {
+                    method: 'POST',
+                    headers: { ...headers(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tabella: tab, modo: scelta('eModo'), mesi: Number(scelta('eMesi')) })
+                });
+                const d = await r.json().catch(() => ({}));
+                if (r.status === 401) { window.location.href = 'index.html'; return; }
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                esito.style.color = 'var(--good)';
+                esito.textContent = d.eliminate ? `Eliminati ${d.eliminate.toLocaleString('it-IT')} log.` : 'Nessun log da eliminare in quel periodo.';
+                esito.classList.remove('hidden');
+                caricaStato();
+                cerca();
+                setTimeout(chiudiModal, 1800);
+            } catch (e) {
+                esito.style.color = 'var(--bad)';
+                esito.textContent = e.message;
+                esito.classList.remove('hidden');
+                b.disabled = false;
+            }
+        });
 
         (async () => {
             $('content').classList.remove('hidden');
