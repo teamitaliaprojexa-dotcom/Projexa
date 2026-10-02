@@ -15,6 +15,7 @@
 import oracledb from 'oracledb';
 import db from '../config/database.js';
 import { decryptDeep } from '../config/crypto.js';
+import { notificheDaVariazioni } from './notifiche.js';
 
 const TICK_MS = 60 * 1000;
 const LOTTO = 500;          // righe per invio
@@ -250,6 +251,9 @@ async function inviaLotto() {
     // Oracle ha confermato: ora si possono togliere dalla coda.
     await q('DELETE FROM audit_outbox WHERE id = ANY($1::bigint[])', [inviate.map((r) => r.id)]);
     await q('COMMIT');
+    // Campanella: le modifiche di Jira e Qlik appena confermate diventano notifiche. Ogni
+    // riga passa di qui una volta sola (è appena uscita dalla coda); un errore non ferma l'invio.
+    await notificheDaVariazioni(inviate);
     // Se restano solo email in attesa (tabella mancante) il giro si ferma qui.
     return inviate.length === rows.length ? rows.length : 0;
   } catch (e) {

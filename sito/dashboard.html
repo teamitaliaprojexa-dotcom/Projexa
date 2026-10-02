@@ -1475,6 +1475,36 @@
             border-color: var(--primary);
         }
 
+        /* CAMPANELLA DELLE NOTIFICHE (backend: routes/notifiche.js, jobs/notifiche.js) */
+        .notif-wrap { position: relative; }
+        .notif-badge { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 0.7rem; font-weight: 700; line-height: 18px; text-align: center; pointer-events: none; box-shadow: 0 0 0 2px #fff; }
+        .notif-panel { position: absolute; top: calc(100% + 8px); right: 0; width: min(420px, calc(100vw - 32px)); max-height: 70vh; display: none; flex-direction: column; background: #fff; border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.18); z-index: 1200; overflow: hidden; }
+        .notif-panel.open { display: flex; }
+        .notif-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 0.9rem; border-bottom: 1px solid var(--border); font-weight: 600; }
+        .notif-head .sp { flex: 1; }
+        .notif-tools { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.9rem; border-bottom: 1px solid var(--border); font-size: 0.8rem; color: var(--text-muted); flex-wrap: wrap; }
+        .notif-tools label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+        .notif-tools .sp { flex: 1; }
+        .notif-tools button { border: none; background: var(--light); border: 1px solid var(--border); border-radius: 6px; padding: 0.25rem 0.6rem; font-size: 0.78rem; cursor: pointer; color: var(--dark); }
+        .notif-tools button:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+        .notif-tools button.danger:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
+        .notif-tools button:disabled { opacity: 0.5; cursor: default; }
+        .notif-list { overflow-y: auto; flex: 1; }
+        .notif-item { display: flex; gap: 0.6rem; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--border); cursor: pointer; align-items: flex-start; }
+        .notif-item:hover { background: var(--light); }
+        .notif-item.unread { background: #EFF6FF; }
+        .notif-item.unread:hover { background: #DBEAFE; }
+        .notif-item input { margin-top: 0.25rem; flex: 0 0 auto; cursor: pointer; }
+        .notif-ico { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; font-size: 0.8rem; color: #fff; }
+        .notif-ico.jira { background: #2563EB; } .notif-ico.qlik { background: #059669; } .notif-ico.scadenza { background: #D97706; }
+        .notif-body { flex: 1; min-width: 0; }
+        .notif-title { font-size: 0.86rem; line-height: 1.35; }
+        .notif-item.unread .notif-title { font-weight: 700; }
+        .notif-msg { font-size: 0.78rem; color: var(--text-muted); white-space: pre-line; margin-top: 0.15rem; word-break: break-word; }
+        .notif-when { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem; }
+        .notif-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); flex: 0 0 auto; margin-top: 0.4rem; }
+        .notif-empty { padding: 2.5rem 1rem; text-align: center; color: var(--text-muted); font-size: 0.88rem; }
+
         /* STATS GRID */
         .stats-grid {
             display: grid;
@@ -3540,9 +3570,22 @@
                             </div>
                         </div>
                     </div>
-                    <button class="btn-icon">
-                        <i class="fas fa-bell"></i>
-                    </button>
+                    <div class="notif-wrap" id="notifWrap">
+                        <button type="button" class="btn-icon" id="notifBtn" title="Notifiche" aria-haspopup="true" aria-expanded="false">
+                            <i class="fas fa-bell"></i>
+                        </button>
+                        <span class="notif-badge" id="notifBadge" style="display: none;"></span>
+                        <div class="notif-panel" id="notifPanel" role="dialog" aria-label="Notifiche">
+                            <div class="notif-head"><i class="fas fa-bell" style="color: var(--primary);"></i> Notifiche <span class="sp"></span><span id="notifCount" style="font-size: 0.78rem; font-weight: 500; color: var(--text-muted);"></span></div>
+                            <div class="notif-tools">
+                                <label><input type="checkbox" id="notifAll"> Seleziona tutto</label>
+                                <span class="sp"></span>
+                                <button type="button" id="notifReadBtn" disabled title="Segna come lette le notifiche selezionate"><i class="fas fa-check"></i> Segna lette</button>
+                                <button type="button" id="notifDelBtn" class="danger" disabled title="Elimina le notifiche selezionate"><i class="fas fa-trash-can"></i> Elimina</button>
+                            </div>
+                            <div class="notif-list" id="notifList"><div class="notif-empty">Caricamento…</div></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -6256,7 +6299,8 @@
         const AUTO_REFRESH_ESCLUSI = [
             /\/calendar\/meetings\/managed\/(status|transcribe|offset|finalize|claim-recording)/,
             /\/calendar\/meetings\/managed\/recap/,
-            /\/auth\//, /\/ai\//, /\/chat/
+            /\/auth\//, /\/ai\//, /\/chat/,
+            /\/notifiche\//   // campanella: segnare lette / eliminare non cambia i dati della dashboard
         ];
         let autoRefreshTimer = null;
         (function intercettaSalvataggi() {
@@ -9822,6 +9866,146 @@
             } catch (e) {
                 return {};
             }
+        }
+
+        // === CAMPANELLA DELLE NOTIFICHE ===
+        // Contatore delle non lette (ogni 60 s e al ritorno sulla pagina) e pannello con
+        // l'elenco. Clic su una notifica = letta (il contatore cala); casella + "Seleziona
+        // tutto" per segnare come lette o eliminare. Backend: routes/notifiche.js.
+        function initNotifiche() {
+            const btn = document.getElementById('notifBtn');
+            const panel = document.getElementById('notifPanel');
+            if (!btn || !panel) return;
+            const badge = document.getElementById('notifBadge');
+            const list = document.getElementById('notifList');
+            const all = document.getElementById('notifAll');
+            const readBtn = document.getElementById('notifReadBtn');
+            const delBtn = document.getElementById('notifDelBtn');
+            const countEl = document.getElementById('notifCount');
+            const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half' };
+            let elenco = [];
+
+            function mostraConteggio(n) {
+                badge.style.display = n > 0 ? '' : 'none';
+                badge.textContent = n > 99 ? '99+' : String(n);
+                btn.title = n > 0 ? `Notifiche: ${n} da leggere` : 'Notifiche';
+            }
+            async function aggiornaConteggio() {
+                try {
+                    const r = await fetch(`${API_URL}/notifiche/conteggio`, { headers: getAuthHeaders() });
+                    if (!r.ok) return;
+                    mostraConteggio((await r.json()).nonLette || 0);
+                } catch (e) { /* rete assente: si riprova al giro dopo */ }
+            }
+            function quando(t) {
+                const d = new Date(t);
+                const oggi = new Date();
+                const stessoGiorno = d.toDateString() === oggi.toDateString();
+                return stessoGiorno ? `oggi alle ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
+                    : d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            }
+            const selezionati = () => [...list.querySelectorAll('input[data-id]:checked')].map((x) => x.dataset.id);
+            function aggiornaStrumenti() {
+                const sel = selezionati();
+                readBtn.disabled = !sel.length || !sel.some((id) => (elenco.find((n) => n.id === id) || {}).letta === false);
+                delBtn.disabled = !sel.length;
+                const tot = list.querySelectorAll('input[data-id]').length;
+                all.checked = tot > 0 && sel.length === tot;
+                all.indeterminate = sel.length > 0 && sel.length < tot;
+            }
+            function disegna(dati) {
+                elenco = dati.notifiche || [];
+                countEl.textContent = dati.totale ? `${dati.nonLette} da leggere su ${dati.totale}` : '';
+                mostraConteggio(dati.nonLette || 0);
+                list.innerHTML = elenco.length ? elenco.map((n) => `
+                    <div class="notif-item${n.letta ? '' : ' unread'}" data-id="${esc(n.id)}">
+                        <input type="checkbox" data-id="${esc(n.id)}" aria-label="Seleziona">
+                        <div class="notif-ico ${esc(n.fonte)}"><i class="${ICONE[n.fonte] || 'fas fa-bell'}"></i></div>
+                        <div class="notif-body">
+                            <div class="notif-title">${esc(n.titolo)}</div>
+                            ${n.messaggio ? `<div class="notif-msg">${esc(n.messaggio)}</div>` : ''}
+                            <div class="notif-when">${esc(quando(n.aggiornata_il || n.creata_il))}</div>
+                        </div>
+                        ${n.letta ? '' : '<span class="notif-dot" title="Da leggere"></span>'}
+                    </div>`).join('')
+                    : '<div class="notif-empty"><i class="fas fa-bell-slash" style="font-size: 1.4rem; display: block; margin-bottom: 0.5rem;"></i>Nessuna notifica</div>';
+                all.checked = false;
+                aggiornaStrumenti();
+            }
+            async function caricaElenco() {
+                try {
+                    const r = await fetch(`${API_URL}/notifiche`, { headers: getAuthHeaders() });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                    disegna(d);
+                } catch (e) {
+                    list.innerHTML = `<div class="notif-empty">${esc(e.message)}</div>`;
+                }
+            }
+            async function azione(percorso, corpo) {
+                const r = await fetch(`${API_URL}/notifiche/${percorso}`, {
+                    method: 'POST',
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify(corpo)
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                return d;
+            }
+
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const aperto = panel.classList.toggle('open');
+                btn.setAttribute('aria-expanded', aperto ? 'true' : 'false');
+                if (aperto) caricaElenco();
+            });
+            document.addEventListener('click', (e) => {
+                if (panel.classList.contains('open') && !document.getElementById('notifWrap').contains(e.target)) {
+                    panel.classList.remove('open');
+                    btn.setAttribute('aria-expanded', 'false');
+                }
+            });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && panel.classList.contains('open')) panel.classList.remove('open'); });
+
+            // Clic sulla notifica (non sulla casella): diventa letta.
+            list.addEventListener('click', async (e) => {
+                if (e.target.matches('input[data-id]')) { aggiornaStrumenti(); return; }
+                const item = e.target.closest('.notif-item');
+                if (!item || !item.classList.contains('unread')) return;
+                item.classList.remove('unread');
+                const dot = item.querySelector('.notif-dot');
+                if (dot) dot.remove();
+                try {
+                    await azione('lette', { ids: [item.dataset.id] });
+                    const n = elenco.find((x) => x.id === item.dataset.id);
+                    if (n) n.letta = true;
+                    const nonLette = elenco.filter((x) => !x.letta).length;
+                    mostraConteggio(nonLette);
+                    countEl.textContent = `${nonLette} da leggere su ${elenco.length}`;
+                    aggiornaStrumenti();
+                } catch (err) {
+                    caricaElenco();
+                }
+            });
+            all.addEventListener('change', () => {
+                list.querySelectorAll('input[data-id]').forEach((x) => { x.checked = all.checked; });
+                aggiornaStrumenti();
+            });
+            readBtn.addEventListener('click', async () => {
+                try { await azione('lette', { ids: selezionati() }); } catch (err) { showNotification(err.message, 'info'); }
+                caricaElenco();
+            });
+            delBtn.addEventListener('click', async () => {
+                const sel = selezionati();
+                if (!sel.length || !confirm(`Eliminare ${sel.length === 1 ? 'la notifica selezionata' : `le ${sel.length} notifiche selezionate`}?`)) return;
+                try { await azione('elimina', { ids: sel }); } catch (err) { showNotification(err.message, 'info'); }
+                caricaElenco();
+            });
+
+            aggiornaConteggio();
+            setInterval(() => { if (!document.hidden) aggiornaConteggio(); }, 60000);
+            document.addEventListener('visibilitychange', () => { if (!document.hidden) aggiornaConteggio(); });
         }
 
         // Mostra la voce "Database" nella sidebar solo agli admin.
@@ -16308,6 +16492,7 @@
             await loadTenantHeaderLogo();
             await loadPageLabels();
             applyRoleVisibility();
+            initNotifiche();
             loadSettingsArguments();
             await loadClientsNames();
             loadProjectClients();

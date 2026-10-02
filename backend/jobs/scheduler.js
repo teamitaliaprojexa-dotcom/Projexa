@@ -19,6 +19,7 @@
 import db from '../config/database.js';
 import { eseguiAggiornaIntegrazioni } from './aggiornaIntegrazioni.js';
 import { eseguiBackupDb, eseguiCopiaStaging } from './scriptVm.js';
+import { eseguiNotificheScadenze } from './notifiche.js';
 import { conContestoAudit } from '../config/auditContext.js';
 
 // Job schedulabili: la chiave è il valore di job_schedules.job.
@@ -35,7 +36,9 @@ const JOBS = {
   // Job di sistema (script della VM, vedi scriptVm.js): riguardano tutti i database,
   // tenant e utente_config della riga servono solo a indicare chi li "possiede".
   backup_db: () => eseguiBackupDb(),
-  copia_staging_neon: () => eseguiCopiaStaging()
+  copia_staging_neon: () => eseguiCopiaStaging(),
+  // Notifiche delle scadenze (To-Do), per tutti i tenant: vedi jobs/notifiche.js.
+  notifiche_scadenze: () => eseguiNotificheScadenze()
 };
 
 // Nomi dei job schedulabili (usati dalla pagina di gestione per l'elenco a discesa).
@@ -45,7 +48,8 @@ export const NOMI_JOB = Object.keys(JOBS);
 export const INFO_JOB = {
   aggiorna_integrazioni: { etichetta: 'Aggiorna Integrazioni (Jira)', jira: true },
   backup_db: { etichetta: 'Backup database VM su Object Storage', jira: false },
-  copia_staging_neon: { etichetta: 'Copia database VM su staging Neon', jira: false }
+  copia_staging_neon: { etichetta: 'Copia database VM su staging Neon', jira: false },
+  notifiche_scadenze: { etichetta: 'Notifiche delle scadenze (To-Do)', jira: false }
 };
 
 export function schedulerAttivo() {
