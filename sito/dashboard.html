@@ -1500,7 +1500,7 @@
         .notif-list { overflow-y: auto; flex: 1; padding: 0.75rem 1rem 1rem; background: #F8FAFC; display: flex; flex-direction: column; gap: 0.55rem; scrollbar-width: thin; scrollbar-color: #CBD5E1 transparent; }
         .notif-list::-webkit-scrollbar { width: 8px; }
         .notif-list::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 8px; }
-        .notif-item { --notif-c: #64748B; position: relative; display: flex; gap: 0.85rem; padding: 0.85rem 1rem 0.85rem 1.15rem; background: #fff; border: 1px solid #E8EDF3; border-radius: 14px; cursor: pointer; align-items: flex-start; transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s; overflow: hidden; }
+        .notif-item { --notif-c: #64748B; position: relative; display: flex; gap: 0.85rem; padding: 0.85rem 1rem 0.85rem 1.15rem; background: #fff; border: 1px solid #E8EDF3; border-radius: 14px; cursor: pointer; align-items: flex-start; transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s; overflow: hidden; flex-shrink: 0; }
         .notif-item::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--notif-c); opacity: 0.35; }
         .notif-item:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(15,23,42,0.08); border-color: #DCE3EC; }
         .notif-item.unread { background: linear-gradient(90deg, color-mix(in srgb, var(--notif-c) 7%, #fff) 0%, #fff 60%); border-color: color-mix(in srgb, var(--notif-c) 30%, #E8EDF3); }
@@ -1518,6 +1518,8 @@
         .notif-side { display: flex; flex-direction: column; align-items: flex-end; gap: 0.45rem; flex: 0 0 auto; padding-top: 0.15rem; }
         .notif-when { font-size: 0.74rem; color: #94A3B8; white-space: nowrap; }
         .notif-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--notif-c); box-shadow: 0 0 0 4px color-mix(in srgb, var(--notif-c) 18%, transparent); }
+        .notif-go { display: inline-flex; align-items: center; gap: 0.35rem; border: none; border-radius: 9px; padding: 0.35rem 0.8rem; font-size: 0.78rem; font-weight: 700; cursor: pointer; color: #fff; background: var(--notif-c); box-shadow: 0 2px 8px color-mix(in srgb, var(--notif-c) 35%, transparent); transition: filter 0.15s, transform 0.15s; }
+        .notif-go:hover { filter: brightness(1.08); transform: translateX(2px); }
         .notif-empty { padding: 3.5rem 1rem; text-align: center; color: #94A3B8; font-size: 0.92rem; }
         .notif-empty i { font-size: 2.2rem; display: block; margin-bottom: 0.75rem; color: #CBD5E1; }
         @media (max-width: 600px) { .notif-side { display: none; } .notif-item { padding: 0.75rem; } }
@@ -9949,6 +9951,7 @@
                         <div class="notif-side">
                             <span class="notif-when">${esc(quando(n.aggiornata_il || n.creata_il))}</span>
                             ${n.letta ? '' : '<span class="notif-dot" title="Da leggere"></span>'}
+                            ${n.tabella === 'tasks' && n.riga_id ? `<button type="button" class="notif-go" data-vai="${esc(n.riga_id)}" title="Apri la To-Do">Vai <i class="fas fa-arrow-right"></i></button>` : ''}
                         </div>
                     </div>`).join('')
                     : '<div class="notif-empty"><i class="fas fa-bell-slash"></i>Nessuna notifica</div>';
@@ -9995,9 +9998,33 @@
                 btn.setAttribute('aria-expanded', 'false');
             });
 
+            // «Vai»: apre la To-Do della notifica (stessa finestra della matita nella To-Do List).
+            async function apriToDo(taskId) {
+                panel.classList.remove('open');
+                btn.setAttribute('aria-expanded', 'false');
+                let task = todoData.find((row) => String(row.__task_id) === String(taskId));
+                if (!task) {
+                    await loadTodoData();
+                    task = todoData.find((row) => String(row.__task_id) === String(taskId));
+                }
+                const sezione = document.getElementById('todoList');
+                if (sezione) sezione.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                if (task) openTaskModal(task);
+                else showNotification('To-Do non trovata: potrebbe essere stata eliminata', 'info');
+            }
+
             // Clic sulla notifica (non sulla casella): diventa letta.
             list.addEventListener('click', async (e) => {
                 if (e.target.matches('input[data-id]')) { aggiornaStrumenti(); return; }
+                const vai = e.target.closest('[data-vai]');
+                if (vai) {
+                    const item = vai.closest('.notif-item');
+                    if (item && item.classList.contains('unread')) {
+                        azione('lette', { ids: [item.dataset.id] }).then(() => aggiornaConteggio()).catch(() => {});
+                    }
+                    apriToDo(vai.dataset.vai);
+                    return;
+                }
                 const item = e.target.closest('.notif-item');
                 if (!item || !item.classList.contains('unread')) return;
                 item.classList.remove('unread');
