@@ -21,6 +21,9 @@ if (GMAIL_APP_PASSWORD) {
   console.warn('⚠️  GMAIL_APP_PASSWORD non impostata: l\'invio email è disabilitato (le registrazioni non invieranno l\'email di conferma).');
 }
 
+// Casella del team Projexa (mittente di tutte le email e destinataria delle richieste privacy).
+export const EMAIL_PROJEXA = GMAIL_USER;
+
 export function isMailerConfigured() {
   return !!transporter;
 }
@@ -128,5 +131,33 @@ export function buildMagicLinkEmail({ nome, magicUrl, validSeconds = 60 }) {
     <p style="text-align:center; font-size:12px; color:#9CA3AF; margin-top:16px;">© Projexa</p>
   </div>`;
   const text = `${saluto}\n\nEcco il tuo link di accesso a Projexa (senza password):\n${magicUrl}\n\nIl link è valido per ${validSeconds} secondi e può essere usato una sola volta.\nSe non hai richiesto tu l'accesso, ignora questa email.`;
+  return { html, text };
+}
+
+// Richiesta di cancellazione dell'account (Privacy e dati personali, art. 17 GDPR): email
+// da Projexa a Projexa, gestita a mano dal team entro 30 giorni.
+export function buildRichiestaCancellazioneEmail({ nome, email, tenant, userId, tenantId, motivo, quando }) {
+  const e = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const righe = [
+    ['Utente', nome || '—'], ['Email', email || '—'], ['Spazio di lavoro', tenant || '—'],
+    ['ID utente', userId], ['ID tenant', tenantId || '—'], ['Data richiesta', quando]
+  ];
+  const html = `
+  <div style="font-family:Arial,Helvetica,sans-serif; max-width:560px; margin:0 auto; color:#111827;">
+    <div style="text-align:center; padding:16px 0;"><div style="font-size:22px; font-weight:700; color:#059669;">Projexa</div></div>
+    <div style="background:#ffffff; border:1px solid #E5E7EB; border-radius:12px; padding:24px;">
+      <p style="font-size:16px; font-weight:700; margin-top:0;">Richiesta di cancellazione dell'account (art. 17 GDPR)</p>
+      <p>Un utente ha chiesto la cancellazione del proprio account dalla dashboard (Privacy e dati personali). Va gestita <strong>entro 30 giorni</strong> dalla richiesta.</p>
+      <table style="border-collapse:collapse; width:100%; font-size:14px;">
+        ${righe.map(([k, v]) => `<tr><td style="padding:6px 8px; border-bottom:1px solid #F3F4F6; color:#6B7280; width:38%;">${e(k)}</td><td style="padding:6px 8px; border-bottom:1px solid #F3F4F6;">${e(v)}</td></tr>`).join('')}
+      </table>
+      <p style="margin-bottom:4px;"><strong>Motivo / note dell'utente:</strong></p>
+      <p style="white-space:pre-line; background:#F9FAFB; border-radius:8px; padding:10px; margin-top:0;">${e(motivo || 'nessuna nota')}</p>
+      <p style="font-size:13px; color:#6B7280;">Prima di cancellare, verificare con l'azienda (spazio di lavoro) quali dati appartengono all'organizzazione e vanno conservati.</p>
+    </div>
+  </div>`;
+  const text = 'Richiesta di cancellazione dell\'account (art. 17 GDPR) - da gestire entro 30 giorni\n\n' +
+    righe.map(([k, v]) => `${k}: ${v}`).join('\n') +
+    `\n\nMotivo / note: ${motivo || 'nessuna nota'}`;
   return { html, text };
 }

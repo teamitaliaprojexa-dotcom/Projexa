@@ -106,6 +106,7 @@ const elenco = (v) => (Array.isArray(v) ? v : String(v || '').split(/[;,]/))
 
 /**
  * tipo:      'conferma_iscrizione' | 'reset_password' | 'magic_link' | 'recap' | 'trascrizione'
+ *            | 'richiesta_cancellazione' (Privacy e dati personali, email da Projexa a Projexa)
  * modalita:  'server'  = inviata da Projexa (Gmail del team)
  *            'client'  = preparata da Projexa e aperta nel programma di posta dell'utente
  *                        (Gmail web o Outlook): l'invio vero lo fa l'utente

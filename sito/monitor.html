@@ -590,6 +590,7 @@
                                 <option value="conferma_iscrizione">Conferma iscrizione</option>
                                 <option value="reset_password">Password dimenticata</option>
                                 <option value="magic_link">Link di accesso</option>
+                                <option value="richiesta_cancellazione">Richiesta cancellazione account</option>
                             </select>
                         </label>
                         <label class="t-email hidden">Come
@@ -1354,7 +1355,7 @@
             const $ = (id) => document.getElementById('lg-' + id);
 
             const EVENTI = { login: 'Login con password', google: 'Google', microsoft: 'Microsoft', magic_link: 'Link via email', impersonazione: 'Impersonazione', cambio_password: 'Cambio password', eliminazione_log: 'Eliminazione log', eliminazione_backup: 'Eliminazione backup' };
-            const TIPI_EMAIL = { recap: 'Recap riunione', trascrizione: 'Trascrizione riunione', conferma_iscrizione: 'Conferma iscrizione', reset_password: 'Password dimenticata', magic_link: 'Link di accesso' };
+            const TIPI_EMAIL = { recap: 'Recap riunione', trascrizione: 'Trascrizione riunione', conferma_iscrizione: 'Conferma iscrizione', reset_password: 'Password dimenticata', magic_link: 'Link di accesso', richiesta_cancellazione: 'Richiesta cancellazione account' };
             const SERVIZI = { gmail_smtp: 'Gmail del team Projexa', gmail_web: 'Gmail (web) dell\'utente', programma_posta: 'Programma di posta dell\'utente (Outlook)' };
             const OPERAZIONI = { INSERT: 'Inserimento', UPDATE: 'Modifica', DELETE: 'Cancellazione' };
             let tab = 'accessi';

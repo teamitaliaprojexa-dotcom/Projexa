@@ -6319,7 +6319,8 @@
             /\/calendar\/meetings\/managed\/(status|transcribe|offset|finalize|claim-recording)/,
             /\/calendar\/meetings\/managed\/recap/,
             /\/auth\//, /\/ai\//, /\/chat/,
-            /\/notifiche\//   // campanella: segnare lette / eliminare non cambia i dati della dashboard
+            /\/notifiche\//,  // campanella: segnare lette / eliminare non cambia i dati della dashboard
+            /\/gdpr\//        // richiesta di cancellazione (email al team)
         ];
         let autoRefreshTimer = null;
         (function intercettaSalvataggi() {
@@ -16336,47 +16337,37 @@
             }
         }
 
-        // Privacy e dati (GDPR): esportazione e cancellazione dell'account.
+        // Privacy e dati (GDPR art. 17): richiesta di cancellazione dell'account, inviata per
+        // email al team Projexa (POST /api/gdpr/richiesta-cancellazione). Nessuna cancellazione
+        // automatica e nessuna esportazione (tolte il 2026-10-02).
         function initPrivacyModal() {
             const modal = document.getElementById('privacyModal');
             const close = document.getElementById('pmClose');
-            const exp = document.getElementById('pmExport');
-            const era = document.getElementById('pmErase');
-            if (close) close.addEventListener('click', () => { if (modal) modal.style.display = 'none'; });
-            if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+            const btn = document.getElementById('pmRichiesta');
+            const motivo = document.getElementById('pmMotivo');
+            const chiudi = () => { if (modal) modal.style.display = 'none'; };
+            if (close) close.addEventListener('click', chiudi);
+            if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) chiudi(); });
 
-            if (exp) exp.addEventListener('click', async () => {
+            if (btn) btn.addEventListener('click', async () => {
+                if (!confirm('Inviare al team Projexa la richiesta di cancellazione del tuo account?\nIl tuo accesso resta attivo finché la richiesta non viene gestita (entro 30 giorni).')) return;
+                btn.disabled = true;
                 try {
-                    const res = await fetch(`${API_URL}/gdpr/export`, { headers: getAuthHeaders() });
-                    if (!res.ok) { showNotification('Errore nell\'esportazione', 'info'); return; }
-                    const blob = await res.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url; a.download = 'miei_dati_projexa.json';
-                    document.body.appendChild(a); a.click(); a.remove();
-                    URL.revokeObjectURL(url);
-                    showNotification('Dati esportati', 'success');
-                } catch (e) { showNotification('Errore di connessione', 'info'); }
-            });
-
-            if (era) era.addEventListener('click', async () => {
-                if (!confirm("Eliminare definitivamente il tuo account? I dati personali verranno anonimizzati e perderai l'accesso. Operazione irreversibile.")) return;
-                try {
-                    const res = await fetch(`${API_URL}/gdpr/erase`, {
-                        method: 'DELETE',
+                    const res = await fetch(`${API_URL}/gdpr/richiesta-cancellazione`, {
+                        method: 'POST',
                         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                        body: JSON.stringify({ confirm: true })
+                        body: JSON.stringify({ motivo: motivo ? motivo.value : '' })
                     });
-                    if (res.ok) {
-                        ['authToken', 'user', 'currentUser', 'currentTenant', 'originalToken', 'originalUser']
-                            .forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
-                        alert('Account eliminato. Verrai reindirizzato alla pagina di accesso.');
-                        window.location.href = 'login.html';
-                    } else {
-                        const err = await res.json().catch(() => ({}));
-                        showNotification('Errore: ' + (err.error || res.status), 'info');
-                    }
-                } catch (e) { showNotification('Errore di connessione', 'info'); }
+                    const d = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(d.error || `Errore ${res.status}`);
+                    if (motivo) motivo.value = '';
+                    chiudi();
+                    showNotification('Richiesta inviata: il team Projexa ti contatterà entro 30 giorni', 'success');
+                } catch (e) {
+                    showNotification(e.message, 'info');
+                } finally {
+                    btn.disabled = false;
+                }
             });
         }
 
@@ -16875,14 +16866,15 @@
             </div>
         </div>
     </div>
-    <!-- Modale Privacy e dati personali (GDPR: export / cancellazione) -->
+    <!-- Modale Privacy e dati personali (GDPR art. 17): richiesta di cancellazione al team Projexa -->
     <div id="privacyModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 700; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 440px; max-width: calc(92vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <h3 style="margin: 0 0 0.5rem; color: var(--dark);">Privacy e dati personali</h3>
-            <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.2rem;">Puoi scaricare una copia dei tuoi dati oppure richiedere la cancellazione dell'account (diritti artt. 15, 17 e 20 GDPR).</p>
+            <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1rem;">Puoi chiedere la cancellazione del tuo account (art. 17 GDPR). La richiesta arriva al team Projexa, che la gestisce entro 30 giorni e ti contatta all'indirizzo email del tuo account. I dati di clienti, progetti e attività appartengono alla tua azienda: la loro sorte viene concordata con lei.</p>
             <div style="display: flex; flex-direction: column; gap: 0.6rem;">
-                <button id="pmExport" type="button" style="padding: 0.6rem 1rem; background: #3B82F6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">⬇ Esporta i miei dati (JSON)</button>
-                <button id="pmErase" type="button" style="padding: 0.6rem 1rem; background: #EF4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">🗑 Elimina il mio account</button>
+                <label for="pmMotivo" style="font-size: 0.8rem; font-weight: 600; color: var(--dark);">Motivo o note (facoltativo)</label>
+                <textarea id="pmMotivo" maxlength="2000" rows="3" style="width: 100%; box-sizing: border-box; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 0.88rem; resize: vertical;"></textarea>
+                <button id="pmRichiesta" type="button" style="padding: 0.6rem 1rem; background: #EF4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">✉ Richiedi la cancellazione dell'account</button>
                 <a href="privacy.html" target="_blank" rel="noopener" style="text-align: center; font-size: 0.85rem; color: var(--primary);">Leggi l'informativa privacy e cookie</a>
                 <button id="pmClose" type="button" style="padding: 0.5rem 1rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Chiudi</button>
             </div>

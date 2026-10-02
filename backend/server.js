@@ -24,6 +24,7 @@ import jobSchedulesRoutes from './routes/job-schedules.js';
 import auditLogRoutes from './routes/audit-log.js';
 import notificheRoutes from './routes/notifiche.js';
 import auditEventiRoutes from './routes/audit-eventi.js';
+import { sendMail, buildRichiestaCancellazioneEmail, EMAIL_PROJEXA } from './config/mailer.js';
 import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
 import { avviaScheduler } from './jobs/scheduler.js';
 import { avviaInvioAudit } from './jobs/auditShipper.js';
@@ -7324,77 +7325,43 @@ app.put('/api/:source(settings|clients|projects)/:id/reference-value', requireAu
 });
 
 // ==========================================
-// GDPR — Diritti dell'interessato (art. 15/17/20)
+// GDPR — Diritto alla cancellazione (art. 17): solo richiesta al team Projexa
 // ==========================================
 
-// Export dei dati personali dell'utente autenticato (accesso/portabilità).
-// Restituisce un JSON scaricabile con tutti i dati riferiti al suo user_id.
-app.get('/api/gdpr/export', requireAuth, async (req, res) => {
+// Privacy e dati personali (dashboard): l'utente NON cancella da solo l'account (i dati
+// di clienti, progetti, task e riunioni sono dell'azienda). Invia una richiesta che arriva
+// per email alla casella del team Projexa (da Projexa a Projexa) e viene gestita entro
+// 30 giorni (art. 17 GDPR). L'invio resta nel log email (tipo richiesta_cancellazione).
+// Esportazione dei dati e cancellazione automatica sono state tolte il 2026-10-02.
+const ultimaRichiestaCancellazione = new Map(); // user_id -> ms (una richiesta ogni 10 minuti)
+app.post('/api/gdpr/richiesta-cancellazione', requireAuth, async (req, res) => {
   try {
     const uid = req.user.user_id;
-    const data = {};
-    const q = async (label, sql, params) => {
-      try { const r = await db.query(sql, params); data[label] = stripSensitive(r.rows); }
-      catch (e) { data[label] = { nota: 'non disponibile', dettaglio: e.message }; }
-    };
-    await q('profilo_utente', 'SELECT * FROM users WHERE id = $1', [uid]); // Projexa: nome/cognome
-    // Dati di autenticazione (email/scadenza) da Projexa-Auth
-    try {
-      const ar = await authDb.query('SELECT email, scadenza, created_at FROM users WHERE id = $1', [uid]);
-      data.autenticazione = stripSensitive(ar.rows);
-    } catch (e) { data.autenticazione = { nota: 'non disponibile', dettaglio: e.message }; }
-    await q('organizzazioni', 'SELECT * FROM user_tenants WHERE user_id = $1', [uid]);
-    await q('ruoli', 'SELECT * FROM user_roles WHERE user_id = $1', [uid]);
-    await q('impostazioni', 'SELECT * FROM settings WHERE user_id = $1', [uid]);
-    await q('clienti', 'SELECT * FROM clients WHERE user_id = $1', [uid]);
-    await q('contatti', 'SELECT * FROM contacts WHERE user_id = $1', [uid]);
-    const payload = {
-      informativa: 'Estrazione dei dati personali associati al tuo account Projexa (art. 15 e 20 GDPR).',
-      generato_il: new Date().toISOString(),
-      utente_id: uid, tenant_id: req.user.tenant_id,
-      dati: data
-    };
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="miei_dati_projexa.json"');
-    res.send(JSON.stringify(payload, null, 2));
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Cancellazione/anonimizzazione dell'account (diritto all'oblio, art. 17).
-// Anonimizza il profilo (nome/cognome/email/password) e revoca gli accessi. I dati
-// aziendali (clienti/contatti) restano al titolare del trattamento (l'organizzazione).
-// Richiede { confirm: true } nel body per evitare cancellazioni accidentali.
-app.delete('/api/gdpr/erase', requireAuth, async (req, res) => {
-  try {
-    if (!req.body || req.body.confirm !== true) {
-      return res.status(400).json({ error: "Conferma richiesta: inviare { confirm: true }" });
+    const prec = ultimaRichiestaCancellazione.get(uid);
+    if (prec && Date.now() - prec < 10 * 60 * 1000) {
+      return res.status(429).json({ error: 'Richiesta già inviata pochi minuti fa: il team Projexa ti contatterà.' });
     }
-    const uid = req.user.user_id;
-    const cols = await getTableColumns('users');
-    const anon = 'utente-rimosso-' + String(uid).replace(/-/g, '').slice(0, 10);
-    const sets = [], params = [];
-    const setIf = (col, val) => { if (cols.has(col)) { params.push(val); sets.push(`"${col}" = $${params.length}`); } };
-    setIf('name', 'Utente'); setIf('cognome', 'Rimosso'); setIf('nome', 'Utente');
-    setIf('email', anon + '@rimosso.invalid');
-    setIf('password_hash', null); setIf('password', null);
-    setIf('telefono', null); setIf('cellulare', null); setIf('avatar', null);
-    if (sets.length) { params.push(uid); await db.query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${params.length}`, params); }
-    // Anonimizza anche il record di autenticazione su Projexa-Auth (email + password inutilizzabile):
-    // così l'utente non può più autenticarsi (diritto all'oblio).
+    const motivo = String((req.body && req.body.motivo) || '').trim().slice(0, 2000);
+    let nome = '';
     try {
-      await authDb.query(
-        "UPDATE users SET email = $1, password_hash = 'DISABLED', updated_at = NOW() WHERE id = $2",
-        [anon + '@rimosso.invalid', uid]
-      );
-    } catch (e) { /* ignore */ }
-    // Revoca gli accessi (l'utente non potrà più autenticarsi)
-    try { await db.query('DELETE FROM user_tenants WHERE user_id = $1', [uid]); } catch (e) { /* ignore */ }
-    try { await db.query('DELETE FROM user_roles WHERE user_id = $1', [uid]); } catch (e) { /* ignore */ }
-    res.json({ message: 'Account anonimizzato e accessi revocati. Verrai disconnesso.' });
+      const u = (await db.query('SELECT name, cognome FROM users WHERE id = $1', [uid])).rows[0];
+      if (u) nome = [u.name, u.cognome].filter(Boolean).join(' ');
+    } catch (e) { /* nome non disponibile: si invia comunque */ }
+    const quando = new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' });
+    const { html, text } = buildRichiestaCancellazioneEmail({
+      nome, email: req.user.email, tenant: req.user.tenant_name, userId: uid, tenantId: req.user.tenant_id, motivo, quando
+    });
+    await sendMail({
+      to: EMAIL_PROJEXA,
+      subject: `Richiesta cancellazione account - ${nome || req.user.email || uid}`,
+      html, text,
+      log: { req, tipo: 'richiesta_cancellazione', userId: uid, tenantId: req.user.tenant_id }
+    });
+    ultimaRichiestaCancellazione.set(uid, Date.now());
+    res.json({ inviata: true });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('[GDPR] Richiesta di cancellazione non inviata:', error.message);
+    res.status(502).json({ error: `Richiesta non inviata (${error.message}). Riprova più tardi o scrivi a ${EMAIL_PROJEXA}.` });
   }
 });
 
