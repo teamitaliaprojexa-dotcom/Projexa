@@ -42,7 +42,7 @@ router.get('/conteggio', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const r = await notifDb.query(
-      `SELECT id::text AS id, fonte, titolo, messaggio, tabella, riga_id, letta, creata_il, aggiornata_il
+      `SELECT id::text AS id, fonte, titolo, messaggio, tabella, riga_id, conteggio, letta, creata_il, aggiornata_il
          FROM notifiche WHERE tenant_id = $1 AND user_id = $2
         ORDER BY letta, aggiornata_il DESC, id DESC
         LIMIT ${MAX_ELENCO}`,

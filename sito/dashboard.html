@@ -1477,33 +1477,50 @@
 
         /* CAMPANELLA DELLE NOTIFICHE (backend: routes/notifiche.js, jobs/notifiche.js) */
         .notif-wrap { position: relative; }
-        .notif-badge { position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 0.7rem; font-weight: 700; line-height: 18px; text-align: center; pointer-events: none; box-shadow: 0 0 0 2px #fff; }
-        .notif-panel { position: absolute; top: calc(100% + 8px); right: 0; width: min(420px, calc(100vw - 32px)); max-height: 70vh; display: none; flex-direction: column; background: #fff; border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.18); z-index: 1200; overflow: hidden; }
-        .notif-panel.open { display: flex; }
-        .notif-head { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 0.9rem; border-bottom: 1px solid var(--border); font-weight: 600; }
+        .notif-badge { position: absolute; top: -5px; right: -5px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px; background: linear-gradient(135deg, #F43F5E, #EF4444); color: #fff; font-size: 0.68rem; font-weight: 800; line-height: 19px; text-align: center; pointer-events: none; box-shadow: 0 0 0 2px #fff, 0 2px 6px rgba(239,68,68,0.45); animation: notifPulse 2.4s ease-in-out infinite; }
+        @keyframes notifPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+        .notif-panel { position: absolute; top: calc(100% + 10px); right: 0; width: min(840px, calc(100vw - 32px)); max-height: min(78vh, 760px); display: none; flex-direction: column; background: #fff; border-radius: 18px; box-shadow: 0 24px 60px rgba(15,23,42,0.22), 0 4px 14px rgba(15,23,42,0.08); z-index: 1200; overflow: hidden; border: 1px solid rgba(226,232,240,0.9); transform-origin: top right; }
+        .notif-panel.open { display: flex; animation: notifOpen 0.18s ease-out; }
+        @keyframes notifOpen { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+        .notif-head { display: flex; align-items: center; gap: 0.75rem; padding: 1rem 1.25rem; background: linear-gradient(120deg, #1E40AF 0%, #3B82F6 55%, #6366F1 100%); color: #fff; }
+        .notif-head-ico { width: 38px; height: 38px; border-radius: 12px; background: rgba(255,255,255,0.18); display: flex; align-items: center; justify-content: center; font-size: 1.05rem; }
+        .notif-head h3 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #fff; line-height: 1.2; }
         .notif-head .sp { flex: 1; }
-        .notif-tools { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.9rem; border-bottom: 1px solid var(--border); font-size: 0.8rem; color: var(--text-muted); flex-wrap: wrap; }
-        .notif-tools label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+        .notif-count:empty { display: none; }
+        .notif-count { font-size: 0.78rem; font-weight: 600; background: rgba(255,255,255,0.18); padding: 0.3rem 0.7rem; border-radius: 999px; white-space: nowrap; }
+        .notif-close { background: rgba(255,255,255,0.15); border: none; color: #fff; width: 32px; height: 32px; border-radius: 10px; cursor: pointer; font-size: 0.95rem; }
+        .notif-close:hover { background: rgba(255,255,255,0.3); }
+        .notif-tools { display: flex; align-items: center; gap: 0.6rem; padding: 0.65rem 1.25rem; border-bottom: 1px solid #EEF2F7; background: #F8FAFC; font-size: 0.82rem; color: #475569; flex-wrap: wrap; }
+        .notif-tools label { display: inline-flex; align-items: center; gap: 0.45rem; cursor: pointer; font-weight: 600; }
         .notif-tools .sp { flex: 1; }
-        .notif-tools button { border: none; background: var(--light); border: 1px solid var(--border); border-radius: 6px; padding: 0.25rem 0.6rem; font-size: 0.78rem; cursor: pointer; color: var(--dark); }
-        .notif-tools button:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
-        .notif-tools button.danger:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
-        .notif-tools button:disabled { opacity: 0.5; cursor: default; }
-        .notif-list { overflow-y: auto; flex: 1; }
-        .notif-item { display: flex; gap: 0.6rem; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--border); cursor: pointer; align-items: flex-start; }
-        .notif-item:hover { background: var(--light); }
-        .notif-item.unread { background: #EFF6FF; }
-        .notif-item.unread:hover { background: #DBEAFE; }
-        .notif-item input { margin-top: 0.25rem; flex: 0 0 auto; cursor: pointer; }
-        .notif-ico { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; font-size: 0.8rem; color: #fff; }
-        .notif-ico.jira { background: #2563EB; } .notif-ico.qlik { background: #059669; } .notif-ico.scadenza { background: #D97706; }
+        .notif-tools button { display: inline-flex; align-items: center; gap: 0.4rem; border: 1px solid #E2E8F0; background: #fff; border-radius: 10px; padding: 0.4rem 0.85rem; font-size: 0.8rem; font-weight: 600; cursor: pointer; color: #334155; transition: all 0.15s; }
+        .notif-tools button:hover:not(:disabled) { border-color: #3B82F6; color: #1D4ED8; background: #EFF6FF; }
+        .notif-tools button.danger:hover:not(:disabled) { border-color: #F87171; color: #B91C1C; background: #FEF2F2; }
+        .notif-tools button:disabled { opacity: 0.45; cursor: default; }
+        .notif-list { overflow-y: auto; flex: 1; padding: 0.75rem 1rem 1rem; background: #F8FAFC; display: flex; flex-direction: column; gap: 0.55rem; scrollbar-width: thin; scrollbar-color: #CBD5E1 transparent; }
+        .notif-list::-webkit-scrollbar { width: 8px; }
+        .notif-list::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 8px; }
+        .notif-item { --notif-c: #64748B; position: relative; display: flex; gap: 0.85rem; padding: 0.85rem 1rem 0.85rem 1.15rem; background: #fff; border: 1px solid #E8EDF3; border-radius: 14px; cursor: pointer; align-items: flex-start; transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s; overflow: hidden; }
+        .notif-item::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--notif-c); opacity: 0.35; }
+        .notif-item:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(15,23,42,0.08); border-color: #DCE3EC; }
+        .notif-item.unread { background: linear-gradient(90deg, color-mix(in srgb, var(--notif-c) 7%, #fff) 0%, #fff 60%); border-color: color-mix(in srgb, var(--notif-c) 30%, #E8EDF3); }
+        .notif-item.unread::before { opacity: 1; }
+        .notif-item.jira { --notif-c: #2563EB; } .notif-item.qlik { --notif-c: #059669; } .notif-item.scadenza { --notif-c: #EA580C; } .notif-item.riunione { --notif-c: #7C3AED; }
+        .notif-item input { margin-top: 0.7rem; flex: 0 0 auto; cursor: pointer; width: 16px; height: 16px; accent-color: #3B82F6; }
+        .notif-ico { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; font-size: 1rem; color: var(--notif-c); background: color-mix(in srgb, var(--notif-c) 12%, #fff); }
         .notif-body { flex: 1; min-width: 0; }
-        .notif-title { font-size: 0.86rem; line-height: 1.35; }
+        .notif-top { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+        .notif-tag { font-size: 0.66rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; color: var(--notif-c); background: color-mix(in srgb, var(--notif-c) 10%, #fff); padding: 0.12rem 0.5rem; border-radius: 999px; }
+        .notif-title { font-size: 0.93rem; line-height: 1.35; color: #0F172A; margin-top: 0.2rem; }
         .notif-item.unread .notif-title { font-weight: 700; }
-        .notif-msg { font-size: 0.78rem; color: var(--text-muted); white-space: pre-line; margin-top: 0.15rem; word-break: break-word; }
-        .notif-when { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem; }
-        .notif-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); flex: 0 0 auto; margin-top: 0.4rem; }
-        .notif-empty { padding: 2.5rem 1rem; text-align: center; color: var(--text-muted); font-size: 0.88rem; }
+        .notif-msg { font-size: 0.82rem; color: #475569; white-space: pre-line; margin-top: 0.25rem; word-break: break-word; line-height: 1.45; }
+        .notif-extra { display: inline-block; font-size: 0.74rem; font-weight: 600; color: #475569; background: #F1F5F9; border-radius: 8px; padding: 0.15rem 0.5rem; margin-top: 0.35rem; }
+        .notif-side { display: flex; flex-direction: column; align-items: flex-end; gap: 0.45rem; flex: 0 0 auto; padding-top: 0.15rem; }
+        .notif-when { font-size: 0.74rem; color: #94A3B8; white-space: nowrap; }
+        .notif-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--notif-c); box-shadow: 0 0 0 4px color-mix(in srgb, var(--notif-c) 18%, transparent); }
+        .notif-empty { padding: 3.5rem 1rem; text-align: center; color: #94A3B8; font-size: 0.92rem; }
+        .notif-empty i { font-size: 2.2rem; display: block; margin-bottom: 0.75rem; color: #CBD5E1; }
+        @media (max-width: 600px) { .notif-side { display: none; } .notif-item { padding: 0.75rem; } }
 
         /* STATS GRID */
         .stats-grid {
@@ -3576,7 +3593,7 @@
                         </button>
                         <span class="notif-badge" id="notifBadge" style="display: none;"></span>
                         <div class="notif-panel" id="notifPanel" role="dialog" aria-label="Notifiche">
-                            <div class="notif-head"><i class="fas fa-bell" style="color: var(--primary);"></i> Notifiche <span class="sp"></span><span id="notifCount" style="font-size: 0.78rem; font-weight: 500; color: var(--text-muted);"></span></div>
+                            <div class="notif-head"><span class="notif-head-ico"><i class="fas fa-bell"></i></span><h3>Notifiche</h3><span class="sp"></span><span class="notif-count" id="notifCount"></span><button type="button" class="notif-close" id="notifClose" title="Chiudi" aria-label="Chiudi"><i class="fas fa-xmark"></i></button></div>
                             <div class="notif-tools">
                                 <label><input type="checkbox" id="notifAll"> Seleziona tutto</label>
                                 <span class="sp"></span>
@@ -9883,7 +9900,8 @@
             const delBtn = document.getElementById('notifDelBtn');
             const countEl = document.getElementById('notifCount');
             const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half' };
+            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines' };
+            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione' };
             let elenco = [];
 
             function mostraConteggio(n) {
@@ -9916,20 +9934,24 @@
             }
             function disegna(dati) {
                 elenco = dati.notifiche || [];
-                countEl.textContent = dati.totale ? `${dati.nonLette} da leggere su ${dati.totale}` : '';
+                countEl.textContent = dati.totale ? `${dati.nonLette} da leggere · ${dati.totale} in tutto` : '';
                 mostraConteggio(dati.nonLette || 0);
                 list.innerHTML = elenco.length ? elenco.map((n) => `
-                    <div class="notif-item${n.letta ? '' : ' unread'}" data-id="${esc(n.id)}">
+                    <div class="notif-item ${esc(n.fonte)}${n.letta ? '' : ' unread'}" data-id="${esc(n.id)}">
                         <input type="checkbox" data-id="${esc(n.id)}" aria-label="Seleziona">
-                        <div class="notif-ico ${esc(n.fonte)}"><i class="${ICONE[n.fonte] || 'fas fa-bell'}"></i></div>
+                        <div class="notif-ico"><i class="${ICONE[n.fonte] || 'fas fa-bell'}"></i></div>
                         <div class="notif-body">
+                            <div class="notif-top"><span class="notif-tag">${esc(ETICHETTE[n.fonte] || n.fonte)}</span></div>
                             <div class="notif-title">${esc(n.titolo)}</div>
                             ${n.messaggio ? `<div class="notif-msg">${esc(n.messaggio)}</div>` : ''}
-                            <div class="notif-when">${esc(quando(n.aggiornata_il || n.creata_il))}</div>
+                            ${n.conteggio > 1 ? `<span class="notif-extra"><i class="fas fa-layer-group"></i> ${esc(n.conteggio)} righe aggiornate</span>` : ''}
                         </div>
-                        ${n.letta ? '' : '<span class="notif-dot" title="Da leggere"></span>'}
+                        <div class="notif-side">
+                            <span class="notif-when">${esc(quando(n.aggiornata_il || n.creata_il))}</span>
+                            ${n.letta ? '' : '<span class="notif-dot" title="Da leggere"></span>'}
+                        </div>
                     </div>`).join('')
-                    : '<div class="notif-empty"><i class="fas fa-bell-slash" style="font-size: 1.4rem; display: block; margin-bottom: 0.5rem;"></i>Nessuna notifica</div>';
+                    : '<div class="notif-empty"><i class="fas fa-bell-slash"></i>Nessuna notifica</div>';
                 all.checked = false;
                 aggiornaStrumenti();
             }
@@ -9967,6 +9989,11 @@
                 }
             });
             document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && panel.classList.contains('open')) panel.classList.remove('open'); });
+            document.getElementById('notifClose').addEventListener('click', (e) => {
+                e.stopPropagation();
+                panel.classList.remove('open');
+                btn.setAttribute('aria-expanded', 'false');
+            });
 
             // Clic sulla notifica (non sulla casella): diventa letta.
             list.addEventListener('click', async (e) => {
@@ -9982,7 +10009,7 @@
                     if (n) n.letta = true;
                     const nonLette = elenco.filter((x) => !x.letta).length;
                     mostraConteggio(nonLette);
-                    countEl.textContent = `${nonLette} da leggere su ${elenco.length}`;
+                    countEl.textContent = `${nonLette} da leggere · ${elenco.length} in tutto`;
                     aggiornaStrumenti();
                 } catch (err) {
                     caricaElenco();

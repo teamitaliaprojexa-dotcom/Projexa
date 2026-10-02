@@ -27,6 +27,7 @@ import { getPromptFor } from '../config/prompts.js';
 import { encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js';
 import { SALTA_LOG_ON, SALTA_LOG_OFF, registraTestoRiunione } from '../config/audit.js';
 import { contestoAudit } from '../config/auditContext.js';
+import { notificaRiunione } from './notifiche.js';
 import { transcribeAudio, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap } from '../routes/ai.js';
 
 export const NOME_PROGRAMMA = 'meetingTranscription';
@@ -498,6 +499,8 @@ export async function generateRecap(user, idCalendar, { origine = null } = {}) {
     testoCifrato: recapCifrato,
     origine: origine || (ctx && ctx.origine) || 'job:recap'
   });
+  // Campanella del proprietario della riunione: recap pronto.
+  await notificaRiunione({ tenantId: user.tenant_id, userId: user.user_id, idCalendar, tipo: 'recap' });
   console.log(`[RECAP] ✓ Recap generato con ${result.label} per la riunione ${idCalendar}`);
   return { provider: result.label, model: result.model, length: recap.length };
 }
@@ -685,6 +688,8 @@ async function processFinalize(job) {
           testoCifrato: encRec(tr.trascrizione),
           origine: 'job:trascrizione'
         });
+        // Campanella: trascrizione completata (una volta, come la riga del log).
+        await notificaRiunione({ tenantId: user.tenant_id, userId: user.user_id, idCalendar: job.id_calendar, tipo: 'trascrizione' });
       }
     } catch (error) {
       console.error(`❌ [LOG] Trascrizione ${job.id_calendar} non registrata: ${error.message}`);

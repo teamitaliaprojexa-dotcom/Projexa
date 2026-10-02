@@ -33,10 +33,11 @@ function fonteDa(origine) {
 const TABELLE = {
   task_app: { nome: 'Task Jira', codice: 'cod_task', f: false },
   cl_quotazioni: { nome: 'Quotazione Jira', codice: 'codice', f: true },
-  // Qlik: per ora proj_componenti (ore per persona e progetto); le regole Qlik si aggiungono
-  // in notifiche_regole quando l'utente sceglie i campi. Ogni tabella qui deve avere
-  // tenant_id, user_id, client_id e project_id.
-  proj_componenti: { nome: 'Componente', codice: 'email', f: false }
+  // Qlik (import voucher): proj_componenti = una riga per persona e progetto.
+  //   INSERT = nuovo "Nome Dipendente" (nominativo) sul progetto;
+  //   UPDATE delle ore: raggruppate per progetto (raggruppa), vedi notificaRaggruppata.
+  // Ogni tabella qui deve avere tenant_id, user_id, client_id e project_id.
+  proj_componenti: { nome: 'Dipendente', codice: 'nominativo', f: false, raggruppa: true }
 };
 
 let cacheRegole = null; // { t, regole }
@@ -65,6 +66,23 @@ async function inserisci(n) {
     `INSERT INTO notifiche (tenant_id, user_id, fonte, titolo, messaggio, tabella, riga_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [n.tenantId, n.userId, n.fonte, cifra(n.titolo), cifra(n.messaggio), n.tabella, n.rigaId]
+  );
+}
+
+// Aggiornamenti raggruppati (ore Qlik): UNA notifica per progetto e per giorno, anche se
+// l'import scrive molte righe e arriva in più blocchi. Se esiste già quella del giorno si
+// aggiorna (righe sommate in conteggio) e torna da leggere.
+async function notificaRaggruppata(g) {
+  const giorno = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' }); // AAAA-MM-GG
+  await notifDb.query(
+    `INSERT INTO notifiche (tenant_id, user_id, fonte, titolo, messaggio, tabella, riga_id, chiave_dedup, conteggio)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (tenant_id, user_id, chiave_dedup) WHERE chiave_dedup IS NOT NULL
+     DO UPDATE SET conteggio = notifiche.conteggio + EXCLUDED.conteggio,
+                   titolo = EXCLUDED.titolo, messaggio = EXCLUDED.messaggio,
+                   letta = false, letta_il = NULL, aggiornata_il = now()`,
+    [g.tenantId, g.userId, g.fonte, cifra(g.titolo), cifra(g.messaggio), g.tabella, g.projectId,
+      `${g.fonte}|${g.tabella}|ore|${g.projectId}|${giorno}`, g.conteggio]
   );
 }
 
@@ -148,6 +166,7 @@ export async function notificheDaVariazioni(righe) {
     const { clienti, progetti } = await nomiClientiProgetti(tutte.map((x) => x.client_id), tutte.map((x) => x.project_id));
 
     let create = 0;
+    const gruppi = new Map(); // aggiornamenti raggruppati per progetto
     for (const { d, cambi } of daFare) {
       const conf = TABELLE[d.tabella];
       // Riga eliminata nel frattempo: si usano i valori del log (INSERT = riga completa).
@@ -161,6 +180,18 @@ export async function notificheDaVariazioni(righe) {
       const cliente = clienti.get(String(riga.client_id || ''));
       const progetto = progetti.get(String(riga.project_id || ''));
       const contesto = [cliente ? `Cliente: ${cliente}` : null, progetto ? `Progetto: ${progetto}` : null].filter(Boolean).join(' · ');
+      if (conf.raggruppa && d.operazione === 'UPDATE') {
+        // Una sola notifica per progetto (e destinatario): si contano le righe cambiate.
+        const k = `${riga.tenant_id}|${riga.user_id}|${riga.project_id || ''}`;
+        const g = gruppi.get(k) || {
+          tenantId: riga.tenant_id, userId: riga.user_id, fonte: d.fonte, tabella: d.tabella,
+          projectId: String(riga.project_id || ''), conteggio: 0, campi: new Set(), contesto
+        };
+        g.conteggio += 1;
+        for (const c of cambi) g.campi.add(c.etichetta);
+        gruppi.set(k, g);
+        continue;
+      }
       const titolo = d.operazione === 'INSERT'
         ? `${conf.f ? 'Nuova' : 'Nuovo'} ${conf.nome}${codice}${cliente ? ` per ${cliente}` : ''}`
         : `${conf.nome}${codice} ${conf.f ? 'aggiornata' : 'aggiornato'}: ${cambi.map((c) => c.etichetta.toLowerCase()).join(', ')}`;
@@ -174,12 +205,52 @@ export async function notificheDaVariazioni(righe) {
       });
       create += 1;
     }
+    for (const g of gruppi.values()) {
+      await notificaRaggruppata({
+        ...g,
+        titolo: `${[...g.campi].join(', ')} aggiornate da Qlik`,
+        messaggio: g.contesto || null
+      });
+      create += 1;
+    }
     if (create) console.log(`[NOTIFICHE] ${create} notifiche da Jira/Qlik`);
     return create;
   } catch (e) {
     if (e.code === '42P01') { avvisaTabellaMancante(); return 0; }
     console.error('[NOTIFICHE] Notifiche da Jira/Qlik non create:', e.message);
     return 0;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// RIUNIONI: trascrizione completata e recap pronto (jobs/meetingTranscription.js, negli
+// stessi punti in cui si registra la riga unica del log). Destinatario: il proprietario
+// della riunione; nel testo l'oggetto, il cliente e il progetto se ci sono.
+// ----------------------------------------------------------------------------
+export async function notificaRiunione({ tenantId, userId, idCalendar, tipo }) {
+  try {
+    const r = (await db.query(
+      `SELECT id::text AS id, oggetto, client_id, project_id, data_calendar::text AS data
+         FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [tenantId, userId, idCalendar]
+    )).rows[0];
+    if (!r) return;
+    const { clienti, progetti } = await nomiClientiProgetti([r.client_id], [r.project_id]);
+    const cliente = clienti.get(String(r.client_id || ''));
+    const progetto = progetti.get(String(r.project_id || ''));
+    const oggetto = r.oggetto || '(riunione senza titolo)';
+    await inserisci({
+      tenantId, userId, fonte: 'riunione',
+      titolo: tipo === 'recap' ? `Recap pronto: ${oggetto}` : `Trascrizione completata: ${oggetto}`,
+      messaggio: [
+        r.data ? `Riunione del ${r.data.split('-').reverse().join('/')}` : null,
+        [cliente ? `Cliente: ${cliente}` : null, progetto ? `Progetto: ${progetto}` : null].filter(Boolean).join(' · ')
+      ].filter(Boolean).join('\n') || null,
+      tabella: 'rec_meeting', rigaId: r.id
+    });
+  } catch (e) {
+    if (e.code === '42P01') { avvisaTabellaMancante(); return; }
+    console.error(`[NOTIFICHE] Notifica ${tipo} della riunione ${idCalendar} non creata:`, e.message);
   }
 }
 
