@@ -7921,6 +7921,17 @@
                     showNotification('Testo lungo: è stato copiato negli appunti, incollalo nell\'email con Ctrl+V', 'info');
                 }
             }
+            // Log: Projexa non sa se l'email verrà poi inviata (lo fa l'utente dal suo programma
+            // di posta), registra che è stata preparata e aperta, con destinatari e oggetto.
+            fetch(`${API_URL}/audit/email`, {
+                method: 'POST', keepalive: true,
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tipo: modal.dataset.field === 'recap' ? 'recap' : 'trascrizione',
+                    a: to, cc, mittente: from, oggetto: subject,
+                    riferimento: modal.dataset.eventId || '', servizio: kind === 'google' ? 'gmail_web' : 'programma_posta'
+                })
+            }).catch(() => {});
             if (kind === 'mailto') window.location.href = url;
             else window.open(url, '_blank', 'noopener');
         }

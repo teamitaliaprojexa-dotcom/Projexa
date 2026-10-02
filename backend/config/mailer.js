@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import { registraEmail } from './audit.js';
 
 dotenv.config();
 
@@ -24,12 +25,31 @@ export function isMailerConfigured() {
   return !!transporter;
 }
 
-export async function sendMail({ to, subject, html, text }) {
-  if (!transporter) throw new Error('Email non configurata (GMAIL_APP_PASSWORD mancante).');
-  return transporter.sendMail({
-    from: `Team Projexa <${GMAIL_USER}>`,
-    to, subject, html, text
-  });
+// log (facoltativo) = { req, tipo, userId, tenantId }: l'invio, riuscito o no, viene
+// registrato nel log email (config/audit.js -> Oracle LOG_EMAIL), senza il testo.
+export async function sendMail({ to, subject, html, text, log = null }) {
+  const traccia = (esito, errore = null) => {
+    if (!log) return;
+    registraEmail(log.req, {
+      tipo: log.tipo, modalita: 'server', esito, a: to, mittente: GMAIL_USER, oggetto: subject,
+      servizio: 'gmail_smtp', errore, userId: log.userId, tenantId: log.tenantId
+    });
+  };
+  if (!transporter) {
+    traccia('ko', 'Email non configurata sul server');
+    throw new Error('Email non configurata (GMAIL_APP_PASSWORD mancante).');
+  }
+  try {
+    const info = await transporter.sendMail({
+      from: `Team Projexa <${GMAIL_USER}>`,
+      to, subject, html, text
+    });
+    traccia('ok');
+    return info;
+  } catch (e) {
+    traccia('ko', e.message);
+    throw e;
+  }
 }
 
 // Costruisce l'HTML dell'email di conferma iscrizione con il pulsante "Conferma iscrizione".

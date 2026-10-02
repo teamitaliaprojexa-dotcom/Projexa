@@ -85,12 +85,65 @@ router.get('/stato', async (req, res) => {
         `SELECT (SELECT COUNT(*) FROM ${SCHEMA_AUDIT}.log_accessi) AS accessi,
                 (SELECT COUNT(*) FROM ${SCHEMA_AUDIT}.log_variazioni) AS variazioni FROM dual`,
         [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-      return { accessi: r.rows[0].ACCESSI, variazioni: r.rows[0].VARIAZIONI };
+      const totali = { accessi: r.rows[0].ACCESSI, variazioni: r.rows[0].VARIAZIONI, email: null };
+      try {
+        const m = await conn.execute(`SELECT COUNT(*) AS n FROM ${SCHEMA_AUDIT}.log_email`, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        totali.email = m.rows[0].N;
+      } catch { /* tabella LOG_EMAIL non ancora creata */ }
+      return totali;
     });
   } catch (e) {
     out.errore = e.message;
   }
   res.json(out);
+});
+
+// Database Oracle dei log: raggiungibilità, capienza (Always Free = 20 GB), spazio
+// occupato da tutto il database (se la procedura lo può leggere) e da ogni tabella, con
+// numero di righe e data del log più vecchio. Lo spazio lo legge la procedura
+// AUDIT_OWNER.SPAZIO_LOG (sezione 4c di Supporto/CreaDB/oracle_audit.sql).
+const CAPIENZA_BYTE = Number(process.env.ORACLE_AUDIT_CAPIENZA_GB || 20) * 1024 ** 3;
+const TABELLE_LOG = { LOG_ACCESSI: 'Accessi', LOG_VARIAZIONI: 'Modifiche ai dati', LOG_EMAIL: 'Email' };
+
+router.get('/spazio', async (req, res) => {
+  const inizio = Date.now();
+  try {
+    const out = await conOracle(async (conn) => {
+      await conn.execute('SELECT 1 FROM dual');
+      const ms = Date.now() - inizio;
+      let tabelle = [];
+      let totaleDb = null;
+      let procedura = true;
+      try {
+        const r = await conn.execute(
+          `BEGIN ${SCHEMA_AUDIT}.spazio_log(:tabelle, :totale); END;`,
+          { tabelle: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR }, totale: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER } },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        const rs = r.outBinds.tabelle;
+        tabelle = (await rs.getRows()).map((x) => ({ nome: x.TABELLA, byte: Number(x.BYTE) || 0 }));
+        await rs.close();
+        totaleDb = r.outBinds.totale;
+      } catch (e) {
+        if (!/PLS-00201|ORA-06550/.test(e.message)) throw e;
+        procedura = false; // procedura non ancora creata: solo righe e date
+      }
+      // Righe e log più vecchio delle tabelle dei log (PROJEXA_LOG può leggerle).
+      const dettaglio = [];
+      for (const [nome, etichetta] of Object.entries(TABELLE_LOG)) {
+        try {
+          const c = await conn.execute(`SELECT COUNT(*) AS n, MIN(quando) AS primo FROM ${SCHEMA_AUDIT}.${nome}`, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+          const sp = tabelle.find((t) => t.nome === nome);
+          dettaglio.push({ nome, etichetta, righe: c.rows[0].N, piuVecchio: c.rows[0].PRIMO, byte: sp ? sp.byte : null });
+        } catch { /* tabella non ancora creata */ }
+      }
+      const spazioLog = tabelle.reduce((s, t) => s + t.byte, 0);
+      return { raggiungibile: true, ms, procedura, capienza: CAPIENZA_BYTE, totaleDb, spazioLog, tabelle: dettaglio };
+    });
+    res.json(out);
+  } catch (e) {
+    res.json({ raggiungibile: false, errore: e.message, capienza: CAPIENZA_BYTE });
+  }
 });
 
 // Elenco per i filtri: utenti (tutti i tenant) e tabelle registrate.
@@ -153,6 +206,50 @@ router.get('/accessi', async (req, res) => {
       }))
     });
   } catch (e) {
+    inviaErrore(res, e);
+  }
+});
+
+router.get('/email', async (req, res) => {
+  try {
+    const { da, a } = intervallo(req.query);
+    const where = ['quando >= :da', 'quando < :a'];
+    const binds = { da, a };
+    if (req.query.esito === 'ok' || req.query.esito === 'ko') { where.push('esito = :esito'); binds.esito = req.query.esito; }
+    if (testo(req.query.tipoEmail, 40)) { where.push('tipo = :tipo'); binds.tipo = testo(req.query.tipoEmail, 40); }
+    if (req.query.modalita === 'server' || req.query.modalita === 'client') { where.push('modalita = :modalita'); binds.modalita = req.query.modalita; }
+    if (testo(req.query.utente, 64)) { where.push('user_id = :utente'); binds.utente = testo(req.query.utente, 64); }
+    if (testo(req.query.cerca)) {
+      where.push('(LOWER(destinatari) LIKE :cerca OR LOWER(cc) LIKE :cerca OR LOWER(oggetto) LIKE :cerca OR LOWER(mittente) LIKE :cerca)');
+      binds.cerca = `%${testo(req.query.cerca).toLowerCase()}%`;
+    }
+    binds.off = pagina(req.query) * PER_PAGINA;
+    binds.lim = PER_PAGINA + 1;
+    const righe = await conOracle(async (conn) => (await conn.execute(
+      `SELECT id, quando, tipo, modalita, esito, destinatari, cc, mittente, oggetto, riferimento, servizio, errore, user_id, tenant_id, ip
+         FROM ${SCHEMA_AUDIT}.log_email
+        WHERE ${where.join(' AND ')}
+        ORDER BY quando DESC, id DESC
+        OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY`,
+      binds, { outFormat: oracledb.OUT_FORMAT_OBJECT })).rows);
+    const altre = righe.length > PER_PAGINA;
+    const lista = righe.slice(0, PER_PAGINA);
+    const n = await nomi(lista.map((r) => r.USER_ID), lista.map((r) => r.TENANT_ID));
+    res.json({
+      altre,
+      righe: lista.map((r) => ({
+        id: r.ID, quando: r.QUANDO, tipo: r.TIPO, modalita: r.MODALITA, esito: r.ESITO,
+        destinatari: r.DESTINATARI, cc: r.CC, mittente: r.MITTENTE, oggetto: r.OGGETTO,
+        riferimento: r.RIFERIMENTO, servizio: r.SERVIZIO, errore: r.ERRORE, ip: r.IP,
+        userId: r.USER_ID, utente: (n.utenti[r.USER_ID] || {}).nome || null,
+        tenantId: r.TENANT_ID, tenant: n.tenant[r.TENANT_ID] || null
+      }))
+    });
+  } catch (e) {
+    if (/ORA-00942/.test(e.message)) {
+      e.message = 'Tabella LOG_EMAIL non presente su Oracle: eseguire la sezione 2b di Supporto/CreaDB/oracle_audit.sql';
+      e.status = 503;
+    }
     inviaErrore(res, e);
   }
 });
@@ -227,7 +324,7 @@ router.get('/variazioni', async (req, res) => {
 router.post('/elimina', express.json(), async (req, res) => {
   try {
     const b = req.body || {};
-    const tabella = { accessi: 'ACCESSI', variazioni: 'VARIAZIONI' }[b.tabella];
+    const tabella = { accessi: 'ACCESSI', variazioni: 'VARIAZIONI', email: 'EMAIL' }[b.tabella];
     const modo = { vecchi: 'VECCHI', ultimi: 'ULTIMI' }[b.modo];
     const mesi = Number(b.mesi);
     if (!tabella || !modo || ![1, 3, 6].includes(mesi)) {

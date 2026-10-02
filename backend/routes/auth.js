@@ -259,7 +259,8 @@ router.post('/register', async (req, res) => {
     try {
       if (isMailerConfigured()) {
         const { html, text } = buildConfirmEmail({ nome, confirmUrl });
-        await sendMail({ to: email, subject: 'Conferma la tua iscrizione a Projexa', html, text });
+        await sendMail({ to: email, subject: 'Conferma la tua iscrizione a Projexa', html, text,
+          log: { req, tipo: 'conferma_iscrizione', userId } });
         emailSent = true;
       }
     } catch (mailErr) {
@@ -458,7 +459,8 @@ router.post('/forgot-password', async (req, res) => {
     try {
       if (isMailerConfigured()) {
         const { html, text } = buildResetPasswordEmail({ nome, resetUrl, validHours: RESET_TOKEN_HOURS });
-        await sendMail({ to: email, subject: 'Reimposta la password di Projexa', html, text });
+        await sendMail({ to: email, subject: 'Reimposta la password di Projexa', html, text,
+          log: { req, tipo: 'reset_password', userId: user.id } });
         emailSent = true;
       }
     } catch (mailErr) {
@@ -585,7 +587,8 @@ router.post('/magic-link', async (req, res) => {
     const nome = (p.rows[0] && p.rows[0].name) || '';
     const { html, text } = buildMagicLinkEmail({ nome, magicUrl, validSeconds: MAGIC_LINK_SECONDS });
     try {
-      await sendMail({ to: user.email, subject: 'Il tuo link di accesso a Projexa', html, text });
+      await sendMail({ to: user.email, subject: 'Il tuo link di accesso a Projexa', html, text,
+        log: { req, tipo: 'magic_link', userId: user.id } });
     } catch (mailErr) {
       console.error('❌ MAGIC-LINK MAIL ERROR:', mailErr.message);
       return res.status(502).json({ error: 'Invio dell\'email non riuscito: riprova tra poco.' });

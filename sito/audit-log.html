@@ -67,6 +67,18 @@
         .denied { text-align: center; padding: 3rem 1rem; color: var(--muted); }
         .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; }
         .hidden { display: none !important; }
+        .db { margin-bottom: 0.75rem; }
+        .db-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem; }
+        .db-head h2 { font-size: 0.95rem; }
+        .db-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; margin-bottom: 0.6rem; }
+        .db-tiles .label { font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+        .db-tiles .value { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 0.1rem; }
+        .meter { height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; margin: 0.2rem 0 0.35rem; }
+        .meter > span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+        .meter.warn > span { background: #D97706; }
+        .meter.bad > span { background: var(--bad); }
+        .db table td, .db table th { padding: 0.35rem 0.5rem; }
+        .num { text-align: right; font-variant-numeric: tabular-nums; }
         .mod { font-size: 0.8rem; line-height: 1.45; }
         .mod .k { font-weight: 600; color: var(--ink2); }
         .mod .old { background: var(--del-bg); color: #991B1B; text-decoration: line-through; padding: 0 0.2rem; border-radius: 3px; }
@@ -93,7 +105,7 @@
         <header>
             <div>
                 <h1><i class="fas fa-clipboard-list"></i> Log</h1>
-                <div class="sub">Accessi e modifiche ai dati, salvati su Oracle (accessi 12 mesi, modifiche 24 mesi)</div>
+                <div class="sub">Accessi, modifiche ai dati ed email, salvati su Oracle (accessi ed email 12 mesi, modifiche 24 mesi)</div>
             </div>
             <a class="btn" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
         </header>
@@ -101,11 +113,20 @@
         <div id="content" class="hidden">
             <div class="status card" id="status">Caricamento…</div>
 
+            <div class="card db" id="dbCard">
+                <div class="db-head">
+                    <h2><i class="fas fa-database" style="color:var(--muted)"></i> Database Oracle dei log</h2>
+                    <span class="small" id="dbStato">Caricamento…</span>
+                </div>
+                <div id="dbCorpo"></div>
+            </div>
+
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
                     <div class="seg" id="tabs" role="tablist">
                         <button type="button" data-tab="accessi" class="on">Accessi</button>
                         <button type="button" data-tab="variazioni">Modifiche ai dati</button>
+                        <button type="button" data-tab="email">Email</button>
                     </div>
                     <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
                         <div id="chipBox"></div>
@@ -146,6 +167,26 @@
                     </label>
                     <label class="t-accessi">Cerca (email, IP, dettaglio)
                         <input type="text" id="fCerca" placeholder="es. @gmail.com">
+                    </label>
+
+                    <label class="t-email hidden">Esito
+                        <select id="fEsitoEmail"><option value="">Tutti</option><option value="ok">Riuscite</option><option value="ko">Non riuscite</option></select>
+                    </label>
+                    <label class="t-email hidden">Tipo
+                        <select id="fTipoEmail">
+                            <option value="">Tutti</option>
+                            <option value="recap">Recap riunione</option>
+                            <option value="trascrizione">Trascrizione riunione</option>
+                            <option value="conferma_iscrizione">Conferma iscrizione</option>
+                            <option value="reset_password">Password dimenticata</option>
+                            <option value="magic_link">Link di accesso</option>
+                        </select>
+                    </label>
+                    <label class="t-email hidden">Come
+                        <select id="fModalita"><option value="">Tutte</option><option value="server">Inviate da Projexa</option><option value="client">Aperte nel programma di posta</option></select>
+                    </label>
+                    <label class="t-email hidden">Cerca (destinatario, oggetto)
+                        <input type="text" id="fCercaEmail" placeholder="es. mario.rossi@">
                     </label>
 
                     <label class="t-variazioni hidden">Tabella
@@ -202,6 +243,8 @@
         if (!localStorage.getItem('authToken')) window.location.href = 'index.html';
 
         const EVENTI = { login: 'Login con password', google: 'Google', microsoft: 'Microsoft', magic_link: 'Link via email', impersonazione: 'Impersonazione', cambio_password: 'Cambio password', eliminazione_log: 'Eliminazione log' };
+        const TIPI_EMAIL = { recap: 'Recap riunione', trascrizione: 'Trascrizione riunione', conferma_iscrizione: 'Conferma iscrizione', reset_password: 'Password dimenticata', magic_link: 'Link di accesso' };
+        const SERVIZI = { gmail_smtp: 'Gmail del team Projexa', gmail_web: 'Gmail (web) dell\'utente', programma_posta: 'Programma di posta dell\'utente (Outlook)' };
         const OPERAZIONI = { INSERT: 'Inserimento', UPDATE: 'Modifica', DELETE: 'Cancellazione' };
         let tab = 'accessi';
         let pag = 0;
@@ -234,6 +277,7 @@
                 const s = await api('/stato');
                 const parti = [];
                 if (s.totali) parti.push(`Accessi registrati: <b>${s.totali.accessi.toLocaleString('it-IT')}</b>`, `Modifiche registrate: <b>${s.totali.variazioni.toLocaleString('it-IT')}</b>`);
+                if (s.totali && s.totali.email !== null && s.totali.email !== undefined) parti.push(`Email registrate: <b>${s.totali.email.toLocaleString('it-IT')}</b>`);
                 if (s.coda && !s.coda.errore) {
                     const vecchia = s.coda.piu_vecchia ? ` (la più vecchia delle ${quando(s.coda.piu_vecchia)})` : '';
                     parti.push(`In attesa di invio: <b>${s.coda.righe}</b>${s.coda.righe ? esc(vecchia) : ''}`);
@@ -261,6 +305,55 @@
         }
 
         // ------------------------------------------------------------------
+        // Database Oracle: raggiungibilità, capienza, spazio occupato e disponibile
+        // ------------------------------------------------------------------
+        function dimensione(n) {
+            if (n === null || n === undefined) return '–';
+            const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let i = 0; let v = Number(n);
+            while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+            return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1).replace('.', ',')} ${u[i]}`;
+        }
+        const giorno = (t) => t ? new Date(t).toLocaleDateString('it-IT') : '–';
+
+        async function caricaSpazio() {
+            try {
+                const d = await api('/spazio');
+                if (!d.raggiungibile) {
+                    $('dbStato').innerHTML = `<span class="st" style="color:var(--bad);font-weight:600"><i class="fas fa-circle-xmark"></i> Non raggiungibile</span>`;
+                    $('dbCorpo').innerHTML = `<div class="small" style="color:var(--bad)">${esc(d.errore || '')}</div>`;
+                    return;
+                }
+                $('dbStato').innerHTML = `<span style="color:var(--good);font-weight:600"><i class="fas fa-circle-check"></i> Disponibile</span> · risposta in ${d.ms} ms`;
+                // Occupato: tutto il database se la procedura lo può leggere, altrimenti solo i log.
+                const occupato = d.totaleDb ?? (d.procedura ? d.spazioLog : null);
+                const perc = occupato !== null ? Math.min(100, 100 * occupato / d.capienza) : null;
+                const tiles = [
+                    ['Capienza', dimensione(d.capienza), 'Always Free'],
+                    ['Occupato', dimensione(occupato), d.totaleDb !== null && d.totaleDb !== undefined ? 'tutto il database' : 'solo le tabelle dei log'],
+                    ['Disponibile', occupato !== null ? dimensione(Math.max(0, d.capienza - occupato)) : '–', perc !== null ? `${(100 - perc).toFixed(1).replace('.', ',')}% libero` : ''],
+                    ['Di cui log', d.procedura ? dimensione(d.spazioLog) : '–', 'accessi, modifiche ed email']
+                ];
+                let html = '<div class="db-tiles">' + tiles.map(([l, v, n]) =>
+                    `<div><div class="label">${esc(l)}</div><div class="value">${esc(v)}</div><div class="small">${esc(n)}</div></div>`).join('') + '</div>';
+                if (perc !== null) {
+                    html += `<div class="meter${perc >= 90 ? ' bad' : perc >= 75 ? ' warn' : ''}"><span style="width:${perc.toFixed(1)}%"></span></div>` +
+                        `<div class="small" style="margin-bottom:0.6rem">${perc.toFixed(1).replace('.', ',')}% della capienza in uso</div>`;
+                }
+                html += '<div class="table-wrap"><table><thead><tr><th>Tabella</th><th class="num">Righe</th><th class="num">Spazio</th><th>Log più vecchio</th></tr></thead><tbody>' +
+                    d.tabelle.map((t) => `<tr><td>${esc(t.etichetta)}</td><td class="num">${Number(t.righe).toLocaleString('it-IT')}</td><td class="num">${t.byte !== null ? dimensione(t.byte) : '–'}</td><td>${esc(giorno(t.piuVecchio))}</td></tr>`).join('') +
+                    '</tbody></table></div>';
+                if (!d.procedura) html += '<div class="small" style="margin-top:0.5rem">Spazio non disponibile: eseguire la sezione 4c di Supporto/CreaDB/oracle_audit.sql su Oracle.</div>';
+                else if (d.totaleDb === null || d.totaleDb === undefined) html += '<div class="small" style="margin-top:0.5rem">Lo spazio di tutto il database non è leggibile: viene mostrato solo quello dei log.</div>';
+                $('dbCorpo').innerHTML = html;
+            } catch (e) {
+                if (e.status === 403) return;
+                $('dbStato').textContent = '';
+                $('dbCorpo').innerHTML = `<div class="small" style="color:var(--bad)">${esc(e.message)}</div>`;
+            }
+        }
+
+        // ------------------------------------------------------------------
         // Filtri e ricerca
         // ------------------------------------------------------------------
         function parametri() {
@@ -277,6 +370,11 @@
                 if ($('fEsito').value) p.set('esito', $('fEsito').value);
                 if ($('fEvento').value) p.set('evento', $('fEvento').value);
                 if ($('fCerca').value.trim()) p.set('cerca', $('fCerca').value.trim());
+            } else if (tab === 'email') {
+                if ($('fEsitoEmail').value) p.set('esito', $('fEsitoEmail').value);
+                if ($('fTipoEmail').value) p.set('tipoEmail', $('fTipoEmail').value);
+                if ($('fModalita').value) p.set('modalita', $('fModalita').value);
+                if ($('fCercaEmail').value.trim()) p.set('cerca', $('fCercaEmail').value.trim());
             } else {
                 const tabella = rigaFiltro ? rigaFiltro.tabella : $('fTabella').value;
                 if (tabella) p.set('tabella', tabella);
@@ -328,6 +426,16 @@
                         <td>${esc(r.email || '')}</td>
                         <td class="nowrap">${esc(r.ip || '')}</td>
                         <td>${esc(r.dettaglio || '')}</td></tr>`).join('') + '</tbody>';
+            } else if (tab === 'email') {
+                $('tbl').innerHTML = '<thead><tr><th>Quando</th><th>Esito</th><th>Tipo</th><th>Destinatari</th><th>Oggetto</th><th>Chi</th><th>Come</th></tr></thead><tbody>' +
+                    righeCorrenti.map((r, i) => `<tr class="row" data-i="${i}">
+                        <td class="nowrap">${esc(quando(r.quando))}</td>
+                        <td><span class="badge b-${esc(r.esito)}">${r.modalita === 'client' ? 'APERTA' : r.esito === 'ok' ? 'INVIATA' : 'NON INVIATA'}</span></td>
+                        <td>${esc(TIPI_EMAIL[r.tipo] || r.tipo)}</td>
+                        <td>${esc(r.destinatari || '')}${r.cc ? `<div class="small">Cc: ${esc(r.cc)}</div>` : ''}${!r.destinatari && !r.cc ? '<span class="small">nessuno indicato</span>' : ''}</td>
+                        <td>${esc(r.oggetto || '')}</td>
+                        <td>${r.userId ? utenteCella(r) : `<span class="small">${esc(r.mittente || '—')}</span>`}</td>
+                        <td class="small">${r.modalita === 'client' ? 'Aperta nel programma di posta' : 'Inviata da Projexa'}</td></tr>`).join('') + '</tbody>';
             } else {
                 $('tbl').innerHTML = '<thead><tr><th>Quando</th><th>Operazione</th><th>Tabella</th><th>Riga</th><th>Modifica</th><th>Chi</th><th>Origine</th></tr></thead><tbody>' +
                     gruppi().map((g, gi) => g.righe.length === 1 ? rigaVar(g.righe[0]) : rigaGruppo(g, gi)).join('') + '</tbody>';
@@ -407,6 +515,21 @@
         }
 
         function dettaglio(r) {
+            if (tab === 'email') {
+                const righe = [
+                    ['Mittente', r.mittente],
+                    ['Destinatari', r.destinatari || 'nessuno indicato'],
+                    ['Cc', r.cc],
+                    ['Servizio', SERVIZI[r.servizio] || r.servizio],
+                    ['Riunione (id)', r.riferimento],
+                    ['IP', r.ip],
+                    ['Errore', r.errore]
+                ].filter(([, v]) => v);
+                const nota = r.modalita === 'client'
+                    ? '<div class="small" style="margin-top:0.5rem">Email preparata da Projexa e aperta nel programma di posta: l\'invio vero lo fa l\'utente, Projexa non sa se è stata poi spedita.</div>'
+                    : '';
+                return `<table class="diff"><tbody>${righe.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</tbody></table>${nota}`;
+            }
             if (tab === 'accessi') {
                 return `<div class="small"><b>Browser:</b> ${esc(r.userAgent || '—')}</div>` +
                     (r.tenant ? `<div class="small" style="margin-top:0.3rem"><b>Spazio di lavoro:</b> ${esc(r.tenant)}</div>` : '');
@@ -475,6 +598,7 @@
             $('tabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
             document.querySelectorAll('.t-accessi').forEach((el) => el.classList.toggle('hidden', tab !== 'accessi'));
             document.querySelectorAll('.t-variazioni').forEach((el) => el.classList.toggle('hidden', tab !== 'variazioni'));
+            document.querySelectorAll('.t-email').forEach((el) => el.classList.toggle('hidden', tab !== 'email'));
             aggiornaChip();
             cerca();
         });
@@ -484,6 +608,7 @@
         $('fTabella').addEventListener('change', () => { if (rigaFiltro) { rigaFiltro = null; aggiornaChip(); } });
         $('cercaBtn').addEventListener('click', () => cerca());
         $('fCerca').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') cerca(); });
+        $('fCercaEmail').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') cerca(); });
         $('moreBtn').addEventListener('click', () => { pag += 1; cerca(true); });
 
         // ------------------------------------------------------------------
@@ -499,7 +624,7 @@
             $('eMesi1').classList.toggle('disabled', uno.disabled);
             if (uno.disabled && uno.checked) document.querySelector('input[name="eMesi"][value="3"]').checked = true;
             const mesi = scelta('eMesi');
-            const cosa = tab === 'accessi' ? 'gli accessi' : 'le modifiche ai dati';
+            const cosa = { accessi: 'gli accessi', variazioni: 'le modifiche ai dati', email: 'le email' }[tab];
             const periodo = modo === 'vecchi'
                 ? `registrati <b>prima di ${mesi} ${mesi === '1' ? 'mese' : 'mesi'} fa</b>`
                 : `registrati <b>negli ultimi ${mesi} mesi, tranne gli ultimi 30 giorni</b>`;
@@ -507,7 +632,7 @@
                 'L&#39;eliminazione non si può annullare e viene registrata negli accessi.';
         }
         $('eliminaBtn').addEventListener('click', () => {
-            $('eliminaTitolo').textContent = tab === 'accessi' ? 'Elimina accessi' : 'Elimina modifiche ai dati';
+            $('eliminaTitolo').textContent = { accessi: 'Elimina accessi', variazioni: 'Elimina modifiche ai dati', email: 'Elimina log delle email' }[tab];
             $('eEsito').classList.add('hidden');
             $('eConferma').disabled = false;
             aggiornaNota();
@@ -535,6 +660,7 @@
                 esito.textContent = d.eliminate ? `Eliminati ${d.eliminate.toLocaleString('it-IT')} log.` : 'Nessun log da eliminare in quel periodo.';
                 esito.classList.remove('hidden');
                 caricaStato();
+                caricaSpazio();
                 cerca();
                 setTimeout(chiudiModal, 1800);
             } catch (e) {
@@ -549,6 +675,7 @@
             $('content').classList.remove('hidden');
             await caricaStato();
             if (!$('deniedCard').classList.contains('hidden')) return;
+            caricaSpazio();
             await caricaFiltri();
             cerca();
         })();

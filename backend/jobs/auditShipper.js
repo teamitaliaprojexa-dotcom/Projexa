@@ -94,6 +94,51 @@ const DEF_VARIAZIONI = {
   dopo: { type: oracledb.DB_TYPE_CLOB }
 };
 
+const SQL_EMAIL = `INSERT INTO ${SCHEMA}.log_email
+  (id_coda, quando, tipo, modalita, esito, destinatari, cc, mittente, oggetto, riferimento, servizio, errore, user_id, tenant_id, ip)
+  VALUES (:id_coda, :quando, :tipo, :modalita, :esito, :destinatari, :cc, :mittente, :oggetto, :riferimento, :servizio, :errore, :user_id, :tenant_id, :ip)`;
+
+const DEF_EMAIL = {
+  id_coda: { type: oracledb.NUMBER },
+  quando: { type: oracledb.DB_TYPE_TIMESTAMP_TZ },
+  tipo: { type: oracledb.STRING, maxSize: 40 },
+  modalita: { type: oracledb.STRING, maxSize: 10 },
+  esito: { type: oracledb.STRING, maxSize: 10 },
+  destinatari: { type: oracledb.STRING, maxSize: 2000 },
+  cc: { type: oracledb.STRING, maxSize: 2000 },
+  mittente: { type: oracledb.STRING, maxSize: 320 },
+  oggetto: { type: oracledb.STRING, maxSize: 500 },
+  riferimento: { type: oracledb.STRING, maxSize: 200 },
+  servizio: { type: oracledb.STRING, maxSize: 40 },
+  errore: { type: oracledb.STRING, maxSize: 1000 },
+  user_id: { type: oracledb.STRING, maxSize: 64 },
+  tenant_id: { type: oracledb.STRING, maxSize: 64 },
+  ip: { type: oracledb.STRING, maxSize: 64 }
+};
+
+function rigaEmail(r) {
+  const d = r.dati || {};
+  return {
+    id_coda: Number(r.id),
+    quando: r.creato_il,
+    tipo: testo(d.tipo, 40) || 'sconosciuto',
+    modalita: testo(d.modalita, 10) || 'server',
+    esito: testo(d.esito, 10) || 'ok',
+    destinatari: testo(d.destinatari, 2000),
+    cc: testo(d.cc, 2000),
+    mittente: testo(d.mittente, 320),
+    oggetto: testo(d.oggetto, 500),
+    riferimento: testo(d.riferimento, 200),
+    servizio: testo(d.servizio, 40),
+    errore: testo(d.errore, 1000),
+    user_id: testo(d.user_id, 64),
+    tenant_id: testo(d.tenant_id, 64),
+    ip: testo(d.ip, 64)
+  };
+}
+
+let tabellaEmailMancante = false;
+
 function rigaAccesso(r) {
   const d = r.dati || {};
   return {
@@ -178,10 +223,22 @@ async function inviaLotto() {
     }
 
     const conn = await (await getPoolOracle()).getConnection();
+    let inviate = rows;
     try {
       await inserisci(conn, SQL_ACCESSI, rows.filter((r) => r.tipo === 'accesso').map(rigaAccesso), DEF_ACCESSI);
       await inserisci(conn, SQL_VARIAZIONI,
         rows.filter((r) => r.tipo === 'variazione').map(rigaVariazione).filter(Boolean), DEF_VARIAZIONI);
+      try {
+        await inserisci(conn, SQL_EMAIL, rows.filter((r) => r.tipo === 'email').map(rigaEmail), DEF_EMAIL);
+        tabellaEmailMancante = false;
+      } catch (e) {
+        // Tabella LOG_EMAIL non ancora creata su Oracle: le email restano in coda (non si
+        // perdono) e accessi e modifiche continuano a essere inviati.
+        if (!/ORA-00942/.test(e.message)) throw e;
+        if (!tabellaEmailMancante) console.warn('[AUDIT] Tabella LOG_EMAIL assente su Oracle: le email restano in coda (eseguire la sezione 2b di Supporto/CreaDB/oracle_audit.sql)');
+        tabellaEmailMancante = true;
+        inviate = rows.filter((r) => r.tipo !== 'email');
+      }
       await conn.commit();
     } catch (e) {
       await conn.rollback().catch(() => {});
@@ -191,9 +248,10 @@ async function inviaLotto() {
     }
 
     // Oracle ha confermato: ora si possono togliere dalla coda.
-    await q('DELETE FROM audit_outbox WHERE id = ANY($1::bigint[])', [rows.map((r) => r.id)]);
+    await q('DELETE FROM audit_outbox WHERE id = ANY($1::bigint[])', [inviate.map((r) => r.id)]);
     await q('COMMIT');
-    return rows.length;
+    // Se restano solo email in attesa (tabella mancante) il giro si ferma qui.
+    return inviate.length === rows.length ? rows.length : 0;
   } catch (e) {
     await q('ROLLBACK').catch(() => {});
     throw e;
