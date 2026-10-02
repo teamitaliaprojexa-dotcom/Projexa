@@ -28,6 +28,7 @@ function accoda(tipo, dati) {
 
 /**
  * evento: 'login' | 'magic_link' | 'google' | 'microsoft' | 'impersonazione' | 'cambio_password'
+ *         | 'eliminazione_backup' (Monitor › Storage, routes/vm-monitor.js)
  * esito:  'ok' | 'ko'
  */
 export function registraAccesso(req, { evento, esito = 'ok', userId = null, email = null, tenantId = null, dettaglio = null }) {

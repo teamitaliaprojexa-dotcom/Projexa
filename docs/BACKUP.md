@@ -24,6 +24,13 @@ File: `projexa_<db>_<data>_<ora>.dump` con `<db>` = `projexa` (DATABASE_URL), `a
 
 ## Controlli
 
+Spazio usato e contenuto del bucket si vedono nella pagina **Monitor › Storage** (admin PROJEXA, sola
+lettura per MONITOR_LETTURA_EMAILS): `GET /api/vm-monitor/storage` in `backend/routes/vm-monitor.js`,
+che legge il bucket con la stessa CLI e lo stesso instance principal del backup.
+L'admin può **eliminare** a mano un backup (cartella intera, `POST /api/vm-monitor/storage/elimina`):
+sono protetti gli ultimi 14 giornalieri e l'ultimo mensile; ogni eliminazione finisce nel log
+degli accessi (evento `eliminazione_backup`).
+
 ```bash
 # esito dell'ultimo backup e prossima esecuzione: pagina Schedulazioni, oppure
 pm2 logs projexa --lines 200 --nostream | grep SCHEDULER

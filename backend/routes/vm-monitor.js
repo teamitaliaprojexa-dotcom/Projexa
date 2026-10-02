@@ -13,6 +13,7 @@ import { execFile } from 'child_process';
 import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { whisperUrls, whisperCppUrls } from './ai.js';
+import { registraAccesso } from '../config/audit.js';
 
 const router = express.Router();
 
@@ -313,6 +314,131 @@ router.get('/status', requireAuth, requireMonitorAccess, async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// OBJECT STORAGE (scheda Storage): bucket dei backup notturni
+// ----------------------------------------------------------------------------
+// Legge l'elenco degli oggetti con la CLI di Oracle della VM, autenticata come
+// "instance principal" (la stessa del backup, deploy/oracle/backup-db.sh): nessuna chiave
+// nel backend. Il criterio projexa-backup-policy dà accesso SOLO a questo bucket, quindi
+// "utilizzato" è lo spazio di questo bucket; i 20 GB Always Free valgono per tutti i bucket
+// dell'account (oggi c'è solo questo). La CLI è lenta ad avviarsi (Python): risposta in
+// memoria per 60 s, «Aggiorna» la rilegge.
+const OCI_CLI = process.env.OCI_CLI || '/opt/projexa/oci-venv/bin/oci';
+const STORAGE_BUCKET = process.env.BACKUP_BUCKET || 'projexa-backup';
+const STORAGE_NS = process.env.OCI_NAMESPACE || 'axzmowo31clc';
+const STORAGE_CAPIENZA = Number(process.env.OCI_STORAGE_CAPIENZA_GB || 20) * 1024 ** 3;
+const STORAGE_CACHE_MS = 60 * 1000;
+let storageCache = null; // { t, dati }
+
+function ociJson(args) {
+  return new Promise((resolve, reject) => {
+    execFile(OCI_CLI, ['--auth', 'instance_principal', ...args, '--output', 'json'],
+      { timeout: 60000, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) {
+          const msg = String(stderr || '').trim().split('\n').filter(Boolean).pop() || err.message;
+          return reject(new Error(err.code === 'ENOENT' ? `CLI di Oracle non trovata (${OCI_CLI})` : msg.slice(0, 300)));
+        }
+        try { resolve(stdout.trim() ? JSON.parse(stdout) : {}); } catch (e) { reject(new Error('Risposta della CLI non leggibile')); }
+      });
+  });
+}
+
+async function leggiOggetti() {
+  const r = await ociJson(['os', 'object', 'list', '--namespace', STORAGE_NS, '--bucket-name', STORAGE_BUCKET,
+    '--all', '--fields', 'name,size,timeCreated,storageTier']);
+  return (r.data || []).map((o) => ({
+    nome: o.name,
+    byte: Number(o.size) || 0,
+    creato: o['time-created'] || o.timeCreated || null,
+    livello: o['storage-tier'] || o.storageTier || null
+  }));
+}
+
+// Eliminazione manuale (solo admin): sempre una cartella intera di backup, mai i più recenti.
+const CARTELLA_BACKUP = /^(daily\/\d{4}-\d{2}-\d{2}|monthly\/\d{4}-\d{2})$/;
+const PROTETTI_GIORNALIERI = 14; // ultimi 14 backup giornalieri
+const PROTETTI_MENSILI = 1;      // ultimo backup mensile
+
+const cartellaDi = (nome) => nome.split('/').slice(0, 2).join('/');
+
+// Cartelle che non si possono eliminare: gli ultimi PROTETTI_GIORNALIERI giornalieri e gli
+// ultimi PROTETTI_MENSILI mensili (per nome = per data, più recenti per primi).
+function cartelleProtette(oggetti) {
+  const cartelle = [...new Set(oggetti.map((o) => cartellaDi(o.nome)).filter((c) => CARTELLA_BACKUP.test(c)))]
+    .sort().reverse();
+  return [
+    ...cartelle.filter((c) => c.startsWith('daily/')).slice(0, PROTETTI_GIORNALIERI),
+    ...cartelle.filter((c) => c.startsWith('monthly/')).slice(0, PROTETTI_MENSILI)
+  ];
+}
+
+router.get('/storage', requireAuth, requireMonitorAccess, async (req, res) => {
+  try {
+    if (!IS_LINUX) return res.status(501).json({ error: 'Storage leggibile solo dalla VM (in locale manca la CLI di Oracle).' });
+    if (storageCache && req.query.aggiorna !== '1' && Date.now() - storageCache.t < STORAGE_CACHE_MS) {
+      return res.json(storageCache.dati);
+    }
+    const oggetti = await leggiOggetti();
+    const usato = oggetti.reduce((s, o) => s + o.byte, 0);
+    const dati = {
+      bucket: STORAGE_BUCKET,
+      capienza: STORAGE_CAPIENZA,
+      usato,
+      disponibile: Math.max(0, STORAGE_CAPIENZA - usato),
+      oggetti,
+      // Regole di conservazione di deploy/oracle/backup-db.sh
+      conservazione: { giornalieri: 30, mensili: 12 },
+      protette: cartelleProtette(oggetti),
+      protezione: { giornalieri: PROTETTI_GIORNALIERI, mensili: PROTETTI_MENSILI },
+      letto: new Date().toISOString()
+    };
+    storageCache = { t: Date.now(), dati };
+    res.json(dati);
+  } catch (error) {
+    res.status(502).json({ error: `Object Storage non leggibile: ${error.message}` });
+  }
+});
+
+// Elimina una cartella di backup (tutti i suoi file). POST: requireMonitorAccess lo
+// consente solo all'admin PROJEXA, la sola lettura riceve 403. Le cartelle protette si
+// ricontrollano qui su un elenco appena riletto (non sulla cache). L'operazione resta nel
+// log degli accessi (evento eliminazione_backup), riuscita o no.
+router.post('/storage/elimina', requireAuth, requireMonitorAccess, express.json(), async (req, res) => {
+  const cartella = String((req.body && req.body.cartella) || '').trim();
+  const traccia = (esito, dettaglio) => registraAccesso(req, {
+    evento: 'eliminazione_backup', esito, userId: req.user.user_id, email: req.user.email,
+    tenantId: req.user.tenant_id, dettaglio
+  });
+  try {
+    if (!IS_LINUX) return res.status(501).json({ error: 'Storage gestibile solo dalla VM.' });
+    if (!CARTELLA_BACKUP.test(cartella)) return res.status(400).json({ error: 'Cartella non valida' });
+    const oggetti = await leggiOggetti();
+    if (cartelleProtette(oggetti).includes(cartella)) {
+      return res.status(400).json({ error: `«${cartella}» è fra i backup protetti (ultimi ${PROTETTI_GIORNALIERI} giornalieri e ultimo mensile): non si può eliminare.` });
+    }
+    const file = oggetti.filter((o) => cartellaDi(o.nome) === cartella);
+    if (!file.length) return res.status(404).json({ error: 'Cartella non trovata (già eliminata?)' });
+    let eliminati = 0;
+    let byte = 0;
+    try {
+      for (const o of file) {
+        await ociJson(['os', 'object', 'delete', '--namespace', STORAGE_NS, '--bucket-name', STORAGE_BUCKET,
+          '--object-name', o.nome, '--force']);
+        eliminati += 1;
+        byte += o.byte;
+      }
+    } finally {
+      storageCache = null;
+      if (eliminati) console.log(`[STORAGE] ${req.user.email}: eliminati ${eliminati}/${file.length} file di ${cartella}`);
+    }
+    traccia('ok', `${cartella}: ${eliminati} file, ${Math.round(byte / 1024 / 1024)} MB`);
+    res.json({ cartella, eliminati, byte });
+  } catch (error) {
+    traccia('ko', `${cartella}: ${error.message}`.slice(0, 1000));
+    res.status(502).json({ error: `Eliminazione non riuscita: ${error.message}` });
   }
 });
 

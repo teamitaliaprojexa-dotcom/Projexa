@@ -5,11 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Projexa - Monitor</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Pagina Monitor a schede: Monitor VM, Schedulazioni (job_schedules) e Log (Oracle).
+    <!-- Pagina Monitor a schede: Monitor VM, Schedulazioni (job_schedules), Log (Oracle) e
+         Storage (Object Storage dei backup).
          Accesso completo all'admin del tenant PROJEXA; sola lettura (solo «Aggiorna») agli
          utenti di MONITOR_LETTURA_EMAILS. Il server ricontrolla tutto: backend/routes/vm-monitor.js
          (requireMonitorAccess), job-schedules.js e audit-log.js.
-         Gli stili e gli id di ogni scheda sono separati (#tab-vm / vm-, #tab-sched / js-, #tab-log / lg-). -->
+         Gli stili e gli id di ogni scheda sono separati (#tab-vm / vm-, #tab-sched / js-, #tab-log / lg-, #tab-st / st-). -->
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
@@ -167,6 +168,42 @@
         #tab-sched .svc .dot.nd { background: #9CA3AF; }
         @media (max-width: 560px) {#tab-sched .form-grid { grid-template-columns: 1fr; } }
 
+        /* ---------------- Scheda Storage ---------------- */
+        #tab-st .btn { padding: 0.55rem 1rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; background: #e5e7eb; color: var(--ink); font-family: inherit; }
+        #tab-st .btn:hover { background: #d1d5db; }
+        #tab-st .btn:disabled { opacity: 0.6; cursor: wait; }
+        #tab-st .toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+        #tab-st .updated, #tab-st .small { font-size: 0.8rem; color: var(--muted); }
+        #tab-st .card { background: var(--surface); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 1rem 1.1rem; margin-bottom: 0.75rem; }
+        #tab-st .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.75rem; margin-bottom: 0.75rem; }
+        #tab-st .tile .label { font-size: 0.78rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+        #tab-st .tile .value { font-size: 1.7rem; font-weight: 700; margin-top: 0.2rem; font-variant-numeric: tabular-nums; }
+        #tab-st .tile .detail { font-size: 0.8rem; color: var(--ink2); margin-top: 0.15rem; }
+        #tab-st .meter { height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; margin: 0.2rem 0 0.35rem; }
+        #tab-st .meter > span { display: block; height: 100%; background: var(--s1); border-radius: 4px; }
+        #tab-st .meter.warn > span { background: #D97706; }
+        #tab-st .meter.bad > span { background: var(--bad); }
+        #tab-st h2 { font-size: 0.95rem; color: var(--ink); margin-bottom: 0.5rem; }
+        #tab-st .table-wrap { overflow-x: auto; }
+        #tab-st table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        #tab-st th { text-align: left; font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+        #tab-st td { padding: 0.5rem; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; vertical-align: top; }
+        #tab-st .num { text-align: right; white-space: nowrap; }
+        #tab-st tr.cartella { cursor: pointer; }
+        #tab-st tr.cartella:hover td { background: #F9FAFB; }
+        #tab-st tr.cartella.open td { background: #EFF6FF; }
+        #tab-st tr.file td { background: #FAFAFA; font-size: 0.8rem; }
+        #tab-st tr.file td:first-child { padding-left: 2rem; word-break: break-all; }
+        #tab-st .badge { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 0.72rem; font-weight: 700; }
+        #tab-st .b-day { background: #DBEAFE; color: #1E40AF; }
+        #tab-st .b-month { background: #EDE9FE; color: #5B21B6; }
+        #tab-st .b-other { background: #F3F4F6; color: var(--muted); }
+        #tab-st .btn-del { padding: 0.25rem 0.55rem; font-size: 0.78rem; border-radius: 6px; background: var(--bad-bg); color: var(--bad); }
+        #tab-st .btn-del:hover { background: #FECACA; }
+        #tab-st .lock { font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+        #tab-st .denied { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+        #tab-st .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; display: block; }
+
         /* ---------------- Scheda Log ---------------- */
         #tab-log .btn { padding: 0.55rem 1rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; background: #e5e7eb; color: var(--ink); }
         #tab-log .btn:hover { background: #d1d5db; }
@@ -273,6 +310,7 @@
                 <button type="button" class="mtab" role="tab" data-tab="vm"><i class="fas fa-server"></i> Monitor VM</button>
                 <button type="button" class="mtab" role="tab" data-tab="sched"><i class="fas fa-clock-rotate-left"></i> Schedulazioni</button>
                 <button type="button" class="mtab" role="tab" data-tab="log"><i class="fas fa-clipboard-list"></i> Log</button>
+                <button type="button" class="mtab" role="tab" data-tab="st"><i class="fas fa-box-archive"></i> Storage</button>
             </nav>
 
             <section class="mpanel" id="tab-vm" role="tabpanel" hidden>
@@ -446,6 +484,32 @@
         </div>
             </section>
 
+            <section class="mpanel" id="tab-st" role="tabpanel" hidden>
+                <div id="st-content" style="display: none;">
+                    <div class="toolbar">
+                        <div class="sub" id="st-intro">Object Storage di Oracle: backup notturni dei database.</div>
+                        <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                            <span class="updated" id="st-updated"></span>
+                            <button type="button" class="btn" id="st-refreshBtn" title="Rilegge il contenuto dello storage"><i class="fas fa-rotate"></i> Aggiorna</button>
+                        </div>
+                    </div>
+                    <div class="tiles" id="st-tiles"></div>
+                    <div class="card" id="st-uso"></div>
+                    <div class="card">
+                        <h2><i class="fas fa-folder-open" style="color: var(--muted);"></i> Contenuto</h2>
+                        <div class="small" id="st-riepilogo" style="margin-bottom: 0.6rem;"></div>
+                        <div class="table-wrap"><table>
+                            <thead><tr><th>Cartella</th><th>Tipo</th><th class="num">File</th><th class="num">Dimensione</th><th>Caricato il</th><th></th></tr></thead>
+                            <tbody id="st-righe"></tbody>
+                        </table></div>
+                    </div>
+                </div>
+                <div id="st-deniedCard" class="card denied" style="display: none;">
+                    <i class="fas fa-circle-exclamation"></i>
+                    <div id="st-deniedMsg">Storage non disponibile.</div>
+                </div>
+            </section>
+
             <section class="mpanel" id="tab-log" role="tabpanel" hidden>
                 <div id="lg-content" class="hidden">
                 <div class="toolbar">
@@ -508,6 +572,7 @@
                                 <option value="impersonazione">Impersonazione</option>
                                 <option value="cambio_password">Cambio password</option>
                                 <option value="eliminazione_log">Eliminazione log</option>
+                                <option value="eliminazione_backup">Eliminazione backup</option>
                             </select>
                         </label>
                         <label class="t-accessi">Cerca (email, IP, dettaglio)
@@ -1288,7 +1353,7 @@
         const schedaLog = (() => {
             const $ = (id) => document.getElementById('lg-' + id);
 
-            const EVENTI = { login: 'Login con password', google: 'Google', microsoft: 'Microsoft', magic_link: 'Link via email', impersonazione: 'Impersonazione', cambio_password: 'Cambio password', eliminazione_log: 'Eliminazione log' };
+            const EVENTI = { login: 'Login con password', google: 'Google', microsoft: 'Microsoft', magic_link: 'Link via email', impersonazione: 'Impersonazione', cambio_password: 'Cambio password', eliminazione_log: 'Eliminazione log', eliminazione_backup: 'Eliminazione backup' };
             const TIPI_EMAIL = { recap: 'Recap riunione', trascrizione: 'Trascrizione riunione', conferma_iscrizione: 'Conferma iscrizione', reset_password: 'Password dimenticata', magic_link: 'Link di accesso' };
             const SERVIZI = { gmail_smtp: 'Gmail del team Projexa', gmail_web: 'Gmail (web) dell\'utente', programma_posta: 'Programma di posta dell\'utente (Outlook)' };
             const OPERAZIONI = { INSERT: 'Inserimento', UPDATE: 'Modifica', DELETE: 'Cancellazione' };
@@ -1831,11 +1896,154 @@
         })();
 
         // =====================================================================
+        // SCHEDA STORAGE (Object Storage di Oracle, bucket dei backup)
+        // =====================================================================
+        const schedaSt = (() => {
+            const $ = (id) => document.getElementById('st-' + id);
+            const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+            let dati = null;
+            const aperte = new Set(); // cartelle aperte, mantenute dopo «Aggiorna»
+
+            function dimensione(n) {
+                const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+                let i = 0; let v = Number(n) || 0;
+                while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+                return `${v.toLocaleString('it-IT', { maximumFractionDigits: i ? 2 : 0 })} ${u[i]}`;
+            }
+            // Disponibile arrotondato per difetto: con pochi MB usati non deve sembrare "tutto libero" tondo.
+            function perDifetto(n) {
+                const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+                let i = 0; let v = Number(n) || 0;
+                while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+                return `${(Math.floor(v * 100) / 100).toLocaleString('it-IT', { minimumFractionDigits: i ? 2 : 0, maximumFractionDigits: 2 })} ${u[i]}`;
+            }
+            const pct = (v, giu) => `${((giu ? Math.floor(v * 100) : Math.ceil(v * 100)) / 100).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+            const quando = (t) => t ? new Date(t).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '–';
+            const tile = (l, v, d) => `<div class="card tile" style="margin-bottom:0"><div class="label">${esc(l)}</div><div class="value">${esc(v)}</div><div class="detail">${esc(d || '')}</div></div>`;
+
+            // Cartelle del backup: daily/AAAA-MM-GG e monthly/AAAA-MM; il resto per prima parte del nome.
+            function cartelle(oggetti) {
+                const m = new Map();
+                for (const o of oggetti) {
+                    const p = o.nome.split('/');
+                    const chiave = p.length > 2 ? `${p[0]}/${p[1]}` : p.length === 2 ? p[0] : '(radice)';
+                    if (!m.has(chiave)) m.set(chiave, { chiave, tipo: p[0] === 'daily' ? 'day' : p[0] === 'monthly' ? 'month' : 'other', file: [], byte: 0, creato: null });
+                    const c = m.get(chiave);
+                    c.file.push(o);
+                    c.byte += o.byte;
+                    if (o.creato && (!c.creato || o.creato > c.creato)) c.creato = o.creato;
+                }
+                const ordine = { day: 0, month: 1, other: 2 };
+                return [...m.values()].sort((a, b) => ordine[a.tipo] - ordine[b.tipo] || (a.chiave < b.chiave ? 1 : -1));
+            }
+
+            function render() {
+                const d = dati;
+                const perc = d.capienza ? 100 * d.usato / d.capienza : 0;
+                const gruppi = cartelle(d.oggetti);
+                const protette = new Set(d.protette || []);
+                const giorn = gruppi.filter((g) => g.tipo === 'day');
+                const mens = gruppi.filter((g) => g.tipo === 'month');
+                $('intro').textContent = `Bucket ${d.bucket}: backup notturni dei 4 database (giornalieri per ${d.conservazione.giornalieri} giorni, mensili per ${d.conservazione.mensili} mesi).`;
+                $('tiles').innerHTML = [
+                    tile('Capienza', dimensione(d.capienza), 'Always Free'),
+                    tile('Utilizzato', dimensione(d.usato), `${d.oggetti.length} file`),
+                    tile('Disponibile', perDifetto(d.disponibile), `${pct(100 - perc, true)} libero`),
+                    tile('Ultimo backup', giorn.length ? giorn[0].chiave.split('/')[1].split('-').reverse().join('/') : '–', giorn.length ? dimensione(giorn[0].byte) : 'nessun backup giornaliero')
+                ].join('');
+                $('uso').innerHTML = `<div class="meter${perc >= 90 ? ' bad' : perc >= 75 ? ' warn' : ''}"><span style="width:${Math.min(100, perc).toFixed(2)}%"></span></div>` +
+                    `<div class="small">${pct(perc)} della capienza in uso. I 20 GB gratuiti valgono per tutto l'Object Storage dell'account: qui si vede il bucket dei backup, l'unico che la VM può leggere.</div>`;
+                const media = giorn.length ? giorn.reduce((s, g) => s + g.byte, 0) / giorn.length : 0;
+                $('riepilogo').textContent = gruppi.length
+                    ? `Backup giornalieri: ${giorn.length}${giorn.length ? ` (dal ${giorn[giorn.length - 1].chiave.split('/')[1].split('-').reverse().join('/')} al ${giorn[0].chiave.split('/')[1].split('-').reverse().join('/')}, in media ${dimensione(media)} a notte)` : ''} · mensili: ${mens.length}. Clic su una cartella per vedere i file.` +
+                      (document.body.classList.contains('ro') ? '' : ` Gli ultimi ${d.protezione.giornalieri} giornalieri e l'ultimo mensile sono protetti.`)
+                    : '';
+                $('righe').innerHTML = gruppi.length ? gruppi.map((g) => {
+                    const aperta = aperte.has(g.chiave);
+                    const tipo = g.tipo === 'day' ? '<span class="badge b-day">Giornaliero</span>' : g.tipo === 'month' ? '<span class="badge b-month">Mensile</span>' : '<span class="badge b-other">Altro</span>';
+                    return `<tr class="cartella${aperta ? ' open' : ''}" data-c="${esc(g.chiave)}">
+                        <td><i class="fas fa-chevron-${aperta ? 'down' : 'right'}" style="font-size:0.7rem;margin-right:0.4rem;color:var(--muted)"></i><i class="fas fa-folder" style="color:#D97706;margin-right:0.35rem"></i>${esc(g.chiave)}</td>
+                        <td>${tipo}</td><td class="num">${g.file.length}</td><td class="num">${dimensione(g.byte)}</td><td>${esc(quando(g.creato))}</td>
+                        <td class="num">${g.tipo === 'other' ? ''
+                            : protette.has(g.chiave) ? `<span class="lock" data-write title="Fra gli ultimi ${d.protezione.giornalieri} giornalieri o l'ultimo mensile: non si può eliminare"><i class="fas fa-lock"></i> protetto</span>`
+                            : `<button type="button" class="btn btn-del" data-write data-elimina="${esc(g.chiave)}" title="Elimina questo backup dallo storage"><i class="fas fa-trash-can"></i> Elimina</button>`}</td></tr>` +
+                        (aperta ? g.file.slice().sort((a, b) => (a.nome < b.nome ? -1 : 1)).map((o) =>
+                            `<tr class="file"><td>${esc(o.nome.split('/').pop())}</td><td class="small">${esc(o.livello || '')}</td><td></td><td class="num">${dimensione(o.byte)}</td><td>${esc(quando(o.creato))}</td><td></td></tr>`).join('') : '');
+                }).join('') : '<tr><td colspan="6" class="small" style="text-align:center;padding:2rem">Il bucket è vuoto.</td></tr>';
+                $('updated').textContent = `Letto alle ${new Date(d.letto).toLocaleTimeString('it-IT')}`;
+            }
+
+            async function carica(forza) {
+                const b = $('refreshBtn');
+                b.disabled = true;
+                b.querySelector('i').classList.add('fa-spin');
+                try {
+                    const r = await fetch(`${API_URL}/vm-monitor/storage${forza ? '?aggiorna=1' : ''}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` } });
+                    if (r.status === 401) { window.location.href = 'index.html'; return; }
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                    dati = d;
+                    $('deniedCard').style.display = 'none';
+                    $('content').style.display = '';
+                    render();
+                } catch (e) {
+                    $('content').style.display = 'none';
+                    $('deniedCard').style.display = '';
+                    $('deniedMsg').textContent = e.message;
+                } finally {
+                    b.disabled = false;
+                    b.querySelector('i').classList.remove('fa-spin');
+                }
+            }
+
+            $('righe').addEventListener('click', async (e) => {
+                const del = e.target.closest('[data-elimina]');
+                if (del) {
+                    e.stopPropagation();
+                    const cartella = del.dataset.elimina;
+                    const g = cartelle(dati.oggetti).find((x) => x.chiave === cartella);
+                    if (!g || !confirm(`Eliminare definitivamente il backup «${cartella}»?\n\n${g.file.length} file, ${dimensione(g.byte)} liberati.\nNon si può annullare: quel backup non sarà più ripristinabile.`)) return;
+                    del.disabled = true;
+                    try {
+                        const r = await fetch(`${API_URL}/vm-monitor/storage/elimina`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ cartella })
+                        });
+                        if (r.status === 401) { window.location.href = 'index.html'; return; }
+                        const d = await r.json().catch(() => ({}));
+                        if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                        aperte.delete(cartella);
+                    } catch (err) {
+                        alert(err.message);
+                    }
+                    carica(true);
+                    return;
+                }
+                const tr = e.target.closest('tr.cartella');
+                if (!tr) return;
+                if (aperte.has(tr.dataset.c)) aperte.delete(tr.dataset.c); else aperte.add(tr.dataset.c);
+                render();
+            });
+            $('refreshBtn').addEventListener('click', () => carica(true));
+            let avviata = false;
+            return {
+                mostra() {
+                    if (avviata) return;
+                    avviata = true;
+                    // Il contenuto (deniedCard compresa) appare dopo la prima risposta.
+                    $('content').style.display = '';
+                    carica(false);
+                }
+            };
+        })();
+
+        // =====================================================================
         // SCHEDE E ACCESSO
         // =====================================================================
-        const SCHEDE = { vm: schedaVm, sched: schedaSched, log: schedaLog };
-        const DA_HASH = { vm: 'vm', schedulazioni: 'sched', log: 'log' };
-        const A_HASH = { vm: 'vm', sched: 'schedulazioni', log: 'log' };
+        const SCHEDE = { vm: schedaVm, sched: schedaSched, log: schedaLog, st: schedaSt };
+        const DA_HASH = { vm: 'vm', schedulazioni: 'sched', log: 'log', storage: 'st' };
+        const A_HASH = { vm: 'vm', sched: 'schedulazioni', log: 'log', st: 'storage' };
 
         function apriScheda(nome) {
             if (!SCHEDE[nome]) nome = 'vm';
