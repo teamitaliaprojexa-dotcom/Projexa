@@ -107,7 +107,11 @@
                 <h1><i class="fas fa-clipboard-list"></i> Log</h1>
                 <div class="sub">Accessi, modifiche ai dati ed email, salvati su Oracle (accessi ed email 12 mesi, modifiche 24 mesi)</div>
             </div>
-            <a class="btn" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                <span class="small" id="aggiornatoAlle"></span>
+                <button type="button" class="btn" id="refreshBtn" title="Aggiorna stato, spazio e risultati mantenendo i filtri"><i class="fas fa-rotate"></i> Aggiorna</button>
+                <a class="btn" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
+            </div>
         </header>
 
         <div id="content" class="hidden">
@@ -330,7 +334,7 @@
                 const perc = occupato !== null ? Math.min(100, 100 * occupato / d.capienza) : null;
                 const tiles = [
                     ['Capienza', dimensione(d.capienza), 'Always Free'],
-                    ['Occupato', dimensione(occupato), d.totaleDb !== null && d.totaleDb !== undefined ? 'tutto il database' : 'solo le tabelle dei log'],
+                    ['Occupato', dimensione(occupato), d.totaleDb !== null && d.totaleDb !== undefined ? 'dati di tutti gli utenti' : 'solo le tabelle dei log'],
                     ['Disponibile', occupato !== null ? dimensione(Math.max(0, d.capienza - occupato)) : '–', perc !== null ? `${(100 - perc).toFixed(1).replace('.', ',')}% libero` : ''],
                     ['Di cui log', d.procedura ? dimensione(d.spazioLog) : '–', 'accessi, modifiche ed email']
                 ];
@@ -668,6 +672,21 @@
                 esito.textContent = e.message;
                 esito.classList.remove('hidden');
                 b.disabled = false;
+            }
+        });
+
+        // Aggiorna: stato, spazio e risultati della scheda aperta, con gli stessi filtri.
+        $('refreshBtn').addEventListener('click', async () => {
+            const b = $('refreshBtn');
+            if (b.disabled) return;
+            b.disabled = true;
+            b.querySelector('i').classList.add('fa-spin');
+            try {
+                await Promise.all([caricaStato(), caricaSpazio(), cerca()]);
+                $('aggiornatoAlle').textContent = `Aggiornato alle ${new Date().toLocaleTimeString('it-IT')}`;
+            } finally {
+                b.disabled = false;
+                b.querySelector('i').classList.remove('fa-spin');
             }
         });
 
