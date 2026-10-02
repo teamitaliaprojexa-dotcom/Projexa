@@ -43,6 +43,63 @@ export function registraAccesso(req, { evento, esito = 'ok', userId = null, emai
   });
 }
 
+// ----------------------------------------------------------------------------
+// TRASCRIZIONE E RECAP: una riga del log variazioni ciascuno, con il testo completo
+// ----------------------------------------------------------------------------
+// Il testo della trascrizione cresce blocco per blocco: il trigger registrerebbe una riga
+// per blocco, con il testo cifrato troncato e quindi illeggibile. Queste scritture accendono
+// projexa.audit_salta (il trigger le salta, Supporto/CreaDB/audit_trascrizione_recap.sql) e
+// a lavoro finito si registra qui UN evento con il testo completo, cifrato come sulla
+// tabella: la pagina Log lo decifra solo per mostrarlo.
+export const SALTA_LOG_ON = "SELECT set_config('projexa.audit_salta', '1', true)";
+export const SALTA_LOG_OFF = "SELECT set_config('projexa.audit_salta', '', true)";
+
+let chiavePkRecMeeting = null; // colonne della chiave primaria di rec_meeting (dal catalogo)
+
+async function colonnePkRecMeeting() {
+  if (chiavePkRecMeeting) return chiavePkRecMeeting;
+  const r = await db.query(
+    `SELECT a.attname FROM pg_index i
+       JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+      WHERE i.indrelid = 'public.rec_meeting'::regclass AND i.indisprimary
+      ORDER BY array_position(i.indkey::int2[], a.attnum)`
+  );
+  chiavePkRecMeeting = r.rows.map((x) => x.attname);
+  if (!chiavePkRecMeeting.length) chiavePkRecMeeting = ['tenant_id', 'user_id', 'id_calendar'];
+  return chiavePkRecMeeting;
+}
+
+/**
+ * campo:   'trascrizione' | 'recap'
+ * testoCifrato: valore come salvato su rec_meeting (encRec)
+ * userId:  chi ha fatto l'operazione (di norma il proprietario della riunione)
+ * origine: es. 'job:trascrizione', 'job:recap' o il percorso della richiesta
+ */
+export async function registraTestoRiunione({ tenantId, userId, ownerId, idCalendar, campo, testoCifrato, origine }) {
+  try {
+    const pk = await colonnePkRecMeeting();
+    const r = await db.query(
+      `SELECT ${pk.map((c) => `"${c}"::text AS "${c}"`).join(', ')} FROM rec_meeting
+        WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [tenantId, ownerId || userId, idCalendar]
+    );
+    if (!r.rows[0]) return;
+    accoda('variazione', {
+      tabella: 'rec_meeting',
+      operazione: 'UPDATE',
+      chiave: pk.map((c) => r.rows[0][c] ?? '').join('|'),
+      tenant_id: tenantId ? String(tenantId) : null,
+      user_id: userId ? String(userId) : null,
+      origine: breve(origine, 400),
+      campi: [campo],
+      prima: null,
+      dopo: { [campo]: testoCifrato }
+    });
+  } catch (e) {
+    console.error(`[AUDIT] Evento "${campo}" della riunione ${idCalendar} non registrato:`, e.message);
+  }
+}
+
 const elenco = (v) => (Array.isArray(v) ? v : String(v || '').split(/[;,]/))
   .map((x) => String(x).trim()).filter(Boolean).join(', ');
 

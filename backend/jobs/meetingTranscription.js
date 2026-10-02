@@ -25,6 +25,8 @@
 import db from '../config/database.js';
 import { getPromptFor } from '../config/prompts.js';
 import { encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js';
+import { SALTA_LOG_ON, SALTA_LOG_OFF, registraTestoRiunione } from '../config/audit.js';
+import { contestoAudit } from '../config/auditContext.js';
 import { transcribeAudio, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap } from '../routes/ai.js';
 
 export const NOME_PROGRAMMA = 'meetingTranscription';
@@ -351,10 +353,38 @@ async function appendTranscript(q, user, idCalendar, add) {
     [user.tenant_id, user.user_id, idCalendar]
   );
   if (cur.rows.length === 0) return; // riunione cancellata nel frattempo
+  // Fuori dal log variazioni: a fine trascrizione si registra una sola riga con tutto il
+  // testo (processFinalize -> registraTestoRiunione).
+  await q.query(SALTA_LOG_ON);
   await q.query(
     `UPDATE rec_meeting SET trascrizione = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
     [encRec((cur.rows[0].trascrizione || '') + add), user.tenant_id, user.user_id, idCalendar]
   );
+  await q.query(SALTA_LOG_OFF);
+  trascrizioniDaRegistrare.add(recapKey(user, idCalendar));
+}
+
+// Riunioni la cui trascrizione è cambiata dall'ultima riga registrata nel log: al passo
+// finale (processFinalize) si registra la trascrizione completa solo per queste, così un
+// recap rilanciato a mano non duplica la riga della trascrizione.
+const trascrizioniDaRegistrare = new Set(); // "tenant|utente|id_calendar"
+
+// Scrittura su rec_meeting fuori dal log variazioni, in una transazione propria (il flag
+// projexa.audit_salta vale solo lì). L'evento lo registra chi chiama.
+async function senzaLog(sql, params) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(SALTA_LOG_ON);
+    const r = await client.query(sql, params);
+    await client.query('COMMIT');
+    return r;
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -429,7 +459,8 @@ export async function recapInProgress(user, ids) {
 }
 
 // user: { tenant_id, user_id, email }. Restituisce { provider, model, length }.
-export async function generateRecap(user, idCalendar) {
+// origine: per il log (default: la richiesta in corso, altrimenti 'job:recap').
+export async function generateRecap(user, idCalendar, { origine = null } = {}) {
   const providerName = await recapProviderName(user);
   if (!providerName) throw httpError(400, 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"');
   const local = localRecapMode(providerName);
@@ -449,11 +480,24 @@ export async function generateRecap(user, idCalendar) {
   const recap = stripMarkdown(applyCorrections(String(result.text || '').trim(), rules).text).trim();
   if (!recap) throw httpError(502, `${result.label} non ha restituito alcun testo`);
 
-  await db.query(
+  const recapCifrato = encRec(recap);
+  await senzaLog(
     // recap_html = NULL: un recap rigenerato sostituisce anche la versione modificata a mano.
     `UPDATE rec_meeting SET recap = $1, recap_html = NULL, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
-    [encRec(recap), user.tenant_id, user.user_id, idCalendar]
+    [recapCifrato, user.tenant_id, user.user_id, idCalendar]
   );
+  // Una riga nel log con il recap completo (il trigger ha saltato l'UPDATE qui sopra).
+  // Recap dalla coda (origine passata): è del proprietario. Pulsante «Recap»: di chi lo preme.
+  const ctx = origine ? null : contestoAudit();
+  await registraTestoRiunione({
+    tenantId: user.tenant_id,
+    userId: (ctx && ctx.userId) || user.user_id,
+    ownerId: user.user_id,
+    idCalendar,
+    campo: 'recap',
+    testoCifrato: recapCifrato,
+    origine: origine || (ctx && ctx.origine) || 'job:recap'
+  });
   console.log(`[RECAP] ✓ Recap generato con ${result.label} per la riunione ${idCalendar}`);
   return { provider: result.label, model: result.model, length: recap.length };
 }
@@ -607,10 +651,13 @@ export async function copiaTrascrizioneCondivisa(source, idCalendar, soloUtente 
   )).rows;
   const testo = encRec(src.trascrizione);
   for (const f of followers) {
-    await db.query(
+    // Fuori dal log: la riga con la trascrizione completa la registra il recap prenotato
+    // qui sotto (processFinalize del collega), come per una registrazione sua.
+    await senzaLog(
       `UPDATE rec_meeting SET trascrizione = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
       [testo, source.tenant_id, f.user_id, f.id_calendar]
     );
+    trascrizioniDaRegistrare.add(recapKey({ tenant_id: source.tenant_id, user_id: f.user_id }, f.id_calendar));
     await enqueueFinalize({ tenant_id: source.tenant_id, user_id: f.user_id, email: null }, f.id_calendar);
   }
   if (followers.length) console.log(`[TRASCRIZIONE CONDIVISA] ${idCalendar}: copiata su ${followers.length} riunion${followers.length === 1 ? 'e' : 'i'} di altri utenti`);
@@ -621,6 +668,28 @@ export async function copiaTrascrizioneCondivisa(source, idCalendar, soloUtente 
 // in caso di errore temporaneo viene rimessa in coda con un nuovo tentativo.
 async function processFinalize(job) {
   const user = jobUser(job);
+  // Trascrizione finita: UNA riga nel log con tutto il testo (i blocchi non sono stati
+  // registrati uno per uno). Solo se il testo è cambiato dall'ultima riga registrata.
+  if (trascrizioniDaRegistrare.delete(recapKey(user, job.id_calendar))) {
+    try {
+      const tr = (await db.query(
+        `SELECT trascrizione FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+        [user.tenant_id, user.user_id, job.id_calendar]
+      )).rows[0];
+      if (tr && tr.trascrizione && tr.trascrizione.trim()) {
+        await registraTestoRiunione({
+          tenantId: user.tenant_id,
+          userId: user.user_id,
+          idCalendar: job.id_calendar,
+          campo: 'trascrizione',
+          testoCifrato: encRec(tr.trascrizione),
+          origine: 'job:trascrizione'
+        });
+      }
+    } catch (error) {
+      console.error(`❌ [LOG] Trascrizione ${job.id_calendar} non registrata: ${error.message}`);
+    }
+  }
   // Prima la copia a chi condivide la trascrizione: non deve dipendere dall'esito del recap.
   // Solo al primo tentativo: i nuovi tentativi riguardano solo il recap di questo utente.
   try {
@@ -635,7 +704,7 @@ async function processFinalize(job) {
         WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
       [user.tenant_id, user.user_id, job.id_calendar]
     );
-    if (t.rows[0] && t.rows[0].has_tr) await generateRecap(user, job.id_calendar);
+    if (t.rows[0] && t.rows[0].has_tr) await generateRecap(user, job.id_calendar, { origine: 'job:recap' });
   } catch (error) {
     const attempts = (Number(job.attempts) || 0) + 1;
     if (isTemporary(error) && attempts < 10) {

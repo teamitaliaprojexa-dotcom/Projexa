@@ -230,6 +230,7 @@
         #tab-log .db table td, #tab-log .db table th { padding: 0.35rem 0.5rem; }
         #tab-log .num { text-align: right; font-variant-numeric: tabular-nums; }
         #tab-log .mod { font-size: 0.8rem; line-height: 1.45; }
+        #tab-log .testo-completo { white-space: pre-wrap; font-size: 0.85rem; line-height: 1.5; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 0.75rem 0.9rem; max-height: 420px; overflow: auto; }
         #tab-log .mod .k { font-weight: 600; color: var(--ink2); }
         #tab-log .mod .old { background: var(--del-bg); color: #991B1B; text-decoration: line-through; padding: 0 0.2rem; border-radius: 3px; }
         #tab-log .mod .new { background: var(--add-bg); color: #065F46; padding: 0 0.2rem; border-radius: 3px; }
@@ -1359,6 +1360,19 @@
                 while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
                 return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1).replace('.', ',')} ${u[i]}`;
             }
+            // Disponibile e percentuali con due decimali e arrotondati PER DIFETTO lo spazio
+            // libero: con pochi MB occupati su 20 GB l'arrotondamento a una cifra mostrava
+            // "20,0 GB" e "100,0% libero", come se non ci fosse niente.
+            function dimensionePerDifetto(n) {
+                const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+                let i = 0; let v = Number(n);
+                while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+                return `${(Math.floor(v * 100) / 100).toLocaleString('it-IT', { minimumFractionDigits: i ? 2 : 0, maximumFractionDigits: 2 })} ${u[i]}`;
+            }
+            function percentuale(v, perDifetto = false) {
+                const x = perDifetto ? Math.floor(v * 100) / 100 : Math.ceil(v * 100) / 100;
+                return `${x.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+            }
             const giorno = (t) => t ? new Date(t).toLocaleDateString('it-IT') : '–';
 
             async function caricaSpazio() {
@@ -1376,14 +1390,14 @@
                     const tiles = [
                         ['Capienza', dimensione(d.capienza), 'Always Free'],
                         ['Occupato', dimensione(occupato), d.totaleDb !== null && d.totaleDb !== undefined ? 'dati di tutti gli utenti' : 'solo le tabelle dei log'],
-                        ['Disponibile', occupato !== null ? dimensione(Math.max(0, d.capienza - occupato)) : '–', perc !== null ? `${(100 - perc).toFixed(1).replace('.', ',')}% libero` : ''],
+                        ['Disponibile', occupato !== null ? dimensionePerDifetto(Math.max(0, d.capienza - occupato)) : '–', perc !== null ? `${percentuale(100 - perc, true)} libero` : ''],
                         ['Di cui log', d.procedura ? dimensione(d.spazioLog) : '–', 'accessi, modifiche ed email']
                     ];
                     let html = '<div class="db-tiles">' + tiles.map(([l, v, n]) =>
                         `<div><div class="label">${esc(l)}</div><div class="value">${esc(v)}</div><div class="small">${esc(n)}</div></div>`).join('') + '</div>';
                     if (perc !== null) {
                         html += `<div class="meter${perc >= 90 ? ' bad' : perc >= 75 ? ' warn' : ''}"><span style="width:${perc.toFixed(1)}%"></span></div>` +
-                            `<div class="small" style="margin-bottom:0.6rem">${perc.toFixed(1).replace('.', ',')}% della capienza in uso</div>`;
+                            `<div class="small" style="margin-bottom:0.6rem">${percentuale(perc)} della capienza in uso</div>`;
                     }
                     html += '<div class="table-wrap"><table><thead><tr><th>Tabella</th><th class="num">Righe</th><th class="num">Spazio</th><th>Log più vecchio</th></tr></thead><tbody>' +
                         d.tabelle.map((t) => `<tr><td>${esc(t.etichetta)}</td><td class="num">${Number(t.righe).toLocaleString('it-IT')}</td><td class="num">${t.byte !== null ? dimensione(t.byte) : '–'}</td><td>${esc(giorno(t.piuVecchio))}</td></tr>`).join('') +
@@ -1522,10 +1536,18 @@
 
             // Colonna "Modifica": per gli UPDATE i campi cambiati con valore prima -> dopo.
             const MAX_CAMPI = 3;
+            // Riga unica di trascrizione / recap della riunione (backend: registraTestoRiunione):
+            // solo il testo finale, senza "prima".
+            const testoCompleto = (r) => r.operazione === 'UPDATE' && r.tabella === 'rec_meeting' && !r.prima && r.dopo;
+
             function riassunto(r) {
                 if (r.soloRicifratura) return '<span class="small">nessun valore cambiato (solo ricifratura)</span>';
                 if (r.operazione === 'INSERT') return '<span class="small">nuova riga (clic per i valori)</span>';
                 if (r.operazione === 'DELETE') return '<span class="small">riga eliminata (clic per i valori)</span>';
+                if (testoCompleto(r)) {
+                    return `<div class="mod">${Object.entries(r.dopo).map(([k, v]) =>
+                        `<div><span class="k">${k === 'recap' ? 'recap completo' : k === 'trascrizione' ? 'trascrizione completa' : esc(k)}:</span> ${breve(v)}</div>`).join('')}<div class="small">clic per leggere tutto il testo</div></div>`;
+                }
                 const prima = r.prima || {};
                 const dopo = r.dopo || {};
                 const campi = r.campi || Object.keys(dopo);
@@ -1578,6 +1600,12 @@
                 if (tab === 'accessi') {
                     return `<div class="small"><b>Browser:</b> ${esc(r.userAgent || '—')}</div>` +
                         (r.tenant ? `<div class="small" style="margin-top:0.3rem"><b>Spazio di lavoro:</b> ${esc(r.tenant)}</div>` : '');
+                }
+                if (testoCompleto(r)) {
+                    // Trascrizione / recap: il testo intero, così com'è stato salvato.
+                    return Object.entries(r.dopo).map(([k, v]) =>
+                        `<div class="small" style="margin-bottom:0.35rem"><b>${esc(k === 'recap' ? 'Recap' : k === 'trascrizione' ? 'Trascrizione' : k)}</b> · ${esc(String(v ?? '').length.toLocaleString('it-IT'))} caratteri</div>` +
+                        `<div class="testo-completo">${esc(v ?? '')}</div>`).join('');
                 }
                 const prima = r.prima || {};
                 const dopo = r.dopo || {};
@@ -1754,7 +1782,8 @@
                 }
                 return [['Quando', 'Operazione', 'Tabella', 'Riga', 'Campi cambiati', 'Prima', 'Dopo', 'Utente', 'Email', 'Spazio di lavoro', 'Origine'],
                     ...righe.map((r) => [quandoCsv(r.quando), OPERAZIONI[r.operazione] || r.operazione, r.tabella, r.chiave,
-                        r.soloRicifratura ? '(solo ricifratura)' : (r.campi || []).join(', '), r.prima, r.dopo, r.utente, r.email, r.tenant, r.origine])];
+                        r.soloRicifratura ? '(solo ricifratura)' : (r.campi || []).join(', '), r.prima,
+                        testoCompleto(r) ? Object.values(r.dopo).join('\n') : r.dopo, r.utente, r.email, r.tenant, r.origine])];
             }
             $('csvBtn').addEventListener('click', async () => {
                 const b = $('csvBtn');
