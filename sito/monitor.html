@@ -32,9 +32,12 @@
         body.ro .ro-badge { display: inline-flex; }
         /* Sola lettura: spariscono tutti i comandi che modificano qualcosa (il server li rifiuta comunque) */
         body.ro [data-write] { display: none !important; }
+        /* Al posto dei comandi nascosti, solo in sola lettura: lo stato da vedere */
+        .ro-only { display: none !important; }
+        body.ro .ro-only { display: inline-flex !important; }
         /* Schede */
-        .mtabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line); margin-bottom: 1.25rem; overflow-x: auto; }
-        .mtab { border: none; background: transparent; padding: 0.7rem 1.1rem; font: inherit; font-size: 0.92rem; font-weight: 600; color: var(--ink2); cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 0.5rem; white-space: nowrap; }
+        .mtabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line); margin-bottom: 1.25rem; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+        .mtab { border: none; background: transparent; padding: 0.7rem 1.1rem; font: inherit; font-size: 0.92rem; font-weight: 600; color: var(--ink2); cursor: pointer; border-bottom: 3px solid transparent; display: inline-flex; align-items: center; gap: 0.5rem; white-space: nowrap; }
         .mtab:hover { color: var(--ink); }
         .mtab.on { color: var(--primary); border-bottom-color: var(--primary); }
         .mpanel[hidden] { display: none; }
@@ -334,7 +337,6 @@
                 <div><i class="fas fa-lock"></i></div>
                 <div id="vm-deniedMsg">Pagina non disponibile.</div>
             </div>
-        </div>
             </section>
 
             <section class="mpanel" id="tab-sched" role="tabpanel" hidden>
@@ -392,7 +394,6 @@
                 <i class="fas fa-lock"></i>
                 <div id="js-deniedMsg">Pagina non disponibile.</div>
             </div>
-        </div>
 
         <!-- Modifica / nuova schedulazione -->
         <div class="overlay" id="js-editOverlay">
@@ -926,7 +927,8 @@
                                 ? `<div class="strong">${esc(dataOra(s.prossima_esecuzione))}</div><div class="small">${esc(traQuanto(s.prossima_esecuzione))}</div>`
                                 : '<span class="small">Da calcolare</span>';
                         return `<tr class="${s.attivo ? '' : 'off'}" data-id="${esc(s.id)}">
-                            <td><label class="switch" title="Attiva / disattiva" data-write><input type="checkbox" data-act="toggle" ${s.attivo ? 'checked' : ''}><span></span></label></td>
+                            <td><label class="switch" title="Attiva / disattiva" data-write><input type="checkbox" data-act="toggle" ${s.attivo ? 'checked' : ''}><span></span></label>
+                                <span class="badge ro-only ${s.attivo ? 'b-ok' : 'b-off'}" title="Stato della schedulazione"><i class="fas ${s.attivo ? 'fa-toggle-on' : 'fa-toggle-off'}"></i> ${s.attivo ? 'ATTIVA' : 'SPENTA'}</span></td>
                             <td><div class="strong">${esc(s.descrizione || s.job)}</div><div class="small">${esc(s.job)} · ${esc(s.tenant_name || s.tenant_id)}</div>
                                 <div class="small"><i class="fas fa-user-gear"></i> ${isJira(s.job)
                                     ? `Configurazione Jira: ${s.utente_config ? esc([s.config_name, s.config_cognome].filter(Boolean).join(' ') || s.utente_config) : 'automatica (primo utente configurato)'}`
