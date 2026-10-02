@@ -36,7 +36,7 @@ function configurazioneMancante() {
     .filter((k) => !String(process.env[k] || '').trim());
 }
 
-// Usato anche dalla pagina Log (routes/audit-log.js) per leggere le tabelle.
+// Usato anche dalla scheda Log della pagina Monitor (routes/audit-log.js) per leggere le tabelle.
 export async function getPoolOracle() {
   const mancanti = configurazioneMancante();
   if (mancanti.length) {

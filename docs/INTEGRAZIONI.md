@@ -42,16 +42,21 @@ filtrata per `tenant_id` e `user_id` del login:
    | `aggiornaJiraQuotazioni` | `Nome Cliente Jira Quot` | uguaglianza |
    | `aggiornaJiraTask` | `Nome Cliente Jira task` | il nome configurato è **contenuto** nel testo Jira (es. dentro le etichette) |
 
-   Il `client_id` scritto sulla riga è `clients.argument`. Le righe Jira che non
-   trovano un cliente vengono ignorate e contate nel riepilogo.
-3. **Insert o update** — si guarda il codice (`codice` / `cod_task`) nel perimetro
-   *tenant + utente + cliente*:
-   - codice assente → **INSERT**;
-   - codice presente e `scadenza > oggi` → **UPDATE**;
-   - codice presente ma riga **scaduta** → non si tocca nulla.
-4. **Colonne** — tutte le altre righe di mappatura valorizzano la colonna Projexa
+   Il `client_id` scritto sulla riga è `clients.argument`. Il cliente serve **solo
+   per inserire**: le righe Jira senza cliente non creano righe nuove (contate come
+   «senza cliente» se non hanno nemmeno una riga da aggiornare).
+3. **Update per codice** — a parità di codice (chiave Jira = `codice` / `cod_task`)
+   si aggiornano **tutte** le righe del tenant con quel codice, **senza guardare il
+   cliente** (anche righe di altri clienti o senza cliente):
+   - `scadenza > oggi` → **UPDATE** delle sole colonne cambiate; se Jira non ha
+     cambiato nulla la riga non si tocca (nemmeno `updated_at`) e nel riepilogo è
+     contata come **invariata**;
+   - riga **scaduta** → non si tocca nulla.
+4. **Insert** — con il cliente abbinato, se il codice non esiste ancora per quel
+   cliente (perimetro *tenant + cliente*) → **INSERT**.
+5. **Colonne** — tutte le altre righe di mappatura valorizzano la colonna Projexa
    indicata in `colonna_projexa` con la colonna Jira indicata in `colonna_jira`.
-5. **Filtro aggiuntivo (solo aggiornamento)** — se configurato, viene eseguito un
+6. **Filtro aggiuntivo (solo aggiornamento)** — se configurato, viene eseguito un
    secondo filtro Jira che **aggiorna soltanto righe già presenti** e non ne crea
    mai di nuove (vedi sotto).
 
@@ -101,7 +106,9 @@ testo): il **nome del filtro Jira** va scritto nella casella di testo.
   sul database sono cifrati. Poiché la cifratura è randomizzata, il codice **non**
   può essere cercato con una `WHERE`: il confronto avviene in memoria sulle righe
   lette dal pool (che decifra in automatico) e le scritture passano da
-  `encryptRowForWrite`.
+  `encryptRowForWrite`. Per lo stesso motivo, prima di aggiornare si confrontano i
+  valori **decifrati** (vuoto e null valgono uguale): riscrivere un testo identico
+  produrrebbe un cifrato diverso e il log variazioni registrerebbe una modifica finta.
 - **Limite di lettura**: 50.000 righe per filtro (500 pagine da 100). Se il filtro ne
   ha di più il programma legge le prime 50.000 e lo **segnala nel riepilogo**: in quel
   caso va ristretto il filtro su Jira, altrimenti la parte esclusa non viene mai

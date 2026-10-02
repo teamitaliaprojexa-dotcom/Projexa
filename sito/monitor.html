@@ -1,0 +1,1843 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - Monitor</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Pagina Monitor a schede: Monitor VM, Schedulazioni (job_schedules) e Log (Oracle).
+         Accesso completo all'admin del tenant PROJEXA; sola lettura (solo «Aggiorna») agli
+         utenti di MONITOR_LETTURA_EMAILS. Il server ricontrolla tutto: backend/routes/vm-monitor.js
+         (requireMonitorAccess), job-schedules.js e audit-log.js.
+         Gli stili e gli id di ogni scheda sono separati (#tab-vm / vm-, #tab-sched / js-, #tab-log / lg-). -->
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --ink: #1f2937; --ink2: #4b5563; --muted: #6b7280; --line: #e5e7eb; --grid: #f0f1f3;
+            --surface: #ffffff; --bg: #f5f5f5; --primary: #3B82F6; --accent: #2563EB;
+            --s1: #2563EB; --s2: #D97706;
+            --good: #047857; --good-bg: #D1FAE5; --warn: #B45309; --warn-bg: #FEF3C7;
+            --bad: #B91C1C; --bad-bg: #FEE2E2; --info-bg: #EFF6FF;
+            --add-bg: #ECFDF5; --del-bg: #FEF2F2;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; background: var(--bg); color: var(--ink); }
+        .container { max-width: 1300px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+        header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+        h1 { font-size: 1.6rem; color: var(--primary); }
+        .sub { font-size: 0.85rem; color: var(--muted); margin-top: 0.2rem; }
+        .head-right { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+        .back { padding: 0.55rem 1rem; border-radius: 8px; font-weight: 600; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; background: #e5e7eb; color: var(--ink); }
+        .back:hover { background: #d1d5db; }
+        .ro-badge { display: none; align-items: center; gap: 0.4rem; font-size: 0.8rem; font-weight: 700; padding: 0.35rem 0.75rem; border-radius: 999px; background: var(--warn-bg); color: var(--warn); }
+        body.ro .ro-badge { display: inline-flex; }
+        /* Sola lettura: spariscono tutti i comandi che modificano qualcosa (il server li rifiuta comunque) */
+        body.ro [data-write] { display: none !important; }
+        /* Schede */
+        .mtabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line); margin-bottom: 1.25rem; overflow-x: auto; }
+        .mtab { border: none; background: transparent; padding: 0.7rem 1.1rem; font: inherit; font-size: 0.92rem; font-weight: 600; color: var(--ink2); cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 0.5rem; white-space: nowrap; }
+        .mtab:hover { color: var(--ink); }
+        .mtab.on { color: var(--primary); border-bottom-color: var(--primary); }
+        .mpanel[hidden] { display: none; }
+        .page-denied { text-align: center; padding: 3rem 1rem; color: var(--muted); background: var(--surface); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .page-denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; display: block; }
+
+        /* ---------------- Scheda Monitor VM ---------------- */
+        #tab-vm .btn { padding: 0.55rem 1rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; background: #e5e7eb; color: var(--ink); }
+        #tab-vm .btn:hover { background: #d1d5db; }
+        #tab-vm .btn:disabled { opacity: 0.6; cursor: wait; }
+        #tab-vm .toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+        #tab-vm .seg { display: inline-flex; background: #e5e7eb; border-radius: 8px; padding: 3px; }
+        #tab-vm .seg button { border: none; background: transparent; padding: 0.35rem 0.9rem; border-radius: 6px; font-size: 0.85rem; font-weight: 600; color: var(--ink2); cursor: pointer; }
+        #tab-vm .seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+        #tab-vm .updated { font-size: 0.8rem; color: var(--muted); }
+        #tab-vm .card { background: var(--surface); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 1rem 1.1rem; }
+        #tab-vm .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.75rem; margin-bottom: 0.75rem; }
+        #tab-vm .tile .label { font-size: 0.78rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+        #tab-vm .tile .value { font-size: 1.7rem; font-weight: 700; margin-top: 0.2rem; font-variant-numeric: tabular-nums; }
+        #tab-vm .tile .detail { font-size: 0.8rem; color: var(--ink2); margin-top: 0.15rem; }
+        #tab-vm .meter { height: 6px; background: var(--grid); border-radius: 3px; margin-top: 0.5rem; overflow: hidden; }
+        #tab-vm .meter > span { display: block; height: 100%; background: var(--s1); border-radius: 3px; }
+        #tab-vm .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 0.75rem; margin-bottom: 0.75rem; }
+        #tab-vm .charts { grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); }
+        @media (max-width: 960px) {#tab-vm .charts { grid-template-columns: 1fr; } }
+        #tab-vm h2 { font-size: 0.95rem; color: var(--ink); margin-bottom: 0.2rem; }
+        #tab-vm .chart-sub { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.4rem; }
+        #tab-vm .chart { position: relative; }
+        #tab-vm .chart svg { display: block; width: 100%; height: 190px; }
+        #tab-vm .tip { position: absolute; pointer-events: none; background: #111827; color: #fff; font-size: 0.78rem; padding: 0.4rem 0.55rem; border-radius: 6px; white-space: nowrap; display: none; z-index: 2; font-variant-numeric: tabular-nums; }
+        #tab-vm .tip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+        #tab-vm .legend { display: flex; gap: 1rem; font-size: 0.8rem; color: var(--ink2); margin-bottom: 0.3rem; }
+        #tab-vm .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+        #tab-vm table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        #tab-vm th { text-align: left; font-size: 0.75rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.35rem 0.4rem; border-bottom: 1px solid var(--line); }
+        #tab-vm td { padding: 0.4rem; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+        #tab-vm td.num, #tab-vm th.num { text-align: right; }
+        #tab-vm .st { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600; font-size: 0.8rem; }
+        #tab-vm .st.good { color: var(--good); }
+        #tab-vm .st.warn { color: var(--warn); }
+        #tab-vm .st.bad { color: var(--bad); }
+        #tab-vm .denied { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+        #tab-vm .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; }
+        #tab-vm .empty { font-size: 0.85rem; color: var(--muted); padding: 2.5rem 0; text-align: center; }
+        @media (max-width: 480px) {#tab-vm .grid2 { grid-template-columns: 1fr; }
+ #tab-vm .tile .value { font-size: 1.4rem; } }
+
+        /* ---------------- Scheda Schedulazioni ---------------- */
+        #tab-sched .btn { padding: 0.55rem 1rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; background: #e5e7eb; color: var(--ink); font-family: inherit; }
+        #tab-sched .btn:hover { background: #d1d5db; }
+        #tab-sched .btn:disabled { opacity: 0.6; cursor: wait; }
+        #tab-sched .btn-primary { background: var(--primary); color: #fff; }
+        #tab-sched .btn-primary:hover { background: #2563EB; }
+        #tab-sched .btn-danger { background: var(--bad-bg); color: var(--bad); }
+        #tab-sched .btn-danger:hover { background: #FECACA; }
+        #tab-sched .btn-sm { padding: 0.35rem 0.65rem; font-size: 0.8rem; border-radius: 6px; }
+        #tab-sched .toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+        #tab-sched .updated { font-size: 0.8rem; color: var(--muted); }
+        #tab-sched .card { background: var(--surface); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 1rem 1.1rem; }
+        #tab-sched .banner { border-radius: 8px; padding: 0.7rem 0.9rem; font-size: 0.85rem; margin-bottom: 1rem; display: flex; gap: 0.6rem; align-items: flex-start; line-height: 1.45; }
+        #tab-sched .banner.info { background: var(--info-bg); color: #1E40AF; }
+        #tab-sched .banner.warn { background: var(--warn-bg); color: var(--warn); }
+        #tab-sched .table-wrap { overflow-x: auto; }
+        #tab-sched table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        #tab-sched th { text-align: left; font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+        #tab-sched td { padding: 0.6rem 0.5rem; border-bottom: 1px solid var(--grid); vertical-align: top; font-variant-numeric: tabular-nums; }
+        #tab-sched tr.off td { color: var(--muted); }
+        #tab-sched .strong { font-weight: 600; color: var(--ink); }
+        #tab-sched .small { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
+        #tab-sched .badge { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+        #tab-sched .b-ok { background: var(--good-bg); color: var(--good); }
+        #tab-sched .b-errori, #tab-sched .b-saltato { background: var(--warn-bg); color: var(--warn); }
+        #tab-sched .b-fallito { background: var(--bad-bg); color: var(--bad); }
+        #tab-sched .b-run { background: var(--info-bg); color: #1D4ED8; }
+        #tab-sched .b-off { background: #F3F4F6; color: var(--muted); }
+        #tab-sched .b-late { background: var(--bad-bg); color: var(--bad); }
+        #tab-sched .err-lines { white-space: pre-line; color: var(--bad); }
+        #tab-sched .actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        #tab-sched .denied { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+        #tab-sched .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; display: block; }
+        #tab-sched .empty { font-size: 0.9rem; color: var(--muted); padding: 2.5rem 0; text-align: center; }
+        /* Interruttore attivo/disattivo */
+        #tab-sched .switch { position: relative; display: inline-block; width: 38px; height: 22px; flex: 0 0 auto; }
+        #tab-sched .switch input { opacity: 0; width: 0; height: 0; }
+        #tab-sched .switch span { position: absolute; inset: 0; background: #D1D5DB; border-radius: 22px; cursor: pointer; transition: background 0.2s; }
+        #tab-sched .switch span::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+        #tab-sched .switch input:checked + span { background: #10B981; }
+        #tab-sched .switch input:checked + span::before { transform: translateX(16px); }
+        /* Finestre */
+        #tab-sched .overlay { position: fixed; inset: 0; background: rgba(17,24,39,0.45); display: none; align-items: center; justify-content: center; z-index: 50; padding: 1rem; }
+        #tab-sched .overlay.open { display: flex; }
+        #tab-sched .modal { background: #fff; border-radius: 12px; width: min(640px, 100%); max-height: 90vh; overflow: auto; box-shadow: 0 20px 50px rgba(0,0,0,0.25); }
+        #tab-sched .modal-head { display: flex; align-items: center; gap: 0.6rem; padding: 1rem 1.25rem; border-bottom: 1px solid var(--line); font-weight: 600; position: sticky; top: 0; background: #fff; z-index: 1; }
+        #tab-sched .modal-head .sp { flex: 1; }
+        #tab-sched .modal-close { background: none; border: none; font-size: 1.4rem; line-height: 1; color: var(--muted); cursor: pointer; }
+        #tab-sched .modal-body { padding: 1rem 1.25rem; }
+        #tab-sched .modal-foot { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0.9rem 1.25rem; border-top: 1px solid var(--line); }
+        #tab-sched .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem 1rem; }
+        #tab-sched .form-grid .full { grid-column: 1 / -1; }
+        #tab-sched label.lbl { display: block; font-size: 0.78rem; font-weight: 600; color: var(--ink2); margin-bottom: 0.3rem; }
+        #tab-sched input[type="text"], #tab-sched input[type="time"], #tab-sched input[type="number"], #tab-sched select, #tab-sched textarea { width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.88rem; font-family: inherit; color: var(--ink); background: #fff; }
+        #tab-sched textarea { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.8rem; min-height: 70px; }
+        #tab-sched .days { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        #tab-sched .days label { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; padding: 0.35rem 0.5rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.82rem; cursor: pointer; user-select: none; }
+        #tab-sched .days input { display: none; }
+        #tab-sched .days input:checked + span { color: #fff; }
+        #tab-sched .days label:has(input:checked) { background: #10B981; border-color: #10B981; color: #fff; }
+        #tab-sched .preview { font-size: 0.8rem; color: var(--ink2); background: #F9FAFB; border-radius: 6px; padding: 0.5rem 0.65rem; }
+        #tab-sched .form-err { color: var(--bad); font-size: 0.82rem; margin-top: 0.6rem; min-height: 1em; }
+        /* Report */
+        #tab-sched .rep-prog { border: 1px solid var(--line); border-radius: 10px; padding: 0.75rem 0.9rem; margin-bottom: 0.75rem; }
+        #tab-sched .rep-prog h4 { font-size: 0.92rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.45rem; }
+        #tab-sched .rep-user { font-size: 0.83rem; padding: 0.4rem 0; border-top: 1px dashed var(--line); }
+        #tab-sched .rep-user:first-of-type { border-top: none; }
+        #tab-sched .nums { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; color: var(--ink2); margin-top: 0.2rem; }
+        #tab-sched .nums b { color: var(--ink); }
+        #tab-sched pre.json { background: #F9FAFB; border-radius: 6px; padding: 0.6rem; font-size: 0.75rem; overflow: auto; max-height: 300px; }
+        #tab-sched details summary { cursor: pointer; font-size: 0.8rem; color: var(--muted); margin-top: 0.5rem; }
+        /* Trascrizioni e recap */
+        #tab-sched .sec-title { font-size: 1.1rem; color: var(--ink); margin: 2rem 0 0.2rem; display: flex; align-items: center; gap: 0.5rem; }
+        #tab-sched .sec-title i { color: var(--primary); }
+        #tab-sched .svc-list { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 0.9rem; }
+        #tab-sched .svc { background: var(--surface); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 0.55rem 0.75rem; display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; }
+        #tab-sched .svc .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+        #tab-sched .svc .dot.on { background: #10B981; }
+        #tab-sched .svc .dot.off { background: #DC2626; }
+        #tab-sched .svc .dot.nd { background: #9CA3AF; }
+        @media (max-width: 560px) {#tab-sched .form-grid { grid-template-columns: 1fr; } }
+
+        /* ---------------- Scheda Log ---------------- */
+        #tab-log .btn { padding: 0.55rem 1rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; background: #e5e7eb; color: var(--ink); }
+        #tab-log .btn:hover { background: #d1d5db; }
+        #tab-log .btn:disabled { opacity: 0.6; cursor: wait; }
+        #tab-log .btn.primary { background: var(--accent); color: #fff; }
+        #tab-log .btn.primary:hover { background: #1d4ed8; }
+        #tab-log .btn.small { padding: 0.3rem 0.65rem; font-size: 0.8rem; }
+        #tab-log .card { background: var(--surface); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 1rem 1.1rem; }
+        #tab-log .status { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; font-size: 0.85rem; color: var(--ink2); margin-bottom: 0.75rem; align-items: center; }
+        #tab-log .status b { color: var(--ink); font-variant-numeric: tabular-nums; }
+        #tab-log .status .bad { color: var(--bad); font-weight: 600; }
+        #tab-log .status .good { color: var(--good); font-weight: 600; }
+        #tab-log .seg { display: inline-flex; background: #e5e7eb; border-radius: 8px; padding: 3px; }
+        #tab-log .seg button { border: none; background: transparent; padding: 0.4rem 1rem; border-radius: 6px; font-size: 0.88rem; font-weight: 600; color: var(--ink2); cursor: pointer; }
+        #tab-log .seg button.on { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+        #tab-log .filters { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: flex-end; margin: 0.75rem 0; }
+        #tab-log .filters label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; color: var(--muted); font-weight: 600; }
+        #tab-log .filters input, #tab-log .filters select { font: inherit; font-size: 0.85rem; padding: 0.4rem 0.5rem; border: 1px solid #d1d5db; border-radius: 6px; background: var(--surface); color: var(--ink); min-width: 0; }
+        #tab-log .filters input[type=text] { width: 13rem; }
+        #tab-log .filters select { max-width: 15rem; }
+        #tab-log .chip { display: inline-flex; align-items: center; gap: 0.4rem; background: #DBEAFE; color: #1E40AF; border-radius: 999px; padding: 0.25rem 0.4rem 0.25rem 0.7rem; font-size: 0.8rem; font-weight: 600; }
+        #tab-log .chip button { border: none; background: transparent; color: inherit; cursor: pointer; font-size: 0.85rem; padding: 0 0.2rem; }
+        #tab-log .table-wrap { overflow-x: auto; }
+        #tab-log table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        #tab-log th { text-align: left; font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+        #tab-log td { padding: 0.5rem; border-bottom: 1px solid var(--grid); vertical-align: top; }
+        #tab-log tr.row { cursor: pointer; }
+        #tab-log tr.row:hover td { background: #F9FAFB; }
+        #tab-log tr.row.open td { background: #EFF6FF; }
+        #tab-log tr.dim td { color: var(--muted); }
+        #tab-log .nowrap { white-space: nowrap; font-variant-numeric: tabular-nums; }
+        #tab-log .small { font-size: 0.78rem; color: var(--muted); }
+        #tab-log .badge { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; }
+        #tab-log .b-ok, #tab-log .b-INSERT { background: #D1FAE5; color: var(--good); }
+        #tab-log .b-ko, #tab-log .b-DELETE { background: #FEE2E2; color: var(--bad); }
+        #tab-log .b-UPDATE { background: #FEF3C7; color: var(--warn); }
+        #tab-log .link { color: var(--accent); cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
+        #tab-log .detail td { background: #FAFAFA; padding: 0.75rem 1rem 1rem; }
+        #tab-log .diff { width: 100%; border-collapse: collapse; font-size: 0.82rem; table-layout: fixed; }
+        #tab-log .diff th { background: transparent; }
+        #tab-log .diff td { border-bottom: 1px solid var(--line); word-break: break-word; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.78rem; }
+        #tab-log .diff td.k { font-family: inherit; font-weight: 600; width: 18%; color: var(--ink2); }
+        #tab-log .diff td.p { background: var(--del-bg); }
+        #tab-log .diff td.d { background: var(--add-bg); }
+        #tab-log .null { color: var(--muted); font-style: italic; }
+        #tab-log .more { text-align: center; margin-top: 0.75rem; }
+        #tab-log .empty { font-size: 0.88rem; color: var(--muted); padding: 2.5rem 0; text-align: center; }
+        #tab-log .denied { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+        #tab-log .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; }
+        #tab-log .hidden { display: none !important; }
+        #tab-log .db { margin-bottom: 0.75rem; }
+        #tab-log .db-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.6rem; }
+        #tab-log .db-head h2 { font-size: 0.95rem; }
+        #tab-log .db-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; margin-bottom: 0.6rem; }
+        #tab-log .db-tiles .label { font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+        #tab-log .db-tiles .value { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 0.1rem; }
+        #tab-log .meter { height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; margin: 0.2rem 0 0.35rem; }
+        #tab-log .meter > span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+        #tab-log .meter.warn > span { background: #D97706; }
+        #tab-log .meter.bad > span { background: var(--bad); }
+        #tab-log .db table td, #tab-log .db table th { padding: 0.35rem 0.5rem; }
+        #tab-log .num { text-align: right; font-variant-numeric: tabular-nums; }
+        #tab-log .mod { font-size: 0.8rem; line-height: 1.45; }
+        #tab-log .mod .k { font-weight: 600; color: var(--ink2); }
+        #tab-log .mod .old { background: var(--del-bg); color: #991B1B; text-decoration: line-through; padding: 0 0.2rem; border-radius: 3px; }
+        #tab-log .mod .new { background: var(--add-bg); color: #065F46; padding: 0 0.2rem; border-radius: 3px; }
+        #tab-log .btn.danger { background: #FEE2E2; color: var(--bad); }
+        #tab-log .btn.danger:hover { background: #FECACA; }
+        #tab-log .btn.danger-solid { background: var(--bad); color: #fff; }
+        #tab-log .btn.danger-solid:hover { background: #991B1B; }
+        #tab-log .modal-bg { position: fixed; inset: 0; background: rgba(17,24,39,0.45); display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 50; }
+        #tab-log .modal { background: var(--surface); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); padding: 1.25rem 1.4rem; width: 100%; max-width: 440px; }
+        #tab-log .modal h2 { font-size: 1.1rem; margin-bottom: 0.75rem; }
+        #tab-log .modal .opt { display: flex; flex-direction: column; gap: 0.45rem; margin: 0.4rem 0 0.9rem; }
+        #tab-log .modal .opt label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; }
+        #tab-log .modal .opt label.disabled { color: #9CA3AF; cursor: not-allowed; }
+        #tab-log .modal .lbl { font-size: 0.75rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+        #tab-log .modal .note { font-size: 0.8rem; color: var(--ink2); background: #F3F4F6; border-radius: 6px; padding: 0.5rem 0.65rem; margin-bottom: 1rem; }
+        #tab-log .modal .actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+        #tab-log .modal .esito { font-size: 0.85rem; margin-bottom: 0.75rem; }
+        @media (max-width: 600px) {#tab-log .filters input[type=text], #tab-log .filters select { width: 100%; max-width: none; }
+ #tab-log .filters label { width: 100%; } }
+        #tab-log .toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-gauge-high"></i> Monitor</h1>
+            <div class="head-right">
+                <span class="ro-badge" title="Puoi solo consultare e aggiornare: nessuna modifica"><i class="fas fa-eye"></i> Sola lettura</span>
+                <a class="back" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
+            </div>
+        </header>
+
+        <div id="pageDenied" class="page-denied" style="display: none;">
+            <i class="fas fa-lock"></i>
+            <div id="pageDeniedMsg">Pagina non disponibile.</div>
+        </div>
+
+        <div id="monitorBody" style="display: none;">
+            <nav class="mtabs" role="tablist">
+                <button type="button" class="mtab" role="tab" data-tab="vm"><i class="fas fa-server"></i> Monitor VM</button>
+                <button type="button" class="mtab" role="tab" data-tab="sched"><i class="fas fa-clock-rotate-left"></i> Schedulazioni</button>
+                <button type="button" class="mtab" role="tab" data-tab="log"><i class="fas fa-clipboard-list"></i> Log</button>
+            </nav>
+
+            <section class="mpanel" id="tab-vm" role="tabpanel" hidden>
+                <div id="vm-content" style="display: none;">
+                <div class="sub" id="vm-hostInfo" style="margin-bottom: 0.75rem;">&nbsp;</div>
+                <div class="toolbar">
+                    <div class="seg" id="vm-rangeSel" role="group" aria-label="Intervallo dei grafici">
+                        <button type="button" data-range="1h" class="on">1 ora</button>
+                        <button type="button" data-range="6h">6 ore</button>
+                        <button type="button" data-range="24h">24 ore</button>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                        <span class="updated" id="vm-updated"></span>
+                        <button type="button" class="btn" id="vm-refreshBtn" title="Aggiorna adesso"><i class="fas fa-rotate"></i> Aggiorna</button>
+                    </div>
+                </div>
+
+                <div class="tiles" id="vm-tiles"></div>
+
+                <div class="grid2 charts">
+                    <div class="card">
+                        <h2>CPU</h2>
+                        <div class="chart-sub">% di utilizzo di tutti i core</div>
+                        <div class="chart" id="vm-chartCpu"></div>
+                    </div>
+                    <div class="card">
+                        <h2>Memoria</h2>
+                        <div class="chart-sub">% di RAM in uso (esclusa la cache, che il sistema libera quando serve)</div>
+                        <div class="chart" id="vm-chartMem"></div>
+                    </div>
+                    <div class="card">
+                        <h2>Rete</h2>
+                        <div class="legend"><span><span class="sw" style="background: var(--s1)"></span>Ricevuti</span><span><span class="sw" style="background: var(--s2)"></span>Inviati</span></div>
+                        <div class="chart" id="vm-chartNet"></div>
+                    </div>
+                    <div class="card">
+                        <h2>Swap</h2>
+                        <div class="chart-sub">% del file di swap in uso (memoria spostata su disco)</div>
+                        <div class="chart" id="vm-chartSwap"></div>
+                    </div>
+                </div>
+
+                <div class="grid2">
+                    <div class="card">
+                        <h2 style="margin-bottom: 0.5rem;">Processi (per RAM)</h2>
+                        <table><thead><tr><th>Processo</th><th class="num">RAM</th><th class="num">CPU</th></tr></thead><tbody id="vm-procBody"></tbody></table>
+                        <div class="chart-sub" style="margin-top: 0.5rem;">CPU degli ultimi 15 s, su un core (100% = un core pieno, la VM ne ha due).</div>
+                    </div>
+                    <div class="card">
+                        <h2 style="margin-bottom: 0.5rem;">Servizi</h2>
+                        <table><tbody id="vm-svcBody"></tbody></table>
+                    </div>
+                    <div class="card">
+                        <h2 style="margin-bottom: 0.5rem;">Database</h2>
+                        <table><thead><tr><th>Database</th><th class="num">Dimensione</th></tr></thead><tbody id="vm-dbBody"></tbody></table>
+                        <h2 style="margin: 1rem 0 0.5rem;">Coda di trascrizione</h2>
+                        <table><tbody id="vm-queueBody"></tbody></table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="vm-deniedCard" class="card denied" style="display: none;">
+                <div><i class="fas fa-lock"></i></div>
+                <div id="vm-deniedMsg">Pagina non disponibile.</div>
+            </div>
+        </div>
+            </section>
+
+            <section class="mpanel" id="tab-sched" role="tabpanel" hidden>
+                <div id="js-content" style="display: none;">
+                <div class="sub" style="margin-bottom: 0.75rem;">Tabella job_schedules: i job partono dallo schedulatore del server, anche a computer spento.</div>
+                <div id="js-schedulerBanner"></div>
+                <div class="toolbar">
+                    <button type="button" class="btn btn-primary" id="js-newBtn" data-write><i class="fas fa-plus"></i> Nuova schedulazione</button>
+                    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                        <span class="updated" id="js-updated"></span>
+                        <button type="button" class="btn" id="js-refreshBtn" title="Aggiorna adesso"><i class="fas fa-rotate"></i> Aggiorna</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Attivo</th>
+                                    <th>Job</th>
+                                    <th>Calendario</th>
+                                    <th>Prossima esecuzione</th>
+                                    <th>Ultima esecuzione</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="js-rows"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Trascrizioni e recap: coda sempre attiva sul server (non a orario) -->
+                <h2 class="sec-title"><i class="fas fa-microphone-lines"></i> Trascrizioni e recap</h2>
+                <div class="sub" style="margin-bottom: 0.75rem;">Coda delle riunioni registrate (rec_meeting_chunks) e servizi della VM che la lavorano. Si aggiorna con la pagina.</div>
+                <div class="svc-list" id="js-svcList"></div>
+                <div class="card">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Riunione</th>
+                                    <th>Blocchi</th>
+                                    <th>Stato</th>
+                                    <th>In coda dal</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="js-sessRows"><tr><td colspan="5"><div class="empty">Caricamento…</div></td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="js-deniedCard" class="card denied" style="display: none;">
+                <i class="fas fa-lock"></i>
+                <div id="js-deniedMsg">Pagina non disponibile.</div>
+            </div>
+        </div>
+
+        <!-- Modifica / nuova schedulazione -->
+        <div class="overlay" id="js-editOverlay">
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="js-editTitle">
+                <div class="modal-head"><i class="fas fa-pen" style="color: var(--primary);"></i><span id="js-editTitle">Schedulazione</span><span class="sp"></span><button type="button" class="modal-close" data-close aria-label="Chiudi">&times;</button></div>
+                <div class="modal-body">
+                    <div class="form-grid">
+                        <div><label class="lbl" for="js-fTenant">Tenant</label><select id="js-fTenant"></select></div>
+                        <div><label class="lbl" for="js-fJob">Job</label><select id="js-fJob"></select></div>
+                        <div class="full">
+                            <label class="lbl" for="js-fUtente" id="js-fUtenteLbl">Configurazione Jira di (mappatura, filtri e token)</label>
+                            <select id="js-fUtente"></select>
+                            <div class="small" id="js-fUtenteHint">Il job aggiorna comunque i dati di <strong>tutto il tenant</strong>: qui scegli solo con quale account leggere Jira. Se questa configurazione non funziona (Jira scollegato, token scaduto) si usa un altro utente configurato e il report lo segnala.</div>
+                        </div>
+                        <div class="full"><label class="lbl" for="js-fDesc">Descrizione</label><input type="text" id="js-fDesc" maxlength="255"></div>
+                        <div class="full" style="display: flex; align-items: center; gap: 0.6rem;">
+                            <label class="switch"><input type="checkbox" id="js-fAttivo"><span></span></label>
+                            <label for="js-fAttivo" style="font-size: 0.88rem; cursor: pointer;">Schedulazione attiva</label>
+                        </div>
+                        <div class="full">
+                            <span class="lbl">Giorni</span>
+                            <div class="days" id="js-fGiorni"></div>
+                        </div>
+                        <div><label class="lbl" for="js-fInizio">Dalle</label><input type="time" id="js-fInizio"></div>
+                        <div><label class="lbl" for="js-fFine">Alle</label><input type="time" id="js-fFine"></div>
+                        <div><label class="lbl" for="js-fIntervallo">Ogni (minuti)</label><input type="number" id="js-fIntervallo" min="5" max="1440" step="5"></div>
+                        <div><label class="lbl" for="js-fTz">Fuso orario</label><input type="text" id="js-fTz" placeholder="Europe/Rome"></div>
+                        <div class="full"><div class="preview" id="js-fPreview"></div></div>
+                        <div class="full">
+                            <label class="lbl" for="js-fParam">Parametri (JSON, facoltativo)</label>
+                            <textarea id="js-fParam" placeholder='es. {"programmi": ["aggiornaJiraTask"]}'></textarea>
+                        </div>
+                    </div>
+                    <div class="form-err" id="js-fErr"></div>
+                </div>
+                <div class="modal-foot">
+                    <button type="button" class="btn" data-close>Annulla</button>
+                    <button type="button" class="btn btn-primary" id="js-saveBtn"><i class="fas fa-check"></i> Salva</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Report dell'ultima esecuzione -->
+        <div class="overlay" id="js-repOverlay">
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="js-repTitle">
+                <div class="modal-head"><i class="fas fa-file-lines" style="color: var(--primary);"></i><span id="js-repTitle">Ultima esecuzione</span><span class="sp"></span><button type="button" class="modal-close" data-close aria-label="Chiudi">&times;</button></div>
+                <div class="modal-body" id="js-repBody"></div>
+            </div>
+        </div>
+            </section>
+
+            <section class="mpanel" id="tab-log" role="tabpanel" hidden>
+                <div id="lg-content" class="hidden">
+                <div class="toolbar">
+                    <div class="sub">Accessi, modifiche ai dati ed email, salvati su Oracle (accessi ed email 12 mesi, modifiche 24 mesi)</div>
+                    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                        <span class="small" id="lg-aggiornatoAlle"></span>
+                        <button type="button" class="btn" id="lg-refreshBtn" title="Aggiorna stato, spazio e risultati mantenendo i filtri"><i class="fas fa-rotate"></i> Aggiorna</button>
+                    </div>
+                </div>
+                <div class="status card" id="lg-status">Caricamento…</div>
+
+                <div class="card db" id="lg-dbCard">
+                    <div class="db-head">
+                        <h2><i class="fas fa-database" style="color:var(--muted)"></i> Database Oracle dei log</h2>
+                        <span class="small" id="lg-dbStato">Caricamento…</span>
+                    </div>
+                    <div id="lg-dbCorpo"></div>
+                </div>
+
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                        <div class="seg" id="lg-tabs" role="tablist">
+                            <button type="button" data-tab="accessi" class="on">Accessi</button>
+                            <button type="button" data-tab="variazioni">Modifiche ai dati</button>
+                            <button type="button" data-tab="email">Email</button>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+                            <div id="lg-chipBox"></div>
+                            <button type="button" class="btn small" id="lg-csvBtn" title="Scarica in CSV i log di questa scheda con i filtri impostati (max 10.000 righe)"><i class="fas fa-file-csv"></i> Esporta CSV</button>
+                            <button type="button" class="btn danger small" id="lg-eliminaBtn" data-write title="Elimina i log di questa scheda"><i class="fas fa-trash-can"></i> Elimina…</button>
+                        </div>
+                    </div>
+
+                    <div class="filters">
+                        <label>Periodo
+                            <select id="lg-fPeriodo">
+                                <option value="1">Ultime 24 ore</option>
+                                <option value="7" selected>Ultimi 7 giorni</option>
+                                <option value="30">Ultimi 30 giorni</option>
+                                <option value="365">Ultimo anno</option>
+                                <option value="custom">Da / a…</option>
+                            </select>
+                        </label>
+                        <label class="custom hidden">Dal <input type="date" id="lg-fDa"></label>
+                        <label class="custom hidden">Al <input type="date" id="lg-fA"></label>
+                        <label>Utente
+                            <select id="lg-fUtente"><option value="">Tutti</option></select>
+                        </label>
+
+                        <label class="t-accessi">Esito
+                            <select id="lg-fEsito"><option value="">Tutti</option><option value="ok">Riusciti</option><option value="ko">Falliti</option></select>
+                        </label>
+                        <label class="t-accessi">Tipo
+                            <select id="lg-fEvento">
+                                <option value="">Tutti</option>
+                                <option value="login">Login con password</option>
+                                <option value="google">Google</option>
+                                <option value="microsoft">Microsoft</option>
+                                <option value="magic_link">Link via email</option>
+                                <option value="impersonazione">Impersonazione</option>
+                                <option value="cambio_password">Cambio password</option>
+                                <option value="eliminazione_log">Eliminazione log</option>
+                            </select>
+                        </label>
+                        <label class="t-accessi">Cerca (email, IP, dettaglio)
+                            <input type="text" id="lg-fCerca" placeholder="es. @gmail.com">
+                        </label>
+
+                        <label class="t-email hidden">Esito
+                            <select id="lg-fEsitoEmail"><option value="">Tutti</option><option value="ok">Riuscite</option><option value="ko">Non riuscite</option></select>
+                        </label>
+                        <label class="t-email hidden">Tipo
+                            <select id="lg-fTipoEmail">
+                                <option value="">Tutti</option>
+                                <option value="recap">Recap riunione</option>
+                                <option value="trascrizione">Trascrizione riunione</option>
+                                <option value="conferma_iscrizione">Conferma iscrizione</option>
+                                <option value="reset_password">Password dimenticata</option>
+                                <option value="magic_link">Link di accesso</option>
+                            </select>
+                        </label>
+                        <label class="t-email hidden">Come
+                            <select id="lg-fModalita"><option value="">Tutte</option><option value="server">Inviate da Projexa</option><option value="client">Aperte nel programma di posta</option></select>
+                        </label>
+                        <label class="t-email hidden">Cerca (destinatario, oggetto)
+                            <input type="text" id="lg-fCercaEmail" placeholder="es. mario.rossi@">
+                        </label>
+
+                        <label class="t-variazioni hidden">Tabella
+                            <select id="lg-fTabella"><option value="">Tutte</option></select>
+                        </label>
+                        <label class="t-variazioni hidden">Operazione
+                            <select id="lg-fOperazione"><option value="">Tutte</option><option value="INSERT">Inserimenti</option><option value="UPDATE">Modifiche</option><option value="DELETE">Cancellazioni</option></select>
+                        </label>
+                        <label class="t-variazioni hidden">Origine
+                            <select id="lg-fOrigine"><option value="">Tutte</option><option value="utente">Da un utente del sito</option><option value="job">Job automatici</option><option value="sql">Fuori dal sito (SQL, script)</option></select>
+                        </label>
+
+                        <button type="button" class="btn primary" id="lg-cercaBtn"><i class="fas fa-magnifying-glass"></i> Cerca</button>
+                    </div>
+
+                    <div class="table-wrap"><table id="lg-tbl"></table></div>
+                    <div class="more"><button type="button" class="btn hidden" id="lg-moreBtn">Carica altri</button></div>
+                </div>
+            </div>
+
+            <div class="modal-bg hidden" id="lg-eliminaModal" role="dialog" aria-modal="true" aria-labelledby="lg-eliminaTitolo">
+                <div class="modal">
+                    <h2 id="lg-eliminaTitolo">Elimina log</h2>
+                    <div class="lbl">Cosa eliminare</div>
+                    <div class="opt">
+                        <label><input type="radio" name="eModo" value="vecchi" checked> I log più vecchi di…</label>
+                        <label><input type="radio" name="eModo" value="ultimi"> I log degli ultimi…</label>
+                    </div>
+                    <div class="lbl">Periodo</div>
+                    <div class="opt">
+                        <label><input type="radio" name="eMesi" value="6" checked> 6 mesi</label>
+                        <label><input type="radio" name="eMesi" value="3"> 3 mesi</label>
+                        <label id="lg-eMesi1"><input type="radio" name="eMesi" value="1"> 1 mese</label>
+                    </div>
+                    <div class="note" id="lg-eNota"></div>
+                    <div class="esito hidden" id="lg-eEsito"></div>
+                    <div class="actions">
+                        <button type="button" class="btn" id="lg-eAnnulla">Annulla</button>
+                        <button type="button" class="btn danger-solid" id="lg-eConferma"><i class="fas fa-trash-can"></i> Elimina</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="lg-deniedCard" class="card denied hidden">
+                <div><i class="fas fa-lock"></i></div>
+                <div id="lg-deniedMsg">Pagina non disponibile.</div>
+            </div>
+            </section>
+        </div>
+    </div>
+
+    <script>
+        // Stesso criterio delle altre pagine: l'API è sulla stessa origine.
+        const API_URL = location.origin + '/api';
+        if (!localStorage.getItem('authToken')) window.location.href = 'index.html';
+        const schedaAttiva = () => (document.querySelector('.mtab.on') || {}).dataset?.tab;
+
+        // =====================================================================
+        // SCHEDA MONITOR VM
+        // =====================================================================
+        const schedaVm = (() => {
+            const REFRESH_MS = 15000;
+            const $ = (id) => document.getElementById('vm-' + id);
+            let range = '1h';
+            let last = null;
+            let timer = null;
+
+            const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+            function bytes(n) {
+                if (n == null) return '–';
+                const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+                let i = 0; let v = Number(n);
+                while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+                return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1).replace('.', ',')} ${u[i]}`;
+            }
+            const rate = (n) => `${bytes(n)}/s`;
+            const pct = (n, d = 1) => n == null ? '–' : `${Number(n).toFixed(d).replace('.', ',')}%`;
+            const hhmm = (t) => new Date(t).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+            function duration(sec) {
+                const d = Math.floor(sec / 86400); const h = Math.floor((sec % 86400) / 3600); const m = Math.floor((sec % 3600) / 60);
+                return d ? `${d} g ${h} h` : h ? `${h} h ${m} min` : `${m} min`;
+            }
+
+            // ------------------------------------------------------------------
+            // Grafico a linee in SVG: un asse, griglia leggera, crosshair con tooltip.
+            // series: [{ key, label, color }]; fmt formatta i valori; max fisso (100 per le %)
+            // oppure calcolato dai dati.
+            // ------------------------------------------------------------------
+            function lineChart(el, points, series, { fmt, max = null }) {
+                if (!points.length) {
+                    el.innerHTML = '<div class="empty">Dati in raccolta: il primo punto arriva entro 15 secondi dall\'avvio del server.</div>';
+                    return;
+                }
+                const W = Math.max(280, el.clientWidth);
+                const H = 190; const L = 44; const R = 8; const T = 8; const B = 22;
+                const top = max ?? niceMax(Math.max(...points.flatMap((p) => series.map((s) => p[s.key]))));
+                const t0 = points[0].t; const t1 = points[points.length - 1].t;
+                const x = (t) => L + (t1 === t0 ? (W - L - R) : (t - t0) / (t1 - t0) * (W - L - R));
+                const y = (v) => T + (1 - Math.min(v, top) / top) * (H - T - B);
+                let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="${esc(series.map((s) => s.label).join(', '))}">`;
+                for (let i = 0; i <= 4; i++) {
+                    const v = top * i / 4; const yy = y(v);
+                    svg += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" stroke="var(--grid)" stroke-width="1"/>`;
+                    svg += `<text x="${L - 6}" y="${yy + 4}" text-anchor="end" font-size="10" fill="var(--muted)">${esc(fmt(v, true))}</text>`;
+                }
+                const ticks = 4;
+                for (let i = 0; i <= ticks; i++) {
+                    const t = t0 + (t1 - t0) * i / ticks;
+                    svg += `<text x="${x(t)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === ticks ? 'end' : 'middle'}" font-size="10" fill="var(--muted)">${hhmm(t)}</text>`;
+                }
+                for (const s of series) {
+                    const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p[s.key]).toFixed(1)}`).join('');
+                    if (series.length === 1) {
+                        svg += `<path d="${d}L${x(t1)},${y(0)}L${x(t0)},${y(0)}Z" fill="${s.color}" opacity="0.08"/>`;
+                    }
+                    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+                }
+                svg += `<line class="xh" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3" style="display:none"/>`;
+                svg += series.map((s) => `<circle class="dot" data-k="${s.key}" r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2" style="display:none"/>`).join('');
+                svg += `<rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/></svg><div class="tip"></div>`;
+                el.innerHTML = svg;
+
+                const svgEl = el.querySelector('svg'); const tip = el.querySelector('.tip');
+                const xh = el.querySelector('.xh'); const dots = el.querySelectorAll('.dot');
+                svgEl.addEventListener('mousemove', (ev) => {
+                    const r = svgEl.getBoundingClientRect();
+                    const mx = (ev.clientX - r.left) * (W / r.width);
+                    let best = 0;
+                    for (let i = 1; i < points.length; i++) if (Math.abs(x(points[i].t) - mx) < Math.abs(x(points[best].t) - mx)) best = i;
+                    const p = points[best]; const px = x(p.t);
+                    xh.setAttribute('x1', px); xh.setAttribute('x2', px); xh.style.display = '';
+                    dots.forEach((c) => { c.setAttribute('cx', px); c.setAttribute('cy', y(p[c.dataset.k])); c.style.display = ''; });
+                    tip.innerHTML = `<div style="opacity:.75;margin-bottom:2px">${new Date(p.t).toLocaleTimeString('it-IT')}</div>` +
+                        series.map((s) => `<div><span class="sw" style="background:${s.color}"></span>${esc(s.label)}: <b>${esc(fmt(p[s.key]))}</b></div>`).join('');
+                    tip.style.display = 'block';
+                    const left = px * (r.width / W);
+                    tip.style.left = `${Math.min(left + 12, r.width - tip.offsetWidth - 4)}px`;
+                    tip.style.top = '6px';
+                });
+                svgEl.addEventListener('mouseleave', () => { tip.style.display = 'none'; xh.style.display = 'none'; dots.forEach((c) => { c.style.display = 'none'; }); });
+            }
+            function niceMax(v) {
+                if (!(v > 0)) return 1;
+                const p = Math.pow(10, Math.floor(Math.log10(v)));
+                for (const m of [1, 2, 2.5, 5, 10]) if (v <= m * p) return m * p;
+                return 10 * p;
+            }
+
+            // ------------------------------------------------------------------
+            function stateBadge(state) {
+                if (state === 'active') return '<span class="st good"><i class="fas fa-circle-check"></i> Attivo</span>';
+                if (state === 'activating' || state === 'reloading') return '<span class="st warn"><i class="fas fa-circle-half-stroke"></i> In avvio</span>';
+                if (state === 'inactive') return '<span class="st warn"><i class="fas fa-circle-pause"></i> Fermo</span>';
+                return `<span class="st bad"><i class="fas fa-circle-xmark"></i> ${esc(state === 'failed' ? 'Errore' : state)}</span>`;
+            }
+
+            function tile(label, value, detail, meter) {
+                return `<div class="card tile"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div>` +
+                    (detail ? `<div class="detail">${esc(detail)}</div>` : '') +
+                    (meter != null ? `<div class="meter"><span style="width:${Math.max(0, Math.min(100, meter)).toFixed(1)}%"></span></div>` : '') + '</div>';
+            }
+
+            function render(d) {
+                $('hostInfo').textContent = `${d.host} · ${d.cpus} core · acceso da ${duration(d.uptime)}`;
+                const m = d.memory; const used = m.total - m.available;
+                const disk = d.disk;
+                $('tiles').innerHTML = [
+                    tile('CPU', d.now ? pct(d.now.cpu) : '–', `carico medio ${d.load.map((v) => v.toFixed(2).replace('.', ',')).join(' · ')}`, d.now ? d.now.cpu : null),
+                    tile('Memoria', bytes(used), `di ${bytes(m.total)} · cache ${bytes(m.cache)}`, m.total ? 100 * used / m.total : null),
+                    tile('Swap', bytes(m.swapUsed), `di ${bytes(m.swapTotal)}`, m.swapTotal ? 100 * m.swapUsed / m.swapTotal : null),
+                    tile('Disco', disk ? bytes(disk.used) : '–', disk ? `di ${bytes(disk.total)} · liberi ${bytes(disk.free)}` : '', disk ? 100 * disk.used / disk.total : null),
+                    tile('Rete', d.now ? rate(d.now.rx + d.now.tx) : '–', d.now ? `↓ ${rate(d.now.rx)} · ↑ ${rate(d.now.tx)}` : '', null)
+                ].join('');
+
+                const pts = d.series;
+                lineChart($('chartCpu'), pts, [{ key: 'cpu', label: 'CPU', color: 'var(--s1)' }], { fmt: (v, axis) => pct(v, axis ? 0 : 1), max: 100 });
+                lineChart($('chartMem'), pts, [{ key: 'mem', label: 'Memoria', color: 'var(--s1)' }], { fmt: (v, axis) => pct(v, axis ? 0 : 1), max: 100 });
+                lineChart($('chartNet'), pts, [{ key: 'rx', label: 'Ricevuti', color: 'var(--s1)' }, { key: 'tx', label: 'Inviati', color: 'var(--s2)' }], { fmt: (v) => rate(v) });
+                lineChart($('chartSwap'), pts, [{ key: 'swap', label: 'Swap', color: 'var(--s1)' }], { fmt: (v, axis) => pct(v, axis ? 0 : 1), max: 100 });
+
+                $('procBody').innerHTML = d.processes.map((p) => `<tr><td>${esc(p.name)}${p.count > 1 ? ` <span style="color:var(--muted)">×${p.count}</span>` : ''}</td><td class="num">${bytes(p.rss)}</td><td class="num">${pct(p.cpu)}</td></tr>`).join('')
+                    || '<tr><td colspan="3" style="color:var(--muted)">Dati in raccolta…</td></tr>';
+                $('svcBody').innerHTML = d.services.map((s) => `<tr><td>${esc(s.label)}</td><td class="num">${stateBadge(s.state)}</td></tr>`).join('');
+                $('dbBody').innerHTML = d.databases.map((x) => `<tr><td>${esc(x.name)}</td><td class="num">${bytes(x.bytes)}</td></tr>`).join('')
+                    || '<tr><td colspan="2" style="color:var(--muted)">Non disponibile</td></tr>';
+                const q = d.queue;
+                $('queueBody').innerHTML = q
+                    ? `<tr><td>Blocchi in attesa</td><td class="num">${q.pending}</td></tr><tr><td>In trascrizione</td><td class="num">${q.transcribing}</td></tr><tr><td>Recap in coda</td><td class="num">${q.recap}</td></tr>`
+                    : '<tr><td style="color:var(--muted)">Non disponibile</td></tr>';
+                $('updated').textContent = `Aggiornato alle ${new Date().toLocaleTimeString('it-IT')} · ogni 15 s`;
+            }
+
+            async function load() {
+                try {
+                    const r = await fetch(`${API_URL}/vm-monitor/status?range=${range}`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` } });
+                    const d = await r.json().catch(() => ({}));
+                    if (r.status === 401) { window.location.href = 'index.html'; return; }
+                    if (!r.ok) {
+                        $('content').style.display = 'none';
+                        $('deniedCard').style.display = '';
+                        $('deniedMsg').textContent = d.error || `Errore ${r.status}`;
+                        if (r.status === 403) { clearInterval(timer); timer = null; }
+                        return;
+                    }
+                    $('deniedCard').style.display = 'none';
+                    $('content').style.display = '';
+                    last = d;
+                    render(d);
+                } catch (e) {
+                    $('updated').textContent = `Aggiornamento non riuscito (${e.message}): nuovo tentativo tra 15 s`;
+                }
+            }
+
+            $('rangeSel').addEventListener('click', (ev) => {
+                const b = ev.target.closest('button[data-range]');
+                if (!b || b.dataset.range === range) return;
+                range = b.dataset.range;
+                $('rangeSel').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+                load();
+            });
+            // Aggiornamento manuale: icona che gira durante la richiesta; l'aggiornamento automatico
+            // riparte da qui (il prossimo tra 15 s).
+            $('refreshBtn').addEventListener('click', async () => {
+                const b = $('refreshBtn');
+                if (b.disabled) return;
+                b.disabled = true;
+                b.querySelector('i').classList.add('fa-spin');
+                try {
+                    await load();
+                } finally {
+                    b.disabled = false;
+                    b.querySelector('i').classList.remove('fa-spin');
+                    avviaTimer();
+                }
+            });
+            let resizeT = null;
+            window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (last && schedaAttiva() === 'vm') render(last); }, 150); });
+            // Aggiornamento automatico solo con la scheda Monitor VM aperta e la finestra visibile.
+            function avviaTimer() {
+                clearInterval(timer);
+                timer = setInterval(() => { if (!document.hidden && schedaAttiva() === 'vm') load(); }, REFRESH_MS);
+            }
+            document.addEventListener('visibilitychange', () => { if (!document.hidden && schedaAttiva() === 'vm') load(); });
+            let avviata = false;
+            // Apertura della scheda: la prima volta avvia, poi ridisegna (i grafici prendono la
+            // larghezza giusta) e aggiorna subito.
+            return {
+                mostra() {
+                    if (!avviata) { avviata = true; load(); avviaTimer(); return; }
+                    if (last) render(last);
+                    load();
+                }
+            };
+        })();
+
+        // =====================================================================
+        // SCHEDA SCHEDULAZIONI
+        // =====================================================================
+        const schedaSched = (() => {
+            const REFRESH_MS = 30000;
+            const RITARDO_MIN = 3; // lo schedulatore controlla ogni minuto: oltre 3 minuti è in ritardo
+            const GIORNI = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+            const $ = (id) => document.getElementById('js-' + id);
+            let dati = null;
+            let editId = null;   // null = nuova schedulazione
+            let timer = null;
+
+            const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+            const headers = (extra) => Object.assign({ 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` }, extra || {});
+            const hhmm = (t) => String(t || '').slice(0, 5);
+
+            function dataOra(iso) {
+                if (!iso) return '–';
+                return new Date(iso).toLocaleString('it-IT', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+            }
+            function traQuanto(iso) {
+                if (!iso) return '';
+                const min = Math.round((new Date(iso) - Date.now()) / 60000);
+                if (min <= 0) return 'entro un minuto';
+                if (min < 60) return `tra ${min} min`;
+                const h = Math.floor(min / 60);
+                return h < 48 ? `tra ${h} h ${min % 60} min` : `tra ${Math.round(h / 24)} giorni`;
+            }
+            function durata(ms) {
+                if (ms == null) return '';
+                const s = Math.round(ms / 1000);
+                return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+            }
+            function giorniTesto(g) {
+                const set = (g || []).map(Number).sort();
+                if (set.join() === '1,2,3,4,5') return 'Lun–Ven';
+                if (set.join() === '1,2,3,4,5,6,7') return 'Tutti i giorni';
+                return set.map((d) => GIORNI[d - 1]).join(', ');
+            }
+            function intervalloTesto(min) {
+                const n = Number(min);
+                if (n % 60 === 0) return n === 60 ? 'ogni ora' : `ogni ${n / 60} ore`;
+                return `ogni ${n} min`;
+            }
+            // Orari di esecuzione di una giornata (stessa regola dello schedulatore).
+            function slot(inizio, fine, passo) {
+                const m = (t) => { const [h, mi] = String(t || '0:0').split(':').map(Number); return (h || 0) * 60 + (mi || 0); };
+                const out = [];
+                const p = Math.max(5, Number(passo) || 60);
+                for (let t = m(inizio); t <= m(fine) && out.length < 300; t += p) {
+                    out.push(`${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`);
+                }
+                return out;
+            }
+            // Job di sistema (backup, copia staging): l'utente è solo il "proprietario" della riga.
+            const isJira = (job) => { const i = ((dati && dati.infoJob) || {})[job]; return !i || i.jira !== false; };
+            const etichettaJob = (job) => (((dati && dati.infoJob) || {})[job] || {}).etichetta || job;
+            const HINT_JIRA = $('fUtenteHint').innerHTML;
+
+            const ESITI = { ok: ['b-ok', 'OK'], errori: ['b-errori', 'CON ERRORI'], saltato: ['b-saltato', 'SALTATO'], fallito: ['b-fallito', 'FALLITO'] };
+
+            // ------------------------------------------------------------------
+            // ELENCO
+            // ------------------------------------------------------------------
+            async function carica() {
+                try {
+                    const r = await fetch(`${API_URL}/job-schedules`, { headers: headers() });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) {
+                        $('content').style.display = 'none';
+                        $('deniedCard').style.display = '';
+                        $('deniedMsg').textContent = d.error || `Errore ${r.status}`;
+                        if (r.status === 403) { clearInterval(timer); timer = null; }
+                        return;
+                    }
+                    dati = d;
+                    $('deniedCard').style.display = 'none';
+                    $('content').style.display = '';
+                    render();
+                    caricaServizi();
+                } catch (e) {
+                    $('updated').textContent = 'Errore di connessione: ' + e.message;
+                }
+            }
+
+            function render() {
+                // Interruttore generale (nel database, vale anche se la pagina è aperta in locale).
+                const pulsante = dati.schedulerSospeso
+                    ? `<button type="button" class="btn btn-sm btn-primary" id="js-schedToggle" data-write data-attivo="1"><i class="fas fa-play"></i> Riattiva schedulatore</button>`
+                    : `<button type="button" class="btn btn-sm btn-danger" id="js-schedToggle" data-write data-attivo="0"><i class="fas fa-pause"></i> Sospendi schedulatore</button>`;
+                const sospeso = dati.schedulerSospeso
+                    ? `<div class="banner warn"><i class="fas fa-circle-pause"></i><div style="flex: 1;">Schedulatore <strong>SOSPESO</strong>: nessun job parte, nemmeno con «Esegui ora». Alla riattivazione le prossime esecuzioni vengono ricalcolate da quel momento (quelle perse non si recuperano).</div>${pulsante}</div>`
+                    : '';
+                $('schedulerBanner').innerHTML = sospeso + (dati.schedulerAttivo
+                    ? `<div class="banner info"><i class="fas fa-circle-check"></i><div style="flex: 1;">Lo schedulatore di questo server è <strong>attivo</strong>${dati.schedulerSospeso ? ', ma sospeso dall’interruttore qui sopra' : ': controlla le schedulazioni ogni minuto'}.</div>${dati.schedulerSospeso ? '' : pulsante}</div>`
+                    : `<div class="banner warn"><i class="fas fa-triangle-exclamation"></i><div>In questo backend lo schedulatore è <strong>spento</strong> (JOB_SCHEDULER_ENABLED non è true). È normale in locale: i job partono solo dal server di produzione. Le modifiche fatte qui valgono comunque, perché la tabella è la stessa.</div>${dati.schedulerSospeso ? '' : pulsante}</div>`);
+                const btnSched = $('schedToggle');
+                if (btnSched) btnSched.addEventListener('click', async () => {
+                    const attiva = btnSched.dataset.attivo === '1';
+                    if (!confirm(attiva
+                        ? 'Riattivare lo schedulatore? Le prossime esecuzioni vengono ricalcolate da adesso.'
+                        : 'Sospendere lo schedulatore? Nessun job partirà (compresi backup notturno e copia su Neon) finché non lo riattivi.')) return;
+                    btnSched.disabled = true;
+                    try {
+                        await chiama('PUT', '/scheduler/stato', { attivo: attiva });
+                    } catch (err) {
+                        alert(err.message);
+                    }
+                    carica();
+                });
+
+                const righe = dati.schedulazioni || [];
+                if (!righe.length) {
+                    $('rows').innerHTML = `<tr><td colspan="6"><div class="empty">Nessuna schedulazione. Usa «Nuova schedulazione» per crearne una.</div></td></tr>`;
+                } else {
+                    $('rows').innerHTML = righe.map((s) => {
+                        const inCorso = !!s.in_esecuzione_dal;
+                        const esito = ESITI[s.ultimo_esito];
+                        const stato = inCorso
+                            ? `<span class="badge b-run"><i class="fas fa-spinner fa-spin"></i> IN ESECUZIONE</span><div class="small">dalle ${esc(dataOra(s.in_esecuzione_dal))}</div>`
+                            : s.ultima_esecuzione
+                                ? `<span class="badge ${esito ? esito[0] : 'b-off'}">${esc(esito ? esito[1] : s.ultimo_esito || '–')}</span>
+                                   <div class="small">${esc(dataOra(s.ultima_esecuzione))}${s.ultima_durata_ms != null ? ' · ' + esc(durata(s.ultima_durata_ms)) : ''}</div>
+                                   ${s.ultimo_errore ? `<div class="small err-lines">${esc(s.ultimo_errore)}</div>` : ''}`
+                                : '<span class="small">Mai eseguita</span>';
+                        // In ritardo: l'ora prevista è passata da più di RITARDO_MIN e il job non è
+                        // partito (server spento o schedulatore disattivato sul server).
+                        const inRitardo = s.attivo && !inCorso && s.prossima_esecuzione
+                            && Date.now() - new Date(s.prossima_esecuzione).getTime() > RITARDO_MIN * 60000;
+                        const prossima = !s.attivo
+                            ? '<span class="badge b-off">DISATTIVATA</span>'
+                            : dati.schedulerSospeso
+                                ? '<span class="badge b-off"><i class="fas fa-circle-pause"></i> SOSPESA</span><div class="small">schedulatore sospeso</div>'
+                            : inRitardo
+                                ? `<span class="badge b-late"><i class="fas fa-triangle-exclamation"></i> IN RITARDO</span>
+                                   <div class="small">prevista ${esc(dataOra(s.prossima_esecuzione))}</div>
+                                   <div class="small" style="color: var(--bad);">Non è partita: lo schedulatore del server non è attivo o il server è spento.</div>`
+                            : s.prossima_esecuzione
+                                ? `<div class="strong">${esc(dataOra(s.prossima_esecuzione))}</div><div class="small">${esc(traQuanto(s.prossima_esecuzione))}</div>`
+                                : '<span class="small">Da calcolare</span>';
+                        return `<tr class="${s.attivo ? '' : 'off'}" data-id="${esc(s.id)}">
+                            <td><label class="switch" title="Attiva / disattiva" data-write><input type="checkbox" data-act="toggle" ${s.attivo ? 'checked' : ''}><span></span></label></td>
+                            <td><div class="strong">${esc(s.descrizione || s.job)}</div><div class="small">${esc(s.job)} · ${esc(s.tenant_name || s.tenant_id)}</div>
+                                <div class="small"><i class="fas fa-user-gear"></i> ${isJira(s.job)
+                                    ? `Configurazione Jira: ${s.utente_config ? esc([s.config_name, s.config_cognome].filter(Boolean).join(' ') || s.utente_config) : 'automatica (primo utente configurato)'}`
+                                    : `Utente: ${s.utente_config ? esc([s.config_name, s.config_cognome].filter(Boolean).join(' ') || s.utente_config) : 'nessuno'} · job di sistema`}</div></td>
+                            <td><div>${esc(giorniTesto(s.giorni_settimana))}</div><div class="small">${esc(hhmm(s.ora_inizio))}–${esc(hhmm(s.ora_fine))} · ${esc(intervalloTesto(s.intervallo_minuti))}</div><div class="small">${esc(s.fuso_orario)}</div></td>
+                            <td>${prossima}</td>
+                            <td>${stato}</td>
+                            <td><div class="actions">
+                                <button type="button" class="btn btn-sm" data-write data-act="edit" title="Modifica"><i class="fas fa-pen"></i></button>
+                                <button type="button" class="btn btn-sm" data-write data-act="run" title="Esegui ora (dallo schedulatore del server, entro un minuto)" ${s.attivo && !inCorso ? '' : 'disabled'}><i class="fas fa-play"></i></button>
+                                <button type="button" class="btn btn-sm" data-act="report" title="Report dell'ultima esecuzione" ${s.ultimo_report || s.ultimo_errore ? '' : 'disabled'}><i class="fas fa-file-lines"></i></button>
+                                ${inCorso ? '<button type="button" class="btn btn-sm" data-write data-act="unlock" title="Sblocca (se è rimasta bloccata dopo un riavvio)"><i class="fas fa-unlock"></i></button>' : ''}
+                                <button type="button" class="btn btn-sm btn-danger" data-write data-act="delete" title="Elimina"><i class="fas fa-trash"></i></button>
+                            </div></td>
+                        </tr>`;
+                    }).join('');
+                }
+                $('updated').textContent = 'Aggiornato alle ' + new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            }
+
+            async function chiama(metodo, url, body) {
+                const r = await fetch(`${API_URL}/job-schedules${url}`, {
+                    method: metodo,
+                    headers: headers(body ? { 'Content-Type': 'application/json' } : {}),
+                    body: body ? JSON.stringify(body) : undefined
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                return d;
+            }
+
+            $('rows').addEventListener('click', async (e) => {
+                const el = e.target.closest('[data-act]');
+                if (!el) return;
+                const tr = el.closest('tr[data-id]');
+                const s = (dati.schedulazioni || []).find((x) => x.id === tr.dataset.id);
+                if (!s) return;
+                const act = el.dataset.act;
+                try {
+                    if (act === 'toggle') {
+                        await chiama('PUT', `/${s.id}`, { attivo: el.checked });
+                        await carica();
+                    } else if (act === 'edit') {
+                        apriModifica(s);
+                    } else if (act === 'run') {
+                        if (!confirm(`Eseguire adesso "${s.descrizione || s.job}"?\nLo lancia lo schedulatore del server entro un minuto.`)) return;
+                        await chiama('POST', `/${s.id}/esegui-ora`);
+                        await carica();
+                    } else if (act === 'report') {
+                        apriReport(s);
+                    } else if (act === 'unlock') {
+                        if (!confirm('Sbloccare la schedulazione? Fallo solo se il job non sta davvero girando (es. il server è stato riavviato a metà).')) return;
+                        await chiama('POST', `/${s.id}/sblocca`);
+                        await carica();
+                    } else if (act === 'delete') {
+                        if (!confirm(`Eliminare definitivamente la schedulazione "${s.descrizione || s.job}"?`)) return;
+                        await chiama('DELETE', `/${s.id}`);
+                        await carica();
+                    }
+                } catch (err) {
+                    alert(err.message);
+                    carica();
+                }
+            });
+
+            // ------------------------------------------------------------------
+            // MODIFICA / NUOVA
+            // ------------------------------------------------------------------
+            $('fGiorni').innerHTML = GIORNI.map((g, i) => `<label><input type="checkbox" value="${i + 1}"><span>${g}</span></label>`).join('');
+
+            function aggiornaAnteprima() {
+                const orari = slot($('fInizio').value, $('fFine').value, $('fIntervallo').value);
+                const giorni = [...$('fGiorni').querySelectorAll('input:checked')].map((x) => Number(x.value));
+                $('fPreview').innerHTML = !giorni.length
+                    ? 'Scegli almeno un giorno.'
+                    : !orari.length
+                        ? 'Nessun orario: controlla la fascia oraria.'
+                        : `<i class="fas fa-calendar-check" style="color: #10B981;"></i> ${esc(giorniTesto(giorni))} alle ${esc(orari.join(', '))} <span style="color: var(--muted);">(${orari.length} esecuzioni al giorno)</span>`;
+            }
+            ['fInizio', 'fFine', 'fIntervallo'].forEach((id) => $(id).addEventListener('input', aggiornaAnteprima));
+            $('fGiorni').addEventListener('change', aggiornaAnteprima);
+
+            // Utenti del tenant scelto, con lo stato Jira accanto al nome.
+            function riempiUtenti(tenantId, selezionato) {
+                const utenti = (dati.utenti || []).filter((u) => u.tenant_id === tenantId);
+                const jira = isJira($('fJob').value);
+                $('fUtenteLbl').textContent = jira ? 'Configurazione Jira di (mappatura, filtri e token)' : 'Utente';
+                $('fUtenteHint').innerHTML = jira ? HINT_JIRA
+                    : 'Job di sistema: lancia uno script sulla VM e riguarda tutti i database. L’utente indica solo a chi è assegnata la schedulazione.';
+                if (!jira) {
+                    $('fUtente').innerHTML = `<option value="">Nessuno</option>` +
+                        utenti.map((u) => `<option value="${esc(u.user_id)}">${esc(u.nome)}</option>`).join('');
+                    $('fUtente').value = selezionato && utenti.some((u) => u.user_id === selezionato) ? selezionato : '';
+                    return;
+                }
+                const stato = (u) => u.mappatura && u.collegato ? 'Jira configurato e collegato'
+                    : u.mappatura ? 'mappatura presente, Jira NON collegato'
+                    : u.collegato ? 'Jira collegato, senza mappatura'
+                    : 'senza configurazione Jira';
+                $('fUtente').innerHTML = `<option value="">Automatica (primo utente configurato)</option>` +
+                    utenti.map((u) => `<option value="${esc(u.user_id)}">${esc(u.nome)} — ${esc(stato(u))}</option>`).join('');
+                $('fUtente').value = selezionato && utenti.some((u) => u.user_id === selezionato) ? selezionato : '';
+            }
+            $('fTenant').addEventListener('change', () => riempiUtenti($('fTenant').value, $('fUtente').value));
+            $('fJob').addEventListener('change', () => riempiUtenti($('fTenant').value, $('fUtente').value));
+
+            function apriModifica(s) {
+                editId = s ? s.id : null;
+                $('editTitle').textContent = s ? 'Modifica schedulazione' : 'Nuova schedulazione';
+                $('fTenant').innerHTML = (dati.tenants || []).map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
+                $('fJob').innerHTML = (dati.jobs || []).map((j) => `<option value="${esc(j)}">${esc(etichettaJob(j))} (${esc(j)})</option>`).join('');
+                $('fTenant').value = s ? s.tenant_id : ((dati.tenants || [])[0] || {}).id || '';
+                $('fJob').value = s ? s.job : (dati.jobs || [])[0] || '';
+                riempiUtenti($('fTenant').value, s ? s.utente_config : null);
+                $('fDesc').value = s ? (s.descrizione || '') : '';
+                $('fAttivo').checked = s ? !!s.attivo : true;
+                const giorni = (s ? s.giorni_settimana : [1, 2, 3, 4, 5]).map(Number);
+                $('fGiorni').querySelectorAll('input').forEach((x) => { x.checked = giorni.includes(Number(x.value)); });
+                $('fInizio').value = hhmm(s ? s.ora_inizio : '09:00');
+                $('fFine').value = hhmm(s ? s.ora_fine : '19:00');
+                $('fIntervallo').value = s ? s.intervallo_minuti : 120;
+                $('fTz').value = s ? s.fuso_orario : 'Europe/Rome';
+                $('fParam').value = s && s.parametri ? JSON.stringify(s.parametri, null, 2) : '';
+                $('fErr').textContent = '';
+                aggiornaAnteprima();
+                $('editOverlay').classList.add('open');
+            }
+
+            $('newBtn').addEventListener('click', () => apriModifica(null));
+
+            $('saveBtn').addEventListener('click', async () => {
+                const body = {
+                    tenant_id: $('fTenant').value,
+                    job: $('fJob').value,
+                    utente_config: $('fUtente').value || null,
+                    descrizione: $('fDesc').value.trim() || null,
+                    attivo: $('fAttivo').checked,
+                    giorni_settimana: [...$('fGiorni').querySelectorAll('input:checked')].map((x) => Number(x.value)),
+                    ora_inizio: $('fInizio').value,
+                    ora_fine: $('fFine').value,
+                    intervallo_minuti: Number($('fIntervallo').value),
+                    fuso_orario: $('fTz').value.trim() || 'Europe/Rome',
+                    parametri: $('fParam').value.trim()
+                };
+                $('fErr').textContent = '';
+                if (body.ora_fine < body.ora_inizio) { $('fErr').textContent = 'L\'ora di fine deve essere successiva a quella di inizio.'; return; }
+                const btn = $('saveBtn');
+                btn.disabled = true;
+                try {
+                    if (editId) await chiama('PUT', `/${editId}`, body);
+                    else await chiama('POST', '', body);
+                    chiudi();
+                    await carica();
+                } catch (err) {
+                    $('fErr').textContent = err.message;
+                } finally {
+                    btn.disabled = false;
+                }
+            });
+
+            // ------------------------------------------------------------------
+            // REPORT DELL'ULTIMA ESECUZIONE
+            // ------------------------------------------------------------------
+            function numeri(r) {
+                const v = (n, l) => `<span><b>${esc(n ?? 0)}</b> ${esc(l)}</span>`;
+                let html = `<div class="nums">${v(r.righeJira, 'righe Jira')}${v(r.inserite, 'inserite')}${v(r.aggiornate, 'aggiornate')}${r.invariate ? v(r.invariate, 'invariate') : ''}${v(r.ignorateSenzaCliente, 'senza cliente')}${v(r.ignorateScadute, 'scadute')}</div>`;
+                if (r.passaggioAggiuntivo) {
+                    const p = r.passaggioAggiuntivo;
+                    html += `<div class="small">Filtro aggiuntivo "${esc(p.filtro)}": ${esc(p.righeJira)} righe, ${esc(p.aggiornate)} aggiornate${p.invariate ? ', ' + esc(p.invariate) + ' invariate' : ''}</div>`;
+                }
+                if (r.errori && r.errori.length) html += `<div class="small" style="color: var(--bad);">${r.errori.map(esc).join('<br>')}</div>`;
+                return html;
+            }
+
+            function apriReport(s) {
+                $('repTitle').textContent = `Ultima esecuzione — ${s.descrizione || s.job}`;
+                const esito = ESITI[s.ultimo_esito];
+                let html = `<div style="margin-bottom: 0.75rem;"><span class="badge ${esito ? esito[0] : 'b-off'}">${esc(esito ? esito[1] : s.ultimo_esito || '–')}</span>
+                    <span class="small" style="margin-left: 0.4rem;">${esc(dataOra(s.ultima_esecuzione))}${s.ultima_durata_ms != null ? ' · ' + esc(durata(s.ultima_durata_ms)) : ''}</span></div>`;
+                if (s.ultimo_errore) html += `<div class="banner warn"><i class="fas fa-triangle-exclamation"></i><div style="white-space: pre-line;">${esc(s.ultimo_errore)}</div></div>`;
+                const rep = s.ultimo_report;
+                if (rep && Array.isArray(rep.risultati)) {
+                    html += rep.risultati.map((p) => {
+                        const testa = `<h4>${esc(p.etichetta || p.programma)} <span class="badge ${p.ok ? 'b-ok' : 'b-fallito'}">${p.ok ? 'ESEGUITO' : 'NON ESEGUITO'}</span></h4>`;
+                        if (!p.ok) return `<div class="rep-prog">${testa}<div class="small" style="color: var(--bad);">${esc(p.errore)}</div></div>`;
+                        const utenti = Array.isArray(p.utenti)
+                            ? p.utenti.map((u) => u.ok
+                                ? `<div class="rep-user"><div class="strong"><i class="fas fa-user-gear" style="color: var(--muted);"></i> Tutto il tenant, con la configurazione Jira di ${esc(u.nome || u.userId)}</div>${numeri(u.report || {})}</div>`
+                                : `<div class="rep-user"><div class="strong"><i class="fas fa-user-slash" style="color: var(--muted);"></i> Configurazione di ${esc(u.nome || u.userId)} non utilizzata</div><div class="small" style="color: ${u.saltato ? 'var(--warn)' : 'var(--bad)'};">${esc(u.errore)}</div></div>`).join('')
+                            : numeri(p);
+                        return `<div class="rep-prog">${testa}${utenti}</div>`;
+                    }).join('');
+                }
+                if (rep && Array.isArray(rep.log)) {
+                    html += `<h4>Output di ${esc(rep.script || 'script')}</h4><pre class="json">${esc(rep.log.join(String.fromCharCode(10)))}</pre>`;
+                }
+                if (rep) html += `<details><summary>Report completo (JSON)</summary><pre class="json">${esc(JSON.stringify(rep, null, 2))}</pre></details>`;
+                $('repBody').innerHTML = html;
+                $('repOverlay').classList.add('open');
+            }
+
+            // ------------------------------------------------------------------
+            // FINESTRE E AGGIORNAMENTO AUTOMATICO
+            // ------------------------------------------------------------------
+            function chiudi() {
+                document.querySelectorAll('#tab-sched .overlay.open').forEach((o) => o.classList.remove('open'));
+            }
+            document.querySelectorAll('#tab-sched [data-close]').forEach((b) => b.addEventListener('click', chiudi));
+            document.querySelectorAll('#tab-sched .overlay').forEach((o) => o.addEventListener('click', (e) => { if (e.target === o) chiudi(); }));
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape') chiudi(); });
+
+            // ------------------------------------------------------------------
+            // TRASCRIZIONI E RECAP (coda sempre attiva: GET /job-schedules/servizi)
+            // ------------------------------------------------------------------
+            let servizi = null;
+
+            async function caricaServizi() {
+                try {
+                    const r = await fetch(`${API_URL}/job-schedules/servizi`, { headers: headers() });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                    servizi = d;
+                    renderServizi();
+                } catch (e) {
+                    $('sessRows').innerHTML = `<tr><td colspan="5"><div class="empty">Impossibile leggere la coda: ${esc(e.message)}</div></td></tr>`;
+                }
+            }
+
+            function renderServizi() {
+                const svc = servizi.servizi || [];
+                const gb = (b) => b == null ? '–' : `${(b / 1073741824).toLocaleString('it-IT', { maximumFractionDigits: 1 })} GB`;
+                const pc = (v) => v == null ? '–' : `${v.toLocaleString('it-IT', { maximumFractionDigits: 1 })}%`;
+                // CPU e RAM per servizio (da systemd): la CPU è % di tutta la VM dall'aggiornamento precedente.
+                const consumo = (s) => (s.mem == null && s.cpu == null) ? ''
+                    : `<div class="small" title="CPU: % di tutti i core della VM dall'aggiornamento precedente">CPU ${pc(s.cpu)} · RAM ${gb(s.mem)}</div>`;
+                const vm = servizi.vm;
+                const vmTile = vm ? `<div class="svc" title="Carico totale della VM (stesso dato del Monitor VM)"><i class="fas fa-server" style="color: var(--primary);"></i>
+                        <div><div class="strong">VM (${vm.cores} core)</div>
+                        <div class="small">CPU ${pc(vm.cpu)} · RAM ${gb(vm.memUsed)} di ${gb(vm.memTotal)}</div></div>
+                    </div>` : '';
+                $('svcList').innerHTML = svc.map(s => {
+                    const on = s.state === 'active';
+                    const nd = s.state === 'n.d.';
+                    return `<div class="svc"><span class="dot ${nd ? 'nd' : on ? 'on' : 'off'}"></span>
+                        <div><div class="strong">${esc(s.label)}</div><div class="small">${esc(nd ? 'non disponibile qui (solo sulla VM)' : on ? 'attivo' : s.state)}</div>${on ? consumo(s) : ''}</div>
+                        ${nd ? '' : `<button type="button" class="btn btn-sm" data-write data-svc-restart="${esc(s.unit)}" data-svc-label="${esc(s.label)}" title="Riavvia il servizio"><i class="fas fa-rotate-right"></i></button>`}
+                    </div>`;
+                }).join('') + vmTile;
+
+                const sess = servizi.sessioni || [];
+                if (!sess.length) {
+                    $('sessRows').innerHTML = `<tr><td colspan="5"><div class="empty"><i class="fas fa-circle-check" style="color:#10B981;"></i> Nessuna riunione in coda: trascrizioni e recap sono tutti completati.</div></td></tr>`;
+                    return;
+                }
+                $('sessRows').innerHTML = sess.map(s => {
+                    const tot = s.in_coda + s.in_trascrizione + s.trascritti;
+                    let stato;
+                    if (s.appesi) {
+                        stato = `<span class="badge b-late"><i class="fas fa-triangle-exclamation"></i> BLOCCATA</span>
+                            <div class="small" style="color: var(--bad);">${s.appesi} blocc${s.appesi === 1 ? 'o' : 'hi'} fermo da oltre ${servizi.minAppeso} minuti (es. server riavviato): usa «Sblocca».</div>`;
+                    } else if (s.in_attesa_riprova) {
+                        stato = `<span class="badge b-errori">IN ATTESA DI RIPROVA</span><div class="small">tentativi: ${s.tentativi}</div>`;
+                    } else if (s.in_trascrizione) {
+                        stato = '<span class="badge b-run"><i class="fas fa-spinner fa-spin"></i> IN TRASCRIZIONE</span>';
+                    } else if (tot === 0 && s.finalize) {
+                        stato = s.recap_in_corso
+                            ? '<span class="badge b-run"><i class="fas fa-spinner fa-spin"></i> RECAP IN CORSO</span>'
+                            : `<span class="badge ${s.tentativi ? 'b-errori' : 'b-off'}">RECAP IN ATTESA</span>${s.tentativi ? `<div class="small">tentativi: ${s.tentativi}</div>` : ''}`;
+                    } else if (s.trascritti && !s.in_coda) {
+                        stato = '<span class="badge b-run">IN ORDINAMENTO</span><div class="small">blocchi pronti, in attesa di quelli precedenti</div>';
+                    } else {
+                        stato = '<span class="badge b-off">IN CODA</span>';
+                    }
+                    const errore = s.ultimo_errore ? `<div class="small err-lines">${esc(s.ultimo_errore)}</div>` : '';
+                    const chiave = `data-t="${esc(s.tenant_id)}" data-u="${esc(s.user_id)}" data-c="${esc(s.id_calendar)}"`;
+                    return `<tr ${chiave}>
+                        <td><div class="strong">${esc(s.oggetto || '(riunione senza titolo)')}</div><div class="small">${esc(s.utente || s.user_id)}</div></td>
+                        <td><div>${tot} in coda</div><div class="small">${s.trascritti} trascritti · ${s.in_trascrizione} in lavorazione · ${s.in_coda} da fare${s.finalize ? ' · recap prenotato' : ''}</div></td>
+                        <td>${stato}${errore}</td>
+                        <td><div>${esc(dataOra(s.dal))}</div></td>
+                        <td><div class="actions" data-write>
+                            <button type="button" class="btn btn-sm" data-sess="sblocca" title="Rimette in coda subito i blocchi fermi «in trascrizione»" ${s.in_trascrizione ? '' : 'disabled'}><i class="fas fa-unlock"></i></button>
+                            <button type="button" class="btn btn-sm" data-sess="riprova" title="Riprova adesso i blocchi in attesa di un nuovo tentativo" ${s.in_attesa_riprova || (s.finalize && s.tentativi) ? '' : 'disabled'}><i class="fas fa-play"></i></button>
+                            <button type="button" class="btn btn-sm" data-sess="recap" title="Rilancia il recap della riunione"><i class="fas fa-file-pen"></i></button>
+                            <button type="button" class="btn btn-sm btn-danger" data-sess="annulla" title="Toglie la riunione dalla coda (l'audio non ancora trascritto si perde)"><i class="fas fa-ban"></i></button>
+                        </div></td>
+                    </tr>`;
+                }).join('');
+            }
+
+            $('sessRows').addEventListener('click', async (e) => {
+                const b = e.target.closest('[data-sess]');
+                if (!b) return;
+                const tr = b.closest('tr');
+                const az = b.dataset.sess;
+                const msg = {
+                    sblocca: 'Rimettere in coda subito i blocchi fermi «in trascrizione»? Fallo solo se la riunione risulta bloccata.',
+                    riprova: 'Riprovare adesso i blocchi in attesa di un nuovo tentativo?',
+                    recap: 'Rilanciare il recap di questa riunione? Il recap attuale verrà sostituito.',
+                    annulla: 'Togliere questa riunione dalla coda?\nL’audio non ancora trascritto andrà PERSO (la trascrizione già scritta resta). Non si può annullare.'
+                }[az];
+                if (!confirm(msg)) return;
+                b.disabled = true;
+                try {
+                    const r = await fetch(`${API_URL}/job-schedules/servizi/sessione/${az}`, {
+                        method: 'POST',
+                        headers: headers({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ tenant_id: tr.dataset.t, user_id: tr.dataset.u, id_calendar: tr.dataset.c })
+                    });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                } catch (err) {
+                    alert(err.message);
+                }
+                caricaServizi();
+            });
+
+            $('svcList').addEventListener('click', async (e) => {
+                const b = e.target.closest('[data-svc-restart]');
+                if (!b) return;
+                if (!confirm(`Riavviare «${b.dataset.svcLabel}»?\nPer qualche secondo il servizio non risponde: i blocchi in lavorazione su questo servizio vengono ripresi dalla coda.`)) return;
+                b.disabled = true;
+                try {
+                    const r = await fetch(`${API_URL}/job-schedules/servizi/riavvia`, {
+                        method: 'POST',
+                        headers: headers({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ unit: b.dataset.svcRestart })
+                    });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                } catch (err) {
+                    alert(err.message);
+                }
+                caricaServizi();
+            });
+
+            $('refreshBtn').addEventListener('click', carica);
+            let avviata = false;
+            return {
+                mostra() {
+                    carica();
+                    if (avviata) return;
+                    avviata = true;
+                    // Aggiornamento periodico solo con la scheda aperta, sospeso mentre una finestra
+                    // è aperta (non perde le modifiche).
+                    timer = setInterval(() => {
+                        if (!document.hidden && schedaAttiva() === 'sched' && !document.querySelector('#tab-sched .overlay.open')) carica();
+                    }, REFRESH_MS);
+                }
+            };
+        })();
+
+        // =====================================================================
+        // SCHEDA LOG
+        // =====================================================================
+        const schedaLog = (() => {
+            const $ = (id) => document.getElementById('lg-' + id);
+
+            const EVENTI = { login: 'Login con password', google: 'Google', microsoft: 'Microsoft', magic_link: 'Link via email', impersonazione: 'Impersonazione', cambio_password: 'Cambio password', eliminazione_log: 'Eliminazione log' };
+            const TIPI_EMAIL = { recap: 'Recap riunione', trascrizione: 'Trascrizione riunione', conferma_iscrizione: 'Conferma iscrizione', reset_password: 'Password dimenticata', magic_link: 'Link di accesso' };
+            const SERVIZI = { gmail_smtp: 'Gmail del team Projexa', gmail_web: 'Gmail (web) dell\'utente', programma_posta: 'Programma di posta dell\'utente (Outlook)' };
+            const OPERAZIONI = { INSERT: 'Inserimento', UPDATE: 'Modifica', DELETE: 'Cancellazione' };
+            let tab = 'accessi';
+            let pag = 0;
+            let rigaFiltro = null; // { tabella, chiave } dopo "Storia di questa riga"
+            let righeCorrenti = [];
+
+            const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+            const quando = (t) => new Date(t).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const headers = () => ({ 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` });
+
+            async function api(path) {
+                const r = await fetch(`${API_URL}/audit-log${path}`, { headers: headers() });
+                const d = await r.json().catch(() => ({}));
+                if (r.status === 401) { window.location.href = 'index.html'; throw new Error('Sessione scaduta'); }
+                if (!r.ok) throw Object.assign(new Error(d.error || `Errore ${r.status}`), { status: r.status });
+                return d;
+            }
+
+            function negato(msg) {
+                $('content').classList.add('hidden');
+                $('deniedCard').classList.remove('hidden');
+                $('deniedMsg').textContent = msg;
+            }
+
+            // ------------------------------------------------------------------
+            // Stato: coda locale, invio a Oracle, totali
+            // ------------------------------------------------------------------
+            async function caricaStato() {
+                try {
+                    const s = await api('/stato');
+                    const parti = [];
+                    if (s.totali) parti.push(`Accessi registrati: <b>${s.totali.accessi.toLocaleString('it-IT')}</b>`, `Modifiche registrate: <b>${s.totali.variazioni.toLocaleString('it-IT')}</b>`);
+                    if (s.totali && s.totali.email !== null && s.totali.email !== undefined) parti.push(`Email registrate: <b>${s.totali.email.toLocaleString('it-IT')}</b>`);
+                    if (s.coda && !s.coda.errore) {
+                        const vecchia = s.coda.piu_vecchia ? ` (la più vecchia delle ${quando(s.coda.piu_vecchia)})` : '';
+                        parti.push(`In attesa di invio: <b>${s.coda.righe}</b>${s.coda.righe ? esc(vecchia) : ''}`);
+                    } else if (s.coda) parti.push(`<span class="bad">Coda: ${esc(s.coda.errore)}</span>`);
+                    if (!s.invio.attivo) parti.push('<span class="bad">Invio a Oracle non attivo su questo server</span>');
+                    else if (s.invio.ultimoErrore) parti.push(`<span class="bad">Invio non riuscito: ${esc(s.invio.ultimoErrore)}</span>`);
+                    else if (s.invio.ultimoInvio) parti.push(`<span class="good"><i class="fas fa-circle-check"></i> Ultimo invio ${esc(new Date(s.invio.ultimoInvio).toLocaleTimeString('it-IT'))}</span>`);
+                    if (s.errore) parti.push(`<span class="bad">Oracle: ${esc(s.errore)}</span>`);
+                    $('status').innerHTML = parti.map((p) => `<span>${p}</span>`).join('') || 'Nessuna informazione';
+                } catch (e) {
+                    if (e.status === 403) return negato(e.message);
+                    $('status').innerHTML = `<span class="bad">${esc(e.message)}</span>`;
+                }
+            }
+
+            async function caricaFiltri() {
+                try {
+                    const f = await api('/filtri');
+                    $('fUtente').innerHTML = '<option value="">Tutti</option>' + f.utenti
+                        .map((u) => `<option value="${esc(u.id)}">${esc(u.nome)}${u.tenant.length ? ` (${esc(u.tenant.join(', '))})` : ''}</option>`).join('');
+                    $('fTabella').innerHTML = '<option value="">Tutte</option>' + f.tabelle.map((t) => `<option>${esc(t)}</option>`).join('');
+                } catch (e) {
+                    if (e.status === 403) negato(e.message);
+                }
+            }
+
+            // ------------------------------------------------------------------
+            // Database Oracle: raggiungibilità, capienza, spazio occupato e disponibile
+            // ------------------------------------------------------------------
+            function dimensione(n) {
+                if (n === null || n === undefined) return '–';
+                const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+                let i = 0; let v = Number(n);
+                while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+                return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1).replace('.', ',')} ${u[i]}`;
+            }
+            const giorno = (t) => t ? new Date(t).toLocaleDateString('it-IT') : '–';
+
+            async function caricaSpazio() {
+                try {
+                    const d = await api('/spazio');
+                    if (!d.raggiungibile) {
+                        $('dbStato').innerHTML = `<span class="st" style="color:var(--bad);font-weight:600"><i class="fas fa-circle-xmark"></i> Non raggiungibile</span>`;
+                        $('dbCorpo').innerHTML = `<div class="small" style="color:var(--bad)">${esc(d.errore || '')}</div>`;
+                        return;
+                    }
+                    $('dbStato').innerHTML = `<span style="color:var(--good);font-weight:600"><i class="fas fa-circle-check"></i> Disponibile</span> · risposta in ${d.ms} ms`;
+                    // Occupato: tutto il database se la procedura lo può leggere, altrimenti solo i log.
+                    const occupato = d.totaleDb ?? (d.procedura ? d.spazioLog : null);
+                    const perc = occupato !== null ? Math.min(100, 100 * occupato / d.capienza) : null;
+                    const tiles = [
+                        ['Capienza', dimensione(d.capienza), 'Always Free'],
+                        ['Occupato', dimensione(occupato), d.totaleDb !== null && d.totaleDb !== undefined ? 'dati di tutti gli utenti' : 'solo le tabelle dei log'],
+                        ['Disponibile', occupato !== null ? dimensione(Math.max(0, d.capienza - occupato)) : '–', perc !== null ? `${(100 - perc).toFixed(1).replace('.', ',')}% libero` : ''],
+                        ['Di cui log', d.procedura ? dimensione(d.spazioLog) : '–', 'accessi, modifiche ed email']
+                    ];
+                    let html = '<div class="db-tiles">' + tiles.map(([l, v, n]) =>
+                        `<div><div class="label">${esc(l)}</div><div class="value">${esc(v)}</div><div class="small">${esc(n)}</div></div>`).join('') + '</div>';
+                    if (perc !== null) {
+                        html += `<div class="meter${perc >= 90 ? ' bad' : perc >= 75 ? ' warn' : ''}"><span style="width:${perc.toFixed(1)}%"></span></div>` +
+                            `<div class="small" style="margin-bottom:0.6rem">${perc.toFixed(1).replace('.', ',')}% della capienza in uso</div>`;
+                    }
+                    html += '<div class="table-wrap"><table><thead><tr><th>Tabella</th><th class="num">Righe</th><th class="num">Spazio</th><th>Log più vecchio</th></tr></thead><tbody>' +
+                        d.tabelle.map((t) => `<tr><td>${esc(t.etichetta)}</td><td class="num">${Number(t.righe).toLocaleString('it-IT')}</td><td class="num">${t.byte !== null ? dimensione(t.byte) : '–'}</td><td>${esc(giorno(t.piuVecchio))}</td></tr>`).join('') +
+                        '</tbody></table></div>';
+                    if (!d.procedura) html += '<div class="small" style="margin-top:0.5rem">Spazio non disponibile: eseguire la sezione 4c di Supporto/CreaDB/oracle_audit.sql su Oracle.</div>';
+                    else if (d.totaleDb === null || d.totaleDb === undefined) html += '<div class="small" style="margin-top:0.5rem">Lo spazio di tutto il database non è leggibile: viene mostrato solo quello dei log.</div>';
+                    $('dbCorpo').innerHTML = html;
+                } catch (e) {
+                    if (e.status === 403) return;
+                    $('dbStato').textContent = '';
+                    $('dbCorpo').innerHTML = `<div class="small" style="color:var(--bad)">${esc(e.message)}</div>`;
+                }
+            }
+
+            // ------------------------------------------------------------------
+            // Filtri e ricerca
+            // ------------------------------------------------------------------
+            function parametri() {
+                const p = new URLSearchParams();
+                const periodo = $('fPeriodo').value;
+                if (periodo === 'custom') {
+                    if ($('fDa').value) p.set('da', new Date(`${$('fDa').value}T00:00`).toISOString());
+                    if ($('fA').value) { const a = new Date(`${$('fA').value}T00:00`); a.setDate(a.getDate() + 1); p.set('a', a.toISOString()); }
+                } else {
+                    p.set('da', new Date(Date.now() - Number(periodo) * 24 * 3600 * 1000).toISOString());
+                }
+                if ($('fUtente').value) p.set('utente', $('fUtente').value);
+                if (tab === 'accessi') {
+                    if ($('fEsito').value) p.set('esito', $('fEsito').value);
+                    if ($('fEvento').value) p.set('evento', $('fEvento').value);
+                    if ($('fCerca').value.trim()) p.set('cerca', $('fCerca').value.trim());
+                } else if (tab === 'email') {
+                    if ($('fEsitoEmail').value) p.set('esito', $('fEsitoEmail').value);
+                    if ($('fTipoEmail').value) p.set('tipoEmail', $('fTipoEmail').value);
+                    if ($('fModalita').value) p.set('modalita', $('fModalita').value);
+                    if ($('fCercaEmail').value.trim()) p.set('cerca', $('fCercaEmail').value.trim());
+                } else {
+                    const tabella = rigaFiltro ? rigaFiltro.tabella : $('fTabella').value;
+                    if (tabella) p.set('tabella', tabella);
+                    if (rigaFiltro) p.set('chiave', rigaFiltro.chiave);
+                    if ($('fOperazione').value) p.set('operazione', $('fOperazione').value);
+                    if ($('fOrigine').value) p.set('origine', $('fOrigine').value);
+                }
+                p.set('pagina', pag);
+                return p;
+            }
+
+            async function cerca(aggiungi = false) {
+                if (!aggiungi) { pag = 0; righeCorrenti = []; }
+                const btn = aggiungi ? $('moreBtn') : $('cercaBtn');
+                btn.disabled = true;
+                if (!aggiungi) $('tbl').innerHTML = '<tbody><tr><td class="empty">Ricerca in corso…</td></tr></tbody>';
+                try {
+                    const d = await api(`/${tab}?${parametri()}`);
+                    righeCorrenti = righeCorrenti.concat(d.righe);
+                    disegna();
+                    $('moreBtn').classList.toggle('hidden', !d.altre);
+                } catch (e) {
+                    if (e.status === 403) return negato(e.message);
+                    $('tbl').innerHTML = `<tbody><tr><td class="empty" style="color:var(--bad)">${esc(e.message)}</td></tr></tbody>`;
+                    $('moreBtn').classList.add('hidden');
+                } finally {
+                    btn.disabled = false;
+                }
+            }
+
+            function utenteCella(r) {
+                if (!r.userId) return '<span class="small">—</span>';
+                const nome = r.utente || r.email || r.userId;
+                return `${esc(nome)}${r.tenant ? `<div class="small">${esc(r.tenant)}</div>` : ''}`;
+            }
+
+            function disegna() {
+                if (!righeCorrenti.length) {
+                    $('tbl').innerHTML = '<tbody><tr><td class="empty">Nessun risultato con questi filtri.</td></tr></tbody>';
+                    return;
+                }
+                if (tab === 'accessi') {
+                    $('tbl').innerHTML = '<thead><tr><th>Quando</th><th>Esito</th><th>Tipo</th><th>Utente</th><th>Email</th><th>IP</th><th>Dettaglio</th></tr></thead><tbody>' +
+                        righeCorrenti.map((r, i) => `<tr class="row" data-i="${i}">
+                            <td class="nowrap">${esc(quando(r.quando))}</td>
+                            <td><span class="badge b-${esc(r.esito)}">${r.esito === 'ok' ? 'OK' : 'FALLITO'}</span></td>
+                            <td>${esc(EVENTI[r.evento] || r.evento)}</td>
+                            <td>${utenteCella(r)}</td>
+                            <td>${esc(r.email || '')}</td>
+                            <td class="nowrap">${esc(r.ip || '')}</td>
+                            <td>${esc(r.dettaglio || '')}</td></tr>`).join('') + '</tbody>';
+                } else if (tab === 'email') {
+                    $('tbl').innerHTML = '<thead><tr><th>Quando</th><th>Esito</th><th>Tipo</th><th>Destinatari</th><th>Oggetto</th><th>Chi</th><th>Come</th></tr></thead><tbody>' +
+                        righeCorrenti.map((r, i) => `<tr class="row" data-i="${i}">
+                            <td class="nowrap">${esc(quando(r.quando))}</td>
+                            <td><span class="badge b-${esc(r.esito)}">${r.modalita === 'client' ? 'APERTA' : r.esito === 'ok' ? 'INVIATA' : 'NON INVIATA'}</span></td>
+                            <td>${esc(TIPI_EMAIL[r.tipo] || r.tipo)}</td>
+                            <td>${esc(r.destinatari || '')}${r.cc ? `<div class="small">Cc: ${esc(r.cc)}</div>` : ''}${!r.destinatari && !r.cc ? '<span class="small">nessuno indicato</span>' : ''}</td>
+                            <td>${esc(r.oggetto || '')}</td>
+                            <td>${r.userId ? utenteCella(r) : `<span class="small">${esc(r.mittente || '—')}</span>`}</td>
+                            <td class="small">${r.modalita === 'client' ? 'Aperta nel programma di posta' : 'Inviata da Projexa'}</td></tr>`).join('') + '</tbody>';
+                } else {
+                    $('tbl').innerHTML = '<thead><tr><th>Quando</th><th>Operazione</th><th>Tabella</th><th>Riga</th><th>Modifica</th><th>Chi</th><th>Origine</th></tr></thead><tbody>' +
+                        gruppi().map((g, gi) => g.righe.length === 1 ? rigaVar(g.righe[0]) : rigaGruppo(g, gi)).join('') + '</tbody>';
+                }
+            }
+
+            // Righe consecutive con stesso secondo, operazione, tabella, origine e utente (es. un
+            // giro del job delle integrazioni) diventano un gruppo, che si apre con un clic.
+            function gruppi() {
+                const out = [];
+                righeCorrenti.forEach((r, i) => {
+                    const chiave = [String(r.quando).slice(0, 19), r.operazione, r.tabella, r.origine, r.userId].join('|');
+                    const ultimo = out[out.length - 1];
+                    if (ultimo && ultimo.chiave === chiave) ultimo.righe.push({ r, i });
+                    else out.push({ chiave, righe: [{ r, i }] });
+                });
+                return out;
+            }
+
+            function rigaVar({ r, i }, gi = null) {
+                const figlio = gi !== null;
+                return `<tr class="row${r.soloRicifratura ? ' dim' : ''}${figlio ? ' child hidden' : ''}" data-i="${i}"${figlio ? ` data-g="${gi}"` : ''}>
+                    <td class="nowrap"${figlio ? ' style="padding-left:1.6rem"' : ''}>${esc(quando(r.quando))}</td>
+                    <td><span class="badge b-${esc(r.operazione)}">${esc(OPERAZIONI[r.operazione] || r.operazione)}</span></td>
+                    <td>${esc(r.tabella)}</td>
+                    <td><span class="link" data-storia="${i}" title="Mostra tutte le modifiche di questa riga">${esc(r.chiave || '')}</span></td>
+                    <td>${riassunto(r)}</td>
+                    <td>${utenteCella(r)}</td>
+                    <td class="small">${esc(r.origine || '')}</td></tr>`;
+            }
+
+            // Valore breve per la tabella (il dettaglio completo resta nel clic sulla riga).
+            function breve(v) {
+                if (v === null || v === undefined || v === '') return '<span class="null">vuoto</span>';
+                let t = typeof v === 'object' ? JSON.stringify(v) : String(v);
+                if (t.length > 60) t = t.slice(0, 57) + '…';
+                return esc(t);
+            }
+
+            // Colonna "Modifica": per gli UPDATE i campi cambiati con valore prima -> dopo.
+            const MAX_CAMPI = 3;
+            function riassunto(r) {
+                if (r.soloRicifratura) return '<span class="small">nessun valore cambiato (solo ricifratura)</span>';
+                if (r.operazione === 'INSERT') return '<span class="small">nuova riga (clic per i valori)</span>';
+                if (r.operazione === 'DELETE') return '<span class="small">riga eliminata (clic per i valori)</span>';
+                const prima = r.prima || {};
+                const dopo = r.dopo || {};
+                const campi = r.campi || Object.keys(dopo);
+                const righe = campi.slice(0, MAX_CAMPI).map((k) =>
+                    `<div><span class="k">${esc(k)}:</span> <span class="old">${breve(prima[k])}</span> → <span class="new">${breve(dopo[k])}</span></div>`);
+                if (campi.length > MAX_CAMPI) righe.push(`<div class="small">e altri ${campi.length - MAX_CAMPI} campi (clic per vederli)</div>`);
+                return `<div class="mod">${righe.join('')}</div>`;
+            }
+
+            function rigaGruppo(g, gi) {
+                const r = g.righe[0].r;
+                const conCambi = g.righe.filter((x) => !x.r.soloRicifratura);
+                const campi = [...new Set(conCambi.flatMap((x) => x.r.campi || []))];
+                const riepilogo = conCambi.length
+                    ? `${esc(campi.slice(0, 6).join(', '))}${campi.length > 6 ? ` e altri ${campi.length - 6}` : ''}`
+                    : '<span class="small">nessun valore cambiato (solo ricifratura)</span>';
+                return `<tr class="row grp${conCambi.length ? '' : ' dim'}" data-grp="${gi}">
+                    <td class="nowrap"><i class="fas fa-chevron-right" style="font-size:0.7rem;margin-right:0.35rem;color:var(--muted)"></i>${esc(quando(r.quando))}</td>
+                    <td><span class="badge b-${esc(r.operazione)}">${esc(OPERAZIONI[r.operazione] || r.operazione)}</span></td>
+                    <td>${esc(r.tabella)}</td>
+                    <td><b>${g.righe.length} righe</b>${conCambi.length && conCambi.length < g.righe.length ? `<div class="small">${conCambi.length} con valori cambiati</div>` : ''}</td>
+                    <td>${riepilogo}</td>
+                    <td>${utenteCella(r)}</td>
+                    <td class="small">${esc(r.origine || '')}</td></tr>` +
+                    g.righe.map((x) => rigaVar(x, gi)).join('');
+            }
+
+            function valore(v) {
+                if (v === null || v === undefined) return '<span class="null">vuoto</span>';
+                if (typeof v === 'object') return esc(JSON.stringify(v, null, 2));
+                return esc(v);
+            }
+
+            function dettaglio(r) {
+                if (tab === 'email') {
+                    const righe = [
+                        ['Mittente', r.mittente],
+                        ['Destinatari', r.destinatari || 'nessuno indicato'],
+                        ['Cc', r.cc],
+                        ['Servizio', SERVIZI[r.servizio] || r.servizio],
+                        ['Riunione (id)', r.riferimento],
+                        ['IP', r.ip],
+                        ['Errore', r.errore]
+                    ].filter(([, v]) => v);
+                    const nota = r.modalita === 'client'
+                        ? '<div class="small" style="margin-top:0.5rem">Email preparata da Projexa e aperta nel programma di posta: l\'invio vero lo fa l\'utente, Projexa non sa se è stata poi spedita.</div>'
+                        : '';
+                    return `<table class="diff"><tbody>${righe.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</tbody></table>${nota}`;
+                }
+                if (tab === 'accessi') {
+                    return `<div class="small"><b>Browser:</b> ${esc(r.userAgent || '—')}</div>` +
+                        (r.tenant ? `<div class="small" style="margin-top:0.3rem"><b>Spazio di lavoro:</b> ${esc(r.tenant)}</div>` : '');
+                }
+                const prima = r.prima || {};
+                const dopo = r.dopo || {};
+                const campi = r.operazione === 'UPDATE' ? (r.campi || Object.keys(dopo)) : Object.keys(r.operazione === 'DELETE' ? prima : dopo);
+                if (!campi.length) return '<div class="small">Nessun valore cambiato: il dato è stato solo riscritto (cifrato di nuovo).</div>';
+                const colonne = r.operazione === 'INSERT' ? '<th>Campo</th><th>Valore inserito</th>'
+                    : r.operazione === 'DELETE' ? '<th>Campo</th><th>Valore cancellato</th>'
+                    : '<th>Campo</th><th>Prima</th><th>Dopo</th>';
+                const righe = campi.map((k) => r.operazione === 'INSERT' ? `<tr><td class="k">${esc(k)}</td><td class="d">${valore(dopo[k])}</td></tr>`
+                    : r.operazione === 'DELETE' ? `<tr><td class="k">${esc(k)}</td><td class="p">${valore(prima[k])}</td></tr>`
+                    : `<tr><td class="k">${esc(k)}</td><td class="p">${valore(prima[k])}</td><td class="d">${valore(dopo[k])}</td></tr>`).join('');
+                return `<table class="diff"><thead><tr>${colonne}</tr></thead><tbody>${righe}</tbody></table>` +
+                    (r.email ? `<div class="small" style="margin-top:0.5rem">Utente: ${esc(r.utente || '')} ${esc(r.email)}</div>` : '');
+            }
+
+            // Clic su una riga: apre/chiude il dettaglio. Clic sulla chiave: storia di quella riga.
+            $('tbl').addEventListener('click', (ev) => {
+                const storia = ev.target.closest('[data-storia]');
+                if (storia) {
+                    const r = righeCorrenti[Number(storia.dataset.storia)];
+                    rigaFiltro = { tabella: r.tabella, chiave: r.chiave };
+                    $('fTabella').value = r.tabella;
+                    aggiornaChip();
+                    cerca();
+                    return;
+                }
+                const grp = ev.target.closest('tr.grp');
+                if (grp) {
+                    const aperto = grp.classList.toggle('open');
+                    grp.querySelector('.fa-chevron-right, .fa-chevron-down').className = `fas fa-chevron-${aperto ? 'down' : 'right'}`;
+                    $('tbl').querySelectorAll(`tr[data-g="${grp.dataset.grp}"]`).forEach((el) => {
+                        if (el.classList.contains('detail')) { if (!aperto) el.remove(); return; }
+                        el.classList.toggle('hidden', !aperto);
+                        if (!aperto) el.classList.remove('open');
+                    });
+                    return;
+                }
+                const tr = ev.target.closest('tr.row');
+                if (!tr) return;
+                const next = tr.nextElementSibling;
+                if (next && next.classList.contains('detail')) { next.remove(); tr.classList.remove('open'); return; }
+                const r = righeCorrenti[Number(tr.dataset.i)];
+                const det = document.createElement('tr');
+                det.className = 'detail';
+                if (tr.dataset.g) det.dataset.g = tr.dataset.g;
+                det.innerHTML = `<td colspan="7">${dettaglio(r)}</td>`;
+                tr.after(det);
+                tr.classList.add('open');
+            });
+
+            function aggiornaChip() {
+                $('chipBox').innerHTML = rigaFiltro && tab === 'variazioni'
+                    ? `<span class="chip">Storia di ${esc(rigaFiltro.tabella)} · ${esc(rigaFiltro.chiave)} <button type="button" id="lg-chipX" title="Togli il filtro">✕</button></span>`
+                    : '';
+                const x = $('chipX');
+                if (x) x.addEventListener('click', () => { rigaFiltro = null; aggiornaChip(); cerca(); });
+            }
+
+            $('tabs').addEventListener('click', (ev) => {
+                const b = ev.target.closest('button[data-tab]');
+                if (!b || b.dataset.tab === tab) return;
+                tab = b.dataset.tab;
+                $('tabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+                document.querySelectorAll('#tab-log .t-accessi').forEach((el) => el.classList.toggle('hidden', tab !== 'accessi'));
+                document.querySelectorAll('#tab-log .t-variazioni').forEach((el) => el.classList.toggle('hidden', tab !== 'variazioni'));
+                document.querySelectorAll('#tab-log .t-email').forEach((el) => el.classList.toggle('hidden', tab !== 'email'));
+                aggiornaChip();
+                cerca();
+            });
+            $('fPeriodo').addEventListener('change', () => {
+                document.querySelectorAll('#tab-log .custom').forEach((el) => el.classList.toggle('hidden', $('fPeriodo').value !== 'custom'));
+            });
+            $('fTabella').addEventListener('change', () => { if (rigaFiltro) { rigaFiltro = null; aggiornaChip(); } });
+            $('cercaBtn').addEventListener('click', () => cerca());
+            $('fCerca').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') cerca(); });
+            $('fCercaEmail').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') cerca(); });
+            $('moreBtn').addEventListener('click', () => { pag += 1; cerca(true); });
+
+            // ------------------------------------------------------------------
+            // Eliminazione: la fa la procedura Oracle ELIMINA_LOG, che protegge sempre gli
+            // ultimi 30 giorni e registra chi ha eliminato cosa.
+            // ------------------------------------------------------------------
+            const scelta = (nome) => (document.querySelector(`input[name="${nome}"]:checked`) || {}).value;
+            function aggiornaNota() {
+                const modo = scelta('eModo');
+                const uno = document.querySelector('input[name="eMesi"][value="1"]');
+                // "Ultimo mese" non è possibile: gli ultimi 30 giorni sono protetti.
+                uno.disabled = modo === 'ultimi';
+                $('eMesi1').classList.toggle('disabled', uno.disabled);
+                if (uno.disabled && uno.checked) document.querySelector('input[name="eMesi"][value="3"]').checked = true;
+                const mesi = scelta('eMesi');
+                const cosa = { accessi: 'gli accessi', variazioni: 'le modifiche ai dati', email: 'le email' }[tab];
+                const periodo = modo === 'vecchi'
+                    ? `registrati <b>prima di ${mesi} ${mesi === '1' ? 'mese' : 'mesi'} fa</b>`
+                    : `registrati <b>negli ultimi ${mesi} mesi, tranne gli ultimi 30 giorni</b>`;
+                $('eNota').innerHTML = `Elimina ${cosa} ${periodo}.<br>Gli ultimi 30 giorni restano sempre protetti. ` +
+                    'L&#39;eliminazione non si può annullare e viene registrata negli accessi.';
+            }
+            $('eliminaBtn').addEventListener('click', () => {
+                $('eliminaTitolo').textContent = { accessi: 'Elimina accessi', variazioni: 'Elimina modifiche ai dati', email: 'Elimina log delle email' }[tab];
+                $('eEsito').classList.add('hidden');
+                $('eConferma').disabled = false;
+                aggiornaNota();
+                $('eliminaModal').classList.remove('hidden');
+            });
+            $('eliminaModal').addEventListener('change', aggiornaNota);
+            const chiudiModal = () => $('eliminaModal').classList.add('hidden');
+            $('eAnnulla').addEventListener('click', chiudiModal);
+            $('eliminaModal').addEventListener('click', (ev) => { if (ev.target === $('eliminaModal')) chiudiModal(); });
+            document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') chiudiModal(); });
+            $('eConferma').addEventListener('click', async () => {
+                const b = $('eConferma');
+                const esito = $('eEsito');
+                b.disabled = true;
+                try {
+                    const r = await fetch(`${API_URL}/audit-log/elimina`, {
+                        method: 'POST',
+                        headers: { ...headers(), 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tabella: tab, modo: scelta('eModo'), mesi: Number(scelta('eMesi')) })
+                    });
+                    const d = await r.json().catch(() => ({}));
+                    if (r.status === 401) { window.location.href = 'index.html'; return; }
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                    esito.style.color = 'var(--good)';
+                    esito.textContent = d.eliminate ? `Eliminati ${d.eliminate.toLocaleString('it-IT')} log.` : 'Nessun log da eliminare in quel periodo.';
+                    esito.classList.remove('hidden');
+                    caricaStato();
+                    caricaSpazio();
+                    cerca();
+                    setTimeout(chiudiModal, 1800);
+                } catch (e) {
+                    esito.style.color = 'var(--bad)';
+                    esito.textContent = e.message;
+                    esito.classList.remove('hidden');
+                    b.disabled = false;
+                }
+            });
+
+            // Aggiorna: stato, spazio e risultati della scheda aperta, con gli stessi filtri.
+            $('refreshBtn').addEventListener('click', async () => {
+                const b = $('refreshBtn');
+                if (b.disabled) return;
+                b.disabled = true;
+                b.querySelector('i').classList.add('fa-spin');
+                try {
+                    await Promise.all([caricaStato(), caricaSpazio(), cerca()]);
+                    $('aggiornatoAlle').textContent = `Aggiornato alle ${new Date().toLocaleTimeString('it-IT')}`;
+                } finally {
+                    b.disabled = false;
+                    b.querySelector('i').classList.remove('fa-spin');
+                }
+            });
+
+            // ------------------------------------------------------------------
+            // Esporta CSV: tutte le righe della scheda con i filtri impostati (non solo quelle
+            // caricate a video), fino a 10.000. Separatore ";" e BOM: si apre bene in Excel.
+            // ------------------------------------------------------------------
+            function csvCampo(v) {
+                if (v === null || v === undefined) return '';
+                const t = typeof v === 'object' ? JSON.stringify(v) : String(v);
+                return /[";\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+            }
+            const quandoCsv = (t) => new Date(t).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace(',', '');
+            function righeCsv(righe) {
+                if (tab === 'accessi') {
+                    return [['Quando', 'Esito', 'Tipo', 'Utente', 'Email', 'Spazio di lavoro', 'IP', 'Dettaglio', 'Browser'],
+                        ...righe.map((r) => [quandoCsv(r.quando), r.esito === 'ok' ? 'OK' : 'FALLITO', EVENTI[r.evento] || r.evento, r.utente, r.email, r.tenant, r.ip, r.dettaglio, r.userAgent])];
+                }
+                if (tab === 'email') {
+                    return [['Quando', 'Esito', 'Tipo', 'Come', 'Destinatari', 'Cc', 'Oggetto', 'Mittente', 'Utente', 'Spazio di lavoro', 'Servizio', 'Riunione (id)', 'IP', 'Errore'],
+                        ...righe.map((r) => [quandoCsv(r.quando), r.modalita === 'client' ? 'APERTA' : r.esito === 'ok' ? 'INVIATA' : 'NON INVIATA', TIPI_EMAIL[r.tipo] || r.tipo,
+                            r.modalita === 'client' ? 'Aperta nel programma di posta' : 'Inviata da Projexa', r.destinatari, r.cc, r.oggetto, r.mittente,
+                            r.utente, r.tenant, SERVIZI[r.servizio] || r.servizio, r.riferimento, r.ip, r.errore])];
+                }
+                return [['Quando', 'Operazione', 'Tabella', 'Riga', 'Campi cambiati', 'Prima', 'Dopo', 'Utente', 'Email', 'Spazio di lavoro', 'Origine'],
+                    ...righe.map((r) => [quandoCsv(r.quando), OPERAZIONI[r.operazione] || r.operazione, r.tabella, r.chiave,
+                        r.soloRicifratura ? '(solo ricifratura)' : (r.campi || []).join(', '), r.prima, r.dopo, r.utente, r.email, r.tenant, r.origine])];
+            }
+            $('csvBtn').addEventListener('click', async () => {
+                const b = $('csvBtn');
+                if (b.disabled) return;
+                b.disabled = true;
+                b.querySelector('i').className = 'fas fa-spinner fa-spin';
+                try {
+                    const p = parametri();
+                    p.delete('pagina');
+                    p.set('export', '1');
+                    const d = await api(`/${tab}?${p}`);
+                    if (!d.righe.length) { alert('Nessun log da esportare con questi filtri.'); return; }
+                    const csv = righeCsv(d.righe).map((riga) => riga.map(csvCampo).join(';')).join('\r\n');
+                    const url = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `log-${{ accessi: 'accessi', variazioni: 'modifiche', email: 'email' }[tab]}-${new Date().toISOString().slice(0, 10)}.csv`;
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    if (d.altre) alert(`Esportate le ${d.righe.length.toLocaleString('it-IT')} righe più recenti: ce ne sono altre. Restringi il periodo o i filtri per esportarle.`);
+                } catch (e) {
+                    alert(`Esportazione non riuscita: ${e.message}`);
+                } finally {
+                    b.disabled = false;
+                    b.querySelector('i').className = 'fas fa-file-csv';
+                }
+            });
+
+            // La prima apertura della scheda carica tutto; dopo si aggiorna con «Aggiorna».
+            let avviata = false;
+            return {
+                async mostra() {
+                    if (avviata) return;
+                    avviata = true;
+                    $('content').classList.remove('hidden');
+                    await caricaStato();
+                    if (!$('deniedCard').classList.contains('hidden')) return;
+                    caricaSpazio();
+                    await caricaFiltri();
+                    cerca();
+                }
+            };
+        })();
+
+        // =====================================================================
+        // SCHEDE E ACCESSO
+        // =====================================================================
+        const SCHEDE = { vm: schedaVm, sched: schedaSched, log: schedaLog };
+        const DA_HASH = { vm: 'vm', schedulazioni: 'sched', log: 'log' };
+        const A_HASH = { vm: 'vm', sched: 'schedulazioni', log: 'log' };
+
+        function apriScheda(nome) {
+            if (!SCHEDE[nome]) nome = 'vm';
+            document.querySelectorAll('.mtab').forEach((b) => {
+                const on = b.dataset.tab === nome;
+                b.classList.toggle('on', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            document.querySelectorAll('.mpanel').forEach((p) => { p.hidden = p.id !== `tab-${nome}`; });
+            if (location.hash !== `#${A_HASH[nome]}`) history.replaceState(null, '', `#${A_HASH[nome]}`);
+            SCHEDE[nome].mostra();
+        }
+
+        document.querySelector('.mtabs').addEventListener('click', (e) => {
+            const b = e.target.closest('.mtab');
+            if (b && b.dataset.tab !== schedaAttiva()) apriScheda(b.dataset.tab);
+        });
+
+        // Prima di tutto il tipo di accesso: completo (admin PROJEXA), sola lettura o nessuno.
+        (async () => {
+            try {
+                const r = await fetch(`${API_URL}/vm-monitor/accesso`, { headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` } });
+                if (r.status === 401) { window.location.href = 'index.html'; return; }
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok || !d.accesso) throw new Error(d.error || 'Pagina riservata all\'amministratore di Projexa');
+                document.body.classList.toggle('ro', d.accesso === 'lettura');
+                document.getElementById('monitorBody').style.display = '';
+                apriScheda(DA_HASH[location.hash.slice(1)] || 'vm');
+            } catch (e) {
+                document.getElementById('pageDenied').style.display = '';
+                document.getElementById('pageDeniedMsg').textContent = e.message;
+            }
+        })();
+    </script>
+</body>
+</html>

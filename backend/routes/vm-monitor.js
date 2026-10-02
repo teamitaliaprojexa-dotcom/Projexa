@@ -1,5 +1,5 @@
-// Monitor della VM (pagina vm-monitor.html): CPU, memoria, disco, rete, servizi, processi.
-// Riservato all'admin (id_roles = 1) del tenant PROJEXA, verificato sul database come per
+// Monitor della VM (pagina monitor.html, scheda Monitor VM): CPU, memoria, disco, rete, servizi, processi.
+// Riservato all'admin (id_roles = 1) del tenant PROJEXA (sola lettura per MONITOR_LETTURA_EMAILS), verificato sul database come per
 // l'editor dei prompt (routes/prompts.js).
 //
 // I dati si leggono direttamente dal sistema (/proc, statfs, systemctl): funziona solo sulla
@@ -23,14 +23,32 @@ const CLK_TCK = 100;                                   // tick al secondo di /pr
 const PAGE = 4096;
 
 // ----------------------------------------------------------------------------
-// ACCESSO: solo admin del tenant PROJEXA
+// ACCESSO: admin del tenant PROJEXA (completo) o utenti in sola lettura
 // ----------------------------------------------------------------------------
-// Esportato: lo usa anche la pagina Schedulazioni job (routes/job-schedules.js).
-export async function requireProjexaAdmin(req, res, next) {
+async function isProjexaAdmin(req) {
+  if (Number(req.user?.id_roles) !== 1) return false;
+  const t = (await db.query('SELECT name FROM tenants WHERE id = $1', [req.user.tenant_id])).rows[0];
+  return !!t && String(t.name || '').trim().toUpperCase() === 'PROJEXA';
+}
+
+// Utenti che vedono la pagina Monitor in SOLA LETTURA (solo richieste GET: nessuna modifica,
+// nessuna azione), in qualunque tenant: email separate da virgola in MONITOR_LETTURA_EMAILS.
+function emailSolaLettura(req) {
+  const email = String(req.user?.email || '').trim().toLowerCase();
+  if (!email) return false;
+  return String(process.env.MONITOR_LETTURA_EMAILS || '')
+    .split(',').map((x) => x.trim().toLowerCase()).filter(Boolean).includes(email);
+}
+
+// Pagina Monitor (Monitor VM, Schedulazioni, Log): admin PROJEXA con tutti i permessi,
+// utenti di MONITOR_LETTURA_EMAILS solo in lettura (le scritture restano 403).
+// Esportato: lo usano anche routes/job-schedules.js e routes/audit-log.js.
+export async function requireMonitorAccess(req, res, next) {
   try {
-    if (Number(req.user?.id_roles) === 1) {
-      const t = (await db.query('SELECT name FROM tenants WHERE id = $1', [req.user.tenant_id])).rows[0];
-      if (t && String(t.name || '').trim().toUpperCase() === 'PROJEXA') return next();
+    if (await isProjexaAdmin(req)) { req.monitorSolaLettura = false; return next(); }
+    if (emailSolaLettura(req)) {
+      if (req.method === 'GET') { req.monitorSolaLettura = true; return next(); }
+      return res.status(403).json({ error: 'Accesso in sola lettura: operazione non consentita' });
     }
     res.status(403).json({ error: 'Pagina riservata all\'amministratore di Projexa' });
   } catch (e) {
@@ -255,7 +273,18 @@ async function transcriptionQueue() {
 // ----------------------------------------------------------------------------
 const RANGES = { '1h': 3600e3, '6h': 6 * 3600e3, '24h': 24 * 3600e3 };
 
-router.get('/status', requireAuth, requireProjexaAdmin, async (req, res) => {
+// Tipo di accesso alla pagina Monitor: la dashboard lo usa per mostrare la voce di menu,
+// la pagina per nascondere i comandi di modifica. Risponde 200 anche a chi non ha accesso.
+router.get('/accesso', requireAuth, async (req, res) => {
+  try {
+    const accesso = (await isProjexaAdmin(req)) ? 'completo' : emailSolaLettura(req) ? 'lettura' : null;
+    res.json({ accesso });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/status', requireAuth, requireMonitorAccess, async (req, res) => {
   try {
     if (!IS_LINUX) return res.status(501).json({ error: 'Monitor disponibile solo sulla VM Linux (in locale non ci sono dati di sistema).' });
     startVmSampler();

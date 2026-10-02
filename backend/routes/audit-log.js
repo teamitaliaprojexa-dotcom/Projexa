@@ -1,6 +1,6 @@
-// Pagina Log (sito/audit-log.html): consultazione di accessi e variazioni salvati su
+// Pagina Monitor (sito/monitor.html), scheda Log: consultazione di accessi e variazioni salvati su
 // Oracle (AUDIT_OWNER.LOG_ACCESSI / LOG_VARIAZIONI, vedi Supporto/CreaDB/oracle_audit.sql).
-// Riservata all'admin del tenant PROJEXA, come Monitor VM e Schedulazioni.
+// Riservata all'admin del tenant PROJEXA (sola lettura per MONITOR_LETTURA_EMAILS), come Monitor VM e Schedulazioni.
 //
 // Le letture passano dal backend sulla VM: Oracle accetta connessioni solo dal suo IP.
 // I valori cifrati ("enc:v1:...") restano cifrati nei log e vengono decifrati qui, solo
@@ -12,12 +12,12 @@ import oracledb from 'oracledb';
 import db from '../config/database.js';
 import authDb from '../config/authDatabase.js';
 import { requireAuth } from '../middleware/auth.js';
-import { requireProjexaAdmin } from './vm-monitor.js';
+import { requireMonitorAccess } from './vm-monitor.js';
 import { decryptDeep } from '../config/crypto.js';
 import { getPoolOracle, statoInvioAudit, SCHEMA_AUDIT } from '../jobs/auditShipper.js';
 
 const router = express.Router();
-router.use(requireAuth, requireProjexaAdmin);
+router.use(requireAuth, requireMonitorAccess);
 
 const PER_PAGINA = 50;
 
@@ -31,6 +31,10 @@ function intervallo(q) {
 }
 
 const pagina = (q) => Math.max(0, parseInt(q.pagina, 10) || 0);
+// Righe da leggere: una pagina, oppure (export=1, pulsante «Esporta CSV») fino a MAX_EXPORT
+// righe dall'inizio, con gli stessi filtri. "altre" = true se l'export è stato troncato.
+const MAX_EXPORT = 10000;
+const limiti = (q) => (q.export === '1' ? { off: 0, per: MAX_EXPORT } : { off: pagina(q) * PER_PAGINA, per: PER_PAGINA });
 const testo = (v, max = 200) => String(v || '').trim().slice(0, max);
 
 async function conOracle(fn) {
@@ -184,8 +188,9 @@ router.get('/accessi', async (req, res) => {
       where.push('(LOWER(email) LIKE :cerca OR ip LIKE :cerca OR LOWER(dettaglio) LIKE :cerca)');
       binds.cerca = `%${testo(req.query.cerca).toLowerCase()}%`;
     }
-    binds.off = pagina(req.query) * PER_PAGINA;
-    binds.lim = PER_PAGINA + 1;
+    const { off, per } = limiti(req.query);
+    binds.off = off;
+    binds.lim = per + 1;
     const righe = await conOracle(async (conn) => (await conn.execute(
       `SELECT id, quando, evento, esito, user_id, email, tenant_id, ip, user_agent, dettaglio
          FROM ${SCHEMA_AUDIT}.log_accessi
@@ -193,8 +198,8 @@ router.get('/accessi', async (req, res) => {
         ORDER BY quando DESC, id DESC
         OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY`,
       binds, { outFormat: oracledb.OUT_FORMAT_OBJECT })).rows);
-    const altre = righe.length > PER_PAGINA;
-    const lista = righe.slice(0, PER_PAGINA);
+    const altre = righe.length > per;
+    const lista = righe.slice(0, per);
     const n = await nomi(lista.map((r) => r.USER_ID), lista.map((r) => r.TENANT_ID));
     res.json({
       altre,
@@ -223,8 +228,9 @@ router.get('/email', async (req, res) => {
       where.push('(LOWER(destinatari) LIKE :cerca OR LOWER(cc) LIKE :cerca OR LOWER(oggetto) LIKE :cerca OR LOWER(mittente) LIKE :cerca)');
       binds.cerca = `%${testo(req.query.cerca).toLowerCase()}%`;
     }
-    binds.off = pagina(req.query) * PER_PAGINA;
-    binds.lim = PER_PAGINA + 1;
+    const { off, per } = limiti(req.query);
+    binds.off = off;
+    binds.lim = per + 1;
     const righe = await conOracle(async (conn) => (await conn.execute(
       `SELECT id, quando, tipo, modalita, esito, destinatari, cc, mittente, oggetto, riferimento, servizio, errore, user_id, tenant_id, ip
          FROM ${SCHEMA_AUDIT}.log_email
@@ -232,8 +238,8 @@ router.get('/email', async (req, res) => {
         ORDER BY quando DESC, id DESC
         OFFSET :off ROWS FETCH NEXT :lim ROWS ONLY`,
       binds, { outFormat: oracledb.OUT_FORMAT_OBJECT })).rows);
-    const altre = righe.length > PER_PAGINA;
-    const lista = righe.slice(0, PER_PAGINA);
+    const altre = righe.length > per;
+    const lista = righe.slice(0, per);
     const n = await nomi(lista.map((r) => r.USER_ID), lista.map((r) => r.TENANT_ID));
     res.json({
       altre,
@@ -282,8 +288,9 @@ router.get('/variazioni', async (req, res) => {
     if (req.query.origine === 'utente') where.push('user_id IS NOT NULL');
     if (req.query.origine === 'job') where.push("origine LIKE 'job:%'");
     if (req.query.origine === 'sql') where.push("origine LIKE 'sql:%'");
-    binds.off = pagina(req.query) * PER_PAGINA;
-    binds.lim = PER_PAGINA + 1;
+    const { off, per } = limiti(req.query);
+    binds.off = off;
+    binds.lim = per + 1;
     const righe = await conOracle(async (conn) => (await conn.execute(
       `SELECT id, quando, tenant_id, user_id, origine, tabella, operazione, chiave, campi, prima, dopo
          FROM ${SCHEMA_AUDIT}.log_variazioni
@@ -294,8 +301,8 @@ router.get('/variazioni', async (req, res) => {
         outFormat: oracledb.OUT_FORMAT_OBJECT,
         fetchInfo: { PRIMA: { type: oracledb.STRING }, DOPO: { type: oracledb.STRING } }
       })).rows);
-    const altre = righe.length > PER_PAGINA;
-    const lista = righe.slice(0, PER_PAGINA);
+    const altre = righe.length > per;
+    const lista = righe.slice(0, per);
     const n = await nomi(lista.map((r) => r.USER_ID), lista.map((r) => r.TENANT_ID));
     res.json({
       altre,

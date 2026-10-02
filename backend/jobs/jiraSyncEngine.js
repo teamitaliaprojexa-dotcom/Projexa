@@ -11,11 +11,12 @@
 //      colonna_projexa = 'Nome_Filtro' dice QUALE filtro salvato su Jira eseguire;
 //      tutte le altre righe dicono "colonna Projexa <- colonna del report Jira".
 //   2. Esegue il filtro su Jira e scorre TUTTE le pagine del risultato.
-//   3. Per ogni riga del report cerca il cliente: il valore della colonna Jira del
-//      nome cliente viene confrontato con clients.valore2 (campo indicato nella
-//      configurazione). Riga senza cliente corrispondente = riga ignorata.
-//   4. Se il codice non esiste per quel cliente -> INSERT; se esiste ed è ancora
-//      valido (scadenza > oggi) -> UPDATE; se esiste ma è scaduto -> non si tocca.
+//   3. UPDATE per solo codice (chiave Jira = colonna codice): tutte le righe del
+//      tenant con quel codice, di qualunque cliente o senza cliente, se ancora
+//      valide (scadenza > oggi) e solo nelle colonne cambiate; scadute = non si toccano.
+//   4. INSERT: si cerca il cliente (colonna Jira del nome cliente confrontata con
+//      clients.valore2); se il codice non esiste per quel cliente -> INSERT.
+//      Senza cliente corrispondente non si inserisce nulla.
 //
 // PERIMETRO: un lancio aggiorna i dati di TUTTO il tenant in un solo passaggio.
 //   * Configurazione di UN utente: mappatura (jira_*), filtro, filtro aggiuntivo e
@@ -269,21 +270,24 @@ function trovaCliente(clienti, valoreJira, modo) {
 // Il codice si indicizza in due modi, perché i due passaggi cercano le righe in
 // modo diverso:
 //
-//   perChiave  cliente + codice -> riga.  Lo usa il passaggio PRINCIPALE, dove lo
-//              stesso codice su clienti diversi è una riga diversa (perimetro:
-//              tenant + cliente, qualunque sia l'utente proprietario).
+//   perChiave  cliente + codice -> riga.  Decide l'INSERIMENTO nel passaggio
+//              principale: lo stesso codice su clienti diversi è una riga diversa
+//              (perimetro: tenant + cliente, qualunque sia l'utente proprietario).
 //   perCodice  codice -> tutte le righe con quel codice, cliente compreso quello
-//              vuoto. Lo usa il passaggio AGGIUNTIVO, che aggiorna per solo codice
-//              Jira: una riga inserita a mano e non legata ad alcun cliente deve
-//              comunque ricevere i valori aggiornati dal filtro.
+//              vuoto. Lo usano gli AGGIORNAMENTI di entrambi i passaggi, per solo
+//              codice Jira: una riga inserita a mano o legata a un altro cliente
+//              riceve comunque i valori aggiornati.
 function chiaveRiga(clientId, codice) {
   return `${String(clientId)}|${norm(codice)}`;
 }
 
-// Righe già presenti di TUTTO il tenant (di qualunque utente).
-async function leggiEsistenti(tabella, colonnaCodice, tenantId) {
+// Righe già presenti di TUTTO il tenant (di qualunque utente), con i valori attuali
+// (già decifrati dal pool) delle colonne che il job scrive: servono a non riscrivere
+// le righe in cui Jira non ha cambiato nulla (vedi campiCambiati).
+async function leggiEsistenti(tabella, colonnaCodice, tenantId, colonneConfronto) {
+  const extra = colonneConfronto.map((c, i) => `, "${c}" AS "v${i}"`).join('');
   const { rows } = await db.query(
-    `SELECT id, client_id, "${colonnaCodice}" AS codice, scadenza FROM "${tabella}"
+    `SELECT id, client_id, "${colonnaCodice}" AS codice, scadenza${extra} FROM "${tabella}"
       WHERE tenant_id = $1`,
     [tenantId]
   );
@@ -293,7 +297,9 @@ async function leggiEsistenti(tabella, colonnaCodice, tenantId) {
     if (vuoto(r.codice)) continue;
     // Stesso oggetto nei due indici: aggiornarlo da una parte lo aggiorna anche
     // dall'altra (serve dopo un inserimento, per non reinserire la stessa riga).
-    const riga = { id: r.id, scadenza: r.scadenza };
+    const valori = {};
+    colonneConfronto.forEach((c, i) => { valori[c] = r[`v${i}`]; });
+    const riga = { id: r.id, scadenza: r.scadenza, valori };
     const codice = norm(r.codice);
     if (!perCodice.has(codice)) perCodice.set(codice, []);
     perCodice.get(codice).push(riga);
@@ -303,6 +309,41 @@ async function leggiEsistenti(tabella, colonnaCodice, tenantId) {
     }
   }
   return { perChiave, perCodice };
+}
+
+// Confronto fra il valore sul database e quello che arriva da Jira, nel tipo della
+// colonna. Senza questo controllo ogni giro riscriveva tutte le righe: i testi cifrati
+// cambiano a ogni scrittura (IV casuale) e il log variazioni registrava migliaia di
+// modifiche "finte". Vuoto e null valgono uguale; un valore rimasto cifrato (chiave
+// non disponibile) risulta diverso e la riga viene riscritta, come prima.
+function confrontabile(valore, tipo) {
+  if (valore === null || valore === undefined) return null;
+  if (tipo === 'date') return String(valore).slice(0, 10);
+  if (tipo.startsWith('timestamp')) {
+    // Il job scrive 'YYYY-MM-DD' (mezzanotte): una data-ora a mezzanotte equivale al giorno.
+    if (typeof valore === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(valore)) return valore;
+    const d = valore instanceof Date ? valore : new Date(valore);
+    if (Number.isNaN(d.getTime())) return String(valore);
+    const giorno = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return d.getHours() || d.getMinutes() || d.getSeconds() || d.getMilliseconds() ? d.toISOString() : giorno;
+  }
+  if (/^(numeric|integer|smallint|bigint|real|double precision)/.test(tipo)) {
+    const n = Number(valore);
+    return Number.isFinite(n) ? n : String(valore);
+  }
+  if (tipo === 'boolean') return valore === true || valore === 't' || valore === 'true';
+  const t = String(valore);
+  return t.trim() === '' ? null : t;
+}
+
+// Colonne da scrivere: solo quelle con un valore diverso da quello già presente.
+function campiCambiati(attuali, nuovi, tipi) {
+  const out = {};
+  for (const [colonna, valore] of Object.entries(nuovi)) {
+    const tipo = tipi.get(colonna) || 'text';
+    if (confrontabile(attuali ? attuali[colonna] : undefined, tipo) !== confrontabile(valore, tipo)) out[colonna] = valore;
+  }
+  return out;
 }
 
 // La riga è ancora aggiornabile se la scadenza è successiva a oggi.
@@ -411,6 +452,8 @@ export async function runJiraSync(config, ctx) {
     clientiConfigurati: 0,
     inserite: 0,
     aggiornate: 0,
+    // Righe già presenti in cui Jira non ha cambiato nulla: non vengono riscritte.
+    invariate: 0,
     ignorateSenzaCliente: 0,
     ignorateSenzaCodice: 0,
     ignorateScadute: 0,
@@ -516,15 +559,16 @@ export async function runJiraSync(config, ctx) {
   }
 
   // --- 4) Clienti e righe già presenti -------------------------------------
-  // Senza clienti configurati il passaggio principale non ha nulla da abbinare, ma
-  // il passaggio aggiuntivo lavora per solo codice e va eseguito lo stesso.
+  // Senza clienti configurati il passaggio principale non inserisce nulla, ma aggiorna
+  // comunque per solo codice (come il passaggio aggiuntivo).
   const clienti = await leggiClienti(tenantId, config.campoClients);
   report.clientiConfigurati = clienti.length;
   if (clienti.length === 0) {
-    report.errori.push(`Nessun cliente ha il campo "${config.campoClients}" valorizzato: il filtro principale non inserisce né aggiorna nulla`);
+    report.errori.push(`Nessun cliente ha il campo "${config.campoClients}" valorizzato: il filtro principale non inserisce righe nuove (aggiorna solo quelle già presenti, per codice)`);
   }
 
-  const { perChiave, perCodice } = await leggiEsistenti(config.tabellaDestinazione, config.colonnaCodice, tenantId);
+  const colonneConfronto = [...new Set(piano.map((p) => p.colonna))].filter((c) => c !== config.colonnaCodice);
+  const { perChiave, perCodice } = await leggiEsistenti(config.tabellaDestinazione, config.colonnaCodice, tenantId, colonneConfronto);
   const haUpdatedAt = colonne.has('updated_at');
 
   // Valori fissi della creazione (es. tipo = 'Jira'): solo colonne che esistono
@@ -555,41 +599,66 @@ export async function runJiraSync(config, ctx) {
     return valori;
   }
 
-  // Aggiorna una riga già presente. Il codice non si tocca: è la chiave.
+  // Aggiorna una riga già presente scrivendo solo le colonne cambiate. Il codice non
+  // si tocca: è la chiave. Restituisce false se non c'era niente da cambiare (riga non
+  // toccata, updated_at compreso): conta come "invariata" nel report.
   async function aggiornaRiga(riga, valori) {
-    const daAggiornare = { ...valori };
-    delete daAggiornare[config.colonnaCodice];
+    const nuovi = { ...valori };
+    delete nuovi[config.colonnaCodice];
+    const daAggiornare = campiCambiati(riga.valori, nuovi, colonne);
+    if (Object.keys(daAggiornare).length === 0) return false;
+    // Valori in memoria allineati: se la stessa riga ricompare nel giro (righe ripetute
+    // o passaggio aggiuntivo) con gli stessi dati, non viene riscritta.
+    riga.valori = { ...(riga.valori || {}), ...daAggiornare };
     if (haUpdatedAt) daAggiornare.updated_at = new Date();
     // In prova a vuoto non si scrive: si conta solo l'aggiornamento che verrebbe
     // fatto (riga.id è null per le righe "inserite" durante la simulazione).
     if (!dryRun && riga.id) await aggiorna(config.tabellaDestinazione, riga.id, daAggiornare);
+    return true;
   }
 
-  // PASSAGGIO PRINCIPALE: abbina il cliente, inserisce le righe nuove e aggiorna
-  // quelle già presenti per lo stesso cliente.
+  // PASSAGGIO PRINCIPALE.
+  //   AGGIORNAMENTO: a parità di codice (chiave Jira = colonnaCodice), SENZA guardare
+  //   il cliente: si aggiornano tutte le righe del tenant con quel codice, anche se
+  //   sono di un altro cliente o di nessuno (richiesta dell'utente, 2026-10-02).
+  //   INSERIMENTO: invariato. Serve il cliente abbinato e si inserisce solo se per quel
+  //   cliente la riga con quel codice non c'è ancora (perimetro cliente + codice).
   async function elaboraPrincipale(righe, conteggi) {
     for (const issue of righe) {
       try {
-        const cliente = trovaCliente(clienti, formatValue(leggi(issue, campoJiraCliente)), config.confrontoCliente);
-        if (!cliente) { conteggi.ignorateSenzaCliente += 1; continue; }
-
         const codice = formatValue(leggi(issue, campoJiraCodice));
         if (vuoto(codice)) { conteggi.ignorateSenzaCodice += 1; continue; }
 
+        const cliente = trovaCliente(clienti, formatValue(leggi(issue, campoJiraCliente)), config.confrontoCliente);
         const valori = valoriDaIssue(issue);
 
         // In prova a vuoto si tiene da parte la prima riga elaborata: serve a
         // controllare a colpo d'occhio che la mappatura produca i valori attesi.
         if (dryRun && !report.esempio) {
           report.esempio = {
-            _clienteAbbinato: cliente.nome,
-            _clientId: cliente.clientId,
+            _clienteAbbinato: cliente ? cliente.nome : null,
+            _clientId: cliente ? cliente.clientId : null,
             [config.colonnaCodice]: codice,
             ...valoriInserimento,
             ...valori
           };
         }
 
+        // Aggiornamento per solo codice (copia dell'elenco: la riga eventualmente
+        // inserita qui sotto non va aggiornata subito dopo).
+        const daAggiornare = [...(perCodice.get(norm(codice)) || [])];
+        for (const riga of daAggiornare) {
+          if (!ancoraValida(riga.scadenza)) { conteggi.ignorateScadute += 1; continue; }
+          if (await aggiornaRiga(riga, valori)) conteggi.aggiornate += 1;
+          else conteggi.invariate += 1;
+        }
+
+        // Inserimento: solo con il cliente abbinato. "Senza cliente" conta le righe Jira
+        // che non hanno né un cliente né una riga già presente da aggiornare.
+        if (!cliente) {
+          if (daAggiornare.length === 0) conteggi.ignorateSenzaCliente += 1;
+          continue;
+        }
         const chiave = chiaveRiga(cliente.clientId, codice);
         const esistente = perChiave.get(chiave);
 
@@ -605,18 +674,14 @@ export async function runJiraSync(config, ctx) {
           // La riga appena creata entra subito nei due indici: se lo stesso codice
           // ricompare (filtro con righe ripetute, oppure passaggio aggiuntivo)
           // viene aggiornata invece di essere inserita una seconda volta.
-          const riga = { id: nuovoId, scadenza: null };
+          const riga = { id: nuovoId, scadenza: null, valori: { ...valoriInserimento, ...valori } };
           perChiave.set(chiave, riga);
           const perQuelCodice = perCodice.get(norm(codice)) || [];
           perQuelCodice.push(riga);
           perCodice.set(norm(codice), perQuelCodice);
           conteggi.inserite += 1;
-          continue;
         }
-
-        if (!ancoraValida(esistente.scadenza)) { conteggi.ignorateScadute += 1; continue; }
-        await aggiornaRiga(esistente, valori);
-        conteggi.aggiornate += 1;
+        // Riga già presente per questo cliente: è fra quelle aggiornate sopra per codice.
       } catch (e) {
         report.errori.push(`${issue.key || '?'}: ${e.message}`);
         if (report.errori.length >= 20) {
@@ -645,8 +710,8 @@ export async function runJiraSync(config, ctx) {
         // il filtro le rinfresca tutte.
         for (const riga of daRinfrescare) {
           if (!ancoraValida(riga.scadenza)) { conteggi.ignorateScadute += 1; continue; }
-          await aggiornaRiga(riga, valori);
-          conteggi.aggiornate += 1;
+          if (await aggiornaRiga(riga, valori)) conteggi.aggiornate += 1;
+          else conteggi.invariate += 1;
         }
       } catch (e) {
         report.errori.push(`${issue.key || '?'}: ${e.message}`);
@@ -658,7 +723,7 @@ export async function runJiraSync(config, ctx) {
     }
   }
 
-  if (clienti.length > 0) await elaboraPrincipale(issues, report);
+  await elaboraPrincipale(issues, report);
 
   // --- 6) Passaggio aggiuntivo (solo aggiornamento) ------------------------
   const nomeFiltroAggiuntivo = await leggiFiltroAggiuntivo(tenantId, userId, config.campoFiltroAggiuntivo);
@@ -671,6 +736,7 @@ export async function runJiraSync(config, ctx) {
         filtro: filtroAgg.name,
         righeJira: 0,
         aggiornate: 0,
+        invariate: 0,
         ignorateSenzaCodice: 0,
         ignorateScadute: 0,
         ignorateNonTrovate: 0
@@ -693,11 +759,11 @@ export async function runJiraSync(config, ctx) {
 
   console.log(
     `[${config.nome}]${dryRun ? ' (PROVA, nessuna scrittura)' : ''} filtro "${report.filtro}": ${report.righeJira} righe Jira, ` +
-    `${report.inserite} inserite, ${report.aggiornate} aggiornate, ` +
+    `${report.inserite} inserite, ${report.aggiornate} aggiornate, ${report.invariate} invariate, ` +
     `${report.ignorateSenzaCliente} senza cliente, ${report.ignorateScadute} scadute` +
     (report.passaggioAggiuntivo
       ? ` | aggiuntivo "${report.passaggioAggiuntivo.filtro}": ${report.passaggioAggiuntivo.righeJira} righe, ` +
-        `${report.passaggioAggiuntivo.aggiornate} aggiornate, ${report.passaggioAggiuntivo.ignorateNonTrovate} non presenti`
+        `${report.passaggioAggiuntivo.aggiornate} aggiornate, ${report.passaggioAggiuntivo.invariate} invariate, ${report.passaggioAggiuntivo.ignorateNonTrovate} non presenti`
       : '')
   );
 
@@ -771,7 +837,7 @@ export async function runJiraSyncTenant(config, ctx) {
     dryRun,
     configurazioneDi: null,
     utenti: [],
-    totali: { righeJira: 0, inserite: 0, aggiornate: 0, ignorateSenzaCliente: 0, ignorateScadute: 0 }
+    totali: { righeJira: 0, inserite: 0, aggiornate: 0, invariate: 0, ignorateSenzaCliente: 0, ignorateScadute: 0 }
   };
 
   for (const u of candidati) {
@@ -780,7 +846,10 @@ export async function runJiraSyncTenant(config, ctx) {
       risultato.utenti.push({ userId: u.userId, nome: u.nome, ok: true, report });
       risultato.configurazioneDi = u.nome;
       for (const k of Object.keys(risultato.totali)) risultato.totali[k] += Number(report[k]) || 0;
-      if (report.passaggioAggiuntivo) risultato.totali.aggiornate += Number(report.passaggioAggiuntivo.aggiornate) || 0;
+      if (report.passaggioAggiuntivo) {
+        risultato.totali.aggiornate += Number(report.passaggioAggiuntivo.aggiornate) || 0;
+        risultato.totali.invariate += Number(report.passaggioAggiuntivo.invariate) || 0;
+      }
       break; // un solo passaggio: tutto il tenant è già aggiornato
     } catch (e) {
       const saltato = CODICI_SALTATO.has(e.code);

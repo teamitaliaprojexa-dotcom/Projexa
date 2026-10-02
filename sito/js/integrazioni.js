@@ -135,6 +135,7 @@
             <div class="integr-nums">
                 ${numero(p.righeJira, 'righe lette da Jira')}
                 ${numero(p.aggiornate, 'aggiornate')}
+                ${p.invariate ? numero(p.invariate, 'invariate') : ''}
                 ${numero(p.ignorateNonTrovate, 'non presenti')}
                 ${numero(p.ignorateScadute, 'già scadute')}
             </div>
@@ -181,6 +182,7 @@
                 ${numero(r.righeJira, 'righe lette da Jira')}
                 ${numero(r.inserite, 'inserite')}
                 ${numero(r.aggiornate, 'aggiornate')}
+                ${r.invariate ? numero(r.invariate, 'invariate') : ''}
                 ${numero(r.ignorateSenzaCliente, 'senza cliente')}
                 ${numero(r.ignorateScadute, 'già scadute')}
                 ${r.ignorateSenzaCodice ? numero(r.ignorateSenzaCodice, 'senza codice') : ''}

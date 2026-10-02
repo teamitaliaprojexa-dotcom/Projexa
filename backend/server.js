@@ -175,11 +175,11 @@ app.use('/api/jira', jiraRoutes);
 app.use('/api/integrazioni', integrazioniRoutes);
 // Editor dei prompt AI (prompt-editor.html): solo admin del tenant PROJEXA.
 app.use('/api/prompts', promptsRoutes);
-// Monitor della VM (vm-monitor.html): solo admin del tenant PROJEXA.
+// Pagina Monitor (monitor.html): solo admin del tenant PROJEXA, sola lettura per MONITOR_LETTURA_EMAILS.
 app.use('/api/vm-monitor', vmMonitorRoutes);
-// Schedulazioni dei job (job-schedules.html): solo admin del tenant PROJEXA.
+// Schedulazioni dei job (monitor.html, scheda Schedulazioni).
 app.use('/api/job-schedules', jobSchedulesRoutes);
-// Pagina Log (audit-log.html): accessi e variazioni salvati su Oracle, solo admin del tenant PROJEXA
+// Log (monitor.html, scheda Log): accessi e variazioni salvati su Oracle
 app.use('/api/audit-log', auditLogRoutes);
 // Eventi da registrare nei log inviati dal browser (es. email del recap aperta): tutti gli utenti
 app.use('/api/audit', auditEventiRoutes);
@@ -3841,6 +3841,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
     // 2) Aggiorna, per ciascun gruppo risolto, la riga proj_componenti corrispondente
     // (per id, mai per email in WHERE: vedi nota sulla cifratura sopra).
     let updated = 0;
+    let unchanged = 0;
     let inserted = 0;
     let workerUpdated = 0;
     const notFoundCommessa = [];
@@ -3899,11 +3900,13 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
           const updatedAtClause = hasUpdatedAt ? ', updated_at = CURRENT_TIMESTAMP' : '';
           const updateParams = [g.ore, componentId, req.user.tenant_id];
           let scadenzaRepairClause = '';
+          let scadenzaChanged = '';
           if (componentiCols.has('scadenza')) {
             // Ogni componente interessato dall'import Qlik viene mantenuto attivo,
             // anche se esisteva già con una scadenza precedente o nulla.
             scadenzaRepairClause = `,
                  scadenza = DATE '2099-12-31'`;
+            scadenzaChanged = " OR scadenza IS DISTINCT FROM DATE '2099-12-31'";
           }
           // Cast esplicito a numeric: se time_spent_hh/time_spent_gg non sono già di
           // tipo numerico (es. varchar, o una precisione che non accetta il valore
@@ -3913,11 +3916,15 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
              SET time_spent_hh = $1::numeric,
                  time_spent_gg = ($1::numeric) / 8.0${scadenzaRepairClause}${updatedAtClause}
              WHERE id = $2 AND tenant_id = $3
+               AND (time_spent_hh IS DISTINCT FROM $1::numeric${scadenzaChanged})
              RETURNING id`,
             updateParams
           );
+          // Riga già con le stesse ore (e già attiva): non si riscrive, così updated_at
+          // resta quello dell'ultima modifica vera e il log non riceve righe inutili.
+          // L'id viene dalla lettura per tenant fatta sopra, quindi la riga esiste.
           if (result.rowCount > 0) updated += result.rowCount;
-          else notFoundComponente.push({ codiceCommessa: g.cod, email: g.email });
+          else unchanged += 1;
         }
       }
 
@@ -3952,6 +3959,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
              WHERE pw.tenant_id = $1
                AND pw.project_id::text = agg.project_id::text
                AND pw.worker_cost_id::text = agg.team_pro::text
+               AND pw.time_spent_hh IS DISTINCT FROM agg.total_hh
              RETURNING pw.id`,
             [req.user.tenant_id, projectIds]
           );
@@ -3969,6 +3977,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
 
     res.json({
       updated,
+      unchanged,
       inserted,
       workerUpdated,
       totalGroups: groups.length,
@@ -7802,7 +7811,7 @@ app.listen(PORT, () => {
   console.log(`\n✓ Health check: http://localhost:${PORT}/api/health\n`);
   // Riprende i blocchi di trascrizione rimasti in coda (es. dopo un riavvio del server)
   kickTranscriptionWorker();
-  // Monitor della VM (vm-monitor.html): storico di CPU/memoria/rete dall'avvio (solo Linux).
+  // Monitor della VM (monitor.html): storico di CPU/memoria/rete dall'avvio (solo Linux).
   startVmSampler();
   // Job schedulati (tabella job_schedules): attivo solo con JOB_SCHEDULER_ENABLED=true (sulla VM).
   avviaScheduler();

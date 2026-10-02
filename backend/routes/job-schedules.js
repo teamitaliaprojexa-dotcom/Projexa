@@ -1,5 +1,5 @@
-// Gestione delle schedulazioni dei job (pagina job-schedules.html, tabella job_schedules).
-// Riservata all'admin (id_roles = 1) del tenant PROJEXA, verificato sul database come per
+// Gestione delle schedulazioni dei job (pagina monitor.html, scheda Schedulazioni; tabella job_schedules).
+// Riservata all'admin (id_roles = 1) del tenant PROJEXA (sola lettura per MONITOR_LETTURA_EMAILS), verificato sul database come per
 // il Monitor VM. La tabella NON è in table_structures: l'endpoint generico /api/data non
 // la espone, si modifica solo da qui.
 //
@@ -10,14 +10,14 @@ import express from 'express';
 import db from '../config/database.js';
 import authDb from '../config/authDatabase.js';
 import { requireAuth } from '../middleware/auth.js';
-import { requireProjexaAdmin, vmCarico } from './vm-monitor.js';
+import { requireMonitorAccess, vmCarico } from './vm-monitor.js';
 import { calcolaProssima, NOMI_JOB, INFO_JOB, schedulerAttivo, schedulerSospeso } from '../jobs/scheduler.js';
 import { execFile } from 'child_process';
 import { statoWorker, kickTranscriptionWorker, enqueueFinalize } from '../jobs/meetingTranscription.js';
 import { whisperUrls, whisperCppUrls } from './ai.js';
 
 const router = express.Router();
-router.use(requireAuth, requireProjexaAdmin);
+router.use(requireAuth, requireMonitorAccess);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ORA = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;

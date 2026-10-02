@@ -370,6 +370,7 @@
     async function sendQlikImport(groups) {
         const CHUNK_SIZE = 2000;
         let totalUpdated = 0;
+        let totalUnchanged = 0;
         let totalInserted = 0;
         let totalWorkerUpdated = 0;
         let totalGroups = 0;
@@ -390,6 +391,7 @@
                     return;
                 }
                 totalUpdated += Number(data.updated) || 0;
+                totalUnchanged += Number(data.unchanged) || 0;
                 totalInserted += Number(data.inserted) || 0;
                 // Il ricalcolo di proj_worker è per progetto (somma TUTTE le righe di
                 // proj_componenti di quel progetto): se lo stesso progetto ricorre in più
@@ -408,6 +410,7 @@
 
         QlikVoucher.lastResult = {
             updated: totalUpdated,
+            unchanged: totalUnchanged,
             inserted: totalInserted,
             workerUpdated: totalWorkerUpdated,
             totalGroups,
@@ -471,8 +474,9 @@
                 <h3 style="margin:0 0 0.75rem; color:#1F2937;">${esc((TEMPLATE_IMPORTS[QlikVoucher.mode] || {}).title || 'Importazione Qlik voucher')}</h3>
                 <p style="margin:0 0 0.45rem; font-size:0.85rem; color:#6B7280;">Ambito: <strong>${result.scope === 'history' ? 'Tutto lo storico' : 'Solo progetti attivi'}</strong></p>
                 <p style="margin:0; font-size:0.95rem;">Righe aggiornate: <strong>${result.updated}</strong> di ${result.totalGroups} gruppi.</p>
+                ${result.unchanged ? `<p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Righe già aggiornate (nessuna modifica): <strong>${result.unchanged}</strong></p>` : ''}
                 <p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Nuovi componenti inseriti: <strong>${result.inserted}</strong></p>
-                <p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Righe proj_worker ricalcolate: <strong>${result.workerUpdated}</strong></p>
+                <p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Righe proj_worker con ore cambiate: <strong>${result.workerUpdated}</strong></p>
                 ${notFoundCommessaHtml}
                 ${notFoundComponenteHtml}
                 <div style="display:flex; justify-content:flex-end; margin-top:1.25rem;">
