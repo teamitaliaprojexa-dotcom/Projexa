@@ -19,6 +19,7 @@
 import db from '../config/database.js';
 import { eseguiAggiornaIntegrazioni } from './aggiornaIntegrazioni.js';
 import { eseguiBackupDb, eseguiCopiaStaging } from './scriptVm.js';
+import { conContestoAudit } from '../config/auditContext.js';
 
 // Job schedulabili: la chiave è il valore di job_schedules.job.
 const JOBS = {
@@ -180,7 +181,8 @@ async function esegui(riga) {
     errore = `Job sconosciuto: ${riga.job}`;
   } else {
     try {
-      report = await job(riga);
+      // Nel log variazioni le modifiche del job risultano con origine "job:<nome>", senza utente.
+      report = await conContestoAudit({ tenantId: riga.tenant_id, origine: `job:${riga.job}` }, () => job(riga));
       const problemi = problemiDelReport(report);
       if ((report && report.ok === false) || problemi.length) esito = 'errori';
       if (problemi.length) errore = problemi.join('\n');

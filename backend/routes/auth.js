@@ -10,6 +10,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { signSessionToken, verifySessionToken, forgetSessionSignature, passwordSignature } from '../config/session.js';
 import { startOAuthLogin, checkOAuthState, deliverLoginToken, takeLoginToken } from '../config/oauthLogin.js';
 import { seedSettingsFromTemplate } from '../config/settingsSeed.js';
+import { registraAccesso } from '../config/audit.js';
 
 // Link con token (conferma iscrizione, reset password) nel log solo in locale: in
 // produzione chi legge i log potrebbe usarli per prendere il controllo degli account.
@@ -71,6 +72,7 @@ router.post('/login', async (req, res) => {
     if (authRes.rows.length === 0) {
       // Email non censita: il frontend reindirizza alla pagina "Prova gratuita".
       console.log(`[LOGIN] No user found with email: ${email}`);
+      registraAccesso(req, { evento: 'login', esito: 'ko', email, dettaglio: 'email non registrata' });
       return res.status(404).json({ error: 'not_registered' });
     }
     const authUser = authRes.rows[0];
@@ -79,6 +81,7 @@ router.post('/login', async (req, res) => {
     console.log(`[LOGIN] Password match result: ${passwordMatch}`);
     if (!passwordMatch) {
       console.log(`[LOGIN] Password mismatch for user: ${email}`);
+      registraAccesso(req, { evento: 'login', esito: 'ko', userId: authUser.id, email, dettaglio: 'password errata' });
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
@@ -86,6 +89,7 @@ router.post('/login', async (req, res) => {
     const licenseCheck = checkLicenseExpiry(authUser);
     if (!licenseCheck.valid) {
       console.log(`[LOGIN] License expired for user: ${email}`);
+      registraAccesso(req, { evento: 'login', esito: 'ko', userId: authUser.id, email, dettaglio: 'licenza scaduta' });
       return res.status(403).json({
         error: 'License expired',
         redirect: `/license-expired.html?expiry=${licenseCheck.expiry}&email=${encodeURIComponent(licenseCheck.email)}`
@@ -148,6 +152,7 @@ router.post('/login', async (req, res) => {
       },
       authUser.password_hash
     );
+    registraAccesso(req, { evento: 'login', userId: userData.id, email: userData.email, tenantId: selectedTenant.id });
 
     res.json({
       success: true,
@@ -364,6 +369,7 @@ router.post('/change-password', requireAuth, async (req, res) => {
     if (!match) {
       registerPwdFailure(userId);
       console.warn(`[CHANGE-PASSWORD] Password attuale errata per utente ${userId}`);
+      registraAccesso(req, { evento: 'cambio_password', esito: 'ko', userId, email: req.user.email, tenantId: req.user.tenant_id, dettaglio: 'password attuale errata' });
       return res.status(401).json({ error: 'Password attuale non corretta.' });
     }
 
@@ -376,6 +382,7 @@ router.post('/change-password', requireAuth, async (req, res) => {
     // Le sessioni aperte con la vecchia password decadono; questa riceve un token nuovo.
     forgetSessionSignature(userId);
     console.log(`[CHANGE-PASSWORD] Password aggiornata per utente ${userId}`);
+    registraAccesso(req, { evento: 'cambio_password', userId, email: req.user.email, tenantId: req.user.tenant_id });
 
     res.json({ success: true, token: signSessionToken(req.user, newHash) });
   } catch (error) {
@@ -644,6 +651,7 @@ router.post('/magic-link/verify', async (req, res) => {
       authUser.password_hash
     );
     console.log(`[MAGIC-LINK] Accesso effettuato dall'utente ${authUser.id}`);
+    registraAccesso(req, { evento: 'magic_link', userId: authUser.id, email: authUser.email, tenantId: tenant.id });
     res.json({
       success: true,
       token: sessionToken,
@@ -823,6 +831,7 @@ router.get('/google-callback', async (req, res) => {
       authUser.password_hash
     );
 
+    registraAccesso(req, { evento: 'google', userId: userData.id, email: userData.email, tenantId: selectedTenant.id });
     deliverLoginToken(req, res, jwtToken, {
       provider: 'google',
       name: buildFullName(userData),
@@ -924,6 +933,11 @@ router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
       },
       emailRes.rows[0] ? emailRes.rows[0].password_hash : null
     );
+    // Registrato a nome dell'admin che impersona, con l'utente impersonato nel dettaglio.
+    registraAccesso(req, {
+      evento: 'impersonazione', userId: req.user.user_id, email: req.user.email, tenantId: tenant_id,
+      dettaglio: `impersona ${email || user_id} (utente ${user_id}) nel tenant ${row.tenant_name || tenant_id}`
+    });
     res.json({
       token,
       user: {

@@ -2,6 +2,7 @@ import pg from 'pg';
 import dotenv from 'dotenv';
 import { resolveDbUrl } from './dbEnv.js';
 import { withDecryption } from './cryptoPool.js';
+import { withAuditContext } from './auditContext.js';
 
 dotenv.config();
 
@@ -17,9 +18,11 @@ const { Pool } = pg;
 pg.types.setTypeParser(1082, (val) => val);
 
 // withDecryption: i valori cifrati ("enc:v1:...") tornano in chiaro in lettura.
-const pool = withDecryption(new Pool({
+// withAuditContext: le scritture fatte durante una richiesta passano utente e tenant
+// ai trigger del log variazioni (vedi config/auditContext.js).
+const pool = withAuditContext(withDecryption(new Pool({
   connectionString: resolveDbUrl('DATABASE_URL')
-}));
+})));
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);

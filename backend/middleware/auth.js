@@ -1,4 +1,5 @@
 import { verifySessionToken } from '../config/session.js';
+import { contestoDaRichiesta } from '../config/auditContext.js';
 
 // Middleware di autenticazione: verifica il token di sessione nell'header Authorization
 // (tipo "session" e password non cambiata dopo il login: vedi config/session.js).
@@ -20,7 +21,8 @@ export async function requireAuth(req, res, next) {
     console.error('❌ AUTH: verifica sessione non riuscita:', error.message);
     return res.status(503).json({ error: 'Servizio temporaneamente non disponibile' });
   }
-  next();
+  // Utente e tenant della richiesta arrivano ai trigger del log variazioni.
+  contestoDaRichiesta(req, next);
 }
 
 export default requireAuth;

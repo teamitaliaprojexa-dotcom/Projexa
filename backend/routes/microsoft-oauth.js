@@ -4,6 +4,7 @@ import authDb from '../config/authDatabase.js';
 import { signSessionToken } from '../config/session.js';
 import { checkOAuthState, deliverLoginToken } from '../config/oauthLogin.js';
 import { seedSettingsFromTemplate } from '../config/settingsSeed.js';
+import { registraAccesso } from '../config/audit.js';
 
 const router = express.Router();
 
@@ -198,6 +199,7 @@ router.get('/microsoft-callback', async (req, res) => {
 
     // === STEP 7: Consegna il token con un cookie monouso (mai nell'URL) ===
     console.log(`[MICROSOFT_AUTH] ✓ Authentication successful for ${email}`);
+    registraAccesso(req, { evento: 'microsoft', userId: userDbData.id, email, tenantId: selectedTenant.id });
     deliverLoginToken(req, res, jwtToken, {
       provider: 'microsoft',
       name: buildFullName(userDbData),

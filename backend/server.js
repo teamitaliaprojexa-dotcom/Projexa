@@ -23,6 +23,7 @@ import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
 import jobSchedulesRoutes from './routes/job-schedules.js';
 import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
 import { avviaScheduler } from './jobs/scheduler.js';
+import { avviaInvioAudit } from './jobs/auditShipper.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
 import { encryptRowForWrite } from './config/crypto.js';
@@ -7799,6 +7800,8 @@ app.listen(PORT, () => {
   startVmSampler();
   // Job schedulati (tabella job_schedules): attivo solo con JOB_SCHEDULER_ENABLED=true (sulla VM).
   avviaScheduler();
+  // Log accessi/variazioni: invio della coda audit_outbox a Oracle (solo con AUDIT_ORACLE_ENABLED=true).
+  avviaInvioAudit();
 });
 
 // Graceful shutdown
