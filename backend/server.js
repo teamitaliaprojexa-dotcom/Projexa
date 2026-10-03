@@ -1785,17 +1785,101 @@ async function ckpProgetto(req, projectId, pool = db) {
   return { projectId: id, clientId: p.client_id, tipologia: t && t.valore2 ? String(t.valore2).trim() : '', licenze };
 }
 
+// Condizione di una riga della configurazione (tabella_verif / campo_verif / colonna_verif /
+// operatore_verif / risultato_verif): la riga entra nella check list solo se il campo del
+// cliente (clients) o del progetto (projects) soddisfa il confronto. Es. «Inserire CIG /ODA su
+// Commessa» solo se il cliente ha «Pubblica Amministrazione» = vero. Righe senza condizione:
+// sempre previste. Campo assente o vuoto: un sì/no vale falso, gli altri valgono testo vuoto.
+const CKP_VERIF_TABELLE = { clients: 'clientId', projects: 'projectId' };
+const CKP_VERO = ['true', 'vero', 't', '1', 'si', 'sì', 'yes'];
+const CKP_FALSO = ['false', 'falso', 'f', '0', 'no'];
+
+async function ckpValoreCampo(pool, req, prog, tabella, campo, colonna, cache) {
+  const k = `${tabella}|${campo}|${colonna}`;
+  if (cache.has(k)) return cache.get(k);
+  const masterId = prog[CKP_VERIF_TABELLE[tabella]];
+  let valore;
+  if (masterId) {
+    const r = (await pool.query(
+      `SELECT "${colonna}" AS v FROM "${tabella}"
+        WHERE tenant_id = $1 AND user_id = $2 AND master_id = $3
+          AND lower(btrim(campo)) IN (lower(btrim($4)), '(*) ' || lower(btrim($4)))
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+        ORDER BY id LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, masterId, campo]
+    )).rows[0];
+    valore = r ? r.v : null;
+  }
+  cache.set(k, valore ?? null);
+  return valore ?? null;
+}
+
+function ckpConfronta(valore, operatore, atteso, colonna) {
+  const testo = (v) => (v == null ? '' : v instanceof Date ? v.toISOString().slice(0, 10) : String(v).trim());
+  const bool = (v) => { const s = testo(v).toLowerCase(); return CKP_VERO.includes(s) ? 'true' : CKP_FALSO.includes(s) ? 'false' : s; };
+  // Sì/no (valore1): vuoto = falso; vero/true/1 e falso/false/0 si confrontano tra loro.
+  const isBool = colonna === 'valore1';
+  const v = isBool ? (testo(valore) === '' ? 'false' : bool(valore)) : testo(valore);
+  const a = isBool ? bool(atteso) : testo(atteso);
+  const num = (s) => (s !== '' && Number.isFinite(Number(String(s).replace(',', '.'))) ? Number(String(s).replace(',', '.')) : null);
+  const uguali = (x, y) => (num(x) != null && num(y) != null ? num(x) === num(y) : x.toLowerCase() === y.toLowerCase());
+  const like = (x, pattern) => {
+    const p = pattern.includes('%') || pattern.includes('_')
+      ? pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*').replace(/_/g, '.')
+      : '.*' + pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '.*';
+    return new RegExp(`^${p}$`, 'i').test(x);
+  };
+  switch (Number(operatore)) {
+    case 1: return uguali(v, a);
+    case 2: return !uguali(v, a);
+    case 3: return a.split(/[,;]/).map((x) => (isBool ? bool(x) : x.trim())).some((x) => uguali(v, x));
+    case 7: return !a.split(/[,;]/).map((x) => (isBool ? bool(x) : x.trim())).some((x) => uguali(v, x));
+    case 4: return like(v, a);
+    case 5: return !like(v, a);
+    case 6: {
+      // «tra»: due estremi separati da ";" o "," (es. 10;20 oppure 2026-01-01;2026-12-31).
+      const [min, max] = a.split(/[;,]/).map((x) => x.trim());
+      if (min == null || max == null) return false;
+      if (num(v) != null && num(min) != null && num(max) != null) return num(v) >= num(min) && num(v) <= num(max);
+      return v >= min && v <= max;
+    }
+    default: return true;
+  }
+}
+
+async function ckpCondizioneOk(pool, req, prog, c, cache) {
+  const tabella = String(c.tabella_verif || '').trim();
+  const campo = String(c.campo_verif || '').trim();
+  if (!tabella || !campo || c.operatore_verif == null || String(c.operatore_verif).trim() === '') return true;
+  if (!CKP_VERIF_TABELLE[tabella]) return true;
+  const colonna = ['valore1', 'valore2', 'valore3'].includes(String(c.colonna_verif || '').trim())
+    ? String(c.colonna_verif).trim() : 'valore2';
+  const valore = await ckpValoreCampo(pool, req, prog, tabella, campo, colonna, cache);
+  return ckpConfronta(valore, c.operatore_verif, c.risultato_verif, colonna);
+}
+
 // Righe previste per il progetto, calcolate dalla configurazione e dalle licenze.
 // Chiave = config_id + licenza. ordinamento = padre * 100 + posizione della licenza: le copie
 // di una fase [Licenze] stanno una dopo l'altra, nell'ordine delle licenze del progetto.
+// Le righe con una condizione non soddisfatta (ckpCondizioneOk) non sono previste; se la
+// condizione è sulla riga di fase (slave 0), restano fuori anche tutte le sue attività.
 async function ckpRighePreviste(pool, req, prog) {
   if (!prog.tipologia) return [];
-  const conf = (await pool.query(
+  let conf = (await pool.query(
     `SELECT * FROM config_chek_list
       WHERE tenant_id = $1 AND user_id = $2 AND tipologia = $3 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
       ORDER BY padre NULLS LAST, figlio NULLS LAST, id`,
     [req.user.tenant_id, req.user.user_id, prog.tipologia]
   )).rows;
+  const cacheValori = new Map();
+  const escluse = new Set();
+  for (const c of conf) {
+    if (!(await ckpCondizioneOk(pool, req, prog, c, cacheValori))) escluse.add(String(c.id));
+  }
+  const padriEsclusi = new Set(conf
+    .filter((c) => Number(c.figlio || 0) === 0 && escluse.has(String(c.id)))
+    .map((c) => String(c.padre)));
+  conf = conf.filter((c) => !escluse.has(String(c.id)) && !padriEsclusi.has(String(c.padre)));
   // Fasi «licenze»: quelle la cui riga di fase (figlio 0) contiene [Licenze].
   const padriLicenze = new Set(conf
     .filter((c) => Number(c.figlio || 0) === 0 && CKP_SEGNAPOSTO_LICENZE.test(String(c.description || '')))
@@ -2039,6 +2123,61 @@ app.put('/api/projects/checklist/ordine', requireAuth, async (req, res) => {
     const rows = await ckpRighe(req, prog, client);
     await client.query('COMMIT');
     res.json({ tipologia: prog.tipologia, licenze: prog.licenze, rows });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    res.status(error.statusCode || 500).json({ error: error.message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// Contatori nella testata del progetto: righe non scadute (scadenza vuota o >= oggi) del
+// progetto, per tenant e utente del contesto. Task = Tkt Jira (task_app), Quotazioni
+// (cl_quotazioni), Meeting (rec_meeting), To Do (tasks).
+const PROJ_CONTATORI = { task: 'task_app', quotazioni: 'cl_quotazioni', meeting: 'rec_meeting', todo: 'tasks' };
+app.get('/api/projects/contatori', requireAuth, async (req, res) => {
+  try {
+    const prog = await ckpProgetto(req, req.query && req.query.projectId);
+    const out = {};
+    await Promise.all(Object.entries(PROJ_CONTATORI).map(async ([k, t]) => {
+      const r = await db.query(
+        `SELECT count(*)::int AS n FROM "${t}"
+          WHERE tenant_id = $1 AND user_id = $2 AND project_id = $3
+            AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+        [req.user.tenant_id, req.user.user_id, prog.projectId]
+      );
+      out[k] = r.rows[0].n;
+    }));
+    res.json(out);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Pulsante «Elimina» della finestra (dopo la doppia conferma nel browser): cancella tutte le
+// righe della check list del progetto, anche quelle già chiuse. Se una sola riga non è
+// modificabile dal ruolo del contesto non si cancella nulla. Riaprendo la Check List il
+// progetto la ricrea da zero dalla configurazione.
+app.delete('/api/projects/checklist', requireAuth, async (req, res) => {
+  let client;
+  try {
+    client = await db.connect();
+    await client.query('BEGIN');
+    const prog = await ckpProgetto(req, req.query && req.query.projectId, client);
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`chek_list|${prog.projectId}`]);
+    const ids = (await client.query(
+      `SELECT id::text AS id FROM "${CKP_TABELLA}"
+        WHERE tenant_id = $1 AND user_id = $2 AND client_id IS NOT DISTINCT FROM $3 AND project_id = $4`,
+      [req.user.tenant_id, req.user.user_id, prog.clientId, prog.projectId]
+    )).rows.map((r) => r.id);
+    if (ids.length) await assertRowsWritable(req, client, CKP_TABELLA, ids);
+    const x = await client.query(
+      `DELETE FROM "${CKP_TABELLA}"
+        WHERE tenant_id = $1 AND user_id = $2 AND client_id IS NOT DISTINCT FROM $3 AND project_id = $4`,
+      [req.user.tenant_id, req.user.user_id, prog.clientId, prog.projectId]
+    );
+    await client.query('COMMIT');
+    res.json({ eliminate: x.rowCount });
   } catch (error) {
     if (client) await client.query('ROLLBACK').catch(() => {});
     res.status(error.statusCode || 500).json({ error: error.message });
@@ -7726,11 +7865,41 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
               ? `${where} ${variab}`
               : 'WHERE ' + variab.replace(/^\s*(and|or)\s+/i, '');
           }
-          const opts = await db.query(
-            `SELECT DISTINCT "${row.colonna}" AS v FROM "${row.tabella}" ${where} ORDER BY "${row.colonna}" NULLS LAST LIMIT 500`,
-            params
-          );
-          row[optionsProp] = opts.rows.map(r => r.v).filter(v => v !== null && v !== undefined && String(v).trim() !== '');
+          // Colonna foreign key (es. licenze_app.licenza_id -> conf_licenze_app.id): al posto
+          // dell'id si mostra (e si salva in valore2) la descrizione della tabella collegata.
+          // Sottoquery per non rendere ambigue le colonne di VariabDB (es. scadenza).
+          const fk = (await db.query(
+            `SELECT ccu.table_name AS foreign_table, ccu.column_name AS foreign_column
+               FROM information_schema.table_constraints tc
+               JOIN information_schema.key_column_usage kcu
+                 ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+               JOIN information_schema.constraint_column_usage ccu
+                 ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+              WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+                AND tc.table_name = $1 AND kcu.column_name = $2
+              LIMIT 1`,
+            [row.tabella, row.colonna]
+          )).rows[0];
+          let sql = `SELECT DISTINCT "${row.colonna}" AS v FROM "${row.tabella}" ${where} ORDER BY "${row.colonna}" NULLS LAST LIMIT 500`;
+          if (fk) {
+            const foreignTable = assertValidIdentifier(fk.foreign_table);
+            const foreignColumn = assertValidIdentifier(fk.foreign_column);
+            const foreignColumns = await getTableColumns(foreignTable);
+            const displayColumn = [...foreignColumns].find(name => /^desc_/i.test(name))
+              || ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2'].find(name => foreignColumns.has(name));
+            if (displayColumn) {
+              assertValidIdentifier(displayColumn);
+              sql = `SELECT "${displayColumn}" AS v FROM "${foreignTable}"
+                      WHERE "${foreignColumn}" IN (SELECT "${row.colonna}" FROM "${row.tabella}" ${where})
+                      LIMIT 500`;
+            }
+          }
+          const opts = await db.query(sql, params);
+          // Deduplica e ordina dopo la lettura: le descrizioni possono essere cifrate sul DB.
+          row[optionsProp] = [...new Set(opts.rows.map(r => r.v)
+            .filter(v => v !== null && v !== undefined && String(v).trim() !== '')
+            .map(v => (fk ? String(v).trim() : v)))]
+            .sort((a, b) => (fk ? String(a).localeCompare(String(b), 'it', { sensitivity: 'base' }) : 0));
         } catch (e) {
           row[optionsProp] = [];
           console.error(`[TIPO ${row.tipo_valore}] Errore risoluzione opzioni:`, e.message);

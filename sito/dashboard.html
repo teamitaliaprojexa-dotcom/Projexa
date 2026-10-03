@@ -585,7 +585,7 @@
         .reorder-grid .reorder-row .drag-handle:hover { border-color: #16A34A; box-shadow: 0 0 0 1px #16A34A; }
         .reorder-newrow { border: 1px dashed #E5E7EB; border-radius: 8px; color: #9CA3AF; font-size: 0.75rem; text-align: center; padding: 6px; }
         .reorder-newrow:hover { border-color: #16A34A; color: #16A34A; }
-        /* Riga dei widget progetto: avanzamento (metà sinistra) + card Sottotask */
+        /* Riga dei widget progetto: avanzamento (metà sinistra) + contatori del progetto */
         .proj-widgets { display: flex; gap: 1.25rem; align-items: stretch; padding: 0.25rem 0 0.6rem; border-bottom: 1px solid var(--border); margin-bottom: 0.9rem; }
         .proj-progress { flex: 0 0 50%; max-width: 50%; display: flex; align-items: center; gap: 1rem; }
         .pp-donut { flex: 0 0 auto; }
@@ -629,11 +629,7 @@
         .multi9-opt { display: flex; align-items: center; gap: 12px; padding: 9px 2px; border-bottom: 1px solid #EEF2F7; font-size: 0.95rem; cursor: pointer; }
         .multi9-opt:last-child { border-bottom: none; }
         .multi9-opt input[type="checkbox"] { width: 18px; height: 18px; flex: 0 0 auto; cursor: pointer; accent-color: #3B82F6; }
-        /* Card statistica (es. Sottotask) */
-        .proj-stat { flex: 0 0 auto; align-self: center; min-width: 120px; background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 14px; padding: 0.8rem 1.1rem; }
-        .proj-stat-label { color: #9CA3AF; font-size: 0.85rem; margin-bottom: 0.25rem; }
-        .proj-stat-value { color: #1F2937; font-size: 1.6rem; font-weight: 700; line-height: 1; }
-        /* Pulsante Check List del progetto (accanto a Sottotask): card con l'immagine checklist.png
+        /* Pulsante Check List del progetto (accanto all'avanzamento): card con l'immagine checklist.png
            (riquadro con la spunta verde che esce in alto a destra) e la scritta sotto.
            Stati (aggiornaFlagCheckList): da iniziare = immagine in grigio; in corso = immagine
            verde e "fatte/totali" sotto la scritta; completata = immagine verde e card verde. */
@@ -641,6 +637,28 @@
             background: linear-gradient(145deg, #F0FDF4 0%, #ECFDF5 55%, #EEF2FF 100%); color: #14532D; font: inherit;
             display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.3rem;
             box-shadow: 0 4px 14px rgba(5,150,105,0.16), inset 0 0 0 1px rgba(5,150,105,0.14); transition: transform 0.18s, box-shadow 0.18s, background 0.2s; }
+        /* Contatori del progetto nella testata (Task, Quotazioni, Meeting, To Do non scaduti):
+           schede con bordo sfumato, icona in un cerchio colorato e numero grande. */
+        .proj-kpis { flex: 1 1 0; min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; align-self: center; }
+        .proj-kpi { --c1: #3B82F6; --c2: #6366F1; --bg: #EFF6FF; position: relative; overflow: hidden; display: flex; align-items: center; gap: 0.7rem;
+            padding: 0.75rem 0.85rem; border-radius: 16px; background: linear-gradient(145deg, #fff 0%, var(--bg) 100%);
+            box-shadow: 0 4px 14px rgba(15,23,42,0.07), inset 0 0 0 1px rgba(15,23,42,0.06); transition: transform 0.18s, box-shadow 0.18s; }
+        .proj-kpi::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: linear-gradient(180deg, var(--c1), var(--c2)); }
+        .proj-kpi::after { content: ''; position: absolute; right: -18px; top: -18px; width: 64px; height: 64px; border-radius: 50%; background: radial-gradient(circle, var(--c1) 0%, transparent 70%); opacity: 0.12; }
+        .proj-kpi:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(15,23,42,0.12), inset 0 0 0 1px rgba(15,23,42,0.08); }
+        .proj-kpi-ico { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; color: #fff; font-size: 1rem;
+            background: linear-gradient(135deg, var(--c1), var(--c2)); box-shadow: 0 4px 10px color-mix(in srgb, var(--c1) 40%, transparent); }
+        .proj-kpi-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.1; }
+        .proj-kpi-num { font-size: 1.55rem; font-weight: 800; color: #0F172A; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+        .proj-kpi-lbl { font-size: 0.8rem; font-weight: 700; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .proj-kpi.zero .proj-kpi-num { color: #94A3B8; }
+        .proj-kpi.k-task { --c1: #3B82F6; --c2: #6366F1; --bg: #EFF6FF; }
+        .proj-kpi.k-quot { --c1: #F59E0B; --c2: #F97316; --bg: #FFF7ED; }
+        .proj-kpi.k-meet { --c1: #8B5CF6; --c2: #EC4899; --bg: #F5F3FF; }
+        .proj-kpi.k-todo { --c1: #10B981; --c2: #14B8A6; --bg: #ECFDF5; }
+        @media (max-width: 1100px) { .proj-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        /* Spazio del pulsante sulla riga di Descrizione (stesse dimensioni della testata). */
+        .proj-ck-slot { display: flex; align-items: center; min-width: 0; }
         .proj-ck:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(5,150,105,0.26), inset 0 0 0 1px rgba(5,150,105,0.22); }
         .proj-ck:hover .proj-ck-img { transform: scale(1.06) rotate(-3deg); }
         .proj-ck:focus-visible { outline: 3px solid #86EFAC; outline-offset: 2px; }
@@ -701,7 +719,11 @@
         .ckp-ko.ro { cursor: default; }
         .ckp-ko.ro:hover { transform: none; background: transparent; }
         .ckp-empty { padding: 2rem 0.5rem; text-align: center; color: #6B7280; }
-        .ckp-foot { padding: 0.6rem 1.2rem; border-top: 1px solid #E5E7EB; font-size: 0.8rem; color: #6B7280; }
+        .ckp-foot { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 1.2rem; border-top: 1px solid #E5E7EB; font-size: 0.8rem; color: #6B7280; }
+        .ckp-foot-testo { flex: 1; }
+        .ckp-del { display: inline-flex; align-items: center; gap: 0.4rem; border: 1px solid #FCA5A5; background: #FEF2F2; color: #B91C1C; border-radius: 9px; padding: 0.35rem 0.8rem; font: inherit; font-size: 0.82rem; font-weight: 700; cursor: pointer; }
+        .ckp-del:hover { background: #FEE2E2; }
+        .ckp-del:disabled { opacity: 0.6; cursor: wait; }
         .drag-handle { cursor: grab; }
         .drag-handle:active { cursor: grabbing; }
         /* Evidenzia in verde la label sotto il mouse quando è spostabile */
@@ -1138,6 +1160,18 @@
         .type11-grid-table tbody tr.group-color-4 td { background: #e8f7fc; }
         .type11-grid-table tbody tr.group-color-4 td:first-child { background: #e8f7fc; color: #0f766e; }
         .type11-grid-table tbody tr:hover td { filter: brightness(0.97); }
+        /* Griglia a una sola colonna in visualizzazione: righe su 3 colonne affiancate
+           (intestazione e filtro restano sopra, larghi quanto le 3 colonne). */
+        .type11-grid-table.type11-multicol tbody {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            column-gap: 10px;
+            row-gap: 7px;
+            padding-top: 7px;
+        }
+        .type11-grid-table.type11-multicol tbody tr { display: block; min-width: 0; }
+        .type11-grid-table.type11-multicol tbody td { display: block; min-width: 0; border-radius: 10px; }
+        .type11-grid-table.type11-multicol tbody tr.type11-empty-row { grid-column: 1 / -1; }
         /* Colonne che contengono indirizzi web (es. url, link_task): il link per
            esteso occuperebbe mezza griglia, quindi la colonna si stringe al minimo
            e la cella mostra solo l'icona che apre la pagina in una nuova scheda. */
@@ -10902,7 +10936,7 @@
                 '<div class="pp-comp-row"><span class="pp-comp-label">Completamento</span>' +
                 '<div class="pp-bar"><div class="pp-fill pp-fill-comp" style="width:' + comp + '%"></div></div>' +
                 '<span class="pp-comp-val">' + comp + '%</span></div>';
-            // Widget avanzamento (metà sinistra) + card Sottotask (dati forniti in seguito).
+            // Widget avanzamento (metà sinistra) + pulsante Check List.
             const progress = '<div class="proj-progress">' +
                 '<div class="pp-donut"><svg viewBox="0 0 80 80" width="62" height="62">' +
                 '<circle cx="40" cy="40" r="' + R + '" fill="none" stroke="#E5E7EB" stroke-width="10"></circle>' +
@@ -10916,16 +10950,71 @@
                 '<div class="pp-remaining">' + remaining + ' giorni rimanenti</div>' +
                 compHtml +
                 '</div></div>';
-            const statCard = '<div class="proj-stat"><div class="proj-stat-label">Sottotask</div>' +
-                '<div class="proj-stat-value" id="projSubtasks">— / —</div></div>';
-            // Pulsante Check List del progetto: il flag parte "da iniziare" e lo aggiorna
-            // aggiornaFlagCheckList quando ci sono i dati della check list del progetto.
-            const checkListBtn = '<button type="button" class="proj-ck" id="projCheckListBtn" title="Check List del progetto">' +
+            // Contatori del progetto (righe non scadute), riempiti da caricaContatoriProgetto.
+            const kpis = '<div class="proj-kpis" id="projKpis">' + PROJ_KPI.map(k =>
+                `<div class="proj-kpi ${k.cls}" data-kpi="${k.key}" title="${escapeHtml(k.title)}">` +
+                `<span class="proj-kpi-ico"><i class="fas ${k.icon}"></i></span>` +
+                '<span class="proj-kpi-txt"><span class="proj-kpi-num">–</span>' +
+                `<span class="proj-kpi-lbl">${escapeHtml(k.label)}</span></span></div>`
+            ).join('') + '</div>';
+            return '<div class="proj-widgets">' + progress + kpis + '</div>';
+        }
+
+        const PROJ_KPI = [
+            { key: 'task', label: 'Task', icon: 'fa-ticket', cls: 'k-task', title: 'Tkt Jira del progetto non scaduti' },
+            { key: 'quotazioni', label: 'Quotazioni', icon: 'fa-file-invoice-dollar', cls: 'k-quot', title: 'Quotazioni del progetto non scadute' },
+            { key: 'meeting', label: 'Meeting', icon: 'fa-video', cls: 'k-meet', title: 'Meeting del progetto non scaduti' },
+            { key: 'todo', label: 'To Do', icon: 'fa-list-check', cls: 'k-todo', title: 'Voci della To do List del progetto non scadute' }
+        ];
+        // Legge i contatori (GET /api/projects/contatori) e li fa salire da 0 al valore.
+        async function caricaContatoriProgetto(listEl, projectId) {
+            const box = listEl.querySelector('#projKpis');
+            if (!box || !projectId) return;
+            try {
+                const r = await fetch(`${API_URL}/projects/contatori?projectId=${encodeURIComponent(projectId)}`, { headers: getAuthHeaders() });
+                if (!r.ok) return;
+                const d = await r.json();
+                box.querySelectorAll('.proj-kpi').forEach(el => {
+                    const n = Number(d[el.dataset.kpi]) || 0;
+                    const num = el.querySelector('.proj-kpi-num');
+                    el.classList.toggle('zero', n === 0);
+                    const t0 = performance.now(), durata = 700;
+                    const passo = (t) => {
+                        const f = Math.min(1, (t - t0) / durata);
+                        num.textContent = Math.round(n * (1 - Math.pow(1 - f, 3)));
+                        if (f < 1) requestAnimationFrame(passo);
+                    };
+                    requestAnimationFrame(passo);
+                });
+            } catch (e) { /* contatori non disponibili: restano i trattini */ }
+        }
+
+        // Pulsante Check List del progetto: il flag parte "da iniziare" e lo aggiorna
+        // aggiornaFlagCheckList quando ci sono i dati della check list del progetto.
+        function projCheckListBtnHtml() {
+            return '<button type="button" class="proj-ck" id="projCheckListBtn" title="Check List del progetto">' +
                 '<img class="proj-ck-img" src="checklist.png" alt="">' +
                 '<span class="proj-ck-lbl">Check List</span><span class="proj-ck-cnt" id="projCheckListCnt"></span></button>';
-            // Stato del pulsante (fatte/totali) letto dopo che la testata è nella pagina.
-            setTimeout(() => ckpStatoProgetto(currentDetailArgument), 0);
-            return '<div class="proj-widgets">' + progress + statCard + checkListBtn + '</div>';
+        }
+        // Posizione del pulsante: nello spazio libero della riga di Descrizione (subito dopo il
+        // campo); se la riga è piena o in riordino, nella testata del progetto.
+        function posizionaCheckListProgetto(listEl, editing) {
+            const norm = (c) => String(c || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
+            const cella = editing ? null : [...listEl.querySelectorAll('.detail-row > .settings-detail-row[data-campo]')]
+                .find(el => norm(el.dataset.campo) === 'descrizione');
+            const riga = cella && cella.parentElement;
+            const usate = riga ? [...riga.children].reduce((n, el) => n + (Number(el.dataset.span) || 1), 0) : 5;
+            if (riga && usate < 5) {
+                riga.insertAdjacentHTML('beforeend', `<div class="proj-ck-slot" style="grid-column: span ${5 - usate};">${projCheckListBtnHtml()}</div>`);
+            } else {
+                // Testata presente solo nella scheda del progetto (non nei nodi annidati).
+                const widgets = listEl.querySelector('.proj-widgets');
+                if (!widgets) return;
+                widgets.insertAdjacentHTML('beforeend', projCheckListBtnHtml());
+            }
+            // Stato del pulsante (fatte/totali) letto dopo che il pulsante è nella pagina.
+            ckpStatoProgetto(currentDetailArgument);
+            caricaContatoriProgetto(listEl, currentDetailArgument);
         }
 
         // Stato del pulsante Check List del progetto: da iniziare (nessuna voce fatta o check list
@@ -10967,7 +11056,7 @@
                 <div class="ckp-box">
                     <div class="ckp-head"><img src="checklist.png" alt=""><h3 id="ckpTitle">Check List<small id="ckpSub"></small></h3><button type="button" class="ckp-agg" id="ckpAggiorna" title="Riallinea la check list a configurazione e licenze del progetto (Check e date non cambiano)"><i class="fas fa-rotate"></i> Aggiorna</button><button type="button" class="ckp-close" id="ckpClose" aria-label="Chiudi">&times;</button></div>
                     <div class="ckp-body" id="ckpBody"></div>
-                    <div class="ckp-foot" id="ckpFoot"></div>
+                    <div class="ckp-foot"><span class="ckp-foot-testo" id="ckpFoot"></span><button type="button" class="ckp-del" id="ckpElimina" title="Cancella tutta la check list di questo progetto"><i class="fas fa-trash"></i> Elimina</button></div>
                 </div></div>`);
             m = document.getElementById('ckpOverlay');
             const chiudi = () => m.classList.remove('open');
@@ -11001,6 +11090,32 @@
                         showNotification('Errore: ' + err.message, 'info');
                     } finally {
                         agg.disabled = false;
+                    }
+                };
+            }
+            // Elimina: cancella tutta la check list del progetto, dopo due conferme.
+            const del = document.getElementById('ckpElimina');
+            if (del) {
+                del.style.display = rows.length ? '' : 'none';
+                del.disabled = rows.some(r => r.__can_write === false);
+                del.title = del.disabled ? 'Alcune voci sono in sola lettura per il tuo ruolo' : 'Cancella tutta la check list di questo progetto';
+                del.onclick = async () => {
+                    if (!confirm(`Eliminare la check list di questo progetto (${rows.length} voci, con spunte e date)?`)) return;
+                    if (!confirm('Conferma definitiva: la cancellazione non si può annullare. Procedere?')) return;
+                    del.disabled = true;
+                    try {
+                        const r = await fetch(`${API_URL}/projects/checklist?projectId=${encodeURIComponent(projectId)}`, {
+                            method: 'DELETE',
+                            headers: getAuthHeaders()
+                        });
+                        const x = await r.json().catch(() => ({}));
+                        if (!r.ok) throw new Error(x.error || `Errore ${r.status}`);
+                        document.getElementById('ckpOverlay')?.classList.remove('open');
+                        aggiornaFlagCheckList(0, 0);
+                        showNotification('Check List eliminata', 'success');
+                    } catch (err) {
+                        showNotification('Errore: ' + err.message, 'info');
+                        del.disabled = false;
                     }
                 };
             }
@@ -13421,6 +13536,7 @@
                     html += '</div>';
                     listEl.innerHTML = html;
                 }
+                if (source === 'projects') posizionaCheckListProgetto(listEl, editing);
                 // La funzione Logo compare esclusivamente nel dettaglio di un cliente già scelto.
                 injectClientLogoAction(listEl, source, argument, label || argument);
                 // Il logo organizzazione compare solo in Settings > Profilo per gli amministratori.
@@ -14899,7 +15015,7 @@
             const fasi = () => dati[tip] || [];
             const segna = () => { sporche.add(tip); aggiornaAzioni(); disegnaTabs(); };
             const chip = (ver) => ver && ver.campo
-                ? `<span class="ckc-chip ver" title="Verifica automatica"><i class="fas fa-bolt"></i>${escapeHtml(ver.tabella === 'clients' ? 'Cliente' : 'Progetto')} · ${escapeHtml(ver.campo)} ${escapeHtml(opLabel(ver.operatore))} ${escapeHtml(risLabel(ver.risultato))}</span>`
+                ? `<span class="ckc-chip ver" title="Condizione: la voce entra nella check list solo se è vera"><i class="fas fa-filter"></i>${escapeHtml(ver.tabella === 'clients' ? 'Cliente' : 'Progetto')} · ${escapeHtml(ver.campo)} ${escapeHtml(opLabel(ver.operatore))} ${escapeHtml(risLabel(ver.risultato))}</span>`
                 : '<span class="ckc-chip none"><i class="far fa-circle"></i>manuale</span>';
 
             widget.innerHTML = `<div class="ckc">
@@ -14975,7 +15091,7 @@
                     body.innerHTML = `
                         <div class="ckc-field"><label>Descrizione</label><textarea id="ckcFDesc" rows="2" maxlength="255" ${ro ? 'readonly' : ''}>${escapeHtml(a.titolo)}</textarea></div>
                         <div class="ckc-field"><label>Tipo verifica</label><input value="selezione" readonly></div>
-                        <div class="ckc-swrow"><div><b>Verifica automatica</b><small>Controlla un campo del cliente o del progetto</small></div>
+                        <div class="ckc-swrow"><div><b>Condizione</b><small>La voce entra nella check list del progetto solo se un campo del cliente o del progetto ha il valore atteso</small></div>
                             <label class="toggle-switch"><input type="checkbox" id="ckcFVer" ${on ? 'checked' : ''} ${dis}><span class="toggle-slider"></span></label></div>
                         ${on ? `<div class="ckc-verbox">
                             <div class="ckc-field"><label>Dove</label><div class="ckc-seg" id="ckcFTab">
@@ -14988,7 +15104,7 @@
                                 ? `<div class="ckc-seg" id="ckcFRisSeg"><button type="button" data-r="true" class="${a.ver.risultato === 'true' ? 'on' : ''}" ${dis}>vero</button><button type="button" data-r="false" class="${a.ver.risultato === 'false' ? 'on' : ''}" ${dis}>falso</button></div>`
                                 : `<input id="ckcFRis" value="${escapeHtml(a.ver.risultato || '')}" placeholder="Valore atteso" ${ro ? 'readonly' : ''}>`}</div>
                             <div class="ckc-preview">${campo
-                                ? `Spunta automatica quando <b>${a.ver.tabella === 'clients' ? 'il cliente' : 'il progetto'}</b> ha <b>${escapeHtml(campo.display)}</b> ${escapeHtml(opLabel(a.ver.operatore) || '…')} <b>${escapeHtml(risLabel(a.ver.risultato) || '…')}</b>`
+                                ? `Voce inserita solo se <b>${a.ver.tabella === 'clients' ? 'il cliente' : 'il progetto'}</b> ha <b>${escapeHtml(campo.display)}</b> ${escapeHtml(opLabel(a.ver.operatore) || '…')} <b>${escapeHtml(risLabel(a.ver.risultato) || '…')}</b>`
                                 : 'Scegli il campo da verificare.'}</div>
                         </div>` : ''}`;
                     if (ro) return;
@@ -15313,7 +15429,12 @@
                     + columnWidths.map(width => `<col style="width:${width}px; min-width:${width}px; max-width:${width}px;">`).join('')
                     + (canExpire ? '<col style="width:44px; min-width:44px; max-width:44px;">' : '')
                     + '</colgroup>';
-                const tableWidth = Math.max(1, columnWidths.reduce((total, width) => total + width, 0) + (canExpire ? 44 : 0));
+                // Griglia con una sola colonna (es. Elenco delle Licenze), in visualizzazione: le
+                // righe si dispongono su 3 colonne affiancate. In modifica resta la tabella normale.
+                const multiColumn = visibleColumns.length === 1 && !editing && !canExpire;
+                const tableWidth = multiColumn
+                    ? columnWidths[0] * 3 + 20
+                    : Math.max(1, columnWidths.reduce((total, width) => total + width, 0) + (canExpire ? 44 : 0));
 
                 // Freccia nell'intestazione = ordinamento; la seconda riga dell'intestazione
                 // contiene il filtro di ogni colonna ("contiene", mentre si scrive).
@@ -15367,7 +15488,7 @@
                 const topFilterHtml = topFilter
                     ? `<div class="type11-top-filter"><label>${escapeHtml(topFilter.label)} <select aria-label="Filtra per ${escapeHtml(topFilter.label)}">${(() => { const v = (widget._type11View && widget._type11View.exact && widget._type11View.exact[topFilter.column]) || type11TopFilterChoice.get(`${fieldId}|${topFilter.column}`) || ''; return v ? `<option value="${escapeHtml(v)}" selected>${escapeHtml(v)}</option>` : '<option value="">Caricamento…</option>'; })()}</select></label></div>`
                     : '';
-                widget.innerHTML = `${topFilterHtml}${toolbar}<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}" style="width:${tableWidth}px;">${colgroup}<thead><tr class="type11-head-row">${head}</tr><tr class="type11-filter-row">${filterHead}</tr></thead><tbody>${body}${emptyRow}</tbody></table></div><div class="type11-grid-count"></div>`;
+                widget.innerHTML = `${topFilterHtml}${toolbar}<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}${multiColumn ? ' type11-multicol' : ''}" style="width:${tableWidth}px;${multiColumn ? ' max-width:100%;' : ''}">${colgroup}<thead><tr class="type11-head-row">${head}</tr><tr class="type11-filter-row">${filterHead}</tr></thead><tbody>${body}${emptyRow}</tbody></table></div><div class="type11-grid-count"></div>`;
                 // Scelta del filtro sopra la griglia ripristinata PRIMA di disegnare le righe.
                 if (topFilter) {
                     const view = widget._type11View || (widget._type11View = { filters: {}, sort: null, exact: {} });

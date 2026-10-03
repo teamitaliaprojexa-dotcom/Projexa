@@ -53,7 +53,8 @@ const OPERATORI = [
   { id: '3', display: 'in' },
   { id: '4', display: 'like' },
   { id: '5', display: 'not like' },
-  { id: '6', display: 'tra' }
+  { id: '6', display: 'tra' },
+  { id: '7', display: 'not in' }
 ];
 
 const REGOLE = {
