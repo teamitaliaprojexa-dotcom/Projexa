@@ -20,6 +20,12 @@ export const PROMPT_FUNCTIONS = {
   RECAP_EMAIL: {
     titolo: 'Recap email della riunione',
     segnaposto: ['TRASCRIZIONE', 'OGGETTO', 'DATA', 'UTENTE']
+  },
+  // Pulsante «Kick-off» della scheda progetto: istruzioni per compilare il template .pptx.
+  // Il formato della risposta (JSON con le modifiche) lo aggiunge sempre il server.
+  KICKOFF: {
+    titolo: 'Slide Kick-off del progetto',
+    segnaposto: ['PROGETTO', 'CLIENTE', 'TEAM', 'LICENZE', 'DATA', 'UTENTE']
   }
 };
 

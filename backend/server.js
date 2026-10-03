@@ -27,6 +27,10 @@ import auditEventiRoutes from './routes/audit-eventi.js';
 import { sendMail, buildRichiestaCancellazioneEmail, EMAIL_PROJEXA } from './config/mailer.js';
 import { regoleColonne, metaColonna, etichetteColonne, etichetteValori, opzioniColonna, applicaRegoleScrittura, ordineGriglia, filtroSopraGriglia } from './config/gridColumnRules.js';
 import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
+import { askAiProvider, PROVIDERS as AI_PROVIDERS } from './routes/ai.js';
+import { getIntegration } from './config/integrations.js';
+import { getPromptFor } from './config/prompts.js';
+import { leggiTemplate, descriviTemplate, applicaModifiche, leggiRispostaAi, testoRisultante, spostamentiRichiesti } from './config/kickoffPptx.js';
 import { avviaScheduler } from './jobs/scheduler.js';
 import { avviaInvioAudit } from './jobs/auditShipper.js';
 import { allowedOrigins } from './config/origins.js';
@@ -2130,6 +2134,303 @@ app.put('/api/projects/checklist/ordine', requireAuth, async (req, res) => {
     if (client) client.release();
   }
 });
+
+// ==========================================
+// KICK-OFF DEL PROGETTO (pulsante «Kick-off» accanto a Check List nella scheda progetto)
+// ==========================================
+// Team = righe di proj_componenti del progetto (tenant + utente + progetto, non scadute):
+// si aggiungono scegliendo un contatto della rubrica e si tolgono chiudendo la riga
+// (scadenza = ieri, come nel resto dell'app). Licenze = campo «Licenze da attivare» del
+// progetto (ckpProgetto). AI = Impostazioni › AI › «AI Slide Kick-Off» (settings.valore2).
+// «Genera»: il browser manda il template .pptx scelto dal PC; il server ne estrae i testi
+// (config/kickoffPptx.js), chiede all'AI le modifiche con il prompt KICKOFF (app_prompts),
+// le applica e restituisce il nuovo .pptx. Il file vive solo in memoria per la durata della
+// richiesta: niente viene salvato sulla VM né nel database.
+const KO_TABELLA = 'proj_componenti';
+const KO_MAX_TEMPLATE = 40 * 1024 * 1024;
+const KO_MAX_TESTO_AI = 120000;
+const koNorm = (s) => String(s || '').trim().toLowerCase();
+
+// Formato della risposta: sempre aggiunto dal server, così un prompt personalizzato non può
+// romperlo.
+const KO_FORMATO = `FORMATO DELLA RISPOSTA (obbligatorio)
+Rispondi SOLO con un oggetto JSON, senza testo prima o dopo, in questa forma:
+{"modifiche": [
+  {"id": "S1.2", "testo": "nuovo testo della casella (\\n per andare a capo)"},
+  {"id": "S4.T1", "righe": [["cella 1", "cella 2"], ["cella 1", "cella 2"]]},
+  {"id": "S4.9", "elimina": true},
+  {"id": "S8.3", "sposta_in": "S7"},
+  {"id": "S8", "elimina_slide": true}
+]}
+- "id" è il codice tra parentesi quadre del template qui sotto: S<slide>.<n> per caselle di testo, forme e immagini, S<slide>.T<n> per le tabelle, S<slide> per l'intera slide.
+- "testo" sostituisce tutto il testo della casella: riscrivi anche le righe che restano uguali, una riga per ogni riga della casella originale e nello stesso ordine (lo stile di ogni riga resta quello del template). "" svuota la casella.
+- "righe" sostituisce tutte le righe della tabella, compresa l'intestazione se c'è: le righe in più copiano lo stile dell'ultima riga.
+- "elimina": true toglie dalla slide la casella, la forma, l'immagine o la tabella.
+- "elimina_slide": true toglie l'intera slide (non tutte le slide).
+- "sposta_in": "S<n>" sposta in un'altra slide l'intero blocco di cui fa parte l'elemento (forma con le sue caselle collegate, icona e descrizione: basta indicare uno dei suoi codici, es. il titolo). Serve per riunire in una sola slide elementi che nel template sono su più slide (es. una licenza che si trova nella slide 8 quando si tiene solo la slide 7): sposta prima i blocchi che servono, poi elimina la slide rimasta inutile. Nella slide di destinazione i blocchi vengono ridisposti e centrati in automatico.
+- Ogni forma e icona indica a quali caselle appartiene ("insieme a: …", "dentro …"): una forma "senza testo" con caselle collegate fa parte di quell'elemento (es. il riquadro colorato di una licenza con titolo e descrizione in caselle a parte) e NON va eliminata se quelle caselle restano piene.
+- Quando svuoti ("") o elimini tutte le caselle collegate a una forma (es. il cerchio di una persona, il riquadro di una licenza), il sistema toglie da solo la forma e le icone che contiene: non serve eliminarle. Elimina esplicitamente solo le forme con "nessun testo collegato" che non servono.
+- Le posizioni (x, y, larg, alt in % della slide) servono a capire quali elementi stanno insieme.
+- Includi solo gli elementi da cambiare. Non usare markdown nei testi.`;
+
+async function koProviderName(req) {
+  const r = (await db.query(
+    `SELECT valore2 FROM settings
+      WHERE tenant_id = $1 AND user_id = $2
+        AND lower(btrim(campo)) IN ('ai slide kick-off', '(*) ai slide kick-off')
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+      ORDER BY id LIMIT 1`,
+    [req.user.tenant_id, req.user.user_id]
+  )).rows[0];
+  return r && r.valore2 ? String(r.valore2).trim() : '';
+}
+
+// Colonna del ruolo della persona in rubrica: la prima presente tra questi nomi, null se
+// la tabella non ce l'ha.
+const KO_COLONNE_RUOLO = ['ruolo', 'role', 'ruolo_progetto', 'qualifica', 'funzione'];
+async function koColRuolo(tabella, pool = db) {
+  const cols = await getTableColumns(tabella, pool);
+  return KO_COLONNE_RUOLO.find((c) => cols.has(c)) || null;
+}
+
+// Contatti della rubrica (tenant + utente), con il ruolo. tutte = anche quelli scaduti.
+async function koRubrica(req, { tutte = false, pool = db } = {}) {
+  const col = await koColRuolo('rubrica', pool);
+  const r = await pool.query(
+    `SELECT id::text AS id, nominativo, email${col ? `, "${col}" AS ruolo` : ''} FROM rubrica
+      WHERE tenant_id = $1 AND user_id = $2
+        ${tutte ? '' : 'AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)'}
+      LIMIT 5000`,
+    [req.user.tenant_id, req.user.user_id]
+  );
+  return r.rows.map((x) => ({ ...x, ruolo: x.ruolo == null ? '' : String(x.ruolo).trim() }));
+}
+
+// Righe del team; tutte = true include quelle chiuse (per riaprirle invece di duplicarle).
+// In proj_componenti si salvano solo nominativo ed email: il ruolo si legge sempre dal
+// contatto di rubrica con la stessa email (e va nel prompt dell'AI).
+async function koTeam(req, prog, { tutte = false, pool = db } = {}) {
+  const r = await pool.query(
+    `SELECT id::text AS id, nominativo, email, id_roles_write, scadenza
+       FROM "${KO_TABELLA}"
+      WHERE tenant_id = $1 AND user_id = $2 AND project_id = $3
+        ${tutte ? '' : 'AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)'}
+      ORDER BY id`,
+    [req.user.tenant_id, req.user.user_id, prog.projectId]
+  );
+  if (!r.rows.length) return r.rows;
+  const ruoloRubrica = new Map((await koRubrica(req, { tutte: true, pool }))
+    .filter((c) => c.ruolo).map((c) => [koNorm(c.email), c.ruolo]));
+  return r.rows.map((x) => ({ ...x, ruolo: ruoloRubrica.get(koNorm(x.email)) || '' }));
+}
+const koTeamOut = (req, rows) => rows
+  .map((x) => ({ id: x.id, nominativo: x.nominativo || '', email: x.email || '', ruolo: x.ruolo || '', __can_write: canWriteRow(req, x.id_roles_write, KO_TABELLA) }))
+  .sort((a, b) => a.nominativo.localeCompare(b.nominativo, 'it', { sensitivity: 'base' }));
+
+// Apertura della finestra: progetto, team, licenze e AI scelta (con lo stato della chiave).
+app.get('/api/projects/kickoff', requireAuth, async (req, res) => {
+  try {
+    const prog = await ckpProgetto(req, req.query && req.query.projectId);
+    const nome = await koProviderName(req);
+    const cfg = AI_PROVIDERS[koNorm(nome)];
+    let connessa = false;
+    if (cfg) {
+      const el = await getIntegration(req.user.user_id, cfg.provider);
+      connessa = !!el[`${cfg.prefix}_api_key`];
+    }
+    res.json({
+      licenze: prog.licenze,
+      team: koTeamOut(req, await koTeam(req, prog)),
+      ai: { nome, supportata: !!cfg, connessa }
+    });
+  } catch (error) {
+    res.status(error.statusCode || error.status || 500).json({ error: error.message });
+  }
+});
+
+// Ricerca nella rubrica (tenant + utente, contatti non scaduti). Il filtro si fa dopo la
+// lettura perché nominativo ed email possono essere cifrati.
+app.get('/api/projects/kickoff/rubrica', requireAuth, async (req, res) => {
+  try {
+    const q = koNorm(req.query && req.query.q);
+    const out = (await koRubrica(req))
+      .filter((x) => !q || koNorm(x.nominativo).includes(q) || koNorm(x.email).includes(q) || koNorm(x.ruolo).includes(q))
+      .sort((a, b) => String(a.nominativo || '').localeCompare(String(b.nominativo || ''), 'it', { sensitivity: 'base' }))
+      .slice(0, 30)
+      .map((x) => ({ id: x.id, nominativo: x.nominativo || '', email: x.email || '', ruolo: x.ruolo }));
+    res.json({ contatti: out });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Aggiunge al team un contatto della rubrica: { projectId, rubricaId }. Stessa email già
+// nel team: errore; riga chiusa in passato (stessa email): si riapre.
+app.post('/api/projects/kickoff/team', requireAuth, async (req, res) => {
+  let client;
+  try {
+    const rubricaId = String((req.body && req.body.rubricaId) || '').trim();
+    if (!/^[0-9a-f-]{36}$/i.test(rubricaId)) return res.status(400).json({ error: 'Contatto non valido' });
+    client = await db.connect();
+    await client.query('BEGIN');
+    const prog = await ckpProgetto(req, req.body && req.body.projectId, client);
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`kickoff_team|${prog.projectId}`]);
+    const contatto = (await koRubrica(req, { tutte: true, pool: client })).find((x) => x.id === rubricaId.toLowerCase());
+    if (!contatto) throw Object.assign(new Error('Contatto non trovato in rubrica'), { statusCode: 404 });
+    const email = String(contatto.email || '').trim();
+    const nominativo = String(contatto.nominativo || '').trim();
+    if (!email || !nominativo) throw Object.assign(new Error('Il contatto in rubrica non ha nominativo o email'), { statusCode: 400 });
+    // Nel team (proj_componenti) passano solo nominativo ed email; il ruolo resta in rubrica.
+    const righe = await koTeam(req, prog, { tutte: true, pool: client });
+    const stessa = righe.filter((x) => koNorm(x.email) === koNorm(email));
+    const attiva = stessa.find((x) => !x.scadenza || new Date(x.scadenza) >= new Date(new Date().toDateString()));
+    if (attiva) throw Object.assign(new Error(`${nominativo} è già nel team`), { statusCode: 409 });
+    if (stessa.length) {
+      const r = stessa[stessa.length - 1];
+      if (!canWriteRow(req, r.id_roles_write, KO_TABELLA)) throw Object.assign(new Error(READ_ONLY_ERROR), { statusCode: 403 });
+      const dati = await cryptoWrite(client, 'main', KO_TABELLA, { nominativo }, r.id);
+      const cols = Object.keys(dati).map(assertValidIdentifier);
+      await client.query(
+        `UPDATE "${KO_TABELLA}" SET scadenza = NULL, ${cols.map((c, i) => `"${c}" = $${i + 2}`).join(', ')} WHERE id::text = $1`,
+        [r.id, ...cols.map((c) => dati[c])]
+      );
+    } else {
+      const riga = { tenant_id: req.user.tenant_id, user_id: req.user.user_id, client_id: prog.clientId,
+        project_id: prog.projectId, email, nominativo };
+      stampRoleWrite(req, riga, await getTableColumns(KO_TABELLA));
+      await insertRowEncrypted(client, 'main', KO_TABELLA, riga);
+    }
+    const team = koTeamOut(req, await koTeam(req, prog, { pool: client }));
+    await client.query('COMMIT');
+    res.json({ team });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    res.status(error.statusCode || 500).json({ error: error.message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// Toglie una persona dal team: la riga si chiude (scadenza = ieri), ore e dati Qlik restano.
+app.delete('/api/projects/kickoff/team/:id', requireAuth, async (req, res) => {
+  try {
+    const prog = await ckpProgetto(req, req.query && req.query.projectId);
+    const r = (await db.query(
+      `SELECT id, id_roles_write FROM "${KO_TABELLA}"
+        WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3 AND project_id = $4 LIMIT 1`,
+      [String(req.params.id || ''), req.user.tenant_id, req.user.user_id, prog.projectId]
+    )).rows[0];
+    if (!r) return res.status(404).json({ error: 'Persona non trovata nel team' });
+    if (!canWriteRow(req, r.id_roles_write, KO_TABELLA)) return res.status(403).json({ error: READ_ONLY_ERROR });
+    await db.query(`UPDATE "${KO_TABELLA}" SET scadenza = CURRENT_DATE - 1 WHERE id = $1`, [r.id]);
+    res.json({ team: koTeamOut(req, await koTeam(req, prog)) });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// «Genera»: corpo = il file .pptx (application/octet-stream), projectId e nome in query.
+// Risposta: il .pptx modificato da scaricare.
+app.post('/api/projects/kickoff/genera', requireAuth,
+  express.raw({ type: 'application/octet-stream', limit: KO_MAX_TEMPLATE }),
+  async (req, res) => {
+    const t0 = Date.now();
+    try {
+      const prog = await ckpProgetto(req, req.query && req.query.projectId);
+      if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Scegli il file Template (.pptx)' });
+      const nomeAi = await koProviderName(req);
+      if (!nomeAi) return res.status(400).json({ error: 'Scegli l\'AI in Impostazioni › AI › «AI Slide Kick-Off»' });
+      if (!AI_PROVIDERS[koNorm(nomeAi)]) return res.status(400).json({ error: `L'AI «${nomeAi}» non può generare le slide: scegli ChatGPT, Claude, Gemini o Mistral in Impostazioni › AI › «AI Slide Kick-Off»` });
+
+      const template = await leggiTemplate(req.body);
+      const descrizione = descriviTemplate(template);
+      if (descrizione.length > KO_MAX_TESTO_AI) {
+        return res.status(413).json({ error: 'Il template contiene troppo testo per l\'AI: usa un template più corto' });
+      }
+
+      // Dati del progetto per i segnaposto del prompt.
+      const nomi = (await db.query(
+        `SELECT (SELECT valore2 FROM projects WHERE id::text = $1 LIMIT 1) AS progetto,
+                (SELECT valore2 FROM clients WHERE id = $2 LIMIT 1) AS cliente,
+                (SELECT concat_ws(' ', name, cognome) FROM users WHERE id = $3) AS utente`,
+        [prog.projectId, prog.clientId, req.user.user_id]
+      )).rows[0] || {};
+      const team = koTeamOut(req, await koTeam(req, prog));
+      const vars = {
+        PROGETTO: nomi.progetto || '',
+        CLIENTE: nomi.cliente || '',
+        TEAM: team.length ? team.map((p) => `- ${p.nominativo}${p.ruolo ? ` — ruolo: ${p.ruolo}` : ''}${p.email ? ` (${p.email})` : ''}`).join('\n') : '(nessuna persona indicata)',
+        LICENZE: prog.licenze.length ? prog.licenze.map((l) => `- ${l}`).join('\n') : '(nessuna licenza indicata)',
+        DATA: new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+        UTENTE: String(nomi.utente || '').trim() || req.user.email || ''
+      };
+      const testoPrompt = (await getPromptFor('KICKOFF', req.user)).testo;
+      const istruzioni = testoPrompt.replace(/\{\{(PROGETTO|CLIENTE|TEAM|LICENZE|DATA|UTENTE)\}\}/g, (m, k) => vars[k]);
+      const prompt = `${istruzioni}\n\n${KO_FORMATO}\n\nTEMPLATE (testi attuali con i codici):\n${descrizione}`;
+
+      // Controllo prima di creare il file: se il prompt usa {{LICENZE}} / {{TEAM}}, ogni
+      // licenza e l'email di ogni persona devono comparire nelle slide. Se l'AI ne ha perso
+      // qualcuno (es. ha riusato il riquadro di una licenza per un'altra), si chiede una
+      // correzione una volta, indicando cosa manca.
+      const normTesto = (s) => String(s || '').toLowerCase().replace(/[’']/g, "'").replace(/\s+/g, ' ').trim();
+      const attesi = [
+        ...(testoPrompt.includes('{{LICENZE}}') ? prog.licenze.map((l) => ({ cosa: `la licenza «${l}»`, testo: l })) : []),
+        ...(testoPrompt.includes('{{TEAM}}') ? team.filter((p) => p.email).map((p) => ({ cosa: `${p.nominativo} (${p.email})`, testo: p.email })) : [])
+      ];
+      const mancanti = (mods) => {
+        const finale = normTesto(testoRisultante(template, mods));
+        return attesi.filter((a) => !finale.includes(normTesto(a.testo)));
+      };
+      let risposta = await askAiProvider(req.user.user_id, nomeAi, prompt);
+      let modifiche = leggiRispostaAi(risposta.text);
+      let persi = mancanti(modifiche);
+      if (persi.length) {
+        console.warn(`[KICKOFF] progetto ${prog.projectId}: mancano ${persi.map((a) => a.cosa).join(', ')}: chiedo la correzione all'AI`);
+        const correzione = `${prompt}\n\nATTENZIONE: una tua risposta precedente era sbagliata perché nelle slide risultanti mancavano: ${persi.map((a) => a.cosa).join('; ')}.
+Ogni licenza deve avere il suo riquadro con il suo nome come titolo (non riusare il riquadro di una licenza per un'altra: se il template ha già un riquadro con quel nome, usa proprio quello, anche se è in un'altra slide: in quel caso spostalo con "sposta_in" prima di eliminare la sua slide) e ogni persona del team deve comparire con la sua email.
+Risposta precedente da correggere:\n${String(risposta.text || '').slice(0, 30000)}\n\nRiscrivi l'elenco COMPLETO delle modifiche corretto, nello stesso formato.`;
+        try {
+          const r2 = await askAiProvider(req.user.user_id, nomeAi, correzione);
+          const m2 = leggiRispostaAi(r2.text);
+          const p2 = mancanti(m2);
+          if (p2.length < persi.length) { risposta = r2; modifiche = m2; persi = p2; }
+        } catch (e) {
+          console.warn(`[KICKOFF] correzione non riuscita: ${e.message}`);
+        }
+      }
+      // Spostamenti di blocchi che non sono licenze del progetto (es. l'AI porta nella slide 7
+      // anche moduli non acquistati della slide 8): scartati, quei blocchi restano dove sono
+      // (e spariscono con la loro slide se l'AI la elimina).
+      if (testoPrompt.includes('{{LICENZE}}') && prog.licenze.length) {
+        const licenze = prog.licenze.map(normTesto);
+        const scartati = spostamentiRichiesti(template, modifiche).filter((sp) => {
+          const t = normTesto(sp.titolo);
+          return !t || !licenze.some((l) => t === l || t.includes(l) || l.includes(t));
+        });
+        if (scartati.length) {
+          const ids = new Set(scartati.map((sp) => sp.id));
+          modifiche = modifiche.filter((m) => !(m && m.sposta_in && ids.has(String(m.id || '').trim().toUpperCase())));
+          console.warn(`[KICKOFF] progetto ${prog.projectId}: scartati gli spostamenti di blocchi che non sono licenze del progetto: ${scartati.map((sp) => sp.titolo || sp.id).join(', ')}`);
+        }
+      }
+      const esito = await applicaModifiche(template, modifiche);
+      if (!esito.applicate) return res.status(502).json({ error: `${risposta.label} non ha indicato modifiche applicabili al template: controlla il prompt e riprova` });
+
+      const nomeFile = `Kick-off ${vars.PROGETTO || 'progetto'}`.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 150) + '.pptx';
+      console.log(`[KICKOFF] progetto ${prog.projectId}: ${esito.applicate} modifiche applicate, ${esito.ignorate} ignorate, ${esito.elementiTolti} elementi e ${esito.slideTolte} slide tolti, ${esito.slideRiallineate} slide riallineate, ${esito.blocchiSpostati} blocchi spostati (${risposta.label} ${risposta.model}, ${Math.round((Date.now() - t0) / 1000)}s)`);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+      res.setHeader('Content-Disposition', `attachment; filename="kick-off.pptx"; filename*=UTF-8''${encodeURIComponent(nomeFile)}`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Kickoff-Modifiche', String(esito.applicate));
+      // Dati ancora mancanti dopo la correzione: la finestra li segnala.
+      if (persi.length) res.setHeader('X-Kickoff-Mancanti', encodeURIComponent(persi.map((a) => a.cosa).join('; ')));
+      res.setHeader('X-Kickoff-Ai', encodeURIComponent(`${risposta.label} (${risposta.model})`));
+      res.send(esito.buffer);
+    } catch (error) {
+      console.error('❌ KICKOFF:', error.message);
+      res.status(error.statusCode || error.status || 500).json({ error: error.message });
+    }
+  });
 
 // Contatori nella testata del progetto: righe non scadute (scadenza vuota o >= oggi) del
 // progetto, per tenant e utente del contesto. Task = Tkt Jira (task_app), Quotazioni

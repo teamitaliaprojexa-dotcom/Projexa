@@ -670,6 +670,58 @@
         .proj-ck.fatta { background: linear-gradient(145deg, #DCFCE7 0%, #BBF7D0 100%); box-shadow: 0 6px 18px rgba(5,150,105,0.3), inset 0 0 0 1px rgba(5,150,105,0.3); }
         .proj-ck.fatta .proj-ck-img { animation: projCkPop 2.6s ease-in-out infinite; }
         @keyframes projCkPop { 0%, 85%, 100% { transform: scale(1); } 90% { transform: scale(1.12); } }
+        /* Pulsante Kick-off (accanto a Check List): stessa card, toni rossi dell'immagine kickoff.png */
+        .proj-ck-slot { gap: 0.75rem; }
+        .proj-ck.proj-ko { background: linear-gradient(145deg, #FEF2F2 0%, #FFF1F2 55%, #EEF2FF 100%); color: #7F1D1D;
+            box-shadow: 0 4px 14px rgba(220,38,38,0.16), inset 0 0 0 1px rgba(220,38,38,0.14); }
+        .proj-ck.proj-ko:hover { box-shadow: 0 10px 24px rgba(220,38,38,0.26), inset 0 0 0 1px rgba(220,38,38,0.22); }
+        .proj-ck.proj-ko:focus-visible { outline-color: #FCA5A5; }
+        .proj-ko .proj-ck-img { width: 46px; filter: drop-shadow(0 3px 5px rgba(220,38,38,0.3)); }
+        /* Finestra Kick-off: sezioni Teams, Licenze, Template, Prompt e pulsante Genera */
+        .ckp-box.ko-box { width: min(760px, calc(92vw * var(--ui-zoom-inv, 1))); height: auto; }
+        .ko-body { overflow-y: auto; padding: 0.4rem 1.2rem 1rem; display: flex; flex-direction: column; gap: 0.9rem; }
+        .ko-sez { border: 1px solid #E5E7EB; border-radius: 12px; padding: 0.75rem 0.9rem; }
+        .ko-sez h4 { margin: 0 0 0.55rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #6B7280; display: flex; align-items: center; gap: 0.45rem; }
+        .ko-sez h4 i { color: #DC2626; }
+        .ko-cerca { position: relative; }
+        .ko-cerca input { width: 100%; box-sizing: border-box; padding: 0.5rem 0.7rem 0.5rem 2rem; border: 1px solid #D1D5DB; border-radius: 9px; font: inherit; font-size: 0.88rem; }
+        .ko-cerca input:focus { outline: none; border-color: #F87171; box-shadow: 0 0 0 3px #FEE2E2; }
+        .ko-cerca > i { position: absolute; left: 0.7rem; top: 50%; transform: translateY(-50%); color: #9CA3AF; font-size: 0.8rem; }
+        .ko-risultati { position: absolute; left: 0; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; box-shadow: 0 12px 28px rgba(15,23,42,0.15); max-height: 240px; overflow-y: auto; z-index: 5; display: none; }
+        .ko-risultati.open { display: block; }
+        .ko-ris { display: flex; flex-direction: column; padding: 0.45rem 0.75rem; cursor: pointer; border-bottom: 1px solid #F3F4F6; }
+        .ko-ris:last-child { border-bottom: none; }
+        .ko-ris:hover, .ko-ris.attivo { background: #FEF2F2; }
+        .ko-ris b { font-size: 0.88rem; color: #111827; font-weight: 600; }
+        .ko-ris small { font-size: 0.75rem; color: #6B7280; }
+        .ko-ris.vuoto { cursor: default; color: #6B7280; font-size: 0.85rem; }
+        .ko-chips { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.6rem; }
+        .ko-chip { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.4rem 0.35rem 0.8rem; border-radius: 999px; background: linear-gradient(135deg, #DC2626, #F97316); color: #fff; font-size: 0.83rem; font-weight: 600; box-shadow: 0 3px 8px rgba(220,38,38,0.25); }
+        .ko-chip-ruolo { font-style: normal; font-weight: 500; font-size: 0.74rem; padding: 0.05rem 0.45rem; border-radius: 999px; background: rgba(255,255,255,0.22); }
+        .ko-chip button { border: none; background: rgba(255,255,255,0.25); color: #fff; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; display: grid; place-items: center; font-size: 0.75rem; padding: 0; }
+        .ko-chip button:hover { background: rgba(255,255,255,0.45); }
+        .ko-chip button:disabled { opacity: 0.5; cursor: default; }
+        .ko-vuoto { font-size: 0.85rem; color: #9CA3AF; }
+        .ko-lic { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+        .ko-lic span { padding: 0.25rem 0.65rem; border-radius: 8px; background: #F3F4F6; color: #374151; font-size: 0.83rem; font-weight: 500; }
+        .ko-riga { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+        .ko-btn { display: inline-flex; align-items: center; gap: 0.4rem; border: 1px solid #FCA5A5; background: #FEF2F2; color: #B91C1C; border-radius: 9px; padding: 0.4rem 0.8rem; font: inherit; font-size: 0.83rem; font-weight: 700; cursor: pointer; text-decoration: none; }
+        .ko-btn:hover { background: #FEE2E2; }
+        .ko-file { font-size: 0.85rem; color: #374151; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ko-file.vuoto { color: #9CA3AF; }
+        .ko-ai { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.7rem; border-radius: 8px; background: #F9FAFB; border: 1px solid #E5E7EB; font-size: 0.83rem; color: #374151; }
+        .ko-ai.ko-ai-ko { border-color: #FCD34D; background: #FFFBEB; color: #92400E; }
+        .ko-foot { justify-content: flex-end; }
+        .ko-genera { display: inline-flex; align-items: center; gap: 0.5rem; border: none; border-radius: 10px; padding: 0.55rem 1.3rem; font: inherit; font-size: 0.92rem; font-weight: 700; color: #fff; cursor: pointer; background: linear-gradient(135deg, #DC2626, #F97316); box-shadow: 0 4px 12px rgba(220,38,38,0.3); }
+        .ko-genera:hover:not(:disabled) { filter: brightness(1.05); transform: translateY(-1px); }
+        .ko-genera:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+        .ko-genera.in-corso { cursor: wait; opacity: 0.8; }
+        .ko-genera.in-corso i { animation: fa-spin 1s linear infinite; }
+        .ko-esito { display: flex; align-items: center; gap: 0.8rem; padding: 0.7rem 0.9rem; border-radius: 12px; background: #F0FDF4; border: 1px solid #BBF7D0; }
+        .ko-esito a { display: inline-flex; flex-direction: column; align-items: center; gap: 0.2rem; text-decoration: none; color: #C2410C; font-size: 0.75rem; font-weight: 600; }
+        .ko-esito a i { font-size: 2.3rem; }
+        .ko-esito a:hover i { transform: scale(1.06); }
+        .ko-esito-testo { flex: 1; font-size: 0.85rem; color: #166534; }
         /* Finestra della check list del progetto: semplice, solo testo; attività rientrate */
         .ckp-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.35); display: none; align-items: center; justify-content: center; z-index: 2500; padding: 1rem; }
         .ckp-overlay.open { display: flex; }
@@ -6548,7 +6600,8 @@
             /\/auth\//, /\/ai\//, /\/chat/,
             /\/notifiche\//,  // campanella: segnare lette / eliminare non cambia i dati della dashboard
             /\/gdpr\//,       // richiesta di cancellazione (email al team)
-            /\/projects\/checklist/ // check list del progetto (spunte nella finestra)
+            /\/projects\/checklist/, // check list del progetto (spunte nella finestra)
+            /\/projects\/kickoff/    // Kick-off del progetto (team e generazione slide)
         ];
         let autoRefreshTimer = null;
         (function intercettaSalvataggi() {
@@ -10994,7 +11047,11 @@
         function projCheckListBtnHtml() {
             return '<button type="button" class="proj-ck" id="projCheckListBtn" title="Check List del progetto">' +
                 '<img class="proj-ck-img" src="checklist.png" alt="">' +
-                '<span class="proj-ck-lbl">Check List</span><span class="proj-ck-cnt" id="projCheckListCnt"></span></button>';
+                '<span class="proj-ck-lbl">Check List</span><span class="proj-ck-cnt" id="projCheckListCnt"></span></button>' +
+                // Kick-off: subito dopo Check List (vedi KICK-OFF DEL PROGETTO più sotto)
+                '<button type="button" class="proj-ck proj-ko" id="projKickoffBtn" title="Kick-off del progetto: slide generate dall\'AI">' +
+                '<img class="proj-ck-img" src="kickoff.png" alt="">' +
+                '<span class="proj-ck-lbl">Kick-off</span></button>';
         }
         // Posizione del pulsante: nello spazio libero della riga di Descrizione (subito dopo il
         // campo); se la riga è piena o in riordino, nella testata del progetto.
@@ -11267,6 +11324,243 @@
                 if ((d.rows || []).length) ckpAggiornaFlagDaRighe(d.rows);
             } catch (err) {
                 showNotification('Check List: ' + err.message, 'info');
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        // === KICK-OFF DEL PROGETTO (pulsante accanto a Check List) ===
+        // Finestra con: Teams (persone scelte dalla rubrica, salvate in proj_componenti),
+        // Licenze (campo «Licenze da attivare» del progetto), Template (.pptx scelto dal PC, ogni
+        // volta), Prompt (editor dei prompt sulla funzione KICKOFF) e AI di Impostazioni › AI ›
+        // «AI Slide Kick-Off» in sola lettura. «Genera» manda il template al server, che lo fa
+        // compilare all'AI e restituisce il nuovo .pptx: resta solo nel browser (icona da
+        // scaricare), sul server non viene salvato nulla.
+        const KO_MAX_FILE = 40 * 1024 * 1024;
+        let koProjectId = null, koFile = null, koDati = null, koUrl = null, koTimerCerca = null;
+        function koModal() {
+            let m = document.getElementById('koOverlay');
+            if (m) return m;
+            document.body.insertAdjacentHTML('beforeend', `<div class="ckp-overlay" id="koOverlay" role="dialog" aria-modal="true" aria-labelledby="koTitle">
+                <div class="ckp-box ko-box">
+                    <div class="ckp-head"><img src="kickoff.png" alt=""><h3 id="koTitle">Kick-off<small id="koSub"></small></h3><button type="button" class="ckp-close" id="koClose" aria-label="Chiudi">&times;</button></div>
+                    <div class="ko-body">
+                        <div class="ko-sez"><h4><i class="fas fa-users"></i> Teams</h4>
+                            <div class="ko-cerca"><i class="fas fa-search"></i><input type="text" id="koCerca" placeholder="Cerca in rubrica (nome, email o ruolo)…" autocomplete="off"><div class="ko-risultati" id="koRisultati"></div></div>
+                            <div class="ko-chips" id="koTeam"></div></div>
+                        <div class="ko-sez"><h4><i class="fas fa-key"></i> Licenze</h4><div class="ko-lic" id="koLicenze"></div></div>
+                        <div class="ko-sez"><h4><i class="fas fa-file-powerpoint"></i> Template</h4>
+                            <div class="ko-riga"><label class="ko-btn" for="koFileInput"><i class="fas fa-folder-open"></i> Scegli file</label>
+                            <input type="file" id="koFileInput" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" hidden>
+                            <span class="ko-file vuoto" id="koFileNome">Nessun file scelto (.pptx)</span></div></div>
+                        <div class="ko-sez"><h4><i class="fas fa-robot"></i> Prompt</h4>
+                            <div class="ko-riga"><button type="button" class="ko-btn" id="koPrompt" title="Apre il prompt Kick-off: puoi modificare il tuo prompt personalizzato"><i class="fas fa-pen"></i> Prompt</button>
+                            <span class="ko-ai" id="koAi"></span></div></div>
+                        <div id="koEsito"></div>
+                    </div>
+                    <div class="ckp-foot ko-foot"><span class="ckp-foot-testo" id="koFoot"></span><button type="button" class="ko-genera" id="koGenera"><i class="fas fa-wand-magic-sparkles"></i> Genera</button></div>
+                </div></div>`);
+            m = document.getElementById('koOverlay');
+            const chiudi = () => {
+                if (document.getElementById('koGenera').classList.contains('in-corso')
+                    && !confirm('La generazione è in corso: chiudendo la finestra il file andrà perso. Chiudere?')) return;
+                m.classList.remove('open');
+            };
+            document.getElementById('koClose').addEventListener('click', chiudi);
+            m.addEventListener('click', (e) => {
+                if (e.target === m) chiudi();
+                if (!e.target.closest('.ko-cerca')) document.getElementById('koRisultati').classList.remove('open');
+            });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && m.classList.contains('open')) chiudi(); });
+            // Nuova scheda con ritorno=kickoff: dopo il Salva (o con «Torna al Kick-off") la
+            // scheda del prompt si chiude e si torna qui, con la finestra Kick-off ancora aperta.
+            document.getElementById('koPrompt').addEventListener('click', () => {
+                const w = window.open('prompt-editor.html?funzione=KICKOFF&ritorno=kickoff', 'projexaPromptKickoff');
+                if (w) w.focus();
+            });
+            const cerca = document.getElementById('koCerca');
+            cerca.addEventListener('input', () => { clearTimeout(koTimerCerca); koTimerCerca = setTimeout(koCercaRubrica, 250); });
+            cerca.addEventListener('focus', koCercaRubrica);
+            cerca.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                const primo = document.querySelector('#koRisultati .ko-ris[data-id]');
+                if (primo) koAggiungi(primo.dataset.id);
+            });
+            document.getElementById('koRisultati').addEventListener('click', (e) => {
+                const r = e.target.closest('.ko-ris[data-id]');
+                if (r) koAggiungi(r.dataset.id);
+            });
+            document.getElementById('koTeam').addEventListener('click', (e) => {
+                const b = e.target.closest('button[data-togli]');
+                if (b) koTogli(b.dataset.togli, b);
+            });
+            document.getElementById('koFileInput').addEventListener('change', (e) => {
+                const f = e.target.files && e.target.files[0];
+                e.target.value = '';
+                if (!f) return;
+                if (!/\.pptx$/i.test(f.name)) { showNotification('Scegli un file PowerPoint .pptx (i vecchi .ppt vanno prima salvati come .pptx)', 'info'); return; }
+                if (f.size > KO_MAX_FILE) { showNotification('Il template supera 40 MB', 'info'); return; }
+                koFile = f;
+                koDisegna();
+            });
+            document.getElementById('koGenera').addEventListener('click', koGenera);
+            return m;
+        }
+        function koDisegna() {
+            const d = koDati || { team: [], licenze: [], ai: {} };
+            document.getElementById('koSub').textContent = currentDetailLabel || '';
+            document.getElementById('koTeam').innerHTML = d.team.length
+                ? d.team.map(p => `<span class="ko-chip" title="${escapeHtml([p.ruolo, p.email].filter(Boolean).join(' · '))}">${escapeHtml(p.nominativo || p.email)}${p.ruolo ? `<em class="ko-chip-ruolo">${escapeHtml(p.ruolo)}</em>` : ''}<button type="button" data-togli="${escapeHtml(p.id)}" aria-label="Togli ${escapeHtml(p.nominativo)}" ${p.__can_write === false ? 'disabled title="Sola lettura per il tuo ruolo"' : 'title="Togli dal team"'}><i class="fas fa-xmark"></i></button></span>`).join('')
+                : '<span class="ko-vuoto">Nessuna persona nel team: cercala in rubrica.</span>';
+            document.getElementById('koLicenze').innerHTML = d.licenze.length
+                ? d.licenze.map(l => `<span>${escapeHtml(l)}</span>`).join('')
+                : '<span class="ko-vuoto" style="background:none;padding:0;">Nessuna licenza: compila «Licenze da attivare» nella scheda del progetto.</span>';
+            const nome = document.getElementById('koFileNome');
+            nome.textContent = koFile ? koFile.name : 'Nessun file scelto (.pptx)';
+            nome.classList.toggle('vuoto', !koFile);
+            // AI in sola lettura: quella scelta in Impostazioni › AI › «AI Slide Kick-Off».
+            const ai = d.ai || {};
+            const aiEl = document.getElementById('koAi');
+            let problema = '';
+            if (!ai.nome) problema = 'scegli l\'AI in Impostazioni › AI › «AI Slide Kick-Off»';
+            else if (!ai.supportata) problema = `«${ai.nome}» non può generare le slide`;
+            else if (!ai.connessa) problema = `${ai.nome} senza chiave API: collegala in Impostazioni › AI`;
+            aiEl.className = 'ko-ai' + (problema ? ' ko-ai-ko' : '');
+            aiEl.innerHTML = problema
+                ? `<i class="fas fa-triangle-exclamation"></i> AI: ${escapeHtml(problema)}`
+                : `<i class="fas fa-robot"></i> AI: <b>${escapeHtml(ai.nome)}</b>`;
+            aiEl.title = 'AI che genera le slide (Impostazioni › AI › «AI Slide Kick-Off»), in sola lettura';
+            const gen = document.getElementById('koGenera');
+            if (!gen.classList.contains('in-corso')) {
+                gen.disabled = !!problema || !koFile;
+                gen.title = problema ? problema.charAt(0).toUpperCase() + problema.slice(1) : (!koFile ? 'Scegli prima il file Template (.pptx)' : 'Genera le slide di Kick-off');
+            }
+        }
+        async function koCercaRubrica() {
+            const box = document.getElementById('koRisultati');
+            const q = document.getElementById('koCerca').value.trim();
+            try {
+                const r = await fetch(`${API_URL}/projects/kickoff/rubrica?q=${encodeURIComponent(q)}`, { headers: getAuthHeaders() });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                const giaNelTeam = new Set(((koDati && koDati.team) || []).map(p => String(p.email || '').toLowerCase()));
+                const lista = (d.contatti || []).filter(c => !giaNelTeam.has(String(c.email || '').toLowerCase()));
+                box.innerHTML = lista.length
+                    ? lista.map(c => `<div class="ko-ris" data-id="${escapeHtml(c.id)}"><b>${escapeHtml(c.nominativo)}</b><small>${escapeHtml([c.ruolo, c.email].filter(Boolean).join(' · '))}</small></div>`).join('')
+                    : `<div class="ko-ris vuoto">${q ? 'Nessun contatto trovato in rubrica' : 'Rubrica vuota'}</div>`;
+                box.classList.add('open');
+            } catch (err) {
+                showNotification('Rubrica: ' + err.message, 'info');
+            }
+        }
+        async function koAggiungi(rubricaId) {
+            document.getElementById('koRisultati').classList.remove('open');
+            try {
+                const r = await fetch(`${API_URL}/projects/kickoff/team`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    body: JSON.stringify({ projectId: koProjectId, rubricaId })
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                koDati.team = d.team || [];
+                document.getElementById('koCerca').value = '';
+                koDisegna();
+            } catch (err) {
+                showNotification('Teams: ' + err.message, 'info');
+            }
+        }
+        async function koTogli(id, btn) {
+            btn.disabled = true;
+            try {
+                const r = await fetch(`${API_URL}/projects/kickoff/team/${encodeURIComponent(id)}?projectId=${encodeURIComponent(koProjectId)}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                koDati.team = d.team || [];
+                koDisegna();
+            } catch (err) {
+                showNotification('Teams: ' + err.message, 'info');
+                btn.disabled = false;
+            }
+        }
+        // Il file generato resta solo nel browser (blob): l'icona lo scarica sul PC.
+        function koMostraEsito(blob, nomeFile, modifiche, ai) {
+            if (koUrl) URL.revokeObjectURL(koUrl);
+            koUrl = URL.createObjectURL(blob);
+            document.getElementById('koEsito').innerHTML = `<div class="ko-esito">
+                <a href="${koUrl}" download="${escapeHtml(nomeFile)}" title="Salva sul PC"><i class="fas fa-file-powerpoint"></i>Salva</a>
+                <span class="ko-esito-testo"><b>${escapeHtml(nomeFile)}</b><br>${modifiche ? `${escapeHtml(modifiche)} modifiche applicate` : 'Slide generate'}${ai ? ` da ${escapeHtml(ai)}` : ''}. Clicca l'icona per salvarlo: il file non resta su Projexa.</span></div>`;
+        }
+        async function koGenera() {
+            const gen = document.getElementById('koGenera');
+            if (!koFile || gen.disabled) return;
+            gen.disabled = true;
+            gen.classList.add('in-corso');
+            gen.innerHTML = '<i class="fas fa-spinner"></i> Generazione…';
+            document.getElementById('koFoot').textContent = 'L\'AI sta preparando le slide: può richiedere fino a qualche minuto.';
+            document.getElementById('koEsito').innerHTML = '';
+            try {
+                const r = await fetch(`${API_URL}/projects/kickoff/genera?projectId=${encodeURIComponent(koProjectId)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/octet-stream', ...getAuthHeaders() },
+                    body: koFile
+                });
+                if (!r.ok) {
+                    const d = await r.json().catch(() => ({}));
+                    throw new Error(d.error || (r.status === 413 ? 'Template troppo grande' : `Errore ${r.status}`));
+                }
+                const blob = await r.blob();
+                const cd = r.headers.get('Content-Disposition') || '';
+                const m = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+                const nomeFile = m ? decodeURIComponent(m[1]) : 'Kick-off.pptx';
+                const ai = decodeURIComponent(r.headers.get('X-Kickoff-Ai') || '');
+                koMostraEsito(blob, nomeFile, r.headers.get('X-Kickoff-Modifiche'), ai);
+                const mancanti = decodeURIComponent(r.headers.get('X-Kickoff-Mancanti') || '');
+                if (mancanti) {
+                    document.querySelector('#koEsito .ko-esito-testo').insertAdjacentHTML('beforeend',
+                        `<br><span style="color:#B45309;"><i class="fas fa-triangle-exclamation"></i> Nelle slide mancano: ${escapeHtml(mancanti)}. Controlla il file o rigenera.</span>`);
+                    showNotification('Slide pronte, ma mancano alcuni dati: ' + mancanti, 'info');
+                } else {
+                    showNotification('Slide di Kick-off pronte', 'success');
+                }
+            } catch (err) {
+                showNotification('Kick-off: ' + err.message, 'info');
+            } finally {
+                gen.classList.remove('in-corso');
+                gen.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Genera';
+                document.getElementById('koFoot').textContent = '';
+                koDisegna();
+            }
+        }
+        document.addEventListener('click', async (e) => {
+            const btn = e.target.closest('#projKickoffBtn');
+            if (!btn) return;
+            const projectId = currentDetailArgument;
+            if (!projectId) return;
+            btn.disabled = true;
+            try {
+                const r = await fetch(`${API_URL}/projects/kickoff?projectId=${encodeURIComponent(projectId)}`, { headers: getAuthHeaders() });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                const m = koModal();
+                // Altro progetto: si riparte da zero (template e file generato).
+                if (koProjectId !== projectId) {
+                    koFile = null;
+                    if (koUrl) { URL.revokeObjectURL(koUrl); koUrl = null; }
+                    document.getElementById('koEsito').innerHTML = '';
+                }
+                koProjectId = projectId;
+                koDati = d;
+                document.getElementById('koCerca').value = '';
+                document.getElementById('koRisultati').classList.remove('open');
+                koDisegna();
+                m.classList.add('open');
+            } catch (err) {
+                showNotification('Kick-off: ' + err.message, 'info');
             } finally {
                 btn.disabled = false;
             }
@@ -15894,9 +16188,10 @@
                     : (aiKey ? ` class="ai-toggle" data-ai-provider="${aiKey}"`
                     : (isDashFlag ? ' data-reload-on-save="1"' : '')));
                 input = `<label class="toggle-switch"><input type="checkbox"${calAttrs} data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>`;
-                // In visualizzazione un "sì" si mostra con il flag verde (vedi .bool-cell); non per
-                // Calendar/AI, i cui interruttori collegano gli account e restano tali.
-                if (!calKey && !aiKey) input = `<span class="bool-cell">${input}${BOOL_FLAG_HTML}</span>`;
+                // In visualizzazione un "sì" si mostra con il flag verde (vedi .bool-cell), anche per
+                // le AI (accanto resta "chiave API collegata"); non per Calendar, i cui interruttori
+                // collegano gli account e restano tali.
+                if (!calKey) input =`<span class="bool-cell">${input}${BOOL_FLAG_HTML}</span>`;
                 if (calKey) {
                     input += `<span class="calendar-conn" data-cal-provider="${calKey}"></span>`;
                     queueCalendarSettingsButtons();

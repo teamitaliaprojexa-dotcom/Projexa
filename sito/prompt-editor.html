@@ -69,7 +69,7 @@
     <div class="container">
         <header>
             <h1><i class="fas fa-envelope-open-text"></i> <span id="pageTitle">Prompt AI</span></h1>
-            <a class="btn btn-secondary" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
+            <a class="btn btn-secondary" id="backBtn" href="dashboard.html"><i class="fas fa-arrow-left"></i> <span id="backLabel">Dashboard</span></a>
         </header>
 
         <div id="editorCard" class="card" style="display: none;">
@@ -89,7 +89,7 @@
             </div>
             <div class="placeholders">
                 Segnaposto (clic per inserirli nel punto del cursore): <span id="placeholders"></span>
-                <br>Se il testo non contiene <code style="cursor: default;">{{TRASCRIZIONE}}</code>, la trascrizione viene aggiunta in fondo.
+                <span id="notaTrascrizione"><br>Se il testo non contiene <code style="cursor: default;">{{TRASCRIZIONE}}</code>, la trascrizione viene aggiunta in fondo.</span>
             </div>
             <textarea id="promptText" spellcheck="false"></textarea>
             <div class="actions">
@@ -122,6 +122,9 @@
         // aprire direttamente con ?funzione=... nell'URL (default: la prima disponibile).
         let FUNZIONE = (new URLSearchParams(location.search).get('funzione') || '').toUpperCase();
         let funzioni = [];
+        // Aperta dal pulsante Prompt della finestra Kick-off (?ritorno=kickoff): dopo il Salva
+        // la scheda si chiude e si torna al Kick-off della dashboard, che è rimasto aperto.
+        const RITORNO_KICKOFF = new URLSearchParams(location.search).get('ritorno') === 'kickoff';
 
         const $ = (id) => document.getElementById(id);
         const textEl = $('promptText');
@@ -316,8 +319,9 @@
             try {
                 const r = await request('PUT', `/prompts/${FUNZIONE}`, { testo: textEl.value, ...scope() });
                 render({ ...current, testo: textEl.value, esiste: true, updated_at: r.updated_at, updated_by: r.updated_by });
-                showStatus('Salvato. Vale dal prossimo utilizzo, senza riavviare nulla.', 'success');
+                showStatus(RITORNO_KICKOFF ? 'Salvato. Torno al Kick-off…' : 'Salvato. Vale dal prossimo utilizzo, senza riavviare nulla.', 'success');
                 if (ctx.isProjexaAdmin) loadCustomList();
+                if (RITORNO_KICKOFF) setTimeout(tornaAlKickoff, 900);
             } catch (e) {
                 showStatus(`Errore nel salvataggio: ${e.message}`, 'error');
                 refreshDirty();
@@ -347,6 +351,27 @@
             }
         });
 
+        // Ritorno al Kick-off: la scheda è stata aperta dalla dashboard, quindi si chiude e si
+        // torna a quella (finestra Kick-off ancora aperta). Se la dashboard non c'è più, la si apre.
+        function tornaAlKickoff() {
+            const dashboard = window.opener && !window.opener.closed ? window.opener : null;
+            if (dashboard) {
+                try { dashboard.focus(); } catch (e) { /* focus non consentito: si chiude comunque */ }
+                window.close();
+                // Se il browser non chiude la scheda, si torna alla dashboard qui.
+                setTimeout(() => { if (!window.closed) location.href = 'dashboard.html'; }, 400);
+                return;
+            }
+            location.href = 'dashboard.html';
+        }
+        if (RITORNO_KICKOFF) {
+            $('backLabel').textContent = 'Torna al Kick-off';
+            $('backBtn').addEventListener('click', (ev) => {
+                ev.preventDefault();
+                if (confirmDiscard()) { savedText = textEl.value; tornaAlKickoff(); }
+            });
+        }
+
         window.addEventListener('beforeunload', (ev) => {
             if (isDirty()) { ev.preventDefault(); ev.returnValue = ''; }
         });
@@ -361,6 +386,7 @@
             $('pageTitle').textContent = `Prompt: ${def.titolo}`;
             $('placeholders').innerHTML = (def.segnaposto || [])
                 .map((p) => `<code data-ph="{{${p}}}">{{${p}}}</code>`).join('');
+            $('notaTrascrizione').style.display = codice === 'RECAP_EMAIL' ? '' : 'none';
             const url = new URL(location.href);
             url.searchParams.set('funzione', codice);
             history.replaceState(null, '', url);
