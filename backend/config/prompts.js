@@ -26,6 +26,12 @@ export const PROMPT_FUNCTIONS = {
   KICKOFF: {
     titolo: 'Slide Kick-off del progetto',
     segnaposto: ['PROGETTO', 'CLIENTE', 'TEAM', 'LICENZE', 'DATA', 'UTENTE']
+  },
+  // Pulsante «Offerta economica» della scheda progetto: istruzioni per compilare il template
+  // Word (.docx). Il formato della risposta (JSON con le modifiche) lo aggiunge il server.
+  OFFERTA_ECONOMICA: {
+    titolo: 'Offerta Economica',
+    segnaposto: ['PROGETTO', 'CLIENTE', 'RAGIONE_SOCIALE', 'CODICE_FISCALE', 'PARTITA_IVA', 'IMPORTO', 'SCONTO', 'IMPORTO_NON_SCONTATO', 'EFFORT', 'PREVENTIVO', 'INVOICE', 'DATA', 'UTENTE']
   }
 };
 

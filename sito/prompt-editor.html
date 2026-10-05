@@ -124,7 +124,9 @@
         let funzioni = [];
         // Aperta dal pulsante Prompt della finestra Kick-off (?ritorno=kickoff): dopo il Salva
         // la scheda si chiude e si torna al Kick-off della dashboard, che è rimasto aperto.
-        const RITORNO_KICKOFF = new URLSearchParams(location.search).get('ritorno') === 'kickoff';
+        // ritorno=offerta: stessa cosa per la finestra Offerta economica.
+        const RITORNO = { kickoff: 'al Kick-off', offerta: "all'Offerta economica" }[new URLSearchParams(location.search).get('ritorno')] || null;
+        const RITORNO_KICKOFF = !!RITORNO;
 
         const $ = (id) => document.getElementById(id);
         const textEl = $('promptText');
@@ -319,7 +321,7 @@
             try {
                 const r = await request('PUT', `/prompts/${FUNZIONE}`, { testo: textEl.value, ...scope() });
                 render({ ...current, testo: textEl.value, esiste: true, updated_at: r.updated_at, updated_by: r.updated_by });
-                showStatus(RITORNO_KICKOFF ? 'Salvato. Torno al Kick-off…' : 'Salvato. Vale dal prossimo utilizzo, senza riavviare nulla.', 'success');
+                showStatus(RITORNO_KICKOFF ? `Salvato. Torno ${RITORNO}…` : 'Salvato. Vale dal prossimo utilizzo, senza riavviare nulla.', 'success');
                 if (ctx.isProjexaAdmin) loadCustomList();
                 if (RITORNO_KICKOFF) setTimeout(tornaAlKickoff, 900);
             } catch (e) {
@@ -365,7 +367,7 @@
             location.href = 'dashboard.html';
         }
         if (RITORNO_KICKOFF) {
-            $('backLabel').textContent = 'Torna al Kick-off';
+            $('backLabel').textContent = `Torna ${RITORNO}`;
             $('backBtn').addEventListener('click', (ev) => {
                 ev.preventDefault();
                 if (confirmDiscard()) { savedText = textEl.value; tornaAlKickoff(); }

@@ -31,6 +31,7 @@ import { askAiProvider, PROVIDERS as AI_PROVIDERS } from './routes/ai.js';
 import { getIntegration } from './config/integrations.js';
 import { getPromptFor } from './config/prompts.js';
 import { leggiTemplate, descriviTemplate, applicaModifiche, leggiRispostaAi, leggiRevisioneAi, testoRisultante, spostamentiRichiesti } from './config/kickoffPptx.js';
+import * as OffertaDocx from './config/offertaDocx.js';
 import { avviaScheduler } from './jobs/scheduler.js';
 import { avviaInvioAudit } from './jobs/auditShipper.js';
 import { allowedOrigins } from './config/origins.js';
@@ -2333,16 +2334,21 @@ Rispondi SOLO con un oggetto JSON, senza testo prima o dopo, in questa forma:
 - Foto: per le persone del team segnate "[foto disponibile]" il sistema inserisce da solo la foto nella forma (es. il cerchio) del blocco in cui compare la loro email. Per questo ogni persona deve stare in un blocco suo, con la sua email scritta nella casella del blocco; non serve nessuna modifica per la foto.
 - Includi solo gli elementi da cambiare. Non usare markdown nei testi.`;
 
-async function koProviderName(req) {
-  const r = (await db.query(
-    `SELECT valore2 FROM settings
-      WHERE tenant_id = $1 AND user_id = $2
-        AND lower(btrim(campo)) IN ('ai slide kick-off', '(*) ai slide kick-off')
-        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
-      ORDER BY id LIMIT 1`,
-    [req.user.tenant_id, req.user.user_id]
-  )).rows[0];
-  return r && r.valore2 ? String(r.valore2).trim() : '';
+// AI scelta in Impostazioni › AI: il primo dei campi indicati che ha un valore (settings.valore2).
+async function koProviderName(req, campi = ['AI Slide Kick-Off']) {
+  for (const campo of campi) {
+    const c = String(campo).trim().toLowerCase();
+    const r = (await db.query(
+      `SELECT valore2 FROM settings
+        WHERE tenant_id = $1 AND user_id = $2
+          AND lower(btrim(campo)) IN ($3, '(*) ' || $3)
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+        ORDER BY id LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, c]
+    )).rows[0];
+    if (r && r.valore2 && String(r.valore2).trim()) return String(r.valore2).trim();
+  }
+  return '';
 }
 
 // Colonna del ruolo della persona in rubrica: la prima presente tra questi nomi, null se
@@ -2665,6 +2671,282 @@ ${descrizioneBozza}`;
       res.send(esito.buffer);
     } catch (error) {
       console.error('❌ KICKOFF:', error.message);
+      res.status(error.statusCode || error.status || 500).json({ error: error.message });
+    }
+  });
+
+// ==========================================
+// OFFERTA ECONOMICA DEL PROGETTO (pulsante accanto a Kick-off nella scheda progetto)
+// ==========================================
+// Come il Kick-off, ma su un template Word (.docx, config/offertaDocx.js). Dati passati
+// all'AI: i campi del progetto Importo, Sconto Applicato, Importo non scontato, Effort Totale,
+// Preventivo (cercati in tutto il progetto, anche dentro le sezioni) e le righe della griglia
+// «Invoice» del progetto. Prompt: funzione OFFERTA_ECONOMICA di app_prompts. AI: Impostazioni ›
+// AI › «AI Offerta Economica» se c'è, altrimenti «AI Slide Kick-Off». Prima stesura, revisione
+// dell'AI sulla bozza, file finale: tutto in memoria, nulla salvato sul server.
+const OF_CAMPI = { importo: 'Importo', sconto: 'Sconto Applicato', importoNonScontato: 'Importo non scontato', effort: 'Effort Totale', preventivo: 'Preventivo' };
+const OF_CAMPI_CLIENTE = { ragioneSociale: 'Ragione Sociale', codiceFiscale: 'Cod fiscale', partitaIva: 'P.iva' };
+const OF_CAMPI_AI = ['AI Offerta Economica', 'AI Slide Kick-Off'];
+const ofNormCampo = (c) => String(c || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
+
+const OF_FORMATO = `FORMATO DELLA RISPOSTA (obbligatorio)
+Rispondi SOLO con un oggetto JSON, senza testo prima o dopo, in questa forma:
+{"modifiche": [
+  {"id": "P3", "testo": "nuovo testo del paragrafo (\\n per più paragrafi con lo stesso stile)"},
+  {"id": "T1", "righe": [["Intestazione 1", "Intestazione 2"], ["cella", "cella"]]},
+  {"id": "P9", "elimina": true}
+]}
+- "id" è il codice tra parentesi quadre del documento qui sotto: P<n> paragrafo del corpo, T<n> tabella, H<n> paragrafo di intestazione o piè di pagina. Tra graffe c'è lo stile del paragrafo (es. {Heading1} = titolo).
+- "testo" sostituisce tutto il testo del paragrafo (stile e carattere del template restano): riscrivi anche le parti che restano uguali.
+- "righe" sostituisce tutte le righe della tabella, compresa l'intestazione se c'è: le righe in più copiano lo stile dell'ultima riga.
+- "elimina": true toglie il paragrafo o la tabella.
+- Includi solo gli elementi da cambiare. Non usare markdown nei testi.`;
+
+// Id del progetto e di tutte le sue sezioni (nodi padre annidati), per cercare i campi ovunque.
+async function ofAlbero(req, prog) {
+  const r = await db.query(
+    `WITH RECURSIVE albero(id, livello) AS (
+       SELECT id, 0 FROM projects WHERE id::text = $1
+       UNION ALL
+       SELECT p.id, a.livello + 1 FROM projects p JOIN albero a ON p.argument = a.id::text
+        WHERE p.tenant_id = $2 AND p.user_id = $3 AND a.livello < 6 AND p.tipo_valore::text = '0'
+     )
+     SELECT id::text AS id FROM albero`,
+    [prog.projectId, req.user.tenant_id, req.user.user_id]
+  );
+  return r.rows.map((x) => x.id);
+}
+
+// Valore di un campo: dalla colonna del suo tipo (sì/no valore1, numeri valore3, resto valore2);
+// se quella è vuota, la prima non vuota.
+function ofValore(row) {
+  const t = String(row.tipo_valore ?? '').trim();
+  const col = ['1', '14', '22'].includes(t) ? 'valore1' : (['3', '8'].includes(t) ? 'valore3' : 'valore2');
+  const pieno = (v) => v != null && String(v).trim() !== '';
+  const v = pieno(row[col]) ? row[col] : [row.valore3, row.valore2, row.valore1].find(pieno);
+  return v == null ? '' : String(v).trim();
+}
+const ofNumero = (v, decimali = 2) => {
+  const n = Number(String(v).replace(/\s/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+  return v !== '' && Number.isFinite(n) ? n.toLocaleString('it-IT', { minimumFractionDigits: decimali, maximumFractionDigits: decimali }) : String(v);
+};
+
+async function ofDati(req, prog) {
+  const ids = await ofAlbero(req, prog);
+  const r = await db.query(
+    `SELECT campo, tipo_valore::text AS tipo_valore, valore1::text AS valore1, valore2::text AS valore2, valore3::text AS valore3, tabella, colonna
+       FROM projects
+      WHERE tenant_id = $1 AND user_id = $2 AND argument = ANY($3::text[])
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+      ORDER BY id`,
+    [req.user.tenant_id, req.user.user_id, ids]
+  );
+  const perCampo = new Map();
+  for (const x of r.rows) { const k = ofNormCampo(x.campo); if (!perCampo.has(k)) perCampo.set(k, x); }
+  const dati = {};
+  for (const [k, nome] of Object.entries(OF_CAMPI)) {
+    const row = perCampo.get(nome.toLowerCase());
+    dati[k] = row ? ofValore(row) : '';
+  }
+  const invoice = perCampo.get('invoice');
+  // Dati del cliente del progetto (campi di clients con master_id = cliente, come le condizioni
+  // della Check List). Nomi confrontati senza maiuscole, spazi e punti ("P.iva" = "P. IVA").
+  const chiave = (c) => ofNormCampo(c).replace(/[^a-z0-9]/g, '');
+  if (prog.clientId) {
+    const rc = await db.query(
+      `SELECT campo, tipo_valore::text AS tipo_valore, valore1::text AS valore1, valore2::text AS valore2, valore3::text AS valore3
+         FROM clients
+        WHERE tenant_id = $1 AND user_id = $2 AND master_id = $3
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+        ORDER BY id`,
+      [req.user.tenant_id, req.user.user_id, prog.clientId]
+    );
+    const perCampoCliente = new Map();
+    for (const x of rc.rows) { const k = chiave(x.campo); if (!perCampoCliente.has(k)) perCampoCliente.set(k, x); }
+    for (const [k, nome] of Object.entries(OF_CAMPI_CLIENTE)) {
+      const row = perCampoCliente.get(chiave(nome));
+      dati[k] = row ? ofValore(row) : '';
+    }
+  }
+  return { dati, invoiceCfg: invoice && String(invoice.tipo_valore) === '11' ? invoice : null };
+}
+
+// Righe della griglia Invoice del progetto (stesse regole della griglia: tenant, utente,
+// progetto, righe non scadute; per le chiavi esterne la descrizione al posto dell'id).
+async function ofInvoice(req, prog, cfg) {
+  if (!cfg || !cfg.tabella) return { colonne: [], righe: [] };
+  const tabella = assertValidIdentifier(String(cfg.tabella).trim());
+  const colonne = parseGridColumnsSpec(cfg.colonna).columns;
+  const cols = await getTableColumns(tabella);
+  const usate = colonne.filter((c) => cols.has(c) && !['tenant_id', 'user_id', 'id'].includes(c));
+  if (!usate.length || !cols.has('tenant_id') || !cols.has('user_id')) return { colonne: [], righe: [] };
+  const fk = new Map((await db.query(
+    `SELECT kcu.column_name, ccu.table_name AS ft, ccu.column_name AS fc
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+       JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+      WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' AND tc.table_name = $1`,
+    [tabella]
+  )).rows.map((x) => [x.column_name, x]));
+  const select = [], joins = [];
+  let j = 0;
+  for (const c of usate) {
+    const f = fk.get(c);
+    if (f && c !== 'project_id' && c !== 'client_id') {
+      const fcols = await getTableColumns(assertValidIdentifier(f.ft));
+      const disp = [...fcols].find((n) => /^desc_/i.test(n)) || ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2'].find((n) => fcols.has(n));
+      if (disp) {
+        const a = `fk${j++}`;
+        joins.push(`LEFT JOIN "${f.ft}" ${a} ON ${a}."${assertValidIdentifier(f.fc)}" = s."${c}"`);
+        select.push(`COALESCE(${a}."${disp}"::text, s."${c}"::text) AS "${c}"`);
+        continue;
+      }
+    }
+    select.push(`s."${c}"`);
+  }
+  const params = [req.user.tenant_id, req.user.user_id];
+  let where = 's.tenant_id = $1 AND s.user_id = $2';
+  if (cols.has('project_id')) { params.push(prog.projectId); where += ` AND s.project_id = $${params.length}`; }
+  if (cols.has('scadenza')) where += ' AND (s.scadenza IS NULL OR s.scadenza >= CURRENT_DATE)';
+  const ordine = ordineGriglia(tabella) || (cols.has('id') ? 's.id' : '1');
+  const r = await db.query(`SELECT ${select.join(', ')} FROM "${tabella}" s ${joins.join(' ')} WHERE ${where} ORDER BY ${ordine.replace(/\bsrc\./g, 's.')}`, params);
+  const etichette = etichetteColonne(tabella);
+  const fmt = (v) => {
+    if (v == null) return '';
+    if (v instanceof Date) return v.toLocaleDateString('it-IT');
+    const s = String(v);
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10).split('-').reverse().join('/');
+    if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s).toLocaleString('it-IT', { maximumFractionDigits: 2 });
+    return s;
+  };
+  const nomeColonna = (c) => etichette[c] || (c.charAt(0).toUpperCase() + c.slice(1).replace(/_/g, ' '));
+  return { colonne: usate.map(nomeColonna), righe: r.rows.map((x) => usate.map((c) => fmt(etichetteValori(tabella, { ...x })[c]))) };
+}
+
+async function ofAiInfo(req) {
+  const nome = await koProviderName(req, OF_CAMPI_AI);
+  const cfg = AI_PROVIDERS[koNorm(nome)];
+  let connessa = false;
+  if (cfg) {
+    const el = await getIntegration(req.user.user_id, cfg.provider);
+    connessa = !!el[`${cfg.prefix}_api_key`];
+  }
+  return { nome, supportata: !!cfg, connessa };
+}
+
+app.get('/api/projects/offerta', requireAuth, async (req, res) => {
+  try {
+    const prog = await ckpProgetto(req, req.query && req.query.projectId);
+    const { dati, invoiceCfg } = await ofDati(req, prog);
+    res.json({ dati, invoice: await ofInvoice(req, prog, invoiceCfg), ai: await ofAiInfo(req) });
+  } catch (error) {
+    res.status(error.statusCode || error.status || 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/projects/offerta/genera', requireAuth,
+  express.raw({ type: 'application/octet-stream', limit: KO_MAX_TEMPLATE }),
+  async (req, res) => {
+    const t0 = Date.now();
+    try {
+      const prog = await ckpProgetto(req, req.query && req.query.projectId);
+      if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Scegli il file Template (.docx)' });
+      const ai = await ofAiInfo(req);
+      if (!ai.nome) return res.status(400).json({ error: 'Scegli l\'AI in Impostazioni › AI («AI Offerta Economica» oppure «AI Slide Kick-Off»)' });
+      if (!ai.supportata) return res.status(400).json({ error: `L'AI «${ai.nome}» non può generare l'offerta: scegli ChatGPT, Claude, Gemini o Mistral` });
+
+      const template = await OffertaDocx.leggiTemplate(req.body);
+      const descrizione = OffertaDocx.descriviTemplate(template);
+      if (descrizione.length > KO_MAX_TESTO_AI) return res.status(413).json({ error: 'Il template contiene troppo testo per l\'AI: usa un template più corto' });
+
+      const { dati, invoiceCfg } = await ofDati(req, prog);
+      const invoice = await ofInvoice(req, prog, invoiceCfg);
+      const nomi = (await db.query(
+        `SELECT (SELECT valore2 FROM projects WHERE id::text = $1 LIMIT 1) AS progetto,
+                (SELECT valore2 FROM clients WHERE id = $2 LIMIT 1) AS cliente,
+                (SELECT concat_ws(' ', name, cognome) FROM users WHERE id = $3) AS utente`,
+        [prog.projectId, prog.clientId, req.user.user_id]
+      )).rows[0] || {};
+      const euro = (v) => (v === '' ? '(non indicato)' : `${ofNumero(v)} €`);
+      const vars = {
+        PROGETTO: nomi.progetto || '',
+        CLIENTE: nomi.cliente || '',
+        IMPORTO: euro(dati.importo),
+        SCONTO: dati.sconto === '' ? '(non indicato)' : ofNumero(dati.sconto),
+        IMPORTO_NON_SCONTATO: euro(dati.importoNonScontato),
+        EFFORT: dati.effort === '' ? '(non indicato)' : ofNumero(dati.effort),
+        PREVENTIVO: dati.preventivo || '(non indicato)',
+        RAGIONE_SOCIALE: dati.ragioneSociale || '(non indicata)',
+        CODICE_FISCALE: dati.codiceFiscale || '(non indicato)',
+        PARTITA_IVA: dati.partitaIva || '(non indicata)',
+        INVOICE: invoice.righe.length
+          ? [invoice.colonne.join(' | '), ...invoice.righe.map((r) => r.join(' | '))].join('\n')
+          : '(nessuna riga nella griglia Invoice)',
+        DATA: new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+        UTENTE: String(nomi.utente || '').trim() || req.user.email || ''
+      };
+      const istruzioni = (await getPromptFor('OFFERTA_ECONOMICA', req.user)).testo
+        .replace(/\{\{(PROGETTO|CLIENTE|RAGIONE_SOCIALE|CODICE_FISCALE|PARTITA_IVA|IMPORTO_NON_SCONTATO|IMPORTO|SCONTO|EFFORT|PREVENTIVO|INVOICE|DATA|UTENTE)\}\}/g, (m, k) => vars[k]);
+      const prompt = `${istruzioni}\n\n${OF_FORMATO}\n\nDOCUMENTO (testi attuali con i codici):\n${descrizione}`;
+
+      // Prima stesura, applicata a una copia nuova del template (l'originale resta per la revisione).
+      let risposta = await askAiProvider(req.user.user_id, ai.nome, prompt, { json: true });
+      let modifiche = leggiRispostaAi(risposta.text);
+      const applica = async (mods) => OffertaDocx.applicaModifiche(await OffertaDocx.leggiTemplate(req.body), mods);
+      let esito = await applica(modifiche);
+      if (!esito.applicate) return res.status(502).json({ error: `${risposta.label} non ha indicato modifiche applicabili al template: controlla il prompt e riprova` });
+
+      // Revisione: istruzioni, documento originale, modifiche e bozza risultante.
+      let revisione = 'non eseguita';
+      const bozza = OffertaDocx.descriviTemplate(await OffertaDocx.leggiTemplate(esito.buffer));
+      const promptRevisione = `${istruzioni}
+
+SEI IL REVISORE dell'offerta economica. Un primo passaggio ha prodotto le MODIFICHE qui sotto, già applicate al DOCUMENTO ORIGINALE: il RISULTATO è il documento ottenuto. Confronta il RISULTATO con le istruzioni e con i dati del progetto.
+Controlla in particolare: dati del cliente (ragione sociale, codice fiscale, partita IVA), importi, sconto, effort, preventivo e piano di fatturazione presenti e uguali ai dati (nessun importo inventato o sbagliato); nessun segnaposto o dato del template rimasto da sostituire; testi al posto giusto.
+
+Rispondi SOLO con un oggetto JSON:
+- se il RISULTATO rispetta le istruzioni: {"ok": true}
+- altrimenti: {"ok": false, "problemi": ["descrizione breve di ogni problema"], "modifiche": [...]}, dove "modifiche" è l'elenco COMPLETO e corretto da applicare al DOCUMENTO ORIGINALE (non al risultato), con i codici del DOCUMENTO ORIGINALE.
+
+${OF_FORMATO}
+
+DOCUMENTO ORIGINALE (codici e testi):
+${descrizione}
+
+MODIFICHE DEL PRIMO PASSAGGIO:
+${JSON.stringify(modifiche).slice(0, 60000)}
+
+RISULTATO (documento dopo le modifiche; qui i codici sono rinumerati e servono solo a leggerlo):
+${bozza}`;
+      if (promptRevisione.length <= 3 * KO_MAX_TESTO_AI) {
+        try {
+          const r2 = await askAiProvider(req.user.user_id, ai.nome, promptRevisione, { json: true });
+          const rev = leggiRevisioneAi(r2.text);
+          if (rev.ok) revisione = 'confermata';
+          else if (rev.modifiche && rev.modifiche.length) {
+            const esito2 = await applica(rev.modifiche);
+            if (esito2.applicate) {
+              esito = esito2; modifiche = rev.modifiche; risposta = r2;
+              revisione = `corretta${rev.problemi.length ? `: ${rev.problemi.join('; ')}` : ''}`;
+            } else revisione = 'correzione non applicabile: tenuta la prima stesura';
+          } else revisione = `problemi segnalati senza correzione: ${rev.problemi.join('; ')}`;
+        } catch (e) {
+          console.warn(`[OFFERTA] revisione non riuscita: ${e.message}`);
+          revisione = 'non riuscita: tenuta la prima stesura';
+        }
+      }
+
+      const nomeFile = `Offerta economica ${vars.PROGETTO || 'progetto'}`.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 150) + '.docx';
+      console.log(`[OFFERTA] progetto ${prog.projectId}: ${esito.applicate} modifiche applicate, ${esito.ignorate} ignorate, revisione ${revisione.slice(0, 200)} (${risposta.label} ${risposta.model}, ${Math.round((Date.now() - t0) / 1000)}s)`);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="offerta.docx"; filename*=UTF-8''${encodeURIComponent(nomeFile)}`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Kickoff-Modifiche', String(esito.applicate));
+      res.setHeader('X-Kickoff-Ai', encodeURIComponent(`${risposta.label} (${risposta.model})`));
+      res.setHeader('X-Kickoff-Revisione', encodeURIComponent(revisione.slice(0, 1500)));
+      res.send(esito.buffer);
+    } catch (error) {
+      console.error('❌ OFFERTA:', error.message);
       res.status(error.statusCode || error.status || 500).json({ error: error.message });
     }
   });

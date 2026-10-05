@@ -689,6 +689,24 @@
         .proj-ck.proj-ko:hover { box-shadow: 0 10px 24px rgba(220,38,38,0.26), inset 0 0 0 1px rgba(220,38,38,0.22); }
         .proj-ck.proj-ko:focus-visible { outline-color: #FCA5A5; }
         .proj-ko .proj-ck-img { width: 46px; filter: drop-shadow(0 3px 5px rgba(220,38,38,0.3)); }
+        /* Pulsante Offerta economica (accanto a Kick-off): stessa card, toni oro dell'immagine offerta.webp */
+        .proj-ck.proj-of { background: linear-gradient(145deg, #FFFBEB 0%, #FEF3C7 55%, #EEF2FF 100%); color: #78350F;
+            box-shadow: 0 4px 14px rgba(180,140,40,0.18), inset 0 0 0 1px rgba(180,140,40,0.18); }
+        .proj-ck.proj-of:hover { box-shadow: 0 10px 24px rgba(180,140,40,0.28), inset 0 0 0 1px rgba(180,140,40,0.26); }
+        .proj-ck.proj-of:focus-visible { outline-color: #FCD34D; }
+        .proj-of .proj-ck-img { width: 40px; filter: drop-shadow(0 3px 5px rgba(180,140,40,0.35)); }
+        .proj-of .proj-ck-lbl { text-align: center; }
+        /* Finestra Offerta economica: dati economici e griglia Invoice in sola lettura */
+        .of-dati { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.5rem; }
+        .of-dato { background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 9px; padding: 0.4rem 0.6rem; }
+        .of-dato small { display: block; font-size: 0.7rem; color: #6B7280; text-transform: uppercase; letter-spacing: 0.03em; }
+        .of-dato b { font-size: 0.92rem; color: #111827; word-break: break-word; }
+        .of-dato.vuoto b { color: #9CA3AF; font-weight: 500; }
+        .of-inv { overflow-x: auto; }
+        .of-inv table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+        .of-inv th { text-align: left; font-size: 0.72rem; color: #6B7280; text-transform: uppercase; padding: 0.35rem 0.4rem; border-bottom: 1px solid #E5E7EB; }
+        .of-inv td { padding: 0.35rem 0.4rem; border-bottom: 1px solid #F3F4F6; color: #1F2937; }
+        .of-box .ko-sez h4 i { color: #B45309; }
         /* Finestra Kick-off: sezioni Teams, Licenze, Template, Prompt e pulsante Genera */
         .ckp-box.ko-box { width: min(760px, calc(92vw * var(--ui-zoom-inv, 1))); height: auto; }
         .ko-body { overflow-y: auto; padding: 0.4rem 1.2rem 1rem; display: flex; flex-direction: column; gap: 0.9rem; }
@@ -6618,7 +6636,8 @@
             /\/notifiche\//,  // campanella: segnare lette / eliminare non cambia i dati della dashboard
             /\/gdpr\//,       // richiesta di cancellazione (email al team)
             /\/projects\/checklist/, // check list del progetto (spunte nella finestra)
-            /\/projects\/kickoff/    // Kick-off del progetto (team e generazione slide)
+            /\/projects\/kickoff/,   // Kick-off del progetto (team e generazione slide)
+            /\/projects\/offerta/    // Offerta economica del progetto (generazione del Word)
         ];
         let autoRefreshTimer = null;
         (function intercettaSalvataggi() {
@@ -11086,7 +11105,11 @@
                 // Kick-off: subito dopo Check List (vedi KICK-OFF DEL PROGETTO più sotto)
                 '<button type="button" class="proj-ck proj-ko" id="projKickoffBtn" title="Kick-off del progetto: slide generate dall\'AI">' +
                 '<img class="proj-ck-img" src="kickoff.png" alt="">' +
-                '<span class="proj-ck-lbl">Kick-off</span></button>';
+                '<span class="proj-ck-lbl">Kick-off</span></button>' +
+                // Offerta economica: subito dopo Kick-off (vedi OFFERTA ECONOMICA DEL PROGETTO)
+                '<button type="button" class="proj-ck proj-of" id="projOffertaBtn" title="Offerta economica del progetto: documento Word compilato dall\'AI">' +
+                '<img class="proj-ck-img" src="offerta.webp" alt="">' +
+                '<span class="proj-ck-lbl">Offerta economica</span></button>';
         }
         // Posizione del pulsante: nello spazio libero della riga di Descrizione (subito dopo il
         // campo); se la riga è piena o in riordino, nella testata del progetto.
@@ -11591,6 +11614,153 @@
                 m.classList.add('open');
             } catch (err) {
                 showNotification('Kick-off: ' + err.message, 'info');
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        // === OFFERTA ECONOMICA DEL PROGETTO (pulsante accanto a Kick-off) ===
+        // Finestra con: Dati economici (Importo, Sconto Applicato, Importo non scontato, Effort
+        // Totale, Preventivo) e griglia Invoice del progetto in sola lettura, Template (.docx
+        // scelto dal PC, ogni volta), Prompt (funzione OFFERTA_ECONOMICA) e AI in sola lettura.
+        // «Genera»: prima stesura + revisione dell'AI, poi il Word compilato da salvare sul PC;
+        // sul server non resta nulla (POST /api/projects/offerta/genera).
+        let ofProjectId = null, ofFile = null, ofDati = null, ofUrl = null;
+        function ofModal() {
+            let m = document.getElementById('ofOverlay');
+            if (m) return m;
+            document.body.insertAdjacentHTML('beforeend', `<div class="ckp-overlay" id="ofOverlay" role="dialog" aria-modal="true" aria-labelledby="ofTitle">
+                <div class="ckp-box ko-box of-box">
+                    <div class="ckp-head"><img src="offerta.webp" alt=""><h3 id="ofTitle">Offerta economica<small id="ofSub"></small></h3><button type="button" class="ckp-close" id="ofClose" aria-label="Chiudi">&times;</button></div>
+                    <div class="ko-body">
+                        <div class="ko-sez"><h4><i class="fas fa-building"></i> Cliente</h4><div class="of-dati" id="ofCliente"></div></div>
+                        <div class="ko-sez"><h4><i class="fas fa-euro-sign"></i> Dati economici</h4><div class="of-dati" id="ofDati"></div></div>
+                        <div class="ko-sez"><h4><i class="fas fa-file-invoice-dollar"></i> Invoice</h4><div class="of-inv" id="ofInvoice"></div></div>
+                        <div class="ko-sez"><h4><i class="fas fa-file-word"></i> Template</h4>
+                            <div class="ko-riga"><label class="ko-btn" for="ofFileInput"><i class="fas fa-folder-open"></i> Scegli file</label>
+                            <input type="file" id="ofFileInput" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+                            <span class="ko-file vuoto" id="ofFileNome">Nessun file scelto (.docx)</span></div></div>
+                        <div class="ko-sez"><h4><i class="fas fa-robot"></i> Prompt</h4>
+                            <div class="ko-riga"><button type="button" class="ko-btn" id="ofPrompt" title="Apre il prompt Offerta Economica: puoi modificare il tuo prompt personalizzato"><i class="fas fa-pen"></i> Prompt</button>
+                            <span class="ko-ai" id="ofAi"></span></div></div>
+                        <div id="ofEsito"></div>
+                    </div>
+                    <div class="ckp-foot ko-foot"><span class="ckp-foot-testo" id="ofFoot"></span><button type="button" class="ko-genera" id="ofGenera"><i class="fas fa-wand-magic-sparkles"></i> Genera</button></div>
+                </div></div>`);
+            m = document.getElementById('ofOverlay');
+            const chiudi = () => {
+                if (document.getElementById('ofGenera').classList.contains('in-corso')
+                    && !confirm('La generazione è in corso: chiudendo la finestra il file andrà perso. Chiudere?')) return;
+                m.classList.remove('open');
+            };
+            document.getElementById('ofClose').addEventListener('click', chiudi);
+            m.addEventListener('click', (e) => { if (e.target === m) chiudi(); });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && m.classList.contains('open')) chiudi(); });
+            document.getElementById('ofPrompt').addEventListener('click', () => {
+                const w = window.open('prompt-editor.html?funzione=OFFERTA_ECONOMICA&ritorno=offerta', 'projexaPromptOfferta');
+                if (w) w.focus();
+            });
+            document.getElementById('ofFileInput').addEventListener('change', (e) => {
+                const f = e.target.files && e.target.files[0];
+                e.target.value = '';
+                if (!f) return;
+                if (!/\.docx$/i.test(f.name)) { showNotification('Scegli un file Word .docx (i vecchi .doc vanno prima salvati come .docx)', 'info'); return; }
+                if (f.size > KO_MAX_FILE) { showNotification('Il template supera 40 MB', 'info'); return; }
+                ofFile = f;
+                ofDisegna();
+            });
+            document.getElementById('ofGenera').addEventListener('click', ofGenera);
+            return m;
+        }
+        function ofDisegna() {
+            const d = ofDati || { dati: {}, invoice: { colonne: [], righe: [] }, ai: {} };
+            document.getElementById('ofSub').textContent = currentDetailLabel || '';
+            const voce = ([l, v]) => `<div class="of-dato${v ? '' : ' vuoto'}"><small>${escapeHtml(l)}</small><b>${escapeHtml(v || 'non compilato')}</b></div>`;
+            document.getElementById('ofCliente').innerHTML = [['Ragione sociale', d.dati.ragioneSociale], ['Codice fiscale', d.dati.codiceFiscale], ['Partita IVA', d.dati.partitaIva]].map(voce).join('');
+            document.getElementById('ofDati').innerHTML = [['Importo', d.dati.importo], ['Sconto applicato', d.dati.sconto], ['Importo non scontato', d.dati.importoNonScontato], ['Effort totale', d.dati.effort], ['Preventivo', d.dati.preventivo]].map(voce).join('');
+            const inv = d.invoice || { colonne: [], righe: [] };
+            document.getElementById('ofInvoice').innerHTML = inv.righe.length
+                ? `<table><thead><tr>${inv.colonne.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead><tbody>${inv.righe.map(r => `<tr>${r.map(c => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+                : '<span class="ko-vuoto">Nessuna riga nella griglia Invoice del progetto.</span>';
+            const nome = document.getElementById('ofFileNome');
+            nome.textContent = ofFile ? ofFile.name : 'Nessun file scelto (.docx)';
+            nome.classList.toggle('vuoto', !ofFile);
+            const ai = d.ai || {};
+            let problema = '';
+            if (!ai.nome) problema = 'scegli l\'AI in Impostazioni › AI («AI Offerta Economica» oppure «AI Slide Kick-Off»)';
+            else if (!ai.supportata) problema = `«${ai.nome}» non può generare l'offerta`;
+            else if (!ai.connessa) problema = `${ai.nome} senza chiave API: collegala in Impostazioni › AI`;
+            const aiEl = document.getElementById('ofAi');
+            aiEl.className = 'ko-ai' + (problema ? ' ko-ai-ko' : '');
+            aiEl.innerHTML = problema ? `<i class="fas fa-triangle-exclamation"></i> AI: ${escapeHtml(problema)}` : `<i class="fas fa-robot"></i> AI: <b>${escapeHtml(ai.nome)}</b>`;
+            aiEl.title = 'AI che compila l\'offerta (Impostazioni › AI), in sola lettura';
+            const gen = document.getElementById('ofGenera');
+            if (!gen.classList.contains('in-corso')) {
+                gen.disabled = !!problema || !ofFile;
+                gen.title = problema ? problema.charAt(0).toUpperCase() + problema.slice(1) : (!ofFile ? 'Scegli prima il file Template (.docx)' : 'Genera l\'offerta economica');
+            }
+        }
+        async function ofGenera() {
+            const gen = document.getElementById('ofGenera');
+            if (!ofFile || gen.disabled) return;
+            gen.disabled = true;
+            gen.classList.add('in-corso');
+            gen.innerHTML = '<i class="fas fa-spinner"></i> Generazione…';
+            document.getElementById('ofFoot').textContent = 'L\'AI compila l\'offerta e poi la ricontrolla (revisione): può richiedere qualche minuto.';
+            document.getElementById('ofEsito').innerHTML = '';
+            try {
+                const r = await fetch(`${API_URL}/projects/offerta/genera?projectId=${encodeURIComponent(ofProjectId)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/octet-stream', ...getAuthHeaders() },
+                    body: ofFile
+                });
+                if (!r.ok) {
+                    const x = await r.json().catch(() => ({}));
+                    throw new Error(x.error || (r.status === 413 ? 'Template troppo grande' : `Errore ${r.status}`));
+                }
+                const blob = await r.blob();
+                const m = /filename\*=UTF-8''([^;]+)/i.exec(r.headers.get('Content-Disposition') || '');
+                const nomeFile = m ? decodeURIComponent(m[1]) : 'Offerta economica.docx';
+                if (ofUrl) URL.revokeObjectURL(ofUrl);
+                ofUrl = URL.createObjectURL(blob);
+                const ai = decodeURIComponent(r.headers.get('X-Kickoff-Ai') || '');
+                const n = r.headers.get('X-Kickoff-Modifiche');
+                const revisione = decodeURIComponent(r.headers.get('X-Kickoff-Revisione') || '');
+                document.getElementById('ofEsito').innerHTML = `<div class="ko-esito">
+                    <a href="${ofUrl}" download="${escapeHtml(nomeFile)}" title="Salva sul PC"><i class="fas fa-file-word" style="color:#2563EB;"></i>Salva</a>
+                    <span class="ko-esito-testo"><b>${escapeHtml(nomeFile)}</b><br>${n ? `${escapeHtml(n)} modifiche applicate` : 'Offerta generata'}${ai ? ` da ${escapeHtml(ai)}` : ''}. Clicca l'icona per salvarlo: il file non resta su Projexa.${revisione ? `<br><span style="color:${/^(corretta|confermata)/i.test(revisione) ? '#166534' : '#B45309'};"><i class="fas fa-clipboard-check"></i> Revisione: ${escapeHtml(revisione)}</span>` : ''}</span></div>`;
+                showNotification('Offerta economica pronta', 'success');
+            } catch (err) {
+                showNotification('Offerta economica: ' + err.message, 'info');
+            } finally {
+                gen.classList.remove('in-corso');
+                gen.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Genera';
+                document.getElementById('ofFoot').textContent = '';
+                ofDisegna();
+            }
+        }
+        document.addEventListener('click', async (e) => {
+            const btn = e.target.closest('#projOffertaBtn');
+            if (!btn) return;
+            const projectId = currentDetailArgument;
+            if (!projectId) return;
+            btn.disabled = true;
+            try {
+                const r = await fetch(`${API_URL}/projects/offerta?projectId=${encodeURIComponent(projectId)}`, { headers: getAuthHeaders() });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                const m = ofModal();
+                if (ofProjectId !== projectId) {
+                    ofFile = null;
+                    if (ofUrl) { URL.revokeObjectURL(ofUrl); ofUrl = null; }
+                    document.getElementById('ofEsito').innerHTML = '';
+                }
+                ofProjectId = projectId;
+                ofDati = d;
+                ofDisegna();
+                m.classList.add('open');
+            } catch (err) {
+                showNotification('Offerta economica: ' + err.message, 'info');
             } finally {
                 btn.disabled = false;
             }
