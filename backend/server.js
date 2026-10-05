@@ -2700,7 +2700,8 @@ Rispondi SOLO con un oggetto JSON, senza testo prima o dopo, in questa forma:
 - "testo" sostituisce tutto il testo del paragrafo (stile e carattere del template restano): riscrivi anche le parti che restano uguali.
 - "righe" sostituisce tutte le righe della tabella, compresa l'intestazione se c'è: le righe in più copiano lo stile dell'ultima riga.
 - "elimina": true toglie il paragrafo o la tabella.
-- Includi solo gli elementi da cambiare. Non usare markdown nei testi.`;
+- Barrato: il testo racchiuso tra ~~ e ~~ viene scritto barrato (es. "~~42.000,00 €~~ importo scontato a: 35.000,00 €"); vale nei paragrafi e nelle celle delle tabelle.
+- Includi solo gli elementi da cambiare. Non usare altro markdown nei testi.`;
 
 // Id del progetto e di tutte le sue sezioni (nodi padre annidati), per cercare i campi ovunque.
 async function ofAlbero(req, prog) {

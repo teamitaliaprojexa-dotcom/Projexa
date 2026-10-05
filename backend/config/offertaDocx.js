@@ -55,24 +55,34 @@ function primoRPr(p) {
   return null;
 }
 
-// Riscrive il testo di un paragrafo: resta pPr, un solo run con lo stile del primo run.
+// Riscrive il testo di un paragrafo: resta pPr, il testo con lo stile del primo run.
+// Il testo tra ~~ e ~~ si scrive barrato (es. importo di listino barrato prima dello scontato).
 function riempiParagrafo(p, testo, rPr) {
   const doc = p.ownerDocument;
   for (const n of Array.from(p.childNodes)) {
     if (!(n.nodeType === 1 && n.namespaceURI === NS_W && n.localName === 'pPr')) p.removeChild(n);
   }
   if (testo === '') return;
-  const r = doc.createElementNS(NS_W, 'w:r');
-  if (rPr) r.appendChild(rPr.cloneNode(true));
-  String(testo).split('\t').forEach((pezzo, i) => {
-    if (i > 0) r.appendChild(doc.createElementNS(NS_W, 'w:tab'));
-    if (pezzo === '') return;
-    const t = doc.createElementNS(NS_W, 'w:t');
-    t.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:space', 'preserve');
-    t.appendChild(doc.createTextNode(pezzo));
-    r.appendChild(t);
+  String(testo).split(/(~~[^~]+~~)/).filter((s) => s !== '').forEach((parte) => {
+    const barrato = /^~~[^~]+~~$/.test(parte);
+    const r = doc.createElementNS(NS_W, 'w:r');
+    const stile = rPr ? rPr.cloneNode(true) : (barrato ? doc.createElementNS(NS_W, 'w:rPr') : null);
+    if (stile && barrato) {
+      // w:strike va dopo gli elementi di carattere già presenti (ordine non vincolante per Word).
+      figli(stile, 'strike').forEach((x) => stile.removeChild(x));
+      stile.appendChild(doc.createElementNS(NS_W, 'w:strike'));
+    }
+    if (stile) r.appendChild(stile);
+    (barrato ? parte.slice(2, -2) : parte).split('\t').forEach((pezzo, i) => {
+      if (i > 0) r.appendChild(doc.createElementNS(NS_W, 'w:tab'));
+      if (pezzo === '') return;
+      const t = doc.createElementNS(NS_W, 'w:t');
+      t.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:space', 'preserve');
+      t.appendChild(doc.createTextNode(pezzo));
+      r.appendChild(t);
+    });
+    p.appendChild(r);
   });
-  p.appendChild(r);
 }
 
 // Nuovo testo di un paragrafo: le righe in più diventano paragrafi copiati dal primo.
