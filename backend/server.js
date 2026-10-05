@@ -2743,9 +2743,16 @@ async function ofDati(req, prog) {
   );
   const perCampo = new Map();
   for (const x of r.rows) { const k = ofNormCampo(x.campo); if (!perCampo.has(k)) perCampo.set(k, x); }
-  const dati = {};
+  // Gestione a ore o a giorni (campo «Gestione a HH», come la griglia del progetto): i campi
+  // che esistono solo in versione _hh/_gg (es. «Sconto Applicato_gg») si leggono da quella giusta.
+  const gestione = perCampo.get('gestione a hh');
+  const aOre = !!gestione && ['true', 't', '1'].includes(String(gestione.valore1 || '').trim().toLowerCase());
+  const dati = { aOre };
   for (const [k, nome] of Object.entries(OF_CAMPI)) {
-    const row = perCampo.get(nome.toLowerCase());
+    const n = nome.toLowerCase();
+    const giusto = aOre ? '_hh' : '_gg', altro = aOre ? '_gg' : '_hh';
+    const candidati = [perCampo.get(n), perCampo.get(n + giusto), perCampo.get(n + altro)].filter(Boolean);
+    const row = candidati.find((r) => ofValore(r) !== '') || candidati[0];
     dati[k] = row ? ofValore(row) : '';
   }
   const invoice = perCampo.get('invoice');
@@ -2773,10 +2780,12 @@ async function ofDati(req, prog) {
 
 // Righe della griglia Invoice del progetto (stesse regole della griglia: tenant, utente,
 // progetto, righe non scadute; per le chiavi esterne la descrizione al posto dell'id).
-async function ofInvoice(req, prog, cfg) {
+async function ofInvoice(req, prog, cfg, aOre = false) {
   if (!cfg || !cfg.tabella) return { colonne: [], righe: [] };
   const tabella = assertValidIdentifier(String(cfg.tabella).trim());
-  const colonne = parseGridColumnsSpec(cfg.colonna).columns;
+  // Come la griglia del progetto: con gestione a ore si nascondono le colonne _gg, altrimenti le _hh.
+  const nascoste = aOre ? '_gg' : '_hh';
+  const colonne = parseGridColumnsSpec(cfg.colonna).columns.filter((c) => !String(c).toLowerCase().endsWith(nascoste));
   const cols = await getTableColumns(tabella);
   const usate = colonne.filter((c) => cols.has(c) && !['tenant_id', 'user_id', 'id'].includes(c));
   if (!usate.length || !cols.has('tenant_id') || !cols.has('user_id')) return { colonne: [], righe: [] };
@@ -2838,7 +2847,7 @@ app.get('/api/projects/offerta', requireAuth, async (req, res) => {
   try {
     const prog = await ckpProgetto(req, req.query && req.query.projectId);
     const { dati, invoiceCfg } = await ofDati(req, prog);
-    res.json({ dati, invoice: await ofInvoice(req, prog, invoiceCfg), ai: await ofAiInfo(req) });
+    res.json({ dati, invoice: await ofInvoice(req, prog, invoiceCfg, dati.aOre), ai: await ofAiInfo(req) });
   } catch (error) {
     res.status(error.statusCode || error.status || 500).json({ error: error.message });
   }
@@ -2860,7 +2869,7 @@ app.post('/api/projects/offerta/genera', requireAuth,
       if (descrizione.length > KO_MAX_TESTO_AI) return res.status(413).json({ error: 'Il template contiene troppo testo per l\'AI: usa un template più corto' });
 
       const { dati, invoiceCfg } = await ofDati(req, prog);
-      const invoice = await ofInvoice(req, prog, invoiceCfg);
+      const invoice = await ofInvoice(req, prog, invoiceCfg, dati.aOre);
       const nomi = (await db.query(
         `SELECT (SELECT valore2 FROM projects WHERE id::text = $1 LIMIT 1) AS progetto,
                 (SELECT valore2 FROM clients WHERE id = $2 LIMIT 1) AS cliente,
@@ -2874,7 +2883,7 @@ app.post('/api/projects/offerta/genera', requireAuth,
         IMPORTO: euro(dati.importo),
         SCONTO: dati.sconto === '' ? '(non indicato)' : ofNumero(dati.sconto),
         IMPORTO_NON_SCONTATO: euro(dati.importoNonScontato),
-        EFFORT: dati.effort === '' ? '(non indicato)' : ofNumero(dati.effort),
+        EFFORT: dati.effort === '' ? '(non indicato)' : `${ofNumero(dati.effort)} ${dati.aOre ? 'ore' : 'giorni'}`,
         PREVENTIVO: dati.preventivo || '(non indicato)',
         RAGIONE_SOCIALE: dati.ragioneSociale || '(non indicata)',
         CODICE_FISCALE: dati.codiceFiscale || '(non indicato)',
@@ -3139,6 +3148,8 @@ app.get('/api/:source(settings|clients|projects)/grid-widget/fk-options', requir
 // Inserisce una nuova riga nella griglia (tipo_valore = 11). tenant_id/user_id/client_id
 // (e project_id per i progetti) vengono sempre forzati dal contesto, non dal browser.
 app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, async (req, res) => {
+  // Campi tipo 4 del progetto: valore2 riallineato dopo il salvataggio della griglia.
+  if (req.params.source === 'projects') tipo4AFineRisposta(req, res, String((req.body && req.body.fieldId) || (req.query && req.query.fieldId) || '').trim());
   try {
     const source = req.params.source;
     const fieldId = ((req.body && req.body.fieldId) || '').trim();
@@ -3239,6 +3250,8 @@ async function gridChosenClientId(pool, source, ctx, req, values) {
 }
 
 app.put('/api/:source(settings|clients|projects)/grid-widget/rows', requireAuth, async (req, res) => {
+  // Campi tipo 4 del progetto: valore2 riallineato dopo il salvataggio della griglia.
+  if (req.params.source === 'projects') tipo4AFineRisposta(req, res, String((req.body && req.body.fieldId) || (req.query && req.query.fieldId) || '').trim());
   let client;
   try {
     const source = req.params.source;
@@ -3381,6 +3394,8 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/rows', requireAuth,
 // a ieri usando la data del database. Gli id ricevuti vengono sempre limitati al
 // contesto autorizzato della griglia (tenant, utente, cliente e progetto).
 app.put('/api/:source(settings|clients|projects)/grid-widget/expire', requireAuth, async (req, res) => {
+  // Campi tipo 4 del progetto: valore2 riallineato dopo il salvataggio della griglia.
+  if (req.params.source === 'projects') tipo4AFineRisposta(req, res, String((req.body && req.body.fieldId) || (req.query && req.query.fieldId) || '').trim());
   try {
     const source = req.params.source;
     const fieldId = String((req.body && req.body.fieldId) || '').trim();
@@ -3436,6 +3451,8 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/expire', requireAut
 // Modifica una riga esistente della griglia (tipo_valore = 11), filtrando sempre per il
 // contesto (tenant/utente/cliente/progetto), mai per valori inviati dal browser.
 app.put('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, async (req, res) => {
+  // Campi tipo 4 del progetto: valore2 riallineato dopo il salvataggio della griglia.
+  if (req.params.source === 'projects') tipo4AFineRisposta(req, res, String((req.body && req.body.fieldId) || (req.query && req.query.fieldId) || '').trim());
   try {
     const source = req.params.source;
     const fieldId = ((req.body && req.body.fieldId) || '').trim();
@@ -3498,6 +3515,8 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, 
 
 // Elimina una riga della griglia (tipo_valore = 11), filtrando sempre per il contesto.
 app.delete('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, async (req, res) => {
+  // Campi tipo 4 del progetto: valore2 riallineato dopo il salvataggio della griglia.
+  if (req.params.source === 'projects') tipo4AFineRisposta(req, res, String((req.body && req.body.fieldId) || (req.query && req.query.fieldId) || '').trim());
   try {
     const source = req.params.source;
     const fieldId = ((req.query && req.query.fieldId) || '').trim();
@@ -4472,6 +4491,8 @@ app.get('/api/data/:table/columns', requireAuth, async (req, res) => {
 
 // POST - Create record
 app.post('/api/data/:table', requireAuth, async (req, res) => {
+  // Nuovo campo in un progetto: campi tipo 4 del progetto riallineati (valore2).
+  if (req.params.table === 'projects') tipo4AFineRisposta(req, res, String((req.body && req.body.argument) || '').trim());
   try {
     const pool = pickDb(req), dbKey = pickDbKey(req);
     const tableName = assertValidIdentifier(req.params.table);
@@ -4623,6 +4644,8 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
 
 // PUT - Update record
 app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
+  // Campo di un progetto salvato: campi tipo 4 del progetto riallineati (valore2).
+  if (req.params.table === 'projects') tipo4AFineRisposta(req, res, req.params.id);
   try {
     const pool = pickDb(req), dbKey = pickDbKey(req);
     const tableName = assertValidIdentifier(req.params.table);
@@ -8812,11 +8835,112 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
   }
 });
 
+// ==========================================
+// CAMPI TIPO 4 (Database) DEI PROGETTI: valore copiato in valore2
+// ==========================================
+// Un campo tipo 4 mostra il valore letto da tabella.colonna (riga di tenant/utente/cliente/
+// progetto + VariabDB). Dopo ogni salvataggio dei dati di un progetto o di una sua griglia
+// lo stesso valore si scrive anche in valore2 del campo, così lo leggono le altre funzioni
+// (Offerta economica, Kick-off, Reporting, condizioni della Check List...). Si ricalcolano
+// tutti i campi tipo 4 del progetto, anche dentro le sezioni; si scrive solo se il valore è
+// cambiato (cifrato se la riga lo è). In background, raggruppando i salvataggi ravvicinati.
+const tipo4InAttesa = new Map(); // "tenant|utente|progetto" -> timer
+
+// Progetto (riga identità argument = campo = 'Progetto') a cui appartiene una riga di projects.
+async function tipo4ProgettoDi(tenantId, userId, rowId) {
+  let id = String(rowId || '');
+  for (let i = 0; i < 8 && EAV_UUID_RE.test(id); i++) {
+    const r = (await db.query(
+      'SELECT id::text AS id, argument, campo, client_id FROM projects WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3 LIMIT 1',
+      [id, tenantId, userId]
+    )).rows[0];
+    if (!r) return null;
+    if (r.argument === 'Progetto' && r.campo === 'Progetto') return { projectId: r.id, clientId: r.client_id };
+    id = String(r.argument || '');
+  }
+  return null;
+}
+
+const tipo4Testo = (v) => {
+  if (v === null || v === undefined) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return String(v);
+};
+
+async function tipo4AllineaProgetto(user, projectId, clientId) {
+  const ids = (await db.query(
+    `WITH RECURSIVE albero(id, livello) AS (
+       SELECT id, 0 FROM projects WHERE id::text = $1
+       UNION ALL
+       SELECT p.id, a.livello + 1 FROM projects p JOIN albero a ON p.argument = a.id::text
+        WHERE p.tenant_id = $2 AND p.user_id = $3 AND a.livello < 6 AND p.tipo_valore::text = '0'
+     )
+     SELECT id::text AS id FROM albero`,
+    [projectId, user.tenant_id, user.user_id]
+  )).rows.map((x) => x.id);
+  const campi = (await db.query(
+    `SELECT id, tabella, colonna, "VariabDB" AS variabdb, valore2::text AS valore2, client_id
+       FROM projects
+      WHERE tenant_id = $1 AND user_id = $2 AND argument = ANY($3::text[]) AND tipo_valore::text = '4'
+        AND tabella IS NOT NULL AND colonna IS NOT NULL
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+    [user.tenant_id, user.user_id, ids]
+  )).rows;
+  let scritti = 0;
+  for (const c of campi) {
+    try {
+      const tabella = assertValidIdentifier(String(c.tabella).trim());
+      const colonna = assertValidIdentifier(String(c.colonna).trim());
+      // Stessa lettura della scheda (GET dei campi), con il progetto vero come contesto.
+      const keys = await referenceKeys(tabella, user, { clientId: c.client_id || clientId, projectId });
+      let where = keys.length ? 'WHERE ' + keys.map((k, i) => `"${k.col}" = $${i + 1}`).join(' AND ') : '';
+      const variab = String(c.variabdb || '').trim();
+      if (variab) where = where ? `${where} ${variab}` : 'WHERE ' + variab.replace(/^\s*(and|or)\s+/i, '');
+      const ref = await db.query(`SELECT "${colonna}" AS v FROM "${tabella}" ${where} LIMIT 1`, keys.map((k) => k.val));
+      const nuovo = tipo4Testo(ref.rows[0] ? ref.rows[0].v : null);
+      if ((nuovo ?? '') === (c.valore2 ?? '')) continue;
+      const dati = await cryptoWrite(db, 'main', 'projects', { valore2: nuovo }, c.id);
+      const cols = Object.keys(dati).filter((k) => k === 'valore2' || k === 'crypto');
+      await db.query(
+        `UPDATE projects SET ${cols.map((k, i) => `"${k}" = $${i + 1}`).join(', ')} WHERE id = $${cols.length + 1}`,
+        [...cols.map((k) => dati[k]), c.id]
+      );
+      scritti += 1;
+    } catch (e) {
+      console.warn(`[TIPO 4] campo ${c.id}: valore non aggiornato (${e.message})`);
+    }
+  }
+  if (scritti) console.log(`[TIPO 4] progetto ${projectId}: ${scritti} campi Database copiati in valore2`);
+  return scritti;
+}
+
+// Da chiamare dopo un salvataggio riuscito che riguarda una riga di projects (campo o griglia).
+function tipo4DopoSalvataggio(req, rowId) {
+  const user = { tenant_id: req.user.tenant_id, user_id: req.user.user_id };
+  (async () => {
+    const prog = await tipo4ProgettoDi(user.tenant_id, user.user_id, rowId);
+    if (!prog) return;
+    const k = `${user.tenant_id}|${user.user_id}|${prog.projectId}`;
+    clearTimeout(tipo4InAttesa.get(k));
+    tipo4InAttesa.set(k, setTimeout(() => {
+      tipo4InAttesa.delete(k);
+      tipo4AllineaProgetto(user, prog.projectId, prog.clientId).catch((e) => console.warn('[TIPO 4]', e.message));
+    }, 800));
+  })().catch((e) => console.warn('[TIPO 4]', e.message));
+}
+// Aggancio: a risposta inviata con esito positivo.
+function tipo4AFineRisposta(req, res, rowId) {
+  if (!rowId) return;
+  res.on('finish', () => { if (res.statusCode < 400) tipo4DopoSalvataggio(req, rowId); });
+}
+
 // Salvataggio di un campo di tipo 4 (riferimento a un'altra tabella) per settings, clients o projects.
 // Prima di scrivere il valore nella tabella di riferimento, verifica che non esista già
 // nella colonna <colonna> della tabella <tabella> indicate nella riga (per lo stesso contesto:
 // tenant/user, +client_id se "clients", +client_id/project_id se "projects", + eventuale VariabDB).
 app.put('/api/:source(settings|clients|projects)/:id/reference-value', requireAuth, async (req, res) => {
+  // Campo tipo 4 di un progetto modificato: il suo valore (e degli altri) va in valore2.
+  if (req.params.source === 'projects') tipo4AFineRisposta(req, res, req.params.id);
   try {
     const table = req.params.source;
     const { id } = req.params;
