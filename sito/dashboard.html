@@ -9042,6 +9042,11 @@
             // VB-Cable...: nessuna finestra di condivisione) oppure dalla condivisione dello schermo.
             // rec.display contiene in entrambi i casi il flusso con l'audio del PC.
             const audioPref = readAudioPref();
+            // Solo un vero loopback (nome salvato con la scelta): una scelta vecchia, es. il
+            // microfono della cuffia, vale «Condivisione schermo» e non duplica la propria voce.
+            if (audioPref.system && !(LOOPBACK_RE.test(audioPref.systemLabel || '') && audioPref.system !== audioPref.input)) {
+                audioPref.system = undefined;
+            }
             if (audioPref.system) {
                 setRecStatus('Avvio della registrazione…');
                 try {
@@ -9447,16 +9452,24 @@
         // Nomi tipici dei dispositivi che riportano l'audio del PC come ingresso (loopback).
         const LOOPBACK_RE = /stereo mix|mix stereo|missaggio stereo|what u hear|cable output|vb-audio|voicemeeter|loopback/i;
 
+        // Audio di sistema: SOLO «Condivisione schermo» (predefinita) e i dispositivi che riportano
+        // davvero l'audio del PC (loopback: Mix stereo, CABLE Output...). I microfoni normali non
+        // compaiono: sceglierne uno (es. quello della cuffia) registrava due volte la propria voce
+        // e mai quella degli altri partecipanti. Una scelta salvata che non è un loopback (scelta
+        // con la versione precedente) torna a «Condivisione schermo».
         function renderSystemAudioList(inputs, selected) {
             const el = document.getElementById('audioSystemList');
             if (!el) return;
-            const sel = inputs.some((d) => d.deviceId === selected) ? selected : '';
-            const item = (value, label, extra) => `<label class="audio-dev-item${value === sel ? ' selected' : ''}"><input type="radio" name="audiosystem" value="${escapeHtml(value)}" ${value === sel ? 'checked' : ''}> ${label}${extra || ''}</label>`;
-            let html = item('', 'Condivisione schermo <span style="color: var(--text-muted);">(il browser chiede ogni volta cosa condividere)</span>');
             const loop = inputs.filter((d) => LOOPBACK_RE.test(d.label || ''));
-            const others = inputs.filter((d) => !LOOPBACK_RE.test(d.label || ''));
-            html += loop.map((d) => item(d.deviceId, escapeHtml(d.label), ' <span class="audio-dev-badge">consigliato</span>')).join('');
-            html += others.map((d, i) => item(d.deviceId, escapeHtml(d.label || `Ingresso ${i + 1}`))).join('');
+            const sel = loop.some((d) => d.deviceId === selected) ? selected : '';
+            if (selected && !sel) {
+                const pref = readAudioPref();
+                delete pref.system; delete pref.systemLabel;
+                writeAudioPref(pref);
+            }
+            const item = (value, label, extra) => `<label class="audio-dev-item${value === sel ? ' selected' : ''}"><input type="radio" name="audiosystem" value="${escapeHtml(value)}" ${value === sel ? 'checked' : ''}> ${label}${extra || ''}</label>`;
+            let html = item('', 'Condivisione schermo <span style="color: var(--text-muted);">(il browser chiede ogni volta cosa condividere: scegli lo schermo intero o la scheda di Teams e attiva la condivisione dell\'audio)</span>');
+            html += loop.map((d) => item(d.deviceId, escapeHtml(d.label), ' <span class="audio-dev-badge">senza condivisione</span>')).join('');
             if (!loop.length) {
                 html += `<div class="audio-dev-empty">Nessun dispositivo "Mix stereo" o cavo virtuale trovato. Puoi attivare Mix stereo da Impostazioni di Windows › Audio › Altre impostazioni audio › Registrazione (clic destro › Mostra dispositivi disattivati), oppure installare VB-Audio Virtual Cable.</div>`;
             }
@@ -9502,7 +9515,12 @@
                 const pref = readAudioPref();
                 if (r.name === 'audioinput') { pref.input = r.value; startAudioMeter(r.value); }
                 if (r.name === 'audiooutput') pref.output = r.value;
-                if (r.name === 'audiosystem') pref.system = r.value || undefined;
+                if (r.name === 'audiosystem') {
+                    // Si salva anche il nome: all'avvio della registrazione si usa il dispositivo
+                    // solo se è un loopback (vedi audioSistemaValido).
+                    pref.system = r.value || undefined;
+                    pref.systemLabel = r.value ? r.closest('.audio-dev-item').textContent.trim() : undefined;
+                }
                 writeAudioPref(pref);
                 r.closest('.audio-dev-list').querySelectorAll('.audio-dev-item').forEach((l) => l.classList.toggle('selected', l.contains(r)));
             });
