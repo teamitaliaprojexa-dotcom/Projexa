@@ -670,6 +670,18 @@
         .proj-ck.fatta { background: linear-gradient(145deg, #DCFCE7 0%, #BBF7D0 100%); box-shadow: 0 6px 18px rgba(5,150,105,0.3), inset 0 0 0 1px rgba(5,150,105,0.3); }
         .proj-ck.fatta .proj-ck-img { animation: projCkPop 2.6s ease-in-out infinite; }
         @keyframes projCkPop { 0%, 85%, 100% { transform: scale(1); } 90% { transform: scale(1.12); } }
+        /* Colonna Foto della griglia «Rubrica interna»: lente (vedi), fotocamera (carica), X (togli) */
+        .type11-foto-col { text-align: center; }
+        .type11-foto { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+        .type11-foto-btn { border: 1px solid #E5E7EB; background: #fff; color: #4B5563; width: 26px; height: 26px; border-radius: 7px; cursor: pointer; display: inline-grid; place-items: center; font-size: 0.75rem; padding: 0; }
+        .type11-foto-btn:hover { background: #EFF6FF; color: #2563EB; border-color: #BFDBFE; }
+        .type11-foto-btn.type11-foto-togli:hover { background: #FEF2F2; color: #B91C1C; border-color: #FCA5A5; }
+        .type11-foto-btn:disabled { opacity: 0.5; cursor: wait; }
+        .type11-foto-vuota { color: #CBD5E1; }
+        .foto-overlay { z-index: 2600; }
+        .foto-box { position: relative; background: #fff; border-radius: 14px; padding: 14px; box-shadow: 0 20px 50px rgba(15,23,42,0.25); }
+        .foto-box img { display: block; max-width: min(520px, 80vw); max-height: 70vh; border-radius: 10px; }
+        .foto-box .foto-chiudi { position: absolute; top: -12px; right: -12px; width: 30px; height: 30px; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(15,23,42,0.25); }
         /* Pulsante Kick-off (accanto a Check List): stessa card, toni rossi dell'immagine kickoff.png */
         .proj-ck-slot { gap: 0.75rem; }
         .proj-ck.proj-ko { background: linear-gradient(145deg, #FEF2F2 0%, #FFF1F2 55%, #EEF2FF 100%); color: #7F1D1D;
@@ -11501,7 +11513,7 @@
             gen.disabled = true;
             gen.classList.add('in-corso');
             gen.innerHTML = '<i class="fas fa-spinner"></i> Generazione…';
-            document.getElementById('koFoot').textContent = 'L\'AI sta preparando le slide: può richiedere fino a qualche minuto.';
+            document.getElementById('koFoot').textContent = 'L\'AI prepara le slide e poi le ricontrolla (revisione): può richiedere qualche minuto.';
             document.getElementById('koEsito').innerHTML = '';
             try {
                 const r = await fetch(`${API_URL}/projects/kickoff/genera?projectId=${encodeURIComponent(koProjectId)}`, {
@@ -11519,6 +11531,13 @@
                 const nomeFile = m ? decodeURIComponent(m[1]) : 'Kick-off.pptx';
                 const ai = decodeURIComponent(r.headers.get('X-Kickoff-Ai') || '');
                 koMostraEsito(blob, nomeFile, r.headers.get('X-Kickoff-Modifiche'), ai);
+                // Esito della revisione dell'AI: confermata, corretta (con i problemi trovati)...
+                const revisione = decodeURIComponent(r.headers.get('X-Kickoff-Revisione') || '');
+                if (revisione) {
+                    const corretta = /^corretta/i.test(revisione);
+                    document.querySelector('#koEsito .ko-esito-testo').insertAdjacentHTML('beforeend',
+                        `<br><span style="color:${corretta || /^confermata/i.test(revisione) ? '#166534' : '#B45309'};"><i class="fas fa-${corretta ? 'pen-to-square' : 'clipboard-check'}"></i> Revisione: ${escapeHtml(revisione)}</span>`);
+                }
                 const mancanti = decodeURIComponent(r.headers.get('X-Kickoff-Mancanti') || '');
                 if (mancanti) {
                     document.querySelector('#koEsito .ko-esito-testo').insertAdjacentHTML('beforeend',
@@ -15012,6 +15031,123 @@
 
         // Filtri e ordinamento lato browser: il server restituisce tutte le righe.
         // Lo stato resta sul widget, così sopravvive al ricaricamento dopo un salvataggio.
+        // === FOTO DEL PROFILO (griglia «Rubrica interna», colonna Foto) ===
+        // Lente = vedi la foto (se c'è). In modifica, sulle righe modificabili: fotocamera =
+        // carica/sostituisci, X = togli. La foto si rimpicciolisce nel browser (lato lungo
+        // 600 px, JPEG) prima di inviarla: PUT /api/rubrica/:id/foto. La usa anche il Kick-off.
+        const FOTO_LATO_MAX = 600;
+        function type11FotoCellHtml(record, modificabile) {
+            const id = escapeHtml(record && record.id || '');
+            if (!id) return '';
+            const ha = record.__ha_foto === true;
+            return `<span class="type11-foto" data-foto-id="${id}">`
+                + (ha ? `<button type="button" class="type11-foto-btn" data-foto-azione="vedi" title="Vedi la foto"><i class="fas fa-magnifying-glass"></i></button>` : '')
+                + (modificabile ? `<button type="button" class="type11-foto-btn" data-foto-azione="carica" title="${ha ? 'Sostituisci la foto' : 'Carica la foto'}"><i class="fas fa-camera"></i></button>` : '')
+                + (modificabile && ha ? `<button type="button" class="type11-foto-btn type11-foto-togli" data-foto-azione="togli" title="Togli la foto"><i class="fas fa-xmark"></i></button>` : '')
+                + (!ha && !modificabile ? '<span class="type11-foto-vuota" title="Nessuna foto">–</span>' : '')
+                + '</span>';
+        }
+        // Rimpicciolisce l'immagine e la converte in JPEG (sfondo bianco per i PNG trasparenti).
+        function fotoRidimensiona(file) {
+            return new Promise((resolve, reject) => {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => {
+                    const k = Math.min(1, FOTO_LATO_MAX / Math.max(img.naturalWidth, img.naturalHeight));
+                    const c = document.createElement('canvas');
+                    c.width = Math.max(1, Math.round(img.naturalWidth * k));
+                    c.height = Math.max(1, Math.round(img.naturalHeight * k));
+                    const ctx = c.getContext('2d');
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, c.width, c.height);
+                    ctx.drawImage(img, 0, 0, c.width, c.height);
+                    URL.revokeObjectURL(url);
+                    c.toBlob(b => (b ? resolve(b) : reject(new Error('Immagine non convertibile'))), 'image/jpeg', 0.88);
+                };
+                img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Il file non è un\'immagine leggibile')); };
+                img.src = url;
+            });
+        }
+        function fotoAggiornaCella(span, ha) {
+            const cell = span.closest('td');
+            if (!cell) return;
+            cell.innerHTML = type11FotoCellHtml({ id: span.dataset.fotoId, __ha_foto: ha }, true);
+        }
+        async function fotoMostra(id) {
+            let ov = document.getElementById('fotoOverlay');
+            if (!ov) {
+                document.body.insertAdjacentHTML('beforeend', `<div class="ckp-overlay foto-overlay" id="fotoOverlay" role="dialog" aria-modal="true" aria-label="Foto del profilo">
+                    <div class="foto-box"><button type="button" class="ckp-close foto-chiudi" aria-label="Chiudi">&times;</button><img id="fotoImg" alt="Foto del profilo"></div></div>`);
+                ov = document.getElementById('fotoOverlay');
+                const chiudi = () => {
+                    ov.classList.remove('open');
+                    const img = document.getElementById('fotoImg');
+                    if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+                    img.removeAttribute('src');
+                };
+                ov.addEventListener('click', e => { if (e.target === ov || e.target.closest('.foto-chiudi')) chiudi(); });
+                document.addEventListener('keydown', e => { if (e.key === 'Escape' && ov.classList.contains('open')) chiudi(); });
+            }
+            const r = await fetch(`${API_URL}/rubrica/${encodeURIComponent(id)}/foto`, { headers: getAuthHeaders() });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                throw new Error(d.error || `Errore ${r.status}`);
+            }
+            document.getElementById('fotoImg').src = URL.createObjectURL(await r.blob());
+            ov.classList.add('open');
+        }
+        document.addEventListener('click', async (e) => {
+            const btn = e.target.closest('.type11-foto-btn');
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation(); // non selezionare la riga della griglia
+            const span = btn.closest('.type11-foto');
+            const id = span && span.dataset.fotoId;
+            if (!id) return;
+            const azione = btn.dataset.fotoAzione;
+            try {
+                if (azione === 'vedi') {
+                    await fotoMostra(id);
+                } else if (azione === 'togli') {
+                    if (!confirm('Togliere la foto di questa persona?')) return;
+                    btn.disabled = true;
+                    const r = await fetch(`${API_URL}/rubrica/${encodeURIComponent(id)}/foto`, { method: 'DELETE', headers: getAuthHeaders() });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                    fotoAggiornaCella(span, false);
+                    showNotification('Foto tolta', 'success');
+                } else if (azione === 'carica') {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/png,image/jpeg,image/webp';
+                    input.addEventListener('change', async () => {
+                        const file = input.files && input.files[0];
+                        if (!file) return;
+                        btn.disabled = true;
+                        try {
+                            const blob = await fotoRidimensiona(file);
+                            const r = await fetch(`${API_URL}/rubrica/${encodeURIComponent(id)}/foto`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'image/jpeg', 'X-File-Name': encodeURIComponent(file.name.replace(/\.[^.]+$/, '') + '.jpg'), ...getAuthHeaders() },
+                                body: blob
+                            });
+                            const d = await r.json().catch(() => ({}));
+                            if (!r.ok) throw new Error(d.error || (r.status === 413 ? 'Immagine troppo grande' : `Errore ${r.status}`));
+                            fotoAggiornaCella(span, true);
+                            showNotification('Foto caricata', 'success');
+                        } catch (err) {
+                            showNotification('Foto: ' + err.message, 'info');
+                            btn.disabled = false;
+                        }
+                    });
+                    input.click();
+                }
+            } catch (err) {
+                showNotification('Foto: ' + err.message, 'info');
+                btn.disabled = false;
+            }
+        });
+
         function type11SetupView(widget, records, columns, displayedValue) {
             const state = widget._type11View || (widget._type11View = { filters: {}, sort: null });
             // exact = filtri a valore esatto dall'elenco sopra la griglia (es. Tipologia).
@@ -15693,6 +15829,13 @@
                 // Selezione multipla per chiudere le righe: disponibile esclusivamente
                 // sul tipo 11, in modifica, per tabelle reali con id e scadenza.
                 const canExpire = editing && !isGantt13 && payload.canExpire === true;
+                // Colonna Foto (Rubrica interna): lente per vedere la foto; in modifica anche
+                // fotocamera per caricarla e X per toglierla (vedi type11FotoCellHtml).
+                const fotoCol = payload.fotoProfilo === true;
+                // Griglia della rubrica stessa: il nominativo si scrive libero (niente «Cerca in
+                // rubrica», che serve solo alle altre tabelle per pescare un contatto esistente).
+                const isRubrica = payload.tabella === 'rubrica';
+                const fotoTd = record => `<td class="type11-foto-col">${type11FotoCellHtml(record, editing && record.__can_write !== false)}</td>`;
 
                 // Colonne di soli indirizzi web: si stringono al minimo e mostrano
                 // l'icona al posto del link per esteso (vedi type11CellHtml).
@@ -15721,23 +15864,26 @@
                 )));
                 const colgroup = '<colgroup>'
                     + columnWidths.map(width => `<col style="width:${width}px; min-width:${width}px; max-width:${width}px;">`).join('')
+                    + (fotoCol ? '<col style="width:84px; min-width:84px; max-width:84px;">' : '')
                     + (canExpire ? '<col style="width:44px; min-width:44px; max-width:44px;">' : '')
                     + '</colgroup>';
                 // Griglia con una sola colonna (es. Elenco delle Licenze), in visualizzazione: le
                 // righe si dispongono su 3 colonne affiancate. In modifica resta la tabella normale.
-                const multiColumn = visibleColumns.length === 1 && !editing && !canExpire;
+                const multiColumn = visibleColumns.length === 1 && !editing && !canExpire && !fotoCol;
                 const tableWidth = multiColumn
                     ? columnWidths[0] * 3 + 20
-                    : Math.max(1, columnWidths.reduce((total, width) => total + width, 0) + (canExpire ? 44 : 0));
+                    : Math.max(1, columnWidths.reduce((total, width) => total + width, 0) + (fotoCol ? 84 : 0) + (canExpire ? 44 : 0));
 
                 // Freccia nell'intestazione = ordinamento; la seconda riga dell'intestazione
                 // contiene il filtro di ogni colonna ("contiene", mentre si scrive).
                 const columnLabels = payload.columnLabels || {};
                 const head = visibleColumns.map(column => `<th scope="col"${linkClass(column)} title="${escapeHtml(column)}">${escapeHtml(type11ColumnLabel(column, columnLabels))}<button type="button" class="type11-sort-btn" data-sort-col="${escapeHtml(column)}" aria-label="Ordina per ${escapeHtml(type11ColumnLabel(column, columnLabels))}"></button><span class="type11-col-resizer" data-resize-col="${escapeHtml(column)}" title="Trascina per cambiare la larghezza (doppio clic: larghezza automatica)"></span></th>`).join('')
+                    + (fotoCol ? '<th scope="col" class="type11-foto-col" title="Foto del profilo">Foto</th>' : '')
                     + (canExpire ? '<th scope="col" class="type11-expire-col" title="Seleziona le righe da chiudere"><i class="fas fa-check-square" aria-hidden="true"></i></th>' : '');
                 const filterHead = visibleColumns.map(column => `<th class="type11-filter-cell">`
                     + `<input type="text" class="type11-filter-val" data-filter-col="${escapeHtml(column)}" placeholder="Filtra…" aria-label="Filtro ${escapeHtml(type11ColumnLabel(column, columnLabels))}">`
                     + `</th>`).join('')
+                    + (fotoCol ? '<th class="type11-filter-cell type11-foto-col"></th>' : '')
                     + (canExpire ? '<th class="type11-filter-cell type11-expire-col"></th>' : '');
                 // Permesso per riga (id_roles_write): le righe non modificabili dal ruolo del
                 // contesto restano in sola lettura (niente modifica, eliminazione o chiusura).
@@ -15752,7 +15898,7 @@
                         // Trascrizione/recap: niente tooltip con tutto il testo (c'è la lente)
                         const displayText = isType11TextViewColumn(column) ? '' : displayedValue(record, column);
                         return `<td${linkClass(column)} title="${escapeHtml(displayText)}">${type11CellHtml(type11CellValue(record, column), column)}</td>`;
-                    }).join('') + (canExpire
+                    }).join('') + (fotoCol ? fotoTd(record) : '') + (canExpire
                         ? `<td class="type11-expire-col"><input type="checkbox" class="type11-expire-check" data-row-id="${escapeHtml(record.id || '')}" aria-label="Seleziona riga" ${record.id && rowWritable(record) ? '' : 'disabled'}></td>`
                         : '') + '</tr>';
                 }).join('');
@@ -15775,7 +15921,7 @@
                 // dentro il tbody, rimossa automaticamente al primo inserimento.
                 const emptyRow = records.length
                     ? ''
-                    : `<tr class="type11-empty-row"><td colspan="${Math.max(visibleColumns.length + (canExpire ? 1 : 0), 1)}" class="type11-grid-state">Nessun dato</td></tr>`;
+                    : `<tr class="type11-empty-row"><td colspan="${Math.max(visibleColumns.length + (fotoCol ? 1 : 0) + (canExpire ? 1 : 0), 1)}" class="type11-grid-state">Nessun dato</td></tr>`;
                 // Il filtro sopra la griglia funziona anche se la sua colonna non è tra quelle
                 // visibili: il server ne manda comunque il valore in __raw_<colonna>.
                 const topFilter = payload.topFilter || null;
@@ -15876,7 +16022,9 @@
                         const tr = document.createElement('tr');
                         tr.className = 'type11-editing-row';
                         tr.dataset.type11New = '1'; // riga nuova non ancora salvata
+                        // Foto: si carica dopo aver salvato la riga (serve il suo id).
                         tr.innerHTML = await type11BuildInlineRowCellsHtml(orderedMeta, {}, true, source, fieldId, context, editOptionsCache)
+                            + (fotoCol ? '<td class="type11-foto-col"></td>' : '')
                             + (canExpire ? '<td class="type11-expire-col"></td>' : '');
                         tbody.insertBefore(tr, tbody.firstChild);
                         await type11FillDynamicSelects(tr, source, fieldId, editOptionsCache);
@@ -15885,7 +16033,7 @@
                         for (const [col, val] of Object.entries((widget._type11View && widget._type11View.exact) || {})) {
                             type11ApplyTopFilterToNewRow(tr, col, val);
                         }
-                        attachType11RubricaSearch(tr);
+                        if (!isRubrica) attachType11RubricaSearch(tr);
                         editingRows.push(tr);
                         editingIsNew = true;
                         setToolbarEditingState(true, true);
@@ -15921,7 +16069,7 @@
                             });
                             await type11FillDynamicSelects(rowEl, source, fieldId, editOptionsCache);
                             type11UpdateBooleano(rowEl);
-                            attachType11RubricaSearch(rowEl);
+                            if (!isRubrica) attachType11RubricaSearch(rowEl);
                             editingRows.push(rowEl);
                         }
                         editingIsNew = false;

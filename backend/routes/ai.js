@@ -157,7 +157,12 @@ async function verifyClaudeKey(apiKey) {
 // --- ChatGPT (OpenAI) e Mistral: stesso formato "chat completions" ---
 const CHAT_COMPLETIONS_BASE = { chatgpt: 'https://api.openai.com/v1', mistral: 'https://api.mistral.ai/v1' };
 
-async function askChatCompletions(key, apiKey, prompt, atts = []) {
+// opzioni.json (es. Kick-off): risposta solo JSON e, dove il modello lo consente, temperatura
+// bassa, così rilanciando la stessa richiesta il risultato cambia poco. Senza opzioni le
+// chiamate restano identiche a prima.
+const TEMPERATURA_JSON = 0.2;
+
+async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}) {
   const cfg = PROVIDERS[key];
   // Mistral non legge i PDF nella chat: se ne estrae il testo (i PDF scansionati, senza
   // testo, restano illeggibili). ChatGPT li riceve come file.
@@ -185,7 +190,13 @@ async function askChatCompletions(key, apiKey, prompt, atts = []) {
   const send = async () => readJson(await callApi(`${CHAT_COMPLETIONS_BASE[key]}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content }] })
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: [{ role: 'user', content }],
+      // ChatGPT (gpt-5) accetta solo la temperatura predefinita: lì solo il formato JSON.
+      ...(opzioni.json ? { response_format: { type: 'json_object' } } : {}),
+      ...(opzioni.json && key === 'mistral' ? { temperature: TEMPERATURA_JSON } : {})
+    })
   }, cfg.label), cfg.label);
   let data;
   try {
@@ -210,7 +221,7 @@ async function verifyChatCompletionsKey(key, apiKey) {
 }
 
 // --- Gemini (Google AI Studio, Generative Language API) ---
-async function geminiGenerate(apiKey, model, prompt, atts = []) {
+async function geminiGenerate(apiKey, model, prompt, atts = [], opzioni = {}) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const parts = [
     ...atts.filter((a) => a.kind === 'image' || a.kind === 'pdf').map((a) => ({ inline_data: { mime_type: a.mime, data: a.data } })),
@@ -219,16 +230,19 @@ async function geminiGenerate(apiKey, model, prompt, atts = []) {
   return readJson(await callApi(url, {
     method: 'POST',
     headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ role: 'user', parts }] })
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts }],
+      ...(opzioni.json ? { generationConfig: { temperature: TEMPERATURA_JSON, responseMimeType: 'application/json' } } : {})
+    })
   }, 'Gemini'), 'Gemini');
 }
 
 // model: di norma quello configurato; per il ripiego su un modello più leggero
 // (Gemini sovraccarico, vedi askAiProvider) se ne passa un altro.
-async function askGemini(apiKey, prompt, model = null, atts = []) {
+async function askGemini(apiKey, prompt, model = null, atts = [], opzioni = {}) {
   let data;
   try {
-    data = await geminiGenerate(apiKey, model || PROVIDERS.gemini.model, prompt, atts);
+    data = await geminiGenerate(apiKey, model || PROVIDERS.gemini.model, prompt, atts, opzioni);
   } catch (error) {
     if (model) throw error;
     // Modello ritirato: Google risponde 404 indicando il sostituto ("use models/<nuovo>").
@@ -237,7 +251,7 @@ async function askGemini(apiKey, prompt, model = null, atts = []) {
     if (!m) throw error;
     console.warn(`[AI] Modello Gemini ${PROVIDERS.gemini.model} ritirato: uso ${m[1]} (aggiornare GEMINI_MODEL)`);
     PROVIDERS.gemini.model = m[1];
-    data = await geminiGenerate(apiKey, PROVIDERS.gemini.model, prompt, atts);
+    data = await geminiGenerate(apiKey, PROVIDERS.gemini.model, prompt, atts, opzioni);
   }
   const cand = (data.candidates || [])[0] || {};
   const parts = (cand.content && cand.content.parts) || [];
@@ -263,10 +277,10 @@ async function verifyGeminiKey(apiKey) {
 }
 
 const ASK = {
-  chatgpt: (k, p, a) => askChatCompletions('chatgpt', k, p, a || []),
-  mistral: (k, p, a) => askChatCompletions('mistral', k, p, a || []),
+  chatgpt: (k, p, a, o) => askChatCompletions('chatgpt', k, p, a || [], o || {}),
+  mistral: (k, p, a, o) => askChatCompletions('mistral', k, p, a || [], o || {}),
   claude: (k, p, a) => askClaude(k, p, a || []),
-  gemini: (k, p, a) => askGemini(k, p, null, a || [])
+  gemini: (k, p, a, o) => askGemini(k, p, null, a || [], o || {})
 };
 const VERIFY = {
   chatgpt: (k) => verifyChatCompletionsKey('chatgpt', k),
@@ -389,7 +403,8 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
 //
 // providerName: valore scritto in settings (es. "Gemini", "ChatGPT", "Claude", "Mistral").
 // Usa la chiave API collegata dall'utente in Impostazioni › AI. Restituisce { text, label, model }.
-export async function askAiProvider(userId, providerName, prompt) {
+// opzioni: { json: true } per le risposte strutturate (vedi TEMPERATURA_JSON).
+export async function askAiProvider(userId, providerName, prompt, opzioni = {}) {
   const key = String(providerName || '').trim().toLowerCase();
   if (key === 'copilot') throw httpError(400, 'Copilot non è disponibile per il recap: scegli un\'altra AI');
   const cfg = PROVIDERS[key];
@@ -398,7 +413,7 @@ export async function askAiProvider(userId, providerName, prompt) {
   const apiKey = el[`${cfg.prefix}_api_key`];
   if (!apiKey) throw httpError(428, `${cfg.label} non collegato: attivalo da Impostazioni › AI`);
   const { result, model } = await withAiRetry(
-    (m) => (m === cfg.model ? ASK[key](apiKey, prompt) : askGemini(apiKey, prompt, m)),
+    (m) => (m === cfg.model ? ASK[key](apiKey, prompt, [], opzioni) : askGemini(apiKey, prompt, m, [], opzioni)),
     { label: cfg.label, model: cfg.model, fallbacks: key === 'gemini' ? geminiFallbackModels() : [], profile: 'background' }
   );
   return { text: result.text, label: cfg.label, model };

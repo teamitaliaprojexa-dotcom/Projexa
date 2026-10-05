@@ -473,6 +473,122 @@ async function spostaBlocco(template, blocco, da, a, tolti, relsCache, altriBloc
   return { ...blocco, nodi: copiati };
 }
 
+// ---------- Foto delle persone (Kick-off, slide del team) ----------
+// La foto della rubrica va dentro la forma del blocco della persona (es. il cerchio sopra
+// nome/ruolo/email): la forma colorata del template resta e fa da anello, la foto (stessa
+// sagoma, più piccola, centrata) le si appoggia sopra, ritagliata al centro per non
+// deformarsi. Se il blocco ha un'immagine al posto della forma, si sostituisce l'immagine.
+// La persona si riconosce dalla sua email scritta nel blocco.
+const REL_IMMAGINE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image';
+// La foto occupa l'84% del diametro della forma: il resto resta visibile come anello colorato.
+const FOTO_DENTRO_FORMA = 0.84;
+
+// Larghezza e altezza di un PNG o JPEG (null se non leggibili).
+function dimensioniImmagine(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 24) return null;
+  if (buf[0] === 0x89 && buf.toString('ascii', 1, 4) === 'PNG') return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+  if (buf[0] === 0xFF && buf[1] === 0xD8) {
+    let i = 2;
+    while (i + 9 < buf.length) {
+      if (buf[i] !== 0xFF) { i += 1; continue; }
+      const m = buf[i + 1];
+      if ((m >= 0xC0 && m <= 0xC3) || (m >= 0xC5 && m <= 0xC7) || (m >= 0xC9 && m <= 0xCB) || (m >= 0xCD && m <= 0xCF)) {
+        return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) };
+      }
+      i += 2 + buf.readUInt16BE(i + 2);
+    }
+  }
+  return null;
+}
+
+// Ritaglio (in millesimi di percento) per adattare la foto alle proporzioni della forma:
+// in larghezza si toglie lo stesso dai due lati, in altezza più dal basso (il viso è in alto).
+function ritaglioFoto(dim, bbox) {
+  if (!dim || !dim.w || !dim.h || !bbox || !bbox.w || !bbox.h) return { l: 0, t: 0, r: 0, b: 0 };
+  const a = dim.w / dim.h, t = bbox.w / bbox.h;
+  if (a > t) { const via = (1 - t / a) * 100000; return { l: Math.round(via / 2), t: 0, r: Math.round(via / 2), b: 0 }; }
+  const via = (1 - a / t) * 100000;
+  return { l: 0, t: Math.round(via * 0.25), r: 0, b: Math.round(via * 0.75) };
+}
+
+async function mettiFoto(template, s, ancora, foto, relsCache, stato) {
+  const el = ancora.el;
+  const ext = foto.mime === 'image/png' ? 'png' : 'jpeg';
+  // File dell'immagine: uno per persona, riusato se la persona compare in più slide.
+  if (!stato.file.has(foto.chiave)) {
+    let n = 1;
+    while (template.zip.file(`ppt/media/projexa_foto_${n}.${ext}`)) n += 1;
+    const nome = `projexa_foto_${n}.${ext}`;
+    template.zip.file(`ppt/media/${nome}`, foto.data);
+    stato.file.set(foto.chiave, nome);
+    stato.estensioni.add(ext);
+  }
+  if (!relsCache.has(s.file)) relsCache.set(s.file, await leggiRels(template.zip, s.file));
+  const rels = relsCache.get(s.file);
+  const usati = new Set(discendenti(rels, NS_REL, 'Relationship').map((r) => r.getAttribute('Id')));
+  let k = 1;
+  while (usati.has(`rIdKoFoto${k}`)) k += 1;
+  const relId = `rIdKoFoto${k}`;
+  const rel = rels.createElementNS(NS_REL, 'Relationship');
+  rel.setAttribute('Id', relId);
+  rel.setAttribute('Type', REL_IMMAGINE);
+  rel.setAttribute('Target', `../media/${stato.file.get(foto.chiave)}`);
+  rels.documentElement.appendChild(rel);
+
+  const doc = el.ownerDocument;
+  const crop = ritaglioFoto(dimensioniImmagine(foto.data), ancora.bbox);
+  const srcRect = doc.createElementNS(NS_A, 'a:srcRect');
+  for (const [k2, v] of Object.entries(crop)) if (v) srcRect.setAttribute(k2, String(v));
+  if (el.localName === 'pic') {
+    const bf = figli(el, NS_P, 'blipFill')[0];
+    const blip = bf && figli(bf, NS_A, 'blip')[0];
+    if (!blip) return false;
+    blip.setAttributeNS(NS_R, 'r:embed', relId);
+    figli(bf, NS_A, 'srcRect').forEach((x) => bf.removeChild(x));
+    bf.insertBefore(srcRect, blip.nextSibling);
+    return true;
+  }
+  // Forma (es. il cerchio colorato): resta com'è e diventa l'anello attorno alla foto. Sopra
+  // si aggiunge un'immagine con la stessa sagoma (cerchio), centrata e più piccola
+  // (FOTO_DENTRO_FORMA del diametro), ritagliata alle sue proporzioni.
+  const spPr = figli(el, NS_P, 'spPr')[0];
+  const xfrm = spPr && figli(spPr, NS_A, 'xfrm')[0];
+  const off = xfrm && figli(xfrm, NS_A, 'off')[0], est = xfrm && figli(xfrm, NS_A, 'ext')[0];
+  if (!off || !est) return false;
+  const x = Number(off.getAttribute('x')) || 0, y = Number(off.getAttribute('y')) || 0;
+  const w = Number(est.getAttribute('cx')) || 0, h = Number(est.getAttribute('cy')) || 0;
+  if (!w || !h) return false;
+  const pw = Math.round(w * FOTO_DENTRO_FORMA), ph = Math.round(h * FOTO_DENTRO_FORMA);
+  const crop2 = ritaglioFoto(dimensioniImmagine(foto.data), { w: pw, h: ph });
+  const sagoma = (discendenti(spPr, NS_A, 'prstGeom')[0] || null);
+  const prst = sagoma ? sagoma.getAttribute('prst') : 'ellipse';
+  const idForma = Math.max(0, ...discendenti(doc, NS_P, 'cNvPr').map((c) => Number(c.getAttribute('id')) || 0)) + 1;
+  const pic = parseXml(`<p:pic xmlns:p="${NS_P}" xmlns:a="${NS_A}" xmlns:r="${NS_R}">`
+    + `<p:nvPicPr><p:cNvPr id="${idForma}" name="Foto ${String(foto.chiave).replace(/[<>&"]/g, '')}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>`
+    + `<p:blipFill><a:blip r:embed="${relId}"/><a:srcRect${Object.entries(crop2).filter(([, v]) => v).map(([k2, v]) => ` ${k2}="${v}"`).join('')}/><a:stretch><a:fillRect/></a:stretch></p:blipFill>`
+    + `<p:spPr><a:xfrm><a:off x="${Math.round(x + (w - pw) / 2)}" y="${Math.round(y + (h - ph) / 2)}"/><a:ext cx="${pw}" cy="${ph}"/></a:xfrm>`
+    + `<a:prstGeom prst="${prst || 'ellipse'}"><a:avLst/></a:prstGeom></p:spPr></p:pic>`).documentElement;
+  // Subito sopra la forma (stesso gruppo, se la forma è in un gruppo): stesse coordinate.
+  el.parentNode.insertBefore(doc.importNode(pic, true), el.nextSibling);
+  return true;
+}
+
+// Tipi di contenuto delle immagini aggiunte (Default per estensione).
+async function registraEstensioni(zip, estensioni) {
+  const ct = zip.file('[Content_Types].xml');
+  if (!ct || !estensioni.size) return;
+  const doc = parseXml(await ct.async('string'));
+  const presenti = new Set(discendenti(doc, NS_CT, 'Default').map((d) => String(d.getAttribute('Extension') || '').toLowerCase()));
+  for (const ext of estensioni) {
+    if (presenti.has(ext)) continue;
+    const d = doc.createElementNS(NS_CT, 'Default');
+    d.setAttribute('Extension', ext);
+    d.setAttribute('ContentType', ext === 'png' ? 'image/png' : 'image/jpeg');
+    doc.documentElement.insertBefore(d, doc.documentElement.firstChild);
+  }
+  zip.file('[Content_Types].xml', new XMLSerializer().serializeToString(doc));
+}
+
 // Gruppi rimasti vuoti dopo aver tolto gli elementi: si tolgono anche loro.
 function togliGruppiVuoti(doc) {
   let tolto = true;
@@ -550,7 +666,9 @@ export function testoRisultante(template, modifiche) {
 }
 
 // Applica le modifiche dell'AI. Restituisce { buffer, applicate, ignorate, slideTolte, elementiTolti }.
-export async function applicaModifiche(template, modifiche) {
+// opzioni.foto: Map email (minuscolo) -> { data: Buffer, mime } con le foto delle persone del
+// team; si mettono nella forma del blocco in cui compare l'email (vedi mettiFoto).
+export async function applicaModifiche(template, modifiche, opzioni = {}) {
   const perId = new Map();
   const perSlide = new Map(template.slide.map((s) => [`S${s.n}`, s]));
   for (const s of template.slide) for (const e of s.elementi) perId.set(e.id, { s, e });
@@ -645,6 +763,30 @@ export async function applicaModifiche(template, modifiche) {
   for (const e of tolti) {
     if (e.el.parentNode) { e.el.parentNode.removeChild(e.el); elementiTolti += 1; }
   }
+  // Foto delle persone: nel blocco (cerchio + nome/ruolo/email) in cui compare la loro email.
+  let fotoMesse = 0;
+  const foto = opzioni.foto instanceof Map ? opzioni.foto : null;
+  if (foto && foto.size) {
+    const stato = { file: new Map(), estensioni: new Set() };
+    for (const s of template.slide) {
+      if (slideDaTogliere.has(s)) continue;
+      for (const b of blocchiPer.get(s) || blocchiSlide(s, template.slideSize)) {
+        const a = b.ancora;
+        if (tolti.has(a) || !a.el.parentNode) continue;
+        // Forma con un suo testo (es. riquadro con la descrizione): non è il posto per una foto.
+        if (a.tipo === 'testo' && String(a.testoFinale ?? a.testo).trim()) continue;
+        const testo = b.membri.filter((e) => e.tipo === 'testo' && !tolti.has(e))
+          .map((e) => String(e.testoFinale ?? e.testo)).join('\n').toLowerCase();
+        const chiave = [...foto.keys()].find((email) => email && testo.includes(email));
+        if (!chiave) continue;
+        if (await mettiFoto(template, s, a, { ...foto.get(chiave), chiave }, relsCache, stato)) {
+          fotoMesse += 1;
+          toccate.add(s);
+        }
+      }
+    }
+    await registraEstensioni(template.zip, stato.estensioni);
+  }
   const ser = new XMLSerializer();
   for (const s of toccate) {
     if (slideDaTogliere.has(s)) continue;
@@ -660,7 +802,7 @@ export async function applicaModifiche(template, modifiche) {
     template.zip.file('ppt/_rels/presentation.xml.rels', ser.serializeToString(template.relDoc));
   }
   const buffer = await template.zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
-  return { buffer, applicate, ignorate, slideTolte: slideDaTogliere.size, elementiTolti, slideRiallineate, blocchiSpostati: daSpostare.size };
+  return { buffer, applicate, ignorate, slideTolte: slideDaTogliere.size, elementiTolti, slideRiallineate, blocchiSpostati: daSpostare.size, fotoMesse };
 }
 
 // Le AI a volte vanno a capo davvero dentro un testo JSON (non ammesso): si convertono in \n.
@@ -680,19 +822,35 @@ function aggiustaJson(s) {
   return out;
 }
 
-// Elenco delle modifiche dalla risposta dell'AI (JSON, anche dentro ```json ... ```).
-export function leggiRispostaAi(testo) {
+// JSON dalla risposta dell'AI (anche dentro ```json ... ```), null se non leggibile.
+function estraiJson(testo) {
   const t = String(testo || '').trim();
   const blocco = /```(?:json)?\s*([\s\S]*?)```/i.exec(t);
   const grezzo = blocco ? blocco[1] : t;
   const inizio = grezzo.indexOf('{'), fine = grezzo.lastIndexOf('}');
   const ini2 = grezzo.indexOf('['), fin2 = grezzo.lastIndexOf(']');
   const parse = (s) => { try { return JSON.parse(s); } catch { return JSON.parse(aggiustaJson(s)); } };
-  let dati = null;
   try {
-    if (inizio >= 0 && fine > inizio && (ini2 < 0 || inizio < ini2)) dati = parse(grezzo.slice(inizio, fine + 1));
-    else if (ini2 >= 0 && fin2 > ini2) dati = parse(grezzo.slice(ini2, fin2 + 1));
-  } catch { dati = null; }
+    if (inizio >= 0 && fine > inizio && (ini2 < 0 || inizio < ini2)) return parse(grezzo.slice(inizio, fine + 1));
+    if (ini2 >= 0 && fin2 > ini2) return parse(grezzo.slice(ini2, fin2 + 1));
+  } catch { /* JSON non valido */ }
+  return null;
+}
+
+// Risposta della revisione: { ok, problemi: [...], modifiche: [...] | null }.
+// ok = true: la bozza va bene; altrimenti modifiche = elenco COMPLETO corretto.
+export function leggiRevisioneAi(testo) {
+  const dati = estraiJson(testo);
+  if (!dati || typeof dati !== 'object') throw httpError(502, 'Revisione: risposta dell\'AI non leggibile');
+  const problemi = (Array.isArray(dati.problemi) ? dati.problemi : []).map((p) => String(p)).filter(Boolean);
+  const modifiche = Array.isArray(dati.modifiche) ? dati.modifiche : (Array.isArray(dati) ? dati : null);
+  const ok = dati.ok === true || dati.ok === 'true' || (!modifiche && !problemi.length);
+  return { ok, problemi, modifiche: ok ? null : modifiche };
+}
+
+// Elenco delle modifiche dalla risposta dell'AI (JSON, anche dentro ```json ... ```).
+export function leggiRispostaAi(testo) {
+  const dati = estraiJson(testo);
   const lista = Array.isArray(dati) ? dati : (dati && Array.isArray(dati.modifiche) ? dati.modifiche : null);
   if (!lista) throw httpError(502, 'L\'AI non ha restituito le modifiche nel formato richiesto: riprova o semplifica il prompt');
   return lista;

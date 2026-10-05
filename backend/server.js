@@ -30,7 +30,7 @@ import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
 import { askAiProvider, PROVIDERS as AI_PROVIDERS } from './routes/ai.js';
 import { getIntegration } from './config/integrations.js';
 import { getPromptFor } from './config/prompts.js';
-import { leggiTemplate, descriviTemplate, applicaModifiche, leggiRispostaAi, testoRisultante, spostamentiRichiesti } from './config/kickoffPptx.js';
+import { leggiTemplate, descriviTemplate, applicaModifiche, leggiRispostaAi, leggiRevisioneAi, testoRisultante, spostamentiRichiesti } from './config/kickoffPptx.js';
 import { avviaScheduler } from './jobs/scheduler.js';
 import { avviaInvioAudit } from './jobs/auditShipper.js';
 import { allowedOrigins } from './config/origins.js';
@@ -891,6 +891,7 @@ app.get('/api/dashboard/tasks/foreign-options/:column', requireAuth, async (req,
       if (selectedValue && !uuidPattern.test(selectedValue)) {
         return res.status(400).json({ error: 'Assegnatario non valido' });
       }
+      await sincronizzaRubricaTenant(req.user.tenant_id); // rubrica condivisa nel tenant
       const result = await db.query(
         `SELECT r.id::text AS value,
                 COALESCE(NULLIF(TRIM(r.nominativo::text), ''), 'Nominativo non disponibile') AS label,
@@ -1000,6 +1001,97 @@ app.get('/api/dashboard/tasks/foreign-options/:column', requireAuth, async (req,
   }
 });
 
+// ==========================================
+// RUBRICA CONDIVISA NEL TENANT (chiave: email)
+// ==========================================
+// Ogni utente ha la sua rubrica (tenant_id + user_id), ma i contatti si condividono: quando
+// una email è nella rubrica di un utente del tenant (riga attiva), viene aggiunta a tutti gli
+// altri utenti del tenant che non hanno nessuna riga con quella email. Se l'email c'è già
+// (anche in una riga chiusa) non si fa nulla: un contatto chiuso da un utente non torna.
+// Il confronto si fa qui e non in SQL perché nominativo ed email possono essere cifrati
+// (cifratura casuale). La copia prende la riga attiva più completa (ruolo, foto) con tutte
+// le sue colonne tranne id e user_id; id_roles_write = ruolo del nuovo proprietario nel
+// tenant (user_tenants.id_roles), così ognuno può modificare la sua copia.
+// Si esegue dopo ogni nuovo contatto e quando si apre la rubrica (griglia, Kick-off, task),
+// così si allineano anche i contatti entrati da altre strade (import, editor del database).
+const RUBRICA_ESCLUSE_COPIA = new Set(['id', 'user_id', 'crypto', 'created_at', 'updated_at']);
+const rubricaInCorso = new Map(); // tenant -> Promise (una sincronizzazione alla volta)
+
+function sincronizzaRubricaTenant(tenantId) {
+  const k = String(tenantId || '');
+  if (!k) return Promise.resolve({ aggiunte: 0 });
+  if (rubricaInCorso.has(k)) return rubricaInCorso.get(k);
+  const p = (async () => {
+    let client;
+    try {
+      client = await db.connect();
+      await client.query('BEGIN');
+      // Anche tra più processi/istanze: una sincronizzazione per tenant alla volta.
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`rubrica_sync|${k}`]);
+      // Utenti del tenant con il loro ruolo: la copia è modificabile dal suo proprietario.
+      const ruoli = new Map();
+      // L'account Admin Projexa (id_roles = 1, account di sistema) non riceve copie.
+      for (const r of (await client.query('SELECT user_id, id_roles FROM user_tenants WHERE tenant_id = $1 AND id_roles <> 1', [k])).rows) {
+        if (!ruoli.has(String(r.user_id))) ruoli.set(String(r.user_id), r.id_roles);
+      }
+      const utenti = [...ruoli.keys()];
+      if (utenti.length < 2) { await client.query('COMMIT'); return { aggiunte: 0 }; }
+      const righe = (await client.query('SELECT * FROM rubrica WHERE tenant_id = $1', [k])).rows;
+      const norm = (e) => String(e || '').trim().toLowerCase();
+      const oggi = new Date(new Date().toDateString());
+      const attiva = (r) => !r.scadenza || new Date(r.scadenza) >= oggi;
+      const peso = (r) => (attiva(r) ? 4 : 0) + (r.foto ? 2 : 0) + (String(r.ruolo || '').trim() ? 1 : 0);
+      const perUtente = new Map(utenti.map((u) => [u, new Set()]));
+      const modello = new Map(); // email -> riga da copiare
+      for (const r of righe) {
+        const e = norm(r.email);
+        if (!e) continue;
+        const u = String(r.user_id);
+        if (perUtente.has(u)) perUtente.get(u).add(e);
+        if (!attiva(r)) continue;
+        if (!modello.has(e) || peso(r) > peso(modello.get(e))) modello.set(e, r);
+      }
+      const cols = await getTableColumns('rubrica', client);
+      let aggiunte = 0;
+      for (const [e, r] of modello) {
+        for (const u of utenti) {
+          if (perUtente.get(u).has(e)) continue;
+          const dati = {};
+          for (const c of Object.keys(r)) {
+            if (!RUBRICA_ESCLUSE_COPIA.has(c) && cols.has(c) && r[c] !== undefined) dati[c] = r[c];
+          }
+          dati.user_id = u;
+          dati.email = String(r.email).trim();
+          if (cols.has('id_roles_write') && ruoli.get(u) != null) dati.id_roles_write = String(ruoli.get(u));
+          await client.query('SAVEPOINT rubrica_copia');
+          try {
+            await insertRowEncrypted(client, 'main', 'rubrica', dati);
+            await client.query('RELEASE SAVEPOINT rubrica_copia');
+            perUtente.get(u).add(e);
+            aggiunte += 1;
+          } catch (err) {
+            // Chiave doppia (inserita nel frattempo): si salta quella copia.
+            await client.query('ROLLBACK TO SAVEPOINT rubrica_copia');
+            if (err.code !== '23505') console.warn(`[RUBRICA] copia di ${e} non riuscita: ${err.message}`);
+          }
+        }
+      }
+      await client.query('COMMIT');
+      if (aggiunte) console.log(`[RUBRICA] tenant ${k}: ${aggiunte} contatti condivisi con gli altri utenti`);
+      return { aggiunte };
+    } catch (error) {
+      if (client) await client.query('ROLLBACK').catch(() => {});
+      console.error('[RUBRICA] sincronizzazione non riuscita:', error.message);
+      return { aggiunte: 0, errore: error.message };
+    } finally {
+      if (client) client.release();
+      rubricaInCorso.delete(k);
+    }
+  })();
+  rubricaInCorso.set(k, p);
+  return p;
+}
+
 // Nuovo contatto in rubrica dal campo "Assegnato a:" del task (tenant e utente dal token).
 // Un'email può comparire una sola volta per tenant e utente: il controllo è fatto qui,
 // dopo la lettura, perché l'email in rubrica può essere cifrata.
@@ -1026,6 +1118,7 @@ app.post('/api/dashboard/rubrica', requireAuth, async (req, res) => {
     const rubricaRow = { tenant_id: req.user.tenant_id, user_id: req.user.user_id, nominativo, email };
     stampRoleWrite(req, rubricaRow, await getTableColumns('rubrica')); // modificabile dal ruolo del creatore
     const result = await insertRowEncrypted(db, 'main', 'rubrica', rubricaRow);
+    sincronizzaRubricaTenant(req.user.tenant_id); // condivide il nuovo contatto con il tenant
     res.status(201).json({ option: { value: String(result.rows[0].id), label: nominativo, name: nominativo, email } });
   } catch (error) {
     if (error.code === '23505') return res.status(409).json({ error: "L'email è già in rubrica" });
@@ -1220,6 +1313,9 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     tableColumnsCache.delete('main:' + tableName);
     const tableColumns = await getTableColumns(tableName);
     if (tableColumns.size === 0) return res.status(404).json({ error: 'Tabella non trovata' });
+    // Rubrica condivisa nel tenant: prima di mostrarla si aggiungono i contatti nuovi degli
+    // altri utenti (vedi sincronizzaRubricaTenant).
+    if (tableName === 'rubrica') await sincronizzaRubricaTenant(req.user.tenant_id);
     for (const column of selectedColumns) {
       assertValidIdentifier(column);
       if (!tableColumns.has(column)) {
@@ -1328,6 +1424,10 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     // Permesso per riga: letto a parte e trasformato in __can_write (vedi sotto).
     const hasRoleWrite = tableColumns.has('id_roles_write');
     if (hasRoleWrite) selectExpressions.push('src.id_roles_write AS "__roles_write"');
+    // Rubrica con le colonne della foto (Supporto/CreaDB/rubrica_foto.sql): la griglia
+    // mostra la colonna Foto (carica / lente). Si legge solo se c'è, non l'immagine.
+    const fotoProfilo = tableName === 'rubrica' && tableColumns.has('foto') && tableColumns.has('foto_mime') && tableColumns.has('id');
+    if (fotoProfilo) selectExpressions.push('(src.foto IS NOT NULL) AS "__ha_foto"');
 
     for (const column of selectedColumns) {
       const fk = fkByColumn.get(column);
@@ -1444,6 +1544,10 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       columnLabels: etichetteColonne(tableName),
       // Elenco sopra la griglia che filtra le righe su una colonna (es. Tipologia).
       topFilter: filtroSopra && tableColumns.has(filtroSopra.column) ? filtroSopra : null,
+      // Colonna Foto (rubrica): GET/PUT/DELETE /api/rubrica/:id/foto.
+      fotoProfilo,
+      // Tabella della griglia: per la rubrica stessa il nominativo non si cerca in rubrica.
+      tabella: tableName,
       // Il frontend mostra la selezione multipla soltanto quando l'operazione
       // richiesta è realmente applicabile alla tabella della griglia tipo 11.
       canExpire: !isView && String(config.tipo_valore) === '11'
@@ -2171,6 +2275,7 @@ Rispondi SOLO con un oggetto JSON, senza testo prima o dopo, in questa forma:
 - Ogni forma e icona indica a quali caselle appartiene ("insieme a: …", "dentro …"): una forma "senza testo" con caselle collegate fa parte di quell'elemento (es. il riquadro colorato di una licenza con titolo e descrizione in caselle a parte) e NON va eliminata se quelle caselle restano piene.
 - Quando svuoti ("") o elimini tutte le caselle collegate a una forma (es. il cerchio di una persona, il riquadro di una licenza), il sistema toglie da solo la forma e le icone che contiene: non serve eliminarle. Elimina esplicitamente solo le forme con "nessun testo collegato" che non servono.
 - Le posizioni (x, y, larg, alt in % della slide) servono a capire quali elementi stanno insieme.
+- Foto: per le persone del team segnate "[foto disponibile]" il sistema inserisce da solo la foto nella forma (es. il cerchio) del blocco in cui compare la loro email. Per questo ogni persona deve stare in un blocco suo, con la sua email scritta nella casella del blocco; non serve nessuna modifica per la foto.
 - Includi solo gli elementi da cambiare. Non usare markdown nei testi.`;
 
 async function koProviderName(req) {
@@ -2253,6 +2358,7 @@ app.get('/api/projects/kickoff', requireAuth, async (req, res) => {
 app.get('/api/projects/kickoff/rubrica', requireAuth, async (req, res) => {
   try {
     const q = koNorm(req.query && req.query.q);
+    if (!q) await sincronizzaRubricaTenant(req.user.tenant_id); // all'apertura dell'elenco
     const out = (await koRubrica(req))
       .filter((x) => !q || koNorm(x.nominativo).includes(q) || koNorm(x.email).includes(q) || koNorm(x.ruolo).includes(q))
       .sort((a, b) => String(a.nominativo || '').localeCompare(String(b.nominativo || ''), 'it', { sensitivity: 'base' }))
@@ -2356,10 +2462,24 @@ app.post('/api/projects/kickoff/genera', requireAuth,
         [prog.projectId, prog.clientId, req.user.user_id]
       )).rows[0] || {};
       const team = koTeamOut(req, await koTeam(req, prog));
+      // Foto del profilo (rubrica.foto, vedi Supporto/CreaDB/rubrica_foto.sql) delle persone
+      // del team: le mette il server nel cerchio del blocco dove compare la loro email.
+      const fotoTeam = new Map();
+      if ((await getTableColumns('rubrica')).has('foto')) {
+        const emailTeam = new Set(team.map((p) => koNorm(p.email)).filter(Boolean));
+        const rf = await db.query(
+          'SELECT email, foto, foto_mime FROM rubrica WHERE tenant_id = $1 AND user_id = $2 AND foto IS NOT NULL',
+          [req.user.tenant_id, req.user.user_id]
+        );
+        for (const x of rf.rows) {
+          const k = koNorm(x.email);
+          if (emailTeam.has(k) && Buffer.isBuffer(x.foto) && !fotoTeam.has(k)) fotoTeam.set(k, { data: x.foto, mime: x.foto_mime || 'image/jpeg' });
+        }
+      }
       const vars = {
         PROGETTO: nomi.progetto || '',
         CLIENTE: nomi.cliente || '',
-        TEAM: team.length ? team.map((p) => `- ${p.nominativo}${p.ruolo ? ` — ruolo: ${p.ruolo}` : ''}${p.email ? ` (${p.email})` : ''}`).join('\n') : '(nessuna persona indicata)',
+        TEAM: team.length ? team.map((p) => `- ${p.nominativo}${p.ruolo ? ` — ruolo: ${p.ruolo}` : ''}${p.email ? ` (${p.email})` : ''}${fotoTeam.has(koNorm(p.email)) ? ' [foto disponibile]' : ''}`).join('\n') : '(nessuna persona indicata)',
         LICENZE: prog.licenze.length ? prog.licenze.map((l) => `- ${l}`).join('\n') : '(nessuna licenza indicata)',
         DATA: new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }),
         UTENTE: String(nomi.utente || '').trim() || req.user.email || ''
@@ -2381,7 +2501,7 @@ app.post('/api/projects/kickoff/genera', requireAuth,
         const finale = normTesto(testoRisultante(template, mods));
         return attesi.filter((a) => !finale.includes(normTesto(a.testo)));
       };
-      let risposta = await askAiProvider(req.user.user_id, nomeAi, prompt);
+      let risposta = await askAiProvider(req.user.user_id, nomeAi, prompt, { json: true });
       let modifiche = leggiRispostaAi(risposta.text);
       let persi = mancanti(modifiche);
       if (persi.length) {
@@ -2390,7 +2510,7 @@ app.post('/api/projects/kickoff/genera', requireAuth,
 Ogni licenza deve avere il suo riquadro con il suo nome come titolo (non riusare il riquadro di una licenza per un'altra: se il template ha già un riquadro con quel nome, usa proprio quello, anche se è in un'altra slide: in quel caso spostalo con "sposta_in" prima di eliminare la sua slide) e ogni persona del team deve comparire con la sua email.
 Risposta precedente da correggere:\n${String(risposta.text || '').slice(0, 30000)}\n\nRiscrivi l'elenco COMPLETO delle modifiche corretto, nello stesso formato.`;
         try {
-          const r2 = await askAiProvider(req.user.user_id, nomeAi, correzione);
+          const r2 = await askAiProvider(req.user.user_id, nomeAi, correzione, { json: true });
           const m2 = leggiRispostaAi(r2.text);
           const p2 = mancanti(m2);
           if (p2.length < persi.length) { risposta = r2; modifiche = m2; persi = p2; }
@@ -2401,23 +2521,84 @@ Risposta precedente da correggere:\n${String(risposta.text || '').slice(0, 30000
       // Spostamenti di blocchi che non sono licenze del progetto (es. l'AI porta nella slide 7
       // anche moduli non acquistati della slide 8): scartati, quei blocchi restano dove sono
       // (e spariscono con la loro slide se l'AI la elimina).
-      if (testoPrompt.includes('{{LICENZE}}') && prog.licenze.length) {
+      const filtraSpostamenti = (mods) => {
+        if (!testoPrompt.includes('{{LICENZE}}') || !prog.licenze.length) return mods;
         const licenze = prog.licenze.map(normTesto);
-        const scartati = spostamentiRichiesti(template, modifiche).filter((sp) => {
+        const scartati = spostamentiRichiesti(template, mods).filter((sp) => {
           const t = normTesto(sp.titolo);
           return !t || !licenze.some((l) => t === l || t.includes(l) || l.includes(t));
         });
-        if (scartati.length) {
-          const ids = new Set(scartati.map((sp) => sp.id));
-          modifiche = modifiche.filter((m) => !(m && m.sposta_in && ids.has(String(m.id || '').trim().toUpperCase())));
-          console.warn(`[KICKOFF] progetto ${prog.projectId}: scartati gli spostamenti di blocchi che non sono licenze del progetto: ${scartati.map((sp) => sp.titolo || sp.id).join(', ')}`);
-        }
-      }
-      const esito = await applicaModifiche(template, modifiche);
+        if (!scartati.length) return mods;
+        const ids = new Set(scartati.map((sp) => sp.id));
+        console.warn(`[KICKOFF] progetto ${prog.projectId}: scartati gli spostamenti di blocchi che non sono licenze del progetto: ${scartati.map((sp) => sp.titolo || sp.id).join(', ')}`);
+        return mods.filter((m) => !(m && m.sposta_in && ids.has(String(m.id || '').trim().toUpperCase())));
+      };
+      modifiche = filtraSpostamenti(modifiche);
+
+      // Le modifiche si applicano sempre a una copia nuova del template (applicaModifiche la
+      // modifica): `template` resta l'originale, usato per i controlli.
+      const applicaAlTemplate = async (mods) => applicaModifiche(await leggiTemplate(req.body), mods, { foto: fotoTeam });
+      let esito = await applicaAlTemplate(modifiche);
       if (!esito.applicate) return res.status(502).json({ error: `${risposta.label} non ha indicato modifiche applicabili al template: controlla il prompt e riprova` });
 
+      // REVISIONE: l'AI riceve istruzioni, template originale, le sue modifiche e la bozza
+      // risultante (descritta come testo). Se la bozza va bene la conferma, altrimenti
+      // restituisce l'elenco completo corretto, che si applica al template originale.
+      // Tutto in memoria: la bozza non viene salvata da nessuna parte.
+      let revisione = 'non eseguita';
+      const descrizioneBozza = descriviTemplate(await leggiTemplate(esito.buffer));
+      const promptRevisione = `${istruzioni}
+
+SEI IL REVISORE della presentazione di Kick-off. Un primo passaggio ha prodotto le MODIFICHE qui sotto, già applicate al TEMPLATE ORIGINALE: il RISULTATO è la presentazione ottenuta. Confronta il RISULTATO con le istruzioni e con i dati del progetto.
+Controlla in particolare:
+- ogni dato richiesto è presente e corretto (licenze, persone del team con nominativo, ruolo ed email, cliente, progetto, data);
+- non restano testi segnaposto o dati del template che dovevano essere sostituiti o tolti;
+- nessun testo è finito nel posto sbagliato (es. il nome di una licenza nel riquadro con l'icona o la descrizione di un'altra);
+- le slide e i blocchi da togliere sono stati tolti, quelli da tenere ci sono ancora.
+Non sono problemi (li fa il sistema): forme rimaste senza testo tolte automaticamente, blocchi ricentrati o spostati di posizione, foto delle persone (le inserisce il sistema nel cerchio e non compaiono nella descrizione del RISULTATO).
+
+Rispondi SOLO con un oggetto JSON:
+- se il RISULTATO rispetta le istruzioni: {"ok": true}
+- altrimenti: {"ok": false, "problemi": ["descrizione breve di ogni problema"], "modifiche": [...]}, dove "modifiche" è l'elenco COMPLETO e corretto da applicare al TEMPLATE ORIGINALE (non al risultato), con i codici del TEMPLATE ORIGINALE e gli stessi tipi di modifica descritti qui sotto.
+
+${KO_FORMATO}
+
+TEMPLATE ORIGINALE (codici e testi):
+${descrizione}
+
+MODIFICHE DEL PRIMO PASSAGGIO:
+${JSON.stringify(modifiche).slice(0, 60000)}
+
+RISULTATO (presentazione dopo le modifiche; qui i codici sono rinumerati e servono solo a leggerla):
+${descrizioneBozza}`;
+      if (promptRevisione.length <= 3 * KO_MAX_TESTO_AI) {
+        try {
+          const r3 = await askAiProvider(req.user.user_id, nomeAi, promptRevisione, { json: true });
+          const rev = leggiRevisioneAi(r3.text);
+          if (rev.ok) {
+            revisione = 'confermata';
+          } else if (rev.modifiche && rev.modifiche.length) {
+            const mods2 = filtraSpostamenti(rev.modifiche);
+            const persi2 = mancanti(mods2);
+            const esito2 = persi2.length <= persi.length ? await applicaAlTemplate(mods2) : null;
+            if (esito2 && esito2.applicate) {
+              esito = esito2; modifiche = mods2; persi = persi2; risposta = r3;
+              revisione = `corretta${rev.problemi.length ? `: ${rev.problemi.join('; ')}` : ''}`;
+            } else {
+              revisione = 'correzione scartata (peggiorava il risultato): tenuta la prima stesura';
+            }
+          } else {
+            revisione = `problemi segnalati senza correzione: ${rev.problemi.join('; ')}`;
+          }
+        } catch (e) {
+          console.warn(`[KICKOFF] revisione non riuscita: ${e.message}`);
+          revisione = 'non riuscita: tenuta la prima stesura';
+        }
+      }
+      console.log(`[KICKOFF] progetto ${prog.projectId}: revisione ${revisione.slice(0, 300)}`);
+
       const nomeFile = `Kick-off ${vars.PROGETTO || 'progetto'}`.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 150) + '.pptx';
-      console.log(`[KICKOFF] progetto ${prog.projectId}: ${esito.applicate} modifiche applicate, ${esito.ignorate} ignorate, ${esito.elementiTolti} elementi e ${esito.slideTolte} slide tolti, ${esito.slideRiallineate} slide riallineate, ${esito.blocchiSpostati} blocchi spostati (${risposta.label} ${risposta.model}, ${Math.round((Date.now() - t0) / 1000)}s)`);
+      console.log(`[KICKOFF] progetto ${prog.projectId}: ${esito.applicate} modifiche applicate, ${esito.ignorate} ignorate, ${esito.elementiTolti} elementi e ${esito.slideTolte} slide tolti, ${esito.slideRiallineate} slide riallineate, ${esito.blocchiSpostati} blocchi spostati, ${esito.fotoMesse} foto (${risposta.label} ${risposta.model}, ${Math.round((Date.now() - t0) / 1000)}s)`);
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
       res.setHeader('Content-Disposition', `attachment; filename="kick-off.pptx"; filename*=UTF-8''${encodeURIComponent(nomeFile)}`);
       res.setHeader('Cache-Control', 'no-store');
@@ -2425,6 +2606,7 @@ Risposta precedente da correggere:\n${String(risposta.text || '').slice(0, 30000
       // Dati ancora mancanti dopo la correzione: la finestra li segnala.
       if (persi.length) res.setHeader('X-Kickoff-Mancanti', encodeURIComponent(persi.map((a) => a.cosa).join('; ')));
       res.setHeader('X-Kickoff-Ai', encodeURIComponent(`${risposta.label} (${risposta.model})`));
+      res.setHeader('X-Kickoff-Revisione', encodeURIComponent(revisione.slice(0, 1500)));
       res.send(esito.buffer);
     } catch (error) {
       console.error('❌ KICKOFF:', error.message);
@@ -2666,6 +2848,8 @@ app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth,
       `INSERT INTO "${tableName}" (${quoted}) VALUES (${placeholders}) RETURNING *`,
       paramsArr
     );
+    // Rubrica condivisa: il nuovo contatto va anche agli altri utenti del tenant.
+    if (tableName === 'rubrica') sincronizzaRubricaTenant(req.user.tenant_id);
     res.status(201).json(stripSensitive(result.rows)[0]);
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
@@ -5519,6 +5703,68 @@ app.put('/api/tenant-logo', requireAuth, requireAdmin, clientLogoBody, async (re
       [req.user.tenant_id, req.body, mimeType, filename]
     );
     return res.json({ ...result.rows[0], size: req.body.length });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Foto del profilo di un contatto della rubrica (colonne foto, foto_mime, foto_nome: vedi
+// Supporto/CreaDB/rubrica_foto.sql). Solo i contatti del tenant e utente del login; per
+// caricare o togliere la foto serve il permesso di scrittura sulla riga (id_roles_write).
+// Solo PNG e JPEG: sono i formati che PowerPoint legge sempre (la foto va nel Kick-off).
+const FOTO_MIME = new Set(['image/png', 'image/jpeg']);
+const fotoBody = express.raw({ type: ['image/png', 'image/jpeg'], limit: '1mb' });
+
+async function rigaRubrica(req, id) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(id || ''))) throw Object.assign(new Error('Contatto non valido'), { statusCode: 400 });
+  const r = (await db.query(
+    'SELECT id, id_roles_write FROM rubrica WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3 LIMIT 1',
+    [String(id), req.user.tenant_id, req.user.user_id]
+  )).rows[0];
+  if (!r) throw Object.assign(new Error('Contatto non trovato in rubrica'), { statusCode: 404 });
+  return r;
+}
+
+app.get('/api/rubrica/:id/foto', requireAuth, async (req, res) => {
+  try {
+    await rigaRubrica(req, req.params.id);
+    const r = (await db.query('SELECT foto, foto_mime, foto_nome FROM rubrica WHERE id::text = $1', [String(req.params.id)])).rows[0];
+    if (!r || !r.foto) return res.status(404).json({ error: 'Foto non presente' });
+    res.set('Content-Type', r.foto_mime || 'image/jpeg');
+    res.set('Cache-Control', 'private, no-store');
+    res.set('X-Foto-Nome', encodeURIComponent(r.foto_nome || 'foto'));
+    return res.send(r.foto);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.put('/api/rubrica/:id/foto', requireAuth, fotoBody, async (req, res) => {
+  try {
+    const r = await rigaRubrica(req, req.params.id);
+    if (!canWriteRow(req, r.id_roles_write, 'rubrica')) return res.status(403).json({ error: READ_ONLY_ERROR });
+    const mimeType = String(req.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!FOTO_MIME.has(mimeType)) return res.status(415).json({ error: 'Formato non supportato. Usa PNG o JPEG.' });
+    if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'File immagine mancante' });
+    if (detectClientLogoMime(req.body) !== mimeType) {
+      return res.status(415).json({ error: 'Il contenuto del file non corrisponde a un’immagine valida.' });
+    }
+    let nome = 'foto';
+    try { nome = decodeURIComponent(String(req.get('x-file-name') || 'foto')); } catch (e) { /* usa il nome di riserva */ }
+    nome = path.basename(nome).replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 255) || 'foto';
+    await db.query('UPDATE rubrica SET foto = $1, foto_mime = $2, foto_nome = $3 WHERE id = $4', [req.body, mimeType, nome, r.id]);
+    return res.json({ success: true, size: req.body.length });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/rubrica/:id/foto', requireAuth, async (req, res) => {
+  try {
+    const r = await rigaRubrica(req, req.params.id);
+    if (!canWriteRow(req, r.id_roles_write, 'rubrica')) return res.status(403).json({ error: READ_ONLY_ERROR });
+    await db.query('UPDATE rubrica SET foto = NULL, foto_mime = NULL, foto_nome = NULL WHERE id = $1', [r.id]);
+    return res.json({ success: true });
   } catch (error) {
     return res.status(error.statusCode || 500).json({ error: error.message });
   }
