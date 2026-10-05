@@ -25,7 +25,7 @@ import auditLogRoutes from './routes/audit-log.js';
 import notificheRoutes from './routes/notifiche.js';
 import auditEventiRoutes from './routes/audit-eventi.js';
 import { sendMail, buildRichiestaCancellazioneEmail, EMAIL_PROJEXA } from './config/mailer.js';
-import { regoleColonne, metaColonna, etichetteColonne, etichetteValori, opzioniColonna, applicaRegoleScrittura, ordineGriglia, filtroSopraGriglia } from './config/gridColumnRules.js';
+import { regoleColonne, metaColonna, etichetteColonne, etichetteValori, opzioniColonna, applicaRegoleScrittura, ordineGriglia, filtroSopraGriglia, TABELLE_VERIFICA } from './config/gridColumnRules.js';
 import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
 import { askAiProvider, PROVIDERS as AI_PROVIDERS } from './routes/ai.js';
 import { getIntegration } from './config/integrations.js';
@@ -1922,11 +1922,12 @@ async function ckpValoreCampo(pool, req, prog, tabella, campo, colonna, cache) {
   return valore ?? null;
 }
 
-function ckpConfronta(valore, operatore, atteso, colonna) {
+// booleano: colonna sì/no (valore1 dei campi, o colonna boolean delle tabelle a righe).
+function ckpConfronta(valore, operatore, atteso, colonna, booleano = colonna === 'valore1') {
   const testo = (v) => (v == null ? '' : v instanceof Date ? v.toISOString().slice(0, 10) : String(v).trim());
   const bool = (v) => { const s = testo(v).toLowerCase(); return CKP_VERO.includes(s) ? 'true' : CKP_FALSO.includes(s) ? 'false' : s; };
-  // Sì/no (valore1): vuoto = falso; vero/true/1 e falso/false/0 si confrontano tra loro.
-  const isBool = colonna === 'valore1';
+  // Sì/no: vuoto = falso; vero/true/1 e falso/false/0 si confrontano tra loro.
+  const isBool = !!booleano;
   const v = isBool ? (testo(valore) === '' ? 'false' : bool(valore)) : testo(valore);
   const a = isBool ? bool(atteso) : testo(atteso);
   const num = (s) => (s !== '' && Number.isFinite(Number(String(s).replace(',', '.'))) ? Number(String(s).replace(',', '.')) : null);
@@ -1955,10 +1956,46 @@ function ckpConfronta(valore, operatore, atteso, colonna) {
   }
 }
 
+// Condizione su una tabella a righe (Quotazioni, Task di sviluppo): righe attive del progetto
+// in quella tabella (totali) e quante rispettano il confronto (ok). null se la condizione non è
+// su una tabella a righe o non è completa. Colonna non più presente: totali contate, ok = 0.
+async function ckpConteggioRighe(pool, req, prog, c, cache) {
+  const tabella = String(c.tabella_verif || '').trim();
+  const campo = String(c.campo_verif || '').trim();
+  if (!tabella || !campo || c.operatore_verif == null || String(c.operatore_verif).trim() === '') return null;
+  if (!(TABELLE_VERIFICA.find((t) => t.id === tabella) || {}).righe) return null;
+  const col = String(c.colonna_verif || campo).trim();
+  const kt = `${tabella}|tipo|${col}`;
+  if (!cache.has(kt)) {
+    cache.set(kt, ((await pool.query(
+      `SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2`,
+      [tabella, col]
+    )).rows[0] || {}).data_type || null);
+  }
+  const tipo = cache.get(kt);
+  const k = `${tabella}|righe|${tipo ? col : ''}`;
+  if (!cache.has(k)) {
+    const r = await pool.query(
+      `SELECT ${tipo ? `"${assertValidIdentifier(col)}"` : 'NULL'} AS v FROM "${assertValidIdentifier(tabella)}"
+        WHERE tenant_id = $1 AND user_id = $2 AND project_id = $3
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+      [req.user.tenant_id, req.user.user_id, prog.projectId]
+    );
+    cache.set(k, r.rows.map((x) => x.v));
+  }
+  const valori = cache.get(k);
+  const ok = tipo ? valori.filter((v) => ckpConfronta(v, c.operatore_verif, c.risultato_verif, col, tipo === 'boolean')).length : 0;
+  return { totali: valori.length, ok };
+}
+
 async function ckpCondizioneOk(pool, req, prog, c, cache) {
   const tabella = String(c.tabella_verif || '').trim();
   const campo = String(c.campo_verif || '').trim();
   if (!tabella || !campo || c.operatore_verif == null || String(c.operatore_verif).trim() === '') return true;
+  // Tabelle a righe (Quotazioni, Task di sviluppo): vera se almeno una riga attiva del
+  // progetto soddisfa il confronto; nessuna riga = falsa.
+  const conteggio = await ckpConteggioRighe(pool, req, prog, c, cache);
+  if (conteggio) return conteggio.ok > 0;
   if (!CKP_VERIF_TABELLE[tabella]) return true;
   const colonna = ['valore1', 'valore2', 'valore3'].includes(String(c.colonna_verif || '').trim())
     ? String(c.colonna_verif).trim() : 'valore2';
@@ -2137,14 +2174,29 @@ async function ckpRicalcolaFasi(pool, req, prog) {
 
 async function ckpRighe(req, prog, pool = db) {
   const r = await pool.query(
-    `SELECT id, tipologia, padre, figlio, ordinamento, description, licenza, check_ok, data_check::text AS data_check, id_roles_write
+    `SELECT id, tipologia, padre, figlio, ordinamento, description, licenza, check_ok, data_check::text AS data_check, id_roles_write,
+            tabella_verif, campo_verif, colonna_verif, operatore_verif, risultato_verif
        FROM "${CKP_TABELLA}"
       WHERE tenant_id = $1 AND user_id = $2 AND client_id IS NOT DISTINCT FROM $3 AND project_id = $4
         AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
       ORDER BY ordinamento NULLS LAST, padre NULLS LAST, figlio NULLS LAST, id`,
     [req.user.tenant_id, req.user.user_id, prog.clientId, prog.projectId]
   );
-  return r.rows.map((x) => ({ ...x, __can_write: canWriteRow(req, x.id_roles_write, CKP_TABELLA) }));
+  // Voci con condizione su Quotazioni / Task di sviluppo: conteggio da mostrare accanto alla
+  // descrizione (righe del progetto nella tabella e quante rispettano la condizione).
+  const cache = new Map();
+  const out = [];
+  for (const x of r.rows) {
+    const { tabella_verif, campo_verif, colonna_verif, operatore_verif, risultato_verif, ...riga } = x;
+    let conteggio = null;
+    try {
+      conteggio = await ckpConteggioRighe(pool, req, prog, { tabella_verif, campo_verif, colonna_verif, operatore_verif, risultato_verif }, cache);
+    } catch (e) { /* conteggio non disponibile: la voce resta senza */ }
+    const dove = conteggio ? (TABELLE_VERIFICA.find((t) => t.id === tabella_verif) || {}).display : null;
+    out.push({ ...riga, ...(conteggio ? { conteggio: { ...conteggio, tabella: dove } } : {}),
+      __can_write: canWriteRow(req, x.id_roles_write, CKP_TABELLA) });
+  }
+  return out;
 }
 
 // Lettura senza creare nulla (stato del pulsante all'apertura della scheda).
@@ -2167,14 +2219,17 @@ app.post('/api/projects/checklist/apri', requireAuth, async (req, res) => {
     // Un'apertura alla volta per progetto: due clic ravvicinati non creano righe doppie.
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`chek_list|${prog.projectId}`]);
     let rows = await ckpRighe(req, prog, client);
-    let creata = false;
-    if (!rows.length && prog.tipologia) {
-      const esito = await ckpSincronizza(client, req, prog);
-      creata = esito.aggiunte > 0;
-      if (creata) rows = await ckpRighe(req, prog, client);
+    // A ogni apertura: se manca la check list si crea, altrimenti si riallinea a configurazione,
+    // condizioni e licenze attuali (stessa funzione dell'ex pulsante «Aggiorna»: Check e date
+    // non cambiano mai).
+    const nuova = !rows.length;
+    let esito = null;
+    if (prog.tipologia) {
+      esito = await ckpSincronizza(client, req, prog);
+      if (esito.aggiunte || esito.aggiornate || esito.chiuse) rows = await ckpRighe(req, prog, client);
     }
     await client.query('COMMIT');
-    res.json({ tipologia: prog.tipologia, licenze: prog.licenze, creata, rows });
+    res.json({ tipologia: prog.tipologia, licenze: prog.licenze, creata: nuova && !!(esito && esito.aggiunte), esito: nuova ? null : esito, rows });
   } catch (error) {
     if (client) await client.query('ROLLBACK').catch(() => {});
     res.status(error.statusCode || 500).json({ error: error.message });

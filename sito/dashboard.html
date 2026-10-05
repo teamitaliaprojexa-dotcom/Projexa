@@ -783,6 +783,9 @@
         .ckp-ko.ro { cursor: default; }
         .ckp-ko.ro:hover { transform: none; background: transparent; }
         .ckp-empty { padding: 2rem 0.5rem; text-align: center; color: #6B7280; }
+        /* Conteggio "totali di ok" delle voci con condizione su Quotazioni / Task di sviluppo */
+        .ckp-conta { display: inline-block; margin-left: 0.45rem; padding: 0.05rem 0.5rem; border-radius: 999px; background: #F1F5F9; color: #475569; font-size: 0.72rem; font-weight: 700; white-space: nowrap; vertical-align: middle; }
+        .ckp-conta.ok { background: #EEF2FF; color: #4338CA; }
         .ckp-foot { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 1.2rem; border-top: 1px solid #E5E7EB; font-size: 0.8rem; color: #6B7280; }
         .ckp-foot-testo { flex: 1; }
         .ckp-del { display: inline-flex; align-items: center; gap: 0.4rem; border: 1px solid #FCA5A5; background: #FEF2F2; color: #B91C1C; border-radius: 9px; padding: 0.35rem 0.8rem; font: inherit; font-size: 0.82rem; font-weight: 700; cursor: pointer; }
@@ -1752,6 +1755,8 @@
         .ckc-seg button { flex: 1; border: none; background: transparent; border-radius: 9px; padding: 0.5rem; font: inherit; font-size: 0.85rem; font-weight: 600; color: #475569; cursor: pointer; }
         .ckc-seg button.on { background: #fff; color: #4F46E5; box-shadow: 0 1px 4px rgba(15,23,42,0.1); }
         .ckc-seg button:disabled { cursor: default; }
+        /* «Dove» con 4 scelte (Clienti, Progetti, Quotazioni, Task di sviluppo): 2 per riga */
+        .ckc-seg.ckc-seg-dove { display: grid; grid-template-columns: 1fr 1fr; }
         .ckc-swrow { display: flex; align-items: center; justify-content: space-between; background: #F8FAFC; border: 1px solid #E6EAF2; border-radius: 12px; padding: 0.65rem 0.85rem; gap: 0.75rem; }
         .ckc-swrow small { display: block; color: #475569; font-size: 0.76rem; }
         .ckc-verbox { display: flex; flex-direction: column; gap: 0.85rem; border-left: 3px solid #C7D2FE; padding-left: 0.85rem; }
@@ -11123,7 +11128,7 @@
             if (m) return m;
             document.body.insertAdjacentHTML('beforeend', `<div class="ckp-overlay" id="ckpOverlay" role="dialog" aria-modal="true" aria-labelledby="ckpTitle">
                 <div class="ckp-box">
-                    <div class="ckp-head"><img src="checklist.png" alt=""><h3 id="ckpTitle">Check List<small id="ckpSub"></small></h3><button type="button" class="ckp-agg" id="ckpAggiorna" title="Riallinea la check list a configurazione e licenze del progetto (Check e date non cambiano)"><i class="fas fa-rotate"></i> Aggiorna</button><button type="button" class="ckp-close" id="ckpClose" aria-label="Chiudi">&times;</button></div>
+                    <div class="ckp-head"><img src="checklist.png" alt=""><h3 id="ckpTitle">Check List<small id="ckpSub"></small></h3><button type="button" class="ckp-close" id="ckpClose" aria-label="Chiudi">&times;</button></div>
                     <div class="ckp-body" id="ckpBody"></div>
                     <div class="ckp-foot"><span class="ckp-foot-testo" id="ckpFoot"></span><button type="button" class="ckp-del" id="ckpElimina" title="Cancella tutta la check list di questo progetto"><i class="fas fa-trash"></i> Elimina</button></div>
                 </div></div>`);
@@ -11136,32 +11141,6 @@
         }
         function ckpDisegna(projectId, d) {
             const rows = d.rows || [];
-            const agg = document.getElementById('ckpAggiorna');
-            if (agg) {
-                agg.style.display = d.tipologia ? '' : 'none';
-                agg.onclick = async () => {
-                    agg.disabled = true;
-                    try {
-                        const r = await fetch(`${API_URL}/projects/checklist/aggiorna`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                            body: JSON.stringify({ projectId })
-                        });
-                        const x = await r.json().catch(() => ({}));
-                        if (!r.ok) throw new Error(x.error || `Errore ${r.status}`);
-                        ckpDisegna(projectId, x);
-                        if ((x.rows || []).length) ckpAggiornaFlagDaRighe(x.rows);
-                        const e = x.esito || {};
-                        const parti = [e.aggiunte ? `${e.aggiunte} aggiunte` : '', e.aggiornate ? `${e.aggiornate} aggiornate` : '', e.chiuse ? `${e.chiuse} tolte` : '']
-                            .filter(Boolean);
-                        showNotification(parti.length ? `Check List aggiornata: ${parti.join(', ')}` : 'Check List già aggiornata', 'success');
-                    } catch (err) {
-                        showNotification('Errore: ' + err.message, 'info');
-                    } finally {
-                        agg.disabled = false;
-                    }
-                };
-            }
             // Elimina: cancella tutta la check list del progetto, dopo due conferme.
             const del = document.getElementById('ckpElimina');
             if (del) {
@@ -11295,8 +11274,18 @@
         // Descrizione con, per le voci spuntate, il badge verde con la spunta a destra
         // (anima = true: appena spuntata, il badge compare con un piccolo rimbalzo).
         let ckpUltimaVoce = null; // voce appena spuntata/tolta: il suo flag compare con l'animazione
+        // Voci con condizione su Quotazioni (cl_quotazioni) o Task di sviluppo (task_app):
+        // "ok di totali" = quante righe del progetto rispettano la condizione della
+        // configurazione su quante righe attive ha il progetto in quella tabella (es. 1 di 7:
+        // 7 quotazioni, 1 da confermare). Calcolato dal server a ogni apertura.
+        function ckpConteggioHtml(r) {
+            const c = r && r.conteggio;
+            if (!c) return '';
+            const tab = c.tabella || 'tabella';
+            return `<span class="ckp-conta${c.ok > 0 ? ' ok' : ''}" title="${escapeHtml(`${tab}: ${c.ok} su ${c.totali} righe del progetto rispettano la condizione`)}">${c.ok} di ${c.totali}</span>`;
+        }
         function ckpCellaDesc(r, anima = false, auto = false) {
-            const testo = escapeHtml(r.description || '');
+            const testo = escapeHtml(r.description || '') + ckpConteggioHtml(r);
             if (auto) {
                 // Fase con attività: niente X; il flag compare da solo quando sono tutte fatte.
                 return r.check_ok === true
@@ -11334,6 +11323,10 @@
                 ckpDisegna(projectId, d);
                 m.classList.add('open');
                 if ((d.rows || []).length) ckpAggiornaFlagDaRighe(d.rows);
+                // Riallineamento automatico all'apertura: si segnala solo se ha cambiato qualcosa.
+                const e = d.esito || {};
+                const parti = [e.aggiunte ? `${e.aggiunte} aggiunte` : '', e.aggiornate ? `${e.aggiornate} aggiornate` : '', e.chiuse ? `${e.chiuse} tolte` : ''].filter(Boolean);
+                if (parti.length) showNotification(`Check List aggiornata: ${parti.join(', ')}`, 'success');
             } catch (err) {
                 showNotification('Check List: ' + err.message, 'info');
             } finally {
@@ -15444,8 +15437,17 @@
             };
             const fasi = () => dati[tip] || [];
             const segna = () => { sporche.add(tip); aggiornaAzioni(); disegnaTabs(); };
+            // «Dove» si verifica la condizione (stessi id di TABELLE_VERIFICA in gridColumnRules.js).
+            // Quotazioni e Task di sviluppo hanno più righe per progetto: basta che una la soddisfi.
+            const DOVE = [
+                { id: 'clients', label: 'Clienti', chip: 'Cliente', frase: 'il cliente ha' },
+                { id: 'projects', label: 'Progetti', chip: 'Progetto', frase: 'il progetto ha' },
+                { id: 'cl_quotazioni', label: 'Quotazioni', chip: 'Quotazioni', frase: 'almeno una quotazione del progetto ha' },
+                { id: 'task_app', label: 'Task di sviluppo', chip: 'Task di sviluppo', frase: 'almeno un task di sviluppo del progetto ha' }
+            ];
+            const dove = (id) => DOVE.find(x => x.id === id) || { label: id, chip: id, frase: 'il campo' };
             const chip = (ver) => ver && ver.campo
-                ? `<span class="ckc-chip ver" title="Condizione: la voce entra nella check list solo se è vera"><i class="fas fa-filter"></i>${escapeHtml(ver.tabella === 'clients' ? 'Cliente' : 'Progetto')} · ${escapeHtml(ver.campo)} ${escapeHtml(opLabel(ver.operatore))} ${escapeHtml(risLabel(ver.risultato))}</span>`
+                ? `<span class="ckc-chip ver" title="Condizione: la voce entra nella check list solo se è vera"><i class="fas fa-filter"></i>${escapeHtml(dove(ver.tabella).chip)} · ${escapeHtml(ver.campo)} ${escapeHtml(opLabel(ver.operatore))} ${escapeHtml(risLabel(ver.risultato))}</span>`
                 : '<span class="ckc-chip none"><i class="far fa-circle"></i>manuale</span>';
 
             widget.innerHTML = `<div class="ckc">
@@ -15521,12 +15523,11 @@
                     body.innerHTML = `
                         <div class="ckc-field"><label>Descrizione</label><textarea id="ckcFDesc" rows="2" maxlength="255" ${ro ? 'readonly' : ''}>${escapeHtml(a.titolo)}</textarea></div>
                         <div class="ckc-field"><label>Tipo verifica</label><input value="selezione" readonly></div>
-                        <div class="ckc-swrow"><div><b>Condizione</b><small>La voce entra nella check list del progetto solo se un campo del cliente o del progetto ha il valore atteso</small></div>
+                        <div class="ckc-swrow"><div><b>Condizione</b><small>La voce entra nella check list del progetto solo se un campo del cliente, del progetto, delle sue quotazioni o dei suoi task di sviluppo ha il valore atteso</small></div>
                             <label class="toggle-switch"><input type="checkbox" id="ckcFVer" ${on ? 'checked' : ''} ${dis}><span class="toggle-slider"></span></label></div>
                         ${on ? `<div class="ckc-verbox">
-                            <div class="ckc-field"><label>Dove</label><div class="ckc-seg" id="ckcFTab">
-                                <button type="button" data-v="clients" class="${a.ver.tabella === 'clients' ? 'on' : ''}" ${dis}>Clienti</button>
-                                <button type="button" data-v="projects" class="${a.ver.tabella === 'projects' ? 'on' : ''}" ${dis}>Progetti</button></div></div>
+                            <div class="ckc-field"><label>Dove</label><div class="ckc-seg ckc-seg-dove" id="ckcFTab">
+                                ${DOVE.map(x => `<button type="button" data-v="${x.id}" class="${a.ver.tabella === x.id ? 'on' : ''}" ${dis}>${escapeHtml(x.label)}</button>`).join('')}</div></div>
                             <div class="ckc-field"><label>Campo</label><select id="ckcFCampo" ${dis}><option value="">${a.ver.tabella ? '-- Scegli il campo --' : '-- Scegli prima dove --'}</option>${campi.map(c => `<option value="${escapeHtml(c.id)}" ${c.id === a.ver.campo ? 'selected' : ''}>${escapeHtml(c.display)}</option>`).join('')}${a.ver.campo && !campo ? `<option selected>${escapeHtml(a.ver.campo)} (non più disponibile)</option>` : ''}</select>
                                 ${campo ? `<div class="ckc-hint">Colonna verificata: ${escapeHtml(campo.colonna)} (calcolata in automatico)</div>` : ''}</div>
                             <div class="ckc-field"><label>Operatore</label><select id="ckcFOp" ${dis}><option value="">-- Seleziona --</option>${operatori.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === String(a.ver.operatore) ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('')}</select></div>
@@ -15534,7 +15535,7 @@
                                 ? `<div class="ckc-seg" id="ckcFRisSeg"><button type="button" data-r="true" class="${a.ver.risultato === 'true' ? 'on' : ''}" ${dis}>vero</button><button type="button" data-r="false" class="${a.ver.risultato === 'false' ? 'on' : ''}" ${dis}>falso</button></div>`
                                 : `<input id="ckcFRis" value="${escapeHtml(a.ver.risultato || '')}" placeholder="Valore atteso" ${ro ? 'readonly' : ''}>`}</div>
                             <div class="ckc-preview">${campo
-                                ? `Voce inserita solo se <b>${a.ver.tabella === 'clients' ? 'il cliente' : 'il progetto'}</b> ha <b>${escapeHtml(campo.display)}</b> ${escapeHtml(opLabel(a.ver.operatore) || '…')} <b>${escapeHtml(risLabel(a.ver.risultato) || '…')}</b>`
+                                ? `Voce inserita solo se <b>${escapeHtml(dove(a.ver.tabella).frase.replace(/ ha$/, ''))}</b> ha <b>${escapeHtml(campo.display)}</b> ${escapeHtml(opLabel(a.ver.operatore) || '…')} <b>${escapeHtml(risLabel(a.ver.risultato) || '…')}</b>`
                                 : 'Scegli il campo da verificare.'}</div>
                         </div>` : ''}`;
                     if (ro) return;

@@ -42,10 +42,20 @@ export function ordinamentoMasterSlave(padre, figlio) {
   return Math.round(((p * 10) + fg) / 10 * 100) / 100;
 }
 
-const TABELLE_VERIFICA = [
+// Dove si verifica la condizione. clients/projects: tabelle a campi (EAV, un campo per
+// riga). righe = tabelle normali con più righe per progetto (colonne vere): la condizione è
+// vera se ALMENO UNA riga attiva del progetto la soddisfa (vedi ckpCondizioneOk in server.js).
+export const TABELLE_VERIFICA = [
   { id: 'clients', display: 'Clienti' },
-  { id: 'projects', display: 'Progetti' }
+  { id: 'projects', display: 'Progetti' },
+  { id: 'cl_quotazioni', display: 'Quotazioni', righe: true },
+  { id: 'task_app', display: 'Task di sviluppo', righe: true }
 ];
+
+// Colonne tecniche delle tabelle a righe: non sono campi da verificare.
+const COLONNE_NON_VERIFICABILI = new Set(['id', 'tenant_id', 'user_id', 'client_id', 'project_id', 'master_id',
+  'crypto', 'id_roles', 'id_roles_write', 'created_at', 'updated_at', 'created_by', 'scadenza']);
+const TIPI_COLONNA_NON_VERIFICABILI = new Set(['bytea', 'json', 'jsonb', 'ARRAY', 'USER-DEFINED']);
 
 const OPERATORI = [
   { id: '1', display: 'uguale' },
@@ -174,7 +184,22 @@ export async function opzioniColonna(db, tableName, column, ctx, dep) {
 
 // Campi di clients / projects dell'utente, tranne i tipi non verificabili, con la colonna
 // in cui tengono il valore. Se lo stesso campo compare con tipi diversi vale il più usato.
-async function campiVerifica(db, tabella, ctx) {
+// Tabelle a righe (Quotazioni, Task di sviluppo): le loro colonne, tranne quelle tecniche;
+// colonna = la colonna stessa, tipo '1' per le colonne sì/no (risultato vero/falso).
+export async function campiVerifica(db, tabella, ctx) {
+  const def = TABELLE_VERIFICA.find((t) => t.id === tabella);
+  if (def && def.righe) {
+    const c = await db.query(
+      `SELECT column_name, data_type FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position`,
+      [tabella]
+    );
+    const etichetta = (n) => { const s = String(n).replace(/_/g, ' ').trim(); return s.charAt(0).toUpperCase() + s.slice(1); };
+    return c.rows
+      .filter((x) => !COLONNE_NON_VERIFICABILI.has(x.column_name) && !TIPI_COLONNA_NON_VERIFICABILI.has(x.data_type))
+      .map((x) => ({ id: x.column_name, display: etichetta(x.column_name), colonna: x.column_name, tipo: x.data_type === 'boolean' ? '1' : '' }))
+      .sort((a, b) => a.display.localeCompare(b.display, 'it', { sensitivity: 'base' }));
+  }
   const q = await db.query(
     `SELECT campo, tipo_valore::text AS tipo, count(*) AS n FROM "${tabella}"
       WHERE tenant_id = $1 AND user_id = $2 AND campo IS NOT NULL AND BTRIM(campo) <> ''
@@ -231,7 +256,8 @@ export async function applicaRegoleScrittura(db, tableName, data, ctx, esistente
         const campi = await campiVerifica(db, tabella, ctx);
         const scelto = campi.find((c) => c.id === campo);
         if (!scelto) {
-          throw Object.assign(new Error(`Il campo «${campo}» non è verificabile in ${tabella === 'clients' ? 'Clienti' : 'Progetti'}`), { statusCode: 400 });
+          const dove = (TABELLE_VERIFICA.find((t) => t.id === tabella) || {}).display || tabella;
+          throw Object.assign(new Error(`Il campo «${campo}» non è verificabile in ${dove}`), { statusCode: 400 });
         }
         colonna = scelto.colonna;
       }
