@@ -11677,7 +11677,12 @@
             document.getElementById('ofSub').textContent = currentDetailLabel || '';
             const voce = ([l, v]) => `<div class="of-dato${v ? '' : ' vuoto'}"><small>${escapeHtml(l)}</small><b>${escapeHtml(v || 'non compilato')}</b></div>`;
             document.getElementById('ofCliente').innerHTML = [['Ragione sociale', d.dati.ragioneSociale], ['Codice fiscale', d.dati.codiceFiscale], ['Partita IVA', d.dati.partitaIva]].map(voce).join('');
-            document.getElementById('ofDati').innerHTML = [['Importo', d.dati.importo], ['Sconto applicato', d.dati.sconto], ['Importo non scontato', d.dati.importoNonScontato], ['Effort totale', d.dati.effort], ['Preventivo', d.dati.preventivo]].map(voce).join('');
+            // Numeri in formato italiano (importi in euro, sconto ed effort con 2 decimali).
+            const num = (v, suffisso = '') => {
+                const n = Number(String(v ?? '').replace(',', '.'));
+                return v === '' || v == null || !Number.isFinite(n) ? (v || '') : n.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + suffisso;
+            };
+            document.getElementById('ofDati').innerHTML = [['Importo', num(d.dati.importo, ' €')], ['Sconto applicato', num(d.dati.sconto)], ['Importo non scontato', num(d.dati.importoNonScontato, ' €')], ['Effort totale', num(d.dati.effort, d.dati.aOre ? ' ore' : ' giorni')], ['Preventivo', d.dati.preventivo]].map(voce).join('');
             const inv = d.invoice || { colonne: [], righe: [] };
             document.getElementById('ofInvoice').innerHTML = inv.righe.length
                 ? `<table><thead><tr>${inv.colonne.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead><tbody>${inv.righe.map(r => `<tr>${r.map(c => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`

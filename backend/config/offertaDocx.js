@@ -219,15 +219,29 @@ export async function applicaModifiche(template, modifiche) {
       scriviParagrafo(e.el, String(m.testo));
     } else if (e.tipo === 'tabella' && Array.isArray(m.righe)) {
       const nuove = m.righe.filter(Array.isArray);
-      let trs = figli(e.el, 'tr');
+      const trs = figli(e.el, 'tr');
       if (!trs.length || !nuove.length) { ignorate += 1; continue; }
-      while (trs.length < nuove.length) {
-        e.el.appendChild(trs[trs.length - 1].cloneNode(true));
-        trs = figli(e.el, 'tr');
-      }
-      trs.slice(nuove.length).forEach((tr) => e.el.removeChild(tr));
+      // Stile delle righe per ruolo: la prima resta l'intestazione e, se il template ha almeno
+      // 3 righe, l'ultima resta la riga finale (es. «Totale», spesso in grassetto); le righe in
+      // mezzo copiano a turno le righe dati del template (mantiene le righe a colori alterni).
+      // Senza riga finale o con una tabella più piccola: si copia l'ultima riga, come prima.
+      const conFinale = trs.length >= 3 && nuove.length >= 2;
+      const corpo = conFinale ? trs.slice(1, -1) : trs.slice(1).length ? trs.slice(1) : [trs[0]];
+      const modelli = nuove.map((_, i) => {
+        if (i === 0) return trs[0];
+        if (conFinale && i === nuove.length - 1) return trs[trs.length - 1];
+        return corpo[(i - 1) % corpo.length];
+      });
+      const usate = new Set();
+      const righeNuove = modelli.map((tr) => {
+        if (!usate.has(tr)) { usate.add(tr); return tr; }
+        return tr.cloneNode(true);
+      });
+      // Ordine finale: le righe del template non usate si tolgono, le altre si rimettono in fila.
+      trs.forEach((tr) => { if (!usate.has(tr)) e.el.removeChild(tr); });
+      righeNuove.forEach((tr) => e.el.appendChild(tr));
       nuove.forEach((celle, i) => {
-        figli(trs[i], 'tc').forEach((tc, j) => scriviCella(tc, celle[j] == null ? '' : String(celle[j])));
+        figli(righeNuove[i], 'tc').forEach((tc, j) => scriviCella(tc, celle[j] == null ? '' : String(celle[j])));
       });
     } else {
       ignorate += 1;

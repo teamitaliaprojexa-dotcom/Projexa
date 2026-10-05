@@ -2775,6 +2775,13 @@ async function ofDati(req, prog) {
       const row = perCampoCliente.get(chiave(nome));
       dati[k] = row ? ofValore(row) : '';
     }
+    // P.iva salvata in un campo numerico (es. 164430043.00): via i decimali e zeri iniziali
+    // ripristinati (la partita IVA italiana ha 11 cifre). Stessa cosa per un codice fiscale
+    // numerico (società: 11 cifre).
+    for (const k of ['partitaIva', 'codiceFiscale']) {
+      const m = /^(\d+)(\.0+)?$/.exec(String(dati[k] || '').trim());
+      if (m) dati[k] = m[1].length < 11 ? m[1].padStart(11, '0') : m[1];
+    }
   }
   return { dati, invoiceCfg: invoice && String(invoice.tipo_valore) === '11' ? invoice : null };
 }
