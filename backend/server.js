@@ -1204,6 +1204,28 @@ app.put('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
   }
 });
 
+// Eliminazione di una task dalla To-Do List: solo task dello stesso tenant e utente, e solo
+// se il ruolo del contesto può modificarla (id_roles_write). L'eliminazione resta nel log
+// di audit con i valori della riga.
+app.delete('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
+  try {
+    const taskId = String(req.params.id || '').trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      return res.status(400).json({ error: 'Id task non valido' });
+    }
+    await assertRowsWritable(req, db, 'tasks', [taskId]);
+    const result = await db.query(
+      'DELETE FROM tasks WHERE id = $1 AND tenant_id = $2 AND user_id = $3 RETURNING id',
+      [taskId, req.user.tenant_id, req.user.user_id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Task non trovata' });
+    res.json({ id: result.rows[0].id, deleted: true });
+  } catch (error) {
+    console.error('[DASHBOARD TASK DELETE]', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 // Divide il contenuto di "VariabDB" (frammento SQL configurato da un utente
 // privilegiato in fase di definizione del campo, non input dell'utente finale) nella
 // parte di condizione e nell'eventuale ORDER BY finale. Sono ammesse tutte e tre le
@@ -9269,12 +9291,15 @@ app.get('/api/issue/options', requireAuth, async (req, res) => {
     }
 
     const [modulesResult, requestersResult] = await Promise.all([
+      // Moduli = licenze del cliente (licenze_app). Il nome non è più in licenze_app ma
+      // nell'anagrafica collegata da licenza_id (conf_licenze_app.description). Il valore
+      // salvato nella issue resta l'id della riga di licenze_app.
       pool.query(
-        `SELECT id::text AS value, TRIM(description::text) AS label
-         FROM public.licenze_app
-         WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
-           AND NULLIF(TRIM(description::text), '') IS NOT NULL
-         ORDER BY label, value`,
+        `SELECT la.id::text AS value, TRIM(cl.description::text) AS label
+         FROM public.licenze_app la
+         JOIN public.conf_licenze_app cl ON cl.id = la.licenza_id
+         WHERE la.tenant_id = $1 AND la.user_id = $2 AND la.client_id = $3
+           AND NULLIF(TRIM(cl.description::text), '') IS NOT NULL`,
         [tenant_id, user_id, client_id]
       ),
       pool.query(
@@ -9289,7 +9314,10 @@ app.get('/api/issue/options', requireAuth, async (req, res) => {
 
     res.json({
       // La UI mostra la label, ma il valore salvato nella tabella issue è l'UUID.
-      moduli: modulesResult.rows.map(row => ({ value: row.value, label: row.label })),
+      // Ordinati dopo la lettura: i nomi possono essere cifrati nel database.
+      moduli: modulesResult.rows.map(row => ({ value: row.value, label: String(row.label || '').trim() }))
+        .filter(row => row.label)
+        .sort((a, b) => a.label.localeCompare(b.label, 'it', { sensitivity: 'base' })),
       richiedenti: requestersResult.rows.map(row => ({ value: row.value, label: row.label }))
     });
   } catch (error) {

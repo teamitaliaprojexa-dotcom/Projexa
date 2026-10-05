@@ -2495,6 +2495,12 @@
         }
 
         .todo-edit-btn:hover { background: rgba(59, 130, 246, 0.16); }
+        /* Matita e cestino affiancati nel margine sinistro della To-Do List */
+        .todo-table-wrap { padding-left: 80px; }
+        .todo-edit-btn:not(.todo-delete-btn) { left: -75px; }
+        .todo-delete-btn { left: -39px; border-color: rgba(220, 38, 38, 0.25); background: rgba(220, 38, 38, 0.06); color: #DC2626; }
+        .todo-delete-btn:hover { background: rgba(220, 38, 38, 0.14); }
+        .todo-delete-btn:disabled { opacity: 0.5; cursor: wait; }
 
         .todo-description-btn {
             width: 32px;
@@ -5761,6 +5767,9 @@
             document.getElementById('taskModalClose').addEventListener('click', closeTaskModal);
             document.getElementById('taskModalCancel').addEventListener('click', closeTaskModal);
             document.getElementById('taskModalSave').addEventListener('click', saveTaskFromModal);
+            document.getElementById('taskModalDelete')?.addEventListener('click', (event) => {
+                if (editingTodoId) deleteTodoTask(editingTodoId, event.currentTarget);
+            });
             document.getElementById('taskModal').addEventListener('click', event => {
                 if (event.target.id === 'taskModal') closeTaskModal();
             });
@@ -5878,6 +5887,7 @@
                     ${gridColumns.map((column, columnIndex) => {
                         const editButton = columnIndex === 0
                             ? `<button type="button" class="todo-edit-btn" data-task-id="${escapeHtml(todo.__task_id)}" title="Modifica task"><i class="fas fa-pen"></i></button>`
+                              + `<button type="button" class="todo-edit-btn todo-delete-btn" data-task-id="${escapeHtml(todo.__task_id)}" title="Elimina task"><i class="fas fa-trash-can"></i></button>`
                             : '';
                         const cellValue = column.name === 'description'
                             ? (todo.description
@@ -5895,11 +5905,14 @@
                         </table>
                     </div>`;
                 removeHiddenTodoGridColumns(todoList.querySelector('.todo-table'));
-                todoList.querySelectorAll('.todo-edit-btn').forEach(button => {
+                todoList.querySelectorAll('.todo-edit-btn:not(.todo-delete-btn)').forEach(button => {
                     button.addEventListener('click', () => {
                         const task = todoData.find(row => String(row.__task_id) === button.dataset.taskId);
                         if (task) openTaskModal(task);
                     });
+                });
+                todoList.querySelectorAll('.todo-delete-btn').forEach(button => {
+                    button.addEventListener('click', () => deleteTodoTask(button.dataset.taskId, button));
                 });
                 todoList.querySelectorAll('.todo-description-btn').forEach(button => {
                     button.addEventListener('click', () => {
@@ -6458,6 +6471,9 @@
             }
             editingTodoId = task?.__task_id || null;
             document.getElementById('taskModalTitle').textContent = editingTodoId ? 'Modifica task' : 'Nuovo task';
+            // Elimina: solo per una task esistente (in modifica).
+            const deleteButton = document.getElementById('taskModalDelete');
+            if (deleteButton) { deleteButton.style.display = editingTodoId ? '' : 'none'; deleteButton.disabled = false; }
             document.getElementById('taskForm').innerHTML = todoColumns.map(column => renderTaskFormField(column, task)).join('');
             document.getElementById('taskModal').classList.add('open');
 
@@ -6498,6 +6514,32 @@
             editingTodoId = null;
             document.getElementById('taskModal').classList.remove('open');
             document.getElementById('taskForm').innerHTML = '';
+        }
+
+        // Elimina una task della To-Do List (cestino sulla riga o pulsante Elimina della
+        // finestra di modifica), dopo la conferma. DELETE /api/dashboard/tasks/:id.
+        async function deleteTodoTask(taskId, button) {
+            const task = todoData.find(row => String(row.__task_id) === String(taskId));
+            const titolo = task && (task.titile || task.title) ? `«${task.titile || task.title}»` : 'questa task';
+            if (!confirm(`Eliminare ${titolo}? L'operazione non si può annullare.`)) return false;
+            if (button) button.disabled = true;
+            try {
+                const response = await fetch(`${API_URL}/dashboard/tasks/${encodeURIComponent(taskId)}`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(result.error || `Errore HTTP ${response.status}`);
+                if (String(editingTodoId) === String(taskId)) closeTaskModal();
+                await loadTodoData();
+                applyFiltersAndRender();
+                showNotification('Task eliminata', 'success');
+                return true;
+            } catch (error) {
+                showNotification('Errore: ' + error.message, 'info');
+                if (button) button.disabled = false;
+                return false;
+            }
         }
 
         async function saveTaskFromModal() {
@@ -18698,6 +18740,7 @@
             </div>
             <form id="taskForm" class="task-form-grid"></form>
             <div class="task-modal-footer">
+                <button id="taskModalDelete" type="button" style="display: none; margin-right: auto; padding: 0.6rem 1rem; border: 1px solid #FCA5A5; border-radius: 8px; background: #FEF2F2; color: #B91C1C; font-weight: 600; cursor: pointer;"><i class="fas fa-trash-can"></i> Elimina</button>
                 <button id="taskModalCancel" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
                 <button id="taskModalSave" type="button" style="padding: 0.6rem 1rem; border: none; border-radius: 8px; background: var(--primary); color: white; font-weight: 600; cursor: pointer;">Salva task</button>
             </div>
