@@ -1136,6 +1136,21 @@
             cursor: pointer;
             user-select: none;
         }
+        .type11-bar .type11-expiry-toggle {
+            margin-left: auto;
+            margin-right: 0.6rem;
+            padding: 0.15rem 0.6rem;
+            border: 1px solid #93C5FD;
+            border-radius: 999px;
+            background: white;
+            color: #1E40AF;
+            font-size: 0.75rem;
+            font-weight: 600;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+        .type11-bar .type11-expiry-toggle:hover { background: #EFF6FF; }
+        .type11-bar .type11-expiry-toggle.on { background: #1E40AF; border-color: #1E40AF; color: white; }
         .type11-bar .type11-arrow {
             flex: 0 0 auto;
             color: #111827;
@@ -15986,6 +16001,40 @@
         // (es. cambio di "Abilita modifica") al posto della scritta "Caricamento griglia…".
         const type11GridSnapshots = new Map();
 
+        // Pulsante a destra nel titolo delle griglie tipo 11 con colonna scadenza. All'apertura
+        // la griglia mostra solo le righe non chiuse (scadenza >= oggi) e il pulsante offre
+        // "Mostra tutti"; dopo il clic mostra tutte le righe e offre "Nascondi chiusi".
+        // La scelta vale finché la griglia resta aperta (widget.dataset.showAll).
+        function type11SetupExpiryToggle(widget, hasExpiry) {
+            const bar = widget.closest('.type11-grid-row')?.querySelector('.type11-bar');
+            if (!bar) return;
+            let btn = bar.querySelector('.type11-expiry-toggle');
+            if (!hasExpiry) { btn?.remove(); return; }
+            if (!btn) {
+                btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'type11-expiry-toggle';
+                // Il clic non deve aprire/chiudere la griglia (gestore sulla barra)
+                btn.addEventListener('click', event => {
+                    event.stopPropagation();
+                    widget.dataset.showAll = widget.dataset.showAll === '1' ? '0' : '1';
+                    const row = widget.closest('.type11-grid-row');
+                    if (row?.classList.contains('collapsed')) bar.click(); // riapre la griglia
+                    loadType11Grid(widget);
+                });
+                btn.addEventListener('mousedown', event => event.stopPropagation()); // niente trascinamento
+                bar.insertBefore(btn, bar.querySelector('.type11-arrow'));
+            }
+            const all = widget.dataset.showAll === '1';
+            btn.classList.toggle('on', all);
+            btn.innerHTML = all
+                ? '<i class="fas fa-eye-slash"></i> Nascondi chiusi'
+                : '<i class="fas fa-eye"></i> Mostra tutti';
+            btn.title = all
+                ? 'Mostra solo le righe ancora valide (scadenza da oggi in poi)'
+                : 'Mostra anche le righe chiuse (scadenza passata)';
+        }
+
         async function loadType11Grid(widget) {
             const tableName = String(widget.dataset.gridTable || '').trim();
             const columns = parseType11Columns(widget.dataset.gridColumns);
@@ -16024,6 +16073,8 @@
                 : '<div class="type11-grid-state">Caricamento griglia…</div>';
             try {
                 const query = new URLSearchParams({ fieldId, clientId: context.clientId || '' });
+                // "Mostra tutti" nel titolo: anche le righe con scadenza passata
+                if (widget.dataset.showAll === '1') query.set('tutti', '1');
                 const res = await fetch(`${API_URL}/${encodeURIComponent(source)}/grid-widget?${query.toString()}`, { headers: getAuthHeaders() });
                 if (!res.ok) {
                     const error = await res.json().catch(() => ({}));
@@ -16031,6 +16082,7 @@
                     return;
                 }
                 const payload = await res.json();
+                type11SetupExpiryToggle(widget, payload.hasExpiry === true);
                 let visibleColumns = Array.isArray(payload.columns) && payload.columns.length
                     ? payload.columns
                     : columns;

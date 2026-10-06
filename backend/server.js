@@ -1530,10 +1530,12 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       queryParams.push(config.argument);
       projectFilter = ` AND src.project_id = $${queryParams.length}`;
     }
-    // Le griglie tipo 11 mostrano soltanto record non scaduti. Se la tabella
+    // Le griglie tipo 11 mostrano di default soltanto record non scaduti. Se la tabella
     // espone la colonna scadenza, NULL e date precedenti a oggi restano escluse.
-    // Il tipo 13 mantiene invece il proprio comportamento Gantt invariato.
-    const expiryFilter = String(config.tipo_valore) === '11' && tableColumns.has('scadenza')
+    // Con ?tutti=1 (pulsante "Mostra tutti" nel titolo della griglia) il filtro non si
+    // applica. Il tipo 13 mantiene invece il proprio comportamento Gantt invariato.
+    const hasExpiry = String(config.tipo_valore) === '11' && tableColumns.has('scadenza');
+    const expiryFilter = hasExpiry && req.query.tutti !== '1'
       ? ' AND src.scadenza >= CURRENT_DATE'
       : '';
 
@@ -1571,6 +1573,8 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       fotoProfilo,
       // Tabella della griglia: per la rubrica stessa il nominativo non si cerca in rubrica.
       tabella: tableName,
+      // La griglia filtra per scadenza: il titolo mostra "Mostra tutti" / "Nascondi chiusi".
+      hasExpiry,
       // Il frontend mostra la selezione multipla soltanto quando l'operazione
       // richiesta è realmente applicabile alla tabella della griglia tipo 11.
       canExpire: !isView && String(config.tipo_valore) === '11'
