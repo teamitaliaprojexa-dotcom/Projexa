@@ -3923,9 +3923,17 @@ const gpHhJoin = (alias) => `LEFT JOIN LATERAL (
        AND b.scadenza >= CURRENT_DATE
   ) hh ON true`;
 const gpNum = (v) => Number(v) || 0;
-// Solo progetti con almeno una commessa attiva con codice (tabella proj_commessa, più
-// commesse per progetto dal 2026-10-06; prima era il campo "Cod commessa" di projects).
+// Solo progetti APERTI (riga del progetto con scadenza >= oggi) con almeno una commessa
+// attiva con codice (tabella proj_commessa, più commesse per progetto dal 2026-10-06;
+// prima era il campo "Cod commessa" di projects, che si chiudeva insieme al progetto).
 const gpCommessaCond = (alias) => `EXISTS (
+    SELECT 1 FROM projects pa
+     WHERE pa.id = ${alias}.project_id
+       AND pa.argument = 'Progetto' AND pa.campo = 'Progetto'
+       AND pa.tenant_id = ${alias}.tenant_id AND pa.user_id = ${alias}.user_id
+       AND pa.scadenza >= CURRENT_DATE
+  )
+  AND EXISTS (
     SELECT 1 FROM proj_commessa k
      WHERE k.project_id = ${alias}.project_id
        AND k.tenant_id = ${alias}.tenant_id AND k.user_id = ${alias}.user_id
