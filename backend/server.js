@@ -8220,6 +8220,25 @@ app.post('/api/:source(settings|clients)/execute-function', requireAuth, async (
   }
 });
 
+// Chiusura e riapertura del progetto: le può fare solo il proprietario, cioè l'utente del
+// contesto deve essere lo user_id della riga del progetto (stesso tenant). L'Admin sempre.
+async function assertProjectOwner(req, projectId, clientId) {
+  if (isAdminUser(req)) return;
+  const params = [projectId, req.user.tenant_id, req.user.user_id];
+  let clientClause = '';
+  if (clientId) { params.push(clientId); clientClause = ` AND client_id = $${params.length}`; }
+  const r = await db.query(
+    `SELECT 1 FROM projects
+      WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3
+        AND argument = 'Progetto' AND campo = 'Progetto'${clientClause}
+      LIMIT 1`,
+    params
+  );
+  if (!r.rows.length) {
+    throw Object.assign(new Error('Solo il proprietario del progetto può chiuderlo o riaprirlo'), { statusCode: 403 });
+  }
+}
+
 // Pulsante "Chiudi Progetto" nel dettaglio progetto: esegue l'istruzione configurata in
 // function_db (cod_istruzione=3, istruzione='update', funzione='Chiudi Progetto') sul
 // project_id/client_id correnti. Stessa logica/riuso del motore già usato per tipo_valore=15
@@ -8232,8 +8251,9 @@ app.post('/api/projects/close', requireAuth, async (req, res) => {
   const clientId = ((req.body && req.body.clientId) || '').trim();
   if (!projectId) return res.status(400).json({ error: 'projectId richiesto' });
   try {
-    // Chiudere il progetto lo modifica: la riga del progetto deve essere modificabile.
-    await assertRowsWritable(req, db, 'projects', [projectId]);
+    // Chiudere il progetto spetta al suo proprietario (user_id del progetto), qualunque sia
+    // id_roles_write: quello vale per la modifica dei campi, non per chiusura/riapertura.
+    await assertProjectOwner(req, projectId, clientId);
     const codIstruzione = 3;
     const funzione = 'Chiudi Progetto';
 
@@ -8312,8 +8332,8 @@ app.post('/api/projects/reopen', requireAuth, async (req, res) => {
   if (!clientId) return res.status(400).json({ error: 'clientId richiesto' });
 
   try {
-    // Riaprire il progetto lo modifica: la riga del progetto deve essere modificabile.
-    await assertRowsWritable(req, db, 'projects', [projectId]);
+    // Riaprire il progetto spetta al suo proprietario (user_id del progetto), come la chiusura.
+    await assertProjectOwner(req, projectId, clientId);
   } catch (error) {
     return res.status(error.statusCode || 500).json({ error: error.message });
   }
