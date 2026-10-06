@@ -14271,7 +14271,17 @@
             }
 
             const reopenProjectBtn = document.getElementById('reopenProjectBtn');
-            if (reopenProjectBtn) reopenProjectBtn.style.display = closedProject ? 'inline-flex' : 'none';
+            if (reopenProjectBtn) {
+                reopenProjectBtn.style.display = closedProject ? 'inline-flex' : 'none';
+                // Come "Chiudi Progetto": serve che la riga del progetto sia modificabile dal
+                // ruolo (id_roles_write); altrimenti il pulsante resta visibile ma spento.
+                reopenProjectBtn.disabled = !currentDetailCanWriteContainer;
+                reopenProjectBtn.style.opacity = currentDetailCanWriteContainer ? '' : '0.5';
+                reopenProjectBtn.style.cursor = currentDetailCanWriteContainer ? 'pointer' : 'not-allowed';
+                reopenProjectBtn.title = currentDetailCanWriteContainer
+                    ? 'Riapri il progetto'
+                    : 'Progetto in sola lettura per il tuo ruolo: non puoi riaprirlo';
+            }
             const showAllWrap = document.getElementById('showAllProjectFieldsWrap');
             if (showAllWrap) showAllWrap.style.display = closedProject ? 'inline-flex' : 'none';
             const showAllToggle = document.getElementById('showAllProjectFieldsToggle');
@@ -17828,7 +17838,7 @@
                 } catch (e) {
                     showNotification('Errore di connessione', 'info');
                 } finally {
-                    reopenProjectBtn.disabled = false;
+                    reopenProjectBtn.disabled = !currentDetailCanWriteContainer;
                 }
             });
 
