@@ -14,10 +14,13 @@
 // ============================================================================
 import { aggiornaJiraQuotazioni, NOME_PROGRAMMA as NOME_QUOTAZIONI } from './aggiornaJiraQuotazioni.js';
 import { aggiornaJiraTask, NOME_PROGRAMMA as NOME_TASK } from './aggiornaJiraTask.js';
+import { aggiornaIssueTicketJira, NOME_PROGRAMMA as NOME_ISSUE_TICKET } from './issueTicketJira.js';
 
 export const PROGRAMMI = [
   { nome: NOME_QUOTAZIONI, etichetta: 'Quotazioni Jira', esegui: aggiornaJiraQuotazioni },
-  { nome: NOME_TASK, etichetta: 'Task Jira', esegui: aggiornaJiraTask }
+  { nome: NOME_TASK, etichetta: 'Task Jira', esegui: aggiornaJiraTask },
+  // Dopo i Task Jira: Ticket Jira delle issue dai codici MySupport (solo se vuoto).
+  { nome: NOME_ISSUE_TICKET, etichetta: 'Ticket Jira delle Issue (da MySupport)', esegui: aggiornaIssueTicketJira }
 ];
 
 // Tenant con un aggiornamento in corso: due lanci contemporanei sullo stesso

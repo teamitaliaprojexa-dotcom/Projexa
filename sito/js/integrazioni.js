@@ -173,6 +173,21 @@
 
     // Numeri e avvisi della sincronizzazione di un singolo utente.
     function renderDettaglio(r) {
+        // Ticket Jira delle Issue da MySupport (jobs/issueTicketJira.js): numeri propri.
+        if (r.tipo === 'issue-mysupport') {
+            return `
+            <div class="integr-nums">
+                ${numero(r.issueConMySupport, 'issue con MySupport')}
+                ${numero(r.aggiornate, 'Ticket Jira scritti')}
+                ${numero(r.giaCompilate, 'già compilate (non toccate)')}
+                ${numero(r.senzaTicket, 'nessun ticket correlato')}
+            </div>
+            ${(r.errori && r.errori.length)
+                ? `<div class="integr-err"><strong>Issue non aggiornate:</strong>
+                    <ul style="margin:0.3rem 0 0;padding-left:1.1rem;">
+                    ${r.errori.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>`
+                : ''}`;
+        }
         return `
             <div style="font-size:0.8rem;color:#6B7280;margin-bottom:0.55rem;">
                 Filtro Jira: <strong>${esc(r.filtro || '—')}</strong> ·
