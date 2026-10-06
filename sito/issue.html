@@ -31,6 +31,8 @@
             line-height: 1.6;
             background: var(--light);
             padding: 1.5rem;
+            /* Pagina ridotta del 30% */
+            zoom: 0.7;
         }
 
         .container {
@@ -249,6 +251,16 @@
             cursor: not-allowed;
         }
 
+        .btn-light {
+            background: white;
+            color: var(--dark);
+            border: 1px solid var(--border);
+        }
+
+        .btn-light:hover {
+            background: var(--light);
+        }
+
         .grid-container {
             overflow-x: auto;
         }
@@ -360,6 +372,204 @@
         .note-view-btn:hover {
             background: rgba(59, 130, 246, 0.08);
             border-color: var(--primary);
+        }
+
+        .detail-cell {
+            width: 40px;
+            text-align: center;
+        }
+
+        .detail-btn {
+            width: 28px;
+            height: 28px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: white;
+            color: var(--primary);
+            cursor: pointer;
+        }
+
+        .detail-btn:hover {
+            background: rgba(59, 130, 246, 0.08);
+            border-color: var(--primary);
+        }
+
+        .modal-card.modal-wide {
+            width: min(900px, 100%);
+        }
+
+        .issue-form {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem 1rem;
+        }
+
+        .issue-form .field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .issue-form .field.full {
+            grid-column: 1 / -1;
+        }
+
+        .issue-form label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .issue-form textarea {
+            min-height: 90px;
+        }
+
+        .issue-form :disabled,
+        .issue-form [readonly] {
+            background: var(--light);
+            color: var(--dark);
+        }
+
+        .issue-modal-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .issue-modal-actions .spacer {
+            flex: 1;
+        }
+
+        .issue-readonly-note {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .jira-cell {
+            white-space: nowrap;
+        }
+
+        .jira-lookup-btn {
+            margin-left: 0.4rem;
+            width: 22px;
+            height: 22px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: white;
+            color: var(--primary);
+            font-size: 0.7rem;
+            cursor: pointer;
+            vertical-align: middle;
+        }
+
+        .jira-lookup-btn:hover {
+            background: rgba(59, 130, 246, 0.08);
+            border-color: var(--primary);
+        }
+
+        .jira-result + .jira-result {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .jira-result h4 {
+            margin-bottom: 0.5rem;
+            font-size: 0.95rem;
+        }
+
+        .jira-fonte {
+            margin-left: 0.4rem;
+            padding: 0.1rem 0.5rem;
+            border-radius: 999px;
+            background: rgba(59, 130, 246, 0.1);
+            color: var(--primary-dark);
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .jira-none {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .jira-table {
+            min-width: 0;
+            width: 100%;
+            margin-bottom: 0.5rem;
+        }
+
+        .jira-table th {
+            width: 30%;
+            padding: 0.3rem 0.5rem;
+            background: var(--light);
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            white-space: normal;
+            vertical-align: top;
+        }
+
+        .jira-table td {
+            padding: 0.3rem 0.5rem;
+            font-size: 0.9rem;
+            word-break: break-word;
+        }
+
+        .owner-me {
+            margin-left: 0.4rem;
+            padding: 0 0.5rem;
+            border: 1px solid #EAB308;
+            border-radius: 999px;
+            background: #FDE047;
+            color: #713F12;
+            font-size: 0.72rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .owner-me:hover {
+            background: #FACC15;
+        }
+
+        /* Risultati del campo Owner: "fixed" sul body, così la finestra non li taglia */
+        .owner-list {
+            display: none;
+            position: fixed;
+            z-index: 1100;
+            max-height: 220px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: white;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+        }
+
+        .owner-list.open {
+            display: block;
+        }
+
+        .owner-item {
+            padding: 0.45rem 0.7rem;
+            font-size: 0.88rem;
+            cursor: pointer;
+        }
+
+        .owner-item small {
+            display: block;
+            font-size: 0.74rem;
+            color: var(--text-muted);
+        }
+
+        .owner-item:hover,
+        .owner-item.active {
+            background: #EEF2FF;
+        }
+
+        .owner-empty {
+            padding: 0.45rem 0.7rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
         }
 
         .modal-overlay {
@@ -550,20 +760,8 @@
             <button class="btn btn-primary" id="addBtn" title="Aggiungi una nuova issue">
                 <i class="fas fa-plus"></i> Aggiungi
             </button>
-            <button class="btn btn-danger" id="deleteBtn" title="Elimina l'issue selezionata" disabled>
-                <i class="fas fa-trash"></i> Elimina
-            </button>
-            <button class="btn btn-warning" id="closeBtn" title="Chiudi l'issue selezionata" disabled>
-                <i class="fas fa-check-circle"></i> Chiudi
-            </button>
-            <button class="btn btn-secondary" id="editBtn" title="Modifica le issue">
-                <i class="fas fa-pen"></i> Modifica
-            </button>
-            <button class="btn btn-secondary" id="saveBtn" title="Salva le modifiche" style="display: none;">
-                <i class="fas fa-save"></i> Salva
-            </button>
-            <button class="btn btn-secondary" id="cancelBtn" title="Annulla le modifiche" style="display: none;">
-                <i class="fas fa-times"></i> Annulla
+            <button class="btn btn-secondary" id="exportBtn" title="Scarica logo, KPI e issue in un file Excel">
+                <i class="fas fa-file-excel"></i> Esporta Excel
             </button>
         </div>
 
@@ -577,9 +775,7 @@
                 <table id="issueTable" style="display: none;">
                     <thead>
                         <tr id="headerRow">
-                            <th style="width: 30px;">
-                                <input type="checkbox" id="selectAllCheckbox">
-                            </th>
+                            <th style="width: 40px;"></th>
                         </tr>
                     </thead>
                     <tbody id="issueTableBody">
@@ -607,6 +803,46 @@
                     <i class="fas fa-save"></i> Conferma nota
                 </button>
             </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="issueModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="issueModalTitle">
+        <div class="modal-card modal-wide">
+            <div class="modal-header">
+                <h3 id="issueModalTitle">Issue</h3>
+                <button type="button" class="modal-close" id="issueModalClose" title="Chiudi" aria-label="Chiudi finestra issue">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="issue-form" id="issueForm"></div>
+            <div class="issue-modal-actions">
+                <button type="button" class="btn btn-danger" id="issueModalDelete" title="Elimina questa issue">
+                    <i class="fas fa-trash"></i> Elimina
+                </button>
+                <button type="button" class="btn btn-primary" id="issueModalCloseIssue" title="Chiude la issue: stato Chiuso e data di chiusura di oggi">
+                    <i class="fas fa-check-circle"></i> Chiudi issue
+                </button>
+                <span class="issue-readonly-note" id="issueModalReadonly">Sola lettura: non hai i permessi per modificare questa issue</span>
+                <span class="spacer"></span>
+                <button type="button" class="btn btn-light" id="issueModalCancel">
+                    <i class="fas fa-times"></i> Annulla
+                </button>
+                <button type="button" class="btn btn-secondary" id="issueModalSave">
+                    <i class="fas fa-save"></i> Salva
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="jiraModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="jiraModalTitle">
+        <div class="modal-card modal-wide">
+            <div class="modal-header">
+                <h3 id="jiraModalTitle">Ticket Jira</h3>
+                <button type="button" class="modal-close" id="jiraModalClose" title="Chiudi" aria-label="Chiudi finestra ticket Jira">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="jiraModalBody"></div>
         </div>
     </div>
 

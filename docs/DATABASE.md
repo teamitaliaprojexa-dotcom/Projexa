@@ -50,8 +50,9 @@ quota fino al reset mensile (~1° ottobre 2026).
 - script `/opt/projexa/sync-staging.sh` (sorgente `deploy/oracle/sync-staging.sh`), servizio e
   timer `projexa-sync-staging` alle 03:30 UTC, installati da `deploy/oracle/setup-sync-staging.sh`;
 - URL di destinazione in `/opt/projexa/staging-sync.env` (permessi 600), mai nel `.env` di produzione;
-- sovrascrive i dati di staging (`pg_restore --clean`, una transazione per database); rifiuta
-  qualunque destinazione che non sia un host `*.neon.tech`.
+- sovrascrive i dati di staging (`pg_restore --clean`, una transazione per database); prima del
+  clean toglie tutte le foreign key dello schema `public` di staging (quelle presenti solo in staging
+  bloccherebbero il DROP delle chiavi primarie); rifiuta qualunque destinazione che non sia un host `*.neon.tech`.
 
 ```bash
 sudo systemctl enable --now projexa-sync-staging.timer    # attivare

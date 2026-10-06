@@ -2495,12 +2495,6 @@
         }
 
         .todo-edit-btn:hover { background: rgba(59, 130, 246, 0.16); }
-        /* Matita e cestino affiancati nel margine sinistro della To-Do List */
-        .todo-table-wrap { padding-left: 80px; }
-        .todo-edit-btn:not(.todo-delete-btn) { left: -75px; }
-        .todo-delete-btn { left: -39px; border-color: rgba(220, 38, 38, 0.25); background: rgba(220, 38, 38, 0.06); color: #DC2626; }
-        .todo-delete-btn:hover { background: rgba(220, 38, 38, 0.14); }
-        .todo-delete-btn:disabled { opacity: 0.5; cursor: wait; }
 
         .todo-description-btn {
             width: 32px;
@@ -5887,7 +5881,6 @@
                     ${gridColumns.map((column, columnIndex) => {
                         const editButton = columnIndex === 0
                             ? `<button type="button" class="todo-edit-btn" data-task-id="${escapeHtml(todo.__task_id)}" title="Modifica task"><i class="fas fa-pen"></i></button>`
-                              + `<button type="button" class="todo-edit-btn todo-delete-btn" data-task-id="${escapeHtml(todo.__task_id)}" title="Elimina task"><i class="fas fa-trash-can"></i></button>`
                             : '';
                         const cellValue = column.name === 'description'
                             ? (todo.description
@@ -5905,14 +5898,11 @@
                         </table>
                     </div>`;
                 removeHiddenTodoGridColumns(todoList.querySelector('.todo-table'));
-                todoList.querySelectorAll('.todo-edit-btn:not(.todo-delete-btn)').forEach(button => {
+                todoList.querySelectorAll('.todo-edit-btn').forEach(button => {
                     button.addEventListener('click', () => {
                         const task = todoData.find(row => String(row.__task_id) === button.dataset.taskId);
                         if (task) openTaskModal(task);
                     });
-                });
-                todoList.querySelectorAll('.todo-delete-btn').forEach(button => {
-                    button.addEventListener('click', () => deleteTodoTask(button.dataset.taskId, button));
                 });
                 todoList.querySelectorAll('.todo-description-btn').forEach(button => {
                     button.addEventListener('click', () => {

@@ -2385,7 +2385,7 @@ async function koColRuolo(tabella, pool = db) {
 async function koRubrica(req, { tutte = false, pool = db } = {}) {
   const col = await koColRuolo('rubrica', pool);
   const r = await pool.query(
-    `SELECT id::text AS id, nominativo, email${col ? `, "${col}" AS ruolo` : ''} FROM rubrica
+    `SELECT id::text AS id, nominativo, email, scadenza${col ? `, "${col}" AS ruolo` : ''} FROM rubrica
       WHERE tenant_id = $1 AND user_id = $2
         ${tutte ? '' : 'AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)'}
       LIMIT 5000`,
@@ -9290,7 +9290,8 @@ app.get('/api/issue/options', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'client_id richiesto' });
     }
 
-    const [modulesResult, requestersResult] = await Promise.all([
+    await sincronizzaRubricaTenant(tenant_id); // rubrica condivisa: allinea prima di leggerla
+    const [modulesResult, requestersResult, rubrica] = await Promise.all([
       // Moduli = licenze del cliente (licenze_app). Il nome non è più in licenze_app ma
       // nell'anagrafica collegata da licenza_id (conf_licenze_app.description). Il valore
       // salvato nella issue resta l'id della riga di licenze_app.
@@ -9309,8 +9310,15 @@ app.get('/api/issue/options', requireAuth, async (req, res) => {
            AND NULLIF(TRIM(nominativo::text), '') IS NOT NULL
          ORDER BY label, value`,
         [tenant_id, user_id, client_id]
-      )
+      ),
+      // Owner = contatto della rubrica (si salva rubrica.id). Anche i contatti scaduti,
+      // così una issue già assegnata mostra ancora il nome; la UI propone solo gli attivi.
+      koRubrica(req, { tutte: true, pool })
     ]);
+    const oggi = new Date(new Date().toDateString());
+    // "me" = contatto di rubrica con l'email dell'utente (confronto qui: l'email può essere cifrata)
+    const myEmail = String(req.user.email || '').trim().toLowerCase();
+    const me = myEmail ? rubrica.find(x => String(x.email || '').trim().toLowerCase() === myEmail) : null;
 
     res.json({
       // La UI mostra la label, ma il valore salvato nella tabella issue è l'UUID.
@@ -9318,8 +9326,69 @@ app.get('/api/issue/options', requireAuth, async (req, res) => {
       moduli: modulesResult.rows.map(row => ({ value: row.value, label: String(row.label || '').trim() }))
         .filter(row => row.label)
         .sort((a, b) => a.label.localeCompare(b.label, 'it', { sensitivity: 'base' })),
-      richiedenti: requestersResult.rows.map(row => ({ value: row.value, label: row.label }))
+      richiedenti: requestersResult.rows.map(row => ({ value: row.value, label: row.label })),
+      owners: rubrica
+        .map(x => ({
+          value: x.id,
+          label: String(x.nominativo || '').trim(),
+          email: String(x.email || '').trim(),
+          attivo: !x.scadenza || new Date(x.scadenza) >= oggi
+        }))
+        .filter(x => x.label)
+        .sort((a, b) => a.label.localeCompare(b.label, 'it', { sensitivity: 'base' })),
+      ownerMe: me ? me.id : null
     });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// GET /api/issue/jira-lookup?codes=ADFPE-299/ADFPE-300 - Dati dei ticket Jira scritti in
+// una issue. Per ogni codice si cerca prima in cl_quotazioni (colonna codice) e, se non
+// c'è, in task_app (cod_task); tenant e utente del contesto. Il confronto si fa dopo la
+// lettura perché i codici possono essere cifrati.
+const JIRA_KEY_RE = /[A-Z][A-Z0-9_]+-\d+/gi;
+const jiraKeys = (text) => [...new Set((String(text || '').match(JIRA_KEY_RE) || []).map((k) => k.toUpperCase()))];
+const ISSUE_JIRA_FONTI = [
+  { table: 'cl_quotazioni', column: 'codice', label: 'Quotazioni' },
+  { table: 'task_app', column: 'cod_task', label: 'Task Jira' }
+];
+app.get('/api/issue/jira-lookup', requireAuth, async (req, res) => {
+  try {
+    const pool = pickDb(req);
+    const codici = jiraKeys(req.query.codes).slice(0, 20);
+    if (!codici.length) return res.status(400).json({ error: 'Nessun codice Jira valido' });
+
+    const daTrovare = new Set(codici);
+    const trovati = new Map(); // codice -> { fonte, righe }
+    for (const fonte of ISSUE_JIRA_FONTI) {
+      if (!daTrovare.size) break;
+      const r = await pool.query(
+        `SELECT * FROM public."${fonte.table}" WHERE tenant_id = $1 AND user_id = $2`,
+        [req.user.tenant_id, req.user.user_id]
+      );
+      for (const row of r.rows) {
+        for (const k of jiraKeys(row[fonte.column])) {
+          if (!daTrovare.has(k)) continue;
+          if (!trovati.has(k)) trovati.set(k, { fonte: fonte.label, righe: [] });
+          if (trovati.get(k).fonte === fonte.label) trovati.get(k).righe.push(row);
+        }
+      }
+      for (const k of trovati.keys()) daTrovare.delete(k);
+    }
+
+    // Solo colonne con dati, senza quelle tecniche (stesse regole del Reporting)
+    const campi = (row) => Object.entries(row)
+      .filter(([c, v]) => !REPORTING_HIDDEN_COLUMNS.has(c) && !isReportingAppoName(c)
+        && v !== null && v !== undefined && String(v).trim() !== '')
+      .map(([c, v]) => ({ campo: reportingColumnLabel(c), valore: v instanceof Date ? v.toISOString() : String(v) }));
+
+    res.json(codici.map((codice) => {
+      const t = trovati.get(codice);
+      return t
+        ? { codice, fonte: t.fonte, righe: t.righe.map(campi) }
+        : { codice, fonte: null, righe: [] };
+    }));
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }

@@ -57,8 +57,26 @@ for name in "${NAMES[@]}"; do
 
   dump="$WORK/$name.dump"
   "$BIN/pg_dump" --format=custom --no-owner --no-privileges --dbname="$src" --file="$dump"
-  "$BIN/pg_restore" --clean --if-exists --no-owner --no-privileges \
-    --single-transaction --exit-on-error --dbname="$(neon_url "$dst")" "$dump"
+  # Prima di --clean si tolgono TUTTE le foreign key di staging (schema public): se in staging
+  # esiste una FK che in produzione non c'è (es. issue_modulo_fkey -> licenze_app_pkey), il DROP
+  # della chiave primaria referenziata fallirebbe. Le FK di produzione vengono ricreate dal dump.
+  # Tutto in un'unica transazione (psql -1): se qualcosa fallisce staging resta com'era.
+  {
+    cat <<'SQL'
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT c.conrelid::regclass AS tbl, c.conname
+           FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace
+           WHERE c.contype = 'f' AND n.nspname = 'public'
+  LOOP
+    EXECUTE format('ALTER TABLE %s DROP CONSTRAINT IF EXISTS %I', r.tbl, r.conname);
+  END LOOP;
+END $$;
+SQL
+    "$BIN/pg_restore" --clean --if-exists --no-owner --no-privileges --file=- "$dump"
+  } | "$BIN/psql" --quiet --no-psqlrc --single-transaction -v ON_ERROR_STOP=1 \
+        --dbname="$(neon_url "$dst")" >/dev/null
   log "$name -> staging ($dst_host): $(du -h "$dump" | cut -f1) copiati"
   rm -f "$dump"
 done
