@@ -13,6 +13,8 @@
 //   computed  colonna calcolata dal server (non modificabile a mano)
 //   readonly  non modificabile: vale il default (nuove righe) o il valore già salvato
 //   filtroSopra  etichetta di un elenco sopra la griglia che filtra le righe su questa colonna
+//   unico     colonna FK con valore unico nel contesto (cliente/progetto): il menu non
+//             propone i valori già presenti nelle righe attive (es. licenze del cliente)
 //
 // Prima tabella: config_chek_list (Impostazioni › Configura Check List, 2026-10-02).
 // ============================================================================
@@ -83,6 +85,10 @@ const REGOLE = {
     // Campo booleano (tipo 1) con un operatore scelto: risultato = vero / falso (salvato
     // true / false). Negli altri casi resta testo libero.
     risultato_verif: { booleano: { campo: 'campo_verif', operatore: 'operatore_verif', tipo: '1' } }
+  },
+  // Elenco Licenze del cliente (2026-10-06): ogni licenza una sola volta per cliente.
+  licenze_app: {
+    licenza_id: { unico: true }
   }
 };
 
@@ -129,6 +135,7 @@ export function metaColonna(tableName, column) {
   if (r.calc) out.calc = r.calc;
   if (r.readonly) out.locked = true;
   if (r.booleano) out.booleano = r.booleano;
+  if (r.unico) out.unico = true;
   return out;
 }
 

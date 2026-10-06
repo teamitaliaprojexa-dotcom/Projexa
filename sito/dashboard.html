@@ -15056,6 +15056,23 @@
             }
         });
 
+        // Colonne "unico" (data-unico): all'apertura del menu si nascondono i valori già
+        // scelti nelle ALTRE righe in modifica della stessa griglia (es. due righe nuove
+        // non ancora salvate non possono avere la stessa licenza).
+        document.addEventListener('focusin', event => {
+            const sel = event.target;
+            if (!(sel instanceof HTMLSelectElement) || sel.dataset.unico !== '1') return;
+            const table = sel.closest('table');
+            if (!table) return;
+            const altri = new Set([...table.querySelectorAll(`select[data-unico="1"][data-col="${CSS.escape(sel.dataset.col)}"]`)]
+                .filter(s => s !== sel && s.value).map(s => s.value));
+            [...sel.options].forEach(o => {
+                const nascondi = o.value !== '' && o.value !== sel.value && altri.has(o.value);
+                o.hidden = nascondi;
+                o.disabled = nascondi;
+            });
+        });
+
         async function type11FkOptions(source, fieldId, column) {
             try {
                 const query = new URLSearchParams({ fieldId: fieldId || '', column: column || '' });
@@ -15139,8 +15156,11 @@
                     () => type11FkOptions(source, fieldId, col.name)
                 );
                 // data-cost-worker: usato per compilare le tariffe alla scelta (vedi TYPE11_FK_AUTOFILL).
-                const optionsHtml = opts.map(o => `<option value="${escapeHtml(o.id)}"${o.cost_worker != null ? ` data-cost-worker="${escapeHtml(o.cost_worker)}"` : ''} ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
-                return `<select class="type11-editor-field" data-col="${escapeHtml(col.name)}" ${dis}><option value="">-- Seleziona --</option>${optionsHtml}</select>`;
+                // Colonna "unico" (es. licenze del cliente): i valori già presenti nelle righe
+                // attive (used) non si propongono, tranne quello già scelto in questa riga.
+                const proposte = col.unico ? opts.filter(o => !o.used || String(o.id) === val) : opts;
+                const optionsHtml = proposte.map(o => `<option value="${escapeHtml(o.id)}"${o.cost_worker != null ? ` data-cost-worker="${escapeHtml(o.cost_worker)}"` : ''} ${String(o.id) === val ? 'selected' : ''}>${escapeHtml(o.display)}</option>`).join('');
+                return `<select class="type11-editor-field" data-col="${escapeHtml(col.name)}"${col.unico ? ' data-unico="1"' : ''} ${dis}><option value="">-- Seleziona --</option>${optionsHtml}</select>`;
             }
             if (type === 'boolean') {
                 const checked = value === true || value === 'true' || value === 't' || value === 1 ? 'checked' : '';

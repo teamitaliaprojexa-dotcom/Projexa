@@ -3176,7 +3176,29 @@ app.get('/api/:source(settings|clients|projects)/grid-widget/fk-options', requir
        LIMIT 200`,
       params
     );
-    res.json(stripSensitive(result.rows));
+    const rows = stripSensitive(result.rows);
+
+    // Colonna "unico" (gridColumnRules.js, es. licenze_app.licenza_id): si segnano con
+    // used = true i valori già presenti nelle righe ATTIVE della griglia nello stesso
+    // contesto (tenant/utente/cliente e, nei progetti, progetto). Il browser non li propone,
+    // tranne il valore già scelto nella riga che si sta modificando.
+    if ((regoleColonne(tableName) || {})[column]?.unico) {
+      const uConds = [];
+      const uParams = [];
+      if (ctx.tableColumns.has('tenant_id')) { uParams.push(req.user.tenant_id); uConds.push(`tenant_id = $${uParams.length}`); }
+      if (ctx.tableColumns.has('user_id')) { uParams.push(effectiveUserId); uConds.push(`user_id = $${uParams.length}`); }
+      if (ctx.tableColumns.has('client_id') && clientId) { uParams.push(clientId); uConds.push(`client_id = $${uParams.length}`); }
+      if (ctx.tableColumns.has('project_id') && source === 'projects') { uParams.push(config.argument); uConds.push(`project_id = $${uParams.length}`); }
+      if (ctx.tableColumns.has('scadenza')) uConds.push('(scadenza IS NULL OR scadenza >= CURRENT_DATE)');
+      const used = await db.query(
+        `SELECT DISTINCT "${column}"::text AS v FROM "${tableName}"
+          WHERE "${column}" IS NOT NULL${uConds.length ? ' AND ' + uConds.join(' AND ') : ''}`,
+        uParams
+      );
+      const usati = new Set(used.rows.map((x) => String(x.v)));
+      rows.forEach((r) => { if (usati.has(String(r.id))) r.used = true; });
+    }
+    res.json(rows);
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
