@@ -3020,6 +3020,45 @@ app.get('/api/projects/contatori', requireAuth, async (req, res) => {
   }
 });
 
+// Stessi contatori nella testata del CLIENTE: righe non scadute del cliente NON legate a un
+// progetto (project_id IS NULL). argument = id della scheda aperta: i contatori valgono solo
+// per la scheda principale del cliente (riga identità), non per le sue sezioni interne
+// ({ root: false }). Per i clienti condivisi si contano le righe del proprietario.
+app.get('/api/clients/contatori', requireAuth, async (req, res) => {
+  try {
+    const argument = String((req.query && req.query.argument) || '').trim();
+    if (!EAV_UUID_RE.test(argument)) return res.status(400).json({ error: 'Cliente non valido' });
+    const acc = await clientAccessByArgument(argument, req, false);
+    if (!acc) return res.status(403).json({ error: 'Non autorizzato' });
+    if (String(acc.clientId) !== argument) return res.json({ root: false });
+    const out = { root: true };
+    await Promise.all(Object.entries(PROJ_CONTATORI).map(async ([k, t]) => {
+      const r = await db.query(
+        `SELECT count(*)::int AS n FROM "${t}"
+          WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3 AND project_id IS NULL
+            AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+        [req.user.tenant_id, acc.ownerUserId, acc.clientId]
+      );
+      out[k] = r.rows[0].n;
+    }));
+    // MySupport (solo cliente): quesiti del cliente non chiusi, con o senza progetto.
+    // La tabella mysupport non ha scadenza; se non esiste ancora il contatore vale 0.
+    try {
+      const ms = await db.query(
+        `SELECT count(*)::int AS n FROM mysupport
+          WHERE tenant_id = $1 AND client_id = $2 AND stato_finale IS DISTINCT FROM 'Chiuso'`,
+        [req.user.tenant_id, acc.clientId]
+      );
+      out.mysupport = ms.rows[0].n;
+    } catch (e) {
+      out.mysupport = 0;
+    }
+    res.json(out);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 // Pulsante «Elimina» della finestra (dopo la doppia conferma nel browser): cancella tutte le
 // righe della check list del progetto, anche quelle già chiuse. Se una sola riga non è
 // modificabile dal ruolo del contesto non si cancella nulla. Riaprendo la Check List il
@@ -4139,6 +4178,97 @@ app.get('/api/kpi-gestione-progetto/worker', requireAuth, async (req, res) => {
     const items = r.rows.map((x) => ({ id: x.id, nominativo: x.nominativo, hh: !!x.hh, time_spent: gpNum(x.time_spent) }))
       .sort((a, b) => String(a.nominativo || '').localeCompare(String(b.nominativo || ''), 'it'));
     res.json(items);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ===================== KPI MYSUPPORT: TEMPI DI CHIUSURA =====================
+// Quesiti MySupport chiusi (stato_finale = 'Chiuso', senza distinguere maiuscole) di tenant e
+// utente del login, per cliente (filtro clienti della dashboard facoltativo) e anno di
+// chiusura. Tempo di risoluzione = data_chiusura - data_apertura (data e ora, tempo di
+// calendario), in fasce: 4 ore, 1 giorno, 2, 3, 5 giorni, da 5 a 10, oltre 10 giorni.
+const MYSUPPORT_FASCE = [
+  { key: 'h4', label: 'In 4 ore', maxOre: 4 },
+  { key: 'g1', label: 'In 1 giorno', maxOre: 24 },
+  { key: 'g2', label: 'In 2 giorni', maxOre: 48 },
+  { key: 'g3', label: 'In 3 giorni', maxOre: 72 },
+  { key: 'g5', label: 'In 5 giorni', maxOre: 120 },
+  { key: 'g10', label: 'Da 5 a 10 giorni', maxOre: 240 },
+  { key: 'oltre', label: 'Oltre 10 giorni', maxOre: null }
+];
+app.get('/api/kpi-mysupport', requireAuth, async (req, res) => {
+  try {
+    const clientIds = parseClientIdsFromQuery(req).filter((id) => GP_UUID.test(id));
+    const base = [req.user.tenant_id, req.user.user_id];
+    const chiusi = `tenant_id = $1 AND user_id = $2 AND LOWER(BTRIM(stato_finale)) = 'chiuso'
+      AND data_apertura IS NOT NULL AND data_chiusura IS NOT NULL AND data_chiusura >= data_apertura`;
+    let anni;
+    try {
+      anni = (await db.query(
+        `SELECT DISTINCT EXTRACT(YEAR FROM data_chiusura)::int AS anno FROM mysupport WHERE ${chiusi} ORDER BY 1 DESC`,
+        base
+      )).rows.map((x) => x.anno);
+    } catch (e) {
+      if (e.code === '42P01') return res.json({ anni: [], fasce: MYSUPPORT_FASCE, clienti: [] }); // tabella assente
+      throw e;
+    }
+    if (!anni.length) return res.json({ anni: [], fasce: MYSUPPORT_FASCE, clienti: [] });
+    const richiesto = parseInt(req.query.anno, 10);
+    const anno = req.query.anno === 'tutti' ? null : (anni.includes(richiesto) ? richiesto : anni[0]);
+
+    const params = [...base];
+    let filtri = '';
+    if (anno) { params.push(anno); filtri += ` AND EXTRACT(YEAR FROM data_chiusura) = $${params.length}`; }
+    if (clientIds.length) { params.push(clientIds); filtri += ` AND client_id = ANY($${params.length}::uuid[])`; }
+    // Una colonna per fascia: conteggio dei quesiti con ore di risoluzione entro il limite
+    // (e oltre il limite della fascia precedente).
+    const ore = `EXTRACT(EPOCH FROM (data_chiusura - data_apertura)) / 3600.0`;
+    const colFasce = MYSUPPORT_FASCE.map((f, i) => {
+      const min = i ? MYSUPPORT_FASCE[i - 1].maxOre : null;
+      const cond = [min != null ? `${ore} > ${min}` : null, f.maxOre != null ? `${ore} <= ${f.maxOre}` : null].filter(Boolean).join(' AND ');
+      return `COUNT(*) FILTER (WHERE ${cond || 'true'})::int AS "${f.key}"`;
+    }).join(', ');
+    const r = await db.query(
+      `SELECT client_id, COUNT(*)::int AS n, AVG(${ore}) AS media_ore,
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY ${ore}) AS mediana_ore, ${colFasce}
+         FROM mysupport
+        WHERE ${chiusi}${filtri}
+        GROUP BY client_id`,
+      params
+    );
+    const nomi = await resolveClientDescriptions(r.rows.map((x) => x.client_id).filter(Boolean), req.user.tenant_id);
+    const clienti = r.rows.map((x) => ({
+      client_id: x.client_id,
+      cliente: (x.client_id && nomi.get(String(x.client_id))) || '(cliente non abbinato)',
+      n: x.n,
+      media_ore: x.media_ore == null ? null : Number(x.media_ore),
+      mediana_ore: x.mediana_ore == null ? null : Number(x.mediana_ore),
+      fasce: MYSUPPORT_FASCE.map((f) => x[f.key])
+    })).sort((a, b) => b.n - a.n || String(a.cliente).localeCompare(String(b.cliente), 'it'));
+
+    // Andamento mensile (grafico sotto il KPI): chiusure per mese dell'anno scelto (o dell'ultimo
+    // con chiusure, se "tutti") e dei 2 anni precedenti, con il tempo medio del mese.
+    // Stesso filtro clienti, nessun filtro sull'anno oltre ai tre anni del confronto.
+    const annoGrafico = anno || anni[0];
+    const anniGrafico = [annoGrafico, annoGrafico - 1, annoGrafico - 2];
+    const mParams = [...base, anniGrafico];
+    let mFiltri = ` AND EXTRACT(YEAR FROM data_chiusura)::int = ANY($3::int[])`;
+    if (clientIds.length) { mParams.push(clientIds); mFiltri += ` AND client_id = ANY($${mParams.length}::uuid[])`; }
+    const m = await db.query(
+      `SELECT EXTRACT(YEAR FROM data_chiusura)::int AS anno, EXTRACT(MONTH FROM data_chiusura)::int AS mese,
+              COUNT(*)::int AS n, AVG(${ore}) AS media_ore
+         FROM mysupport WHERE ${chiusi}${mFiltri}
+        GROUP BY 1, 2`,
+      mParams
+    );
+    const mesi = anniGrafico.map((a) => {
+      const n = Array(12).fill(0);
+      const mediaOre = Array(12).fill(null);
+      m.rows.filter((x) => x.anno === a).forEach((x) => { n[x.mese - 1] = x.n; mediaOre[x.mese - 1] = x.media_ore == null ? null : Number(x.media_ore); });
+      return { anno: a, n, media_ore: mediaOre };
+    });
+    res.json({ anni, anno: anno || 'tutti', fasce: MYSUPPORT_FASCE, clienti, mesi });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -5688,6 +5818,119 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error('[QLIK VOUCHER IMPORT]', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// ==========================================================================
+// QLIK › MYSUPPORT — importazione dei quesiti MySupport da file Excel (2026-10-06)
+// --------------------------------------------------------------------------
+// Il browser (js/Qlik_voucher.js) legge il file e manda le righe già mappate sulle colonne
+// della tabella mysupport (Codice Quesito -> codice_quesito, Cliente -> mycliente, ...).
+// Qui ogni riga viene abbinata al cliente Projexa il cui campo "My Support" (scheda cliente)
+// è uguale alla colonna Cliente del file (senza distinguere maiuscole/minuscole e spazi):
+// da quel cliente prendono tenant_id, user_id (proprietario del cliente) e client_id.
+// Le righe senza cliente abbinato NON vengono caricate (riepilogo "clienti non trovati").
+// Chiave: (tenant_id, codice_quesito). Riga nuova -> INSERT; già presente -> UPDATE solo se
+// qualche valore è cambiato (altrimenti non si scrive: niente righe inutili nel log).
+// Perimetro: tutto il tenant del login, come l'import Qlik voucher. Una transazione per blocco.
+// ==========================================================================
+const MYSUPPORT_COLONNE = ['stato_finale', 'mycliente', 'procedura', 'data_apertura', 'data_chiusura',
+  'modulo', 'urgenza', 'year_tkt', 'operatore'];
+const mySupportNorm = (v) => String(v == null ? '' : v).normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+
+app.post('/api/mysupport/import', requireAuth, async (req, res) => {
+  try {
+    const rowsIn = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    if (!rowsIn.length) return res.status(400).json({ error: 'Nessuna riga da importare' });
+    if (rowsIn.length > 5000) return res.status(400).json({ error: 'Troppe righe in una sola richiesta (massimo 5000)' });
+    const cols = await getTableColumns('mysupport');
+    if (!cols.size) return res.status(400).json({ error: 'Tabella mysupport non trovata' });
+
+    // Testo (max lunghezza della colonna), data/ora 'AAAA-MM-GG HH:MM:SS', anno intero.
+    const testo = (v, max) => { const s = String(v == null ? '' : v).trim(); return s ? s.slice(0, max) : null; };
+    const dataOra = (v) => (/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/.test(String(v || '').trim()) ? String(v).trim() : null);
+    const anno = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n > 1900 && n < 3000 ? n : null; };
+
+    // 1) Clienti del tenant con il campo "My Support" compilato (anche "(*) My Support").
+    //    Il valore può essere cifrato: il confronto si fa dopo la lettura.
+    const campi = await db.query(
+      `SELECT argument, valore2 FROM clients
+        WHERE tenant_id = $1 AND LOWER(BTRIM(regexp_replace(campo, '^\\(\\*\\)\\s*', ''))) = 'my support'
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+      [req.user.tenant_id]
+    );
+    const clientiPerNome = new Map(); // nome normalizzato -> Map(clientId -> ownerUserId)
+    for (const c of campi.rows) {
+      const nome = mySupportNorm(c.valore2);
+      if (!nome) continue;
+      const root = await resolveClientRoot(c.argument, req.user.tenant_id);
+      if (!root) continue;
+      if (!clientiPerNome.has(nome)) clientiPerNome.set(nome, new Map());
+      clientiPerNome.get(nome).set(String(root.clientId), root.ownerUserId);
+    }
+
+    let inserted = 0, updated = 0, unchanged = 0, invalid = 0;
+    const nonTrovati = new Map(); // nome cliente del file -> numero righe
+    const ambigui = new Set();
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      for (const r of rowsIn) {
+        const codice = testo(r && r.codice_quesito, 50);
+        if (!codice) { invalid += 1; continue; }
+        const nomeFile = testo(r.mycliente, 255);
+        const abbinati = clientiPerNome.get(mySupportNorm(nomeFile));
+        if (!abbinati) { const k = nomeFile || '(vuoto)'; nonTrovati.set(k, (nonTrovati.get(k) || 0) + 1); continue; }
+        if (abbinati.size > 1) { ambigui.add(nomeFile); continue; } // stesso valore su più clienti
+        const [[clientId, ownerUserId]] = [...abbinati];
+        const valori = {
+          stato_finale: testo(r.stato_finale, 100),
+          mycliente: nomeFile,
+          procedura: testo(r.procedura, 255),
+          data_apertura: dataOra(r.data_apertura),
+          data_chiusura: dataOra(r.data_chiusura),
+          modulo: testo(r.modulo, 255),
+          urgenza: testo(r.urgenza, 100),
+          year_tkt: anno(r.year_tkt),
+          operatore: testo(r.operatore, 255)
+        };
+        const params = [req.user.tenant_id, ownerUserId, clientId, codice, ...MYSUPPORT_COLONNE.map((k) => valori[k])];
+        const segn = MYSUPPORT_COLONNE.map((k, i) => {
+          const p = `$${i + 5}`;
+          return (k === 'data_apertura' || k === 'data_chiusura') ? `${p}::timestamp` : (k === 'year_tkt' ? `${p}::integer` : p);
+        });
+        // UPDATE solo se cambia qualcosa (cliente/proprietario compresi); xmax = 0 -> inserita.
+        const confronto = ['user_id', 'client_id', ...MYSUPPORT_COLONNE];
+        const out = await client.query(
+          `INSERT INTO mysupport (tenant_id, user_id, client_id, codice_quesito, ${MYSUPPORT_COLONNE.join(', ')})
+           VALUES ($1, $2, $3, $4, ${segn.join(', ')})
+           ON CONFLICT (tenant_id, codice_quesito) DO UPDATE SET
+             user_id = EXCLUDED.user_id, client_id = EXCLUDED.client_id,
+             ${MYSUPPORT_COLONNE.map((k) => `${k} = EXCLUDED.${k}`).join(', ')}
+           WHERE (${confronto.map((k) => `mysupport.${k}`).join(', ')})
+                 IS DISTINCT FROM (${confronto.map((k) => `EXCLUDED.${k}`).join(', ')})
+           RETURNING (xmax = 0) AS inserita`,
+          params
+        );
+        if (!out.rows.length) unchanged += 1;
+        else if (out.rows[0].inserita) inserted += 1;
+        else updated += 1;
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+    res.json({
+      totale: rowsIn.length, inserted, updated, unchanged, invalid,
+      nonTrovati: [...nonTrovati].map(([nome, righe]) => ({ nome, righe })).sort((a, b) => b.righe - a.righe),
+      ambigui: [...ambigui]
+    });
+  } catch (error) {
+    console.error('[MYSUPPORT IMPORT]', error);
     res.status(error.statusCode || 500).json({ error: error.message });
   }
 });

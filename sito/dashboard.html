@@ -662,6 +662,10 @@
         .proj-kpi.k-quot { --c1: #F59E0B; --c2: #F97316; --bg: #FFF7ED; }
         .proj-kpi.k-meet { --c1: #8B5CF6; --c2: #EC4899; --bg: #F5F3FF; }
         .proj-kpi.k-todo { --c1: #10B981; --c2: #14B8A6; --bg: #ECFDF5; }
+        .proj-kpi.k-ms { --c1: #EF4444; --c2: #F43F5E; --bg: #FEF2F2; }
+        /* Scheda cliente: 5 contatori (c'è anche MySupport) */
+        .cli-widgets .proj-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+        @media (max-width: 1100px) { .cli-widgets .proj-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 1100px) { .proj-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         /* Spazio del pulsante sulla riga di Descrizione (stesse dimensioni della testata). */
         .proj-ck-slot { display: flex; align-items: center; min-width: 0; }
@@ -1902,6 +1906,37 @@
 
         /* KPI Gestione Progetto: schede per cliente, righe compatte, una barra per riga
            (fondo verde = offerta 100%, riempimento blu = time spent, rosso oltre il 100%) */
+        /* KPI MySupport: tempi di chiusura (fasce dal verde al rosso) */
+        #msCard[hidden] { display: none; }
+        .ms-anno { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--text-muted); }
+        .ms-anno select { padding: 0.3rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; font: inherit; color: var(--dark); background: white; }
+        .ms-fasce { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.6rem; margin-bottom: 1rem; }
+        @media (max-width: 1200px) { .ms-fasce { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+        .ms-fascia { border-radius: 12px; padding: 0.6rem 0.75rem; background: #f8fafc; border: 1px solid #eef2f7; border-top: 4px solid var(--c); }
+        .ms-fascia .v { font-size: 1.4rem; font-weight: 700; color: var(--dark); line-height: 1.1; font-variant-numeric: tabular-nums; }
+        .ms-fascia .p { font-size: 0.75rem; font-weight: 600; color: var(--c); margin-left: 0.3rem; }
+        .ms-fascia .l { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem; }
+        .ms-sintesi { display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.6rem; }
+        .ms-sintesi b { color: var(--dark); font-variant-numeric: tabular-nums; }
+        .ms-bar { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: #f1f5f9; }
+        .ms-bar > span { height: 100%; background: var(--c); }
+        .ms-bar.big { height: 16px; margin-bottom: 1.1rem; }
+        .ms-righe { display: flex; flex-direction: column; gap: 0.15rem; }
+        .ms-riga { display: grid; grid-template-columns: minmax(0, 220px) 70px 110px minmax(0, 1fr); align-items: center; gap: 0.9rem; padding: 0.45rem 0.6rem; border-radius: 10px; }
+        .ms-riga:hover { background: #f8fafc; }
+        .ms-riga .c { font-size: 0.85rem; font-weight: 600; color: var(--dark); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ms-riga .n, .ms-riga .m { font-size: 0.78rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+        .ms-riga.head { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+        .ms-riga.head:hover { background: none; }
+        .ms-riga .c.ms-link { cursor: pointer; color: #1D4ED8; }
+        .ms-riga .c.ms-link:hover, .ms-riga .c.ms-link:focus-visible { text-decoration: underline; outline: none; }
+        .ms-filtro { margin-bottom: 0.8rem; }
+        .ms-chip { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.4rem 0.3rem 0.75rem; border-radius: 999px; background: #EFF6FF; color: #1E40AF; font-size: 0.82rem; }
+        .ms-chip button { border: none; background: transparent; color: #1D4ED8; cursor: pointer; padding: 0 0.25rem; }
+        .ms-trend { margin-top: 1.4rem; padding-top: 1.1rem; border-top: 1px solid #eef2f7; }
+        .ms-trend-head .t { font-size: 0.9rem; font-weight: 700; color: var(--dark); }
+        .ms-trend-head { margin-bottom: 0.4rem; }
+        .ms-trend-box { position: relative; height: 280px; }
         .gp-card { margin-bottom: 3rem; background: white; padding: 1.75rem 2rem 2rem; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04); }
         .gp-legend { display: flex; gap: 0.9rem; flex-wrap: wrap; font-size: 0.75rem; color: var(--text-muted); }
         .gp-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
@@ -3190,8 +3225,9 @@
 
         /* Finestra AI: risposta in testo semplice con a capo preservati */
         .ai-chat-answer {
-            min-height: 6rem;
-            max-height: calc(50vh * var(--ui-zoom-inv, 1));
+            /* Finestra AI raddoppiata (2026-10-06): più spazio per la risposta */
+            min-height: 12rem;
+            max-height: calc(70vh * var(--ui-zoom-inv, 1));
             overflow: auto;
             padding: 0.9rem 1rem;
             border: 1px solid var(--border);
@@ -3257,6 +3293,36 @@
             font: inherit; font-size: 0.9rem; font-weight: 400;
         }
         /* Allegati in ingresso (chip con nome e X) e file generati dall'AI */
+        /* Pulsante "Trascrizione" della finestra AI e pannello di scelta della riunione */
+        .ai-tr-bar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+        .ai-tr-btn { padding: 0.4rem 0.9rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer; font-size: 0.85rem; }
+        .ai-tr-btn:hover, .ai-tr-btn[aria-expanded="true"] { background: #EEF2FF; border-color: #C7D2FE; color: #4338CA; }
+        .ai-tr-chip { display: inline-flex; align-items: center; gap: 0.4rem; max-width: 100%; padding: 0.3rem 0.4rem 0.3rem 0.7rem; border-radius: 999px; background: #EEF2FF; color: #3730A3; font-size: 0.82rem; }
+        .ai-tr-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ai-tr-chip button { border: none; background: transparent; color: #6366F1; cursor: pointer; padding: 0 0.2rem; }
+        .ai-tr-panel { border: 1px solid var(--border); border-radius: 10px; padding: 0.7rem; background: #F9FAFB; display: flex; flex-direction: column; gap: 0.6rem; }
+        .ai-tr-date { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--text-muted); }
+        .ai-tr-date input { padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+        .ai-tr-list { display: flex; flex-direction: column; gap: 0.3rem; max-height: 220px; overflow-y: auto; }
+        .ai-tr-item { display: flex; align-items: center; gap: 0.6rem; width: 100%; text-align: left; padding: 0.5rem 0.7rem; border: 1px solid var(--border); border-radius: 8px; background: white; cursor: pointer; font: inherit; font-size: 0.86rem; color: var(--dark); }
+        .ai-tr-item:hover { border-color: #C7D2FE; background: #F5F7FF; }
+        .ai-tr-item.sel { border-color: #6366F1; background: #EEF2FF; }
+        .ai-tr-item b { flex: none; font-variant-numeric: tabular-nums; color: #4338CA; }
+        .ai-tr-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ai-tr-item small { flex: none; color: var(--text-muted); }
+        .ai-tr-empty { font-size: 0.85rem; color: var(--text-muted); padding: 0.3rem 0.2rem; }
+        /* display: flex sopra prevarrebbe sull'attributo hidden: pannello ed etichetta restano
+           nascosti finché non si clicca Trascrizione / non si sceglie una riunione. */
+        .ai-tr-panel[hidden], .ai-tr-chip[hidden] { display: none; }
+        .ai-tr-filters { display: flex; align-items: center; gap: 0.6rem 0.9rem; flex-wrap: wrap; }
+        .ai-tr-filters[hidden], .ai-tr-date[hidden], .ai-tr-azioni[hidden] { display: none; }
+        .ai-tr-date select { padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; max-width: 240px; }
+        .ai-tr-check { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; color: var(--dark); cursor: pointer; }
+        .ai-tr-item input[type="checkbox"] { flex: none; margin: 0; }
+        .ai-tr-azioni { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
+        .ai-tr-conteggio { flex: 1; font-size: 0.8rem; color: var(--text-muted); }
+        .ai-tr-usa { padding: 0.4rem 0.9rem; border: none; border-radius: 8px; background: #6366F1; color: white; font-weight: 600; cursor: pointer; }
+        .ai-tr-usa:disabled { opacity: 0.5; cursor: default; }
         .ai-chat-files { display: flex; flex-wrap: wrap; gap: 0.4rem; }
         .ai-chat-files:empty { display: none; }
         .ai-chat-file {
@@ -4222,6 +4288,19 @@
                 <div id="gpoContent" class="gp-content"><div class="gp-empty">Caricamento…</div></div>
             </div>
 
+            <!-- KPI MYSUPPORT: tempi di risoluzione dei quesiti chiusi (data_chiusura - data_apertura),
+                 per fascia e per cliente. Compare solo se ci sono quesiti MySupport chiusi. -->
+            <div class="gp-card" id="msCard" hidden>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                    <div class="section-title" style="margin: 0;">
+                        <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: #EF4444;"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8Zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7Z"/></svg>
+                        MySupport – tempi di chiusura
+                    </div>
+                    <label class="ms-anno">Anno di chiusura <select id="msAnno" aria-label="Anno di chiusura"></select></label>
+                </div>
+                <div id="msContent" class="gp-content"><div class="gp-empty">Caricamento…</div></div>
+            </div>
+
         </div>
     </main>
 
@@ -4249,6 +4328,15 @@
             } catch (e) {
                 return '';
             }
+        }
+
+        // Campi URL (tipo 5): link solo per indirizzi web scritti per intero (http:// o https://).
+        // safeUrl da solo trasformerebbe un percorso di rete (\\server\cartella) in
+        // https://server/cartella e un percorso relativo (Documenti\Clienti) in un indirizzo
+        // del sito Projexa: link fasulli. Percorsi e cartelle del PC restano semplice testo.
+        function campoUrlLink(value) {
+            const text = String(value || '').trim();
+            return /^https?:\/\/[^\s\\]+$/i.test(text) ? safeUrl(text) : '';
         }
 
         // === GESTIONE UTENTE ===
@@ -5449,6 +5537,181 @@
                 + groupLine + `<div class="gp-panel"><div class="gp-rows">${rows}</div></div>`;
         }
 
+        // === KPI MYSUPPORT: TEMPI DI CHIUSURA (GET /api/kpi-mysupport) ===
+        // Quesiti chiusi per fascia di tempo di risoluzione (data_chiusura - data_apertura),
+        // in totale e per cliente; filtro clienti della dashboard e anno di chiusura.
+        const MS_COLORI = ['#10B981', '#22C55E', '#84CC16', '#EAB308', '#F59E0B', '#F97316', '#DC2626'];
+        let msSeq = 0;
+        let msCliente = null; // { id, name }: cliente scelto con un clic sul nome (null = tutti)
+
+        function msDurata(ore) {
+            if (ore == null || !Number.isFinite(ore)) return '–';
+            if (ore < 24) return `${ore.toLocaleString('it-IT', { maximumFractionDigits: 1 })} h`;
+            return `${(ore / 24).toLocaleString('it-IT', { maximumFractionDigits: 1 })} gg`;
+        }
+        // Barra a segmenti: una parte per fascia, larghezza proporzionale, tooltip con i numeri.
+        function msBarHtml(counts, fasce, big = false) {
+            const tot = counts.reduce((t, n) => t + n, 0) || 1;
+            return `<div class="ms-bar${big ? ' big' : ''}">${counts.map((n, i) => n
+                ? `<span style="--c:${MS_COLORI[i]}; width:${(n / tot) * 100}%;" title="${escapeHtml(fasce[i].label)}: ${n} (${Math.round(n / tot * 100)}%)"></span>` : '').join('')}</div>`;
+        }
+
+        // --- Andamento mensile: chiusure per mese, anno scelto contro i 2 precedenti ---
+        const MS_MESI = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
+        const MS_MESI_LUNGHI = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+        let msTrendChart = null;
+
+        function msTrendHtml(mesi) {
+            if (!Array.isArray(mesi) || !mesi.length) return '';
+            const [cur, ...prec] = mesi;
+            // Anno in corso: il confronto con gli anni precedenti si fa sullo stesso periodo
+            // (da gennaio al mese corrente), altrimenti un anno a metà sembrerebbe sempre in calo.
+            const oggi = new Date();
+            const fino = cur.anno === oggi.getFullYear() ? oggi.getMonth() + 1 : 12;
+            const tot = (s) => s.n.slice(0, fino).reduce((t, v) => t + v, 0);
+            const periodo = fino < 12 ? ` (gen–${MS_MESI[fino - 1].toLowerCase()})` : '';
+            // Picco dell'anno scelto: il mese con più chiusure (il primo, a parità).
+            const max = Math.max(...cur.n);
+            const picco = max > 0 ? `Picco ${cur.anno}: <b>${MS_MESI_LUNGHI[cur.n.indexOf(max)]}</b> con <b>${max}</b> chiusure` : `Nessuna chiusura nel ${cur.anno}`;
+            const confronto = prec.map(p => {
+                const tp = tot(p);
+                if (!tp) return `${p.anno}: nessuna chiusura`;
+                const diff = Math.round((tot(cur) - tp) / tp * 100);
+                return `${p.anno}${periodo}: <b>${tp}</b> (${diff >= 0 ? '+' : ''}${diff}% nel ${cur.anno})`;
+            }).join(' · ');
+            return `<div class="ms-trend">
+                <div class="ms-trend-head"><span class="t">Chiusure per mese – ${cur.anno} confrontato con ${prec.map(p => p.anno).join(' e ')}</span></div>
+                <div class="ms-sintesi"><span>Totale ${cur.anno}${periodo}: <b>${tot(cur)}</b></span><span>${picco}</span><span>${confronto}</span></div>
+                <div class="ms-trend-box"><canvas id="msTrendChart" aria-label="Chiusure MySupport per mese"></canvas></div>
+            </div>`;
+        }
+
+        function msDisegnaTrend(mesi) {
+            if (msTrendChart) { msTrendChart.destroy(); msTrendChart = null; }
+            const canvas = document.getElementById('msTrendChart');
+            if (!canvas || typeof Chart === 'undefined' || !Array.isArray(mesi) || !mesi.length) return;
+            // Anno scelto in evidenza (rosso, pieno), i precedenti tratteggiati: blu e verde
+            // (il grigio per l'anno -2 si vedeva poco).
+            const stili = [
+                { colore: '#EF4444', sfondo: 'rgba(239, 68, 68, 0.12)', dash: [], spessore: 3 },
+                { colore: '#3B82F6', sfondo: 'transparent', dash: [6, 4], spessore: 2 },
+                { colore: '#10B981', sfondo: 'transparent', dash: [2, 4], spessore: 2.5 }
+            ];
+            const cur = mesi[0];
+            const max = Math.max(...cur.n);
+            const iPicco = max > 0 ? cur.n.indexOf(max) : -1;
+            msTrendChart = new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: MS_MESI,
+                    datasets: mesi.map((s, k) => ({
+                        label: String(s.anno),
+                        data: s.n,
+                        borderColor: stili[k].colore,
+                        backgroundColor: stili[k].sfondo,
+                        borderDash: stili[k].dash,
+                        borderWidth: stili[k].spessore,
+                        fill: k === 0,
+                        tension: 0.3,
+                        // Il picco dell'anno scelto ha un punto più grande.
+                        pointRadius: k === 0 ? s.n.map((_, i) => (i === iPicco ? 7 : 3)) : 2,
+                        pointBackgroundColor: stili[k].colore,
+                        mediaOre: s.media_ore
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { position: 'top', labels: { usePointStyle: true, padding: 14, font: { size: 12, weight: 600 } } },
+                        tooltip: {
+                            callbacks: {
+                                title: (items) => MS_MESI_LUNGHI[items[0].dataIndex],
+                                label: (item) => {
+                                    const media = item.dataset.mediaOre ? item.dataset.mediaOre[item.dataIndex] : null;
+                                    return ` ${item.dataset.label}: ${item.parsed.y} chiusure${media != null ? ` · tempo medio ${msDurata(media)}` : ''}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: 'rgba(148, 163, 184, 0.2)' } },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        async function loadKpiMySupport() {
+            const card = document.getElementById('msCard');
+            const content = document.getElementById('msContent');
+            const sel = document.getElementById('msAnno');
+            if (!card || !content || !sel) return;
+            const seq = ++msSeq;
+            const params = new URLSearchParams();
+            // Cliente scelto con un clic sul nome: vale al posto del filtro clienti della dashboard.
+            (msCliente ? [msCliente.id] : getSelectedClientIds()).forEach(id => params.append('clientId', id));
+            if (sel.value) params.set('anno', sel.value);
+            try {
+                const res = await fetch(`${API_URL}/kpi-mysupport?${params.toString()}`, { headers: getAuthHeaders() });
+                const d = await res.json().catch(() => ({}));
+                if (seq !== msSeq) return;
+                if (!res.ok) throw new Error(d.error || `Errore HTTP ${res.status}`);
+                // Nessun quesito chiuso in assoluto: il riquadro resta nascosto.
+                if (!d.anni || !d.anni.length) { card.hidden = true; return; }
+                card.hidden = false;
+                const scelto = String(d.anno);
+                sel.innerHTML = d.anni.map(a => `<option value="${a}">${a}</option>`).join('') + '<option value="tutti">Tutti gli anni</option>';
+                sel.value = scelto;
+                const fasce = d.fasce || [];
+                const clienti = d.clienti || [];
+                if (!clienti.length) { content.innerHTML = '<div class="gp-empty">Nessun quesito chiuso per i clienti e l\'anno scelti.</div>'; return; }
+                const totali = fasce.map((_, i) => clienti.reduce((t, c) => t + (c.fasce[i] || 0), 0));
+                const n = clienti.reduce((t, c) => t + c.n, 0);
+                const media = clienti.reduce((t, c) => t + (c.media_ore || 0) * c.n, 0) / (n || 1);
+                const entro1g = totali[0] + totali[1];
+                const filtroCliente = msCliente
+                    ? `<div class="ms-filtro"><span class="ms-chip"><i class="fas fa-filter"></i> Cliente: <b>${escapeHtml(msCliente.name)}</b><button type="button" data-ms-tutti title="Torna a tutti i clienti" aria-label="Torna a tutti i clienti"><i class="fas fa-times"></i></button></span></div>`
+                    : '';
+                content.innerHTML = filtroCliente +
+                    `<div class="ms-fasce">${fasce.map((f, i) => `<div class="ms-fascia" style="--c:${MS_COLORI[i]};"><div><span class="v">${totali[i]}</span><span class="p">${Math.round(totali[i] / (n || 1) * 100)}%</span></div><div class="l">${escapeHtml(f.label)}</div></div>`).join('')}</div>`
+                    + `<div class="ms-sintesi"><span>Quesiti chiusi: <b>${n}</b></span><span>Tempo medio di chiusura: <b>${msDurata(media)}</b></span><span>Chiusi entro 1 giorno: <b>${Math.round(entro1g / (n || 1) * 100)}%</b></span></div>`
+                    + msBarHtml(totali, fasce, true)
+                    + `<div class="ms-righe"><div class="ms-riga head"><span>Cliente</span><span>Chiusi</span><span>Medio / mediano</span><span>Distribuzione per fascia</span></div>`
+                    + clienti.map(c => `<div class="ms-riga"><span class="c${c.client_id && !msCliente ? ' ms-link' : ''}"${c.client_id && !msCliente ? ` data-ms-client="${escapeHtml(c.client_id)}" data-ms-name="${escapeHtml(c.cliente)}" role="button" tabindex="0" title="Mostra solo ${escapeHtml(c.cliente)}"` : ` title="${escapeHtml(c.cliente)}"`}>${escapeHtml(c.cliente)}</span><span class="n">${c.n}</span><span class="m">${msDurata(c.media_ore)} / ${msDurata(c.mediana_ore)}</span>${msBarHtml(c.fasce, fasce)}</div>`).join('')
+                    + '</div>'
+                    + msTrendHtml(d.mesi);
+                msDisegnaTrend(d.mesi);
+            } catch (e) {
+                if (seq !== msSeq) return;
+                card.hidden = false;
+                content.innerHTML = `<div class="gp-empty">Impossibile caricare i dati: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function initKpiMySupport() {
+            document.getElementById('msAnno')?.addEventListener('change', loadKpiMySupport);
+            const content = document.getElementById('msContent');
+            // Clic sul nome di un cliente: KPI e grafico filtrati su quel cliente; la X dell'etichetta
+            // torna a tutti i clienti (filtro della dashboard).
+            const scegli = (el) => {
+                msCliente = { id: el.dataset.msClient, name: el.dataset.msName || 'Cliente' };
+                loadKpiMySupport();
+                document.getElementById('msCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            };
+            content?.addEventListener('click', (e) => {
+                if (e.target.closest('[data-ms-tutti]')) { msCliente = null; loadKpiMySupport(); return; }
+                const el = e.target.closest('[data-ms-client]');
+                if (el) scegli(el);
+            });
+            content?.addEventListener('keydown', (e) => {
+                const el = e.target.closest('[data-ms-client]');
+                if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); scegli(el); }
+            });
+            loadKpiMySupport();
+        }
+
         function initGestioneProgetto() {
             const card = document.querySelector('.gp-card');
             if (!card || card.dataset.bound) return;
@@ -5596,6 +5859,8 @@
             Object.assign(gpState, { level: 'list', client: null, project: null, worker: null });
             loadGestioneProgetto();
             loadOrdiniProgetto();
+            msCliente = null; // nuovo filtro clienti: il KPI MySupport torna a tutti i clienti del filtro
+            loadKpiMySupport();
             refreshProjectSearch();
         }
 
@@ -9851,6 +10116,7 @@
             const info = AI_INFO[key];
             if (!info) return;
             aiChatProvider = key;
+            resetAiChat();
             const s = aiStatus[key] || {};
             document.getElementById('aiChatTitleText').textContent = info.label;
             document.getElementById('aiChatModel').textContent = s.model ? `modello: ${s.model}` : '';
@@ -9860,6 +10126,51 @@
 
         function closeAiChat() {
             document.getElementById('aiChatModal').classList.remove('open');
+        }
+
+        // Ogni apertura della finestra parte da zero: niente richiesta, allegati, trascrizione,
+        // risposta o file della conversazione precedente.
+        let aiChatSessione = 0; // cambia a ogni apertura: le risposte di richieste vecchie si ignorano
+        function resetAiChat() {
+            aiChatSessione += 1;
+            const sendBtn = document.getElementById('aiChatSend');
+            if (sendBtn) sendBtn.disabled = false;
+            const prompt = document.getElementById('aiChatPrompt');
+            if (prompt) prompt.value = '';
+            aiChatAttachments = [];
+            renderAiChatAttachments();
+            const fileInput = document.getElementById('aiChatFileInput');
+            if (fileInput) fileInput.value = '';
+            aiChatMeeting = null;
+            renderAiTrChip();
+            const panel = document.getElementById('aiTrPanel');
+            if (panel) panel.hidden = true;
+            document.getElementById('aiTrToggle')?.setAttribute('aria-expanded', 'false');
+            const date = document.getElementById('aiTrDate');
+            if (date) date.value = '';
+            const list = document.getElementById('aiTrList');
+            if (list) list.innerHTML = '';
+            // Modalità "per periodo" spenta e filtri vuoti
+            const periodo = document.getElementById('aiTrPeriodo');
+            if (periodo) periodo.checked = false;
+            ['aiTrDa', 'aiTrA'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+            const cliente = document.getElementById('aiTrCliente');
+            if (cliente) cliente.value = '';
+            const progetto = document.getElementById('aiTrProgetto');
+            if (progetto) progetto.innerHTML = '<option value="">Tutti i progetti</option>';
+            const giornoWrap = document.getElementById('aiTrGiornoWrap');
+            if (giornoWrap) giornoWrap.hidden = false;
+            const periodoWrap = document.getElementById('aiTrPeriodoWrap');
+            if (periodoWrap) periodoWrap.hidden = true;
+            const azioni = document.getElementById('aiTrPeriodoAzioni');
+            if (azioni) azioni.hidden = true;
+            const answer = document.getElementById('aiChatAnswer');
+            if (answer) { answer.textContent = ''; answer.classList.remove('ai-chat-error'); }
+            renderAiChatOutFiles([]);
+            aiChatLastAnswer = null;
+            const download = document.getElementById('aiChatDownload');
+            if (download) download.disabled = true;
+            document.getElementById('aiChatDownloadMenu')?.classList.remove('open');
         }
 
         // Allegati della richiesta: restano solo nel browser finché non si invia; il server
@@ -9951,6 +10262,243 @@
             }
         }
 
+        // --- Trascrizioni delle riunioni da aggiungere alla richiesta ---
+        // Un giorno: si sceglie una riunione. "Per periodo": date Da/A, cliente (obbligatorio) e
+        // progetto (facoltativo); si scelgono una o più riunioni (tutte selezionate di default),
+        // utile per cercare in quale riunione si è parlato di un argomento.
+        // All'invio partono solo gli id: i testi li aggiunge il server alla richiesta scritta
+        // dall'utente (nessun prompt standard o custom del recap viene usato o modificato).
+        let aiChatMeeting = null; // { ids: [...], label }
+
+        const aiOggiIso = () => {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        };
+        const aiDataIt = (iso) => String(iso || '').slice(0, 10).split('-').reverse().join('/');
+
+        function renderAiTrChip() {
+            const chip = document.getElementById('aiTrChip');
+            if (!chip) return;
+            chip.hidden = !aiChatMeeting;
+            chip.innerHTML = aiChatMeeting
+                ? `<i class="fas fa-file-lines"></i><span title="${escapeHtml(aiChatMeeting.label)}">${escapeHtml(aiChatMeeting.label)}</span><button type="button" id="aiTrRemove" aria-label="Togli la trascrizione"><i class="fas fa-times"></i></button>`
+                : '';
+            document.getElementById('aiTrRemove')?.addEventListener('click', () => {
+                aiChatMeeting = null;
+                renderAiTrChip();
+                document.querySelectorAll('#aiTrList .ai-tr-item.sel').forEach(b => b.classList.remove('sel'));
+            });
+        }
+
+        const aiTrPerPeriodo = () => !!document.getElementById('aiTrPeriodo')?.checked;
+        let aiTrSeq = 0; // scarta le risposte di caricamenti superati
+
+        async function loadAiTrascrizioni() {
+            const list = document.getElementById('aiTrList');
+            const azioni = document.getElementById('aiTrPeriodoAzioni');
+            if (!list) return;
+            const periodo = aiTrPerPeriodo();
+            if (azioni) azioni.hidden = true;
+            let query;
+            if (periodo) {
+                const da = document.getElementById('aiTrDa')?.value;
+                const a = document.getElementById('aiTrA')?.value;
+                const clientId = document.getElementById('aiTrCliente')?.value;
+                const projectId = document.getElementById('aiTrProgetto')?.value;
+                if (!da || !a) { list.innerHTML = '<div class="ai-tr-empty">Indica le date Da e A.</div>'; return; }
+                if (da > a) { list.innerHTML = '<div class="ai-tr-empty">La data Da è successiva alla data A.</div>'; return; }
+                if (!clientId) { list.innerHTML = '<div class="ai-tr-empty">Scegli il cliente.</div>'; return; }
+                query = new URLSearchParams({ da, a, clientId });
+                if (projectId) query.set('projectId', projectId);
+            } else {
+                const data = document.getElementById('aiTrDate')?.value;
+                if (!data) return;
+                query = new URLSearchParams({ data });
+            }
+            const seq = ++aiTrSeq;
+            list.innerHTML = '<div class="ai-tr-empty"><i class="fas fa-spinner fa-spin"></i> Caricamento…</div>';
+            try {
+                const res = await fetch(`${API_URL}/ai/trascrizioni?${query.toString()}`, { headers: calendarAuthHeaders() });
+                const items = await res.json().catch(() => []);
+                if (seq !== aiTrSeq) return;
+                if (!res.ok) throw new Error(items.error || `Errore ${res.status}`);
+                const scelte = new Set(aiChatMeeting ? aiChatMeeting.ids : []);
+                const kb = (n) => `${Math.max(1, Math.round(n / 1000))}k caratteri`;
+                if (!items.length) {
+                    list.innerHTML = `<div class="ai-tr-empty">${periodo ? 'Nessuna riunione con trascrizione nel periodo per questo cliente.' : 'Nessuna riunione con trascrizione in questo giorno.'}</div>`;
+                    return;
+                }
+                if (periodo) {
+                    // Più scelte: una casella per riunione, tutte selezionate all'inizio.
+                    list.innerHTML = items.map(m => `<label class="ai-tr-item" data-tr-id="${escapeHtml(m.id)}" data-tr-car="${m.caratteri}"><input type="checkbox" class="ai-tr-sel" checked><b>${escapeHtml(aiDataIt(m.data))}${m.orario ? ' ' + escapeHtml(m.orario) : ''}</b><span>${escapeHtml(m.oggetto)}</span><small>${kb(m.caratteri)}</small></label>`).join('');
+                    if (azioni) azioni.hidden = false;
+                    const tutte = document.getElementById('aiTrTutte');
+                    if (tutte) tutte.checked = true;
+                    aggiornaAiTrConteggio();
+                } else {
+                    const dataIt = aiDataIt(query.get('data'));
+                    list.innerHTML = items.map(m => `<button type="button" class="ai-tr-item${scelte.has(m.id) && scelte.size === 1 ? ' sel' : ''}" role="option" data-tr-id="${escapeHtml(m.id)}" data-tr-label="${escapeHtml(`${m.oggetto} - ${dataIt}${m.orario ? ' ' + m.orario : ''}`)}"><b>${escapeHtml(m.orario || '--:--')}</b><span>${escapeHtml(m.oggetto)}</span><small>${kb(m.caratteri)}</small></button>`).join('');
+                }
+            } catch (e) {
+                if (seq !== aiTrSeq) return;
+                list.innerHTML = `<div class="ai-tr-empty">Impossibile caricare le riunioni: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        // Riunioni spuntate in modalità "per periodo": conteggio, lunghezza totale e avviso se
+        // il testo supera quello che il server manda all'AI (400.000 caratteri in totale).
+        function aggiornaAiTrConteggio() {
+            const sel = [...document.querySelectorAll('#aiTrList .ai-tr-sel:checked')].map(c => c.closest('.ai-tr-item'));
+            const totale = sel.reduce((t, el) => t + (Number(el.dataset.trCar) || 0), 0);
+            const tot = document.querySelectorAll('#aiTrList .ai-tr-sel').length;
+            const info = document.getElementById('aiTrConteggio');
+            if (info) {
+                info.textContent = `${sel.length} di ${tot} selezionate · ${Math.round(totale / 1000)}k caratteri`
+                    + (totale > 400000 ? ' · oltre il limite: le ultime non verranno incluse' : '');
+            }
+            const usa = document.getElementById('aiTrUsa');
+            if (usa) usa.disabled = sel.length === 0;
+            const tutte = document.getElementById('aiTrTutte');
+            if (tutte) tutte.checked = tot > 0 && sel.length === tot;
+        }
+
+        // Clienti e progetti con almeno una riunione con trascrizione nel periodo Da–A
+        // (GET /api/ai/trascrizioni/clienti). Il nome del cliente viene dall'elenco clienti
+        // della dashboard; quelli dei progetti da /projects/list del cliente scelto.
+        let aiTrProgettiDelPeriodo = new Map(); // clientId -> Set(projectId)
+
+        async function riempiAiTrClienti() {
+            const sel = document.getElementById('aiTrCliente');
+            const da = document.getElementById('aiTrDa')?.value;
+            const a = document.getElementById('aiTrA')?.value;
+            if (!sel) return;
+            const attuale = sel.value;
+            aiTrProgettiDelPeriodo = new Map();
+            if (da && a && da <= a) {
+                try {
+                    const r = await fetch(`${API_URL}/ai/trascrizioni/clienti?${new URLSearchParams({ da, a })}`, { headers: calendarAuthHeaders() });
+                    const righe = r.ok ? await r.json() : [];
+                    (Array.isArray(righe) ? righe : []).forEach(x => aiTrProgettiDelPeriodo.set(String(x.clientId), new Set((x.projectIds || []).map(String))));
+                } catch { /* elenco non disponibile: nessun cliente proposto */ }
+            }
+            const nomi = new Map(dashboardClients.map(c => [String(c.id), c.name]));
+            const clienti = [...aiTrProgettiDelPeriodo.keys()]
+                .map(id => ({ id, name: nomi.get(id) || 'Cliente' }))
+                .sort((x, y) => String(x.name).localeCompare(String(y.name), 'it', { sensitivity: 'base' }));
+            sel.innerHTML = `<option value="">${clienti.length ? '-- Scegli il cliente --' : 'Nessun cliente con trascrizioni nel periodo'}</option>`
+                + clienti.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+            // Il cliente già scelto resta solo se ha ancora trascrizioni nel nuovo periodo.
+            sel.value = aiTrProgettiDelPeriodo.has(attuale) ? attuale : '';
+            await riempiAiTrProgetti();
+        }
+
+        async function riempiAiTrProgetti() {
+            const sel = document.getElementById('aiTrProgetto');
+            const clientId = document.getElementById('aiTrCliente')?.value;
+            if (!sel) return;
+            const attuale = sel.value;
+            sel.innerHTML = '<option value="">Tutti i progetti</option>';
+            const conTrascrizioni = aiTrProgettiDelPeriodo.get(String(clientId || ''));
+            if (!clientId || !conTrascrizioni || !conTrascrizioni.size) return;
+            try {
+                const r = await fetch(`${API_URL}/projects/list?clientId=${encodeURIComponent(clientId)}`, { headers: getAuthHeaders() });
+                const projects = r.ok ? await r.json() : [];
+                sel.innerHTML += (Array.isArray(projects) ? projects : [])
+                    .filter(p => conTrascrizioni.has(String(p.id)))
+                    .map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name || p.description || 'Progetto')}</option>`).join('');
+                if (attuale && conTrascrizioni.has(attuale)) sel.value = attuale;
+            } catch { /* progetti non disponibili: resta "Tutti i progetti" */ }
+        }
+
+        function aggiornaAiTrModalita() {
+            const periodo = aiTrPerPeriodo();
+            const giorno = document.getElementById('aiTrGiornoWrap');
+            const wrap = document.getElementById('aiTrPeriodoWrap');
+            if (giorno) giorno.hidden = periodo;
+            if (wrap) wrap.hidden = !periodo;
+            if (periodo) {
+                // Proposta iniziale: ultimi 3 mesi fino a oggi.
+                const da = document.getElementById('aiTrDa');
+                const a = document.getElementById('aiTrA');
+                if (a && !a.value) a.value = aiOggiIso();
+                if (da && !da.value) {
+                    const d = new Date(); d.setMonth(d.getMonth() - 3);
+                    da.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                }
+                riempiAiTrClienti().then(loadAiTrascrizioni);
+                return;
+            }
+            loadAiTrascrizioni();
+        }
+
+        // Cambio delle date del periodo: si ricalcolano i clienti con trascrizioni, poi l'elenco.
+        async function onAiTrPeriodoCambiato() {
+            await riempiAiTrClienti();
+            loadAiTrascrizioni();
+        }
+
+        function initAiTrascrizione() {
+            const toggle = document.getElementById('aiTrToggle');
+            const panel = document.getElementById('aiTrPanel');
+            const date = document.getElementById('aiTrDate');
+            const list = document.getElementById('aiTrList');
+            if (!toggle || !panel || !date || !list) return;
+            const chiudiPannello = () => {
+                panel.hidden = true;
+                toggle.setAttribute('aria-expanded', 'false');
+                document.getElementById('aiChatPrompt')?.focus();
+            };
+            toggle.addEventListener('click', () => {
+                const open = panel.hidden;
+                panel.hidden = !open;
+                toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+                if (open) {
+                    if (!date.value) date.value = aiOggiIso();
+                    aggiornaAiTrModalita();
+                }
+            });
+            date.addEventListener('change', loadAiTrascrizioni);
+            document.getElementById('aiTrPeriodo')?.addEventListener('change', aggiornaAiTrModalita);
+            document.getElementById('aiTrDa')?.addEventListener('change', onAiTrPeriodoCambiato);
+            document.getElementById('aiTrA')?.addEventListener('change', onAiTrPeriodoCambiato);
+            document.getElementById('aiTrCliente')?.addEventListener('change', async () => {
+                await riempiAiTrProgetti();
+                loadAiTrascrizioni();
+            });
+            document.getElementById('aiTrProgetto')?.addEventListener('change', loadAiTrascrizioni);
+            document.getElementById('aiTrTutte')?.addEventListener('change', (e) => {
+                list.querySelectorAll('.ai-tr-sel').forEach(c => { c.checked = e.target.checked; });
+                aggiornaAiTrConteggio();
+            });
+            list.addEventListener('change', (e) => { if (e.target.classList.contains('ai-tr-sel')) aggiornaAiTrConteggio(); });
+            // "Usa le selezionate" (per periodo): tutte le riunioni spuntate vanno con la richiesta.
+            document.getElementById('aiTrUsa')?.addEventListener('click', () => {
+                const ids = [...list.querySelectorAll('.ai-tr-sel:checked')].map(c => c.closest('.ai-tr-item').dataset.trId);
+                if (!ids.length) return;
+                const cliente = document.getElementById('aiTrCliente');
+                const nomeCliente = cliente?.selectedOptions[0]?.textContent || '';
+                const progetto = document.getElementById('aiTrProgetto');
+                const nomeProgetto = progetto?.value ? progetto.selectedOptions[0]?.textContent : '';
+                const periodoTxt = `${aiDataIt(document.getElementById('aiTrDa')?.value)} – ${aiDataIt(document.getElementById('aiTrA')?.value)}`;
+                aiChatMeeting = {
+                    ids,
+                    label: `${ids.length} trascrizion${ids.length === 1 ? 'e' : 'i'} · ${[nomeCliente, nomeProgetto].filter(Boolean).join(' - ')} · ${periodoTxt}`
+                };
+                renderAiTrChip();
+                chiudiPannello();
+            });
+            // Un giorno: il clic su una riunione la sceglie e chiude il pannello.
+            list.addEventListener('click', (e) => {
+                if (aiTrPerPeriodo()) return;
+                const item = e.target.closest('.ai-tr-item');
+                if (!item) return;
+                aiChatMeeting = { ids: [item.dataset.trId], label: item.dataset.trLabel };
+                list.querySelectorAll('.ai-tr-item').forEach(b => b.classList.toggle('sel', b === item));
+                renderAiTrChip();
+                chiudiPannello();
+            });
+        }
+
         async function sendAiChat() {
             const key = aiChatProvider;
             const promptEl = document.getElementById('aiChatPrompt');
@@ -9958,36 +10506,46 @@
             const sendBtn = document.getElementById('aiChatSend');
             const downloadBtn = document.getElementById('aiChatDownload');
             const prompt = promptEl.value.trim();
-            if (!key || sendBtn.disabled || (!prompt && !aiChatAttachments.length)) return;
+            if (!key || sendBtn.disabled || (!prompt && !aiChatAttachments.length && !aiChatMeeting)) return;
             sendBtn.disabled = true;
+            const sessione = aiChatSessione; // se la finestra viene richiusa/riaperta, la risposta si scarta
             answerEl.classList.remove('ai-chat-error');
-            answerEl.innerHTML = `<span class="ai-chat-wait"><i class="fas fa-spinner fa-spin"></i> ${aiChatAttachments.length ? 'Invio degli allegati e attesa della risposta…' : 'In attesa della risposta…'}</span>`;
+            answerEl.innerHTML = `<span class="ai-chat-wait"><i class="fas fa-spinner fa-spin"></i> ${aiChatAttachments.length ? 'Invio degli allegati e attesa della risposta…' : (aiChatMeeting ? 'Invio della trascrizione e attesa della risposta…' : 'In attesa della risposta…')}</span>`;
             renderAiChatOutFiles([]);
             try {
                 const files = [];
                 for (const f of aiChatAttachments) files.push({ name: f.name, data: await readFileBase64(f) });
+                const body = { prompt };
+                if (files.length) body.files = files;
+                if (aiChatMeeting) body.meetingIds = aiChatMeeting.ids; // il server aggiunge le trascrizioni
                 const res = await fetch(`${API_URL}/ai/${key}/chat`, {
                     method: 'POST',
                     headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify(files.length ? { prompt, files } : { prompt })
+                    body: JSON.stringify(body)
                 });
                 const data = await res.json().catch(() => ({}));
+                if (sessione !== aiChatSessione) return; // risposta di una chat già chiusa
                 if (!res.ok) throw new Error(data.error || (res.status === 413 ? 'Allegati troppo grandi' : `Errore ${res.status}`));
                 // Testo semplice: nessun HTML interpretato, a capo preservati dal CSS.
                 answerEl.textContent = data.text || (data.files && data.files.length ? '' : '(risposta vuota)');
                 if (data.truncated) answerEl.textContent += '\n\n[Risposta interrotta per lunghezza massima]';
+                if (data.trascrizioniEscluse > 0) {
+                    showNotification(`${data.trascrizioniEscluse} trascrizion${data.trascrizioniEscluse === 1 ? 'e non inclusa' : 'i non incluse'} per il limite di lunghezza: restringi il periodo o togli qualche riunione`, 'info');
+                }
                 renderAiChatOutFiles(data.files);
                 aiChatLastAnswer = data.text ? { text: data.text, label: (AI_INFO[key] && AI_INFO[key].label) || 'AI' } : null;
                 if (downloadBtn) downloadBtn.disabled = !aiChatLastAnswer;
             } catch (e) {
+                if (sessione !== aiChatSessione) return;
                 answerEl.classList.add('ai-chat-error');
                 answerEl.textContent = e.message;
             } finally {
-                sendBtn.disabled = false;
+                if (sessione === aiChatSessione) sendBtn.disabled = false;
             }
         }
 
         function initAiIntegration() {
+            initAiTrascrizione();
             document.getElementById('aiChatSend')?.addEventListener('click', sendAiChat);
             document.getElementById('aiChatClose')?.addEventListener('click', closeAiChat);
 
@@ -9997,7 +10555,7 @@
             const aiModal = document.getElementById('aiChatModal');
             aiModal?.addEventListener('keydown', (e) => {
                 if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.isComposing) return;
-                if (e.target.closest('#aiChatClose, #aiChatDownload, .ai-chat-dl-menu, a, [data-ai-remove]')) return;
+                if (e.target.closest('#aiChatClose, #aiChatDownload, .ai-chat-dl-menu, a, [data-ai-remove], #aiTrToggle, #aiTrPanel, #aiTrChip')) return;
                 e.preventDefault();
                 sendAiChat();
             });
@@ -11172,13 +11730,35 @@
                 compHtml +
                 '</div></div>';
             // Contatori del progetto (righe non scadute), riempiti da caricaContatoriProgetto.
-            const kpis = '<div class="proj-kpis" id="projKpis">' + PROJ_KPI.map(k =>
-                `<div class="proj-kpi ${k.cls}" data-kpi="${k.key}" title="${escapeHtml(k.title)}">` +
+            return '<div class="proj-widgets">' + progress + projKpisHtml() + '</div>';
+        }
+
+        // Riquadri contatori (Task, Quotazioni, Meeting, To Do): stessi per progetto e cliente.
+        // perCliente: titoli riferiti al cliente (righe senza progetto).
+        function projKpisHtml(perCliente = false) {
+            return '<div class="proj-kpis" id="projKpis">' + PROJ_KPI.filter(k => perCliente || !k.soloCliente).map(k =>
+                `<div class="proj-kpi ${k.cls}" data-kpi="${k.key}" title="${escapeHtml(perCliente ? k.title.replace('del progetto', 'del cliente non legati a un progetto') : k.title)}">` +
                 `<span class="proj-kpi-ico"><i class="fas ${k.icon}"></i></span>` +
                 '<span class="proj-kpi-txt"><span class="proj-kpi-num">–</span>' +
                 `<span class="proj-kpi-lbl">${escapeHtml(k.label)}</span></span></div>`
             ).join('') + '</div>';
-            return '<div class="proj-widgets">' + progress + kpis + '</div>';
+        }
+
+        // Testata della scheda CLIENTE con gli stessi contatori del progetto, contati sulle
+        // righe del cliente senza progetto (GET /api/clients/contatori). Se la scheda aperta è
+        // una sezione interna del cliente (non la principale) la testata viene tolta.
+        function renderClientKpis() {
+            return '<div class="proj-widgets cli-widgets">' + projKpisHtml(true) + '</div>';
+        }
+        async function caricaContatoriCliente(listEl, argument) {
+            const widgets = listEl.querySelector('.cli-widgets');
+            if (!widgets || !argument) return;
+            try {
+                const r = await fetch(`${API_URL}/clients/contatori?argument=${encodeURIComponent(argument)}`, { headers: getAuthHeaders() });
+                const d = r.ok ? await r.json() : null;
+                if (!d || !d.root) { widgets.remove(); return; }
+                mostraContatori(listEl, d);
+            } catch (e) { widgets.remove(); }
         }
 
         // table = tabella della griglia (tipo 11) della scheda a cui porta il clic sul contatore.
@@ -11186,7 +11766,9 @@
             { key: 'task', label: 'Task', icon: 'fa-ticket', cls: 'k-task', title: 'Tkt Jira del progetto non scaduti', table: 'task_app' },
             { key: 'quotazioni', label: 'Quotazioni', icon: 'fa-file-invoice-dollar', cls: 'k-quot', title: 'Quotazioni del progetto non scadute', table: 'cl_quotazioni' },
             { key: 'meeting', label: 'Meeting', icon: 'fa-video', cls: 'k-meet', title: 'Meeting del progetto non scaduti', table: 'rec_meeting' },
-            { key: 'todo', label: 'To Do', icon: 'fa-list-check', cls: 'k-todo', title: 'Voci della To do List del progetto non scadute', table: 'tasks' }
+            { key: 'todo', label: 'To Do', icon: 'fa-list-check', cls: 'k-todo', title: 'Voci della To do List del progetto non scadute', table: 'tasks' },
+            // Solo nella scheda cliente: quesiti MySupport non chiusi (tabella mysupport).
+            { key: 'mysupport', label: 'MySupport', icon: 'fa-headset', cls: 'k-ms', title: 'Quesiti MySupport del cliente non chiusi', table: 'mysupport', soloCliente: true }
         ];
 
         // Clic su un contatore: scorre fino alla griglia della stessa tabella nella scheda
@@ -11211,8 +11793,18 @@
 
         // Legge i contatori (GET /api/projects/contatori) e li fa salire da 0 al valore.
         async function caricaContatoriProgetto(listEl, projectId) {
+            if (!listEl.querySelector('#projKpis') || !projectId) return;
+            try {
+                const r = await fetch(`${API_URL}/projects/contatori?projectId=${encodeURIComponent(projectId)}`, { headers: getAuthHeaders() });
+                if (!r.ok) return;
+                mostraContatori(listEl, await r.json());
+            } catch (e) { /* contatori non disponibili: restano i trattini */ }
+        }
+
+        // Riquadri contatori (progetto o cliente): clic = vai alla griglia, numeri animati da 0.
+        function mostraContatori(listEl, d) {
             const box = listEl.querySelector('#projKpis');
-            if (!box || !projectId) return;
+            if (!box) return;
             if (!box.dataset.nav) {
                 box.dataset.nav = '1';
                 box.addEventListener('click', event => {
@@ -11228,23 +11820,18 @@
                     });
                 });
             }
-            try {
-                const r = await fetch(`${API_URL}/projects/contatori?projectId=${encodeURIComponent(projectId)}`, { headers: getAuthHeaders() });
-                if (!r.ok) return;
-                const d = await r.json();
-                box.querySelectorAll('.proj-kpi').forEach(el => {
-                    const n = Number(d[el.dataset.kpi]) || 0;
-                    const num = el.querySelector('.proj-kpi-num');
-                    el.classList.toggle('zero', n === 0);
-                    const t0 = performance.now(), durata = 700;
-                    const passo = (t) => {
-                        const f = Math.min(1, (t - t0) / durata);
-                        num.textContent = Math.round(n * (1 - Math.pow(1 - f, 3)));
-                        if (f < 1) requestAnimationFrame(passo);
-                    };
-                    requestAnimationFrame(passo);
-                });
-            } catch (e) { /* contatori non disponibili: restano i trattini */ }
+            box.querySelectorAll('.proj-kpi').forEach(el => {
+                const n = Number(d[el.dataset.kpi]) || 0;
+                const num = el.querySelector('.proj-kpi-num');
+                el.classList.toggle('zero', n === 0);
+                const t0 = performance.now(), durata = 700;
+                const passo = (t) => {
+                    const f = Math.min(1, (t - t0) / durata);
+                    num.textContent = Math.round(n * (1 - Math.pow(1 - f, 3)));
+                    if (f < 1) requestAnimationFrame(passo);
+                };
+                requestAnimationFrame(passo);
+            });
         }
 
         // Pulsante Check List del progetto: il flag parte "da iniziare" e lo aggiorna
@@ -14137,7 +14724,10 @@
                 // del progetto: ordinamento = riga, layout_col = posizione (1..5) nella riga.
                 // I dati salvati col precedente layout verticale vengono ricomposti per
                 // posizione, così all'apertura risultano subito disposti su cinque colonne.
-                const progressHtml = source === 'projects' ? renderProjectProgress(rows) : '';
+                // Testata: avanzamento + contatori nel progetto; solo contatori nel cliente
+                // (tolti da caricaContatoriCliente se la scheda è una sezione interna).
+                const progressHtml = source === 'projects' ? renderProjectProgress(rows)
+                    : (source === 'clients' ? renderClientKpis() : '');
                 const byRow = new Map();
                 const orderCounts = new Map();
                 rows.forEach(r => {
@@ -14187,6 +14777,7 @@
                     listEl.innerHTML = html;
                 }
                 if (source === 'projects') posizionaCheckListProgetto(listEl, editing);
+                if (source === 'clients') caricaContatoriCliente(listEl, argument);
                 // La funzione Logo compare esclusivamente nel dettaglio di un cliente già scelto.
                 injectClientLogoAction(listEl, source, argument, label || argument);
                 // Il logo organizzazione compare solo in Settings > Profilo per gli amministratori.
@@ -16876,7 +17467,7 @@
             } else if (tipo === 5) {
                 // URL -> valore2: testo editabile + link cliccabile (icona dentro la casella)
                 const val = row.valore2 == null ? '' : row.valore2;
-                const link = safeUrl(val);
+                const link = campoUrlLink(val);
                 const icon = link ? `<a class="field-icon" href="${escapeHtml(link)}" target="_blank" rel="noopener" title="Apri">🔗</a>` : '';
                 input = `<span class="field-icon-wrap">${icon}<input type="text" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(val)}" placeholder="https://..."></span>`;
             } else if (tipo === 6) {
@@ -18732,6 +19323,7 @@
             await initRevenueChart(); // carica anni disponibili + dati kpi_fatturazione filtrati
             initGestioneProgetto();   // KPI Gestione Progetto (offerta / time spent)
             initOrdiniProgetto();     // KPI Offerte e ordini (sotto Gestione Progetto)
+            initKpiMySupport();       // KPI MySupport: tempi di chiusura (in fondo)
             initClientFilter();
             initProjectSearch();
             initKpiCards();
@@ -18908,13 +19500,37 @@
         </div>
     </div>
     <div id="aiChatModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="aiChatTitle">
-        <div class="task-modal-card" style="width: min(760px, calc(96vw * var(--ui-zoom-inv, 1)));">
+        <div class="task-modal-card" style="width: min(1520px, calc(96vw * var(--ui-zoom-inv, 1))); max-height: calc(94vh * var(--ui-zoom-inv, 1));">
             <div class="task-modal-header">
                 <h3 id="aiChatTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-robot" style="color: #6366F1;"></i> <span id="aiChatTitleText">AI</span> <span id="aiChatModel" style="font-size: 0.75rem; color: var(--text-muted); font-weight: 400;"></span></h3>
                 <button id="aiChatClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
             </div>
             <div style="padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; overflow: auto;">
-                <textarea id="aiChatPrompt" rows="4" placeholder="Scrivi la tua richiesta… (Invio per inviare, Maiusc+Invio per andare a capo). Puoi trascinare qui i file da allegare." style="width: 100%; resize: vertical; padding: 0.7rem 0.8rem; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 0.9rem;"></textarea>
+                <!-- Trascrizione di una riunione da aggiungere alla richiesta: si sceglie il giorno,
+                     poi la riunione; il testo lo aggiunge il server all'invio (routes/ai.js). -->
+                <div class="ai-tr-bar">
+                    <button id="aiTrToggle" type="button" class="ai-tr-btn" aria-expanded="false" aria-controls="aiTrPanel" title="Aggiungi alla richiesta la trascrizione di una riunione"><i class="fas fa-file-lines"></i> Trascrizione</button>
+                    <span id="aiTrChip" class="ai-tr-chip" hidden></span>
+                </div>
+                <div id="aiTrPanel" class="ai-tr-panel" hidden>
+                    <div class="ai-tr-filters">
+                        <label class="ai-tr-check"><input id="aiTrPeriodo" type="checkbox"> Per periodo</label>
+                        <label class="ai-tr-date" id="aiTrGiornoWrap">Giorno <input id="aiTrDate" type="date"></label>
+                        <span id="aiTrPeriodoWrap" class="ai-tr-filters" hidden>
+                            <label class="ai-tr-date">Da <input id="aiTrDa" type="date"></label>
+                            <label class="ai-tr-date">A <input id="aiTrA" type="date"></label>
+                            <label class="ai-tr-date">Cliente <select id="aiTrCliente"><option value="">-- Scegli il cliente --</option></select></label>
+                            <label class="ai-tr-date">Progetto <select id="aiTrProgetto"><option value="">Tutti i progetti</option></select></label>
+                        </span>
+                    </div>
+                    <div id="aiTrList" class="ai-tr-list" role="listbox" aria-label="Riunioni con trascrizione"></div>
+                    <div id="aiTrPeriodoAzioni" class="ai-tr-azioni" hidden>
+                        <label class="ai-tr-check"><input id="aiTrTutte" type="checkbox" checked> Seleziona tutte</label>
+                        <span id="aiTrConteggio" class="ai-tr-conteggio"></span>
+                        <button id="aiTrUsa" type="button" class="ai-tr-usa"><i class="fas fa-check"></i> Usa le selezionate</button>
+                    </div>
+                </div>
+                <textarea id="aiChatPrompt" rows="8" placeholder="Scrivi la tua richiesta… (Invio per inviare, Maiusc+Invio per andare a capo). Puoi trascinare qui i file da allegare." style="width: 100%; resize: vertical; padding: 0.7rem 0.8rem; border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 0.9rem;"></textarea>
                 <input id="aiChatFileInput" type="file" multiple hidden accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.docx,.xlsx,.txt,.csv,.tsv,.md,.json,.vtt,.srt,.xml,.html,.htm,.log,.sql,.js,.ts,.py,.css,.yaml,.yml,.ini">
                 <div id="aiChatFiles" class="ai-chat-files"></div>
                 <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.5rem; flex-wrap: wrap;">

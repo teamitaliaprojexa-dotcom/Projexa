@@ -370,16 +370,152 @@ router.post('/export', requireAuth, async (req, res) => {
   }
 });
 
+// ==========================================
+// TRASCRIZIONI DEI MEETING NELLA FINESTRA AI (pulsante "Trascrizione")
+// ==========================================
+// L'utente sceglie un giorno, vede le sue riunioni con trascrizione (rec_meeting, anche
+// quelle ricevute da un collega: la trascrizione condivisa è copiata sulla sua riga) e ne
+// sceglie una. All'invio il server aggiunge il testo della trascrizione alla richiesta scritta
+// dall'utente: è una richiesta libera, NON usa né modifica i prompt standard/custom del recap.
+// Limite TOTALE del testo delle trascrizioni mandato all'AI in una richiesta (anche con più
+// riunioni scelte "per periodo") e numero massimo di riunioni per richiesta.
+const MAX_TRASCRIZIONE_CHARS = 400000;
+const MAX_TRASCRIZIONI = 50;
+const AI_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const AI_DATA = /^\d{4}-\d{2}-\d{2}$/;
+
+// Riunioni con trascrizione: { id, oggetto, data, orario, caratteri }.
+//   ?data=AAAA-MM-GG                       un giorno;
+//   ?da=…&a=…&clientId=…[&projectId=…]     "per periodo": cliente obbligatorio, progetto facoltativo.
+router.get('/trascrizioni', requireAuth, async (req, res) => {
+  try {
+    const q = req.query || {};
+    const params = [req.user.tenant_id, req.user.user_id];
+    let filtro;
+    if (q.data) {
+      const data = String(q.data).trim();
+      if (!AI_DATA.test(data)) return res.status(400).json({ error: 'Data non valida (AAAA-MM-GG)' });
+      params.push(data);
+      filtro = `data_calendar::date = $${params.length}::date`;
+    } else {
+      const da = String(q.da || '').trim();
+      const a = String(q.a || '').trim();
+      const clientId = String(q.clientId || '').trim();
+      const projectId = String(q.projectId || '').trim();
+      if (!AI_DATA.test(da) || !AI_DATA.test(a)) return res.status(400).json({ error: 'Indica le date Da e A' });
+      if (da > a) return res.status(400).json({ error: 'La data Da è successiva alla data A' });
+      if (!AI_UUID.test(clientId)) return res.status(400).json({ error: 'Scegli il cliente' });
+      if (projectId && !AI_UUID.test(projectId)) return res.status(400).json({ error: 'Progetto non valido' });
+      params.push(da, a, clientId);
+      filtro = `data_calendar::date BETWEEN $3::date AND $4::date AND client_id = $5`;
+      if (projectId) { params.push(projectId); filtro += ` AND project_id = $${params.length}`; }
+    }
+    const r = await db.query(
+      `SELECT id_calendar, oggetto, data_calendar, orario_calendar, trascrizione FROM rec_meeting
+        WHERE tenant_id = $1 AND user_id = $2 AND ${filtro}
+        ORDER BY data_calendar, orario_calendar NULLS LAST
+        LIMIT 500`,
+      params
+    );
+    // trascrizione è cifrata: il pool la restituisce in chiaro, il filtro si fa qui.
+    res.json(r.rows
+      .filter((x) => x.trascrizione && String(x.trascrizione).trim())
+      .map((x) => ({
+        id: x.id_calendar,
+        oggetto: x.oggetto || '(senza titolo)',
+        data: x.data_calendar ? String(x.data_calendar).slice(0, 10) : '',
+        orario: x.orario_calendar ? String(x.orario_calendar).slice(0, 5) : '',
+        caratteri: String(x.trascrizione).trim().length
+      })));
+  } catch (error) {
+    console.error('❌ AI_TRASCRIZIONI:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Clienti (e loro progetti) con almeno una riunione con trascrizione nel periodo Da–A:
+// [{ clientId, projectIds: [...] }]. Servono ai menu Cliente/Progetto di "Per periodo".
+router.get('/trascrizioni/clienti', requireAuth, async (req, res) => {
+  try {
+    const da = String((req.query && req.query.da) || '').trim();
+    const a = String((req.query && req.query.a) || '').trim();
+    if (!AI_DATA.test(da) || !AI_DATA.test(a)) return res.status(400).json({ error: 'Indica le date Da e A' });
+    if (da > a) return res.json([]);
+    const r = await db.query(
+      `SELECT client_id::text AS client_id, project_id::text AS project_id, trascrizione FROM rec_meeting
+        WHERE tenant_id = $1 AND user_id = $2 AND client_id IS NOT NULL
+          AND data_calendar::date BETWEEN $3::date AND $4::date`,
+      [req.user.tenant_id, req.user.user_id, da, a]
+    );
+    // trascrizione è cifrata: il pool la restituisce in chiaro, il filtro si fa qui.
+    const perCliente = new Map();
+    for (const x of r.rows) {
+      if (!x.trascrizione || !String(x.trascrizione).trim()) continue;
+      if (!perCliente.has(x.client_id)) perCliente.set(x.client_id, new Set());
+      if (x.project_id) perCliente.get(x.client_id).add(x.project_id);
+    }
+    res.json([...perCliente].map(([clientId, progetti]) => ({ clientId, projectIds: [...progetti] })));
+  } catch (error) {
+    console.error('❌ AI_TRASCRIZIONI_CLIENTI:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Testo delle trascrizioni scelte (solo riunioni dell'utente), in ordine di data, con le
+// correzioni automatiche dei termini (come per il recap) e un'intestazione per riunione.
+// Oltre MAX_TRASCRIZIONE_CHARS in totale le riunioni successive non entrano (escluse).
+// Restituisce { testo, incluse, escluse } oppure null se nessuna trascrizione è disponibile.
+async function testoTrascrizioni(user, ids) {
+  const rows = (await db.query(
+    `SELECT id_calendar, trascrizione, oggetto, data_calendar, orario_calendar FROM rec_meeting
+      WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = ANY($3::text[])
+      ORDER BY data_calendar, orario_calendar NULLS LAST`,
+    [user.tenant_id, user.user_id, ids]
+  )).rows.filter((row) => row.trascrizione && String(row.trascrizione).trim());
+  if (!rows.length) return null;
+  // Import dinamico: jobs/meetingTranscription.js importa a sua volta questo file.
+  const { loadCorrections, applyCorrections } = await import('../jobs/meetingTranscription.js');
+  const parti = [];
+  let totale = 0;
+  let escluse = 0;
+  for (const row of rows) {
+    let testo = applyCorrections(String(row.trascrizione).trim(), await loadCorrections(user, row.id_calendar)).text;
+    const spazio = MAX_TRASCRIZIONE_CHARS - totale;
+    if (spazio < 2000) { escluse += 1; continue; }
+    let troncata = false;
+    if (testo.length > spazio) { testo = testo.slice(0, spazio); troncata = true; }
+    totale += testo.length;
+    const data = row.data_calendar ? String(row.data_calendar).slice(0, 10).split('-').reverse().join('/') : '';
+    const ora = row.orario_calendar ? String(row.orario_calendar).slice(0, 5) : '';
+    const titolo = [row.oggetto || 'Riunione', [data, ora].filter(Boolean).join(' ')].filter(Boolean).join(' - ');
+    parti.push(`=== TRASCRIZIONE DELLA RIUNIONE: ${titolo} ===\n${testo}${troncata ? '\n[... trascrizione troncata per lunghezza ...]' : ''}\n=== FINE TRASCRIZIONE ===`);
+  }
+  const nota = escluse ? `\n\n[Nota: altre ${escluse} trascrizioni non incluse per limite di lunghezza]` : '';
+  return { testo: parti.join('\n\n') + nota, incluse: parti.length, escluse };
+}
+
 // Invia una richiesta (una domanda, una risposta) al fornitore con la chiave dell'utente.
+// meetingIds / meetingId (facoltativi): id_calendar di riunioni dell'utente; le loro
+// trascrizioni vengono aggiunte alla richiesta (pulsante "Trascrizione" della finestra AI).
 router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) => {
   const cfg = req.aiProvider;
   try {
     // Allegati: solo in memoria per la durata della richiesta, mai salvati.
     const atts = await prepareAttachments(req.body && req.body.files);
     let prompt = String((req.body && req.body.prompt) || '').trim();
+    const b = req.body || {};
+    const meetingIds = [...new Set([...(Array.isArray(b.meetingIds) ? b.meetingIds : []), b.meetingId]
+      .map((x) => String(x || '').trim()).filter(Boolean))];
+    if (meetingIds.length > MAX_TRASCRIZIONI) return res.status(400).json({ error: `Troppe trascrizioni (massimo ${MAX_TRASCRIZIONI})` });
+    const tr = meetingIds.length ? await testoTrascrizioni(req.user, meetingIds) : null;
+    if (meetingIds.length && !tr) return res.status(404).json({ error: 'Trascrizione non trovata' });
+    const trascrizione = tr ? tr.testo : null;
+    if (!prompt && trascrizione) prompt = tr.incluse > 1 ? 'Fai un riepilogo delle trascrizioni.' : 'Fai un riepilogo della trascrizione.';
     if (!prompt && atts.length) prompt = atts.length > 1 ? 'Analizza i file allegati.' : 'Analizza il file allegato.';
     if (!prompt) return res.status(400).json({ error: 'Scrivi una richiesta' });
     if (prompt.length > MAX_PROMPT_CHARS) return res.status(400).json({ error: `Richiesta troppo lunga (max ${MAX_PROMPT_CHARS} caratteri)` });
+    // La trascrizione segue la richiesta dell'utente (il limite vale solo per quella scritta).
+    if (trascrizione) prompt = `${prompt}\n\n${trascrizione}`;
 
     const el = await getIntegration(req.user.user_id, cfg.provider);
     const apiKey = el[`${cfg.prefix}_api_key`];
@@ -390,7 +526,11 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
       (m) => (m === cfg.model ? ASK[key](apiKey, prompt, atts) : askGemini(apiKey, prompt, m, atts)),
       { label: cfg.label, model: cfg.model, fallbacks: key === 'gemini' ? geminiFallbackModels() : [], profile: 'interactive' }
     );
-    res.json({ provider: key, model, text: result.text, files: result.files || [], truncated: !!result.truncated });
+    res.json({
+      provider: key, model, text: result.text, files: result.files || [], truncated: !!result.truncated,
+      // Trascrizioni rimaste fuori per il limite di lunghezza (la dashboard lo segnala)
+      trascrizioniEscluse: tr ? tr.escluse : 0
+    });
   } catch (error) {
     console.error(`❌ AI_CHAT (${req.params.provider}):`, error.message);
     res.status(error.status || 500).json({ error: error.message });

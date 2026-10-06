@@ -256,6 +256,36 @@ async function leggiClienti(tenantId, campo) {
     .sort((a, b) => b.chiave.length - a.chiave.length);
 }
 
+// Quesiti MySupport del tenant abbinati a un cliente: codice_quesito -> cliente
+// { clientId, userId, nome }. Serve all'abbinamento alternativo dei task Jira tramite la
+// colonna ticket_correlati (config.colonnaCorrelatiMySupport). Tabella assente = nessuno.
+async function leggiQuesitiMySupport(tenantId) {
+  try {
+    const { rows } = await db.query(
+      `SELECT codice_quesito, client_id, user_id, mycliente FROM mysupport
+        WHERE tenant_id = $1 AND client_id IS NOT NULL AND codice_quesito IS NOT NULL`,
+      [tenantId]
+    );
+    return new Map(rows.map((r) => [norm(r.codice_quesito),
+      { clientId: String(r.client_id), userId: r.user_id, nome: r.mycliente ? String(r.mycliente).trim() : 'MySupport' }]));
+  } catch (e) {
+    if (e.code === '42P01') return new Map();
+    throw e;
+  }
+}
+
+// Cliente del primo Codice Quesito MySupport contenuto nel testo di ticket_correlati.
+// Il testo si spezza in "parole" (lettere/cifre): così il codice 1234 non viene trovato
+// dentro 12345, e funzionano elenchi come "16768963, 16769021" o "MS 16768963".
+function trovaClienteMySupport(quesiti, testo) {
+  if (!quesiti || !quesiti.size || vuoto(testo)) return null;
+  for (const parola of String(testo).split(/[^0-9A-Za-z_-]+/)) {
+    const c = quesiti.get(norm(parola));
+    if (c) return { ...c, codiceQuesito: parola };
+  }
+  return null;
+}
+
 function trovaCliente(clienti, valoreJira, modo) {
   const v = norm(valoreJira);
   if (!v) return null;
@@ -567,6 +597,20 @@ export async function runJiraSync(config, ctx) {
     report.errori.push(`Nessun cliente ha il campo "${config.campoClients}" valorizzato: il filtro principale non inserisce righe nuove (aggiorna solo quelle già presenti, per codice)`);
   }
 
+  // Abbinamento alternativo con i quesiti MySupport (solo se configurato, es. Task Jira):
+  // richiede che la colonna ticket_correlati sia mappata su un campo Jira.
+  let quesitiMySupport = null;
+  const colCorrelati = config.colonnaCorrelatiMySupport || null;
+  if (colCorrelati) {
+    if (!piano.some((p) => p.colonna === colCorrelati)) {
+      report.errori.push(`Abbinamento MySupport non attivo: la colonna "${colCorrelati}" non è mappata in ${config.tabellaMappatura}`);
+    } else {
+      quesitiMySupport = await leggiQuesitiMySupport(tenantId);
+      report.quesitiMySupport = quesitiMySupport.size;
+      report.abbinateMySupport = 0;
+    }
+  }
+
   const colonneConfronto = [...new Set(piano.map((p) => p.colonna))].filter((c) => c !== config.colonnaCodice);
   const { perChiave, perCodice } = await leggiEsistenti(config.tabellaDestinazione, config.colonnaCodice, tenantId, colonneConfronto);
   const haUpdatedAt = colonne.has('updated_at');
@@ -629,8 +673,14 @@ export async function runJiraSync(config, ctx) {
         const codice = formatValue(leggi(issue, campoJiraCodice));
         if (vuoto(codice)) { conteggi.ignorateSenzaCodice += 1; continue; }
 
-        const cliente = trovaCliente(clienti, formatValue(leggi(issue, campoJiraCliente)), config.confrontoCliente);
         const valori = valoriDaIssue(issue);
+        let cliente = trovaCliente(clienti, formatValue(leggi(issue, campoJiraCliente)), config.confrontoCliente);
+        // Nome cliente non abbinato: si prova con i Codici Quesito MySupport scritti in
+        // ticket_correlati (il ticket va sul cliente del quesito).
+        if (!cliente && quesitiMySupport) {
+          cliente = trovaClienteMySupport(quesitiMySupport, valori[colCorrelati]);
+          if (cliente) conteggi.abbinateMySupport = (conteggi.abbinateMySupport || 0) + 1;
+        }
 
         // In prova a vuoto si tiene da parte la prima riga elaborata: serve a
         // controllare a colpo d'occhio che la mappatura produca i valori attesi.

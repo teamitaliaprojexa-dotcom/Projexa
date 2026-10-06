@@ -212,6 +212,155 @@
         ensureFileInput().click();
     }
 
+    // Primo passo del pulsante Qlik: quale importazione? Voucher (job di sempre, poi la
+    // scelta dell'ambito) oppure MySupport (quesiti di assistenza nella tabella mysupport).
+    function showQlikTypeModal() {
+        let modal = document.getElementById('qlikTypeModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'qlikTypeModal';
+            modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:950; display:flex; align-items:center; justify-content:center;';
+            document.body.appendChild(modal);
+        }
+        modal.innerHTML = `
+            <div style="background:white; border-radius:10px; padding:1.5rem; width:480px; max-width:92vw; box-shadow:0 10px 40px rgba(0,0,0,0.25);">
+                <h3 style="margin:0 0 0.75rem; color:#1F2937;">Importazione Qlik</h3>
+                <p style="margin:0; color:#4B5563; line-height:1.45;">Quale file vuoi caricare?</p>
+                <div style="display:flex; flex-direction:column; gap:0.65rem; margin-top:1.15rem;">
+                    <button id="qlikTypeVoucher" type="button" style="padding:0.75rem 1rem; text-align:left; background:#3B82F6; color:white; border:none; border-radius:7px; font-weight:600; cursor:pointer;">
+                        Voucher <span style="display:block; font-size:0.78rem; font-weight:400; opacity:0.9; margin-top:0.2rem;">Ore attività sulle commesse dei progetti</span>
+                    </button>
+                    <button id="qlikTypeMySupport" type="button" style="padding:0.75rem 1rem; text-align:left; background:#F3F4F6; color:#1F2937; border:1px solid #D1D5DB; border-radius:7px; font-weight:600; cursor:pointer;">
+                        MySupport <span style="display:block; font-size:0.78rem; font-weight:400; color:#6B7280; margin-top:0.2rem;">Quesiti di assistenza dei clienti (campo My Support della scheda cliente)</span>
+                    </button>
+                </div>
+                <div style="display:flex; justify-content:flex-end; margin-top:1rem;">
+                    <button id="qlikTypeCancel" type="button" style="padding:0.5rem 0.9rem; background:white; color:#4B5563; border:1px solid #D1D5DB; border-radius:6px; cursor:pointer;">Annulla</button>
+                </div>
+            </div>`;
+        modal.style.display = 'flex';
+        const close = () => { modal.style.display = 'none'; };
+        document.getElementById('qlikTypeVoucher').onclick = () => { close(); QlikVoucher.mode = 'qlik'; showQlikScopeModal(); };
+        document.getElementById('qlikTypeMySupport').onclick = () => { close(); QlikVoucher.mode = 'mysupport'; openQlikFilePicker('active'); };
+        document.getElementById('qlikTypeCancel').onclick = close;
+        modal.onclick = (e) => { if (e.target === modal) close(); };
+    }
+
+    // ==========================================================================
+    // MYSUPPORT — colonne del file -> colonne della tabella mysupport
+    // ==========================================================================
+    const MYSUPPORT_MAPPA = [
+        ['Codice Quesito', 'codice_quesito'],
+        ['Stato Finale', 'stato_finale'],
+        ['Cliente', 'mycliente'],
+        ['Procedura', 'procedura'],
+        ['Data Apertura', 'data_apertura'],
+        ['Data Chiusura', 'data_chiusura'],
+        ['Modulo', 'modulo'],
+        ['Urgenza', 'urgenza'],
+        ['year_TKT', 'year_tkt'],
+        ['Operatore', 'operatore']
+    ];
+
+    // Data/ora del file -> 'AAAA-MM-GG HH:MM:SS' (ora locale). Excel la passa come numero
+    // seriale (giorni dal 30/12/1899) oppure come testo "gg/mm/aaaa hh:mm".
+    function excelDataOra(raw) {
+        if (raw === null || raw === undefined || raw === '') return null;
+        const due = (n) => String(n).padStart(2, '0');
+        if (typeof raw === 'number' && Number.isFinite(raw)) {
+            // Seriale Excel -> ms (UTC "nominale"), arrotondato al secondo: i decimali di Excel
+            // darebbero altrimenti 11:55:59 per un orario delle 11:56.
+            const ms = Math.round((raw - 25569) * 86400) * 1000;
+            const d = new Date(ms);
+            return `${d.getUTCFullYear()}-${due(d.getUTCMonth() + 1)}-${due(d.getUTCDate())} ${due(d.getUTCHours())}:${due(d.getUTCMinutes())}:${due(d.getUTCSeconds())}`;
+        }
+        const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(String(raw).trim());
+        if (m) return `${m[3]}-${due(m[2])}-${due(m[1])} ${due(m[4] || 0)}:${m[5] || '00'}:${m[6] || '00'}`;
+        const iso = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(String(raw).trim());
+        if (iso) return `${iso[1]}-${iso[2]}-${iso[3]} ${iso[4] || '00'}:${iso[5] || '00'}:${iso[6] || '00'}`;
+        return null;
+    }
+
+    async function handleMySupportFile(columns, rows, fileName) {
+        const mancanti = MYSUPPORT_MAPPA.filter(([nome]) => !findColumn(columns, nome)).map(([nome]) => nome);
+        if (mancanti.length) {
+            notify(`Il file MySupport non contiene le colonne: ${mancanti.join(', ')}`, 'info');
+            return;
+        }
+        const colonna = Object.fromEntries(MYSUPPORT_MAPPA.map(([nome, db]) => [db, findColumn(columns, nome)]));
+        const righe = rows.map((row) => {
+            const out = {};
+            MYSUPPORT_MAPPA.forEach(([, db]) => {
+                const v = row[colonna[db]];
+                out[db] = (db === 'data_apertura' || db === 'data_chiusura') ? excelDataOra(v)
+                    : (v === null || v === undefined ? null : String(v).trim());
+            });
+            return out;
+        }).filter((r) => r.codice_quesito);
+        if (!righe.length) { notify('Nessuna riga con "Codice Quesito" nel file', 'info'); return; }
+
+        notify(`File letto: ${righe.length} quesiti da importare…`, 'info');
+        const CHUNK = 2000;
+        const tot = { totale: 0, inserted: 0, updated: 0, unchanged: 0, invalid: 0, nonTrovati: new Map(), ambigui: new Set() };
+        for (let i = 0; i < righe.length; i += CHUNK) {
+            try {
+                const res = await fetch(`${API_BASE}/mysupport/import`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify({ rows: righe.slice(i, i + CHUNK) })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) { notify('Errore durante l\'importazione MySupport: ' + (data.error || res.status), 'info'); return; }
+                ['totale', 'inserted', 'updated', 'unchanged', 'invalid'].forEach((k) => { tot[k] += Number(data[k]) || 0; });
+                (data.nonTrovati || []).forEach((x) => tot.nonTrovati.set(x.nome, (tot.nonTrovati.get(x.nome) || 0) + x.righe));
+                (data.ambigui || []).forEach((x) => tot.ambigui.add(x));
+            } catch (e) {
+                notify('Errore di connessione durante l\'importazione MySupport', 'info');
+                return;
+            }
+        }
+        showMySupportResultModal(tot, fileName);
+    }
+
+    function showMySupportResultModal(r, fileName) {
+        let modal = document.getElementById('qlikResultModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'qlikResultModal';
+            modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:950; display:flex; align-items:center; justify-content:center;';
+            document.body.appendChild(modal);
+        }
+        const nonTrovati = [...r.nonTrovati].sort((a, b) => b[1] - a[1]);
+        const scartate = nonTrovati.reduce((t, [, n]) => t + n, 0);
+        const nonTrovatiHtml = nonTrovati.length
+            ? `<div style="margin-top:0.75rem;"><strong>Clienti del file non abbinati (${nonTrovati.length}, ${scartate} righe non caricate):</strong>
+               <div style="max-height:140px; overflow-y:auto; font-size:0.8rem; color:#6B7280; margin-top:0.3rem;">${nonTrovati.map(([nome, n]) => `${esc(nome)} (${n})`).join('<br>')}</div>
+               <div style="font-size:0.78rem; color:#6B7280; margin-top:0.3rem;">Per caricarli, scrivi il nome come nel file nel campo <em>My Support</em> della scheda del cliente.</div></div>`
+            : '';
+        const ambiguiHtml = r.ambigui.size
+            ? `<div style="margin-top:0.75rem; color:#B45309;"><strong>Nome My Support presente su più clienti (righe non caricate):</strong>
+               <div style="font-size:0.8rem; margin-top:0.3rem;">${[...r.ambigui].map(esc).join('<br>')}</div></div>`
+            : '';
+        modal.innerHTML = `
+            <div style="background:white; border-radius:10px; padding:1.5rem; width:480px; max-width:92vw; max-height:80vh; overflow-y:auto; box-shadow:0 10px 40px rgba(0,0,0,0.25);">
+                <h3 style="margin:0 0 0.75rem; color:#1F2937;">Importazione MySupport</h3>
+                <p style="margin:0 0 0.45rem; font-size:0.85rem; color:#6B7280;">File: <strong>${esc(fileName || '')}</strong> · ${r.totale} quesiti letti</p>
+                <p style="margin:0; font-size:0.95rem;">Quesiti nuovi inseriti: <strong>${r.inserted}</strong></p>
+                <p style="margin:0.35rem 0 0; font-size:0.95rem;">Quesiti aggiornati: <strong>${r.updated}</strong></p>
+                <p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Già presenti senza variazioni: <strong>${r.unchanged}</strong></p>
+                ${r.invalid ? `<p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Righe senza Codice Quesito: <strong>${r.invalid}</strong></p>` : ''}
+                ${nonTrovatiHtml}
+                ${ambiguiHtml}
+                <div style="display:flex; justify-content:flex-end; margin-top:1.25rem;">
+                    <button id="qlikResultClose" type="button" style="padding:0.5rem 1rem; background:#3B82F6; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Chiudi</button>
+                </div>
+            </div>`;
+        modal.style.display = 'flex';
+        document.getElementById('qlikResultClose').addEventListener('click', () => { modal.style.display = 'none'; });
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; }, { once: true });
+        notify(`Import MySupport completato: ${r.inserted} inseriti, ${r.updated} aggiornati`, (r.inserted + r.updated) > 0 ? 'success' : 'info');
+    }
+
     // Chiede esplicitamente se limitare l'aggiornamento ai progetti attivi
     // (scadenza 31/12/2099) oppure includere anche tutti i progetti storici.
     function showQlikScopeModal() {
@@ -319,6 +468,12 @@
 
         // Tabella in memoria (equivalente strutturale al file caricato).
         QlikVoucher.table = { columns, rows, fileName: file.name, scope: QlikVoucher.scope };
+
+        // File MySupport: altro programma (tabella mysupport), non i voucher.
+        if (QlikVoucher.mode === 'mysupport') {
+            await handleMySupportFile(columns, rows, file.name);
+            return;
+        }
 
         const colCommessa = findColumn(columns, 'Codice Commessa');
         const colTitoloCommessa = findColumn(columns, 'Titolo Commessa');
@@ -500,8 +655,8 @@
         if (link) {
             link.addEventListener('click', (e) => {
                 e.preventDefault();
-                QlikVoucher.mode = 'qlik'; // file voucher Qlik: nessun controllo di template
-                showQlikScopeModal();
+                // Prima la scelta Voucher / MySupport (vedi showQlikTypeModal).
+                showQlikTypeModal();
             });
         }
         checkQlikVisibility();

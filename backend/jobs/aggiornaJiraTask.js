@@ -48,7 +48,11 @@ const CONFIG = {
   // Impostazioni -> Integrazioni: secondo filtro Jira usato SOLO per aggiornare
   // task già presenti (tipicamente quelli che il filtro principale non estrae più
   // perché chiusi). Se il campo è vuoto, il passaggio non viene eseguito.
-  campoFiltroAggiuntivo: 'Filtro aggiuntivo Task (solo agg)'
+  campoFiltroAggiuntivo: 'Filtro aggiuntivo Task (solo agg)',
+  // Abbinamento alternativo del cliente (2026-10-06): se il nome cliente Jira non trova
+  // corrispondenza, si cerca nella colonna ticket_correlati del ticket un Codice Quesito
+  // MySupport (tabella mysupport) e il ticket va sul cliente di quel quesito.
+  colonnaCorrelatiMySupport: 'ticket_correlati'
 };
 
 // ctx = { tenantId, userId?, utentePreferito?, dryRun? }: aggiorna sempre tutto il
