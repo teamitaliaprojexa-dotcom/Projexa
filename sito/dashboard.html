@@ -646,6 +646,12 @@
         .proj-kpi::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: linear-gradient(180deg, var(--c1), var(--c2)); }
         .proj-kpi::after { content: ''; position: absolute; right: -18px; top: -18px; width: 64px; height: 64px; border-radius: 50%; background: radial-gradient(circle, var(--c1) 0%, transparent 70%); opacity: 0.12; }
         .proj-kpi:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(15,23,42,0.12), inset 0 0 0 1px rgba(15,23,42,0.08); }
+        .proj-kpi { cursor: pointer; }
+        .proj-kpi:focus-visible { outline: 2px solid #3B82F6; outline-offset: 2px; }
+        /* Griglia raggiunta dal clic su un contatore del progetto: bordo blu che sfuma */
+        .type11-grid-row.t11-evidenzia { animation: t11Evidenzia 1.6s ease-out 1; }
+        @keyframes t11Evidenzia { 0%, 35% { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.45); } 100% { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0); } }
+        @media (prefers-reduced-motion: reduce) { .type11-grid-row.t11-evidenzia { animation: none; } }
         .proj-kpi-ico { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; color: #fff; font-size: 1rem;
             background: linear-gradient(135deg, var(--c1), var(--c2)); box-shadow: 0 4px 10px color-mix(in srgb, var(--c1) 40%, transparent); }
         .proj-kpi-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.1; }
@@ -1119,23 +1125,47 @@
             background: transparent;
             overflow: hidden;
         }
-        /* Barra del nome campo (tipo 11): azzurra, larga quanto il flyout, con freccia
-           su/giù per aprire/chiudere verticalmente la griglia sottostante. */
+        /* Barra del nome campo (tipo 11): intestazione della card della griglia, con icona,
+           titolo + contatore, riepilogo, interruttore Attive|Tutte e freccia su/giù per
+           aprire/chiudere la griglia sottostante. */
         .type11-bar {
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 0.75rem;
             width: 100%;
             box-sizing: border-box;
-            background: #CFE8FB;
+            background: white;
             color: #111827;
-            font-weight: 700;
+            font-weight: 600;
             font-size: 0.95rem;
-            padding: 0.55rem 0.9rem;
-            border-radius: 8px;
+            padding: 0.7rem 1rem;
+            border-radius: 12px 12px 0 0;
             cursor: pointer;
             user-select: none;
         }
+        .type11-bar:hover { background: #f8fafc; }
+        /* La card: bordo sottile e angoli arrotondati attorno a intestazione e griglia */
+        .settings-detail-row.type11-grid-row {
+            border: 1px solid #e2e8f0 !important;
+            border-radius: 12px;
+            background: white;
+            padding: 0 !important;
+            gap: 0 !important;
+            margin-bottom: 0.7rem;
+        }
+        .settings-detail-row.type11-grid-row.collapsed .type11-bar { border-radius: 12px; }
+        .settings-detail-row.type11-grid-row:not(.collapsed) > .type11-grid-widget {
+            border-top: 1px solid #eef2f7; border-radius: 0 0 12px 12px; padding: 0.5rem 0.75rem 0.75rem;
+        }
+        .t11-ico { flex: none; width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 0.95rem; }
+        .t11-ico.viola { background: #EEEDFE; color: #3C3489; }
+        .t11-ico.verde { background: #E1F5EE; color: #085041; }
+        .t11-ico.rosa { background: #FBEAF0; color: #72243E; }
+        .t11-ico.grigio { background: #F1F5F9; color: #475569; }
+        .t11-head { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+        .t11-title { display: flex; align-items: center; gap: 0.45rem; min-width: 0; font-weight: 600; color: #111827; }
+        .t11-cnt { flex: none; font-size: 0.72rem; font-weight: 600; color: #475569; background: #f1f5f9; border-radius: 999px; padding: 0.05rem 0.5rem; }
         /* Vista "elenco" delle griglie in sola lettura (Commesse): righe semplici in una
            griglia leggera e semitrasparente, codice | descrizione allineati. */
         .type11-vista-elenco { display: grid; grid-template-columns: max-content minmax(0, 1fr); margin: 0.6rem 0.25rem 0.4rem;
@@ -1149,21 +1179,17 @@
         .t11-el-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .t11-el-row.chiusa > span { opacity: 0.5; }
         .t11-el-empty { padding: 0.8rem 0.9rem; color: var(--text-muted); font-size: 0.85rem; }
+        /* Interruttore Attive | Tutte nel titolo della card */
         .type11-bar .type11-expiry-toggle {
-            margin-left: auto;
-            margin-right: 0.6rem;
-            padding: 0.15rem 0.6rem;
-            border: 1px solid #93C5FD;
-            border-radius: 999px;
-            background: white;
-            color: #1E40AF;
-            font-size: 0.75rem;
-            font-weight: 600;
-            white-space: nowrap;
-            cursor: pointer;
+            flex: none; display: inline-flex; margin-left: auto; margin-right: 0.6rem;
+            border: 1px solid #cbd5e1; border-radius: 999px; overflow: hidden; background: white;
         }
-        .type11-bar .type11-expiry-toggle:hover { background: #EFF6FF; }
-        .type11-bar .type11-expiry-toggle.on { background: #1E40AF; border-color: #1E40AF; color: white; }
+        .type11-bar .type11-expiry-toggle button {
+            border: none; background: transparent; padding: 0.2rem 0.75rem; font-size: 0.75rem; font-weight: 500;
+            color: #64748b; cursor: pointer; white-space: nowrap;
+        }
+        .type11-bar .type11-expiry-toggle button:hover { background: #f1f5f9; }
+        .type11-bar .type11-expiry-toggle button.on { background: #dbeafe; color: #1e40af; font-weight: 600; }
         .type11-bar .type11-arrow {
             flex: 0 0 auto;
             color: #111827;
@@ -11155,16 +11181,53 @@
             return '<div class="proj-widgets">' + progress + kpis + '</div>';
         }
 
+        // table = tabella della griglia (tipo 11) della scheda a cui porta il clic sul contatore.
         const PROJ_KPI = [
-            { key: 'task', label: 'Task', icon: 'fa-ticket', cls: 'k-task', title: 'Tkt Jira del progetto non scaduti' },
-            { key: 'quotazioni', label: 'Quotazioni', icon: 'fa-file-invoice-dollar', cls: 'k-quot', title: 'Quotazioni del progetto non scadute' },
-            { key: 'meeting', label: 'Meeting', icon: 'fa-video', cls: 'k-meet', title: 'Meeting del progetto non scaduti' },
-            { key: 'todo', label: 'To Do', icon: 'fa-list-check', cls: 'k-todo', title: 'Voci della To do List del progetto non scadute' }
+            { key: 'task', label: 'Task', icon: 'fa-ticket', cls: 'k-task', title: 'Tkt Jira del progetto non scaduti', table: 'task_app' },
+            { key: 'quotazioni', label: 'Quotazioni', icon: 'fa-file-invoice-dollar', cls: 'k-quot', title: 'Quotazioni del progetto non scadute', table: 'cl_quotazioni' },
+            { key: 'meeting', label: 'Meeting', icon: 'fa-video', cls: 'k-meet', title: 'Meeting del progetto non scaduti', table: 'rec_meeting' },
+            { key: 'todo', label: 'To Do', icon: 'fa-list-check', cls: 'k-todo', title: 'Voci della To do List del progetto non scadute', table: 'tasks' }
         ];
+
+        // Clic su un contatore: scorre fino alla griglia della stessa tabella nella scheda
+        // del progetto e, se è chiusa, la apre (stesso clic della barra del titolo).
+        function vaiAllaGrigliaDelKpi(listEl, kpiKey) {
+            const kpi = PROJ_KPI.find(k => k.key === kpiKey);
+            if (!kpi) return;
+            const widget = [...listEl.querySelectorAll('.type11-grid-widget')]
+                .find(w => String(w.dataset.gridTable || '').trim().toLowerCase() === kpi.table);
+            const row = widget && widget.closest('.type11-grid-row');
+            if (!row) {
+                showNotification(`La sezione ${kpi.label} non è presente in questo progetto`, 'info');
+                return;
+            }
+            if (row.classList.contains('collapsed')) row.querySelector('.type11-bar')?.click();
+            row.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            row.classList.remove('t11-evidenzia');
+            void row.offsetWidth; // riparte l'animazione anche su clic ripetuti
+            row.classList.add('t11-evidenzia');
+            row.addEventListener('animationend', () => row.classList.remove('t11-evidenzia'), { once: true });
+        }
+
         // Legge i contatori (GET /api/projects/contatori) e li fa salire da 0 al valore.
         async function caricaContatoriProgetto(listEl, projectId) {
             const box = listEl.querySelector('#projKpis');
             if (!box || !projectId) return;
+            if (!box.dataset.nav) {
+                box.dataset.nav = '1';
+                box.addEventListener('click', event => {
+                    const el = event.target.closest('.proj-kpi');
+                    if (el) vaiAllaGrigliaDelKpi(listEl, el.dataset.kpi);
+                });
+                box.querySelectorAll('.proj-kpi').forEach(el => {
+                    el.setAttribute('role', 'button');
+                    el.tabIndex = 0;
+                    el.title += ' — clicca per andare alla sezione';
+                    el.addEventListener('keydown', event => {
+                        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); vaiAllaGrigliaDelKpi(listEl, el.dataset.kpi); }
+                    });
+                });
+            }
             try {
                 const r = await fetch(`${API_URL}/projects/contatori?projectId=${encodeURIComponent(projectId)}`, { headers: getAuthHeaders() });
                 if (!r.ok) return;
@@ -14680,6 +14743,9 @@
 
         function formatType11Cell(value, column) {
             if (value == null || value === '') return '';
+            // 31/12/2099 = "nessuna scadenza" (valore tecnico delle righe attive): a video non
+            // si mostra. In modifica il campo mantiene comunque il valore.
+            if (/^2099-12-31(?:$|T)/.test(String(value).trim())) return '';
 
             if (isType11CurrencyColumn(column)) {
                 const rawValue = String(value).trim();
@@ -16044,42 +16110,79 @@
         // (es. cambio di "Abilita modifica") al posto della scritta "Caricamento griglia…".
         const type11GridSnapshots = new Map();
 
+        // Icona e colore della card di ogni griglia, per tabella. Colori per famiglia:
+        // viola = documenti commerciali, verde = numeri economici, rosa = persone e attività.
+        // Le tabelle non elencate prendono un'icona neutra.
+        const TYPE11_ICONE = {
+            proj_commessa: ['fa-file-signature', 'viola'],
+            cl_quotazioni: ['fa-file-invoice-dollar', 'viola'],
+            licenze_app: ['fa-key', 'viola'],
+            invoice: ['fa-receipt', 'verde'],
+            proj_worker: ['fa-coins', 'verde'],
+            proj_worker_cost: ['fa-coins', 'verde'],
+            proj_anno_fatt: ['fa-calendar-days', 'verde'],
+            proj_componenti: ['fa-users', 'rosa'],
+            task_app: ['fa-ticket', 'rosa'],
+            tasks: ['fa-list-check', 'rosa'],
+            issue: ['fa-circle-exclamation', 'rosa'],
+            contacts: ['fa-address-book', 'rosa'],
+            rubrica: ['fa-address-book', 'rosa'],
+            rec_meeting: ['fa-microphone', 'rosa'],
+            proj_activity: ['fa-chart-gantt', 'verde']
+        };
+        function type11IconHtml(tabella, tipo) {
+            const key = String(tabella || '').trim().toLowerCase();
+            const [ico, colore] = TYPE11_ICONE[key] || [Number(tipo) === 13 ? 'fa-chart-gantt' : 'fa-table', 'grigio'];
+            return `<span class="t11-ico ${colore}" aria-hidden="true"><i class="fas ${ico}"></i></span>`;
+        }
+
+        // Intestazione della card: solo il contatore delle righe mostrate (visibile anche a
+        // griglia chiusa). Niente riepilogo sotto il titolo (scelta dell'utente).
+        function type11SetupHeader(widget, records) {
+            const cnt = widget.closest('.type11-grid-row')?.querySelector('.type11-bar .t11-cnt');
+            if (cnt) { cnt.textContent = String(records.length); cnt.hidden = false; }
+        }
+
         // Tabelle delle griglie tipo 11 che in sola lettura si mostrano come semplice elenco
         // di righe (senza tabella): vedi loadType11Grid.
         const TYPE11_VISTA_ELENCO = new Set(['proj_commessa']);
 
-        // Pulsante a destra nel titolo delle griglie tipo 11 con colonna scadenza. All'apertura
-        // la griglia mostra solo le righe non chiuse (scadenza >= oggi) e il pulsante offre
-        // "Mostra tutti"; dopo il clic mostra tutte le righe e offre "Nascondi chiusi".
-        // La scelta vale finché la griglia resta aperta (widget.dataset.showAll).
+        // Interruttore "Attive | Tutte" a destra nel titolo delle griglie tipo 11 con colonna
+        // scadenza. All'apertura è su "Attive": solo le righe non chiuse (scadenza >= oggi);
+        // "Tutte" mostra anche le righe chiuse. La scelta vale finché la griglia resta aperta
+        // (widget.dataset.showAll).
         function type11SetupExpiryToggle(widget, hasExpiry) {
             const bar = widget.closest('.type11-grid-row')?.querySelector('.type11-bar');
             if (!bar) return;
-            let btn = bar.querySelector('.type11-expiry-toggle');
-            if (!hasExpiry) { btn?.remove(); return; }
-            if (!btn) {
-                btn = document.createElement('button');
-                btn.type = 'button';
-                btn.className = 'type11-expiry-toggle';
+            let seg = bar.querySelector('.type11-expiry-toggle');
+            if (!hasExpiry) { seg?.remove(); return; }
+            if (!seg) {
+                seg = document.createElement('span');
+                seg.className = 'type11-expiry-toggle';
+                seg.setAttribute('role', 'group');
+                seg.setAttribute('aria-label', 'Righe da mostrare');
+                seg.innerHTML = '<button type="button" data-all="0" title="Solo le righe ancora valide">Attive</button>'
+                    + '<button type="button" data-all="1" title="Anche le righe chiuse (scadenza passata)">Tutte</button>';
                 // Il clic non deve aprire/chiudere la griglia (gestore sulla barra)
-                btn.addEventListener('click', event => {
+                seg.addEventListener('click', event => {
                     event.stopPropagation();
-                    widget.dataset.showAll = widget.dataset.showAll === '1' ? '0' : '1';
+                    const b = event.target.closest('button[data-all]');
+                    const attuale = widget.dataset.showAll === '1' ? '1' : '0';
+                    if (!b || b.dataset.all === attuale) return;
+                    widget.dataset.showAll = b.dataset.all;
                     const row = widget.closest('.type11-grid-row');
                     if (row?.classList.contains('collapsed')) bar.click(); // riapre la griglia
                     loadType11Grid(widget);
                 });
-                btn.addEventListener('mousedown', event => event.stopPropagation()); // niente trascinamento
-                bar.insertBefore(btn, bar.querySelector('.type11-arrow'));
+                seg.addEventListener('mousedown', event => event.stopPropagation()); // niente trascinamento
+                bar.insertBefore(seg, bar.querySelector('.type11-arrow'));
             }
             const all = widget.dataset.showAll === '1';
-            btn.classList.toggle('on', all);
-            btn.innerHTML = all
-                ? '<i class="fas fa-eye-slash"></i> Nascondi chiusi'
-                : '<i class="fas fa-eye"></i> Mostra tutti';
-            btn.title = all
-                ? 'Mostra solo le righe ancora valide (scadenza da oggi in poi)'
-                : 'Mostra anche le righe chiuse (scadenza passata)';
+            seg.querySelectorAll('button').forEach(b => {
+                const on = (b.dataset.all === '1') === all;
+                b.classList.toggle('on', on);
+                b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            });
         }
 
         async function loadType11Grid(widget) {
@@ -16134,6 +16237,7 @@
                     ? payload.columns
                     : columns;
                 const records = Array.isArray(payload.rows) ? payload.rows : (Array.isArray(payload) ? payload : []);
+                type11SetupHeader(widget, records);
                 const hasProjectIdColumn = visibleColumns.some(column => String(column).toLowerCase() === 'project_id');
                 const projectOptions = hasProjectIdColumn ? await type11ProjectOptions(context.clientId) : [];
                 const projectLabels = new Map(projectOptions.map(project => [String(project.id), project.display]));
@@ -16828,7 +16932,11 @@
                 // riordino è attivo, così la griglia (tipo 11) si può spostare come gli altri campi.
                 return `<div class="settings-detail-row type11-grid-row${startCollapsed ? ' collapsed' : ''}" data-row-id="${id}" data-campo="${campo}">
                     <div class="type11-bar${detailReorderMode ? ' drag-handle' : ''}" data-type11-toggle="1"${drag}>
-                        <span style="display:flex; align-items:center; min-width:0;">${checkbox11}${campoLabelHtml(row.campo)}</span>
+                        <span style="display:flex; align-items:center; gap:0.75rem; min-width:0; flex:1 1 auto;">${checkbox11}${type11IconHtml(row.tabella, tipo)}
+                            <span class="t11-head">
+                                <span class="t11-title">${campoLabelHtml(row.campo)}<span class="t11-cnt" hidden></span></span>
+                            </span>
+                        </span>
                         <span class="type11-arrow"><i class="fas fa-chevron-${startCollapsed ? 'down' : 'up'}"></i></span>
                     </div>
                     <div class="type11-grid-widget" data-grid-tipo="${tipo}" data-grid-source="${escapeHtml(currentDetailSource)}" data-grid-field-id="${id}" data-grid-table="${escapeHtml(row.tabella == null ? '' : row.tabella)}" data-grid-columns="${escapeHtml(row.colonna == null ? '' : row.colonna)}" data-grid-tenant-id="${escapeHtml(row.tenant_id == null ? '' : row.tenant_id)}" data-grid-user-id="${escapeHtml(row.user_id == null ? '' : row.user_id)}" data-grid-client-id="${escapeHtml(row.client_id == null ? '' : row.client_id)}"><div class="type11-grid-state">Caricamento griglia…</div></div>

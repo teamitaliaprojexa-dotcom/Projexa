@@ -8897,6 +8897,8 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
           row.resolved_value = ref.rows[0] ? ref.rows[0].v : null;
         } catch (e) {
           row.resolved_value = null;
+          // Prima l'errore era scartato in silenzio: il campo restava vuoto senza motivo visibile.
+          console.warn(`[TIPO 4] "${row.campo}" (${row.tabella}.${row.colonna}${row.VariabDB ? ' ' + row.VariabDB : ''}): ${e.message}`);
         }
       }
       // Tipo 12: VariabDB contiene una piccola espressione di concatenazione. Il backend
