@@ -1136,6 +1136,19 @@
             cursor: pointer;
             user-select: none;
         }
+        /* Vista "elenco" delle griglie in sola lettura (Commesse): righe semplici in una
+           griglia leggera e semitrasparente, codice | descrizione allineati. */
+        .type11-vista-elenco { display: grid; grid-template-columns: max-content minmax(0, 1fr); margin: 0.6rem 0.25rem 0.4rem;
+            border: 1px solid rgba(148, 163, 184, 0.28); border-radius: 10px; overflow: hidden;
+            background: rgba(207, 232, 251, 0.18); font-size: 0.88rem; color: var(--dark); }
+        .t11-el-row { display: contents; }
+        .t11-el-row > span { padding: 0.45rem 0.9rem; border-top: 1px solid rgba(148, 163, 184, 0.22); min-width: 0; }
+        .t11-el-row:first-child > span { border-top: none; }
+        .t11-el-row:nth-child(even) > span { background: rgba(255, 255, 255, 0.45); }
+        .t11-el-code { font-weight: 600; color: #1e3a8a; white-space: nowrap; border-right: 1px solid rgba(148, 163, 184, 0.22); }
+        .t11-el-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .t11-el-row.chiusa > span { opacity: 0.5; }
+        .t11-el-empty { padding: 0.8rem 0.9rem; color: var(--text-muted); font-size: 0.85rem; }
         .type11-bar .type11-expiry-toggle {
             margin-left: auto;
             margin-right: 0.6rem;
@@ -1918,6 +1931,11 @@
         .gp-client-name button { background: none; border: none; padding: 0; font: inherit; font-weight: 700; font-size: 1.19rem; color: var(--dark); cursor: pointer; text-align: left; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
         .gp-client-name button:hover { color: var(--primary); }
         .gp-client-name small { color: var(--text-muted); font-size: 0.75rem; }
+        .gp-client-link { color: inherit; cursor: pointer; text-decoration: none; }
+        .gp-client-link:hover { color: var(--primary); text-decoration: underline; }
+        /* Titolo del riquadro progetto: cliente sopra e progetto sotto, stesso stile */
+        .gp-proj-title { min-width: 0; font-weight: 700; font-size: 1.19rem; line-height: 1.3; color: var(--dark); }
+        .gp-proj-title .gp-client-link { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .gp-client-foot { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.4rem; font-variant-numeric: tabular-nums; }
 
         .gp-rows { padding: 0.35rem 0.5rem 0.5rem; }
@@ -1925,6 +1943,13 @@
         .gp-row:hover { background: #f8fafc; }
         .gp-row.static { cursor: default; }
         .gp-row.static:hover { background: transparent; }
+        /* Voci di costo sotto il progetto (prima vista): rientrate e più piccole */
+        .gp-voci { margin: -0.2rem 0 0.4rem 1.1rem; padding-left: 0.5rem; border-left: 2px solid #e2e8f0; }
+        .gp-voci .gp-row { padding: 0.35rem 0.6rem; }
+        .gp-voci .gp-row-title { font-size: 0.78rem; font-weight: 500; color: #334155; }
+        .gp-voci .gp-row-meta { font-size: 0.68rem; }
+        .gp-voci .gp-meter { height: 6px; }
+        .gp-voci .gp-badge { font-size: 0.68rem; min-width: 46px; padding: 0.15rem 0.4rem; }
         .gp-row-head { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
         .gp-row-title { font-size: 0.85rem; font-weight: 600; color: var(--dark); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
         .gp-compl { flex: none; font-size: 0.68rem; font-weight: 600; color: #7c3aed; background: #f5f3ff; border-radius: 999px; padding: 0.1rem 0.5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -5264,25 +5289,32 @@
         // Riga compatta: titolo + "offerta · speso", barra, badge %.
         // completamento (facoltativo): valore del campo "Completamento" del progetto, accanto al nome.
         // showOfferta = false: riga di una singola persona (l'offerta è della voce, non sua).
-        // Voce di costo "Fabbrica" (solo questa): se il tempo speso registrato è inferiore
-        // all'offerta, accanto a "Speso" nella riga del progetto si indica quanto manca da
-        // inserire (offerta - speso), con offerta e speso della sola Fabbrica nel tooltip.
-        // Quanto manca da inserire per la Fabbrica del progetto (0 = niente da segnalare).
-        function gpFabbricaManca(it) {
-            const f = it.fabbrica;
+        // Voci di costo "Fabbrica" e "Project Manager" (solo queste): se il tempo speso
+        // registrato è inferiore all'offerta, accanto a "Speso" nella riga del progetto si indica
+        // quanto manca da inserire (offerta - speso), con offerta e speso della voce nel tooltip.
+        // key = campo dell'item ('fabbrica' | 'pm'), label = nome mostrato.
+        const GP_VOCI_DA_INSERIRE = [
+            { key: 'fabbrica', label: 'Fabbrica' },
+            { key: 'pm', label: 'Project Manager' }
+        ];
+        // Quanto manca da inserire per la voce del progetto (0 = niente da segnalare).
+        function gpVoceManca(it, key) {
+            const f = it[key];
             if (!f) return 0;
             const offerta = Number(f.offerta) || 0;
             const manca = Math.round((offerta - (Number(f.time_spent) || 0)) * 100) / 100;
             return offerta > 0 && manca > 0 ? manca : 0;
         }
 
-        function gpFabbricaMeta(it) {
-            const manca = gpFabbricaManca(it);
-            if (!manca) return '';
-            const offerta = Number(it.fabbrica.offerta) || 0;
-            const speso = Number(it.fabbrica.time_spent) || 0;
-            return ` · <span class="gp-fab" title="Fabbrica: offerta ${escapeHtml(gpFmt(offerta, it.hh))}, speso ${escapeHtml(gpFmt(speso, it.hh))}">`
-                + `<i class="fas fa-triangle-exclamation"></i> Fabbrica: mancano <b>${gpFmt(manca, it.hh)}</b> da inserire</span>`;
+        // Avviso nella riga della voce stessa (Fabbrica / Project Manager), non nel totale del
+        // progetto: v = voce di costo { worker, offerta, time_spent, hh }.
+        function gpVoceMeta(v) {
+            const nome = String(v.worker || '').trim().toLowerCase();
+            if (!GP_VOCI_DA_INSERIRE.some(x => x.label.toLowerCase() === nome)) return '';
+            const offerta = Number(v.offerta) || 0;
+            const manca = Math.round((offerta - (Number(v.time_spent) || 0)) * 100) / 100;
+            if (!(offerta > 0 && manca > 0)) return '';
+            return ` · <span class="gp-fab"><i class="fas fa-triangle-exclamation"></i> mancano <b>${gpFmt(manca, v.hh)}</b> da inserire</span>`;
         }
 
         function gpRowHtml(title, offerta, spent, hhOff, hhSpent, attrs, clickable = true, completamento = null, showOfferta = true, extraMeta = '') {
@@ -5330,42 +5362,46 @@
         function gpTableHtml(items) {
             if (!items.length) return '<div class="gp-empty">Nessun dato da mostrare.</div>';
             if (gpState.level === 'list') {
-                // Una scheda per cliente con i suoi progetti; totale del cliente solo se i progetti
-                // usano la stessa unità (ore e giorni non si sommano).
-                const groups = [];
-                const byClient = new Map();
-                items.forEach(it => {
-                    const key = String(it.client_id);
-                    if (!byClient.has(key)) { const g = { id: it.client_id, name: it.client, rows: [] }; byClient.set(key, g); groups.push(g); }
-                    byClient.get(key).rows.push(it);
-                });
-                // Nessun totale per cliente: la somma di progetti diversi non è significativa.
-                const cards = groups.map(g => {
-                    const name = g.name || '(cliente non trovato)';
-                    const rows = g.rows.map(it => gpRowHtml(it.project || '(progetto non trovato)', it.offerta, it.time_spent, it.hh, it.hh,
-                        `data-gp-project="${escapeHtml(it.project_id)}" data-gp-name="${escapeHtml(it.project || '')}" data-gp-client="${escapeHtml(it.client_id)}" data-gp-client-name="${escapeHtml(it.client || '')}" title="Mostra le voci di costo"`,
-                        true, it.completamento, true, gpFabbricaMeta(it))).join('');
+                // Una scheda per progetto (niente raggruppamento per cliente): in testa il nome del
+                // progetto e sotto il cliente; nel corpo il totale del progetto e le sue voci di costo.
+                // Il clic su una voce apre i componenti di quella voce.
+                const cards = items.map(it => {
+                    const client = it.client || '(cliente non trovato)';
+                    const project = it.project || '(progetto non trovato)';
+                    const projAttrs = `data-gp-project="${escapeHtml(it.project_id)}" data-gp-name="${escapeHtml(it.project || '')}" data-gp-client="${escapeHtml(it.client_id)}" data-gp-client-name="${escapeHtml(it.client || '')}"`;
+                    const totale = gpRowHtml('Totale progetto', it.offerta, it.time_spent, it.hh, it.hh,
+                        `${projAttrs} title="Mostra il dettaglio delle voci di costo"`,
+                        true, it.completamento, true);
+                    const voci = (it.voci || []).length
+                        ? `<div class="gp-voci">${it.voci.map(v => gpRowHtml(v.worker || '(voce non trovata)', v.offerta, v.time_spent, v.hh, v.hh,
+                            `data-gp-worker="${escapeHtml(v.worker_cost_id)}" data-gp-name="${escapeHtml(v.worker || '')}" data-gp-offerta="${Number(v.offerta) || 0}" data-gp-hh="${v.hh ? 1 : 0}"`
+                            + ` data-gp-wproject="${escapeHtml(it.project_id)}" data-gp-wproject-name="${escapeHtml(it.project || '')}" data-gp-wclient="${escapeHtml(it.client_id)}" data-gp-wclient-name="${escapeHtml(it.client || '')}" title="Mostra i componenti"`,
+                            true, null, true, gpVoceMeta(v))).join('')}</div>`
+                        : '';
                     return `<div class="gp-client">
                         <div class="gp-client-head">
                             <div class="gp-client-top">
-                                <div class="gp-avatar" style="background:${gpAvatarColor(name)};">${escapeHtml(name.trim().charAt(0).toUpperCase() || '?')}</div>
-                                <div class="gp-client-name">
-                                    <button type="button" data-gp-client="${escapeHtml(g.id)}" data-gp-name="${escapeHtml(g.name || '')}" title="Mostra solo questo cliente">${escapeHtml(name)}</button>
-                                    <small>${g.rows.length} progett${g.rows.length === 1 ? 'o' : 'i'}</small>
+                                <div class="gp-avatar" style="background:${gpAvatarColor(client)};">${escapeHtml(client.trim().charAt(0).toUpperCase() || '?')}</div>
+                                <div class="gp-client-name gp-proj-title">
+                                    <a class="gp-client-link" data-gp-client="${escapeHtml(it.client_id)}" data-gp-name="${escapeHtml(it.client || '')}" title="${escapeHtml(client)} - mostra solo questo cliente">${escapeHtml(client)}</a>
+                                    <button type="button" ${projAttrs} title="${escapeHtml(project)} - mostra il dettaglio delle voci di costo">${escapeHtml(project)}</button>
                                 </div>
                             </div>
                         </div>
-                        <div class="gp-rows">${rows}</div>
+                        <div class="gp-rows">${totale}${voci}</div>
                     </div>`;
                 }).join('');
-                // Progetti con Fabbrica ancora da inserire (offerta Fabbrica > speso Fabbrica).
-                const daFab = items.filter(it => gpFabbricaManca(it) > 0);
-                const fabTip = `<div class="gp-stat-tip" role="tooltip"><div class="t">Progetti da inserire a Fabbrica</div>${daFab.length
-                    ? `<ul>${daFab.map(it => `<li><span>${escapeHtml(`${it.client || '(cliente non trovato)'} – ${it.project || '(progetto non trovato)'}`)}</span><b class="fab">mancano ${escapeHtml(gpFmt(gpFabbricaManca(it), it.hh))}</b></li>`).join('')}</ul>`
-                    : '<div class="none">Nessuno</div>'}</div>`;
-                const fabStat = `<div class="gp-stat amber" tabindex="0"><div class="v">${daFab.length}</div><div class="l">Progetti da inserire a Fabbrica</div>${fabTip}</div>`;
+                // Progetti con Fabbrica / Project Manager ancora da inserire (offerta > speso della voce).
+                const stats = GP_VOCI_DA_INSERIRE.map(({ key, label }) => {
+                    const titolo = `Progetti da inserire a ${label}`;
+                    const da = items.filter(it => gpVoceManca(it, key) > 0);
+                    const tip = `<div class="gp-stat-tip" role="tooltip"><div class="t">${escapeHtml(titolo)}</div>${da.length
+                        ? `<ul>${da.map(it => `<li><span>${escapeHtml(`${it.client || '(cliente non trovato)'} – ${it.project || '(progetto non trovato)'}`)}</span><b class="fab">mancano ${escapeHtml(gpFmt(gpVoceManca(it, key), it.hh))}</b></li>`).join('')}</ul>`
+                        : '<div class="none">Nessuno</div>'}</div>`;
+                    return `<div class="gp-stat amber" tabindex="0"><div class="v">${da.length}</div><div class="l">${escapeHtml(titolo)}</div>${tip}</div>`;
+                }).join('');
                 return gpSummaryHtml(items, 'Progetti monitorati',
-                    it => `${it.client || '(cliente non trovato)'} – ${it.project || '(progetto non trovato)'}`, fabStat) + `<div class="gp-grid">${cards}</div>`;
+                    it => `${it.client || '(cliente non trovato)'} – ${it.project || '(progetto non trovato)'}`, stats) + `<div class="gp-grid">${cards}</div>`;
             }
             if (gpState.level === 'project') {
                 const rows = items.map(it => gpRowHtml(it.worker || '(voce non trovata)', it.offerta, it.time_spent, it.hh, it.hh,
@@ -5418,6 +5454,11 @@
                 }
                 const worker = e.target.closest('[data-gp-worker]');
                 if (worker) {
+                    // Voce cliccata nella prima vista: porta con sé cliente e progetto
+                    if (worker.dataset.gpWproject) {
+                        gpState.client = { id: worker.dataset.gpWclient, name: worker.dataset.gpWclientName || 'Cliente' };
+                        gpState.project = { id: worker.dataset.gpWproject, name: worker.dataset.gpWprojectName || 'Progetto' };
+                    }
                     gpState.worker = { id: worker.dataset.gpWorker, name: worker.dataset.gpName || 'Voce di costo', offerta: Number(worker.dataset.gpOfferta) || 0, hh: worker.dataset.gpHh === '1' };
                     gpState.level = 'worker';
                     loadGestioneProgetto();
@@ -16003,6 +16044,10 @@
         // (es. cambio di "Abilita modifica") al posto della scritta "Caricamento griglia…".
         const type11GridSnapshots = new Map();
 
+        // Tabelle delle griglie tipo 11 che in sola lettura si mostrano come semplice elenco
+        // di righe (senza tabella): vedi loadType11Grid.
+        const TYPE11_VISTA_ELENCO = new Set(['proj_commessa']);
+
         // Pulsante a destra nel titolo delle griglie tipo 11 con colonna scadenza. All'apertura
         // la griglia mostra solo le righe non chiuse (scadenza >= oggi) e il pulsante offre
         // "Mostra tutti"; dopo il clic mostra tutte le righe e offre "Nascondi chiusi".
@@ -16103,6 +16148,30 @@
                 // Elimina. Senza parentesi il comportamento è quello di sempre.
                 const lockedColumns = new Set(Array.isArray(payload.lockedColumns) ? payload.lockedColumns : []);
                 const editOnly = !!payload.editOnly;
+                // Griglie in "vista elenco" (es. Commesse): in sola lettura le righe sono solo
+                // testo, una per riga con i valori uniti da " - ", senza tabella né filtri.
+                // Con "Abilita modifica" resta la griglia normale.
+                if (!editing && TYPE11_VISTA_ELENCO.has(String(payload.tabella || '').toLowerCase())) {
+                    // Righe semplici in una griglia leggera e semitrasparente: prima colonna
+                    // (es. codice commessa) a sinistra, le altre come descrizione. Niente
+                    // intestazioni né filtri. Le righe chiuse (con "Mostra tutti") sono attenuate.
+                    const oggi = new Date(new Date().toDateString());
+                    const righe = records.map(record => {
+                        const valori = visibleColumns.map(column =>
+                            String(formatType11Cell(type11CellValue(record, column), column) ?? '').trim());
+                        const [codice, ...resto] = valori;
+                        const descr = resto.filter(Boolean).join(' - ');
+                        if (!codice && !descr) return '';
+                        const raw = record.__scadenza ?? record.scadenza;
+                        const chiusa = raw && new Date(String(raw).slice(0, 10)) < oggi;
+                        return `<div class="t11-el-row${chiusa ? ' chiusa' : ''}"><span class="t11-el-code">${escapeHtml(codice)}</span><span class="t11-el-text">${escapeHtml(descr)}</span></div>`;
+                    }).filter(Boolean);
+                    widget.innerHTML = righe.length
+                        ? `<div class="type11-vista-elenco">${righe.join('')}</div>`
+                        : '<div class="t11-el-empty">Nessuna commessa</div>';
+                    type11GridSnapshots.delete(fieldId);
+                    return;
+                }
                 // Tipo 13: identico al tipo 11 in visualizzazione, ma in modifica mostra
                 // solo il pulsante "Modifica" che apre la pagina Gantt (gantt.html).
                 const isGantt13 = Number(widget.dataset.gridTipo) === 13;

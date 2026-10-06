@@ -86,6 +86,16 @@ const REGOLE = {
   }
 };
 
+// Etichette valide per QUALSIASI tabella che ha la colonna (le regole della singola
+// tabella in REGOLE hanno la precedenza). commessa_id: FK verso proj_commessa (2026-10-06).
+const ETICHETTE_COMUNI = {
+  commessa_id: 'Commessa'
+};
+
+export function etichettaComune(column) {
+  return ETICHETTE_COMUNI[column] || null;
+}
+
 // Ordinamento predefinito della griglia per tabella (se il campo non ne indica uno in VariabDB).
 const ORDINE = {
   config_chek_list: 'src.tipologia NULLS LAST, src.ordinamento NULLS LAST, src.id'
@@ -108,9 +118,9 @@ export function regoleColonne(tableName) {
 // Metadati da aggiungere a GET .../grid-widget/columns.
 export function metaColonna(tableName, column) {
   const r = (REGOLE[tableName] || {})[column];
-  if (!r) return {};
+  if (!r) return ETICHETTE_COMUNI[column] ? { label: ETICHETTE_COMUNI[column] } : {};
   const out = {};
-  if (r.label) out.label = r.label;
+  if (r.label || ETICHETTE_COMUNI[column]) out.label = r.label || ETICHETTE_COMUNI[column];
   if (r.default !== undefined) out.default = r.default;
   if (r.options) out.options = r.options;
   if (r.dynamic) out.dynamic = true;
@@ -124,7 +134,7 @@ export function metaColonna(tableName, column) {
 
 // Etichette delle intestazioni per GET .../grid-widget.
 export function etichetteColonne(tableName) {
-  const out = {};
+  const out = { ...ETICHETTE_COMUNI };
   for (const [col, r] of Object.entries(REGOLE[tableName] || {})) if (r.label) out[col] = r.label;
   return out;
 }

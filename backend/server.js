@@ -25,7 +25,7 @@ import auditLogRoutes from './routes/audit-log.js';
 import notificheRoutes from './routes/notifiche.js';
 import auditEventiRoutes from './routes/audit-eventi.js';
 import { sendMail, buildRichiestaCancellazioneEmail, EMAIL_PROJEXA } from './config/mailer.js';
-import { regoleColonne, metaColonna, etichetteColonne, etichetteValori, opzioniColonna, applicaRegoleScrittura, ordineGriglia, filtroSopraGriglia, TABELLE_VERIFICA } from './config/gridColumnRules.js';
+import { regoleColonne, metaColonna, etichetteColonne, etichetteValori, opzioniColonna, applicaRegoleScrittura, ordineGriglia, filtroSopraGriglia, TABELLE_VERIFICA, etichettaComune } from './config/gridColumnRules.js';
 import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
 import { askAiProvider, PROVIDERS as AI_PROVIDERS } from './routes/ai.js';
 import { getIntegration } from './config/integrations.js';
@@ -824,7 +824,7 @@ app.get('/api/dashboard/tasks', requireAuth, async (req, res) => {
         tableColumnsCache.delete('main:' + fk.foreign_table);
         const foreignColumns = await getTableColumns(fk.foreign_table);
         const foreignNames = [...foreignColumns];
-        const preferredNames = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'titile', 'label', 'valore2'];
+        const preferredNames = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'titile', 'label', 'valore2', 'commessa'];
         // In Projexa clienti e progetti sono contenitori EAV: il loro nome
         // leggibile e' nella riga identita', colonna valore2.
         const eavDisplayColumn = ['clients', 'projects'].includes(fk.foreign_table)
@@ -969,7 +969,7 @@ app.get('/api/dashboard/tasks/foreign-options/:column', requireAuth, async (req,
     }
 
     const foreignNames = [...foreignColumns];
-    const preferredNames = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'titile', 'label', 'valore2'];
+    const preferredNames = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'titile', 'label', 'valore2', 'commessa'];
     const displayColumn = foreignNames.find(name => /^desc_/i.test(name))
       || preferredNames.find(name => foreignColumns.has(name))
       || foreignColumn;
@@ -1466,7 +1466,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
       tableColumnsCache.delete('main:' + fk.foreign_table);
       const foreignColumns = await getTableColumns(fk.foreign_table);
       const foreignNames = [...foreignColumns];
-      const preferredNames = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2'];
+      const preferredNames = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2', 'commessa'];
       const displayColumn = foreignNames.find(name => /^desc_/i.test(name))
         || preferredNames.find(name => foreignColumns.has(name))
         || null;
@@ -1491,6 +1491,9 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     if (filtroSopra && !selectedColumns.includes(filtroSopra.column) && tableColumns.has(filtroSopra.column)) {
       selectExpressions.push(`src."${assertValidIdentifier(filtroSopra.column)}" AS "__raw_${filtroSopra.column}"`);
     }
+    // Scadenza della riga anche se non è tra le colonne visibili: con "Mostra tutti" il
+    // browser riconosce le righe chiuse (es. card attenuate nella vista a elenco).
+    if (tableColumns.has('scadenza')) selectExpressions.push('src.scadenza AS "__scadenza"');
     const selectList = selectExpressions.join(', ');
     const joinClause = joins.length ? '\n       ' + joins.join('\n       ') : '';
 
@@ -2837,7 +2840,7 @@ async function ofInvoice(req, prog, cfg, aOre = false) {
     const f = fk.get(c);
     if (f && c !== 'project_id' && c !== 'client_id') {
       const fcols = await getTableColumns(assertValidIdentifier(f.ft));
-      const disp = [...fcols].find((n) => /^desc_/i.test(n)) || ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2'].find((n) => fcols.has(n));
+      const disp = [...fcols].find((n) => /^desc_/i.test(n)) || ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2', 'commessa'].find((n) => fcols.has(n));
       if (disp) {
         const a = `fk${j++}`;
         joins.push(`LEFT JOIN "${f.ft}" ${a} ON ${a}."${assertValidIdentifier(f.fc)}" = s."${c}"`);
@@ -3146,7 +3149,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget/fk-options', requir
     // appena effettuate allo schema (stessa cautela usata per la griglia principale).
     tableColumnsCache.delete('main:' + foreignTable);
     const foreignColumns = await getTableColumns(foreignTable);
-    const preferredNames = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2'];
+    const preferredNames = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2', 'commessa'];
     const displayColumn = [...foreignColumns].find(name => /^desc_/i.test(name))
       || preferredNames.find(name => foreignColumns.has(name))
       || foreignColumn;
@@ -3920,12 +3923,14 @@ const gpHhJoin = (alias) => `LEFT JOIN LATERAL (
        AND b.scadenza >= CURRENT_DATE
   ) hh ON true`;
 const gpNum = (v) => Number(v) || 0;
-// Solo progetti con "Cod commessa" valorizzato (campo di projects con argument = id progetto).
+// Solo progetti con almeno una commessa attiva con codice (tabella proj_commessa, più
+// commesse per progetto dal 2026-10-06; prima era il campo "Cod commessa" di projects).
 const gpCommessaCond = (alias) => `EXISTS (
-    SELECT 1 FROM projects k
-     WHERE k.campo = 'Cod commessa' AND k.valore2 > '' AND k.argument = ${alias}.project_id::text
+    SELECT 1 FROM proj_commessa k
+     WHERE k.project_id = ${alias}.project_id
        AND k.tenant_id = ${alias}.tenant_id AND k.user_id = ${alias}.user_id
-       AND k.scadenza >= CURRENT_DATE
+       AND NULLIF(BTRIM(k.cod_commessa), '') IS NOT NULL
+       AND (k.scadenza IS NULL OR k.scadenza >= CURRENT_DATE)
   )`;
 
 // Progetti esclusi da Gestione Progetto e Offerte e ordini (campi di projects con argument =
@@ -3967,7 +3972,15 @@ app.get('/api/kpi-gestione-progetto', requireAuth, async (req, res) => {
                   ELSE 0 END) AS fab_offerta,
               SUM(CASE WHEN LOWER(BTRIM(wc.desc_worker)) = 'fabbrica' THEN
                     CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END
-                  ELSE 0 END) AS fab_spent
+                  ELSE 0 END) AS fab_spent,
+              -- Stessa segnalazione per la voce "Project Manager".
+              BOOL_OR(LOWER(BTRIM(wc.desc_worker)) = 'project manager') AS ha_pm,
+              SUM(CASE WHEN LOWER(BTRIM(wc.desc_worker)) = 'project manager' THEN
+                    CASE WHEN hh.gestione_hh THEN COALESCE(a.offerta_effort_hh, 0) ELSE COALESCE(a.offerta_effort_gg, 0) END
+                  ELSE 0 END) AS pm_offerta,
+              SUM(CASE WHEN LOWER(BTRIM(wc.desc_worker)) = 'project manager' THEN
+                    CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END
+                  ELSE 0 END) AS pm_spent
          FROM proj_worker a
          LEFT JOIN proj_worker_cost wc ON wc.id = a.worker_cost_id AND wc.scadenza >= CURRENT_DATE
          ${gpHhJoin('a')}
@@ -3986,9 +3999,40 @@ app.get('/api/kpi-gestione-progetto', requireAuth, async (req, res) => {
         GROUP BY a.client_id, a.project_id, hh.gestione_hh, comp.completamento`,
       params
     );
+    // Voci di costo di ogni progetto (stessi filtri), mostrate subito sotto il progetto nella
+    // prima vista invece che nel drill down: una riga per progetto e voce (worker_cost_id).
+    const v = await db.query(
+      `SELECT a.project_id, a.worker_cost_id, MAX(wc.desc_worker) AS worker, hh.gestione_hh AS hh,
+              SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.offerta_effort_hh, 0) ELSE COALESCE(a.offerta_effort_gg, 0) END) AS offerta,
+              SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END) AS time_spent
+         FROM proj_worker a
+         LEFT JOIN proj_worker_cost wc ON wc.id = a.worker_cost_id AND wc.scadenza >= CURRENT_DATE
+         ${gpHhJoin('a')}
+        WHERE a.tenant_id = $1 AND a.user_id = $2 AND a.scadenza >= CURRENT_DATE
+          AND (a.offerta_effort_hh <> 0 OR a.offerta_effort_gg <> 0) ${clientCond}
+          AND ${gpCommessaCond('a')}
+          AND ${gpStatoEsclusoCond('a.project_id', 'a')}
+        GROUP BY a.project_id, a.worker_cost_id, hh.gestione_hh`,
+      params
+    );
+    const vociByProject = new Map();
+    v.rows.forEach((x) => {
+      const k = String(x.project_id);
+      if (!vociByProject.has(k)) vociByProject.set(k, []);
+      vociByProject.get(k).push({
+        worker_cost_id: x.worker_cost_id,
+        worker: x.worker || null,
+        hh: !!x.hh,
+        offerta: gpNum(x.offerta),
+        time_spent: gpNum(x.time_spent)
+      });
+    });
+    vociByProject.forEach((list) => list.sort((a, b) => String(a.worker || '').localeCompare(String(b.worker || ''), 'it')));
+
     const clients = await resolveClientDescriptions(r.rows.map((x) => x.client_id), req.user.tenant_id);
     const projects = await resolveProjectDescriptions(r.rows.map((x) => x.project_id), req.user.tenant_id, req.user.user_id);
     const items = r.rows.map((x) => ({
+      voci: vociByProject.get(String(x.project_id)) || [],
       client_id: x.client_id,
       client: clients.get(String(x.client_id)) || null,
       project_id: x.project_id,
@@ -3997,7 +4041,8 @@ app.get('/api/kpi-gestione-progetto', requireAuth, async (req, res) => {
       completamento: x.completamento == null ? null : Number(x.completamento),
       offerta: gpNum(x.offerta),
       time_spent: gpNum(x.time_spent),
-      fabbrica: x.ha_fabbrica ? { offerta: gpNum(x.fab_offerta), time_spent: gpNum(x.fab_spent) } : null
+      fabbrica: x.ha_fabbrica ? { offerta: gpNum(x.fab_offerta), time_spent: gpNum(x.fab_spent) } : null,
+      pm: x.ha_pm ? { offerta: gpNum(x.pm_offerta), time_spent: gpNum(x.pm_spent) } : null
     })).sort((a, b) => String(a.client || '').localeCompare(String(b.client || ''), 'it')
       || String(a.project || '').localeCompare(String(b.project || ''), 'it'));
     res.json(items);
@@ -5199,12 +5244,18 @@ app.post('/api/data/import/rollback', requireAuth, async (req, res) => {
 // Il file Excel viene letto ed elaborato interamente nel browser: qui arriva
 // solo il riepilogo già raggruppato per (Codice Commessa, Email Dipendente),
 // con il totale ore di ciascun gruppo. L'endpoint:
-//  1) risolve ogni Codice Commessa nel project_id corrispondente, leggendo
-//     ele_commesse di TUTTO il tenant del login (non solo dell'utente);
+//  1) risolve ogni Codice Commessa (+ Titolo Commessa) nella COMMESSA corrispondente
+//     (proj_commessa: commessa_id + project_id; più commesse per progetto dal
+//     2026-10-06), leggendo TUTTO il tenant del login. Se proj_commessa non esiste
+//     si usa la vecchia ele_commesse (una commessa per progetto, commessa_id vuoto);
 //  2) per ciascun gruppo risolto, aggiorna la riga di proj_componenti con la
-//     stessa email e lo stesso project_id:
+//     stessa email, lo stesso project_id e la stessa commessa_id:
 //       time_spent_hh = totale ore del gruppo (sovrascrive il valore precedente)
 //       time_spent_gg = time_spent_hh / 8
+//     Una riga della persona sul progetto ancora senza commessa viene assegnata alla
+//     commessa (niente doppioni); altrimenti si inserisce una riga nuova con commessa_id;
+//  3) ricalcola time_spent di proj_worker: per le righe con commessa_id la somma dei
+//     componenti di quella commessa, per quelle senza commessa la somma del progetto.
 // Tutto in un'unica transazione: se il salvataggio di una riga fallisce per un
 // errore imprevisto, nessuna modifica del blocco viene applicata.
 //
@@ -5242,20 +5293,29 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
 
     // Verifica la struttura minima delle due tabelle coinvolte, con un errore
     // esplicito se non sono ancora predisposte come richiesto.
-    let commesseCols, componentiCols;
+    // Dal 2026-10-06 le commesse stanno in proj_commessa (più commesse per progetto,
+    // Supporto/CreaDB/proj_commessa.sql): il codice Qlik individua la COMMESSA, non solo il
+    // progetto, e proj_componenti / proj_worker ricevono commessa_id. Se proj_commessa non
+    // esiste ancora (DB non migrato) si usa la vecchia ele_commesse, una commessa per progetto.
+    let commesseCols, componentiCols, projCommessaCols;
     try {
-      commesseCols = await getTableColumns('ele_commesse');
+      projCommessaCols = await getTableColumns('proj_commessa');
+      commesseCols = projCommessaCols.size ? projCommessaCols : await getTableColumns('ele_commesse');
       componentiCols = await getTableColumns('proj_componenti');
     } catch (schemaErr) {
       console.error('[QLIK VOUCHER IMPORT] lettura schema fallita', schemaErr);
-      return res.status(500).json({ error: 'Impossibile leggere la struttura di ele_commesse/proj_componenti: ' + schemaErr.message });
+      return res.status(500).json({ error: 'Impossibile leggere la struttura di proj_commessa/ele_commesse/proj_componenti: ' + schemaErr.message });
     }
+    const useProjCommessa = projCommessaCols.size > 0;
+    const tabellaCommesse = useProjCommessa ? 'proj_commessa' : 'ele_commesse';
     if (commesseCols.size === 0) {
-      return res.status(400).json({ error: 'Tabella ele_commesse non trovata' });
+      return res.status(400).json({ error: 'Tabella proj_commessa (o ele_commesse) non trovata' });
     }
     if (!['tenant_id', 'user_id', 'cod_commessa', 'project_id'].every((c) => commesseCols.has(c))) {
-      return res.status(400).json({ error: 'La tabella ele_commesse deve contenere tenant_id, user_id, cod_commessa e project_id' });
+      return res.status(400).json({ error: `La tabella ${tabellaCommesse} deve contenere tenant_id, user_id, cod_commessa e project_id` });
     }
+    // commessa_id su proj_componenti: le ore si tengono per progetto + commessa + persona.
+    const componentiHasCommessa = useProjCommessa && componentiCols.has('commessa_id');
     if (componentiCols.size === 0) {
       return res.status(400).json({ error: 'Tabella proj_componenti non trovata' });
     }
@@ -5272,16 +5332,20 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
     // - history: nessun filtro sulla scadenza del progetto.
     // Il controllo e' lato server per evitare che un payload alterato possa
     // aggiornare involontariamente lo storico.
+    // Con proj_commessa, in "active" anche la commessa deve essere ancora valida.
     const activeProjectFilter = scope === 'active'
-      ? ` AND p.scadenza = DATE '2099-12-31'`
+      ? ` AND p.scadenza = DATE '2099-12-31'${useProjCommessa && commesseCols.has('scadenza') ? ' AND (ec.scadenza IS NULL OR ec.scadenza >= CURRENT_DATE)' : ''}`
       : '';
-    const commessaTitleExpression = commesseCols.has('titolo_commessa')
-      ? 'COALESCE(ec.titolo_commessa, p.valore2)'
-      : 'p.valore2';
+    // Titolo con cui confrontare il "Titolo Commessa" del file: proj_commessa.commessa,
+    // in mancanza il nome del progetto (come prima).
+    const commessaTitleExpression = useProjCommessa
+      ? 'COALESCE(NULLIF(BTRIM(ec.commessa), \'\'), p.valore2)'
+      : (commesseCols.has('titolo_commessa') ? 'COALESCE(ec.titolo_commessa, p.valore2)' : 'p.valore2');
     const commesseResult = await db.query(
       `SELECT ec.cod_commessa, ec.project_id, p.client_id, p.user_id AS owner_user_id,
+              ${useProjCommessa ? 'ec.id' : 'NULL::uuid'} AS commessa_id,
               ${commessaTitleExpression} AS titolo_commessa
-       FROM ele_commesse ec
+       FROM ${tabellaCommesse} ec
        JOIN projects p
          ON p.id::text = ec.project_id::text
         AND p.tenant_id = ec.tenant_id
@@ -5301,31 +5365,27 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
       .replace(/\s+/g, ' ');
     const projectKey = (cod, titolo) => String(cod).trim() + '\u0001'
       + normalizeCommessaTitle(titolo);
+    // Ogni corrispondenza è una coppia progetto + commessa (commessaId null con ele_commesse).
     const projectsByCommessa = new Map();
     const projectsByCode = new Map();
+    const sameMatch = (a, row) => String(a.projectId) === String(row.project_id)
+      && String(a.commessaId || '') === String(row.commessa_id || '');
     for (const row of commesseResult.rows) {
+      const match = {
+        projectId: row.project_id,
+        commessaId: row.commessa_id || null,
+        clientId: row.client_id,
+        ownerUserId: row.owner_user_id,
+        titolo: row.titolo_commessa
+      };
       const key = projectKey(row.cod_commessa, row.titolo_commessa);
       const matches = projectsByCommessa.get(key) || [];
-      if (!matches.some((project) => String(project.projectId) === String(row.project_id))) {
-        matches.push({
-          projectId: row.project_id,
-          clientId: row.client_id,
-          ownerUserId: row.owner_user_id,
-          titolo: row.titolo_commessa
-        });
-      }
+      if (!matches.some((m) => sameMatch(m, row))) matches.push(match);
       projectsByCommessa.set(key, matches);
 
       const codeKey = String(row.cod_commessa).trim();
       const codeMatches = projectsByCode.get(codeKey) || [];
-      if (!codeMatches.some((project) => String(project.projectId) === String(row.project_id))) {
-        codeMatches.push({
-          projectId: row.project_id,
-          clientId: row.client_id,
-          ownerUserId: row.owner_user_id,
-          titolo: row.titolo_commessa
-        });
-      }
+      if (!codeMatches.some((m) => sameMatch(m, row))) codeMatches.push(match);
       projectsByCode.set(codeKey, codeMatches);
     }
 
@@ -5356,7 +5416,11 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
       [...projectsByCommessa.values()].flatMap((matches) => matches)
         .map((p) => p.projectId).filter(Boolean).map(String)
     )];
-    const componentIdByKey = new Map(); // "projectId\u0001email" -> id
+    // Chiave: "projectId\u0001commessaId\u0001email" -> id (commessaId vuoto = riga senza
+    // commessa, cioè precedente a proj_commessa o con ele_commesse).
+    const componentKeyOf = (projectId, commessaId, email) =>
+      String(projectId) + '\u0001' + String(commessaId || '') + '\u0001' + String(email || '').trim().toLowerCase();
+    const componentIdByKey = new Map();
     // Proprietario di ogni progetto: fra righe doppie (stesso progetto ed email,
     // utenti diversi) vince quella del proprietario, l'unica visibile in griglia.
     const ownerByProject = new Map(
@@ -5365,12 +5429,12 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
     );
     if (projectIds.length) {
       const componentiResult = await db.query(
-        `SELECT id, project_id, email, user_id FROM proj_componenti
+        `SELECT id, project_id, email, user_id${componentiHasCommessa ? ', commessa_id' : ''} FROM proj_componenti
          WHERE tenant_id = $1 AND project_id::text = ANY($2::text[])`,
         [req.user.tenant_id, projectIds]
       );
       for (const row of componentiResult.rows) {
-        const key = String(row.project_id) + '\u0001' + String(row.email || '').trim().toLowerCase();
+        const key = componentKeyOf(row.project_id, componentiHasCommessa ? row.commessa_id : null, row.email);
         const isOwner = String(row.user_id) === ownerByProject.get(String(row.project_id));
         if (!componentIdByKey.has(key) || isOwner) componentIdByKey.set(key, row.id);
       }
@@ -5430,8 +5494,22 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
         }
         for (const project of projects) {
           const projectId = project.projectId;
-          const componentKey = String(projectId) + '\u0001' + g.email;
-          const componentId = componentIdByKey.get(componentKey);
+          const commessaId = componentiHasCommessa ? project.commessaId : null;
+          const componentKey = componentKeyOf(projectId, commessaId, g.email);
+          let componentId = componentIdByKey.get(componentKey);
+          // Riga della stessa persona sullo stesso progetto ma ancora senza commessa
+          // (precedente a proj_commessa): la si assegna a questa commessa invece di
+          // crearne un doppione. Una volta assegnata non vale più per altre commesse.
+          let assegnaCommessa = false;
+          if (!componentId && commessaId) {
+            const legacyKey = componentKeyOf(projectId, null, g.email);
+            componentId = componentIdByKey.get(legacyKey);
+            if (componentId) {
+              componentIdByKey.delete(legacyKey);
+              componentIdByKey.set(componentKey, componentId);
+              assegnaCommessa = true;
+            }
+          }
           if (!componentId) {
             const newComponentData = {
               tenant_id: req.user.tenant_id,
@@ -5449,6 +5527,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
               time_spent_hh: g.ore,
               time_spent_gg: g.ore / 8
             };
+            if (commessaId) newComponentData.commessa_id = commessaId;
             if (componentiCols.has('team_pro')) {
               const workerCostKey = String(project.clientId) + '\u0001' + g.codiceArticolo;
               const workerCostId = workerCostIdByKey.get(String(project.ownerUserId) + '\u0001' + workerCostKey)
@@ -5474,12 +5553,18 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
           const updateParams = [g.ore, componentId, req.user.tenant_id];
           let scadenzaRepairClause = '';
           let scadenzaChanged = '';
+          if (assegnaCommessa) {
+            updateParams.push(commessaId);
+            scadenzaRepairClause += `,
+                 commessa_id = $${updateParams.length}::uuid`;
+            scadenzaChanged += ` OR commessa_id IS DISTINCT FROM $${updateParams.length}::uuid`;
+          }
           if (componentiCols.has('scadenza')) {
             // Ogni componente interessato dall'import Qlik viene mantenuto attivo,
             // anche se esisteva già con una scadenza precedente o nulla.
-            scadenzaRepairClause = `,
+            scadenzaRepairClause += `,
                  scadenza = DATE '2099-12-31'`;
-            scadenzaChanged = " OR scadenza IS DISTINCT FROM DATE '2099-12-31'";
+            scadenzaChanged += " OR scadenza IS DISTINCT FROM DATE '2099-12-31'";
           }
           // Cast esplicito a numeric: se time_spent_hh/time_spent_gg non sono già di
           // tipo numerico (es. varchar, o una precisione che non accetta il valore
@@ -5518,20 +5603,33 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
           console.error('[QLIK VOUCHER IMPORT] La tabella proj_worker deve contenere project_id, worker_cost_id, time_spent_hh e time_spent_gg: aggiornamento saltato');
         } else {
           const workerUpdatedAtClause = projWorkerCols.has('updated_at') ? ', updated_at = CURRENT_TIMESTAMP' : '';
+          // Con le commesse (commessa_id su proj_worker e proj_componenti):
+          //  - riga di proj_worker CON commessa: somma dei componenti della stessa commessa;
+          //  - riga SENZA commessa: somma di tutti i componenti del progetto (come prima).
+          const perCommessa = componentiHasCommessa && projWorkerCols.has('commessa_id');
           const aggResult = await client.query(
             `UPDATE proj_worker pw
              SET time_spent_hh = agg.total_hh,
                  time_spent_gg = agg.total_hh / 8.0${workerUpdatedAtClause}
              FROM (
-               SELECT project_id, team_pro, SUM(time_spent_hh) AS total_hh
+               SELECT project_id, team_pro, ${perCommessa ? 'commessa_id' : 'NULL::uuid AS commessa_id'}, SUM(time_spent_hh) AS total_hh
+               FROM proj_componenti
+               WHERE tenant_id = $1 AND project_id::text = ANY($2::text[])
+                 AND team_pro IS NOT NULL${perCommessa ? ' AND commessa_id IS NOT NULL' : ''}
+               GROUP BY project_id, team_pro${perCommessa ? `, commessa_id
+               UNION ALL
+               SELECT project_id, team_pro, NULL::uuid, SUM(time_spent_hh)
                FROM proj_componenti
                WHERE tenant_id = $1 AND project_id::text = ANY($2::text[])
                  AND team_pro IS NOT NULL
-               GROUP BY project_id, team_pro
+               GROUP BY project_id, team_pro` : ''}
              ) agg
              WHERE pw.tenant_id = $1
                AND pw.project_id::text = agg.project_id::text
                AND pw.worker_cost_id::text = agg.team_pro::text
+               ${perCommessa
+                 ? `AND pw.commessa_id IS NOT DISTINCT FROM agg.commessa_id`
+                 : ''}
                AND pw.time_spent_hh IS DISTINCT FROM agg.total_hh
              RETURNING pw.id`,
             [req.user.tenant_id, projectIds]
@@ -6958,7 +7056,10 @@ const REPORTING_TABLES = {
   fatturazione: { table: 'proj_anno_fatt', label: 'Fatturazione Anno/mese' },
   costi: { table: 'proj_worker', label: 'Costi Progetto' },
   tktjira: { table: 'task_app', label: 'Tkt Jira' },
-  todo: { table: 'tasks', label: 'To do List' }
+  todo: { table: 'tasks', label: 'To do List' },
+  // View delle commesse (Supporto/CreaDB/ele_commesse.sql): una riga per commessa e
+  // componente. commessa_id è un UUID senza foreign key (view): non lo si propone.
+  commesse: { table: 'ele_commesse', label: 'Commesse', hidden: ['commessa_id'] }
 };
 // Colonne tecniche mai mostrate come campi.
 const REPORTING_HIDDEN_COLUMNS = new Set(['id', 'tenant_id', 'user_id', 'client_id', 'project_id', 'id_roles',
@@ -6968,7 +7069,7 @@ const REPORTING_HIDDEN_COLUMNS = new Set(['id', 'tenant_id', 'user_id', 'client_
 // Campi/colonne di appoggio ("appo…", anche "apppo…", maiuscole o minuscole): mai mostrati.
 const isReportingAppoName = (name) => /^app+o/i.test(String(name || '').replace(/^\(\*\)\s*/, '').trim());
 // Colonna descrittiva di una tabella collegata (FK): stessa scelta delle griglie tipo 11.
-const REPORTING_FK_DISPLAY = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2'];
+const REPORTING_FK_DISPLAY = ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2', 'commessa'];
 
 // Colonne utilizzabili di una tabella dettaglio: [{ name, type, fk: { table, column, display } }].
 async function reportingTableColumns(area) {
@@ -6989,6 +7090,7 @@ async function reportingTableColumns(area) {
   const out = [];
   for (const c of cols) {
     if (REPORTING_HIDDEN_COLUMNS.has(c.column_name) || isReportingAppoName(c.column_name)) continue;
+    if ((REPORTING_TABLES[area].hidden || []).includes(c.column_name)) continue;
     const fk = fks.find((x) => x.column_name === c.column_name);
     let fkInfo = null;
     if (fk) {
@@ -7002,6 +7104,8 @@ async function reportingTableColumns(area) {
 }
 // Etichetta leggibile dal nome tecnico: "data_richiesta" -> "Data richiesta".
 const reportingColumnLabel = (name) => {
+  const comune = etichettaComune(String(name)); // es. commessa_id -> "Commessa"
+  if (comune) return comune;
   const s = String(name).replace(/_/g, ' ').trim();
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
@@ -8847,7 +8951,7 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
             const foreignColumn = assertValidIdentifier(fk.foreign_column);
             const foreignColumns = await getTableColumns(foreignTable);
             const displayColumn = [...foreignColumns].find(name => /^desc_/i.test(name))
-              || ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2'].find(name => foreignColumns.has(name));
+              || ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2', 'commessa'].find(name => foreignColumns.has(name));
             if (displayColumn) {
               assertValidIdentifier(displayColumn);
               sql = `SELECT "${displayColumn}" AS v FROM "${foreignTable}"

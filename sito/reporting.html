@@ -168,7 +168,7 @@
         }
         /* Colori delle sigle per area (C clienti, P progetti, tabelle dettaglio) */
         .report-grid th.col-projects .th-area { background: #D1FAE5; color: #065F46; }
-        .report-grid th.col-quotazioni .th-area, .report-grid th.col-fatturazione .th-area, .report-grid th.col-costi .th-area { background: #FEF3C7; color: #92400E; }
+        .report-grid th.col-quotazioni .th-area, .report-grid th.col-fatturazione .th-area, .report-grid th.col-costi .th-area, .report-grid th.col-commesse .th-area { background: #FEF3C7; color: #92400E; }
         .report-grid th.col-contatti .th-area, .report-grid th.col-licenze .th-area { background: #EDE9FE; color: #5B21B6; }
         .report-grid th.col-issue .th-area, .report-grid th.col-tktjira .th-area, .report-grid th.col-todo .th-area { background: #FCE7F3; color: #9D174D; }
         .th-area { width: auto; min-width: 16px; padding: 0 3px; }
@@ -467,7 +467,8 @@
             fatturazione: { label: 'Fatturazione Anno/mese', icon: 'fa-calendar-days', tag: 'F', table: true },
             costi: { label: 'Costi Progetto', icon: 'fa-coins', tag: 'CP', table: true },
             tktjira: { label: 'Tkt Jira', icon: 'fa-ticket', tag: 'J', table: true },
-            todo: { label: 'To do List', icon: 'fa-list-check', tag: 'T', table: true }
+            todo: { label: 'To do List', icon: 'fa-list-check', tag: 'T', table: true },
+            commesse: { label: 'Commesse', icon: 'fa-file-signature', tag: 'Cm', table: true } // view ele_commesse
         };
         Object.entries(AREAS).forEach(([area, cfg]) => { cfg.btnId = 'btn-' + area; cfg.listId = 'fields-' + area; });
         document.getElementById('reportingSide').innerHTML =

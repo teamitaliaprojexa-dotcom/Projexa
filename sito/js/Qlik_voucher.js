@@ -28,23 +28,25 @@
 //   2) Il file viene letto interamente nel browser (SheetJS) e caricato in una
 //      tabella in memoria con la STESSA struttura del file (una colonna per
 //      ogni intestazione del foglio) — QlikVoucher.table.
-//   3) Il backend legge le righe di ele_commesse di TUTTO il tenant del login
-//      (non solo dell'utente) per ricavare, da ele_commesse.cod_commessa, il
+//   3) Il backend legge le commesse (proj_commessa, più commesse per progetto;
+//      ele_commesse solo se proj_commessa non esiste) di TUTTO il tenant del
+//      login per ricavare, da cod_commessa (+ titolo), la commessa e il suo
 //      project_id: chiunque importi il file aggiorna anche i progetti degli
 //      altri utenti del tenant. Le righe nuove di proj_componenti sono intestate
-//      al proprietario del progetto.
+//      al proprietario del progetto e portano commessa_id.
 //   4) Le righe del file vengono raggruppate per (Email Dipendente, Codice
 //      Commessa, Titolo Commessa) sommando "Ore Attivita" (numero decimale,
 //      es. 4,50 = 4h30m).
-//   5) Per ogni gruppo risolto in un project_id, il backend
+//   5) Per ogni gruppo risolto in una commessa, il backend
 //      (POST /api/qlik-voucher/import) aggiorna la riga di proj_componenti con
-//      la stessa email e lo stesso project_id oppure, se non esiste, la crea
-//      usando anche "Nome Dipendente":
+//      la stessa email, lo stesso project_id e la stessa commessa_id oppure, se
+//      non esiste, la crea usando anche "Nome Dipendente"; poi ricalcola le ore
+//      di proj_worker per commessa:
 //        proj_componenti.time_spent_hh = totale ore del gruppo
 //        proj_componenti.time_spent_gg = time_spent_hh / 8
 //
 // NOTE / LIMITI NOTI
-//   - ele_commesse e proj_componenti devono essere tabelle gestite (presenti e
+//   - proj_commessa (o ele_commesse) e proj_componenti devono essere tabelle gestite (presenti e
 //     attive in table_structures) e possedere le colonne usate qui sotto,
 //     altrimenti l'endpoint di import risponde con un errore esplicito.
 //   - L'aggiornamento di time_spent_hh SOVRASCRIVE il valore esistente con il
