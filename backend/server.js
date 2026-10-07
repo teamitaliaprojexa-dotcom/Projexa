@@ -4247,6 +4247,27 @@ app.get('/api/kpi-mysupport', requireAuth, async (req, res) => {
       fasce: MYSUPPORT_FASCE.map((f) => x[f.key])
     })).sort((a, b) => b.n - a.n || String(a.cliente).localeCompare(String(b.cliente), 'it'));
 
+    // Dettaglio per procedura (solo su richiesta, quando la dashboard ha scelto un cliente con
+    // un clic sul nome): stessi conteggi e fasce, raggruppati per il campo "procedura".
+    let procedure;
+    if (req.query.dettaglio === 'procedura') {
+      const p = await db.query(
+        `SELECT NULLIF(BTRIM(procedura), '') AS procedura, COUNT(*)::int AS n, AVG(${ore}) AS media_ore,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY ${ore}) AS mediana_ore, ${colFasce}
+           FROM mysupport
+          WHERE ${chiusi}${filtri}
+          GROUP BY 1`,
+        params
+      );
+      procedure = p.rows.map((x) => ({
+        procedura: x.procedura || '(procedura non indicata)',
+        n: x.n,
+        media_ore: x.media_ore == null ? null : Number(x.media_ore),
+        mediana_ore: x.mediana_ore == null ? null : Number(x.mediana_ore),
+        fasce: MYSUPPORT_FASCE.map((f) => x[f.key])
+      })).sort((a, b) => b.n - a.n || String(a.procedura).localeCompare(String(b.procedura), 'it'));
+    }
+
     // Andamento mensile (grafico sotto il KPI): chiusure per mese dell'anno scelto (o dell'ultimo
     // con chiusure, se "tutti") e dei 2 anni precedenti, con il tempo medio del mese.
     // Stesso filtro clienti, nessun filtro sull'anno oltre ai tre anni del confronto.
@@ -4268,7 +4289,7 @@ app.get('/api/kpi-mysupport', requireAuth, async (req, res) => {
       m.rows.filter((x) => x.anno === a).forEach((x) => { n[x.mese - 1] = x.n; mediaOre[x.mese - 1] = x.media_ore == null ? null : Number(x.media_ore); });
       return { anno: a, n, media_ore: mediaOre };
     });
-    res.json({ anni, anno: anno || 'tutti', fasce: MYSUPPORT_FASCE, clienti, mesi });
+    res.json({ anni, anno: anno || 'tutti', fasce: MYSUPPORT_FASCE, clienti, procedure, mesi });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -7332,7 +7353,9 @@ const REPORTING_TABLES = {
   todo: { table: 'tasks', label: 'To do List' },
   // View delle commesse (Supporto/CreaDB/ele_commesse.sql): una riga per commessa e
   // componente. commessa_id è un UUID senza foreign key (view): non lo si propone.
-  commesse: { table: 'ele_commesse', label: 'Commesse', hidden: ['commessa_id'] }
+  commesse: { table: 'ele_commesse', label: 'Commesse', hidden: ['commessa_id'] },
+  // Quesiti MySupport importati da Qlik › MySupport (tabella senza scadenza).
+  mysupport: { table: 'mysupport', label: 'MySupport' }
 };
 // Colonne tecniche mai mostrate come campi.
 const REPORTING_HIDDEN_COLUMNS = new Set(['id', 'tenant_id', 'user_id', 'client_id', 'project_id', 'id_roles',

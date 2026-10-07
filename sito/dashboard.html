@@ -1930,6 +1930,8 @@
         .ms-riga.head:hover { background: none; }
         .ms-riga .c.ms-link { cursor: pointer; color: #1D4ED8; }
         .ms-riga .c.ms-link:hover, .ms-riga .c.ms-link:focus-visible { text-decoration: underline; outline: none; }
+        .ms-procedure { margin-top: 0.9rem; padding-top: 0.6rem; border-top: 1px dashed #e2e8f0; }
+        .ms-procedure .ms-riga:not(.head) .c { font-weight: 500; }
         .ms-filtro { margin-bottom: 0.8rem; }
         .ms-chip { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.4rem 0.3rem 0.75rem; border-radius: 999px; background: #EFF6FF; color: #1E40AF; font-size: 0.82rem; }
         .ms-chip button { border: none; background: transparent; color: #1D4ED8; cursor: pointer; padding: 0 0.25rem; }
@@ -5653,6 +5655,7 @@
             // Cliente scelto con un clic sul nome: vale al posto del filtro clienti della dashboard.
             (msCliente ? [msCliente.id] : getSelectedClientIds()).forEach(id => params.append('clientId', id));
             if (sel.value) params.set('anno', sel.value);
+            if (msCliente) params.set('dettaglio', 'procedura');
             try {
                 const res = await fetch(`${API_URL}/kpi-mysupport?${params.toString()}`, { headers: getAuthHeaders() });
                 const d = await res.json().catch(() => ({}));
@@ -5681,6 +5684,12 @@
                     + `<div class="ms-righe"><div class="ms-riga head"><span>Cliente</span><span>Chiusi</span><span>Medio / mediano</span><span>Distribuzione per fascia</span></div>`
                     + clienti.map(c => `<div class="ms-riga"><span class="c${c.client_id && !msCliente ? ' ms-link' : ''}"${c.client_id && !msCliente ? ` data-ms-client="${escapeHtml(c.client_id)}" data-ms-name="${escapeHtml(c.cliente)}" role="button" tabindex="0" title="Mostra solo ${escapeHtml(c.cliente)}"` : ` title="${escapeHtml(c.cliente)}"`}>${escapeHtml(c.cliente)}</span><span class="n">${c.n}</span><span class="m">${msDurata(c.media_ore)} / ${msDurata(c.mediana_ore)}</span>${msBarHtml(c.fasce, fasce)}</div>`).join('')
                     + '</div>'
+                    // Cliente scelto: sotto la sua riga, il dettaglio per procedura.
+                    + (msCliente && Array.isArray(d.procedure) && d.procedure.length
+                        ? `<div class="ms-righe ms-procedure"><div class="ms-riga head"><span>Procedura</span><span>Chiusi</span><span>Medio / mediano</span><span>Distribuzione per fascia</span></div>`
+                            + d.procedure.map(p => `<div class="ms-riga"><span class="c" title="${escapeHtml(p.procedura)}">${escapeHtml(p.procedura)}</span><span class="n">${p.n}</span><span class="m">${msDurata(p.media_ore)} / ${msDurata(p.mediana_ore)}</span>${msBarHtml(p.fasce, fasce)}</div>`).join('')
+                            + '</div>'
+                        : '')
                     + msTrendHtml(d.mesi);
                 msDisegnaTrend(d.mesi);
             } catch (e) {
