@@ -4597,7 +4597,40 @@ app.get('/api/kpi-mysupport', requireAuth, async (req, res) => {
       m.rows.filter((x) => x.anno === a).forEach((x) => { n[x.mese - 1] = x.n; mediaOre[x.mese - 1] = x.media_ore == null ? null : Number(x.media_ore); });
       return { anno: a, n, media_ore: mediaOre };
     });
-    res.json({ anni, anno: anno || 'tutti', fasce: MYSUPPORT_FASCE, clienti, procedure, mesi });
+    // Quesiti NON chiusi (stato_finale diverso da "Chiuso", o vuoto) per cliente e per stato:
+    // sezione sotto il grafico. Sono quelli ancora aperti oggi: nessun filtro sull'anno, stesso
+    // filtro clienti (o cliente scelto con un clic).
+    const aParams = [...base];
+    let aFiltri = '';
+    if (clientIds.length) { aParams.push(clientIds); aFiltri = ` AND client_id = ANY($${aParams.length}::uuid[])`; }
+    const a = await db.query(
+      `SELECT client_id, COALESCE(NULLIF(BTRIM(stato_finale), ''), '(senza stato)') AS stato, COUNT(*)::int AS n
+         FROM mysupport
+        WHERE tenant_id = $1 AND user_id = $2
+          AND LOWER(BTRIM(COALESCE(stato_finale, ''))) <> 'chiuso'${aFiltri}
+        GROUP BY 1, 2`,
+      aParams
+    );
+    const nomiAperti = await resolveClientDescriptions(a.rows.map((x) => x.client_id).filter(Boolean), req.user.tenant_id);
+    const apertiPerCliente = new Map();
+    for (const x of a.rows) {
+      const k = String(x.client_id || '');
+      if (!apertiPerCliente.has(k)) {
+        apertiPerCliente.set(k, {
+          client_id: x.client_id,
+          cliente: (x.client_id && (nomiAperti.get(k) || nomi.get(k))) || '(cliente non abbinato)',
+          n: 0, stati: []
+        });
+      }
+      const c = apertiPerCliente.get(k);
+      c.n += x.n;
+      c.stati.push({ stato: x.stato, n: x.n });
+    }
+    const aperti = [...apertiPerCliente.values()]
+      .map((c) => ({ ...c, stati: c.stati.sort((p, q) => q.n - p.n || p.stato.localeCompare(q.stato, 'it')) }))
+      .sort((p, q) => q.n - p.n || String(p.cliente).localeCompare(String(q.cliente), 'it'));
+
+    res.json({ anni, anno: anno || 'tutti', fasce: MYSUPPORT_FASCE, clienti, procedure, mesi, aperti });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
