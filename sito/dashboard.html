@@ -1968,10 +1968,18 @@
         .ms-stato { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.55rem; border-radius: 999px; background: #f8fafc; border: 1px solid #eef2f7; font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
         .ms-stato i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); display: inline-block; }
         .ms-stato b { color: var(--dark); font-variant-numeric: tabular-nums; }
-        .ms-riga.ms-riga-aperti { grid-template-columns: minmax(0, 220px) 90px minmax(0, 1fr); }
-        .ms-hbar-track { width: 100%; }
-        .ms-hbar { display: flex; height: 20px; min-width: 24px; border-radius: 6px; overflow: hidden; }
-        .ms-hbar > span { background: var(--c); color: #fff; font-size: 0.7rem; font-weight: 700; line-height: 20px; text-align: center; overflow: hidden; white-space: nowrap; text-overflow: clip; min-width: 3px; font-variant-numeric: tabular-nums; }
+        .ms-ap-cliente { padding: 0.55rem 0.6rem 0.7rem; border-top: 1px solid #f1f5f9; }
+        .ms-ap-cliente:first-of-type { border-top: none; }
+        .ms-ap-testa { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.35rem; }
+        .ms-ap-nome { font-size: 0.88rem; font-weight: 700; color: var(--dark); }
+        .ms-ap-nome.ms-link { cursor: pointer; color: #1D4ED8; }
+        .ms-ap-nome.ms-link:hover, .ms-ap-nome.ms-link:focus-visible { text-decoration: underline; outline: none; }
+        .ms-ap-tot { font-size: 0.75rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+        .ms-ap-riga { display: grid; grid-template-columns: minmax(0, 200px) minmax(0, 1fr) 44px; align-items: center; gap: 0.75rem; padding: 0.18rem 0 0.18rem 1.1rem; }
+        .ms-ap-stato { font-size: 0.8rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ms-ap-track { height: 12px; border-radius: 999px; background: #f1f5f9; overflow: hidden; }
+        .ms-ap-bar { height: 100%; min-width: 4px; border-radius: 999px; background: var(--c); }
+        .ms-ap-n { font-size: 0.8rem; font-weight: 700; color: var(--dark); text-align: right; font-variant-numeric: tabular-nums; }
         .gp-card { margin-bottom: 3rem; background: white; padding: 1.75rem 2rem 2rem; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04); }
         .gp-legend { display: flex; gap: 0.9rem; flex-wrap: wrap; font-size: 0.75rem; color: var(--text-muted); }
         .gp-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
@@ -5726,22 +5734,32 @@
             const stati = [...totStati].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'it'));
             const colore = new Map(stati.map(([s], i) => [s, MS_COLORI_STATI[i % MS_COLORI_STATI.length]]));
             const totale = aperti.reduce((t, c) => t + c.n, 0);
-            const chip = (stato, n) => `<span class="ms-stato" style="--c:${colore.get(stato)};"><i></i>${escapeHtml(stato)} <b>${n}</b></span>`;
-            // Barra orizzontale lunga in proporzione al cliente con più quesiti non chiusi,
-            // a pezzi per stato (numero dentro il pezzo; dettaglio passando il mouse).
-            const max = Math.max(...aperti.map(c => c.n)) || 1;
-            const barra = (c) => `<div class="ms-hbar-track"><div class="ms-hbar" style="width:${(c.n / max) * 100}%;">${[...c.stati]
-                .sort((a, b) => stati.findIndex(x => x[0] === a.stato) - stati.findIndex(x => x[0] === b.stato))
-                .map(s => `<span style="--c:${colore.get(s.stato)}; flex:${s.n} 0 0;" title="${escapeHtml(s.stato)}: ${s.n}">${s.n}</span>`).join('')}</div></div>`;
-            const link = (c) => c.client_id && !msCliente
-                ? ` ms-link" data-ms-client="${escapeHtml(c.client_id)}" data-ms-name="${escapeHtml(c.cliente)}" role="button" tabindex="0" title="Mostra solo ${escapeHtml(c.cliente)}`
-                : `" title="${escapeHtml(c.cliente)}`;
+            // Per ogni cliente: nome (clic = scheda cliente, sezione MySupport) con il totale e,
+            // sotto, una riga per stato_finale con la barra orizzontale. Le barre sono in scala
+            // sullo stato più numeroso di tutti i clienti, così si confrontano tra loro.
+            const max = Math.max(...aperti.flatMap(c => c.stati.map(s => s.n))) || 1;
+            const nome = (c) => c.client_id
+                ? `<span class="ms-ap-nome ms-link" data-ms-scheda="${escapeHtml(c.client_id)}" data-ms-name="${escapeHtml(c.cliente)}" role="button" tabindex="0" title="Apri la scheda di ${escapeHtml(c.cliente)} nella sezione MySupport">${escapeHtml(c.cliente)}</span>`
+                : `<span class="ms-ap-nome">${escapeHtml(c.cliente)}</span>`;
             return `<div class="ms-aperti">
                 <div class="ms-sintesi"><span>Ticket non chiusi: <b>${totale}</b></span><span>Clienti: <b>${aperti.length}</b></span></div>
-                <div class="ms-stati">${stati.map(([s, n]) => chip(s, n)).join('')}</div>
-                <div class="ms-righe"><div class="ms-riga ms-riga-aperti head"><span>Cliente</span><span>Non chiusi</span><span>Per stato</span></div>
-                ${aperti.map(c => `<div class="ms-riga ms-riga-aperti"><span class="c${link(c)}">${escapeHtml(c.cliente)}</span><span class="n">${c.n}</span>${barra(c)}</div>`).join('')}
-                </div></div>`;
+                ${aperti.map(c => `<div class="ms-ap-cliente">
+                    <div class="ms-ap-testa">${nome(c)}</div>
+                    ${c.stati.map(s => `<div class="ms-ap-riga">
+                        <span class="ms-ap-stato" title="${escapeHtml(s.stato)}">${escapeHtml(s.stato)}</span>
+                        <div class="ms-ap-track"><div class="ms-ap-bar" style="--c:${colore.get(s.stato)}; width:${(s.n / max) * 100}%;"></div></div>
+                        <span class="ms-ap-n">${s.n}</span></div>`).join('')}
+                </div>`).join('')}
+            </div>`;
+        }
+
+        // Clic sul nome di un cliente nel riquadro «MySupport tkt in gestione»: apre la sua scheda
+        // e porta alla griglia MySupport aperta (come il contatore MySupport della scheda).
+        async function apriSchedaClienteMySupport(clientId, nome) {
+            currentClientId = clientId;
+            await openDetailFlyout('clients', clientId, nome);
+            const listEl = document.getElementById('settingsDetailList');
+            if (listEl && currentDetailArgument === clientId) vaiAllaGrigliaDelKpi(listEl, 'mysupport');
         }
 
         async function loadKpiMySupport() {
@@ -5823,14 +5841,20 @@
                 // Si resta sul riquadro in cui si è cliccato.
                 el.closest('.gp-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             };
+            const scheda = (el) => apriSchedaClienteMySupport(el.dataset.msScheda, el.dataset.msName || 'Cliente');
             content?.addEventListener('click', (e) => {
                 if (e.target.closest('[data-ms-tutti]')) { msCliente = null; loadKpiMySupport(); return; }
+                const sk = e.target.closest('[data-ms-scheda]');
+                if (sk) { scheda(sk); return; }
                 const el = e.target.closest('[data-ms-client]');
                 if (el) scegli(el);
             });
             content?.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                const sk = e.target.closest('[data-ms-scheda]');
+                if (sk) { e.preventDefault(); scheda(sk); return; }
                 const el = e.target.closest('[data-ms-client]');
-                if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); scegli(el); }
+                if (el) { e.preventDefault(); scegli(el); }
             });
         }
 
