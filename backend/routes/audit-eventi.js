@@ -10,8 +10,9 @@ import { registraEmail } from '../config/audit.js';
 const router = express.Router();
 router.use(requireAuth);
 
-// attivita = email «Attività a tuo carico» della To-Do List (filtro Assegnato a › Invia email).
-const TIPI = new Set(['recap', 'trascrizione', 'attivita']);
+// L'email «Attività a tuo carico» della To-Do List NON si registra: Projexa ne prepara solo il
+// testo, l'invio lo fa l'utente.
+const TIPI = new Set(['recap', 'trascrizione']);
 const SERVIZI = new Set(['gmail_web', 'programma_posta']);
 
 router.post('/email', (req, res) => {

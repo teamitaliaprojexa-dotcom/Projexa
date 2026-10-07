@@ -6227,13 +6227,7 @@
                 showNotification('Testo lungo: è stato copiato negli appunti, incollalo nell\'email con Ctrl+V', 'info');
             }
             if (!to.length) showNotification(`Nessuna email in rubrica per ${name}: inserisci il destinatario nell'email`, 'info');
-            // Log come per il recap: Projexa registra che l'email è stata preparata e aperta.
-            fetch(`${API_URL}/audit/email`, {
-                method: 'POST', keepalive: true,
-                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tipo: 'attivita', a: to, cc: [], oggetto: subject,
-                    riferimento: name, servizio: kind === 'google' ? 'gmail_web' : 'programma_posta' })
-            }).catch(() => {});
+            // Nessuna riga nel log email: Projexa prepara solo il testo, l'email la invia l'utente.
             if (kind === 'mailto') window.location.href = url;
             else if (tab && !tab.closed) tab.location.href = url;
             else window.open(url, '_blank', 'noopener');
