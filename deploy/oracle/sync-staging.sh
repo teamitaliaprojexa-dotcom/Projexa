@@ -60,12 +60,24 @@ for name in "${NAMES[@]}"; do
   # Prima di --clean si tolgono TUTTE le foreign key di staging (schema public): se in staging
   # esiste una FK che in produzione non c'è (es. issue_modulo_fkey -> licenze_app_pkey), il DROP
   # della chiave primaria referenziata fallirebbe. Le FK di produzione vengono ricreate dal dump.
+  # Stesso discorso per le viste (anche materializzate): una vista di staging che dipende da una
+  # tabella (es. ele_commesse -> projects) bloccherebbe il DROP della tabella; quelle di
+  # produzione vengono ricreate dal dump.
   # Tutto in un'unica transazione (psql -1): se qualcosa fallisce staging resta com'era.
   {
     cat <<'SQL'
 DO $$
 DECLARE r record;
 BEGIN
+  FOR r IN SELECT c.relname, c.relkind
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE c.relkind IN ('v', 'm') AND n.nspname = 'public'
+             AND NOT EXISTS (SELECT 1 FROM pg_depend d
+                             WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
+  LOOP
+    EXECUTE format('DROP %s IF EXISTS public.%I CASCADE',
+                   CASE r.relkind WHEN 'm' THEN 'MATERIALIZED VIEW' ELSE 'VIEW' END, r.relname);
+  END LOOP;
   FOR r IN SELECT c.conrelid::regclass AS tbl, c.conname
            FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace
            WHERE c.contype = 'f' AND n.nspname = 'public'

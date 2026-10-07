@@ -112,6 +112,8 @@ function parseEnergy(raw) {
 // riunione, poi quelli senza cliente) e, per ultima, una frase fissa d'esempio per lo stile.
 // Whisper ne legge al massimo ~224 token: il testo viene tenuto entro PROMPT_MAX_CHARS,
 // togliendo per primi i termini in coda (i generici).
+// Niente etichette "Nome:" nel prompt ("Cliente: X.", "Partecipanti: ..."): Whisper le
+// ricopiava nella trascrizione ("Yanko: Cliente: Va bene, ok."). Si scrivono come frasi.
 const PROMPT_MAX_CHARS = 700;
 const PROMPT_STYLE = 'Buongiorno a tutti, possiamo iniziare. Allora, come dicevamo, facciamo il punto della situazione: mi sentite? Sì, perfetto.';
 
@@ -145,9 +147,9 @@ async function buildWhisperPrompt(user, idCalendar, names) {
     const me = await speakerName(user);
     const persone = [...new Set([me, ...(names || [])].filter(Boolean))];
     const head = [
-      m.oggetto ? `Riunione: ${String(m.oggetto).trim()}.` : '',
-      persone.length ? `Partecipanti: ${persone.join(', ')}.` : '',
-      cliente ? `Cliente: ${cliente}.` : ''
+      m.oggetto ? `Riunione ${String(m.oggetto).trim()}.` : '',
+      persone.length ? `Partecipano ${persone.join(', ')}.` : '',
+      cliente ? `Per il cliente ${cliente}.` : ''
     ].filter(Boolean).join(' ');
     // Termini finché c'è spazio (i primi sono quelli del cliente).
     const room = PROMPT_MAX_CHARS - head.length - PROMPT_STYLE.length - 20;
@@ -158,7 +160,7 @@ async function buildWhisperPrompt(user, idCalendar, names) {
       kept.push(term);
       len += term.length + 2;
     }
-    return [head, kept.length ? `Si parla di: ${kept.join(', ')}.` : '', PROMPT_STYLE].filter(Boolean).join(' ');
+    return [head, kept.length ? `Si parla di ${kept.join(', ')}.` : '', PROMPT_STYLE].filter(Boolean).join(' ');
   } catch (e) {
     console.warn('⚠️ PROMPT WHISPER:', e.message);
     return PROMPT_STYLE;
@@ -210,12 +212,56 @@ function mergeLines(lines) {
   return out;
 }
 
+// Pulizia dei segmenti di Whisper (già in ordine di tempo) prima di unirli in righe:
+//  - via le etichette ricopiate dal prompt a inizio testo ("Cliente: ...", prompt vecchi);
+//  - via le ripetizioni: Whisper a volte riscrive una frase appena detta ("cosa che mi sembra
+//    un po' strana" due volte). Un segmento di almeno DUP_MIN_WORDS parole già contenuto nel
+//    testo dei segmenti precedenti più vicini si scarta; se invece ripete solo la coda del
+//    precedente (almeno DUP_MIN_WORDS parole) si tiene la parte nuova. Le ripetizioni brevi
+//    ("sì, sì", "ok, ok") restano: spesso sono parlato vero.
+const PROMPT_LABEL_RE = /^(?:cliente|partecipanti|riunione|si parla di)\s*:\s*/i;
+const DUP_MIN_WORDS = 3;
+const DUP_LOOKBACK = 3; // segmenti precedenti con cui confrontare
+
+const dupWords = (s) => String(s || '').toLowerCase().normalize('NFC')
+  .replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+
+function cleanSegments(lines) {
+  const out = [];
+  for (const l of lines) {
+    let text = String(l.text || '').trim();
+    while (PROMPT_LABEL_RE.test(text)) text = text.replace(PROMPT_LABEL_RE, '').trim();
+    if (!text) continue;
+    const words = dupWords(text);
+    if (!l.cont && words.length >= DUP_MIN_WORDS && out.length) {
+      const prev = out.slice(-DUP_LOOKBACK).map((x) => dupWords(x.text));
+      // Ripetizione intera di una frase appena detta.
+      const flat = ` ${prev.flat().join(' ')} `;
+      if (flat.includes(` ${words.join(' ')} `)) continue;
+      // Ripete la coda del segmento precedente: si toglie la parte ripetuta.
+      const last = prev[prev.length - 1];
+      let k = Math.min(last.length, words.length - 1);
+      for (; k >= DUP_MIN_WORDS; k--) {
+        if (last.slice(-k).join(' ') === words.slice(0, k).join(' ')) break;
+      }
+      if (k >= DUP_MIN_WORDS) {
+        // Si tagliano le prime k parole del testo originale (punteggiatura compresa).
+        const re = new RegExp(`^(?:[^\\p{L}\\p{N}]*[\\p{L}\\p{N}]+){${k}}[^\\p{L}\\p{N}]*`, 'u');
+        text = text.replace(re, '').trim();
+        if (!text) continue;
+      }
+    }
+    out.push({ ...l, text });
+  }
+  return out;
+}
+
 // Righe "[hh:mm:ss] Nome: testo" di un blocco, con l'intestazione di sessione se presente.
 function formatLines(lines, offset, startLabel) {
   lines.sort((a, b) => a.start - b.start);
   let add = '';
   if (startLabel) add += `\n--- ${String(startLabel).slice(0, 80)} ---\n`;
-  for (const l of mergeLines(lines)) add += `[${hhmmss((Number(offset) || 0) + l.start)}] ${l.who ? `${l.who}: ` : ''}${l.text}\n`;
+  for (const l of mergeLines(cleanSegments(lines))) add +=`[${hhmmss((Number(offset) || 0) + l.start)}] ${l.who ? `${l.who}: ` : ''}${l.text}\n`;
   return add;
 }
 
