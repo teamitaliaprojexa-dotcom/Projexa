@@ -18,7 +18,7 @@
 // ============================================================================
 import db from '../config/database.js';
 import { eseguiAggiornaIntegrazioni } from './aggiornaIntegrazioni.js';
-import { eseguiBackupDb, eseguiCopiaStaging } from './scriptVm.js';
+import { eseguiBackupDb, eseguiCopiaStaging, eseguiPuliziaVm } from './scriptVm.js';
 import { eseguiNotificheScadenze } from './notifiche.js';
 import { conContestoAudit } from '../config/auditContext.js';
 
@@ -37,6 +37,8 @@ const JOBS = {
   // tenant e utente_config della riga servono solo a indicare chi li "possiede".
   backup_db: () => eseguiBackupDb(),
   copia_staging_neon: () => eseguiCopiaStaging(),
+  // Pulizia di cache e log della VM che non si puliscono da soli (vedi scriptVm.js).
+  pulizia_vm: () => eseguiPuliziaVm(),
   // Notifiche delle scadenze (To-Do), per tutti i tenant: vedi jobs/notifiche.js.
   notifiche_scadenze: () => eseguiNotificheScadenze()
 };
@@ -49,6 +51,7 @@ export const INFO_JOB = {
   aggiorna_integrazioni: { etichetta: 'Aggiorna Integrazioni (Jira)', jira: true },
   backup_db: { etichetta: 'Backup database VM su Object Storage', jira: false },
   copia_staging_neon: { etichetta: 'Copia database VM su staging Neon', jira: false },
+  pulizia_vm: { etichetta: 'Pulizia cache e log della VM', jira: false },
   notifiche_scadenze: { etichetta: 'Notifiche delle scadenze (To-Do)', jira: false }
 };
 
