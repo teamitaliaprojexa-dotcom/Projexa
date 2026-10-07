@@ -679,7 +679,10 @@ app.get('/api/page-labels', requireAuth, async (req, res) => {
 const DASHBOARD_TASK_HIDDEN_COLUMNS = new Set([
   'id', 'tenant_id', 'user_id', 'created_by', 'created_at',
   'data_inizio', 'scadenza', 'id_roles', 'id_roles_write',
-  'appo_task_2', 'appo_task_3', 'appo_task_4'
+  'appo_task_2', 'appo_task_3', 'appo_task_4',
+  // Assegnatario scritto a mano (non in rubrica): non è una colonna a sé in griglia/form, si
+  // mostra in "Assegnato a" quando assigned_to è vuoto (Supporto/CreaDB/tasks_assegnato_libero.sql).
+  'assigned_to_text'
 ]);
 const DASHBOARD_TASK_READONLY_COLUMNS = new Set(['updated_at']);
 
@@ -707,6 +710,13 @@ function dashboardTaskInput(body, metadata) {
     let value = rawValue;
     if (typeof value === 'string') value = value.trim();
     clean[column] = value === '' ? null : value;
+  }
+  // "Assegnato a" libero: nominativo scritto a mano, salvato senza toccare la rubrica.
+  // Vale solo senza contatto di rubrica (assigned_to); se la colonna non c'è si ignora.
+  if (Object.prototype.hasOwnProperty.call(source, 'assigned_to_text')
+      && metadata.some(column => column.column_name === 'assigned_to_text')) {
+    const text = String(source.assigned_to_text ?? '').replace(/\s+/g, ' ').trim().slice(0, 255);
+    clean.assigned_to_text = clean.assigned_to ? null : (text || null);
   }
   return clean;
 }
@@ -772,6 +782,7 @@ app.get('/api/dashboard/tasks', requireAuth, async (req, res) => {
     const visibleMetadata = metadata.filter(
       column => !DASHBOARD_TASK_HIDDEN_COLUMNS.has(column.column_name)
     );
+    const hasAssignedText = metadata.some(column => column.column_name === 'assigned_to_text');
 
     const fkResult = await db.query(
       `SELECT kcu.column_name,
@@ -803,10 +814,11 @@ app.get('/api/dashboard/tasks', requireAuth, async (req, res) => {
       let resolvedForeign = false;
 
       // assigned_to contiene rubrica.id; in griglia viene mostrato rubrica.nominativo.
+      // Senza contatto: il nominativo scritto a mano (assigned_to_text), se c'è.
       if (column === 'assigned_to' && metadata.udt_name === 'uuid') {
         selectExpressions.push('src."assigned_to" AS "__raw_assigned_to"');
         selectExpressions.push(
-          `CASE WHEN src.assigned_to IS NULL THEN NULL ELSE COALESCE((
+          `CASE WHEN src.assigned_to IS NULL THEN ${hasAssignedText ? "NULLIF(TRIM(src.assigned_to_text), '')" : 'NULL'} ELSE COALESCE((
              SELECT NULLIF(TRIM(r.nominativo::text), '')
              FROM rubrica r
              WHERE r.id = src.assigned_to

@@ -6572,7 +6572,8 @@
         // strict = true: il testo deve corrispondere a un contatto (altrimenti torna alla scelta
         // precedente); false: testo libero, il contatto serve solo a compilare più in fretta.
         // onChoose(option | null) viene chiamato a ogni scelta.
-        function attachRubricaAutocomplete(input, data, { strict = false, onChoose = () => {} } = {}) {
+        // freeText = true: con nessun risultato si avvisa che verrà salvato il testo scritto.
+        function attachRubricaAutocomplete(input, data, { strict = false, freeText = false, onChoose = () => {} } = {}) {
             const list = document.createElement('div');
             list.className = 'task-assignee-list rubrica-ac-list';
             list.setAttribute('role', 'listbox');
@@ -6602,7 +6603,7 @@
                 // Nessun risultato: pulsante verde "+ Aggiungi" per creare il contatto in rubrica.
                 list.innerHTML = shown.length
                     ? shown.map((option, index) => `<div class="task-assignee-item${index === active ? ' active' : ''}" role="option" data-index="${index}">${escapeHtml(option.label)}${option.email ? `<small>${escapeHtml(option.email)}</small>` : ''}</div>`).join('')
-                    : `<div class="task-assignee-empty"><span>${data.options.length ? 'Nessun contatto trovato' : 'Rubrica vuota'}</span><button type="button" class="task-assignee-add" title="Aggiungi un contatto alla rubrica"><i class="fas fa-plus"></i> Aggiungi</button></div>`;
+                    : `<div class="task-assignee-empty"><span>${data.options.length ? 'Nessun contatto trovato' : 'Rubrica vuota'}${freeText ? ': verrà salvato il testo scritto' : ''}</span><button type="button" class="task-assignee-add" title="Aggiungi un contatto alla rubrica"><i class="fas fa-plus"></i> Aggiungi</button></div>`;
                 position();
                 list.classList.add('open');
             };
@@ -6664,19 +6665,35 @@
             return { choose, setSelectedText: text => { selectedText = text; } };
         }
 
-        // Campo "Assegnato a:" del task: si sceglie un contatto (salvato come rubrica.id).
+        // Campo "Assegnato a:" del task: si cerca e si sceglie un contatto della rubrica (salvato
+        // come rubrica.id) oppure si scrive un nominativo qualsiasi, salvato così com'è
+        // (assigned_to_text) senza aggiungerlo alla rubrica, come l'Owner delle Issue.
         async function setupTaskAssigneeSearch(selectedValue = '', selectedLabel = '') {
             const hidden = document.getElementById('taskField_assigned_to');
             const input = document.getElementById('taskField_assigned_to_search');
             if (!hidden || !input) return;
-            hidden.value = selectedValue || '';
-            input.value = selectedValue ? (selectedLabel && selectedLabel !== selectedValue ? selectedLabel : '') : '';
-            const loaded = await loadRubrica(selectedValue);
+            // Senza contatto il valore ricevuto è il nominativo libero (non un id di rubrica).
+            const isId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(selectedValue || ''));
+            hidden.value = isId ? selectedValue : '';
+            input.value = isId
+                ? (selectedLabel && selectedLabel !== selectedValue ? selectedLabel : '')
+                : String(selectedLabel || selectedValue || '');
+            const loaded = await loadRubrica(isId ? selectedValue : '');
             const data = { options: loaded.options.slice() };
             const current = data.options.find(option => String(option.value) === String(hidden.value));
             if (current) input.value = current.name || current.label;
+            // Scrivendo si stacca il contatto scelto: resta il testo, finché non se ne sceglie un altro.
+            input.addEventListener('input', () => { hidden.value = ''; });
+            // Testo uguale al nominativo di un solo contatto: si aggancia quel contatto.
+            input.addEventListener('blur', () => {
+                if (hidden.value) return;
+                const text = input.value.trim().toLocaleLowerCase('it-IT');
+                const exact = text ? data.options.filter(option => String(option.name || option.label).toLocaleLowerCase('it-IT') === text) : [];
+                if (exact.length === 1) hidden.value = exact[0].value;
+            });
             const ac = attachRubricaAutocomplete(input, data, {
-                strict: true,
+                strict: false,
+                freeText: true,
                 onChoose: option => { hidden.value = option ? option.value : ''; }
             });
             ac.setSelectedText(input.value);
@@ -6921,6 +6938,11 @@
                 if (!input) return;
                 values[column.name] = column.type === 'boolean' ? input.checked : input.value;
             });
+            // "Assegnato a" senza contatto di rubrica: il nominativo scritto (vuoto = nessuno).
+            const assigneeSearch = document.getElementById('taskField_assigned_to_search');
+            if (assigneeSearch) {
+                values.assigned_to_text = values.assigned_to ? '' : assigneeSearch.value.trim();
+            }
 
             const saveButton = document.getElementById('taskModalSave');
             saveButton.disabled = true;
