@@ -819,6 +819,29 @@
         .ckp-del { display: inline-flex; align-items: center; gap: 0.4rem; border: 1px solid #FCA5A5; background: #FEF2F2; color: #B91C1C; border-radius: 9px; padding: 0.35rem 0.8rem; font: inherit; font-size: 0.82rem; font-weight: 700; cursor: pointer; }
         .ckp-del:hover { background: #FEE2E2; }
         .ckp-del:disabled { opacity: 0.6; cursor: wait; }
+        /* Righe custom e «Abilita modifica» */
+        .ckp-mod { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; font-weight: 600; color: #4B5563; cursor: pointer; user-select: none; white-space: nowrap; }
+        .ckp-mod input { position: absolute; opacity: 0; width: 0; height: 0; }
+        .ckp-mod-sw { position: relative; width: 32px; height: 18px; border-radius: 999px; background: #D1D5DB; transition: background 0.15s; flex: 0 0 auto; }
+        .ckp-mod-sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.25); transition: transform 0.15s; }
+        .ckp-mod input:checked + .ckp-mod-sw { background: #16A34A; }
+        .ckp-mod input:checked + .ckp-mod-sw::after { transform: translateX(14px); }
+        .ckp-mod input:focus-visible + .ckp-mod-sw { box-shadow: 0 0 0 3px #DCFCE7; }
+        .ckp-table tr.custom td.desc { box-shadow: inset 3px 0 0 #A5B4FC; }
+        .ckp-table.edit tr.custom td.desc { background: #F5F7FF; }
+        .ckp-grip { color: #94A3B8; cursor: grab; padding: 0 0.15rem; }
+        .ckp-grip:active { cursor: grabbing; }
+        .ckp-nome { flex: 1; min-width: 12rem; border: 1px solid #C7D2FE; border-radius: 7px; padding: 0.25rem 0.5rem; font: inherit; font-weight: inherit; color: #1F2937; background: #fff; }
+        .ckp-nome:focus { outline: none; border-color: #6366F1; box-shadow: 0 0 0 3px #E0E7FF; }
+        .ckp-riga-edit { display: flex; align-items: center; gap: 0.2rem; }
+        .ckp-riga-edit > .ckp-desc-wrap { flex: 1; display: flex; align-items: center; min-width: 0; }
+        .ckp-riga-edit > [data-aggiungi] { margin-left: auto; }
+        .ckp-riga-btn { border: 1px solid #E5E7EB; background: #F9FAFB; color: #4B5563; width: 24px; height: 24px; border-radius: 6px; font-size: 0.7rem; cursor: pointer; display: inline-grid; place-items: center; padding: 0; margin-left: 0.4rem; vertical-align: middle; flex: 0 0 auto; }
+        .ckp-riga-btn:hover { background: #EEF2FF; color: #4338CA; border-color: #C7D2FE; }
+        .ckp-riga-btn.del:hover { background: #FEF2F2; color: #B91C1C; border-color: #FCA5A5; }
+        .ckp-table tr.trascinata { opacity: 0.4; }
+        .ckp-table tr.drop-sopra td { box-shadow: inset 0 2px 0 #6366F1; }
+        .ckp-table tr.drop-sotto td { box-shadow: inset 0 -2px 0 #6366F1; }
         .drag-handle { cursor: grab; }
         .drag-handle:active { cursor: grabbing; }
         /* Evidenzia in verde la label sotto il mouse quando è spostabile */
@@ -11916,19 +11939,58 @@
             if (m) return m;
             document.body.insertAdjacentHTML('beforeend', `<div class="ckp-overlay" id="ckpOverlay" role="dialog" aria-modal="true" aria-labelledby="ckpTitle">
                 <div class="ckp-box">
-                    <div class="ckp-head"><img src="checklist.png" alt=""><h3 id="ckpTitle">Check List<small id="ckpSub"></small></h3><button type="button" class="ckp-close" id="ckpClose" aria-label="Chiudi">&times;</button></div>
+                    <div class="ckp-head"><img src="checklist.png" alt=""><h3 id="ckpTitle">Check List<small id="ckpSub"></small></h3><label class="ckp-mod" title="Aggiungi, rinomina, sposta ed elimina fasi e attività custom del progetto"><input type="checkbox" id="ckpModifica"><span class="ckp-mod-sw"></span>Abilita modifica</label><button type="button" class="ckp-close" id="ckpClose" aria-label="Chiudi">&times;</button></div>
                     <div class="ckp-body" id="ckpBody"></div>
-                    <div class="ckp-foot"><span class="ckp-foot-testo" id="ckpFoot"></span><button type="button" class="ckp-del" id="ckpElimina" title="Cancella tutta la check list di questo progetto"><i class="fas fa-trash"></i> Elimina</button></div>
+                    <div class="ckp-foot"><span class="ckp-foot-testo" id="ckpFoot"></span><button type="button" class="ckp-agg" id="ckpNuovaFase" hidden title="Aggiunge una fase custom in fondo alla check list"><i class="fas fa-plus"></i> Fase</button><button type="button" class="ckp-del" id="ckpElimina" title="Cancella tutta la check list di questo progetto"><i class="fas fa-trash"></i> Elimina</button></div>
                 </div></div>`);
             m = document.getElementById('ckpOverlay');
+            // «Abilita modifica»: ridisegna la finestra con i comandi per le righe custom.
+            document.getElementById('ckpModifica').addEventListener('change', (e) => {
+                ckpModifica = e.target.checked;
+                if (ckpUltimi) ckpDisegna(ckpUltimi.projectId, ckpUltimi.d);
+            });
             const chiudi = () => m.classList.remove('open');
             document.getElementById('ckpClose').addEventListener('click', chiudi);
             m.addEventListener('click', (e) => { if (e.target === m) chiudi(); });
             document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && m.classList.contains('open')) chiudi(); });
             return m;
         }
+        // Righe custom (fasi/attività aggiunte a mano nel progetto, non nella configurazione):
+        // con «Abilita modifica» si aggiungono (+ sulle fasi per un'attività, «+ Fase» in basso),
+        // si rinominano, si eliminano e si spostano trascinandole dalla maniglia. Il server le
+        // tiene dietro alla riga dopo cui sono state messe, anche quando la check list si
+        // riallinea alla configurazione all'apertura.
+        let ckpModifica = false;
+        let ckpUltimi = null; // { projectId, d }: ultimo disegno, per ridisegnare al cambio modalità
+        let ckpDaFocalizzare = null; // riga custom appena creata: si mette il cursore sul nome
+        async function ckpChiama(url, method, body) {
+            const r = await fetch(`${API_URL}/projects/checklist${url}`, {
+                method,
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                ...(body ? { body: JSON.stringify(body) } : {})
+            });
+            const x = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(x.error || `Errore ${r.status}`);
+            return x;
+        }
         function ckpDisegna(projectId, d) {
+            ckpUltimi = { projectId, d };
             const rows = d.rows || [];
+            const modifica = ckpModifica;
+            const nuovaFase = document.getElementById('ckpNuovaFase');
+            if (nuovaFase) {
+                nuovaFase.hidden = !modifica;
+                nuovaFase.onclick = async () => {
+                    nuovaFase.disabled = true;
+                    try {
+                        const x = await ckpChiama('/custom', 'POST', { projectId, livello: 'fase', description: 'Nuova fase', dopoId: rows.length ? rows[rows.length - 1].id : null });
+                        ckpDaFocalizzare = String(x.id);
+                        ckpDisegna(projectId, { ...d, rows: x.rows });
+                        ckpAggiornaFlagDaRighe(x.rows);
+                    } catch (err) { showNotification('Errore: ' + err.message, 'info'); }
+                    finally { nuovaFase.disabled = false; }
+                };
+            }
             // Elimina: cancella tutta la check list del progetto, dopo due conferme.
             const del = document.getElementById('ckpElimina');
             if (del) {
@@ -11982,11 +12044,18 @@
             // Fasi con attività: Check calcolato dal server (fatta quando lo sono tutte le attività).
             const sezioneDi = (r) => `${r.padre}|${r.licenza || ''}`;
             const conAttivita = new Set(rows.filter(r => Number(r.figlio || 0) > 0).map(sezioneDi));
-            body.innerHTML = `<table class="ckp-table"><tbody>${rows.map(r => {
+            body.innerHTML = `<table class="ckp-table${modifica ? ' edit' : ''}"><tbody>${rows.map(r => {
                 const padre = Number(r.figlio || 0) === 0;
                 const auto = padre && conAttivita.has(sezioneDi(r));
-                return `<tr class="${padre ? 'padre' : 'figlio'}${auto ? ' auto' : ''}" data-id="${escapeHtml(r.id)}">
-                    <td class="desc">${padre && r.licenza ? frecce(r) : ''}${ckpCellaDesc(r, String(r.id) === ckpUltimaVoce, auto)}</td>
+                const scrivibile = r.__can_write !== false;
+                // Modifica: le custom hanno maniglia, nome modificabile e cestino; ogni fase ha il
+                // + per aggiungere un'attività custom in fondo alla sua sezione.
+                const desc = modifica && r.custom && scrivibile
+                    ? `<span class="ckp-desc-wrap"><i class="fas fa-grip-vertical ckp-grip" title="Trascina per spostare"></i><input type="text" class="ckp-nome" maxlength="255" value="${escapeHtml(r.description || '')}" aria-label="Descrizione"><button type="button" class="ckp-riga-btn del" data-elimina title="Elimina${padre ? ' la fase e le sue attività custom' : ''}"><i class="fas fa-trash"></i></button></span>`
+                    : ckpCellaDesc(r, String(r.id) === ckpUltimaVoce, auto);
+                const piu = modifica && padre ? `<button type="button" class="ckp-riga-btn" data-aggiungi title="Aggiungi un'attività in questa fase"><i class="fas fa-plus"></i></button>` : '';
+                return `<tr class="${padre ? 'padre' : 'figlio'}${auto ? ' auto' : ''}${r.custom ? ' custom' : ''}" data-id="${escapeHtml(r.id)}">
+                    <td class="desc">${modifica ? `<div class="ckp-riga-edit">${desc}${piu}</div>` : `${padre && r.licenza ? frecce(r) : ''}${desc}`}</td>
                     <td class="c"><input type="checkbox" ${r.check_ok === true ? 'checked' : ''} ${r.__can_write === false ? 'disabled title="Sola lettura per il tuo ruolo"' : ''} aria-label="Check"></td>
                     <td class="d">${ckpCellaData(r, auto)}</td></tr>`;
             }).join('')}</tbody></table>`;
@@ -12008,8 +12077,104 @@
                 ckpUltimaVoce = null;
                 ckpAggiornaFlagDaRighe(x.rows || rows);
             };
+            // Risposta del server a una modifica delle custom: si ridisegna mantenendo lo scroll.
+            const ridisegna = (x) => {
+                const scroll = body.scrollTop;
+                ckpDisegna(projectId, { ...d, rows: x.rows || rows });
+                body.scrollTop = scroll;
+                ckpAggiornaFlagDaRighe(x.rows || rows);
+            };
+            if (ckpDaFocalizzare) {
+                const inp = body.querySelector(`tr[data-id="${CSS.escape(ckpDaFocalizzare)}"] .ckp-nome`);
+                ckpDaFocalizzare = null;
+                if (inp) { inp.scrollIntoView({ block: 'nearest' }); inp.focus(); inp.select(); }
+            }
+            // Trascinamento delle custom (solo dalla maniglia): una fase si porta dietro le sue
+            // attività custom; il server riceve l'ordine completo e ricalcola le posizioni.
+            let trascinate = null;
+            const pulisciDrop = () => body.querySelectorAll('.drop-sopra, .drop-sotto').forEach(t => t.classList.remove('drop-sopra', 'drop-sotto'));
+            body.onmousedown = (e) => {
+                const grip = e.target.closest('.ckp-grip');
+                const tr = grip && grip.closest('tr[data-id]');
+                if (tr) tr.draggable = true;
+            };
+            // Clic sulla maniglia senza trascinare: la riga torna non trascinabile.
+            body.onmouseup = () => { if (!trascinate) body.querySelectorAll('tr[draggable="true"]').forEach(t => { t.draggable = false; }); };
+            body.ondragstart = (e) => {
+                const tr = e.target.closest && e.target.closest('tr[data-id]');
+                if (!tr || !tr.draggable) { e.preventDefault(); return; }
+                const i = rows.findIndex(r => String(r.id) === tr.dataset.id);
+                trascinate = [String(rows[i].id)];
+                if (Number(rows[i].figlio || 0) === 0) {
+                    for (let j = i + 1; j < rows.length && Number(rows[j].figlio || 0) > 0 && rows[j].custom; j++) trascinate.push(String(rows[j].id));
+                }
+                trascinate.forEach(id => body.querySelector(`tr[data-id="${CSS.escape(id)}"]`)?.classList.add('trascinata'));
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', tr.dataset.id);
+            };
+            body.ondragover = (e) => {
+                if (!trascinate) return;
+                const tr = e.target.closest('tr[data-id]');
+                if (!tr || trascinate.includes(tr.dataset.id)) { pulisciDrop(); return; }
+                e.preventDefault();
+                const box = tr.getBoundingClientRect();
+                const sopra = e.clientY < box.top + box.height / 2;
+                pulisciDrop();
+                tr.classList.add(sopra ? 'drop-sopra' : 'drop-sotto');
+            };
+            body.ondragend = () => {
+                pulisciDrop();
+                body.querySelectorAll('tr.trascinata').forEach(t => t.classList.remove('trascinata'));
+                body.querySelectorAll('tr[draggable="true"]').forEach(t => { t.draggable = false; });
+                trascinate = null;
+            };
+            body.ondrop = async (e) => {
+                if (!trascinate) return;
+                e.preventDefault();
+                const tr = e.target.closest('tr[data-id]');
+                const sotto = tr && tr.classList.contains('drop-sotto');
+                const blocco = trascinate;
+                body.ondragend();
+                if (!tr || blocco.includes(tr.dataset.id)) return;
+                const ids = rows.map(r => String(r.id)).filter(id => !blocco.includes(id));
+                ids.splice(ids.indexOf(tr.dataset.id) + (sotto ? 1 : 0), 0, ...blocco);
+                try { ridisegna(await ckpChiama('/ordine-custom', 'PUT', { projectId, ids })); }
+                catch (err) { showNotification('Errore: ' + err.message, 'info'); ckpDisegna(projectId, d); }
+            };
+            // Invio sul nome: conferma (blur -> change). Esc: annulla la modifica.
+            body.onkeydown = (e) => {
+                const inp = e.target.closest('.ckp-nome');
+                if (!inp) return;
+                if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+                else if (e.key === 'Escape') { e.stopPropagation(); inp.value = inp.defaultValue; inp.blur(); }
+            };
             // Clic sul flag di una voce fatta: toglie la spunta (come togliere la casella).
             body.onclick = async (e) => {
+                const piu = e.target.closest('[data-aggiungi]');
+                if (piu) {
+                    // Nuova attività custom in fondo alla sezione della fase.
+                    const i = rows.findIndex(r => String(r.id) === piu.closest('tr[data-id]').dataset.id);
+                    let j = i;
+                    while (j + 1 < rows.length && Number(rows[j + 1].figlio || 0) > 0) j++;
+                    piu.disabled = true;
+                    try {
+                        const x = await ckpChiama('/custom', 'POST', { projectId, livello: 'attivita', description: 'Nuova attività', dopoId: rows[j].id });
+                        ckpDaFocalizzare = String(x.id);
+                        ridisegna(x);
+                    } catch (err) { showNotification('Errore: ' + err.message, 'info'); piu.disabled = false; }
+                    return;
+                }
+                const elimina = e.target.closest('[data-elimina]');
+                if (elimina) {
+                    const tr = elimina.closest('tr[data-id]');
+                    const r = rows.find(x => String(x.id) === tr.dataset.id);
+                    const fase = Number(r.figlio || 0) === 0;
+                    if (!confirm(`Eliminare ${fase ? 'la fase' : "l'attività"} «${r.description}»${fase ? ' e le sue attività custom' : ''}?`)) return;
+                    elimina.disabled = true;
+                    try { ridisegna(await ckpChiama(`/custom/${encodeURIComponent(tr.dataset.id)}?projectId=${encodeURIComponent(projectId)}`, 'DELETE')); }
+                    catch (err) { showNotification('Errore: ' + err.message, 'info'); elimina.disabled = false; }
+                    return;
+                }
                 const sp = e.target.closest('[data-sposta]');
                 if (sp) {
                     const elenco = [...(sezioni.get(String(sp.dataset.padre)) || [])];
@@ -12045,6 +12210,15 @@
                 const el = e.target;
                 const tr = el.closest('tr[data-id]');
                 if (!tr) return;
+                if (el.classList.contains('ckp-nome')) {
+                    // Nuovo nome di una riga custom (vuoto: si torna al precedente).
+                    const nome = el.value.trim();
+                    if (!nome || nome === el.defaultValue) { el.value = el.defaultValue; return; }
+                    el.disabled = true;
+                    try { ridisegna(await ckpChiama(`/custom/${encodeURIComponent(tr.dataset.id)}`, 'PUT', { projectId, description: nome })); }
+                    catch (err) { el.value = el.defaultValue; el.disabled = false; showNotification('Errore: ' + err.message, 'info'); }
+                    return;
+                }
                 if (el.type === 'checkbox') {
                     el.disabled = true;
                     try { await salva(tr, { check_ok: el.checked }); }
@@ -12108,6 +12282,9 @@
                 const d = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
                 const m = ckpModal();
+                // A ogni apertura si parte in sola consultazione (modifica spenta).
+                ckpModifica = false;
+                document.getElementById('ckpModifica').checked = false;
                 ckpDisegna(projectId, d);
                 m.classList.add('open');
                 if ((d.rows || []).length) ckpAggiornaFlagDaRighe(d.rows);

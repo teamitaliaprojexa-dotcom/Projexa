@@ -2157,7 +2157,8 @@ async function ckpSincronizza(client, req, prog) {
   // padre * 100 + 50 + n), così le voci conservate non si mescolano alle sezioni attuali.
   const spuntata = (r) => r.check_ok === true || r.data_check != null;
   const gruppo = (r) => `${r.padre}|${r.licenza || ''}`;
-  const orfane = attuali.filter((r) => !usate.has(String(r.id)));
+  // Le righe custom (aggiunte a mano nel progetto) non vengono dalla configurazione: mai chiuse.
+  const orfane = attuali.filter((r) => !usate.has(String(r.id)) && r.custom !== true);
   const gruppiConservati = [...new Set(orfane.filter(spuntata).map(gruppo))];
   const daChiudere = [];
   for (const r of orfane) {
@@ -2177,8 +2178,108 @@ async function ckpSincronizza(client, req, prog) {
     );
     esito.chiuse = x.rowCount;
   }
+  await ckpRiallineaCustom(client, req, prog);
   await ckpRicalcolaFasi(client, req, prog);
   return esito;
+}
+
+// ---- Righe custom ----
+// Fasi e attività aggiunte a mano nella finestra del progetto («Abilita modifica»): custom =
+// true, config_id vuoto. La loro posizione è rif_id = la riga (standard o custom) subito
+// prima; le righe standard restano nell'ordine della configurazione e le custom si
+// rimettono dietro alla loro riga di riferimento, così dopo ogni allineamento restano dove
+// sono state messe, senza toccare le standard.
+//  - attività custom: padre/licenza della fase che la precede (conta per il completamento
+//    automatico di quella fase);
+//  - fase custom: padre = -id (gruppo tutto suo); non può stare in mezzo alle attività
+//    standard di un'altra fase: va in fondo a quella sezione.
+// Riferimento non più presente (riga tolta): un'attività va in fondo alla sua sezione,
+// una fase in fondo alla lista.
+function ckpOrdina(righe) {
+  const id = (r) => String(r.id);
+  const attive = new Set(righe.map(id));
+  const isFase = (r) => Number(r.figlio || 0) === 0;
+  const std = righe.filter((r) => r.custom !== true);
+  const custom = righe.filter((r) => r.custom === true).sort((a, b) => Number(a.id) - Number(b.id));
+  const dopo = new Map(); // rif -> righe custom agganciate
+  for (const c of custom) {
+    const rif = c.rif_id == null ? '' : String(c.rif_id);
+    if (rif !== '' && (!attive.has(rif) || rif === id(c))) continue; // orfana: dopo
+    if (!dopo.has(rif)) dopo.set(rif, []);
+    dopo.get(rif).push(c);
+  }
+  const messe = new Set();
+  const metti = (r, dest) => {
+    if (messe.has(id(r))) return;
+    messe.add(id(r));
+    dest.push(r);
+    for (const c of dopo.get(id(r)) || []) metti(c, dest);
+  };
+  const out = [];
+  for (const c of dopo.get('') || []) metti(c, out);
+  for (const s of std) metti(s, out);
+  for (const c of custom) {
+    if (messe.has(id(c))) continue;
+    const blocco = [];
+    metti(c, blocco);
+    let pos = out.length;
+    if (!isFase(c)) {
+      const g = `${c.padre}|${c.licenza || ''}`;
+      const ultimo = out.map((r) => `${r.padre}|${r.licenza || ''}`).lastIndexOf(g);
+      if (ultimo >= 0) pos = ultimo + 1;
+    }
+    out.splice(pos, 0, ...blocco);
+  }
+  // Fase custom seguita da attività standard (di un'altra fase): la fase, con le sue attività
+  // custom, si sposta dopo quelle attività.
+  for (let i = 0; i < out.length; i++) {
+    if (out[i].custom !== true || !isFase(out[i])) continue;
+    let fine = i + 1;
+    while (fine < out.length && !isFase(out[fine]) && out[fine].custom === true) fine++;
+    let oltre = fine;
+    while (oltre < out.length && !isFase(out[oltre])) oltre++;
+    if (oltre > fine) {
+      const blocco = out.splice(i, fine - i);
+      out.splice(oltre - blocco.length, 0, ...blocco);
+      i--;
+    }
+  }
+  // Valori delle righe custom ricavati dalla posizione: { id, padre, licenza, rif_id }.
+  const valori = new Map();
+  let fase = null;
+  out.forEach((r, i) => {
+    if (r.custom === true) {
+      const v = isFase(r)
+        ? { padre: -Number(r.id), licenza: null }
+        : { padre: fase ? fase.padre : null, licenza: fase ? (fase.licenza || null) : null };
+      v.rif_id = i ? Number(out[i - 1].id) : null;
+      valori.set(id(r), v);
+      Object.assign(r, { padre: v.padre, licenza: v.licenza });
+    }
+    if (isFase(r)) fase = r;
+  });
+  return { righe: out, valori };
+}
+
+// Salva padre / licenza / rif_id delle righe custom calcolati da ckpOrdina.
+async function ckpRiallineaCustom(pool, req, prog) {
+  const r = (await pool.query(
+    `SELECT id, custom, figlio, padre, licenza, rif_id FROM "${CKP_TABELLA}"
+      WHERE tenant_id = $1 AND user_id = $2 AND client_id IS NOT DISTINCT FROM $3 AND project_id = $4
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+      ORDER BY ordinamento NULLS LAST, padre NULLS LAST, figlio NULLS LAST, id`,
+    [req.user.tenant_id, req.user.user_id, prog.clientId, prog.projectId]
+  )).rows;
+  if (!r.some((x) => x.custom === true)) return;
+  const prima = new Map(r.map((x) => [String(x.id), { padre: x.padre, licenza: x.licenza, rif_id: x.rif_id }]));
+  const norm = (v) => (v == null ? '' : String(Number.isFinite(Number(v)) && String(v).trim() !== '' ? Number(v) : v));
+  const { valori } = ckpOrdina(r);
+  for (const [id, v] of valori) {
+    const p = prima.get(id);
+    if (norm(p.padre) === norm(v.padre) && (p.licenza || '') === (v.licenza || '') && norm(p.rif_id) === norm(v.rif_id)) continue;
+    await pool.query(`UPDATE "${CKP_TABELLA}" SET padre = $1, licenza = $2, rif_id = $3 WHERE id = $4`,
+      [v.padre, v.licenza, v.rif_id, id]);
+  }
 }
 
 // Fasi con attività: il loro Check non si mette a mano, lo calcola il server. Fatta quando
@@ -2205,7 +2306,8 @@ async function ckpRicalcolaFasi(pool, req, prog) {
 async function ckpRighe(req, prog, pool = db) {
   const r = await pool.query(
     `SELECT id, tipologia, padre, figlio, ordinamento, description, licenza, check_ok, data_check::text AS data_check, id_roles_write,
-            tabella_verif, campo_verif, colonna_verif, operatore_verif, risultato_verif
+            tabella_verif, campo_verif, colonna_verif, operatore_verif, risultato_verif,
+            COALESCE(custom, false) AS custom, rif_id
        FROM "${CKP_TABELLA}"
       WHERE tenant_id = $1 AND user_id = $2 AND client_id IS NOT DISTINCT FROM $3 AND project_id = $4
         AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
@@ -2216,8 +2318,9 @@ async function ckpRighe(req, prog, pool = db) {
   // descrizione (righe del progetto nella tabella e quante rispettano la condizione).
   const cache = new Map();
   const out = [];
-  for (const x of r.rows) {
-    const { tabella_verif, campo_verif, colonna_verif, operatore_verif, risultato_verif, ...riga } = x;
+  // Ordine: standard come la configurazione, custom dietro alla loro riga di riferimento.
+  for (const x of ckpOrdina(r.rows).righe) {
+    const { tabella_verif, campo_verif, colonna_verif, operatore_verif, risultato_verif, rif_id, ...riga } = x;
     let conteggio = null;
     try {
       conteggio = await ckpConteggioRighe(pool, req, prog, { tabella_verif, campo_verif, colonna_verif, operatore_verif, risultato_verif }, cache);
@@ -2322,6 +2425,147 @@ app.put('/api/projects/checklist/ordine', requireAuth, async (req, res) => {
   } finally {
     if (client) client.release();
   }
+});
+
+// ---- Righe custom dalla finestra («Abilita modifica») ----
+// Ogni operazione: transazione + lock del progetto, poi riallineamento delle custom
+// (ckpRiallineaCustom) e del completamento delle fasi; risposta = righe aggiornate.
+async function ckpModificaCustom(req, res, projectId, fn) {
+  let client;
+  try {
+    client = await db.connect();
+    await client.query('BEGIN');
+    const prog = await ckpProgetto(req, projectId, client);
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`chek_list|${prog.projectId}`]);
+    const extra = (await fn(client, prog)) || {};
+    await ckpRiallineaCustom(client, req, prog);
+    await ckpRicalcolaFasi(client, req, prog);
+    const rows = await ckpRighe(req, prog, client);
+    await client.query('COMMIT');
+    res.json({ tipologia: prog.tipologia, licenze: prog.licenze, rows, ...extra });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    res.status(error.statusCode || 500).json({ error: error.message });
+  } finally {
+    if (client) client.release();
+  }
+}
+
+// Righe attive del progetto (id, custom, livello...), nell'ordine mostrato.
+async function ckpRigheOrdinate(client, req, prog) {
+  const r = (await client.query(
+    `SELECT id, custom, figlio, padre, licenza, rif_id FROM "${CKP_TABELLA}"
+      WHERE tenant_id = $1 AND user_id = $2 AND client_id IS NOT DISTINCT FROM $3 AND project_id = $4
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+      ORDER BY ordinamento NULLS LAST, padre NULLS LAST, figlio NULLS LAST, id`,
+    [req.user.tenant_id, req.user.user_id, prog.clientId, prog.projectId]
+  )).rows;
+  return ckpOrdina(r).righe;
+}
+
+const ckpDescrizione = (v) => {
+  const s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, 255);
+  if (!s) throw Object.assign(new Error('Descrizione obbligatoria'), { statusCode: 400 });
+  return s;
+};
+
+// Nuova riga custom: { projectId, livello: 'fase' | 'attivita', description, dopoId }.
+// dopoId = riga dopo la quale inserirla (vuoto = in cima).
+app.post('/api/projects/checklist/custom', requireAuth, (req, res) => {
+  const b = req.body || {};
+  ckpModificaCustom(req, res, b.projectId, async (client, prog) => {
+    const description = ckpDescrizione(b.description);
+    const fase = b.livello === 'fase';
+    let dopoId = b.dopoId == null || String(b.dopoId).trim() === '' ? null : String(b.dopoId).trim();
+    if (dopoId != null) {
+      const righe = await ckpRigheOrdinate(client, req, prog);
+      if (!righe.some((x) => String(x.id) === dopoId)) throw Object.assign(new Error('Posizione non valida: riapri la Check List'), { statusCode: 409 });
+    }
+    const data = { tenant_id: req.user.tenant_id, user_id: req.user.user_id, client_id: prog.clientId,
+      project_id: prog.projectId, tipologia: prog.tipologia || '', figlio: fase ? 0 : 1, description,
+      check_ok: false, data_check: null, custom: true, rif_id: dopoId == null ? null : Number(dopoId) };
+    if (!isAdminUser(req)) data.id_roles_write = roleWriteValue(req);
+    const cols = Object.keys(data);
+    const x = await client.query(
+      `INSERT INTO "${CKP_TABELLA}" (${cols.map((c) => `"${c}"`).join(', ')})
+       VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id`,
+      cols.map((c) => data[c])
+    );
+    return { id: x.rows[0].id };
+  });
+});
+
+// Cambio descrizione di una riga custom: { projectId, description }.
+app.put('/api/projects/checklist/custom/:id', requireAuth, (req, res) => {
+  const b = req.body || {};
+  ckpModificaCustom(req, res, b.projectId, async (client, prog) => {
+    const id = String(req.params.id || '').trim();
+    if (!/^\d+$/.test(id)) throw Object.assign(new Error('Voce non valida'), { statusCode: 400 });
+    const description = ckpDescrizione(b.description);
+    await assertRowsWritable(req, client, CKP_TABELLA, [id]);
+    const x = await client.query(
+      `UPDATE "${CKP_TABELLA}" SET description = $1
+        WHERE id::text = $2 AND custom = true AND tenant_id = $3 AND user_id = $4 AND project_id = $5
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+      [description, id, req.user.tenant_id, req.user.user_id, prog.projectId]
+    );
+    if (!x.rowCount) throw Object.assign(new Error('Voce custom non trovata'), { statusCode: 404 });
+  });
+});
+
+// Eliminazione di una riga custom (chiusa: scadenza = ieri). Una fase custom si porta via le
+// sue attività custom. Le righe agganciate a quelle tolte passano alla riga che le precedeva.
+app.delete('/api/projects/checklist/custom/:id', requireAuth, (req, res) => {
+  ckpModificaCustom(req, res, req.query && req.query.projectId, async (client, prog) => {
+    const id = String(req.params.id || '').trim();
+    const righe = await ckpRigheOrdinate(client, req, prog);
+    const i = righe.findIndex((x) => String(x.id) === id);
+    if (i < 0 || righe[i].custom !== true) throw Object.assign(new Error('Voce custom non trovata'), { statusCode: 404 });
+    const togli = [id];
+    if (Number(righe[i].figlio || 0) === 0) {
+      for (let j = i + 1; j < righe.length && Number(righe[j].figlio || 0) > 0 && righe[j].custom === true; j++) togli.push(String(righe[j].id));
+    }
+    await assertRowsWritable(req, client, CKP_TABELLA, togli);
+    const prima = i ? Number(righe[i - 1].id) : null;
+    await client.query(
+      `UPDATE "${CKP_TABELLA}" SET rif_id = $1
+        WHERE tenant_id = $2 AND user_id = $3 AND project_id = $4 AND custom = true
+          AND rif_id::text = ANY($5::text[]) AND NOT (id::text = ANY($5::text[]))`,
+      [prima, req.user.tenant_id, req.user.user_id, prog.projectId, togli]
+    );
+    await client.query(
+      `UPDATE "${CKP_TABELLA}" SET scadenza = CURRENT_DATE - 1
+        WHERE id::text = ANY($1::text[]) AND tenant_id = $2 AND user_id = $3 AND project_id = $4`,
+      [togli, req.user.tenant_id, req.user.user_id, prog.projectId]
+    );
+  });
+});
+
+// Ordine dopo un trascinamento: { projectId, ids: [ tutte le righe, nell'ordine voluto ] }.
+// Contano solo le posizioni delle custom (rif_id = riga precedente); le standard restano
+// nell'ordine della configurazione.
+app.put('/api/projects/checklist/ordine-custom', requireAuth, (req, res) => {
+  const b = req.body || {};
+  ckpModificaCustom(req, res, b.projectId, async (client, prog) => {
+    const ids = Array.isArray(b.ids) ? b.ids.map((x) => String(x)) : [];
+    const righe = await ckpRigheOrdinate(client, req, prog);
+    const attuali = new Set(righe.map((x) => String(x.id)));
+    if (ids.length !== attuali.size || new Set(ids).size !== ids.length || ids.some((x) => !attuali.has(x))) {
+      throw Object.assign(new Error('La Check List è cambiata nel frattempo: riaprila'), { statusCode: 409 });
+    }
+    const perId = new Map(righe.map((x) => [String(x.id), x]));
+    const cambiate = [];
+    ids.forEach((id, i) => {
+      const r = perId.get(id);
+      const rif = i ? Number(ids[i - 1]) : null;
+      if (r.custom === true && String(r.rif_id ?? '') !== String(rif ?? '')) cambiate.push([id, rif]);
+    });
+    if (!cambiate.length) return;
+    await assertRowsWritable(req, client, CKP_TABELLA, cambiate.map(([id]) => id));
+    for (const [id, rif] of cambiate) {
+      await client.query(`UPDATE "${CKP_TABELLA}" SET rif_id = $1 WHERE id::text = $2`, [rif, id]);
+    }
+  });
 });
 
 // ==========================================
