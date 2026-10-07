@@ -11941,7 +11941,7 @@
                 <div class="ckp-box">
                     <div class="ckp-head"><img src="checklist.png" alt=""><h3 id="ckpTitle">Check List<small id="ckpSub"></small></h3><label class="ckp-mod" title="Aggiungi, rinomina, sposta ed elimina fasi e attività custom del progetto"><input type="checkbox" id="ckpModifica"><span class="ckp-mod-sw"></span>Abilita modifica</label><button type="button" class="ckp-close" id="ckpClose" aria-label="Chiudi">&times;</button></div>
                     <div class="ckp-body" id="ckpBody"></div>
-                    <div class="ckp-foot"><span class="ckp-foot-testo" id="ckpFoot"></span><button type="button" class="ckp-agg" id="ckpNuovaFase" hidden title="Aggiunge una fase custom in fondo alla check list"><i class="fas fa-plus"></i> Fase</button><button type="button" class="ckp-del" id="ckpElimina" title="Cancella tutta la check list di questo progetto"><i class="fas fa-trash"></i> Elimina</button></div>
+                    <div class="ckp-foot"><span class="ckp-foot-testo" id="ckpFoot"></span><button type="button" class="ckp-agg" id="ckpNuovaFase" style="display:none" title="Aggiunge una nuova voce custom in fondo alla check list"><i class="fas fa-plus"></i> Aggiungi Attività</button><button type="button" class="ckp-del" id="ckpElimina" title="Cancella tutta la check list di questo progetto"><i class="fas fa-trash"></i> Elimina</button></div>
                 </div></div>`);
             m = document.getElementById('ckpOverlay');
             // «Abilita modifica»: ridisegna la finestra con i comandi per le righe custom.
@@ -11979,7 +11979,8 @@
             const modifica = ckpModifica;
             const nuovaFase = document.getElementById('ckpNuovaFase');
             if (nuovaFase) {
-                nuovaFase.hidden = !modifica;
+                // style.display: l'attributo hidden è annullato dal display di .ckp-agg.
+                nuovaFase.style.display = modifica ? '' : 'none';
                 nuovaFase.onclick = async () => {
                     nuovaFase.disabled = true;
                     try {

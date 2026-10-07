@@ -2208,6 +2208,10 @@ function ckpOrdina(righe) {
     if (!dopo.has(rif)) dopo.set(rif, []);
     dopo.get(rif).push(c);
   }
+  // Più custom agganciate alla stessa riga: prima le attività (appartengono alla fase di quella
+  // riga), poi le fasi. Es. + su una fase standard seguita da una fase custom: la nuova
+  // attività resta nella fase standard e non finisce sotto quella custom.
+  for (const lista of dopo.values()) lista.sort((a, b) => (isFase(a) - isFase(b)) || (Number(a.id) - Number(b.id)));
   const messe = new Set();
   const metti = (r, dest) => {
     if (messe.has(id(r))) return;
