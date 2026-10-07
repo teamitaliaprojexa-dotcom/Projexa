@@ -1970,11 +1970,11 @@
         .ms-stato b { color: var(--dark); font-variant-numeric: tabular-nums; }
         .ms-ap-cliente { padding: 0.55rem 0.6rem 0.7rem; border-top: 1px solid #f1f5f9; }
         .ms-ap-cliente:first-of-type { border-top: none; }
-        .ms-ap-testa { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.35rem; }
+        .ms-ap-testa { display: flex; align-items: baseline; gap: 0.35rem; margin-bottom: 0.35rem; }
         .ms-ap-nome { font-size: 0.88rem; font-weight: 700; color: var(--dark); }
         .ms-ap-nome.ms-link { cursor: pointer; color: #1D4ED8; }
         .ms-ap-nome.ms-link:hover, .ms-ap-nome.ms-link:focus-visible { text-decoration: underline; outline: none; }
-        .ms-ap-tot { font-size: 0.75rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+        .ms-ap-tot { font-size: 0.88rem; font-weight: 700; color: var(--dark); font-variant-numeric: tabular-nums; }
         .ms-ap-riga { display: grid; grid-template-columns: minmax(0, 200px) minmax(0, 1fr) 44px; align-items: center; gap: 0.75rem; padding: 0.18rem 0 0.18rem 1.1rem; }
         .ms-ap-stato { font-size: 0.8rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .ms-ap-track { height: 12px; border-radius: 999px; background: #f1f5f9; overflow: hidden; }
@@ -5744,7 +5744,7 @@
             return `<div class="ms-aperti">
                 <div class="ms-sintesi"><span>Ticket non chiusi: <b>${totale}</b></span><span>Clienti: <b>${aperti.length}</b></span></div>
                 ${aperti.map(c => `<div class="ms-ap-cliente">
-                    <div class="ms-ap-testa">${nome(c)}</div>
+                    <div class="ms-ap-testa">${nome(c)}<span class="ms-ap-tot" title="Ticket non chiusi del cliente (somma delle righe sotto)">(${c.n})</span></div>
                     ${c.stati.map(s => `<div class="ms-ap-riga">
                         <span class="ms-ap-stato" title="${escapeHtml(s.stato)}">${escapeHtml(s.stato)}</span>
                         <div class="ms-ap-track"><div class="ms-ap-bar" style="--c:${colore.get(s.stato)}; width:${(s.n / max) * 100}%;"></div></div>
