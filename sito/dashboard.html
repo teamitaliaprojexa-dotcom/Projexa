@@ -2547,9 +2547,10 @@
         .todo-table-wrap {
             width: 100%;
             max-width: 100%;
-            max-height: 600px;
+            /* Nessuna altezza massima: con «Espandi» la tabella cresce e si allunga la pagina,
+               senza scorrimento verticale dentro il riquadro. Resta solo quello orizzontale. */
             overflow-x: auto;
-            overflow-y: auto;
+            overflow-y: hidden;
             box-sizing: border-box;
             padding-left: 44px;
             border: 1px solid var(--border);
