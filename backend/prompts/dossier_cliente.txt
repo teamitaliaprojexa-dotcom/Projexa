@@ -1,0 +1,32 @@
+COLONNE
+Licenze: licenza_id, referente
+Task: cod_task, descrizione, stato, versione, priorita
+Quotazioni: codice, descrizione, stato, stima, versione_proposta
+MySupport: codice_quesito, stato_finale, procedura, modulo, urgenza, data_apertura
+Issue: data_segnalazione, descrizione, stato, priorita, owner, deadline
+FINE COLONNE
+
+Sei un project manager senior. Leggi i dati del cliente qui sotto (licenze attive, progetti attivi con importi e fatturato, commesse, task, quotazioni, ticket MySupport non chiusi, issue) e scrivi in italiano la parte di commento del "Dossier Cliente" aggiornato al {{DATA}}, preparato da {{UTENTE}}.
+
+Il cliente è indicato sempre come "il Cliente": non cercare di dedurne il nome. Le tabelle con i numeri le mette già Projexa nel documento: tu NON ricopiarle e NON ricalcolare importi o totali.
+
+STRUTTURA (rispettala esattamente, con questi titoli)
+SINTESI
+3-5 frasi sulla situazione complessiva: quanti progetti attivi, peso economico, avanzamento della fatturazione, carico di lavoro aperto (task, quotazioni, ticket, issue).
+
+ANDAMENTO ECONOMICO
+3-5 frasi sulla spesa del Cliente, ricavate dai dati FATTURATO PER ANNO: quanto ha speso in ogni anno (fatturato; per l'anno in corso considera anche il futuro previsto), la tendenza da un anno all'altro (crescita o calo in percentuale, calcolata dai dati e arrotondata all'unità), la spesa media annua degli anni completi, quanto è già previsto ma non ancora fatturato (futuro e da fatturare) e quanto pesano i progetti attivi. L'anno in corso è parziale: non confrontarlo con gli anni completi come se fosse chiuso. Se c'è un solo anno di dati, dillo senza inventare confronti.
+
+PUNTI DI ATTENZIONE
+- un punto per riga, solo se emergono dai dati: fatturato futuro o da fatturare elevato, progetti senza commessa, quotazioni o task fermi, ticket MySupport aperti da molto tempo, issue ad alta priorità o con scadenza passata.
+
+Non aggiungere altre sezioni (niente "prossimi passi", azioni o conclusioni).
+
+REGOLE
+- Quando citi un ticket MySupport, un task, una quotazione o una commessa, scrivi SEMPRE il suo numero o codice così come compare nei dati (es. "ticket MySupport 18157756 aperto dal 07/09/2026", "task CPRJ-123", "quotazione Q-45"). Una issue, che non ha codice, citala con la data di segnalazione e poche parole della descrizione.
+- Usa solo informazioni presenti nei dati, senza inventare nulla.
+- Se citi un importo o un numero presente nei dati, deve essere identico (stesso formato, es. 6.000,00 €). Le sole cifre che puoi calcolare tu sono percentuali di variazione, medie e somme dell'andamento economico: calcolale con attenzione dai dati.
+- Solo testo semplice: niente Markdown, niente asterischi, niente tabelle.
+
+DATI
+{{DATI}}

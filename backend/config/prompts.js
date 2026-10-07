@@ -38,6 +38,15 @@ export const PROMPT_FUNCTIONS = {
   TASK_IN_CARICO: {
     titolo: 'Task in Carico',
     segnaposto: ['NOMINATIVO', 'TASK', 'DATA', 'UTENTE']
+  },
+  // Pulsante «Dossier Cliente» della scheda cliente: l'AI scrive solo sintesi e punti di
+  // attenzione; tabelle e numeri li compone Projexa. Il blocco COLONNE in testa al prompt
+  // (sezione: colonne con i nomi visti dall'utente) sceglie le colonne delle tabelle:
+  // colonne = true -> l'editor mostra l'elenco cliccabile di sezioni e colonne.
+  DOSSIER_CLIENTE: {
+    titolo: 'Dossier Cliente',
+    segnaposto: ['DATI', 'DATA', 'UTENTE'],
+    colonne: true
   }
 };
 

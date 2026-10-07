@@ -665,6 +665,30 @@
         .proj-kpi.k-ms { --c1: #EF4444; --c2: #F43F5E; --bg: #FEF2F2; }
         /* Scheda cliente: 5 contatori (c'è anche MySupport) */
         .cli-widgets .proj-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+        /* Pulsante «Dossier Cliente» su una riga sotto i mini KPI della scheda cliente, a sinistra */
+        .cli-widgets { flex-wrap: wrap; row-gap: 0.75rem; }
+        .cli-dossier-riga { flex: 0 0 100%; display: flex; justify-content: flex-start; }
+        .cli-dossier { flex: 0 0 auto; align-self: center; display: flex; align-items: center; gap: 0.6rem; padding: 0.75rem 1rem; border: none; border-radius: 16px; cursor: pointer; font: inherit;
+            background: linear-gradient(145deg, #fff 0%, #EEF2FF 100%); color: #3730A3;
+            box-shadow: 0 4px 14px rgba(79,70,229,0.14), inset 0 0 0 1px rgba(79,70,229,0.16); transition: transform 0.18s, box-shadow 0.18s; }
+        .cli-dossier:hover { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(79,70,229,0.22), inset 0 0 0 1px rgba(79,70,229,0.22); }
+        .cli-dossier:focus-visible { outline: 2px solid #6366F1; outline-offset: 2px; }
+        .cli-dossier-ico { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, #6366F1, #4338CA); font-size: 1rem; }
+        .cli-dossier-lbl { font-size: 0.82rem; font-weight: 700; white-space: nowrap; }
+        /* Finestra di scelta del Dossier Cliente (solo attivi / anche chiusi + anno) */
+        .ckp-box.dos-box { width: min(460px, calc(92vw * var(--ui-zoom-inv, 1))); height: auto; }
+        .dos-body { padding: 0.9rem 1.2rem; display: flex; flex-direction: column; gap: 0.6rem; }
+        .dos-opz { display: flex; gap: 0.65rem; align-items: flex-start; padding: 0.65rem 0.8rem; border: 1px solid #E5E7EB; border-radius: 10px; cursor: pointer; }
+        .dos-opz:has(input:checked) { border-color: #A5B4FC; background: #F5F7FF; }
+        .dos-opz input { margin-top: 0.2rem; accent-color: #4F46E5; }
+        .dos-opz span { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.88rem; color: #111827; }
+        .dos-opz small { color: #6B7280; font-size: 0.78rem; }
+        .dos-anno { display: flex; align-items: center; gap: 0.6rem; padding-left: 1.9rem; font-size: 0.85rem; font-weight: 600; color: #374151; }
+        .dos-anno[hidden] { display: none; }
+        .dos-anno select { padding: 0.35rem 0.6rem; border: 1px solid #D1D5DB; border-radius: 8px; font: inherit; font-weight: 400; }
+        .dos-btn { border: none; border-radius: 9px; padding: 0.45rem 0.95rem; font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; background: #F3F4F6; color: #374151; }
+        .dos-btn.dos-apri { background: #4F46E5; color: #fff; display: inline-flex; align-items: center; gap: 0.4rem; }
+        .dos-btn.dos-apri:hover { background: #4338CA; }
         @media (max-width: 1100px) { .cli-widgets .proj-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 1100px) { .proj-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         /* Spazio del pulsante sulla riga di Descrizione (stesse dimensioni della testata). */
@@ -12061,8 +12085,68 @@
         // righe del cliente senza progetto (GET /api/clients/contatori). Se la scheda aperta è
         // una sezione interna del cliente (non la principale) la testata viene tolta.
         function renderClientKpis() {
-            return '<div class="proj-widgets cli-widgets">' + projKpisHtml(true) + '</div>';
+            // Sotto i mini KPI, a sinistra: «Dossier Cliente» (anteprima da stampare in PDF, dossier-cliente.html).
+            return '<div class="proj-widgets cli-widgets">' + projKpisHtml(true)
+                + '<div class="cli-dossier-riga"><button type="button" class="cli-dossier" id="cliDossierBtn" title="Dossier Cliente: anteprima da stampare o salvare in PDF (sintesi scritta dall\'AI del recap)">'
+                + '<span class="cli-dossier-ico"><i class="fas fa-file-pdf"></i></span><span class="cli-dossier-lbl">Dossier Cliente</span></button></div></div>';
         }
+        // «Dossier Cliente»: anteprima in una nuova scheda (dossier-cliente.html), da stampare o
+        // salvare in PDF in orizzontale. Il cliente è quello della scheda aperta.
+        // Prima dell'apertura si sceglie: «Solo attivi» (progetti aperti, di qualunque anno) oppure
+        // «Anche chiusi» (nessun controllo sulla scadenza) con l'Anno del progetto (o tutti gli anni).
+        function dossierScelta(clientId) {
+            let m = document.getElementById('dosOverlay');
+            if (!m) {
+                document.body.insertAdjacentHTML('beforeend', `<div class="ckp-overlay" id="dosOverlay" role="dialog" aria-modal="true" aria-labelledby="dosTitle">
+                    <div class="ckp-box dos-box">
+                        <div class="ckp-head"><span class="cli-dossier-ico"><i class="fas fa-file-pdf"></i></span><h3 id="dosTitle">Dossier Cliente<small>Quali progetti includere?</small></h3><button type="button" class="ckp-close" data-dos-chiudi aria-label="Chiudi">&times;</button></div>
+                        <div class="dos-body">
+                            <label class="dos-opz"><input type="radio" name="dosModo" value="attivi" checked><span><b>Solo attivi</b><small>Progetti aperti, anche di anni precedenti, e dati validi oggi.</small></span></label>
+                            <label class="dos-opz"><input type="radio" name="dosModo" value="tutti"><span><b>Anche chiusi</b><small>Progetti aperti e chiusi, senza controllo sulla scadenza, dell'anno scelto.</small></span></label>
+                            <div class="dos-anno" id="dosAnnoRiga" hidden><label for="dosAnno">Anno del progetto</label><select id="dosAnno"><option value="">Caricamento…</option></select></div>
+                        </div>
+                        <div class="ckp-foot"><span class="ckp-foot-testo"></span><button type="button" class="btn-secondary dos-btn" data-dos-chiudi>Annulla</button><button type="button" class="dos-btn dos-apri" id="dosApri"><i class="fas fa-file-pdf"></i> Apri Dossier</button></div>
+                    </div></div>`);
+                m = document.getElementById('dosOverlay');
+                m.addEventListener('click', (e) => { if (e.target === m || e.target.closest('[data-dos-chiudi]')) m.classList.remove('open'); });
+                document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && m.classList.contains('open')) m.classList.remove('open'); });
+            }
+            const anni = document.getElementById('dosAnno');
+            const riga = document.getElementById('dosAnnoRiga');
+            m.querySelector('input[value="attivi"]').checked = true;
+            riga.hidden = true;
+            let anniCaricati = false;
+            m.querySelectorAll('input[name="dosModo"]').forEach(r => {
+                r.onchange = async () => {
+                    riga.hidden = r.value !== 'tutti' || !r.checked;
+                    if (r.value !== 'tutti' || anniCaricati) return;
+                    anniCaricati = true;
+                    try {
+                        const res = await fetch(`${API_URL}/clients/dossier/anni?clientId=${encodeURIComponent(clientId)}`, { headers: getAuthHeaders() });
+                        const lista = res.ok ? await res.json() : [];
+                        const corrente = new Date().getFullYear();
+                        anni.innerHTML = lista.map(a => `<option value="${a}">${a}</option>`).join('') + '<option value="">Tutti gli anni</option>';
+                        anni.value = lista.includes(corrente) ? String(corrente) : (lista.length ? String(lista[0]) : '');
+                    } catch (e) {
+                        anni.innerHTML = '<option value="">Tutti gli anni</option>';
+                    }
+                };
+            });
+            document.getElementById('dosApri').onclick = () => {
+                const modo = m.querySelector('input[name="dosModo"]:checked').value;
+                const qs = new URLSearchParams({ clientId, modo });
+                if (modo === 'tutti' && anni.value) qs.set('anno', anni.value);
+                m.classList.remove('open');
+                window.open(`dossier-cliente.html?${qs.toString()}`, '_blank');
+            };
+            m.classList.add('open');
+        }
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#cliDossierBtn')) return;
+            const clientId = currentDetailSource === 'clients' ? currentDetailArgument : '';
+            if (clientId) dossierScelta(clientId);
+        });
+
         async function caricaContatoriCliente(listEl, argument) {
             const widgets = listEl.querySelector('.cli-widgets');
             if (!widgets || !argument) return;

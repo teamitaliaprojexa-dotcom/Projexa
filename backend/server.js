@@ -6725,6 +6725,551 @@ async function assertOwnedClientLogoContext(clientId, req) {
   }
 }
 
+// ==========================================
+// DOSSIER CLIENTE (pulsante «Dossier Cliente» nella scheda cliente, a destra dei mini KPI)
+// ==========================================
+// GET /api/clients/dossier?clientId=...  dati dell'anteprima da stampare (sito/dossier-cliente.html)
+// GET /api/clients/dossier/colonne       sezioni e colonne scegliibili (editor dei prompt)
+// Perimetro: cliente a cui l'utente ha accesso (proprietario o condiviso); i dati sono quelli
+// del proprietario del cliente, come nella scheda. Numeri e tabelle li compone Projexa; l'AI del
+// recap («AI generazione e-mail recap») scrive solo sintesi, punti di attenzione e prossimi passi
+// con il prompt DOSSIER_CLIENTE. All'AI NON arrivano ragione sociale, codice fiscale, partita IVA
+// né il nome del cliente (sempre "il Cliente").
+// Colonne delle tabelle: blocco COLONNE ... FINE COLONNE in testa al prompt, con i nomi che vede
+// l'utente (etichette di set_label o della griglia) oppure quelli tecnici; senza blocco, i default.
+const DOS_SEZIONI = [
+  // Licenze attive del cliente (Elenco Licenze, filtro «Attive» = active true).
+  { key: 'licenze', titolo: 'Licenze', alias: ['licenze', 'licenza', 'elenco licenze'], tabella: 'licenze_app', perProgetto: false,
+    default: ['licenza_id', 'referente'] },
+  { key: 'task', titolo: 'Task', alias: ['task', 'task di sviluppo', 'task jira', 'tkt jira'], tabella: 'task_app', perProgetto: true,
+    default: ['cod_task', 'descrizione', 'stato', 'versione', 'priorita'] },
+  { key: 'quotazioni', titolo: 'Quotazioni', alias: ['quotazioni', 'quotazione'], tabella: 'cl_quotazioni', perProgetto: true,
+    default: ['codice', 'descrizione', 'stato', 'stima', 'versione_proposta'] },
+  { key: 'mysupport', titolo: 'MySupport', alias: ['mysupport', 'ticket mysupport', 'tkt mysupport'], tabella: 'mysupport', perProgetto: false,
+    default: ['codice_quesito', 'stato_finale', 'procedura', 'modulo', 'urgenza', 'data_apertura'] },
+  { key: 'issue', titolo: 'Issue', alias: ['issue'], tabella: 'issue', perProgetto: false,
+    default: ['data_segnalazione', 'descrizione', 'stato', 'priorita', 'owner', 'deadline'] }
+];
+const DOS_TECNICHE = new Set(['id', 'tenant_id', 'user_id', 'client_id', 'project_id', 'master_id', 'crypto',
+  'id_roles', 'id_roles_write', 'created_at', 'updated_at', 'created_by', 'scadenza', 'data_inizio', 'commessa_id']);
+const dosNorm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+const dosBella = (c) => c.charAt(0).toUpperCase() + c.slice(1).replace(/_/g, ' ');
+// Campi della scheda progetto nel Dossier (nome del campo come in scheda; _hh/_gg secondo
+// «Gestione a HH», come la scheda e l'Offerta economica).
+const DOS_CAMPI_PROGETTO = {
+  anno: 'Anno', tipo: 'Tipo', tipologia: 'Tipologia', rischio: 'Rischio', stato: 'Stato Progetto',
+  richiedente: 'Richiedente',
+  effort: 'Effort Totale', importo: 'Importo', importoNonScontato: 'Importo non scontato', sconto: 'Sconto Applicato',
+  fatturato: 'Fatturato', fatturatoFuturo: 'Fatturato Futuro', daFatturare: 'da Fatturare',
+  aConsuntivo: 'a Consuntivo', paOda: 'Pubblica Amministrazione (ODA)'
+};
+const DOS_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const dosNum = (v) => {
+  if (v == null || String(v).trim() === '') return null;
+  const n = Number(String(v).replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+};
+const dosVero = (v) => ['true', 't', '1', 'si', 'sì', 'yes'].includes(String(v ?? '').trim().toLowerCase());
+
+// Etichette da set_label per una tabella: { colonne: Map(colonna -> etichetta),
+// valori: Map(colonna -> Map(valore -> nuovo valore)) }. Righe usate (lingua IT, valide oggi,
+// precedenza tenant+utente > tenant > utente > globale):
+//   - tabella + colonna, valore = nome della colonna (o colonna vuota, valore = colonna) -> etichetta;
+//   - tabella + colonna, altro valore -> traduzione del valore di quella colonna;
+//   - da_pagina, valore = nome della colonna -> etichetta (come le etichette delle pagine).
+async function dosSetLabel(req, tabella, colonne) {
+  const out = { colonne: new Map(), valori: new Map() };
+  try {
+    const r = await db.query(
+      `SELECT tenant_id, user_id, tabella, colonna, valore, new_valore, da_pagina
+         FROM set_label
+        WHERE (tenant_id = $1 OR tenant_id IS NULL) AND (user_id = $2 OR user_id IS NULL)
+          AND (id_lingua IS NULL OR UPPER(id_lingua) = 'IT')
+          AND (data_inizio IS NULL OR data_inizio <= CURRENT_DATE) AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+          AND (LOWER(BTRIM(tabella)) = LOWER($3) OR (da_pagina IS TRUE AND valore = ANY($4::text[])))`,
+      [req.user.tenant_id, req.user.user_id, tabella, colonne]
+    );
+    const peso = (x) => (x.tenant_id && x.user_id ? 4 : x.tenant_id ? 3 : x.user_id ? 2 : 1) + (x.tabella ? 10 : 0);
+    const presi = new Map();
+    const tieni = (k, x) => { if (!presi.has(k) || peso(x) > presi.get(k).p) presi.set(k, { p: peso(x), x }); };
+    const set = new Set(colonne.map((c) => c.toLowerCase()));
+    for (const x of r.rows) {
+      const col = String(x.colonna || '').trim().toLowerCase();
+      const val = String(x.valore || '').trim();
+      if (x.tabella && col && set.has(col) && val.toLowerCase() !== col) tieni(`v|${col}|${val}`, x);
+      else if (set.has(col || val.toLowerCase())) tieni(`c|${col || val.toLowerCase()}`, x);
+    }
+    for (const [k, { x }] of presi) {
+      const [tipo, col, val] = k.split('|');
+      if (tipo === 'c') out.colonne.set(col, String(x.new_valore));
+      else {
+        if (!out.valori.has(col)) out.valori.set(col, new Map());
+        out.valori.get(col).set(val, String(x.new_valore));
+      }
+    }
+  } catch (e) { /* set_label assente: etichette standard */ }
+  return out;
+}
+
+// Colonne sceglibili di una sezione: [{ nome, label }] nell'ordine della tabella.
+async function dosColonneSezione(req, sez) {
+  const cols = [...await getTableColumns(sez.tabella)].filter((c) => !DOS_TECNICHE.has(c) && !/^ap+o\d*$/i.test(c));
+  const sl = await dosSetLabel(req, sez.tabella, cols);
+  const regole = etichetteColonne(sez.tabella);
+  return { cols, label: (c) => sl.colonne.get(c.toLowerCase()) || regole[c] || dosBella(c), sl };
+}
+
+// Blocco COLONNE del prompt -> { scelte: { key: [colonne] }, resto: prompt senza il blocco, ignorate }.
+function dosLeggiColonne(testo, disponibili) {
+  const m = /^[ \t]*COLONNE[ \t]*\r?\n([\s\S]*?)^[ \t]*FINE COLONNE[ \t]*$/im.exec(testo);
+  const scelte = {};
+  const ignorate = [];
+  if (!m) return { scelte, resto: testo, ignorate };
+  for (const riga of m[1].split(/\r?\n/)) {
+    const mm = /^\s*([^:]+):\s*(.*)$/.exec(riga);
+    if (!mm) continue;
+    const sez = DOS_SEZIONI.find((s) => [s.titolo, ...s.alias].some((a) => dosNorm(a) === dosNorm(mm[1])));
+    if (!sez || !disponibili[sez.key]) { if (mm[1].trim()) ignorate.push(`sezione «${mm[1].trim()}»`); continue; }
+    const d = disponibili[sez.key];
+    const lista = [];
+    for (const t of mm[2].split(/[,;]/).map((x) => x.trim()).filter(Boolean)) {
+      const c = d.cols.find((x) => dosNorm(x) === dosNorm(t) || dosNorm(d.label(x)) === dosNorm(t));
+      if (c && !lista.includes(c)) lista.push(c); else if (!c) ignorate.push(`${sez.titolo}: «${t}»`);
+    }
+    if (lista.length) scelte[sez.key] = lista;
+  }
+  return { scelte, resto: testo.replace(m[0], '').trim(), ignorate };
+}
+
+// Righe di una sezione per il cliente (tenant, proprietario, cliente; righe non scadute).
+// Chiavi esterne con la descrizione (come le griglie); owner/assegnatari id di rubrica -> nominativo.
+async function dosRighe(req, owner, clientId, sez, colonne, d, opz = {}) {
+  const tabella = assertValidIdentifier(sez.tabella);
+  const cols = await getTableColumns(tabella);
+  if (!cols.size || !cols.has('client_id')) return [];
+  const usate = colonne.filter((c) => cols.has(c));
+  const fk = new Map((await db.query(
+    `SELECT kcu.column_name, ccu.table_name AS ft, ccu.column_name AS fc
+       FROM information_schema.table_constraints tc
+       JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+       JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
+      WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' AND tc.table_name = $1`,
+    [tabella]
+  )).rows.map((x) => [x.column_name, x]));
+  const select = [cols.has('project_id') ? 's.project_id::text AS "__progetto"' : 'NULL AS "__progetto"'];
+  const joins = [];
+  let j = 0;
+  for (const c of usate) {
+    const f = fk.get(c);
+    if (f) {
+      const fcols = await getTableColumns(assertValidIdentifier(f.ft));
+      const disp = ['clients', 'projects'].includes(f.ft) && fcols.has('valore2') ? 'valore2'
+        : [...fcols].find((n) => /^desc_/i.test(n)) || ['description', 'descrizione', 'nominativo', 'name', 'nome', 'title', 'label', 'valore2', 'commessa'].find((n) => fcols.has(n));
+      if (disp) {
+        const a = `fk${j++}`;
+        joins.push(`LEFT JOIN "${f.ft}" ${a} ON ${a}."${assertValidIdentifier(f.fc)}" = s."${c}"`);
+        select.push(`COALESCE(${a}."${disp}"::text, s."${c}"::text) AS "${c}"`);
+        continue;
+      }
+    }
+    select.push(`s."${assertValidIdentifier(c)}"`);
+  }
+  const params = [req.user.tenant_id, clientId];
+  let where = 's.tenant_id = $1 AND s.client_id = $2';
+  if (cols.has('user_id')) { params.push(owner); where += ` AND s.user_id = $${params.length}`; }
+  // Solo attivi: righe valide oggi. Anche chiusi: nessun controllo sulla scadenza.
+  if (cols.has('scadenza') && !opz.tutti) where += ' AND s.scadenza >= CURRENT_DATE';
+  if (sez.key === 'mysupport') where += ` AND LOWER(BTRIM(COALESCE(s.stato_finale, ''))) <> 'chiuso'`;
+  if (sez.key === 'licenze' && cols.has('active')) where += ' AND s.active IS TRUE';
+  const ordine = (ordineGriglia(tabella) || (cols.has('id') ? 's.id' : '1')).replace(/\bsrc\./g, 's.');
+  const r = await db.query(
+    `SELECT ${select.join(', ')} FROM "${tabella}" s ${joins.join(' ')} WHERE ${where} ORDER BY ${ordine} LIMIT 2000`,
+    params
+  );
+  // Id di rubrica rimasti (owner delle Issue, assegnatari...): nominativo.
+  const ids = new Set();
+  r.rows.forEach((x) => usate.forEach((c) => { if (DOS_UUID.test(String(x[c] ?? ''))) ids.add(String(x[c])); }));
+  const nomi = new Map();
+  if (ids.size) {
+    try {
+      const rb = await db.query('SELECT id::text AS id, nominativo FROM rubrica WHERE tenant_id = $1 AND id::text = ANY($2::text[])',
+        [req.user.tenant_id, [...ids]]);
+      rb.rows.forEach((x) => nomi.set(x.id, x.nominativo));
+    } catch (e) { /* rubrica non disponibile */ }
+    // Id di una licenza del cliente (es. «Modulo» delle Issue = riga di licenze_app): il suo nome.
+    const resto = [...ids].filter((x) => !nomi.has(x));
+    if (resto.length) {
+      try {
+        const li = await db.query(
+          `SELECT la.id::text AS id, cl.description AS n FROM licenze_app la JOIN conf_licenze_app cl ON cl.id = la.licenza_id
+            WHERE la.tenant_id = $1 AND la.id::text = ANY($2::text[])`,
+          [req.user.tenant_id, resto]
+        );
+        li.rows.forEach((x) => nomi.set(x.id, x.n));
+      } catch (e) { /* licenze non disponibili */ }
+    }
+  }
+  // Tipo delle colonne nel database: il formato numerico italiano (1.234,56) solo per i decimali
+  // (importi, stime); gli interi senza separatori (es. anni); il testo sempre com'è, anche se è
+  // fatto di sole cifre (es. codice quesito 18157756: è un codice, non un numero).
+  const tipi = new Map((await db.query(
+    `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1`,
+    [tabella]
+  )).rows.map((x) => [x.column_name, x.data_type]));
+  const DECIMALI = ['numeric', 'decimal', 'real', 'double precision', 'money'];
+  const INTERI = ['integer', 'bigint', 'smallint'];
+  const fmt = (c, v) => {
+    if (v == null || v === '') return '';
+    if (v instanceof Date) return v.toLocaleDateString('it-IT');
+    let s = String(v);
+    if (nomi.has(s)) return String(nomi.get(s));
+    const tr = d.sl.valori.get(c.toLowerCase());
+    if (tr && tr.has(s)) return tr.get(s);
+    const tipo = tipi.get(c) || '';
+    if (tipo.startsWith('date') || tipo.startsWith('timestamp')) {
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10).split('-').reverse().join('/');
+    }
+    if (/^-?\d+(\.\d+)?$/.test(s)) {
+      if (DECIMALI.includes(tipo)) return Number(s).toLocaleString('it-IT', { maximumFractionDigits: 2 });
+      if (INTERI.includes(tipo)) return String(Number(s));
+    }
+    return s.length > 400 ? `${s.slice(0, 397)}…` : s;
+  };
+  return r.rows.map((x) => {
+    const riga = etichetteValori(tabella, { ...x });
+    return { progetto: x.__progetto || null, valori: usate.map((c) => fmt(c, riga[c])) };
+  }).map((x, i) => ({ ...x, _cols: i === 0 ? usate : undefined }));
+}
+
+// Progetti attivi del cliente (riga del progetto non scaduta, stato non annullato/in
+// negoziazione) con i campi della scheda (anche dentro le sezioni) e le commesse.
+async function dosProgetti(req, owner, clientId, opz = {}) {
+  // Solo attivi: i progetti aperti (riga del progetto valida oggi), anche In Negoziazione, e
+  // QUALUNQUE sia il loro Anno (un progetto aperto del 2025 resta tra gli attivi).
+  // Esclusi sempre (anche con «Anche chiusi») i progetti con Stato Progetto «Annullato».
+  // Anche chiusi: nessun controllo sulla scadenza; con l'anno scelto, solo i progetti con quel
+  // valore nel campo «Anno» (il più recente del progetto).
+  const params = [req.user.tenant_id, owner, clientId];
+  let filtro = '';
+  if (!opz.tutti) {
+    filtro = 'AND a.scadenza >= CURRENT_DATE';
+  } else if (opz.anno) {
+    params.push(String(opz.anno));
+    filtro = `AND (SELECT regexp_replace(BTRIM(COALESCE(an.valore3::text, an.valore2, '')), '\\.0+$', '')
+                     FROM projects an
+                    WHERE an.campo = 'Anno' AND an.argument = a.id::text AND an.tenant_id = a.tenant_id AND an.user_id = a.user_id
+                    ORDER BY an.scadenza DESC NULLS LAST, an.id DESC LIMIT 1) = $${params.length}`;
+  }
+  const p = (await db.query(
+    `SELECT a.id::text AS id, a.valore2 AS nome, (a.scadenza IS NULL OR a.scadenza < CURRENT_DATE) AS chiuso FROM projects a
+      WHERE a.campo = 'Progetto' AND a.argument = 'Progetto' AND a.tenant_id = $1 AND a.user_id = $2 AND a.client_id = $3
+        ${filtro}
+        AND NOT EXISTS (
+          SELECT 1 FROM projects sp
+           WHERE sp.campo = 'Stato Progetto' AND sp.argument = a.id::text
+             AND sp.tenant_id = a.tenant_id AND sp.user_id = a.user_id
+             ${opz.tutti ? '' : 'AND sp.scadenza >= CURRENT_DATE'}
+             AND LOWER(BTRIM(sp.valore2)) = 'annullato')
+      ORDER BY (a.scadenza >= CURRENT_DATE) DESC NULLS LAST, a.valore2`,
+    params
+  )).rows;
+  const out = [];
+  const daRisolvere = new Set();
+  for (const prog of p) {
+    const ids = (await db.query(
+      `WITH RECURSIVE albero(id, livello) AS (
+         SELECT id, 0 FROM projects WHERE id::text = $1
+         UNION ALL
+         SELECT x.id, a.livello + 1 FROM projects x JOIN albero a ON x.argument = a.id::text
+          WHERE x.tenant_id = $2 AND x.user_id = $3 AND a.livello < 6 AND x.tipo_valore::text = '0'
+       )
+       SELECT id::text AS id FROM albero`,
+      [prog.id, req.user.tenant_id, owner]
+    )).rows.map((x) => x.id);
+    const r = await db.query(
+      `SELECT campo, tipo_valore::text AS tipo_valore, valore1::text AS valore1, valore2::text AS valore2, valore3::text AS valore3
+         FROM projects
+        WHERE tenant_id = $1 AND user_id = $2 AND argument = ANY($3::text[])${opz.tutti ? '' : ' AND scadenza >= CURRENT_DATE'}
+        ORDER BY (scadenza >= CURRENT_DATE) DESC NULLS LAST, scadenza DESC NULLS LAST, id`,
+      [req.user.tenant_id, owner, ids]
+    );
+    const perCampo = new Map();
+    for (const x of r.rows) { const k = ofNormCampo(x.campo); if (!perCampo.has(k)) perCampo.set(k, x); }
+    const gestione = perCampo.get('gestione a hh');
+    const aOre = !!gestione && dosVero(gestione.valore1);
+    const campo = (nome) => {
+      const n = nome.toLowerCase();
+      const giusto = aOre ? '_hh' : '_gg', altro = aOre ? '_gg' : '_hh';
+      const c = [perCampo.get(n), perCampo.get(n + giusto), perCampo.get(n + altro)].filter(Boolean);
+      return c.find((x) => dosValore(x) !== '') || c[0] || null;
+    };
+    const v = { id: prog.id, nome: prog.nome, aOre, chiuso: !!prog.chiuso };
+    for (const [k, nome] of Object.entries(DOS_CAMPI_PROGETTO)) {
+      const row = campo(nome);
+      if (k === 'aConsuntivo') v[k] = row ? dosVero(row.valore1) : null;
+      else if (k === 'paOda') v[k] = row ? { si: dosVero(row.valore1), valore: String(row.valore2 || '').trim() } : null;
+      else v[k] = row ? dosValore(row) : '';
+      // Anno salvato come numero (2026.00): intero.
+      if (k === 'anno' && /^\d{4}(\.0+)?$/.test(String(v[k]).trim())) v[k] = String(parseInt(v[k], 10));
+      if (typeof v[k] === 'string' && DOS_UUID.test(v[k])) daRisolvere.add(v[k]);
+    }
+    out.push(v);
+  }
+  // Valori che sono id (es. Richiedente scelto dalla rubrica): nominativo / descrizione.
+  if (daRisolvere.size) {
+    const nomi = new Map();
+    try {
+      const rb = await db.query('SELECT id::text AS id, nominativo AS n FROM rubrica WHERE tenant_id = $1 AND id::text = ANY($2::text[])',
+        [req.user.tenant_id, [...daRisolvere]]);
+      rb.rows.forEach((x) => nomi.set(x.id, x.n));
+    } catch (e) { /* rubrica non disponibile */ }
+    out.forEach((v) => Object.keys(v).forEach((k) => { if (typeof v[k] === 'string' && nomi.has(v[k])) v[k] = String(nomi.get(v[k])); }));
+  }
+  // Commesse (più di una per progetto: tabella proj_commessa).
+  if (out.length) {
+    try {
+      const c = await db.query(
+        `SELECT project_id::text AS p, cod_commessa, commessa FROM proj_commessa
+          WHERE tenant_id = $1 AND project_id::text = ANY($2::text[])${opz.tutti ? '' : ' AND scadenza >= CURRENT_DATE'}
+          ORDER BY cod_commessa`,
+        [req.user.tenant_id, out.map((x) => x.id)]
+      );
+      out.forEach((v) => { v.commesse = c.rows.filter((x) => x.p === v.id).map((x) => ({ cod: x.cod_commessa, nome: x.commessa || '' })); });
+    } catch (e) { out.forEach((v) => { v.commesse = []; }); }
+  }
+  return out;
+}
+
+// Valore di un campo della scheda per il Dossier: sì/no (tipi 1, 14, 22) da valore1, numeri
+// (3, 8) da valore3, il resto da valore2. A differenza di ofValore NON ripiega sul sì/no: un
+// campo a tendina vuoto (es. Richiedente tipo 17, valore1 = true) resta vuoto, non "true".
+function dosValore(row) {
+  const t = String(row.tipo_valore ?? '').trim();
+  const pieno = (v) => v != null && String(v).trim() !== '';
+  if (['1', '14', '22'].includes(t)) return pieno(row.valore1) ? String(row.valore1).trim() : '';
+  const ordine = ['3', '8'].includes(t) ? [row.valore3, row.valore2] : [row.valore2, row.valore3];
+  const v = ordine.find(pieno);
+  return v == null ? '' : String(v).trim();
+}
+
+async function dosAccesso(req, clientId) {
+  const id = String(clientId || '').trim();
+  if (!DOS_UUID.test(id)) throw Object.assign(new Error('Cliente non valido'), { statusCode: 400 });
+  const acc = await clientAccess(id, req, false);
+  if (!acc) throw Object.assign(new Error('Cliente non accessibile'), { statusCode: 403 });
+  return { clientId: id, owner: acc.ownerUserId };
+}
+
+// Anni dei progetti del cliente (campo «Anno», anche dei progetti chiusi): scelta «Anche chiusi».
+app.get('/api/clients/dossier/anni', requireAuth, async (req, res) => {
+  try {
+    const { clientId, owner } = await dosAccesso(req, req.query.clientId);
+    const r = await db.query(
+      `SELECT DISTINCT regexp_replace(BTRIM(COALESCE(an.valore3::text, an.valore2, '')), '\\.0+$', '') AS anno
+         FROM projects a JOIN projects an ON an.argument = a.id::text AND an.campo = 'Anno'
+                                         AND an.tenant_id = a.tenant_id AND an.user_id = a.user_id
+        WHERE a.campo = 'Progetto' AND a.argument = 'Progetto' AND a.tenant_id = $1 AND a.user_id = $2 AND a.client_id = $3`,
+      [req.user.tenant_id, owner, clientId]
+    );
+    res.json(r.rows.map((x) => parseInt(x.anno, 10)).filter((n) => n > 1900 && n < 3000).sort((x, y) => y - x));
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.get('/api/clients/dossier/colonne', requireAuth, async (req, res) => {
+  try {
+    const out = [];
+    for (const sez of DOS_SEZIONI) {
+      const d = await dosColonneSezione(req, sez);
+      if (!d.cols.length) continue;
+      out.push({ key: sez.key, titolo: sez.titolo, colonne: d.cols.map((c) => ({ nome: c, label: d.label(c) })) });
+    }
+    res.json(out);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.get('/api/clients/dossier', requireAuth, async (req, res) => {
+  try {
+    const { clientId, owner } = await dosAccesso(req, req.query.clientId);
+    // Scelta all'apertura: modo=attivi (default) oppure modo=tutti (anche chiusi, senza controllo
+    // sulla scadenza) con anno = Anno del progetto (vuoto = tutti gli anni).
+    const tutti = req.query.modo === 'tutti';
+    const annoN = parseInt(req.query.anno, 10);
+    const opz = { tutti, anno: tutti && annoN > 1900 && annoN < 3000 ? annoN : null };
+    const nomeCliente = (await resolveClientDescriptions([clientId], req.user.tenant_id)).get(clientId) || 'Cliente';
+
+    // Anagrafica (solo nel documento, mai all'AI) e Pubblica Amministrazione del cliente.
+    const rc = await db.query(
+      `SELECT campo, tipo_valore::text AS tipo_valore, valore1::text AS valore1, valore2::text AS valore2, valore3::text AS valore3
+         FROM clients WHERE tenant_id = $1 AND user_id = $2 AND master_id = $3${tutti ? '' : ' AND scadenza >= CURRENT_DATE'}
+        ORDER BY (scadenza >= CURRENT_DATE) DESC NULLS LAST, scadenza DESC NULLS LAST, id`,
+      [req.user.tenant_id, owner, clientId]
+    );
+    const chiave = (c) => ofNormCampo(c).replace(/[^a-z0-9]/g, '');
+    const perCampoCliente = new Map();
+    for (const x of rc.rows) { const k = chiave(x.campo); if (!perCampoCliente.has(k)) perCampoCliente.set(k, x); }
+    const anag = {};
+    for (const [k, nome] of Object.entries(OF_CAMPI_CLIENTE)) { const row = perCampoCliente.get(chiave(nome)); anag[k] = row ? ofValore(row) : ''; }
+    for (const k of ['partitaIva', 'codiceFiscale']) {
+      const m = /^(\d+)(\.0+)?$/.exec(String(anag[k] || '').trim());
+      if (m) anag[k] = m[1].length < 11 ? m[1].padStart(11, '0') : m[1];
+    }
+    const pa = perCampoCliente.get(chiave('Pubblica Amministrazione'));
+    const cliente = { nome: nomeCliente, ...anag, pubblicaAmministrazione: pa ? dosVero(pa.valore1) : null };
+
+    const progetti = await dosProgetti(req, owner, clientId, opz);
+    const totali = { importo: 0, fatturato: 0, fatturatoFuturo: 0, daFatturare: 0 };
+    progetti.forEach((p) => Object.keys(totali).forEach((k) => { totali[k] += dosNum(p[k]) || 0; }));
+
+    // Fatturato per anno del cliente (vista kpi_fatturazione, come il KPI Fatturato). Sempre TUTTI
+    // gli anni: servono all'AI per l'andamento economico (spesa per anno, tendenza); nel documento,
+    // con «Anche chiusi» e un anno scelto, la tabella mostra solo quell'anno (fatturatoAnni).
+    let fatturatoTuttiAnni = [];
+    try {
+      fatturatoTuttiAnni = (await db.query(
+        `SELECT anno, SUM(totale) AS totale, SUM(forecast) AS forecast, SUM(da_fatturare) AS da_fatturare
+           FROM kpi_fatturazione WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
+          GROUP BY anno ORDER BY anno`,
+        [req.user.tenant_id, owner, clientId]
+      )).rows.map((x) => ({ anno: x.anno, fatturato: Number(x.totale) || 0, futuro: Number(x.forecast) || 0, daFatturare: Number(x.da_fatturare) || 0 }));
+    } catch (e) { /* vista assente */ }
+    // Tabella «Fatturazione dei progetti per anno»: SOLO i progetti del dossier, in TUTTI gli anni in
+    // cui fatturano (proj_anno_fatt), così un progetto con Anno 2025 che fattura anche nel 2026 fa
+    // comparire il 2026. Stessa logica delle viste kpi_fatturazione / proj_fatturato: fatturato =
+    // mesi passati (anno in corso: fino al mese attuale); futuro = mesi successivi a oggi;
+    // da fatturare (proj_fatturato, per progetto) sulla riga dell'anno in corso.
+    let fatturatoAnni = [];
+    const idsProgetti = progetti.map((p) => p.id);
+    if (idsProgetti.length) {
+      try {
+        fatturatoAnni = (await db.query(
+          `WITH m AS (
+             SELECT p.anno, v.mese, COALESCE(v.imp, 0) AS imp
+               FROM proj_anno_fatt p
+              CROSS JOIN LATERAL (VALUES (1, p.gennaio), (2, p.febbraio), (3, p.marzo), (4, p.aprile), (5, p.maggio), (6, p.giugno),
+                                         (7, p.luglio), (8, p.agosto), (9, p.settembre), (10, p.ottobre), (11, p.novembre), (12, p.dicembre)) v(mese, imp)
+              WHERE p.tenant_id = $1 AND p.project_id::text = ANY($2::text[])
+           )
+           SELECT anno,
+                  SUM(CASE WHEN anno < EXTRACT(YEAR FROM CURRENT_DATE)
+                             OR (anno = EXTRACT(YEAR FROM CURRENT_DATE) AND mese <= EXTRACT(MONTH FROM CURRENT_DATE)) THEN imp ELSE 0 END) AS fatturato,
+                  SUM(CASE WHEN anno > EXTRACT(YEAR FROM CURRENT_DATE)
+                             OR (anno = EXTRACT(YEAR FROM CURRENT_DATE) AND mese > EXTRACT(MONTH FROM CURRENT_DATE)) THEN imp ELSE 0 END) AS futuro
+             FROM m GROUP BY anno ORDER BY anno`,
+          [req.user.tenant_id, idsProgetti]
+        )).rows.map((x) => ({ anno: Number(x.anno), fatturato: Number(x.fatturato) || 0, futuro: Number(x.futuro) || 0, daFatturare: 0 }));
+        const df = (await db.query(
+          'SELECT SUM(da_fatturare) AS d FROM proj_fatturato WHERE tenant_id = $1 AND project_id::text = ANY($2::text[])',
+          [req.user.tenant_id, idsProgetti]
+        )).rows[0];
+        const daFatt = Number(df && df.d) || 0;
+        if (daFatt) {
+          const annoCorrente = new Date().getFullYear();
+          let riga = fatturatoAnni.find((x) => x.anno === annoCorrente);
+          if (!riga) { riga = { anno: annoCorrente, fatturato: 0, futuro: 0, daFatturare: 0 }; fatturatoAnni.push(riga); fatturatoAnni.sort((x, y) => x.anno - y.anno); }
+          riga.daFatturare = daFatt;
+        }
+      } catch (e) { /* tabelle o viste assenti */ }
+    }
+
+    // Prompt: colonne scelte (blocco COLONNE) e istruzioni per l'AI.
+    const disponibili = {};
+    for (const sez of DOS_SEZIONI) disponibili[sez.key] = await dosColonneSezione(req, sez);
+    let promptTesto = '';
+    try { promptTesto = (await getPromptFor('DOSSIER_CLIENTE', req.user)).testo; } catch (e) { promptTesto = ''; }
+    const { scelte, resto, ignorate } = dosLeggiColonne(promptTesto, disponibili);
+
+    const idsAttivi = new Set(progetti.map((p) => p.id));
+    const sezioni = [];
+    for (const sez of DOS_SEZIONI) {
+      const d = disponibili[sez.key];
+      if (!d.cols.length) continue;
+      const colonne = (scelte[sez.key] || sez.default).filter((c) => d.cols.includes(c));
+      if (!colonne.length) continue;
+      const righe = await dosRighe(req, owner, clientId, sez, colonne, d, opz);
+      const usate = (righe[0] && righe[0]._cols) || colonne;
+      sezioni.push({
+        key: sez.key, titolo: sez.titolo, perProgetto: sez.perProgetto,
+        colonne: usate.map((c) => d.label(c)),
+        // Per progetto: solo i progetti attivi e le righe senza progetto (le altre no).
+        righe: righe.filter((x) => !sez.perProgetto || !x.progetto || idsAttivi.has(x.progetto))
+          .map((x) => ({ progetto: x.progetto && idsAttivi.has(x.progetto) ? x.progetto : null, valori: x.valori }))
+      });
+    }
+
+    // Dati per l'AI: niente anagrafica né nome del cliente.
+    const nascondi = (s) => {
+      let t = String(s ?? '');
+      if (nomeCliente && nomeCliente.length > 2) t = t.split(nomeCliente).join('il Cliente');
+      return t;
+    };
+    // Punto delle migliaia sempre (toLocaleString it-IT non separa i numeri di 4 cifre).
+    const euro = (v) => {
+      const x = dosNum(v);
+      if (x == null) return '';
+      const [int, dec] = Math.abs(x).toFixed(2).split('.');
+      return `${x < 0 ? '-' : ''}${int.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${dec} €`;
+    };
+    const righeAi = [];
+    righeAi.push(`Pubblica Amministrazione: ${cliente.pubblicaAmministrazione == null ? 'non indicato' : (cliente.pubblicaAmministrazione ? 'sì' : 'no')}`);
+    righeAi.push(`\n${tutti ? `PROGETTI APERTI E CHIUSI${opz.anno ? ` DELL'ANNO ${opz.anno}` : ''}` : 'PROGETTI ATTIVI'} (${progetti.length})`);
+    progetti.forEach((p, i) => {
+      righeAi.push(`${i + 1}. ${nascondi(p.nome)} | anno ${p.anno || '-'} | tipo ${p.tipo || '-'} | tipologia ${p.tipologia || '-'} | rischio ${p.rischio || '-'} | stato ${p.stato || '-'}`
+        + ` | effort ${p.effort || '-'} ${p.aOre ? 'ore' : 'giorni'} | importo ${euro(p.importo) || '-'} | importo non scontato ${euro(p.importoNonScontato) || '-'} | sconto ${p.sconto || '-'}%`
+        + ` | fatturato ${euro(p.fatturato) || '-'} | fatturato futuro ${euro(p.fatturatoFuturo) || '-'} | da fatturare ${euro(p.daFatturare) || '-'}`
+        + ` | a consuntivo ${p.aConsuntivo ? 'sì' : 'no'} | PA (ODA) ${p.paOda && p.paOda.si ? `sì ${p.paOda.valore}` : 'no'}`
+        + ` | commesse ${(p.commesse || []).map((c) => c.cod).join(', ') || 'nessuna'}${p.chiuso ? ' | CHIUSO' : ''}`);
+    });
+    righeAi.push(`TOTALI: importo ${euro(totali.importo)} | fatturato ${euro(totali.fatturato)} | fatturato futuro ${euro(totali.fatturatoFuturo)} | da fatturare ${euro(totali.daFatturare)}`);
+    if (fatturatoTuttiAnni.length) {
+      const annoCorrente = new Date().getFullYear();
+      righeAi.push(`\nFATTURATO PER ANNO (spesa del Cliente; ${annoCorrente} = anno in corso: il fatturato è parziale, fino a oggi; futuro e da fatturare sono quanto previsto)`);
+      fatturatoTuttiAnni.forEach((a) => righeAi.push(`${a.anno}${Number(a.anno) === annoCorrente ? ' (in corso)' : ''}: fatturato ${euro(a.fatturato)} | futuro ${euro(a.futuro)} | da fatturare ${euro(a.daFatturare)} | totale anno ${euro(a.fatturato + a.futuro)}`));
+    }
+    if (fatturatoAnni.length) {
+      righeAi.push('\nFATTURAZIONE DEI SOLI PROGETTI DI QUESTO DOSSIER PER ANNO (anche gli anni in cui la fatturazione sconfina oltre l\'anno del progetto)');
+      fatturatoAnni.forEach((a) => righeAi.push(`${a.anno}: fatturato ${euro(a.fatturato)} | futuro ${euro(a.futuro)} | da fatturare ${euro(a.daFatturare)}`));
+    }
+    const nomeProg = new Map(progetti.map((p) => [p.id, p.nome]));
+    for (const s of sezioni) {
+      righeAi.push(`\n${s.titolo.toUpperCase()} (${s.righe.length}) - colonne: ${s.colonne.join(' | ')}`);
+      s.righe.slice(0, 300).forEach((r) => righeAi.push(`${s.perProgetto ? `[${r.progetto ? nascondi(nomeProg.get(r.progetto)) : 'senza progetto'}] ` : ''}${nascondi(r.valori.join(' | '))}`));
+      if (s.righe.length > 300) righeAi.push(`… altre ${s.righe.length - 300} righe`);
+    }
+    const datiAi = righeAi.join('\n');
+
+    const oggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Rome' });
+    const utente = String(await speakerName(req.user) || '').trim() || req.user.email || '';
+    let ai = { testo: '', label: '', errore: '' };
+    const providerName = await recapProviderName(req.user);
+    if (!providerName) ai.errore = 'Nessuna AI scelta in Impostazioni › AI › «AI generazione e-mail recap»: il dossier è senza sintesi.';
+    else if (!resto.trim()) ai.errore = 'Prompt «Dossier Cliente» non disponibile: il dossier è senza sintesi.';
+    else {
+      const build = (dati) => {
+        let tpl = resto;
+        if (!tpl.includes('{{DATI}}')) tpl += '\n\nDATI\n{{DATI}}';
+        return tpl.replace(/\{\{(DATI|DATA|UTENTE)\}\}/g, (m, k) => (k === 'DATI' ? dati : k === 'DATA' ? oggi : utente));
+      };
+      try {
+        const r = localRecapMode(providerName) === 'server'
+          ? await askOllamaRecap(async (t) => build(t), datiAi)
+          : await askAiProvider(req.user.user_id, providerName, build(datiAi));
+        ai = { testo: stripMarkdown(String(r.text || '')).trim(), label: r.label || providerName, errore: '' };
+      } catch (e) {
+        ai.errore = `L'AI non ha risposto (${e.message}): il dossier è senza sintesi.`;
+      }
+    }
+
+    res.json({ cliente, data: oggi, utente, filtro: opz, progetti, totali, fatturatoAnni, sezioni, ai, colonneIgnorate: ignorate });
+  } catch (error) {
+    console.error('[DOSSIER CLIENTE]', error.message);
+    res.status(error.statusCode || error.status || 500).json({ error: error.message });
+  }
+});
+
 app.get('/api/client-logos/:clientId', requireAuth, async (req, res) => {
   try {
     const clientId = req.params.clientId;

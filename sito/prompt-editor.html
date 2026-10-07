@@ -63,6 +63,14 @@
         .custom-list li:hover { background: #F3F4F6; }
         .custom-list .muted { color: #6b7280; }
         textarea:disabled { background: #f9fafb; color: #9ca3af; }
+        .colonne-box { font-size: 0.85rem; color: #4b5563; margin-bottom: 0.75rem; padding: 0.7rem 0.8rem; background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px; }
+        .colonne-nota { margin-bottom: 0.5rem; }
+        .colonne-nota code { background: #EEF2FF; color: #3730A3; padding: 1px 6px; border-radius: 4px; font-family: Consolas, Menlo, monospace; }
+        .colonne-sez { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem; margin-top: 0.35rem; }
+        .colonne-sez b { min-width: 90px; color: #374151; }
+        .colonne-sez button { border: 1px solid #C7D2FE; background: #fff; color: #3730A3; border-radius: 999px; padding: 1px 9px; font-size: 0.8rem; cursor: pointer; }
+        .colonne-sez button:hover { background: #EEF2FF; }
+        .colonne-sez button.usata { background: #E0E7FF; border-color: #A5B4FC; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -90,6 +98,12 @@
             <div class="placeholders">
                 Segnaposto (clic per inserirli nel punto del cursore): <span id="placeholders"></span>
                 <span id="notaTrascrizione"><br>Se il testo non contiene <code style="cursor: default;">{{TRASCRIZIONE}}</code>, la trascrizione viene aggiunta in fondo.</span>
+            </div>
+            <!-- Funzioni con tabelle (Dossier Cliente): colonne sceglibili per sezione. Il clic aggiunge
+                 la colonna alla riga della sezione nel blocco COLONNE ... FINE COLONNE del testo. -->
+            <div class="colonne-box" id="colonneBox" style="display: none;">
+                <div class="colonne-nota">Colonne delle tabelle: clic su una colonna per aggiungerla alla sua sezione nel blocco <code>COLONNE</code> in cima al testo (l'ordine nel blocco è l'ordine delle colonne nel documento; per toglierne una cancellala dal testo).</div>
+                <div id="colonneElenco"></div>
             </div>
             <textarea id="promptText" spellcheck="false"></textarea>
             <div class="actions">
@@ -313,7 +327,73 @@
             refreshDirty();
         });
 
-        textEl.addEventListener('input', refreshDirty);
+        textEl.addEventListener('input', () => { refreshDirty(); evidenziaColonne(); });
+
+        // --- Colonne delle tabelle (funzioni con colonne: true, es. Dossier Cliente) ---
+        let colonneSezioni = []; // [{ key, titolo, colonne: [{ nome, label }] }]
+        const normC = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+        const RE_BLOCCO = /^[ \t]*COLONNE[ \t]*\r?\n([\s\S]*?)^[ \t]*FINE COLONNE[ \t]*$/im;
+
+        // Colonne già nel blocco, per sezione: { titoloNormalizzato: Set(colonne normalizzate) }.
+        function colonneNelTesto() {
+            const m = RE_BLOCCO.exec(textEl.value);
+            const out = {};
+            if (!m) return out;
+            for (const riga of m[1].split(/\r?\n/)) {
+                const mm = /^\s*([^:]+):\s*(.*)$/.exec(riga);
+                if (mm) out[normC(mm[1])] = new Set(mm[2].split(/[,;]/).map(normC).filter(Boolean));
+            }
+            return out;
+        }
+
+        function evidenziaColonne() {
+            if (!colonneSezioni.length) return;
+            const usate = colonneNelTesto();
+            document.querySelectorAll('#colonneElenco button[data-sez]').forEach((b) => {
+                const s = usate[normC(b.dataset.sez)];
+                b.classList.toggle('usata', !!s && (s.has(normC(b.dataset.label)) || s.has(normC(b.dataset.nome))));
+            });
+        }
+
+        function aggiungiColonna(sezione, label) {
+            if (textEl.disabled || textEl.readOnly) return;
+            let t = textEl.value;
+            let m = RE_BLOCCO.exec(t);
+            if (!m) { t = `COLONNE\nFINE COLONNE\n\n${t}`; m = RE_BLOCCO.exec(t); }
+            const righe = m[1].split(/\r?\n/).filter((r, i, a) => !(i === a.length - 1 && r === ''));
+            const i = righe.findIndex((r) => { const mm = /^\s*([^:]+):/.exec(r); return mm && normC(mm[1]) === normC(sezione); });
+            if (i >= 0) {
+                const gia = righe[i].split(':').slice(1).join(':').split(/[,;]/).map(normC);
+                if (gia.includes(normC(label))) return;
+                righe[i] = `${righe[i].replace(/[\s,;]+$/, '')}${/:\s*$/.test(righe[i]) ? ' ' : ', '}${label}`;
+            } else {
+                righe.push(`${sezione}: ${label}`);
+            }
+            const blocco = `COLONNE\n${righe.join('\n')}\nFINE COLONNE`;
+            textEl.value = t.slice(0, m.index) + blocco + t.slice(m.index + m[0].length);
+            refreshDirty();
+            evidenziaColonne();
+        }
+
+        async function caricaColonne(def) {
+            $('colonneBox').style.display = def.colonne ? '' : 'none';
+            colonneSezioni = [];
+            if (!def.colonne) return;
+            $('colonneElenco').textContent = 'Caricamento colonne…';
+            try {
+                colonneSezioni = await request('GET', '/clients/dossier/colonne');
+                $('colonneElenco').innerHTML = colonneSezioni.map((s) => `<div class="colonne-sez"><b>${esc(s.titolo)}:</b>${s.colonne.map((c) =>
+                    `<button type="button" data-sez="${esc(s.titolo)}" data-label="${esc(c.label)}" data-nome="${esc(c.nome)}" title="${esc(c.nome)}">${esc(c.label)}</button>`).join('')}</div>`).join('');
+                evidenziaColonne();
+            } catch (e) {
+                $('colonneElenco').textContent = `Colonne non disponibili: ${e.message}`;
+            }
+        }
+
+        $('colonneElenco').addEventListener('click', (ev) => {
+            const b = ev.target.closest('button[data-sez]');
+            if (b) aggiungiColonna(b.dataset.sez, b.dataset.label);
+        });
 
         $('saveBtn').addEventListener('click', async () => {
             if (!textEl.value.trim()) { showStatus('Il prompt non può essere vuoto.', 'error'); return; }
@@ -393,7 +473,8 @@
             url.searchParams.set('funzione', codice);
             history.replaceState(null, '', url);
             $('status').className = 'status';
-            await Promise.all([loadPrompt(), ctx.isProjexaAdmin ? loadCustomList() : null]);
+            await Promise.all([loadPrompt(), ctx.isProjexaAdmin ? loadCustomList() : null, caricaColonne(def)]);
+            evidenziaColonne();
         }
 
         $('funzioneSel').addEventListener('change', async () => {

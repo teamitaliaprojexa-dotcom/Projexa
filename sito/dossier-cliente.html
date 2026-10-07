@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - Dossier Cliente</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!--
+      DOSSIER CLIENTE: anteprima da stampare o salvare in PDF (orizzontale), aperta dal pulsante
+      «Dossier Cliente» della scheda cliente. Dati da GET /api/clients/dossier (backend/server.js):
+      numeri e tabelle li compone Projexa; la sintesi la scrive l'AI del recap con il prompt
+      «Dossier Cliente» (DOSSIER_CLIENTE), senza ricevere anagrafica né nome del cliente.
+    -->
+    <style>
+        @page { size: A4 landscape; margin: 10mm; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; color: #1F2937; background: #E5E7EB; font-size: 11px; }
+        .toolbar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; padding: 0.7rem 1.2rem; background: #fff; border-bottom: 1px solid #E5E7EB; font-size: 13px; }
+        .toolbar .t { font-weight: 700; color: #3730A3; }
+        .toolbar .stato { color: #6B7280; flex: 1; }
+        .btn { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.5rem 1rem; border: none; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+        .btn-primary { background: #4F46E5; color: #fff; }
+        .btn-primary:disabled { opacity: 0.5; cursor: wait; }
+        .btn-secondary { background: #F3F4F6; color: #374151; }
+        .avvisi { max-width: 297mm; margin: 0.8rem auto 0; padding: 0 0.5rem; }
+        .avviso { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; border-radius: 8px; padding: 0.5rem 0.8rem; margin-bottom: 0.4rem; font-size: 12px; }
+        .pagina { width: 297mm; max-width: 100%; min-height: 210mm; margin: 0.8rem auto 2rem; background: #fff; padding: 10mm 12mm; box-shadow: 0 4px 20px rgba(0,0,0,0.12); }
+        .caricamento { text-align: center; padding: 4rem 1rem; color: #6B7280; font-size: 14px; }
+        /* Loghi grandi: colonne laterali larghe (i loghi sono larghi e bassi, li limita la larghezza) */
+        .testata { display: grid; grid-template-columns: 300px 1fr 300px; align-items: center; gap: 1rem; padding-bottom: 6mm; border-bottom: 2px solid #4F46E5; }
+        .logo { height: 120px; display: flex; align-items: center; }
+        .logo.dx { justify-content: flex-end; }
+        .logo img { max-height: 120px; max-width: 300px; width: 100%; height: 100%; object-fit: contain; object-position: left center; }
+        .logo.dx img { object-position: right center; }
+        .titolo { text-align: center; }
+        .titolo h1 { font-size: 22px; color: #312E81; letter-spacing: 0.02em; }
+        .titolo .cli { font-size: 15px; font-weight: 700; margin-top: 2px; }
+        .titolo .sub { font-size: 11px; color: #6B7280; margin-top: 3px; }
+        /* Anagrafica: una voce per riga, etichette allineate */
+        .anag { display: grid; grid-template-columns: max-content 1fr; gap: 1.2mm 4mm; margin: 4mm 0 2mm; font-size: 13.5px; }
+        .anag span { color: #4B5563; }
+        .anag b { color: #111827; font-size: 14px; }
+        h2 { font-size: 13.5px; color: #312E81; margin: 6mm 0 2mm; padding-bottom: 1mm; border-bottom: 1px solid #C7D2FE; break-after: avoid; }
+        h3 { font-size: 12px; color: #374151; margin: 4mm 0 1.5mm; break-after: avoid; }
+        .sintesi { background: #F5F7FF; border: 1px solid #E0E7FF; border-radius: 8px; padding: 3mm 4mm; margin-top: 4mm; font-size: 11.5px; line-height: 1.5; break-inside: avoid; }
+        .sintesi h4 { font-size: 11.5px; color: #3730A3; margin: 2mm 0 1mm; }
+        .sintesi h4:first-child { margin-top: 0; }
+        .sintesi ul { margin: 0 0 1mm 5mm; }
+        .sintesi .ai { font-size: 9.5px; color: #6B7280; margin-top: 2mm; text-align: right; }
+        table { width: 100%; border-collapse: collapse; font-size: 10px; }
+        table.stretta { width: auto; min-width: 35%; max-width: 100%; }
+        table.stretta th, table.stretta td { padding-right: 8mm; }
+        thead { display: table-header-group; }
+        /* Intestazioni di colonna sempre centrate (anche sopra le colonne numeriche) */
+        th { background: #EEF2FF; color: #312E81; text-align: center; vertical-align: middle; font-weight: 700; padding: 1.6mm 1.8mm; border-bottom: 1px solid #C7D2FE; }
+        td { padding: 1.4mm 1.8mm; border-bottom: 1px solid #F1F5F9; vertical-align: top; }
+        tr { break-inside: avoid; }
+        td.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        th.n { text-align: center; }
+        tr.tot td { font-weight: 700; background: #F8FAFC; border-top: 1px solid #C7D2FE; }
+        .si { color: #047857; font-weight: 700; }
+        .chiuso { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 4px; background: #F3F4F6; color: #6B7280; font-size: 8.5px; font-weight: 700; text-transform: uppercase; vertical-align: middle; }
+        .no { color: #9CA3AF; }
+        .vuoto { color: #9CA3AF; font-style: italic; font-size: 10.5px; margin: 1mm 0 2mm; }
+        .progetto { break-inside: avoid-page; }
+        .piede { margin-top: 8mm; padding-top: 2mm; border-top: 1px solid #E5E7EB; font-size: 9px; color: #9CA3AF; display: flex; justify-content: space-between; }
+        @media print {
+            body { background: #fff; }
+            .toolbar, .avvisi { display: none !important; }
+            .pagina { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <span class="t"><i class="fas fa-file-pdf"></i> Dossier Cliente</span>
+        <span class="stato" id="stato">Preparo il dossier…</span>
+        <button class="btn btn-primary" id="stampaBtn" type="button" disabled><i class="fas fa-print"></i> Stampa / Salva PDF</button>
+        <button class="btn btn-secondary" type="button" onclick="window.close()"><i class="fas fa-xmark"></i> Chiudi</button>
+    </div>
+    <div class="avvisi" id="avvisi"></div>
+    <div class="pagina" id="pagina"><div class="caricamento"><i class="fas fa-spinner fa-spin"></i> Raccolgo i dati del cliente e l'AI scrive la sintesi: può volerci qualche istante…</div></div>
+
+    <script>
+        const API_URL = location.origin + '/api';
+        const $ = (id) => document.getElementById(id);
+        const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const auth = () => ({ 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` });
+
+        const num = (v) => {
+            if (v == null || String(v).trim() === '') return null;
+            const n = Number(String(v).replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+            return Number.isFinite(n) ? n : null;
+        };
+        // Euro con il punto delle migliaia SEMPRE (il formato it-IT del browser non separa i numeri
+        // di 4 cifre: 6000,00 invece di 6.000,00).
+        const euro = (v) => {
+            const n = num(v);
+            if (n == null) return '';
+            const [int, dec] = Math.abs(n).toFixed(2).split('.');
+            return `${n < 0 ? '-' : ''}${int.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${dec} €`;
+        };
+        const perc = (v) => { const n = num(v); return n == null ? '' : n.toLocaleString('it-IT', { maximumFractionDigits: 2 }) + ' %'; };
+        const sino = (b) => b == null ? '' : (b ? '<span class="si">Sì</span>' : '<span class="no">No</span>');
+
+        // Logo (cliente o tenant) letto con l'autenticazione: URL locale per <img>, null se assente.
+        async function logo(url) {
+            try {
+                const r = await fetch(`${API_URL}${url}`, { headers: auth() });
+                if (!r.ok) return null;
+                return URL.createObjectURL(await r.blob());
+            } catch (e) { return null; }
+        }
+
+        // Testo dell'AI in testo semplice -> titoli (righe in MAIUSCOLO), elenchi ("- ") e paragrafi.
+        function sintesiHtml(testo) {
+            let html = '', lista = false;
+            const chiudi = () => { if (lista) { html += '</ul>'; lista = false; } };
+            for (const r of String(testo || '').split(/\r?\n/)) {
+                const t = r.trim();
+                if (!t) { chiudi(); continue; }
+                if (/^[A-ZÀ-Ù0-9 '’/&()-]{4,}:?$/.test(t)) { chiudi(); html += `<h4>${esc(t.replace(/:$/, ''))}</h4>`; continue; }
+                const b = /^[-•*]\s+(.*)$/.exec(t);
+                if (b) { if (!lista) { html += '<ul>'; lista = true; } html += `<li>${esc(b[1])}</li>`; continue; }
+                chiudi();
+                html += `<p>${esc(t)}</p>`;
+            }
+            chiudi();
+            return html;
+        }
+
+        function tabella(colonne, righe, numeriche = []) {
+            // Poche colonne (es. Licenze): tabella larga quanto il contenuto, non tutta la pagina.
+            return `<table${colonne.length <= 3 ? ' class="stretta"' : ''}><thead><tr>${colonne.map((c, i) => `<th${numeriche.includes(i) ? ' class="n"' : ''}>${esc(c)}</th>`).join('')}</tr></thead>
+                <tbody>${righe.map((r) => `<tr>${r.map((v, i) => `<td${numeriche.includes(i) ? ' class="n"' : ''}>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+        }
+
+        function sezioneHtml(s, righe, titolo, livello = 'h2') {
+            const testa = `<${livello}>${esc(titolo)} (${righe.length})</${livello}>`;
+            return testa + (righe.length ? tabella(s.colonne, righe.map((r) => r.valori)) : '<div class="vuoto">Nessuna riga.</div>');
+        }
+
+        let titoloProgetti = 'Progetti attivi';
+        function progettiHtml(d) {
+            if (!d.progetti.length) return `<h2>${esc(titoloProgetti)} (0)</h2><div class="vuoto">Nessun progetto.</div>`;
+            const testa = ['Progetto', 'Anno', 'Tipo', 'Tipologia', 'Rischio', 'Stato', 'Richiedente', 'Effort', 'Importo', 'Importo non scontato', 'Sconto',
+                'Fatturato', 'Fatturato futuro', 'Da fatturare', 'A consuntivo', 'PA (ODA)', 'Commesse'];
+            const righe = d.progetti.map((p) => `<tr>
+                <td><b>${esc(p.nome)}</b>${p.chiuso ? ' <span class="chiuso">chiuso</span>' : ''}</td><td>${esc(/^\d{4}(\.0+)?$/.test(String(p.anno || '').trim()) ? String(parseInt(p.anno, 10)) : p.anno)}</td><td>${esc(p.tipo)}</td><td>${esc(p.tipologia)}</td><td>${esc(p.rischio)}</td><td>${esc(p.stato)}</td><td>${esc(p.richiedente)}</td>
+                <td class="n">${p.effort !== '' ? esc(`${(num(p.effort) ?? p.effort).toLocaleString('it-IT')} ${p.aOre ? 'h' : 'gg'}`) : ''}</td>
+                <td class="n">${esc(euro(p.importo))}</td><td class="n">${esc(euro(p.importoNonScontato))}</td><td class="n">${esc(perc(p.sconto))}</td>
+                <td class="n">${esc(euro(p.fatturato))}</td><td class="n">${esc(euro(p.fatturatoFuturo))}</td><td class="n">${esc(euro(p.daFatturare))}</td>
+                <td>${sino(p.aConsuntivo)}</td>
+                <td>${p.paOda ? `${sino(p.paOda.si)}${p.paOda.valore ? ` ${esc(p.paOda.valore)}` : ''}` : ''}</td>
+                <td>${(p.commesse || []).map((c) => `${esc(c.cod)}${c.nome ? ` – ${esc(c.nome)}` : ''}`).join('<br>')}</td></tr>`).join('');
+            const t = d.totali;
+            const tot = `<tr class="tot"><td>Totale</td><td colspan="7"></td><td class="n">${esc(euro(t.importo))}</td><td colspan="2"></td>
+                <td class="n">${esc(euro(t.fatturato))}</td><td class="n">${esc(euro(t.fatturatoFuturo))}</td><td class="n">${esc(euro(t.daFatturare))}</td><td colspan="3"></td></tr>`;
+            const num_ = [7, 8, 9, 10, 11, 12, 13];
+            return `<h2>${esc(titoloProgetti)} (${d.progetti.length})</h2><table><thead><tr>${testa.map((c, i) => `<th${num_.includes(i) ? ' class="n"' : ''}>${esc(c)}</th>`).join('')}</tr></thead><tbody>${righe}${tot}</tbody></table>`;
+        }
+
+        function fatturatoAnniHtml(d) {
+            if (!d.fatturatoAnni.length) return '';
+            // Fatturazione dei soli progetti del dossier, in tutti gli anni in cui fatturano: con un
+            // anno scelto, gli anni diversi sono la fatturazione che sconfina oltre l'anno del progetto.
+            const annoScelto = d.filtro && d.filtro.anno ? Number(d.filtro.anno) : null;
+            const righe = d.fatturatoAnni.map((a) => [`${a.anno}${annoScelto && Number(a.anno) !== annoScelto ? ' (sconfinamento)' : ''}`, euro(a.fatturato), euro(a.futuro), euro(a.daFatturare)]);
+            const tot = d.fatturatoAnni.reduce((t, a) => ({ f: t.f + a.fatturato, u: t.u + a.futuro, d: t.d + a.daFatturare }), { f: 0, u: 0, d: 0 });
+            return `<h2>Fatturazione dei progetti per anno</h2><table style="width:auto; min-width: 50%;"><thead><tr><th>Anno</th><th class="n">Fatturato</th><th class="n">Fatturato futuro</th><th class="n">Da fatturare</th></tr></thead>
+                <tbody>${righe.map((r) => `<tr>${r.map((v, i) => `<td${i ? ' class="n"' : ''}>${esc(v)}</td>`).join('')}</tr>`).join('')}
+                <tr class="tot"><td>Totale</td><td class="n">${esc(euro(tot.f))}</td><td class="n">${esc(euro(tot.u))}</td><td class="n">${esc(euro(tot.d))}</td></tr></tbody></table>`;
+        }
+
+        async function carica() {
+            const qs = new URLSearchParams(location.search);
+            const clientId = qs.get('clientId') || '';
+            // Scelta fatta all'apertura: modo=attivi (default) o tutti (anche chiusi) + anno del progetto.
+            const filtroQs = new URLSearchParams({ clientId, modo: qs.get('modo') === 'tutti' ? 'tutti' : 'attivi' });
+            if (qs.get('anno')) filtroQs.set('anno', qs.get('anno'));
+            if (!localStorage.getItem('authToken')) { location.href = 'index.html'; return; }
+            try {
+                const [r, logoTenant, logoCliente] = await Promise.all([
+                    fetch(`${API_URL}/clients/dossier?${filtroQs.toString()}`, { headers: auth() }),
+                    logo('/tenant-logo'),
+                    logo(`/client-logos/${encodeURIComponent(clientId)}`)
+                ]);
+                const d = await r.json().catch(() => ({}));
+                if (r.status === 401) { location.href = 'index.html'; return; }
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                document.title = `Dossier Cliente - ${d.cliente.nome}`;
+
+                const avvisi = [];
+                if (d.ai && d.ai.errore) avvisi.push(d.ai.errore);
+                if (d.colonneIgnorate && d.colonneIgnorate.length) avvisi.push(`Nel prompt «Dossier Cliente» ci sono colonne o sezioni non riconosciute, ignorate: ${d.colonneIgnorate.join(', ')}.`);
+                $('avvisi').innerHTML = avvisi.map((a) => `<div class="avviso"><i class="fas fa-circle-info"></i> ${esc(a)}</div>`).join('');
+
+                const c = d.cliente;
+                const f = d.filtro || {};
+                const descrFiltro = f.tutti ? `Progetti aperti e chiusi${f.anno ? ` · anno ${f.anno}` : ' · tutti gli anni'}` : 'Solo progetti attivi';
+                titoloProgetti = f.tutti ? `Progetti aperti e chiusi${f.anno ? ` (anno ${f.anno})` : ''}` : 'Progetti attivi';
+                let html = `<div class="testata">
+                    <div class="logo">${logoTenant ? `<img src="${logoTenant}" alt="Logo">` : ''}</div>
+                    <div class="titolo"><h1>DOSSIER CLIENTE</h1><div class="cli">${esc(c.nome)}</div><div class="sub">Aggiornato al ${esc(d.data)} · ${esc(descrFiltro)}</div></div>
+                    <div class="logo dx">${logoCliente ? `<img src="${logoCliente}" alt="Logo cliente">` : ''}</div>
+                </div>
+                <div class="anag">
+                    <span>Ragione sociale:</span><b>${esc(c.ragioneSociale || '—')}</b>
+                    <span>Codice fiscale:</span><b>${esc(c.codiceFiscale || '—')}</b>
+                    <span>Partita IVA:</span><b>${esc(c.partitaIva || '—')}</b>
+                    <span>Pubblica Amministrazione:</span><b>${c.pubblicaAmministrazione == null ? '—' : (c.pubblicaAmministrazione ? 'Sì' : 'No')}</b>
+                    <span>Project Manager:</span><b>${esc(d.utente || '—')}</b>
+                </div>`;
+                if (d.ai && d.ai.testo) html += `<div class="sintesi">${sintesiHtml(d.ai.testo)}<div class="ai">Sintesi generata in Projexa</div></div>`;
+
+                const sez = Object.fromEntries((d.sezioni || []).map((s) => [s.key, s]));
+                if (sez.licenze) html += sezioneHtml(sez.licenze, sez.licenze.righe, 'Licenze attive');
+                html += progettiHtml(d) + fatturatoAnniHtml(d);
+
+                // Per ogni progetto attivo: i suoi task e le sue quotazioni.
+                for (const p of d.progetti) {
+                    const blocchi = ['task', 'quotazioni'].filter((k) => sez[k]).map((k) => {
+                        const righe = sez[k].righe.filter((r) => r.progetto === p.id);
+                        return righe.length ? sezioneHtml(sez[k], righe, `${sez[k].titolo}`, 'h3') : '';
+                    }).join('');
+                    if (blocchi) html += `<div class="progetto"><h2>Progetto: ${esc(p.nome)}${p.chiuso ? ' <span class="chiuso">chiuso</span>' : ''}</h2>${blocchi}</div>`;
+                }
+                if (sez.task) html += sezioneHtml(sez.task, sez.task.righe.filter((r) => !r.progetto), 'Task senza progetto');
+                if (sez.quotazioni) html += sezioneHtml(sez.quotazioni, sez.quotazioni.righe.filter((r) => !r.progetto), 'Quotazioni senza progetto');
+                if (sez.mysupport) html += sezioneHtml(sez.mysupport, sez.mysupport.righe, 'Ticket MySupport non chiusi');
+                if (sez.issue) html += sezioneHtml(sez.issue, sez.issue.righe, 'Issue');
+                html += `<div class="piede"><span>Projexa · Dossier Cliente · ${esc(c.nome)}</span><span>${esc(d.data)}</span></div>`;
+
+                $('pagina').innerHTML = html;
+                $('stato').textContent = d.ai && d.ai.testo ? 'Pronto: controlla e stampa (orientamento orizzontale).' : 'Pronto, senza sintesi dell\'AI: controlla e stampa.';
+                $('stampaBtn').disabled = false;
+            } catch (e) {
+                $('pagina').innerHTML = `<div class="caricamento" style="color:#B91C1C;"><i class="fas fa-triangle-exclamation"></i> ${esc(e.message)}</div>`;
+                $('stato').textContent = 'Dossier non disponibile';
+            }
+        }
+
+        $('stampaBtn').addEventListener('click', () => window.print());
+        carica();
+    </script>
+</body>
+</html>
