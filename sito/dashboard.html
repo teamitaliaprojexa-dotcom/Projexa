@@ -4200,8 +4200,27 @@
                         </div>
                     </div>
 
+                    <!-- Assegnato a: opzioni ricavate dalle task caricate (renderAssigneeFilterOptions) -->
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Assegnato a:</label>
+                        <div class="todo-multiselect" id="assigneeFilterMS" data-filter="assignee">
+                            <button type="button" class="todo-multiselect-toggle" id="assigneeFilterToggle">
+                                <span id="assigneeFilterLabel">Tutti</span>
+                                <span class="chevron">▾</span>
+                            </button>
+                            <div class="todo-multiselect-panel" id="assigneeFilterPanel" style="max-height: 320px; overflow-y: auto;">
+                                <div class="todo-multiselect-divider"></div>
+                                <button type="button" class="todo-multiselect-clear" data-clear="assignee">Deseleziona tutto</button>
+                            </div>
+                        </div>
+                    </div>
+
                     <button id="resetFiltersBtn" style="padding: 0.5rem 0.75rem; background: rgba(107, 114, 128, 0.1); color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; transition: all 0.3s;">
                         ⟲ Reset
+                    </button>
+                    <!-- Compare scegliendo un solo nominativo in "Assegnato a": email con le sue attività -->
+                    <button type="button" id="todoEmailBtn" style="display: none; padding: 0.5rem 0.9rem; background: #10B981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem;" title="Prepara l'email «Attività a tuo carico» con le task filtrate">
+                        <i class="fas fa-envelope"></i> Invia email
                     </button>
                 </div>
 
@@ -6008,6 +6027,7 @@
         let currentPriorityFilter = [];
         let currentStatusFilter = ['todo', 'in_progress']; // Default: Da fare, In corso
         let currentDateFilter = [];
+        let currentAssigneeFilter = []; // nominativi di "Assegnato a" ('__none__' = senza assegnatario)
         let currentClientFilter = []; // Selezione multipla: array vuoto = tutti i clienti
         let todoData = [];
         let todoColumns = [];
@@ -6077,8 +6097,109 @@
         const TODO_FILTER_CONFIG = {
             priority: { getState: () => currentPriorityFilter, setState: (v) => { currentPriorityFilter = v; }, allLabel: 'Tutte' },
             status: { getState: () => currentStatusFilter, setState: (v) => { currentStatusFilter = v; }, allLabel: 'Tutti' },
-            date: { getState: () => currentDateFilter, setState: (v) => { currentDateFilter = v; }, allLabel: 'Tutte le date' }
+            date: { getState: () => currentDateFilter, setState: (v) => { currentDateFilter = v; }, allLabel: 'Tutte le date' },
+            assignee: { getState: () => currentAssigneeFilter, setState: (v) => { currentAssigneeFilter = v; }, allLabel: 'Tutti' }
         };
+
+        // === Filtro "Assegnato a" + pulsante "Invia email" ===
+        // Opzioni = nominativi presenti nelle task caricate (contatti della rubrica e nomi scritti
+        // a mano), più "Nessuno". Con un solo nominativo scelto compare "Invia email": prepara
+        // l'email «Attività a tuo carico» con le task filtrate, come l'email del recap (Gmail web
+        // con il calendario default Google, altrimenti il programma di posta del computer).
+        const TODO_NESSUNO = '__none__';
+        const todoAssigneeName = (t) => String(t.assigned_to || '').trim();
+        let todoAssigneeSignature = '';
+
+        function renderAssigneeFilterOptions() {
+            const panel = document.getElementById('assigneeFilterPanel');
+            if (!panel) return;
+            const names = [...new Set(todoData.map(todoAssigneeName).filter(Boolean))]
+                .sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }));
+            const signature = names.join('\u0001');
+            // Scelte non più presenti tra le task: si tolgono.
+            const valid = new Set([...names, TODO_NESSUNO]);
+            currentAssigneeFilter = currentAssigneeFilter.filter(v => valid.has(v));
+            if (signature !== todoAssigneeSignature) {
+                todoAssigneeSignature = signature;
+                panel.querySelectorAll('.todo-multiselect-option').forEach(node => node.remove());
+                const divider = panel.querySelector('.todo-multiselect-divider');
+                const options = [...names.map(n => ({ value: n, label: n })), { value: TODO_NESSUNO, label: 'Nessuno' }];
+                divider.insertAdjacentHTML('beforebegin', options.map(o =>
+                    `<label class="todo-multiselect-option"><input type="checkbox" value="${escapeHtml(o.value)}"> ${escapeHtml(o.label)}</label>`).join(''));
+                panel.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+                    checkbox.addEventListener('change', () => {
+                        const current = new Set(currentAssigneeFilter);
+                        if (checkbox.checked) current.add(checkbox.value); else current.delete(checkbox.value);
+                        currentAssigneeFilter = [...current];
+                        updateTodoMultiselectLabel('assignee');
+                        currentTodoPage = 10;
+                        applyFiltersAndRender();
+                    });
+                });
+            }
+            updateTodoMultiselectLabel('assignee');
+        }
+
+        // Pulsante visibile solo con un solo nominativo scelto (non "Nessuno").
+        function updateTodoEmailButton() {
+            const btn = document.getElementById('todoEmailBtn');
+            if (!btn) return;
+            const one = currentAssigneeFilter.length === 1 && currentAssigneeFilter[0] !== TODO_NESSUNO;
+            btn.style.display = one ? '' : 'none';
+            if (one) btn.title = `Prepara l'email «Attività a tuo carico» per ${currentAssigneeFilter[0]} con le task filtrate`;
+        }
+
+        async function sendTodoAssigneeEmail() {
+            const name = currentAssigneeFilter[0];
+            const tasks = getFilteredTodos();
+            if (!name || !tasks.length) { showNotification('Nessuna attività da inviare con i filtri attuali', 'info'); return; }
+            // Destinatario: l'email del contatto di rubrica (nominativo scritto a mano: da compilare).
+            let to = [];
+            const contactId = tasks.map(t => t.__raw_assigned_to).find(Boolean);
+            if (contactId) {
+                const loaded = await loadRubrica();
+                const contact = loaded.options.find(o => String(o.value) === String(contactId));
+                if (contact && contact.email) to = [contact.email];
+            }
+            const fmt = (v) => {
+                if (!v) return 'nessuna';
+                const d = parseTodoDate(v);
+                return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            };
+            const dash = (v) => (v == null || String(v).trim() === '' ? '—' : String(v).trim());
+            const subject = 'Attività a tuo carico';
+            const body = [`Ciao ${name},`, '', 'di seguito le attività a tuo carico:', '',
+                ...tasks.map((t, i) => [
+                    `${i + 1}. ${dash(t.titile || t.title)}`,
+                    `   Cliente: ${dash(t.client_id)}`,
+                    `   Progetto: ${dash(t.project_id)}`,
+                    `   Descrizione: ${dash(t.description).replace(/\r?\n/g, '\n   ')}`,
+                    `   Scadenza: ${fmt(t.due_date)}`,
+                    ''
+                ].join('\n')),
+                'Grazie'].join('\n');
+            const kind = calendarDefaultProvider === 'google' ? 'google' : 'mailto';
+            const build = (b) => kind === 'google'
+                ? `https://mail.google.com/mail/?view=cm&fs=1${to.length ? `&to=${encodeURIComponent(to.join(','))}` : ''}&su=${encodeURIComponent(subject)}${b ? `&body=${encodeURIComponent(b)}` : ''}`
+                : `mailto:${to.map(encodeURIComponent).join(';')}?subject=${encodeURIComponent(subject)}${b ? `&body=${encodeURIComponent(b.replace(/\n/g, '\r\n'))}` : ''}`;
+            let url = build(body);
+            if (url.length > EMAIL_URL_MAX[kind]) {
+                // Testo troppo lungo per il link: negli appunti, da incollare nell'email.
+                url = build('');
+                if (navigator.clipboard) navigator.clipboard.writeText(body).catch(() => {});
+                showNotification('Testo lungo: è stato copiato negli appunti, incollalo nell\'email con Ctrl+V', 'info');
+            }
+            if (!to.length) showNotification(`Nessuna email in rubrica per ${name}: inserisci il destinatario nell'email`, 'info');
+            // Log come per il recap: Projexa registra che l'email è stata preparata e aperta.
+            fetch(`${API_URL}/audit/email`, {
+                method: 'POST', keepalive: true,
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tipo: 'attivita', a: to, cc: [], oggetto: subject,
+                    riferimento: name, servizio: kind === 'google' ? 'gmail_web' : 'programma_posta' })
+            }).catch(() => {});
+            if (kind === 'mailto') window.location.href = url;
+            else window.open(url, '_blank', 'noopener');
+        }
 
         function updateTodoMultiselectLabel(filterKey) {
             const config = TODO_FILTER_CONFIG[filterKey];
@@ -6111,7 +6232,8 @@
                 updateTodoMultiselectLabel(filterKey);
                 initMultiselectToggle(`${filterKey}FilterMS`, `${filterKey}FilterToggle`);
 
-                panel.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+                // "Assegnato a": le caselle nascono con i dati (renderAssigneeFilterOptions).
+                if (filterKey !== 'assignee') panel.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
                     checkbox.addEventListener('change', () => {
                         const config = TODO_FILTER_CONFIG[filterKey];
                         const current = new Set(config.getState());
@@ -6166,10 +6288,13 @@
                 currentPriorityFilter = [];
                 currentStatusFilter = ['todo', 'in_progress'];
                 currentDateFilter = [];
+                currentAssigneeFilter = [];
                 currentTodoPage = 10;
                 Object.keys(TODO_FILTER_CONFIG).forEach(updateTodoMultiselectLabel);
                 applyFiltersAndRender();
             });
+
+            document.getElementById('todoEmailBtn')?.addEventListener('click', sendTodoAssigneeEmail);
         }
 
         function getFilteredTodos() {
@@ -6188,6 +6313,11 @@
             // Filtra per stato (selezione multipla; array vuoto = tutti)
             if (currentStatusFilter.length > 0) {
                 filtered = filtered.filter(t => currentStatusFilter.includes(t.status));
+            }
+
+            // Filtra per assegnatario (nominativo mostrato; '__none__' = senza assegnatario)
+            if (currentAssigneeFilter.length > 0) {
+                filtered = filtered.filter(t => currentAssigneeFilter.includes(todoAssigneeName(t) || TODO_NESSUNO));
             }
 
             // Filtra per data (selezione multipla; un task passa se rientra in almeno una delle scadenze selezionate)
@@ -6234,6 +6364,8 @@
         }
 
         function applyFiltersAndRender() {
+            renderAssigneeFilterOptions();
+            updateTodoEmailButton();
             const filtered = getFilteredTodos();
             document.getElementById('todoTotal').textContent = filtered.length;
             // Allinea il contatore "visualizzati" a quanti task sono realmente mostrati.
