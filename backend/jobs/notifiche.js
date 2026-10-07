@@ -223,6 +223,68 @@ export async function notificheDaVariazioni(righe) {
 }
 
 // ----------------------------------------------------------------------------
+// QLIK › MYSUPPORT: nuovi ticket (solo INSERT, mai gli aggiornamenti). mysupport non ha il
+// log variazioni (scelta dell'utente), quindi la chiama direttamente l'import
+// (POST /api/mysupport/import) dopo il COMMIT, con le righe davvero inserite.
+// Attiva solo con la regola ('qlik', 'mysupport', 'INSERT') in notifiche_regole.
+// Destinatario: il proprietario del cliente abbinato (user_id della riga).
+//   righe: [{ id, tenantId, userId, clientId, codice }]
+// Molti ticket nuovi nello stesso import (es. primo caricamento): invece di una notifica per
+// ticket, una per cliente con l'elenco dei numeri.
+// ----------------------------------------------------------------------------
+const MYSUPPORT_MAX_SINGOLE = 20;
+const MYSUPPORT_MAX_CODICI = 60; // numeri elencati nella notifica raggruppata
+
+export async function notificheNuoviMySupport(righe) {
+  try {
+    if (!Array.isArray(righe) || !righe.length) return 0;
+    const regole = await regoleAttive();
+    if (!regole.some((x) => x.fonte === 'qlik' && x.tabella === 'mysupport' && x.operazione === 'INSERT')) return 0;
+    const { clienti } = await nomiClientiProgetti(righe.map((r) => r.clientId), []);
+    const nomeCliente = (id) => clienti.get(String(id || '')) || '(cliente non trovato)';
+    let create = 0;
+    if (righe.length <= MYSUPPORT_MAX_SINGOLE) {
+      for (const r of righe) {
+        const cliente = nomeCliente(r.clientId);
+        await inserisci({
+          tenantId: r.tenantId, userId: r.userId, fonte: 'qlik',
+          titolo: `Nuovo ticket MySupport ${r.codice} per ${cliente}`,
+          messaggio: `Ticket: ${r.codice}\nCliente: ${cliente}`,
+          tabella: 'mysupport', rigaId: String(r.id)
+        });
+        create += 1;
+      }
+    } else {
+      const gruppi = new Map(); // destinatario + cliente -> ticket
+      for (const r of righe) {
+        const k = `${r.tenantId}|${r.userId}|${r.clientId}`;
+        if (!gruppi.has(k)) gruppi.set(k, { tenantId: r.tenantId, userId: r.userId, clientId: r.clientId, codici: [] });
+        gruppi.get(k).codici.push(r.codice);
+      }
+      for (const g of gruppi.values()) {
+        const cliente = nomeCliente(g.clientId);
+        const n = g.codici.length;
+        const elenco = g.codici.slice(0, MYSUPPORT_MAX_CODICI).join(', ')
+          + (n > MYSUPPORT_MAX_CODICI ? ` e altri ${n - MYSUPPORT_MAX_CODICI}` : '');
+        await inserisci({
+          tenantId: g.tenantId, userId: g.userId, fonte: 'qlik',
+          titolo: n === 1 ? `Nuovo ticket MySupport ${g.codici[0]} per ${cliente}` : `${n} nuovi ticket MySupport per ${cliente}`,
+          messaggio: `Ticket: ${elenco}\nCliente: ${cliente}`,
+          tabella: 'mysupport', rigaId: null
+        });
+        create += 1;
+      }
+    }
+    if (create) console.log(`[NOTIFICHE] ${create} notifiche per ${righe.length} nuovi ticket MySupport`);
+    return create;
+  } catch (e) {
+    if (e.code === '42P01') { avvisaTabellaMancante(); return 0; }
+    console.error('[NOTIFICHE] Notifiche dei nuovi ticket MySupport non create:', e.message);
+    return 0;
+  }
+}
+
+// ----------------------------------------------------------------------------
 // RIUNIONI: trascrizione completata e recap pronto (jobs/meetingTranscription.js, negli
 // stessi punti in cui si registra la riga unica del log). Destinatario: il proprietario
 // della riunione; nel testo l'oggetto, il cliente e il progetto se ci sono.

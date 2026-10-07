@@ -23,6 +23,7 @@ import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
 import jobSchedulesRoutes from './routes/job-schedules.js';
 import auditLogRoutes from './routes/audit-log.js';
 import notificheRoutes from './routes/notifiche.js';
+import { notificheNuoviMySupport } from './jobs/notifiche.js';
 import auditEventiRoutes from './routes/audit-eventi.js';
 import { sendMail, buildRichiestaCancellazioneEmail, EMAIL_PROJEXA } from './config/mailer.js';
 import { regoleColonne, metaColonna, etichetteColonne, etichetteValori, opzioniColonna, applicaRegoleScrittura, ordineGriglia, filtroSopraGriglia, TABELLE_VERIFICA, etichettaComune } from './config/gridColumnRules.js';
@@ -6199,6 +6200,7 @@ app.post('/api/mysupport/import', requireAuth, async (req, res) => {
     }
 
     let inserted = 0, updated = 0, unchanged = 0, invalid = 0;
+    const nuovi = []; // ticket inseriti (non gli aggiornati): notifiche dopo il COMMIT
     const nonTrovati = new Map(); // nome cliente del file -> numero righe
     const ambigui = new Set();
     const client = await db.connect();
@@ -6238,12 +6240,14 @@ app.post('/api/mysupport/import', requireAuth, async (req, res) => {
              ${MYSUPPORT_COLONNE.map((k) => `${k} = EXCLUDED.${k}`).join(', ')}
            WHERE (${confronto.map((k) => `mysupport.${k}`).join(', ')})
                  IS DISTINCT FROM (${confronto.map((k) => `EXCLUDED.${k}`).join(', ')})
-           RETURNING (xmax = 0) AS inserita`,
+           RETURNING id, (xmax = 0) AS inserita`,
           params
         );
         if (!out.rows.length) unchanged += 1;
-        else if (out.rows[0].inserita) inserted += 1;
-        else updated += 1;
+        else if (out.rows[0].inserita) {
+          inserted += 1;
+          nuovi.push({ id: out.rows[0].id, tenantId: req.user.tenant_id, userId: ownerUserId, clientId, codice });
+        } else updated += 1;
       }
       await client.query('COMMIT');
     } catch (e) {
@@ -6252,6 +6256,9 @@ app.post('/api/mysupport/import', requireAuth, async (req, res) => {
     } finally {
       client.release();
     }
+    // Campanella: solo i ticket nuovi (numero e cliente abbinato), mai gli aggiornamenti.
+    // Gli errori delle notifiche non fanno fallire l'import (già salvato).
+    if (nuovi.length) await notificheNuoviMySupport(nuovi);
     res.json({
       totale: rowsIn.length, inserted, updated, unchanged, invalid,
       nonTrovati: [...nonTrovati].map(([nome, righe]) => ({ nome, righe })).sort((a, b) => b.righe - a.righe),
