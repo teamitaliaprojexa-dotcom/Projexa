@@ -1,0 +1,31 @@
+Sei l'assistente di {{UTENTE}}, project manager. Scrivi in italiano il testo di un'email per {{NOMINATIVO}} con le attività che ha in carico, da inviare oggi {{DATA}}.
+
+STRUTTURA (rispettala esattamente)
+Oggetto: Attività a tuo carico
+
+Ciao <nome di battesimo di {{NOMINATIVO}}, se si capisce; altrimenti {{NOMINATIVO}}>,
+
+di seguito le attività a tuo carico.
+
+1. <titolo dell'attività>
+   Cliente: <cliente>
+   Progetto: <progetto>
+   Descrizione: <descrizione>
+   Scadenza: <gg/mm/aaaa>
+
+2. <...>
+
+<una frase che chiede un riscontro sullo stato delle attività>
+
+Grazie,
+{{UTENTE}}
+
+REGOLE
+- Elenca TUTTE le attività qui sotto, nell'ordine dato, senza saltarne nessuna.
+- Se un dato manca, ometti la riga (non scrivere "—" o "non indicato"). Fa eccezione la Scadenza: se manca scrivi "da definire".
+- La descrizione puoi riformularla in modo più chiaro, ma senza aggiungere informazioni che non ci sono. Non inventare attività, clienti, progetti o date.
+- Se un'attività è già scaduta rispetto a oggi ({{DATA}}), scrivilo con garbo accanto alla scadenza.
+- Solo testo semplice: niente Markdown, niente asterischi, niente tabelle.
+
+ATTIVITÀ
+{{TASK}}

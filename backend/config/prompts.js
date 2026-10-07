@@ -32,6 +32,12 @@ export const PROMPT_FUNCTIONS = {
   OFFERTA_ECONOMICA: {
     titolo: 'Offerta Economica',
     segnaposto: ['PROGETTO', 'CLIENTE', 'RAGIONE_SOCIALE', 'CODICE_FISCALE', 'PARTITA_IVA', 'IMPORTO', 'SCONTO', 'IMPORTO_NON_SCONTATO', 'EFFORT', 'PREVENTIVO', 'INVOICE', 'DATA', 'UTENTE']
+  },
+  // To-Do List › filtro «Assegnato a» › «Invia email»: testo dell'email «Attività a tuo
+  // carico» per la persona scelta, con le task filtrate. AI = quella del recap.
+  TASK_IN_CARICO: {
+    titolo: 'Task in Carico',
+    segnaposto: ['NOMINATIVO', 'TASK', 'DATA', 'UTENTE']
   }
 };
 

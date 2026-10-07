@@ -6167,8 +6167,46 @@
                 return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
             };
             const dash = (v) => (v == null || String(v).trim() === '' ? '—' : String(v).trim());
-            const subject = 'Attività a tuo carico';
-            const body = [`Ciao ${name},`, '', 'di seguito le attività a tuo carico:', '',
+            const kind = calendarDefaultProvider === 'google' ? 'google' : 'mailto';
+            // Gmail: la scheda si apre subito (dentro il clic), altrimenti dopo l'attesa dell'AI
+            // il browser la bloccherebbe come popup; l'indirizzo si imposta a testo pronto.
+            const tab = kind === 'google' ? window.open('', '_blank') : null;
+            if (tab) tab.document.write('<p style="font-family: sans-serif; color: #475569;">Preparo l\'email…</p>');
+
+            // Testo scritto dall'AI del recap con il prompt «Task in Carico» (TASK_IN_CARICO).
+            // Se l'AI non è scelta o non risponde: il testo fisso qui sotto.
+            let subject = 'Attività a tuo carico';
+            let body = '';
+            const btn = document.getElementById('todoEmailBtn');
+            const btnHtml = btn ? btn.innerHTML : '';
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> L\'AI scrive l\'email…'; }
+            try {
+                const r = await fetch(`${API_URL}/dashboard/tasks/email-in-carico`, {
+                    method: 'POST',
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        nominativo: name,
+                        tasks: tasks.map(t => ({
+                            titolo: t.titile || t.title || '',
+                            cliente: t.client_id || '',
+                            progetto: t.project_id || '',
+                            descrizione: t.description || '',
+                            scadenza: t.due_date ? fmt(t.due_date) : ''
+                        }))
+                    })
+                });
+                const x = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(x.error || `Errore ${r.status}`);
+                body = String(x.testo || '').replace(/\r\n?/g, '\n').trim();
+                // Prima riga "Oggetto: ..." (come nel recap): diventa l'oggetto dell'email.
+                const subj = /^oggetto\s*:\s*(.+)\n+/i.exec(body);
+                if (subj) { subject = subj[1].trim() || subject; body = body.slice(subj[0].length).trim(); }
+            } catch (err) {
+                showNotification(`Testo dall'AI non disponibile (${err.message}): uso il testo standard`, 'info');
+            } finally {
+                if (btn) { btn.disabled = false; btn.innerHTML = btnHtml; }
+            }
+            if (!body) body = [`Ciao ${name},`, '', 'di seguito le attività a tuo carico:', '',
                 ...tasks.map((t, i) => [
                     `${i + 1}. ${dash(t.titile || t.title)}`,
                     `   Cliente: ${dash(t.client_id)}`,
@@ -6178,7 +6216,6 @@
                     ''
                 ].join('\n')),
                 'Grazie'].join('\n');
-            const kind = calendarDefaultProvider === 'google' ? 'google' : 'mailto';
             const build = (b) => kind === 'google'
                 ? `https://mail.google.com/mail/?view=cm&fs=1${to.length ? `&to=${encodeURIComponent(to.join(','))}` : ''}&su=${encodeURIComponent(subject)}${b ? `&body=${encodeURIComponent(b)}` : ''}`
                 : `mailto:${to.map(encodeURIComponent).join(';')}?subject=${encodeURIComponent(subject)}${b ? `&body=${encodeURIComponent(b.replace(/\n/g, '\r\n'))}` : ''}`;
@@ -6198,6 +6235,7 @@
                     riferimento: name, servizio: kind === 'google' ? 'gmail_web' : 'programma_posta' })
             }).catch(() => {});
             if (kind === 'mailto') window.location.href = url;
+            else if (tab && !tab.closed) tab.location.href = url;
             else window.open(url, '_blank', 'noopener');
         }
 

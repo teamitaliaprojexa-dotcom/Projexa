@@ -26,8 +26,8 @@ import notificheRoutes from './routes/notifiche.js';
 import auditEventiRoutes from './routes/audit-eventi.js';
 import { sendMail, buildRichiestaCancellazioneEmail, EMAIL_PROJEXA } from './config/mailer.js';
 import { regoleColonne, metaColonna, etichetteColonne, etichetteValori, opzioniColonna, applicaRegoleScrittura, ordineGriglia, filtroSopraGriglia, TABELLE_VERIFICA, etichettaComune } from './config/gridColumnRules.js';
-import { kickTranscriptionWorker } from './jobs/meetingTranscription.js';
-import { askAiProvider, PROVIDERS as AI_PROVIDERS } from './routes/ai.js';
+import { kickTranscriptionWorker, recapProviderName, speakerName, stripMarkdown } from './jobs/meetingTranscription.js';
+import { askAiProvider, PROVIDERS as AI_PROVIDERS, localRecapMode, askOllamaRecap } from './routes/ai.js';
 import { getIntegration } from './config/integrations.js';
 import { getPromptFor } from './config/prompts.js';
 import { leggiTemplate, descriviTemplate, applicaModifiche, leggiRispostaAi, leggiRevisioneAi, testoRisultante, spostamentiRichiesti } from './config/kickoffPptx.js';
@@ -1213,6 +1213,53 @@ app.put('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('[DASHBOARD TASK UPDATE]', error);
     res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// To-Do List › filtro «Assegnato a» › «Invia email»: testo dell'email «Attività a tuo
+// carico» scritto dall'AI con il prompt TASK_IN_CARICO (app_prompts, editor dei prompt).
+// AI = quella di Impostazioni › AI › «AI generazione e-mail recap», anche «Recap Projexa
+// (lento)». Body: { nominativo, tasks: [{ titolo, cliente, progetto, descrizione, scadenza }] }
+// con le task filtrate nella pagina (dati dell'utente stesso, mandati alla sua AI).
+// Risposta: { testo, ai }. L'email la apre il browser, come per il recap.
+app.post('/api/dashboard/tasks/email-in-carico', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const pulito = (v, max) => String(v == null ? '' : v).replace(/\r\n?/g, '\n').trim().slice(0, max);
+    const nominativo = pulito(b.nominativo, 255);
+    const tasks = Array.isArray(b.tasks) ? b.tasks.slice(0, 200) : [];
+    if (!nominativo || !tasks.length) return res.status(400).json({ error: 'Nessuna attività da inviare' });
+    const providerName = await recapProviderName(req.user);
+    if (!providerName) return res.status(400).json({ error: 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"' });
+
+    const elenco = tasks.map((t, i) => [
+      `${i + 1}. ${pulito(t.titolo, 500) || '(senza titolo)'}`,
+      `   Cliente: ${pulito(t.cliente, 255)}`,
+      `   Progetto: ${pulito(t.progetto, 255)}`,
+      `   Descrizione: ${pulito(t.descrizione, 4000).replace(/\n/g, '\n   ')}`,
+      `   Scadenza: ${pulito(t.scadenza, 20)}`
+    ].join('\n')).join('\n\n');
+    const vars = {
+      NOMINATIVO: nominativo,
+      DATA: new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Rome' }),
+      UTENTE: String(await speakerName(req.user) || '').trim() || req.user.email || ''
+    };
+    const template = (await getPromptFor('TASK_IN_CARICO', req.user)).testo;
+    const build = (task) => {
+      let tpl = template;
+      // Se il prompt non prevede {{TASK}}, l'elenco si aggiunge in fondo.
+      if (!tpl.includes('{{TASK}}')) tpl += '\n\nAttività:\n{{TASK}}';
+      return tpl.replace(/\{\{(NOMINATIVO|TASK|DATA|UTENTE)\}\}/g, (m, k) => (k === 'TASK' ? task : vars[k] || ''));
+    };
+    const result = localRecapMode(providerName) === 'server'
+      ? await askOllamaRecap(async (text) => build(text), elenco)
+      : await askAiProvider(req.user.user_id, providerName, build(elenco));
+    const testo = stripMarkdown(String(result.text || '')).trim();
+    if (!testo) return res.status(502).json({ error: `${result.label || providerName} non ha restituito alcun testo` });
+    res.json({ testo, ai: result.label || providerName });
+  } catch (error) {
+    console.error('[TASK IN CARICO]', error.message);
+    res.status(error.statusCode || error.status || 500).json({ error: error.message });
   }
 });
 
