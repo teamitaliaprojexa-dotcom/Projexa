@@ -38,6 +38,7 @@ import { avviaInvioAudit } from './jobs/auditShipper.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
 import { encryptRowForWrite } from './config/crypto.js';
+import { buildGanttXlsx } from './config/ganttXlsx.js';
 import { resolveDbUrl } from './config/dbEnv.js';
 
 dotenv.config();
@@ -4029,6 +4030,37 @@ app.get('/api/projects/gantt-activity', requireAuth, async (req, res) => {
       return out;
     });
     res.json({ rows, canWrite, context: { clientId: ctx.clientId, projectId: ctx.projectId } });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Export Excel del Gantt nel template Documentazione/Template/Gantt_template.xlsx (stessa
+// lettura e stessi permessi della pagina Gantt, disponibile anche in sola visualizzazione).
+// Il file si crea in memoria e va direttamente al browser: niente copie sul server.
+app.get('/api/projects/gantt-activity/export', requireAuth, async (req, res) => {
+  try {
+    const fieldId = String(req.query.fieldId || '').trim();
+    const ctx = await resolveGanttContext(fieldId, req, false);
+    const result = await db.query(
+      `SELECT *
+       FROM ${GANTT_TABLE}
+       WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3 AND project_id = $4
+       ORDER BY ordinamento1 NULLS LAST, ordinamento2 NULLS FIRST,
+                ordinamento3 NULLS FIRST, ordinamento4 NULLS FIRST, created_at`,
+      [ctx.tenantId, ctx.userId, ctx.clientId, ctx.projectId]
+    );
+    const proj = await db.query(
+      `SELECT valore2 FROM projects WHERE id::text = $1 AND tenant_id = $2 LIMIT 1`,
+      [String(ctx.projectId), ctx.tenantId]
+    );
+    const projectName = String(proj.rows[0]?.valore2 || '').trim() || 'Progetto';
+    const buffer = await buildGanttXlsx({ projectName, rows: result.rows });
+    const fileName = `Gantt_${projectName}.xlsx`.replace(/[\\/:*?"<>|\r\n]+/g, '_');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(buffer);
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }

@@ -5,10 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Projexa - Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <!-- defer: le librerie dal CDN non bloccano il disegno della pagina; sono comunque
+         pronte prima di DOMContentLoaded, l'unico punto da cui vengono usate. -->
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     <script src="js/ui-scale.js"></script>
     <!-- SheetJS: lettura dei file Excel (.xlsx) caricati per l'importazione Qlik voucher -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -3839,10 +3841,10 @@
 
         <div class="sidebar-footer">
             <div class="user-profile">
-                <div class="user-avatar">FR</div>
+                <div class="user-avatar"></div>
                 <div class="user-info">
-                    <p class="name">Federica</p>
-                    <p class="email">fed@project.ai</p>
+                    <p class="name"></p>
+                    <p class="email"></p>
                 </div>
             </div>
         </div>
@@ -4087,7 +4089,18 @@
         <div class="header">
             <div class="header-top">
                 <div class="header-title">
-                    <h1 id="greeting">Benvenuta, Federica! 👋</h1>
+                    <!-- Vuoto finché updateGreeting non scrive l'utente del login (niente nomi di esempio) -->
+                    <h1 id="greeting">&nbsp;</h1>
+                    <script>
+                        // Saluto immediato dai dati del login: la pagina è grande e DOMContentLoaded
+                        // (dove updateGreeting completa foto, tenant e ruolo) arriva parecchio dopo.
+                        (function () {
+                            try {
+                                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                                if (u && u.name) document.getElementById('greeting').textContent = 'Welcome, ' + u.name;
+                            } catch (e) { /* resta vuoto fino a updateGreeting */ }
+                        })();
+                    </script>
                 </div>
                 <div class="header-actions">
                     <div class="search-box" id="projectSearchBox">

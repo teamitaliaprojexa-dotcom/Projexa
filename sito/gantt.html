@@ -279,6 +279,8 @@
             </select>
         </span>
         <button class="btn" id="copyBtn" style="display:none;"><i class="fas fa-copy"></i> Copia progetto da</button>
+        <!-- Export Excel: disponibile sia in visualizzazione sia in modifica -->
+        <button class="btn" id="exportBtn" title="Scarica il Gantt nel modello Excel"><i class="fas fa-file-excel" style="color:#16A34A;"></i> Esporta Excel</button>
         <span class="spacer"></span>
         <span class="autosave-wrap">
             <span>Salvataggio automatico</span>
@@ -1341,6 +1343,50 @@
         });
 
         window.addEventListener('resize', drawDependencies);
+
+        // ===== Export Excel =====
+        // Il server compila una copia del modello Gantt_template.xlsx con le attività salvate
+        // e la restituisce come file da scaricare. Con il salvataggio automatico le modifiche
+        // in sospeso si scrivono prima; senza, si avvisa che l'export contiene solo i dati salvati.
+        document.getElementById('exportBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('exportBtn');
+            if (btn.disabled) return;
+            const autosave = document.getElementById('autosaveToggle').checked;
+            if (!readOnly && !autosave && hasPending()
+                && !confirm('Ci sono modifiche non salvate: l\'export conterrà solo i dati già salvati. Continuare?')) return;
+            btn.disabled = true;
+            const original = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparazione…';
+            try {
+                if (!readOnly && autosave && hasPending()) { clearTimeout(saveTimer); await flush(); }
+                const res = await fetch(`${API_URL}/projects/gantt-activity/export?fieldId=${encodeURIComponent(fieldId)}`, {
+                    headers: getAuthHeaders()
+                });
+                if (res.status === 401) { location.href = 'login.html'; return; }
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.error || `Errore ${res.status}`);
+                }
+                const blob = await res.blob();
+                const disp = res.headers.get('Content-Disposition') || '';
+                const m = /filename\*=UTF-8''([^;]+)/i.exec(disp);
+                const fileName = m ? decodeURIComponent(m[1]) : 'Gantt.xlsx';
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 2000);
+                showToast('Export pronto');
+            } catch (e) {
+                showToast('Errore export: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = original;
+            }
+        });
 
         // ===== "Copia progetto da" =====
         let copySources = [];
