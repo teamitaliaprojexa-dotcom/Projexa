@@ -6961,9 +6961,18 @@
                 else if (strict && exact.length !== 1) { input.value = selectedText; close(); }
                 else close();
             });
-            // Con la pagina che scorre l'elenco "fixed" resterebbe staccato dal campo.
+            // Con la pagina che scorre l'elenco "fixed" resterebbe staccato dal campo: se scorre un
+            // contenitore del campo l'elenco lo segue. Lo scorrimento del testo dentro il campo
+            // stesso (celle strette delle griglie) o di altri elementi non lo chiude più.
             window.addEventListener('scroll', event => {
-                if (list.classList.contains('open') && !list.contains(event.target)) close();
+                if (!list.classList.contains('open') || list.contains(event.target) || event.target === input) return;
+                const scroller = event.target === document ? document.documentElement : event.target;
+                if (!(scroller instanceof Node) || !scroller.contains(input)) return;
+                const z = window.uiZoom ? window.uiZoom() : 1;
+                const rect = input.getBoundingClientRect();
+                // Campo uscito dall'area visibile: elenco chiuso; altrimenti si riposiziona.
+                if (rect.bottom < 0 || rect.top > window.innerHeight) close();
+                else { list.style.left = (rect.left / z) + 'px'; list.style.top = (rect.bottom / z + 2) + 'px'; }
             }, true);
             return { choose, setSelectedText: text => { selectedText = text; } };
         }
