@@ -452,6 +452,19 @@ async function buildRecapPrompt(user, vars) {
   return tpl.replace(/\{\{(TRASCRIZIONE|OGGETTO|DATA|UTENTE)\}\}/g, (m, k) => vars[k] || '');
 }
 
+// Oggetto della mail deciso dal codice, non dall'AI: il modello locale a volte inventa il
+// nome del progetto da una parola storpiata (es. "LAFIX" da "la fix"). Se nelle prime righe
+// c'è "Oggetto: ..." che non contiene il titolo della riunione, si riscrive con titolo e data.
+function forceSubject(recap, vars) {
+  const titolo = String(vars.OGGETTO || '').trim();
+  if (!recap || !titolo) return recap;
+  const lines = recap.split('\n');
+  const i = lines.slice(0, 5).findIndex((l) => /^\s*oggetto\s*:/i.test(l));
+  if (i < 0 || lines[i].toLowerCase().includes(titolo.toLowerCase())) return recap;
+  lines[i] = `Oggetto: ${titolo} – Recap call${vars.DATA ? ` del ${vars.DATA}` : ''} e prossimi passi`;
+  return lines.join('\n');
+}
+
 // AI scelta nel campo "AI generazione e-mail recap" (settings.valore2), '' se non scelta.
 export async function recapProviderName(user) {
   const setting = (await db.query(
@@ -518,13 +531,14 @@ export async function generateRecap(user, idCalendar, { origine = null } = {}) {
   recapRunning.add(key);
   try {
     result = local === 'server'
-      ? await askOllamaRecap((text) => buildRecapPrompt(user, { ...vars, TRASCRIZIONE: text }), transcript)
+      ? await askOllamaRecap((text) => buildRecapPrompt(user, { ...vars, TRASCRIZIONE: text }), transcript,
+        { meeting: true, contesto: vars.OGGETTO })
       : await askAiProvider(user.user_id, providerName, await buildRecapPrompt(user, { ...vars, TRASCRIZIONE: transcript }));
   } finally {
     recapRunning.delete(key);
   }
   // e sul recap prodotto (l'AI può riscrivere a modo suo un nome già corretto)
-  const recap = stripMarkdown(applyCorrections(String(result.text || '').trim(), rules).text).trim();
+  const recap = forceSubject(stripMarkdown(applyCorrections(String(result.text || '').trim(), rules).text).trim(), vars);
   if (!recap) throw httpError(502, `${result.label} non ha restituito alcun testo`);
 
   const recapCifrato = encRec(recap);

@@ -1,0 +1,33 @@
+Sei l'assistente di {{UTENTE}}. Scrivi in italiano la e-mail di recap della riunione «{{OGGETTO}}» del {{DATA}}, da inviare ai partecipanti.
+
+REGOLE
+- Usa SOLO informazioni presenti nel testo. Non inventare date, scadenze, nomi o numeri di ticket.
+- Riporta TUTTI gli argomenti di lavoro trattati, anche quelli citati brevemente, nell'ordine della riunione.
+- Copia numeri di ticket, nomi e date esattamente come nel testo.
+- Un'azione va assegnata solo a chi l'ha presa in carico o a cui è stata chiesta esplicitamente. Se la scadenza non è stata detta scrivi "da definire".
+- La trascrizione è automatica: ignora saluti, battute, discorsi personali e parole chiaramente storpiate che non riesci a interpretare.
+- Testo semplice, senza markdown né asterischi.
+
+STRUTTURA
+Oggetto: {{OGGETTO}} – Recap call del {{DATA}} e prossimi passi
+
+Ciao a tutti,
+
+di seguito il riepilogo della call di oggi, con le azioni concordate e le relative scadenze.
+
+1. TITOLO ARGOMENTO
+- punti discussi e decisioni prese
+(una sezione numerata per ogni argomento)
+
+AZIONI IN CARICO
+
+Nome persona o gruppo
+- azione – scadenza (o "da definire")
+
+Resto a disposizione per qualsiasi chiarimento.
+
+Un saluto,
+{{UTENTE}}
+
+TESTO DELLA RIUNIONE
+{{TRASCRIZIONE}}

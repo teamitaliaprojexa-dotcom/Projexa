@@ -579,9 +579,17 @@ export function localRecapMode(providerName) {
   return LOCAL_RECAP_MODES[String(providerName || '').trim().toLowerCase()] || null;
 }
 
-// Istruzioni per riassumere un pezzo di trascrizione troppo lunga.
-export const RECAP_CHUNK_PROMPT = `Questo è un pezzo ({{N}} di {{TOT}}) della trascrizione di una riunione.
-Scrivi appunti sintetici in italiano, in testo semplice: argomenti trattati, decisioni prese, azioni (chi, cosa, entro quando), numeri e date citati.
+// Istruzioni per riassumere un pezzo di trascrizione. Regole rigide perché il modello locale
+// (7B) tende a saltare gli argomenti brevi, a inventare scadenze e ad assegnare azioni a caso.
+export const RECAP_CHUNK_PROMPT = `Questo è un pezzo ({{N}} di {{TOT}}) della trascrizione di una riunione{{CONTESTO}}.
+La trascrizione è automatica: può contenere parole storpiate e chiacchiere fuori tema.
+
+Scrivi appunti in italiano, in testo semplice, un punto per riga:
+- TUTTI gli argomenti di lavoro trattati nel pezzo, anche quelli citati brevemente: nessuno va saltato.
+- Per ogni argomento: cosa si è detto o deciso, con nomi di persone, numeri di ticket, date e numeri ESATTAMENTE come nel testo.
+- Azioni: scrivi "AZIONE: chi - cosa - scadenza" solo se una persona la prende in carico o le viene chiesta esplicitamente. Se la scadenza non è detta scrivi "scadenza non indicata": non inventare date.
+- Non attribuire a una persona cose dette o fatte da altri.
+- Ignora saluti, battute e discorsi personali.
 Usa solo informazioni presenti nel testo, senza introduzioni né commenti.
 
 Trascrizione:
@@ -594,6 +602,12 @@ const OLLAMA_CHARS_PER_TOKEN = 2.5;
 const OLLAMA_MAX_CTX = 32768;          // oltre si riassume a pezzi
 const OLLAMA_OUTPUT_TOKENS = 1500;
 const OLLAMA_CHUNK_CHARS = 24000;      // ~8.000 token per pezzo
+// Riunioni: un 7B su 10.000+ token di parlato perde gli argomenti di metà call e inventa
+// scadenze anche quando il testo sta tutto nel contesto. Oltre questa soglia si riassume
+// SEMPRE a pezzi di ~5 minuti di call; il tempo totale cresce di poco (la lettura è la stessa).
+const OLLAMA_MEETING_SINGLE_CHARS = 9000;
+const OLLAMA_MEETING_CHUNK_CHARS = 7000;
+const OLLAMA_NOTES_TOKENS = 700;
 
 // POST JSON verso Ollama con il modulo http di Node, NON con fetch: fetch (undici) chiude la
 // richiesta se le intestazioni della risposta non arrivano entro 5 minuti
@@ -659,31 +673,41 @@ const ctxFor = (chars, outTokens) =>
 // Recap con Ollama. buildPrompt(testo) restituisce il prompt completo (prompt RECAP_EMAIL
 // con il testo al posto di {{TRASCRIZIONE}}). Se la trascrizione non sta nel contesto, prima
 // si riassume a pezzi e il recap si scrive dagli appunti.
-export async function askOllamaRecap(buildPrompt, transcript) {
+// opts.meeting: trascrizione di una riunione -> oltre OLLAMA_MEETING_SINGLE_CHARS sempre a pezzi
+// piccoli; opts.contesto: titolo della riunione, passato anche ai pezzi.
+export async function askOllamaRecap(buildPrompt, transcript, { meeting = false, contesto = '' } = {}) {
   // Gli orari "[hh:mm:ss]" a inizio riga non servono al recap e costano molti token
   // (le cifre si spezzano): si tolgono, lasciando nome di chi parla e testo.
   const plain = String(transcript || '').replace(/^\[\d{1,3}:\d{2}(?::\d{2})?\]\s*/gm, '');
   const overhead = (await buildPrompt('')).length;
+  const notesTokens = meeting ? OLLAMA_NOTES_TOKENS : 1000;
+  const ctxText = contesto ? ` («${contesto}»)` : '';
 
   // Riassunto a pezzi: appunti per ogni pezzo, poi il recap si scrive dagli appunti.
   const fromNotes = async (pieceChars) => {
     const pieces = splitText(plain, pieceChars);
     const notes = [];
     for (let i = 0; i < pieces.length; i++) {
-      const p = RECAP_CHUNK_PROMPT.replace('{{N}}', i + 1).replace('{{TOT}}', pieces.length).replace('{{TESTO}}', pieces[i]);
-      notes.push((await ollamaGenerate(p, ctxFor(p.length, 1000), 1000)).text);
+      const vals = { N: i + 1, TOT: pieces.length, CONTESTO: ctxText, TESTO: pieces[i] };
+      const p = RECAP_CHUNK_PROMPT.replace(/\{\{(N|TOT|CONTESTO|TESTO)\}\}/g, (m, k) => String(vals[k]));
+      notes.push(`--- Parte ${i + 1} di ${pieces.length} ---\n${(await ollamaGenerate(p, ctxFor(p.length, notesTokens), notesTokens)).text}`);
     }
-    return `(Appunti ricavati dalla trascrizione, riassunta a pezzi)\n\n${notes.join('\n\n')}`;
+    return '(Appunti ricavati dalla trascrizione, riassunta a pezzi nell\'ordine della riunione. '
+      + 'Ogni argomento degli appunti deve comparire nel recap; le righe "AZIONE" vanno nelle azioni in carico '
+      + 'con la persona indicata; dove è scritto "scadenza non indicata" non inventare date.)\n\n'
+      + notes.join('\n\n');
   };
 
   const fits = (overhead + plain.length) / OLLAMA_CHARS_PER_TOKEN + OLLAMA_OUTPUT_TOKENS <= OLLAMA_MAX_CTX;
-  let prompt = await buildPrompt(fits ? plain : await fromNotes(OLLAMA_CHUNK_CHARS));
+  let prompt;
+  if (meeting && plain.length > OLLAMA_MEETING_SINGLE_CHARS) prompt = await buildPrompt(await fromNotes(OLLAMA_MEETING_CHUNK_CHARS));
+  else prompt = await buildPrompt(fits ? plain : await fromNotes(OLLAMA_CHUNK_CHARS));
   let result = await ollamaGenerate(prompt, ctxFor(prompt.length, OLLAMA_OUTPUT_TOKENS), OLLAMA_OUTPUT_TOKENS);
   // Prompt troncato da Ollama (stima dei token sbagliata): il recap sarebbe fatto solo sulla
   // fine della riunione e senza istruzioni. Si rifà a pezzi più piccoli.
   if (result.truncated) {
     console.warn('⚠️ [RECAP] Ollama: nuovo tentativo riassumendo la trascrizione a pezzi più piccoli');
-    prompt = await buildPrompt(await fromNotes(Math.floor(OLLAMA_CHUNK_CHARS / 2)));
+    prompt = await buildPrompt(await fromNotes(Math.floor((meeting ? OLLAMA_MEETING_CHUNK_CHARS : OLLAMA_CHUNK_CHARS) / 2)));
     result = await ollamaGenerate(prompt, ctxFor(prompt.length, OLLAMA_OUTPUT_TOKENS), OLLAMA_OUTPUT_TOKENS);
     if (result.truncated) throw httpError(502, 'Recap Projexa: la riunione è troppo lunga per il modello locale');
   }
