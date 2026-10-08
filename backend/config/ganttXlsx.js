@@ -134,7 +134,72 @@ function buildTree(rows) {
   return tree;
 }
 
-export async function buildGanttXlsx({ projectName, rows }) {
+// ---- Logo del cliente al posto della scritta «Gantt» (celle unite B2:B7) ----
+// Area disponibile in pixel: colonna B (~318 px) per le righe 2-7 (6 × 21 px), con margine.
+const LOGO_BOX = { w: 300, h: 116, colOffPx: 9, rowOffPx: 5 };
+const EMU = 9525; // EMU per pixel
+const LOGO_EXT = { 'image/png': 'png', 'image/jpeg': 'jpeg' };
+
+// Dimensioni in pixel di un PNG o JPEG (null se non leggibili).
+function imageSize(buf, mime) {
+  if (mime === 'image/png' && buf.length >= 24) return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+  if (mime === 'image/jpeg') {
+    let i = 2;
+    while (i + 9 < buf.length) {
+      if (buf[i] !== 0xFF) { i++; continue; }
+      const marker = buf[i + 1];
+      const len = buf.readUInt16BE(i + 2);
+      // SOF0..SOF15 (esclusi DHT, JPG, DAC): contengono altezza e larghezza.
+      if (marker >= 0xC0 && marker <= 0xCF && ![0xC4, 0xC8, 0xCC].includes(marker)) {
+        return { w: buf.readUInt16BE(i + 7), h: buf.readUInt16BE(i + 5) };
+      }
+      i += 2 + len;
+    }
+  }
+  return null;
+}
+
+async function addLogo(zip, logo) {
+  const ext = LOGO_EXT[logo.mime];
+  const size = ext && imageSize(logo.buffer, logo.mime);
+  if (!size || !size.w || !size.h) return false;
+  // Proporzioni mantenute, centrato nell'area del titolo.
+  const scale = Math.min(LOGO_BOX.w / size.w, LOGO_BOX.h / size.h);
+  const w = Math.round(size.w * scale), h = Math.round(size.h * scale);
+  const offX = LOGO_BOX.colOffPx + Math.round((LOGO_BOX.w - w) / 2);
+  const offY = LOGO_BOX.rowOffPx + Math.round((LOGO_BOX.h - h) / 2);
+
+  zip.file(`xl/media/logo_cliente.${ext}`, logo.buffer);
+  zip.file('xl/drawings/_rels/drawing1.xml.rels',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    + `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/logo_cliente.${ext}"/>`
+    + '</Relationships>');
+  zip.file('xl/drawings/drawing1.xml',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+    + `<xdr:oneCellAnchor><xdr:from><xdr:col>1</xdr:col><xdr:colOff>${offX * EMU}</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>${offY * EMU}</xdr:rowOff></xdr:from>`
+    + `<xdr:ext cx="${w * EMU}" cy="${h * EMU}"/>`
+    + '<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="2" name="Logo cliente"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>'
+    + '<xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>'
+    + `<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${w * EMU}" cy="${h * EMU}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>`
+    + '</xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>');
+  // Il foglio Gantt non ha relazioni nel template: si crea il file con il solo disegno.
+  zip.file('xl/worksheets/_rels/sheet2.xml.rels',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    + '<Relationship Id="rIdLogo" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>'
+    + '</Relationships>');
+  let ct = await zip.file('[Content_Types].xml').async('string');
+  if (!new RegExp(`<Default Extension="${ext}"`).test(ct)) {
+    ct = ct.replace('<Default Extension="xml"', `<Default Extension="${ext}" ContentType="${logo.mime}"/><Default Extension="xml"`);
+  }
+  ct = ct.replace('</Types>', '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/></Types>');
+  zip.file('[Content_Types].xml', ct);
+  return true;
+}
+
+export async function buildGanttXlsx({ projectName, rows, logo = null }) {
   let templateBuf;
   try {
     templateBuf = await fs.readFile(GANTT_TEMPLATE_PATH);
@@ -143,6 +208,8 @@ export async function buildGanttXlsx({ projectName, rows }) {
   }
   const zip = await JSZip.loadAsync(templateBuf);
   let xml = await zip.file(SHEET).async('string');
+  // Logo del cliente (PNG/JPEG): sostituisce la scritta «Gantt»; senza logo resta la scritta.
+  const hasLogo = !!(logo && logo.buffer && await addLogo(zip, logo));
 
   const items = flatten(buildTree(rows || []));
   const dataRows = Math.max(items.length, TEMPLATE_DATA_ROWS);
@@ -168,7 +235,8 @@ export async function buildGanttXlsx({ projectName, rows }) {
   for (const [num, rowXml] of [...byNum.entries()].sort((a, b) => a[0] - b[0])) {
     if (num < FIRST_DATA_ROW) {
       // Intestazione: nome progetto e date; le formule che puntano alle righe di servizio scendono.
-      const cells = num === 3 ? { D: projectName || '' } : num === 4 ? { D: projStart } : num === 5 ? { D: projEnd } : null;
+      const cells = num === 2 ? (hasLogo ? { B: null } : null)
+        : num === 3 ? { D: projectName || '' } : num === 4 ? { D: projStart } : num === 5 ? { D: projEnd } : null;
       out.push(rewriteRow(rowXml, num, shift, cells));
     } else if (num === FIRST_DATA_ROW) {
       // Righe dati generate al posto delle 38 righe di esempio del template.
@@ -232,6 +300,7 @@ export async function buildGanttXlsx({ projectName, rows }) {
     .replace(/(<pane [^>]*?)topLeftCell="[^"]*"/, '$1topLeftCell="H1"')
     .replace(/<selection activeCell="[^"]*" sqref="[^"]*"\/>/, '<selection activeCell="A1" sqref="A1"/>')
     .replace(/<selection pane="topRight" activeCell="[^"]*" sqref="[^"]*"\/>/, '<selection pane="topRight" activeCell="H11" sqref="H11"/>');
+  if (hasLogo) xml = xml.replace(/(<pageMargins [^>]*\/>)/, '$1<drawing r:id="rIdLogo"/>');
   zip.file(SHEET, xml);
 
   // Catena di calcolo: si toglie (Excel la ricostruisce) e si chiede il ricalcolo all'apertura,

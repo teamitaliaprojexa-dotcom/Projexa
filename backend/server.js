@@ -4055,7 +4055,16 @@ app.get('/api/projects/gantt-activity/export', requireAuth, async (req, res) => 
       [String(ctx.projectId), ctx.tenantId]
     );
     const projectName = String(proj.rows[0]?.valore2 || '').trim() || 'Progetto';
-    const buffer = await buildGanttXlsx({ projectName, rows: result.rows });
+    // Logo del cliente (stesso contesto tenant/utente del Gantt) al posto della scritta «Gantt».
+    const logoRes = await db.query(
+      `SELECT logo, mime_type FROM client_logos WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3 LIMIT 1`,
+      [ctx.tenantId, ctx.userId, ctx.clientId]
+    );
+    const logoRow = logoRes.rows[0];
+    const logo = logoRow && Buffer.isBuffer(logoRow.logo)
+      ? { buffer: logoRow.logo, mime: detectClientLogoMime(logoRow.logo) || logoRow.mime_type }
+      : null;
+    const buffer = await buildGanttXlsx({ projectName, rows: result.rows, logo });
     const fileName = `Gantt_${projectName}.xlsx`.replace(/[\\/:*?"<>|\r\n]+/g, '_');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName.replace(/[^\x20-\x7E]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
