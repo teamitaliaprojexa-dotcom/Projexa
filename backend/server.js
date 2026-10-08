@@ -1384,15 +1384,24 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     // Per i clienti condivisi il contesto dati è quello del proprietario; negli
     // altri contesti la riga deve appartenere all'utente autenticato.
     let effectiveUserId = req.user.user_id;
+    // Sola lettura: cliente condiviso in lettura o cliente/progetto di un collaboratore del
+    // team del Manager (la griglia si mostra come una view: niente Nuova riga/Modifica/Elimina).
+    let readOnlyAccess = false;
     if (source === 'clients') {
       const access = await clientAccessByArgument(config.argument, req, false);
       if (!access) return res.status(403).json({ error: 'Non autorizzato' });
       effectiveUserId = access.ownerUserId;
+      readOnlyAccess = access.permission === 'read';
       if (String(config.user_id) !== String(effectiveUserId)) {
         return res.status(403).json({ error: 'Non autorizzato' });
       }
     } else if (String(config.user_id) !== String(req.user.user_id)) {
-      return res.status(403).json({ error: 'Non autorizzato' });
+      if (source === 'projects' && await isTeamMember(config.user_id, req)) {
+        effectiveUserId = String(config.user_id);
+        readOnlyAccess = true;
+      } else {
+        return res.status(403).json({ error: 'Non autorizzato' });
+      }
     }
 
     const tableName = assertValidIdentifier(String(config.tabella || '').trim());
@@ -1462,7 +1471,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
            AND campo = 'Gestione a HH'
            AND argument = $4
          LIMIT 1`,
-        [req.user.tenant_id, req.user.user_id, clientId, config.argument]
+        [req.user.tenant_id, effectiveUserId, clientId, config.argument]
       );
       const managementValue = managementResult.rows[0]?.valore1;
       const manageByHours = managementValue === true
@@ -1628,16 +1637,16 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     // __can_write: la riga è modificabile dal ruolo del contesto (id_roles_write).
     // canWriteField: il campo griglia stesso (riga settings/clients/projects) è modificabile.
     const rows = result.rows.map((row) => {
-      const out = { ...row, __can_write: hasRoleWrite ? canWriteRow(req, row.__roles_write, tableName) : true };
+      const out = { ...row, __can_write: !readOnlyAccess && (hasRoleWrite ? canWriteRow(req, row.__roles_write, tableName) : true) };
       delete out.__roles_write;
       // Colonne con elenco fisso (config/gridColumnRules.js): a video l'etichetta.
       return etichetteValori(tableName, out);
     });
     res.json({
       rows,
-      canWriteField: canWriteRow(req, config.id_roles_write, source),
+      canWriteField: !readOnlyAccess && canWriteRow(req, config.id_roles_write, source),
       columns: selectedColumns,
-      isView,
+      isView: isView || readOnlyAccess,
       lockedColumns: selectedColumns.filter(c => columnsSpec.locked.has(c)),
       editOnly: columnsSpec.editOnly,
       // Etichette delle intestazioni diverse dal nome della colonna (gridColumnRules.js).
@@ -1682,15 +1691,24 @@ async function resolveGridWidgetContext(source, fieldId, req, needWrite) {
   const config = configResult.rows[0];
 
   let effectiveUserId = req.user.user_id;
+  // readOnly: dati visibili ma non modificabili (cliente condiviso in lettura o
+  // cliente/progetto di un collaboratore del team del Manager: solo letture).
+  let readOnly = false;
   if (source === 'clients') {
     const access = await clientAccessByArgument(config.argument, req, needWrite);
     if (!access) throw Object.assign(new Error('Non autorizzato'), { statusCode: 403 });
     effectiveUserId = access.ownerUserId;
+    readOnly = access.permission === 'read';
     if (String(config.user_id) !== String(effectiveUserId)) {
       throw Object.assign(new Error('Non autorizzato'), { statusCode: 403 });
     }
   } else if (String(config.user_id) !== String(req.user.user_id)) {
-    throw Object.assign(new Error('Non autorizzato'), { statusCode: 403 });
+    if (!needWrite && source === 'projects' && await isTeamMember(config.user_id, req)) {
+      effectiveUserId = String(config.user_id);
+      readOnly = true;
+    } else {
+      throw Object.assign(new Error('Non autorizzato'), { statusCode: 403 });
+    }
   }
 
   const tableName = assertValidIdentifier(String(config.tabella || '').trim());
@@ -1717,7 +1735,7 @@ async function resolveGridWidgetContext(source, fieldId, req, needWrite) {
   const columnsSpec = parseGridColumnsSpec(config.colonna);
 
   return {
-    config, tableName, tableColumns, generatedColumns, effectiveUserId, clientId,
+    config, tableName, tableColumns, generatedColumns, effectiveUserId, clientId, readOnly,
     lockedColumns: columnsSpec.locked,
     editOnly: columnsSpec.editOnly
   };
@@ -3994,7 +4012,8 @@ async function resolveGanttContext(fieldId, req, needWrite) {
     tenantId: req.user.tenant_id,
     userId: ctx.effectiveUserId,
     clientId: ctx.clientId,
-    projectId: ctx.config.argument
+    projectId: ctx.config.argument,
+    readOnly: !!ctx.readOnly
   };
 }
 
@@ -4023,7 +4042,7 @@ app.get('/api/projects/gantt-activity', requireAuth, async (req, res) => {
     );
     // Il Gantt si modifica come un unico albero: se anche una sola attività non è
     // modificabile dal ruolo del contesto (id_roles_write), la pagina va in sola lettura.
-    const canWrite = result.rows.every((r) => !('id_roles_write' in r) || canWriteRow(req, r.id_roles_write));
+    const canWrite = !ctx.readOnly && result.rows.every((r) => !('id_roles_write' in r) || canWriteRow(req, r.id_roles_write));
     const rows = result.rows.map((r) => {
       const out = { id: r.id };
       for (const c of GANTT_COLUMNS) out[c] = r[c];
@@ -4281,8 +4300,9 @@ app.get('/api/kpi-fatturazione', requireAuth, async (req, res) => {
   try {
     const anno = req.query.anno ? Number(req.query.anno) : null;
     const clientIds = parseClientIdsFromQuery(req);
-    const conditions = ['tenant_id = $1', 'user_id = $2'];
-    const params = [req.user.tenant_id, req.user.user_id];
+    // KPI del fatturato: propri + dei collaboratori del team del Manager (campo «Manager»).
+    const conditions = ['tenant_id = $1', 'user_id::text = ANY($2::text[])'];
+    const params = [req.user.tenant_id, await selfAndTeamIds(req)];
     if (Number.isFinite(anno)) { params.push(anno); conditions.push(`anno = $${params.length}`); }
     if (clientIds.length) { params.push(clientIds); conditions.push(`client_id = ANY($${params.length})`); }
     const result = await db.query(
@@ -4757,8 +4777,8 @@ app.get('/api/kpi-gestione-progetto/ordini', requireAuth, async (req, res) => {
 app.get('/api/kpi-fatturazione/years', requireAuth, async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT DISTINCT anno FROM kpi_fatturazione WHERE tenant_id = $1 AND user_id = $2 ORDER BY anno`,
-      [req.user.tenant_id, req.user.user_id]
+      `SELECT DISTINCT anno FROM kpi_fatturazione WHERE tenant_id = $1 AND user_id::text = ANY($2::text[]) ORDER BY anno`,
+      [req.user.tenant_id, await selfAndTeamIds(req)]
     );
     res.json(result.rows.map(r => r.anno));
   } catch (error) {
@@ -6724,20 +6744,31 @@ app.get('/api/clients/names', requireAuth, async (req, res) => {
     // Sempre filtrato per tenant_id e user_id del login, anche per gli amministratori:
     // un admin loggato sul tenant Projexa non deve vedere i clienti di altri tenant
     // (es. Teamsystem) in questa lista (Clienti / Progetti clienti / filtro in alto).
-    // Clienti propri + clienti condivisi con me (ACL). Un flag "shared" distingue i secondi.
+    // Clienti propri + clienti condivisi con me (ACL) + clienti dei collaboratori del mio team
+    // (campo «Manager», sola lettura). "shared" distingue i non propri; "team" con "owner_name"
+    // indica quelli del team e di chi sono.
+    // Il team si aggiunge solo su richiesta (?team=1: elenchi Clienti, Progetti clienti, modello
+    // del nuovo cliente); riunioni, To Do e menu collegati restano sui clienti propri/condivisi.
+    const team = String(req.query.team || '') === '1' ? await teamMemberIds(req) : [];
     const result = await db.query(
-      `SELECT id, valore2 AS name,
-              (user_id <> $2) AS shared
+      `SELECT id, valore2 AS name, user_id::text AS owner_id,
+              (user_id <> $2) AS shared,
+              (user_id::text = ANY($3::text[])) AS team
        FROM clients c
        WHERE argument = 'Cliente' AND campo = 'Cliente'
          AND tenant_id = $1 AND valore2 IS NOT NULL${scadCond}
-         AND (user_id = $2 OR EXISTS (
+         AND (user_id = $2 OR user_id::text = ANY($3::text[]) OR EXISTS (
                SELECT 1 FROM client_shares s
                WHERE s.client_id = c.id AND s.shared_with_user_id = $2 AND s.tenant_id = $1))
        ORDER BY valore2`,
-      [req.user.tenant_id, req.user.user_id]
+      [req.user.tenant_id, req.user.user_id, team]
     );
-    res.json(sortByName(result.rows)); // [{ id, name, shared }, ...]
+    const ownerNames = await userDisplayNames(result.rows.filter((r) => r.team).map((r) => r.owner_id));
+    for (const r of result.rows) {
+      if (r.team) r.owner_name = ownerNames.get(r.owner_id) || '';
+      delete r.owner_id;
+    }
+    res.json(sortByName(result.rows)); // [{ id, name, shared, team, owner_name? }, ...]
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -7333,13 +7364,16 @@ app.get('/api/clients/dossier', requireAuth, async (req, res) => {
 app.get('/api/client-logos/:clientId', requireAuth, async (req, res) => {
   try {
     const clientId = req.params.clientId;
-    await assertOwnedClientLogoContext(clientId, req);
+    // Lettura: anche clienti condivisi o del team del Manager (logo del proprietario).
+    if (!UUID_RE.test(String(clientId || ''))) return res.status(400).json({ error: 'Cliente non valido' });
+    const acc = await clientAccess(clientId, req, false);
+    if (!acc) return res.status(403).json({ error: 'Cliente non accessibile nel contesto corrente' });
     const result = await db.query(
       `SELECT logo, mime_type, filename
        FROM client_logos
        WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
        LIMIT 1`,
-      [req.user.tenant_id, req.user.user_id, clientId]
+      [req.user.tenant_id, acc.ownerUserId, clientId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Logo non presente' });
     const row = result.rows[0];
@@ -7582,8 +7616,49 @@ async function resolveClientRoot(idOrArgument, tenantId) {
   return null;
 }
 
+// ---------- Team del Manager ----------
+// Ogni utente indica il proprio responsabile nel campo «Manager» del Profilo (impostazioni,
+// tipo 19: valore2 = user_id del responsabile). Il team di un utente = i colleghi dello stesso
+// tenant che lo hanno indicato come Manager (solo i diretti). Il Manager vede in SOLA LETTURA
+// clienti e progetti del team e il KPI fatturato del team; To Do, riunioni, impostazioni e gli
+// altri KPI restano personali. Confronto fatto qui e non in SQL: valore2 può essere cifrato.
+async function teamMemberIds(req) {
+  if (req.__teamIds) return req.__teamIds;
+  const me = String(req.user.user_id || '');
+  let ids = [];
+  try {
+    const r = await db.query(
+      `SELECT user_id, valore2 FROM settings
+        WHERE tenant_id = $1 AND argument = 'Profilo' AND campo = 'Manager' AND valore2 IS NOT NULL`,
+      [req.user.tenant_id]
+    );
+    ids = [...new Set(r.rows
+      .filter((x) => String(x.valore2).trim() === me && String(x.user_id) !== me)
+      .map((x) => String(x.user_id)))];
+  } catch (e) { ids = []; }
+  req.__teamIds = ids;
+  return ids;
+}
+// "Nome Cognome" degli utenti indicati (per l'indicazione «Team: …» negli elenchi).
+async function userDisplayNames(userIds) {
+  const ids = [...new Set((userIds || []).filter(Boolean).map(String))];
+  const map = new Map();
+  if (!ids.length) return map;
+  const r = await db.query('SELECT id::text AS id, name, cognome FROM users WHERE id::text = ANY($1::text[])', [ids]);
+  for (const x of r.rows) map.set(x.id, [x.name, x.cognome].filter(Boolean).join(' '));
+  return map;
+}
+async function isTeamMember(userId, req) {
+  return userId != null && (await teamMemberIds(req)).includes(String(userId));
+}
+// Utente proprietario dei dati + team: per le letture "di team" (es. KPI fatturato).
+async function selfAndTeamIds(req) {
+  return [String(req.user.user_id), ...(await teamMemberIds(req))];
+}
+
 // Accesso dell'utente corrente a un cliente (id riga identità). Restituisce
 // { ownerUserId, permission, isOwner } oppure null se nessun accesso.
+// Clienti di un collaboratore del team: accesso in sola lettura ({ permission: 'read', team: true }).
 async function clientAccess(clientId, req, needWrite) {
   const c = await db.query(
     `SELECT user_id FROM clients WHERE id = $1 AND argument = 'Cliente' AND campo = 'Cliente' AND tenant_id = $2`,
@@ -7596,7 +7671,12 @@ async function clientAccess(clientId, req, needWrite) {
     'SELECT permission FROM client_shares WHERE client_id = $1 AND shared_with_user_id = $2 AND tenant_id = $3 LIMIT 1',
     [clientId, req.user.user_id, req.user.tenant_id]
   );
-  if (s.rows.length === 0) return null;
+  if (s.rows.length === 0) {
+    if (!needWrite && await isTeamMember(ownerUserId, req)) {
+      return { ownerUserId, permission: 'read', isOwner: false, team: true };
+    }
+    return null;
+  }
   const permission = s.rows[0].permission || 'read';
   if (needWrite && permission !== 'write') return null;
   return { ownerUserId, permission, isOwner: false };
@@ -7750,14 +7830,15 @@ app.post('/api/clients', requireAuth, async (req, res) => {
 
     // 2) Deep-copy della STRUTTURA (valori vuoti) da un cliente modello, preservando la
     //    gerarchia (primo livello + Nodi Padre e relativi figli, ricorsivamente).
-    //    Sorgente: il cliente scelto (sourceClientId, stesso tenant+utente); se assente
-    //    (es. primo cliente) si usa il modello master: tenant 'PROJEXA' / 'PROJEXA_COPIA_CLIENTE'.
+    //    Sorgente: il cliente scelto (sourceClientId, stesso tenant, proprio o di un collaboratore
+    //    del team: si copia solo la struttura, le righe nuove sono di chi crea con il suo ruolo);
+    //    se assente (es. primo cliente) si usa il modello master: tenant 'PROJEXA' / 'PROJEXA_COPIA_CLIENTE'.
     let srcId = null;
     if (sourceClientId) {
       const v = await client.query(
         `SELECT id FROM clients WHERE id = $1 AND argument='Cliente' AND campo='Cliente'
-           AND tenant_id = $2 AND user_id = $3`,
-        [sourceClientId, req.user.tenant_id, req.user.user_id]
+           AND tenant_id = $2 AND user_id::text = ANY($3::text[])`,
+        [sourceClientId, req.user.tenant_id, await selfAndTeamIds(req)]
       );
       if (v.rows.length) srcId = v.rows[0].id;
     }
@@ -7873,14 +7954,23 @@ app.get('/api/projects/search', requireAuth, async (req, res) => {
 app.get('/api/projects/list', requireAuth, async (req, res) => {
   try {
     const clientId = ((req.query && req.query.clientId) || '').trim();
-    const params = [req.user.tenant_id, req.user.user_id];
-    let where = `argument = 'Progetto' AND campo = 'Progetto' AND tenant_id = $1 AND user_id = $2 AND valore2 IS NOT NULL
+    // Con il cliente indicato (o ?team=1, modelli del nuovo progetto) compaiono anche i progetti
+    // dei collaboratori del team del Manager (sola lettura, "team" + "owner_name"); altrimenti solo i propri.
+    const owners = (clientId || String(req.query.team || '') === '1') ? await selfAndTeamIds(req) : [String(req.user.user_id)];
+    const params = [req.user.tenant_id, owners];
+    let where = `argument = 'Progetto' AND campo = 'Progetto' AND tenant_id = $1 AND user_id::text = ANY($2::text[]) AND valore2 IS NOT NULL
                  AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`;
     if (clientId) { params.push(clientId); where += ` AND client_id = $${params.length}`; }
     const r = await db.query(
-      `SELECT id, valore2 AS name, client_id FROM projects WHERE ${where} ORDER BY valore2`,
+      `SELECT id, valore2 AS name, client_id, user_id::text AS owner_id FROM projects WHERE ${where} ORDER BY valore2`,
       params
     );
+    const me = String(req.user.user_id);
+    const names = await userDisplayNames(r.rows.filter((x) => x.owner_id !== me).map((x) => x.owner_id));
+    for (const x of r.rows) {
+      if (x.owner_id !== me) { x.team = true; x.owner_name = names.get(x.owner_id) || ''; }
+      delete x.owner_id;
+    }
     res.json(sortByName(r.rows));
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -7924,6 +8014,15 @@ app.post('/api/projects', requireAuth, async (req, res) => {
   const sourceProjectId = ((req.body && req.body.sourceProjectId) || '').trim();
   if (!clientId) return res.status(400).json({ error: 'clientId richiesto' });
   if (!name) return res.status(400).json({ error: 'Nome progetto richiesto' });
+  // Il cliente deve essere modificabile da chi crea (proprio o condiviso in scrittura): i clienti
+  // del team del Manager sono in sola lettura e non ricevono progetti nuovi.
+  try {
+    if (!(await clientAccess(clientId, req, true))) {
+      return res.status(403).json({ error: 'Cliente in sola lettura: non puoi crearvi progetti' });
+    }
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
 
   const client = await db.connect();
   try {
@@ -7939,13 +8038,15 @@ app.post('/api/projects', requireAuth, async (req, res) => {
     });
     const newProject = ins.rows[0];
 
-    // 2) Sorgente struttura: progetto modello scelto (stesso tenant+utente) o master PROGETTO_COPIA.
+    // 2) Sorgente struttura: progetto modello scelto (stesso tenant, proprio o di un collaboratore
+    //    del team: si copia la sola struttura) o master PROGETTO_COPIA. Le righe nuove sono di chi
+    //    crea, con id_roles_write = suo ruolo (vedi sotto).
     let srcId = null;
     if (sourceProjectId) {
       const v = await client.query(
         `SELECT id FROM projects WHERE id = $1 AND argument='Progetto' AND campo='Progetto'
-           AND tenant_id = $2 AND user_id = $3`,
-        [sourceProjectId, req.user.tenant_id, req.user.user_id]
+           AND tenant_id = $2 AND user_id::text = ANY($3::text[])`,
+        [sourceProjectId, req.user.tenant_id, await selfAndTeamIds(req)]
       );
       if (v.rows.length) srcId = v.rows[0].id;
     }
@@ -10075,12 +10176,29 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
     // progetto corrente (per i progetti, l'id del progetto è il suo stesso "argument").
     let clientContextId = null;
     let projectContextId = null;
+    // Sola lettura: cliente condiviso in lettura o cliente/progetto di un collaboratore del team.
+    let readOnlyAccess = false;
     if (table === 'clients') {
       const acc = await clientAccessByArgument(argument, req, false);
       if (!acc) return res.status(403).json({ error: 'Non autorizzato' });
       effectiveUserId = acc.ownerUserId;
       clientContextId = acc.clientId;
+      readOnlyAccess = acc.permission === 'read';
     }
+    if (table === 'projects' && EAV_UUID_RE.test(String(argument))) {
+      // Progetto (o suo Nodo Padre) di un collaboratore del team: righe del proprietario.
+      const own = await db.query(`SELECT user_id::text AS user_id FROM projects WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        [argument, req.user.tenant_id]);
+      const ownerId = own.rows[0]?.user_id;
+      if (ownerId && ownerId !== String(req.user.user_id) && await isTeamMember(ownerId, req)) {
+        effectiveUserId = ownerId;
+        readOnlyAccess = true;
+      }
+    }
+    if (readOnlyAccess) res.set('X-Team-Read', '1');
+    // Utente dei dati letti dai campi «database» (tipo 4/17/18): il proprietario del
+    // cliente/progetto aperto, non sempre chi è collegato (condivisione o team).
+    const contextUser = String(effectiveUserId) === String(req.user.user_id) ? req.user : { ...req.user, user_id: effectiveUserId };
     // Progetti: filtro aggiuntivo per client_id (accesso a parità di tenant+user+client).
     const params = [argument, req.user.tenant_id, effectiveUserId, roleLevel];
     let projClause = '';
@@ -10121,17 +10239,34 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
       const c = await db.query(`SELECT id_roles_write FROM "${table}" WHERE id = $1 LIMIT 1`, [argument]);
       if (c.rows[0]) containerWritable = canWriteRow(req, c.rows[0].id_roles_write, table);
     }
+    if (readOnlyAccess) containerWritable = false;
     res.set('X-Can-Write-Container', containerWritable ? '1' : '0');
 
     const rows = result.rows;
+    // Tipo 19 (utente del tenant, es. «Manager» del Profilo): menu con i colleghi dello stesso
+    // tenant (escluso chi è collegato); si salva lo user_id in valore2, a video «Nome Cognome».
+    let tenantColleagues = null;
+    if (rows.some((r) => Number(r.tipo_valore) === 19)) {
+      const u = await db.query(
+        `SELECT DISTINCT u.id::text AS id, u.name, u.cognome
+           FROM user_tenants ut JOIN users u ON u.id = ut.user_id
+          WHERE ut.tenant_id = $1 AND ut.user_id <> $2`,
+        [req.user.tenant_id, req.user.user_id]
+      );
+      tenantColleagues = u.rows
+        .map((x) => ({ id: x.id, label: [x.name, x.cognome].filter(Boolean).join(' ') || x.id }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'it', { sensitivity: 'base' }));
+    }
     for (const row of rows) {
-      // Permesso per riga: il campo è modificabile solo se id_roles_write = ruolo del contesto.
-      row.__can_write = canWriteRow(req, row.id_roles_write, table);
+      if (Number(row.tipo_valore) === 19) row.tipo19_options = tenantColleagues || [];
+      // Permesso per riga: il campo è modificabile solo se id_roles_write = ruolo del contesto
+      // (mai per un cliente/progetto in sola lettura: condiviso in lettura o del team).
+      row.__can_write = !readOnlyAccess && canWriteRow(req, row.id_roles_write, table);
       if (Number(row.tipo_valore) === 4 && row.tabella && row.colonna) {
         try {
           assertValidIdentifier(row.tabella);
           assertValidIdentifier(row.colonna);
-          const keys = await referenceKeys(row.tabella, req.user, { clientId: clientContextId, projectId: projectContextId });
+          const keys = await referenceKeys(row.tabella, contextUser, { clientId: clientContextId, projectId: projectContextId });
           let where = keys.length
             ? 'WHERE ' + keys.map((k, i) => `"${k.col}" = $${i + 1}`).join(' AND ')
             : '';
@@ -10183,7 +10318,7 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
         try {
           assertValidIdentifier(row.tabella);
           assertValidIdentifier(row.colonna);
-          const keys = await referenceKeys(row.tabella, req.user, { clientId: clientContextId, projectId: projectContextId });
+          const keys = await referenceKeys(row.tabella, contextUser, { clientId: clientContextId, projectId: projectContextId });
           const params = keys.map(k => k.val);
           const conds = keys.map((k, i) => `"${k.col}" = $${i + 1}`);
           let where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';

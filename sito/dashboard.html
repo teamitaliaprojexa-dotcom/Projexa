@@ -1542,6 +1542,12 @@
         .parent-form-footer button { border: 0; border-radius: 7px; padding: 0.55rem 1.1rem; font-weight: 600; cursor: pointer; }
         .parent-form-save { background: #10B981; color: #fff; }
         .parent-form-cancel { background: #E5E7EB; color: #374151; }
+        /* Clienti/progetti di un collaboratore del team del Manager (sola lettura) */
+        .team-badge {
+            display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px;
+            background: #EDE9FE; color: #5B21B6; font-size: 0.68rem; font-weight: 600;
+            vertical-align: middle; white-space: nowrap;
+        }
         /* Griglia (tipo 11) in modifica/inserimento: «Salva» in fondo disabilitato */
         #parentFormDialog:has(.type11-grid-toolbar.type11-grid-editing) #parentFormSave,
         #settingsDetailFlyout:has(.type11-grid-toolbar.type11-grid-editing) #settingsDetailSaveBtn {
@@ -6767,7 +6773,8 @@
             let control;
 
             if (column.name === 'client_id') {
-                const options = [{ value: '', label: 'Nessun cliente' }, ...dashboardClients.map(client => ({
+                // To Do personale: i clienti del team (sola lettura) non si propongono.
+                const options = [{ value: '', label: 'Nessun cliente' }, ...dashboardClients.filter(client => !client.team).map(client => ({
                     value: client.id,
                     label: client.name + (client.shared ? ' (condiviso)' : '')
                 }))];
@@ -11865,12 +11872,21 @@
             }
         }
 
+        // Etichetta dei clienti/progetti di un collaboratore del team (campo «Manager»): si
+        // aprono in sola lettura. c.team / c.owner_name arrivano da /clients/names e /projects/list.
+        function teamBadgeHtml(c) {
+            if (!c || !c.team) return '';
+            const who = c.owner_name ? `Team: ${c.owner_name}` : 'Team';
+            return ` <span class="team-badge" title="Di ${escapeHtml(c.owner_name || 'un collaboratore')}: sola lettura">${escapeHtml(who)}</span>`;
+        }
+
         // Carica nel flyout Clienti le Ragioni Sociali (query su clients, filtrata per tenant+utente del login).
         async function loadClientsNames() {
             const listEl = document.getElementById('clientsList');
             if (!listEl) return;
             try {
-                const res = await fetch(`${API_URL}/clients/names`, { headers: getAuthHeaders() });
+                // team=1: anche i clienti dei collaboratori del mio team (campo «Manager»), in sola lettura.
+                const res = await fetch(`${API_URL}/clients/names?team=1`, { headers: getAuthHeaders() });
                 if (!res.ok) {
                     listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore nel caricamento</li>';
                     return;
@@ -11885,7 +11901,7 @@
                 }
                 // Ogni voce mostra il nome ma porta con sé l'id della riga cliente,
                 // che verrà usato come "argument" per il flyout di dettaglio.
-                listEl.innerHTML = clients.map(c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}"><span class="flyout-item-label">${escapeHtml(c.name)}</span></li>`).join('');
+                listEl.innerHTML = clients.map(c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}"${c.team ? ' data-client-team="1"' : ''}><span class="flyout-item-label">${escapeHtml(c.name)}${teamBadgeHtml(c)}</span></li>`).join('');
                 listEl.querySelectorAll('li[data-client-id]').forEach(li => {
                     li.addEventListener('click', () => {
                         detailNavStack = [];
@@ -11918,11 +11934,11 @@
             const listEl = document.getElementById('projectClientsList');
             if (!listEl) return;
             try {
-                const res = await fetch(`${API_URL}/clients/names`, { headers: getAuthHeaders() });
+                const res = await fetch(`${API_URL}/clients/names?team=1`, { headers: getAuthHeaders() });
                 if (!res.ok) { listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore</li>'; return; }
                 const clients = await res.json();
                 if (!Array.isArray(clients) || clients.length === 0) { listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Nessun cliente</li>'; return; }
-                listEl.innerHTML = clients.map(c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}"><span class="flyout-item-label">${escapeHtml(c.name)}</span></li>`).join('');
+                listEl.innerHTML = clients.map(c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}"${c.team ? ' data-client-team="1"' : ''}><span class="flyout-item-label">${escapeHtml(c.name)}${teamBadgeHtml(c)}</span></li>`).join('');
                 listEl.querySelectorAll('li[data-client-id]').forEach(li => {
                     li.addEventListener('click', () => {
                         listEl.querySelectorAll('li[data-client-id]').forEach(x => x.classList.remove('active-client'));
@@ -11961,8 +11977,11 @@
             try {
                 const res = await fetch(`${API_URL}/projects/list?clientId=${encodeURIComponent(clientId)}`, { headers: getAuthHeaders() });
                 const projects = res.ok ? await res.json() : [];
-                const addBtn = `<button id="projAddBtn" type="button" style="margin-bottom:0.75rem; padding:0.4rem 0.7rem; background:#3B82F6; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">+ Nuovo progetto</button>`;
-                const rows = (projects || []).map(p => `<div class="settings-detail-link proj-row" data-proj-id="${escapeHtml(p.id)}" data-proj-name="${escapeHtml(p.name)}"><span class="flyout-item-label">${escapeHtml(p.name)}</span><button type="button" class="proj-rename-btn" title="Rinomina il progetto" aria-label="Rinomina ${escapeHtml(p.name)}"><i class="fas fa-pen"></i></button><span class="parent-arrow">›</span></div>`).join('')
+                // Cliente di un collaboratore del team (sola lettura): niente nuovi progetti.
+                const teamClient = !!document.querySelector(`#projectClientsList li[data-client-id="${CSS.escape(String(clientId))}"][data-client-team="1"], #clientsList li[data-client-id="${CSS.escape(String(clientId))}"][data-client-team="1"]`);
+                const addBtn = teamClient ? '' : `<button id="projAddBtn" type="button" style="margin-bottom:0.75rem; padding:0.4rem 0.7rem; background:#3B82F6; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">+ Nuovo progetto</button>`;
+                // Progetti del team: etichetta «Team: …» e niente rinomina (si aprono in sola lettura).
+                const rows = (projects || []).map(p => `<div class="settings-detail-link proj-row" data-proj-id="${escapeHtml(p.id)}" data-proj-name="${escapeHtml(p.name)}"><span class="flyout-item-label">${escapeHtml(p.name)}${teamBadgeHtml(p)}</span>${p.team ? '' : `<button type="button" class="proj-rename-btn" title="Rinomina il progetto" aria-label="Rinomina ${escapeHtml(p.name)}"><i class="fas fa-pen"></i></button>`}<span class="parent-arrow">›</span></div>`).join('')
                     || '<div style="color: var(--text-muted);">Nessun progetto</div>';
                 listEl.innerHTML = addBtn + rows;
                 listEl.querySelectorAll('.proj-row').forEach(r => r.addEventListener('click', (e) => {
@@ -12005,8 +12024,9 @@
             if (!listEl) return;
             if (titleEl) titleEl.textContent = 'Nuovo progetto';
             let models = [];
-            try { const r = await fetch(`${API_URL}/projects/list`, { headers: getAuthHeaders() }); if (r.ok) models = await r.json(); } catch (e) {}
-            const opts = ['<option value="">Modello standard</option>'].concat((models || []).map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}</option>`)).join('');
+            // Modelli: i propri progetti e quelli del team (se ne copia solo la struttura).
+            try { const r = await fetch(`${API_URL}/projects/list?team=1`, { headers: getAuthHeaders() }); if (r.ok) models = await r.json(); } catch (e) {}
+            const opts = ['<option value="">Modello standard</option>'].concat((models || []).map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}${m.team && m.owner_name ? ' (Team: ' + escapeHtml(m.owner_name) + ')' : ''}</option>`)).join('');
             listEl.innerHTML = `<div style="margin-bottom:0.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Nome progetto</label><input id="npName" type="text" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;"></div>
                 <div style="margin-bottom:0.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Copia struttura da</label><select id="npModel" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">${opts}</select></div>
                 <div style="display:flex; gap:0.5rem;"><button id="npCreate" type="button" style="flex:1; padding:0.5rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Crea</button><button id="npCancel" type="button" style="flex:0 0 auto; padding:0.5rem 0.8rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button></div>`;
@@ -15273,6 +15293,8 @@
                 let rows = await res.json();
                 // Permesso di scrittura (id_roles_write): contenitore e singoli campi.
                 currentDetailCanWriteContainer = res.headers.get('X-Can-Write-Container') !== '0';
+                // Cliente condiviso in lettura o cliente/progetto del team del Manager: solo visualizzazione.
+                currentDetailTeamRead = res.headers.get('X-Team-Read') === '1';
                 currentDetailReadOnlyIds = new Set((Array.isArray(rows) ? rows : [])
                     .filter(r => r.__can_write === false).map(r => String(r.id)));
                 // Nasconde le righe "segnaposto" senza campo (usate solo per far comparire l'argomento vuoto)
@@ -15491,6 +15513,9 @@
         // Il server applica comunque le stesse regole.
         let currentDetailCanWriteContainer = true;
         let currentDetailReadOnlyIds = new Set();
+        // true = dettaglio in sola lettura per accesso (cliente condiviso in lettura o dati di un
+        // collaboratore del team del Manager): niente "Abilita modifica" né comandi di modifica.
+        let currentDetailTeamRead = false;
 
         // Struttura dei campi (nuovo/elimina/rinomina/sposta), stesse regole del server:
         // - Admin: tutto;
@@ -15525,7 +15550,8 @@
             let mode = clientDetailMode;
             const listEl = document.getElementById('settingsDetailList');
             const closedProject = currentDetailSource === 'projects' && currentProjectClosed;
-            if (closedProject) {
+            const teamRead = currentDetailTeamRead && currentDetailSource !== 'settings';
+            if (closedProject || teamRead) {
                 clientDetailMode = 'view';
                 mode = 'view';
             }
@@ -15546,7 +15572,7 @@
 
             // Toggle "Abilita modifica"
             const toggleWrap = document.getElementById('clientEditToggleWrap');
-            if (toggleWrap) toggleWrap.style.display = closedProject ? 'none' : 'inline-flex';
+            if (toggleWrap) toggleWrap.style.display = (closedProject || teamRead) ? 'none' : 'inline-flex';
             const toggle = document.getElementById('clientEditToggle');
             if (toggle) toggle.checked = (mode !== 'view');
 
@@ -15559,7 +15585,7 @@
             }
 
             const reopenProjectBtn = document.getElementById('reopenProjectBtn');
-            if (reopenProjectBtn) reopenProjectBtn.style.display = closedProject ? 'inline-flex' : 'none';
+            if (reopenProjectBtn) reopenProjectBtn.style.display = (closedProject && !teamRead) ? 'inline-flex' : 'none';
             const showAllWrap = document.getElementById('showAllProjectFieldsWrap');
             if (showAllWrap) showAllWrap.style.display = closedProject ? 'inline-flex' : 'none';
             const showAllToggle = document.getElementById('showAllProjectFieldsToggle');
@@ -18103,6 +18129,16 @@
                     .concat(opts.map(o => `<option value="${escapeHtml(o)}" ${String(o) === current ? 'selected' : ''}>${escapeHtml(o)}</option>`))
                     .join('');
                 input = `<select data-setting-id="${id}" data-field="valore2">${optionsHtml}</select>`;
+            } else if (tipo === 19) {
+                // Utente del tenant (es. «Manager» del Profilo): menu con i nominativi dei colleghi
+                // (row.tipo19_options = [{ id, label }]); si salva lo user_id in valore2.
+                const current = row.valore2 == null ? '' : String(row.valore2);
+                const opts = Array.isArray(row.tipo19_options) ? row.tipo19_options.slice() : [];
+                if (current && !opts.some(o => String(o.id) === current)) opts.unshift({ id: current, label: 'Utente non più disponibile' });
+                const optionsHtml = ['<option value="">— Nessuno —</option>']
+                    .concat(opts.map(o => `<option value="${escapeHtml(o.id)}" ${String(o.id) === current ? 'selected' : ''}>${escapeHtml(o.label)}</option>`))
+                    .join('');
+                input = `<select data-setting-id="${id}" data-field="valore2">${optionsHtml}</select>`;
             } else if (tipo === 18) {
                 // Multi-selezione da tabella esterna (tabella.colonna + VariabDB, row.tipo18_options),
                 // stessa UI a checkbox del tipo 9 ma i selezionati sono uniti da ", " (non ";").
@@ -18626,10 +18662,11 @@
             if (modelSel) {
                 modelSel.innerHTML = '<option value="">— Modello standard —</option>';
                 try {
-                    const r = await fetch(`${API_URL}/clients/names`, { headers: getAuthHeaders() });
+                    // Come modello anche i clienti del team (se ne copia solo la struttura).
+                    const r = await fetch(`${API_URL}/clients/names?team=1`, { headers: getAuthHeaders() });
                     if (r.ok) {
                         const list = await r.json();
-                        modelSel.innerHTML += (list || []).map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name || ('Cliente ' + c.id))}</option>`).join('');
+                        modelSel.innerHTML += (list || []).map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name || ('Cliente ' + c.id))}${c.team && c.owner_name ? ' (Team: ' + escapeHtml(c.owner_name) + ')' : ''}</option>`).join('');
                     }
                 } catch (e) { /* ignore */ }
             }
