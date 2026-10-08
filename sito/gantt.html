@@ -1379,7 +1379,10 @@
                 a.click();
                 a.remove();
                 setTimeout(() => URL.revokeObjectURL(url), 2000);
-                showToast('Export pronto');
+                const logoStatus = res.headers.get('X-Gantt-Logo');
+                showToast(logoStatus === 'assente' ? 'Export pronto (nessun logo caricato per questo cliente)'
+                    : logoStatus === 'formato' ? 'Export pronto (logo cliente non leggibile: ricaricalo in PNG o JPEG)'
+                    : 'Export pronto');
             } catch (e) {
                 showToast('Errore export: ' + e.message);
             } finally {

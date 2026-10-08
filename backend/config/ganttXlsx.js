@@ -138,11 +138,22 @@ function buildTree(rows) {
 // Area disponibile in pixel: colonna B (~318 px) per le righe 2-7 (6 × 21 px), con margine.
 const LOGO_BOX = { w: 300, h: 116, colOffPx: 9, rowOffPx: 5 };
 const EMU = 9525; // EMU per pixel
-const LOGO_EXT = { 'image/png': 'png', 'image/jpeg': 'jpeg' };
+// I formati accettati dal caricamento del logo cliente (Excel 365 disegna anche il WebP).
+const LOGO_EXT = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' };
 
-// Dimensioni in pixel di un PNG o JPEG (null se non leggibili).
+// Dimensioni in pixel di un PNG, JPEG o WebP (null se non leggibili).
 function imageSize(buf, mime) {
   if (mime === 'image/png' && buf.length >= 24) return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+  if (mime === 'image/webp' && buf.length >= 30) {
+    const chunk = buf.toString('ascii', 12, 16);
+    if (chunk === 'VP8 ') return { w: buf.readUInt16LE(26) & 0x3FFF, h: buf.readUInt16LE(28) & 0x3FFF };
+    if (chunk === 'VP8L') {
+      const b = buf.readUInt32LE(21);
+      return { w: (b & 0x3FFF) + 1, h: ((b >>> 14) & 0x3FFF) + 1 };
+    }
+    if (chunk === 'VP8X') return { w: buf.readUIntLE(24, 3) + 1, h: buf.readUIntLE(27, 3) + 1 };
+    return null;
+  }
   if (mime === 'image/jpeg') {
     let i = 2;
     while (i + 9 < buf.length) {
@@ -210,6 +221,7 @@ export async function buildGanttXlsx({ projectName, rows, logo = null }) {
   let xml = await zip.file(SHEET).async('string');
   // Logo del cliente (PNG/JPEG): sostituisce la scritta «Gantt»; senza logo resta la scritta.
   const hasLogo = !!(logo && logo.buffer && await addLogo(zip, logo));
+  const logoStatus = hasLogo ? 'inserito' : (logo && logo.buffer ? 'formato' : 'assente');
 
   const items = flatten(buildTree(rows || []));
   const dataRows = Math.max(items.length, TEMPLATE_DATA_ROWS);
@@ -314,5 +326,6 @@ export async function buildGanttXlsx({ projectName, rows, logo = null }) {
   zip.file('xl/workbook.xml', wb.replace(/<calcPr ([^>]*?)\/>/, (all, attrs) =>
     `<calcPr ${attrs.replace(/\s*fullCalcOnLoad="[^"]*"/, '')} fullCalcOnLoad="1"/>`));
 
-  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  return { buffer, logoStatus };
 }
