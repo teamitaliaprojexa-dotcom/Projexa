@@ -10244,14 +10244,16 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
 
     const rows = result.rows;
     // Tipo 19 (utente del tenant, es. «Manager» del Profilo): menu con i colleghi dello stesso
-    // tenant (escluso chi è collegato); si salva lo user_id in valore2, a video «Nome Cognome».
+    // tenant con un ruolo superiore al proprio (id_roles più basso), mai l'Admin (id_roles = 1)
+    // né chi è collegato; si salva lo user_id in valore2, a video «Nome Cognome».
     let tenantColleagues = null;
     if (rows.some((r) => Number(r.tipo_valore) === 19)) {
       const u = await db.query(
         `SELECT DISTINCT u.id::text AS id, u.name, u.cognome
            FROM user_tenants ut JOIN users u ON u.id = ut.user_id
-          WHERE ut.tenant_id = $1 AND ut.user_id <> $2`,
-        [req.user.tenant_id, req.user.user_id]
+          WHERE ut.tenant_id = $1 AND ut.user_id <> $2
+            AND ut.id_roles IS NOT NULL AND ut.id_roles <> 1 AND ut.id_roles < $3`,
+        [req.user.tenant_id, req.user.user_id, userRoleLevel(req)]
       );
       tenantColleagues = u.rows
         .map((x) => ({ id: x.id, label: [x.name, x.cognome].filter(Boolean).join(' ') || x.id }))

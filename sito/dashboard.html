@@ -480,6 +480,18 @@
             color: #065F46;
         }
 
+        /* Ricerca dinamica e gruppi del team negli elenchi "Clienti" e "Progetti clienti" */
+        .settings-flyout .flyout-search {
+            width: 100%; box-sizing: border-box; margin: 0 0 0.6rem; padding: 6px 10px;
+            border: 1px solid var(--border); border-radius: 8px; font: inherit; font-size: 0.85rem;
+        }
+        .settings-flyout ul li.flyout-group-head {
+            margin-top: 0.7rem; padding: 4px 8px; border: none; border-radius: 6px; cursor: default;
+            background: #EDE9FE; color: #5B21B6; font-size: 0.75rem; font-weight: 700;
+        }
+        .settings-flyout ul li.flyout-group-head:hover { color: #5B21B6; }
+        .settings-flyout ul li.flyout-search-empty { color: var(--text-muted); border: none; cursor: default; }
+
         /* Elenchi "Clienti" e "Progetti clienti": stessa animazione 3D dei pulsanti
            della sidebar (vedi .sidebar-menu a). Si anima solo il nome, non la riga. */
         .settings-flyout ul li[data-client-id] > .flyout-item-label {
@@ -3758,6 +3770,7 @@
                     <div class="flyout-resizer"></div>
                     <div class="settings-flyout-inner">
                         <div class="settings-flyout-title">Clienti</div>
+                        <input type="search" class="flyout-search" data-search-list="clientsList" placeholder="Cerca cliente…" aria-label="Cerca cliente" autocomplete="off">
                         <ul id="clientsList">
                             <li style="color: var(--text-muted); border: none;">Caricamento…</li>
                         </ul>
@@ -3773,6 +3786,7 @@
                     <div class="flyout-resizer"></div>
                     <div class="settings-flyout-inner">
                         <div class="settings-flyout-title">Progetti clienti</div>
+                        <input type="search" class="flyout-search" data-search-list="projectClientsList" placeholder="Cerca cliente…" aria-label="Cerca cliente" autocomplete="off">
                         <ul id="projectClientsList">
                             <li style="color: var(--text-muted); border: none;">Caricamento…</li>
                         </ul>
@@ -11880,6 +11894,52 @@
             return ` <span class="team-badge" title="Di ${escapeHtml(c.owner_name || 'un collaboratore')}: sola lettura">${escapeHtml(who)}</span>`;
         }
 
+        // Voci degli elenchi Clienti / Progetti clienti: prima i propri (e condivisi), poi quelli
+        // del team del Manager raggruppati per collaboratore, ciascun gruppo con la sua intestazione.
+        function clientFlyoutItemsHtml(clients) {
+            const li = c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}"${c.team ? ` data-client-team="1" data-group="${escapeHtml(c.owner_name || '')}"` : ''}><span class="flyout-item-label">${escapeHtml(c.name)}</span></li>`;
+            const own = clients.filter(c => !c.team);
+            const groups = new Map();
+            clients.filter(c => c.team).forEach(c => {
+                const k = c.owner_name || 'Collaboratore';
+                if (!groups.has(k)) groups.set(k, []);
+                groups.get(k).push(c);
+            });
+            let html = own.map(li).join('');
+            [...groups.keys()].sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' })).forEach(k => {
+                html += `<li class="flyout-group-head" data-group-head="${escapeHtml(k)}" title="Clienti di ${escapeHtml(k)}: sola lettura">Team: ${escapeHtml(k)}</li>`
+                    + groups.get(k).map(li).join('');
+            });
+            return html;
+        }
+        // Ricerca dinamica (contiene, senza maiuscole/minuscole) sull'elenco collegato al campo:
+        // le intestazioni dei gruppi senza clienti visibili si nascondono.
+        function applyFlyoutSearch(listId) {
+            const listEl = document.getElementById(listId);
+            const input = document.querySelector(`.flyout-search[data-search-list="${listId}"]`);
+            if (!listEl || !input) return;
+            const needle = input.value.trim().toLocaleLowerCase('it-IT');
+            let visible = 0;
+            listEl.querySelectorAll('li[data-client-id]').forEach(li => {
+                const show = !needle || String(li.dataset.clientName || '').toLocaleLowerCase('it-IT').includes(needle);
+                li.style.display = show ? '' : 'none';
+                if (show) visible++;
+            });
+            listEl.querySelectorAll('li.flyout-group-head').forEach(head => {
+                const k = head.dataset.groupHead;
+                const any = [...listEl.querySelectorAll('li[data-client-team="1"]')].some(li => li.dataset.group === k && li.style.display !== 'none');
+                head.style.display = any ? '' : 'none';
+            });
+            listEl.querySelector('li.flyout-search-empty')?.remove();
+            if (needle && !visible && listEl.querySelector('li[data-client-id]')) {
+                listEl.insertAdjacentHTML('beforeend', '<li class="flyout-search-empty">Nessun cliente trovato</li>');
+            }
+        }
+        document.addEventListener('input', event => {
+            const input = event.target.closest && event.target.closest('.flyout-search');
+            if (input) applyFlyoutSearch(input.dataset.searchList);
+        });
+
         // Carica nel flyout Clienti le Ragioni Sociali (query su clients, filtrata per tenant+utente del login).
         async function loadClientsNames() {
             const listEl = document.getElementById('clientsList');
@@ -11901,7 +11961,8 @@
                 }
                 // Ogni voce mostra il nome ma porta con sé l'id della riga cliente,
                 // che verrà usato come "argument" per il flyout di dettaglio.
-                listEl.innerHTML = clients.map(c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}"${c.team ? ' data-client-team="1"' : ''}><span class="flyout-item-label">${escapeHtml(c.name)}${teamBadgeHtml(c)}</span></li>`).join('');
+                listEl.innerHTML = clientFlyoutItemsHtml(clients);
+                applyFlyoutSearch('clientsList'); // mantiene il filtro scritto prima del ricaricamento
                 listEl.querySelectorAll('li[data-client-id]').forEach(li => {
                     li.addEventListener('click', () => {
                         detailNavStack = [];
@@ -11938,7 +11999,8 @@
                 if (!res.ok) { listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Errore</li>'; return; }
                 const clients = await res.json();
                 if (!Array.isArray(clients) || clients.length === 0) { listEl.innerHTML = '<li style="color: var(--text-muted); border: none;">Nessun cliente</li>'; return; }
-                listEl.innerHTML = clients.map(c => `<li data-client-id="${escapeHtml(c.id)}" data-client-name="${escapeHtml(c.name)}"${c.team ? ' data-client-team="1"' : ''}><span class="flyout-item-label">${escapeHtml(c.name)}${teamBadgeHtml(c)}</span></li>`).join('');
+                listEl.innerHTML = clientFlyoutItemsHtml(clients);
+                applyFlyoutSearch('projectClientsList');
                 listEl.querySelectorAll('li[data-client-id]').forEach(li => {
                     li.addEventListener('click', () => {
                         listEl.querySelectorAll('li[data-client-id]').forEach(x => x.classList.remove('active-client'));
