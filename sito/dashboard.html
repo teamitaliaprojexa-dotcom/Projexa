@@ -20352,12 +20352,20 @@
             });
 
             // Con un ordinamento scelto dall'utente (clic sull'intestazione) i colori
-            // restano, ma le righe non vengono riordinate per gruppo.
-            const keepOrder = table.dataset.type11Sorted === "1";
-            (keepOrder ? rows : orderedRows).forEach(function (row) {
-                colorClasses.forEach(c => row.classList.remove(c));
-                row.classList.add("group-color-" + groups.get(row.__gridGroupKey));
-                if (!keepOrder) tbody.appendChild(row);
+            // restano, ma le righe non vengono riordinate per gruppo. Le righe si spostano
+            // solo se l'ordine cambia davvero e mai mentre si scrive in un campo della
+            // griglia: spostare una riga toglie il fuoco al campo (l'osservatore scatta a
+            // ogni modifica della pagina, anche all'apertura dell'elenco della rubrica).
+            const editingInside = tbody.contains(document.activeElement);
+            const sameOrder = orderedRows.every(function (row, i) { return rows[i] === row; });
+            const reorder = table.dataset.type11Sorted !== "1" && !sameOrder && !editingInside;
+            (reorder ? orderedRows : rows).forEach(function (row) {
+                const groupClass = "group-color-" + groups.get(row.__gridGroupKey);
+                if (!row.classList.contains(groupClass)) {
+                    colorClasses.forEach(c => row.classList.remove(c));
+                    row.classList.add(groupClass);
+                }
+                if (reorder) tbody.appendChild(row);
             });
         });
     }
