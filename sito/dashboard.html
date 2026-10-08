@@ -6852,9 +6852,14 @@
         // (contiene, senza maiuscole/minuscole). L'elenco dei risultati è "fixed" sul body,
         // così non viene tagliato dalle celle o dai contenitori con scorrimento.
         let rubricaCache = null; // Promise di { options, me }
+        let rubricaCacheAt = 0;
+        // Oltre questo tempo i contatti si rileggono: chi aggiunge o modifica un contatto in
+        // Rubrica lo ritrova nella ricerca senza dover ricaricare la pagina.
+        const RUBRICA_CACHE_MS = 30000;
 
         function loadRubrica(selectedValue = '', force = false) {
-            if (!selectedValue && rubricaCache && !force) return rubricaCache;
+            if (!selectedValue && rubricaCache && !force && Date.now() - rubricaCacheAt < RUBRICA_CACHE_MS) return rubricaCache;
+            if (!selectedValue) rubricaCacheAt = Date.now();
             const query = new URLSearchParams(selectedValue ? { selectedValue } : {});
             const promise = fetch(`${API_URL}/dashboard/tasks/foreign-options/assigned_to?${query.toString()}`, { headers: getAuthHeaders() })
                 .then(async response => {
@@ -17485,6 +17490,8 @@
                 // Griglia della rubrica stessa: il nominativo si scrive libero (niente «Cerca in
                 // rubrica», che serve solo alle altre tabelle per pescare un contatto esistente).
                 const isRubrica = payload.tabella === 'rubrica';
+                // Griglia Rubrica ricaricata (anche dopo salvataggi): la ricerca nei contatti si rilegge.
+                if (isRubrica) rubricaCache = null;
                 const fotoTd = record => `<td class="type11-foto-col">${type11FotoCellHtml(record, editing && record.__can_write !== false)}</td>`;
 
                 // Colonne di soli indirizzi web: si stringono al minimo e mostrano
