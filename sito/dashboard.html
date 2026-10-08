@@ -7008,29 +7008,33 @@
             });
         }
 
-        // Griglie (tipo 11): nella colonna "nominativo" in modifica si cerca in rubrica e,
-        // scelto il contatto, si compila anche la colonna "email" della stessa riga.
-        // Il nominativo resta comunque scrivibile liberamente.
+        // Griglie (tipo 11): nelle colonne "nominativo" e "referente" (es. Elenco Licenze) in
+        // modifica si cerca in rubrica; scelto il contatto, per "nominativo" si compila anche la
+        // colonna "email" della stessa riga. Il testo resta comunque scrivibile liberamente.
+        const TYPE11_RUBRICA_COLS = ['nominativo', 'referente'];
         async function attachType11RubricaSearch(rowEl) {
-            const nameInput = rowEl.querySelector('input.type11-editor-field[data-col="nominativo"][type="text"]:not([disabled])');
-            if (!nameInput || nameInput.dataset.rubrica === '1') return;
-            nameInput.dataset.rubrica = '1';
-            nameInput.placeholder = 'Cerca in rubrica…';
+            const inputs = TYPE11_RUBRICA_COLS
+                .map(col => rowEl.querySelector(`input.type11-editor-field[data-col="${col}"][type="text"]:not([disabled])`))
+                .filter(input => input && input.dataset.rubrica !== '1');
+            if (!inputs.length) return;
+            inputs.forEach(input => { input.dataset.rubrica = '1'; input.placeholder = 'Cerca in rubrica…'; });
             const loaded = await loadRubrica();
             const data = { options: loaded.options };
-            attachRubricaAutocomplete(nameInput, data, {
+            inputs.forEach(nameInput => attachRubricaAutocomplete(nameInput, data, {
                 strict: false,
+                freeText: true,
                 onChoose: option => {
                     // Evento "change": la griglia segna la riga come modificata (non "input",
                     // che riaprirebbe l'elenco dei risultati).
                     nameInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    if (nameInput.dataset.col !== 'nominativo') return;
                     const emailInput = rowEl.querySelector('input.type11-editor-field[data-col="email"]:not([disabled])');
                     if (option && emailInput && option.email) {
                         emailInput.value = option.email;
                         emailInput.dispatchEvent(new Event('change', { bubbles: true }));
                     }
                 }
-            });
+            }));
         }
 
         // Piccola finestra "Nuovo contatto" (nominativo + email) che scrive la riga in rubrica.
