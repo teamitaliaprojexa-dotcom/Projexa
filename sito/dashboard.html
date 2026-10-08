@@ -13453,8 +13453,10 @@
 
             title.textContent = parentFormState.label || 'Dettaglio';
             const closedProjectReadOnly = parentFormState.source === 'projects' && currentProjectClosed;
-            if (closedProjectReadOnly) parentFormState.edit = false;
-            if (toggleWrap) toggleWrap.style.display = closedProjectReadOnly ? 'none' : 'inline-flex';
+            // teamRead: dati di un cliente/progetto in sola lettura (condiviso in lettura o del team
+            // del Manager), segnalato dal server con X-Team-Read (vedi sotto).
+            if (closedProjectReadOnly || parentFormState.teamRead) parentFormState.edit = false;
+            if (toggleWrap) toggleWrap.style.display = (closedProjectReadOnly || parentFormState.teamRead) ? 'none' : 'inline-flex';
             if (toggle) toggle.checked = !!parentFormState.edit;
             const action = parentFormState.action || 'values';
             if (save) {
@@ -13477,6 +13479,16 @@
                     headers: getAuthHeaders()
                 });
                 if (!response.ok) throw new Error('Errore nel caricamento');
+                if (response.headers.get('X-Team-Read') === '1' && !parentFormState.teamRead) {
+                    // Sola lettura: niente "Abilita modifica", strumenti e Salva.
+                    parentFormState.teamRead = true;
+                    parentFormState.edit = false;
+                    parentFormState.action = 'values';
+                    if (toggleWrap) toggleWrap.style.display = 'none';
+                    if (toggle) toggle.checked = false;
+                    if (save) save.style.display = 'none';
+                    updateParentFormToolbar();
+                }
                 let rows = await response.json();
                 rows = (Array.isArray(rows) ? rows : []).filter(row =>
                     row.campo != null && String(row.campo).trim() !== ''
@@ -14525,9 +14537,11 @@
                 const items = data.items || [];
                 // Albero disponibile solo se abilitato e la tabella ha "responsabile".
                 const orgView = orgEnabled && data.tree;
-                const edit = linkedListEditMode; // "Abilita modifica" attivo anche in organigramma
+                // Cliente in sola lettura (condiviso in lettura o del team del Manager): solo consultazione.
+                desc.readOnly = !!data.readOnly;
+                const edit = linkedListEditMode && !desc.readOnly; // "Abilita modifica" attivo anche in organigramma
 
-                const toggleHtml = `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;"><label style="display: flex; align-items: center; gap: 6px; cursor: pointer;"><span>Abilita modifica</span><span class="toggle-switch"><input type="checkbox" id="linkedListEditToggle" ${edit ? 'checked' : ''}><span class="toggle-slider"></span></span></label></div>`;
+                const toggleHtml = desc.readOnly ? '' : `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;"><label style="display: flex; align-items: center; gap: 6px; cursor: pointer;"><span>Abilita modifica</span><span class="toggle-switch"><input type="checkbox" id="linkedListEditToggle" ${edit ? 'checked' : ''}><span class="toggle-slider"></span></span></label></div>`;
                 const addHtml = edit ? `<div style="display:flex; gap:0.4rem; margin-bottom:0.75rem;">
                     <button id="linkedAddBtn" type="button" title="Inserisci nuovo record" style="width:30px; height:30px; background:#3B82F6; color:white; border:none; border-radius:6px; cursor:pointer;"><i class="fas fa-plus"></i></button>
                     <button id="linkedEditHintBtn" type="button" title="Modifica record" style="width:30px; height:30px; background:#6B7280; color:white; border:none; border-radius:6px; cursor:pointer;"><i class="fas fa-pen"></i></button>
@@ -14817,8 +14831,10 @@
                 const entries = Object.entries(row).filter(([k]) => !hidden.includes(k));
                 if (entries.length === 0) { listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>'; return; }
 
-                const edit = linkedRowEditMode;
-                const toggleHtml = `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;"><span>Abilita modifica</span><label class="toggle-switch"><input type="checkbox" id="linkedEditToggle" ${edit ? 'checked' : ''}><span class="toggle-slider"></span></label></div>`;
+                // Riga di un cliente in sola lettura (condiviso in lettura o del team): solo consultazione.
+                const rowReadOnly = res.headers.get('X-Team-Read') === '1';
+                const edit = linkedRowEditMode && !rowReadOnly;
+                const toggleHtml = rowReadOnly ? '' : `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;"><span>Abilita modifica</span><label class="toggle-switch"><input type="checkbox" id="linkedEditToggle" ${edit ? 'checked' : ''}><span class="toggle-slider"></span></label></div>`;
                 // Campi: FK -> menu a discesa (valore corrente selezionato); generate/sola lettura -> disabilitati.
                 let fieldsHtml = '';
                 for (const [k, v] of entries) {

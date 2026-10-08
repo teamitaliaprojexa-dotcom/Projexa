@@ -9848,6 +9848,24 @@ app.post('/api/projects/reopen', requireAuth, async (req, res) => {
 // tipo_valore = 20: elenco valori da una tabella esterna. Il campo (fieldId) contiene
 // tabella (clients.tabella) e colonna (clients.colonna). Restituisce { id, value } per
 // ogni riga, filtrando per tenant_id, user_id e id_cliente (se presenti nella tabella).
+// tipo_valore = 20 (tabella collegata, es. Contatti): campo e proprietario dei dati.
+// Il campo è dell'utente collegato oppure, per i clienti, del proprietario di un cliente a cui
+// l'utente ha accesso (condiviso o del team del Manager): in quel caso la lettura usa i dati
+// del proprietario e readOnly segnala se si può solo consultare.
+async function linkedFieldContext(source, fieldId, req, cols) {
+  const f = await db.query(
+    `SELECT ${cols}, argument, user_id::text AS owner_id FROM "${source}" WHERE id = $1 AND tenant_id = $2`,
+    [fieldId, req.user.tenant_id]
+  );
+  const row = f.rows[0];
+  if (!row) return null;
+  if (row.owner_id === String(req.user.user_id)) return { row, ownerUserId: row.owner_id, readOnly: false };
+  if (source !== 'clients') return null;
+  const acc = await clientAccessByArgument(row.argument, req, false);
+  if (!acc || String(acc.ownerUserId) !== row.owner_id) return null;
+  return { row, ownerUserId: row.owner_id, readOnly: acc.permission === 'read' };
+}
+
 app.get('/api/:source(settings|clients)/linked-list', requireAuth, async (req, res) => {
   try {
     const source = req.params.source;
@@ -9856,13 +9874,10 @@ app.get('/api/:source(settings|clients)/linked-list', requireAuth, async (req, r
     if (!fieldId) {
       return res.status(400).json({ error: 'fieldId richiesto' });
     }
-    const f = await db.query(
-      `SELECT tabella, colonna FROM "${source}" WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
-      [fieldId, req.user.tenant_id, req.user.user_id]
-    );
-    if (f.rows.length === 0) return res.status(404).json({ error: 'Campo non trovato' });
-    const tabella = f.rows[0].tabella;
-    const colonna = f.rows[0].colonna;
+    const lctx = await linkedFieldContext(source, fieldId, req, 'tabella, colonna');
+    if (!lctx) return res.status(404).json({ error: 'Campo non trovato' });
+    const tabella = lctx.row.tabella;
+    const colonna = lctx.row.colonna;
     if (!tabella || !colonna) return res.status(400).json({ error: 'tabella/colonna non impostate sul campo' });
     assertValidIdentifier(tabella);
     assertValidIdentifier(colonna);
@@ -9872,7 +9887,7 @@ app.get('/api/:source(settings|clients)/linked-list', requireAuth, async (req, r
     const conds = [];
     const params = [];
     if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
-    if (cols.has('user_id')) { params.push(req.user.user_id); conds.push(`user_id = $${params.length}`); }
+    if (cols.has('user_id')) { params.push(lctx.ownerUserId); conds.push(`user_id = $${params.length}`); }
     if (clientId) {
       const clientIdColumn = cols.has('client_id') ? 'client_id' : cols.has('id_cliente') ? 'id_cliente' : null;
       if (clientIdColumn) { params.push(clientId); conds.push(`"${clientIdColumn}" = $${params.length}`); }
@@ -9894,7 +9909,7 @@ app.get('/api/:source(settings|clients)/linked-list', requireAuth, async (req, r
       `SELECT id, "${colonna}" AS value${extraSel} FROM "${tabella}" ${where} ORDER BY "${colonna}" NULLS LAST LIMIT 200`,
       params
     );
-    res.json({ tabella, colonna, tree: treeReady, items: stripSensitive(result.rows) });
+    res.json({ tabella, colonna, tree: treeReady, readOnly: lctx.readOnly, items: stripSensitive(result.rows) });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -9911,12 +9926,9 @@ app.get('/api/:source(settings|clients)/linked-row', requireAuth, async (req, re
     if (!fieldId || !rowId) {
       return res.status(400).json({ error: 'fieldId e rowId richiesti' });
     }
-    const f = await db.query(
-      `SELECT tabella FROM "${source}" WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
-      [fieldId, req.user.tenant_id, req.user.user_id]
-    );
-    if (f.rows.length === 0) return res.status(404).json({ error: 'Campo non trovato' });
-    const tabella = f.rows[0].tabella;
+    const lctx = await linkedFieldContext(source, fieldId, req, 'tabella');
+    if (!lctx) return res.status(404).json({ error: 'Campo non trovato' });
+    const tabella = lctx.row.tabella;
     if (!tabella) return res.status(400).json({ error: 'tabella non impostata sul campo' });
     assertValidIdentifier(tabella);
     if (!(await isManagedTable(tabella))) return res.status(404).json({ error: 'Tabella non gestita' });
@@ -9925,7 +9937,7 @@ app.get('/api/:source(settings|clients)/linked-row', requireAuth, async (req, re
     const conds = ['id = $1'];
     const params = [rowId];
     if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
-    if (cols.has('user_id')) { params.push(req.user.user_id); conds.push(`user_id = $${params.length}`); }
+    if (cols.has('user_id')) { params.push(lctx.ownerUserId); conds.push(`user_id = $${params.length}`); }
     if (clientId) {
       const clientIdColumn = cols.has('client_id') ? 'client_id' : cols.has('id_cliente') ? 'id_cliente' : null;
       if (clientIdColumn) { params.push(clientId); conds.push(`"${clientIdColumn}" = $${params.length}`); }
@@ -9935,6 +9947,7 @@ app.get('/api/:source(settings|clients)/linked-row', requireAuth, async (req, re
       params
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
+    if (lctx.readOnly) res.set('X-Team-Read', '1');
     res.json(stripSensitive(result.rows)[0]);
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
