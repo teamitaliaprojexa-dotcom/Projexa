@@ -185,10 +185,12 @@
                 });
                 const data = await res.json().catch(() => ({}));
                 if (res.ok) {
+                    // Stesso messaggio per email nuove e già registrate (il server non rivela quali
+                    // indirizzi usano Projexa): le istruzioni arrivano nell'email.
                     if (data.emailSent) {
-                        showOk('Account creato! Ti abbiamo inviato un\'email: clicca su "Conferma iscrizione" per attivare la prova gratuita di 1 mese.');
+                        showOk(`Ti abbiamo inviato un'email a ${body.email}: segui le istruzioni per attivare la prova gratuita di 1 mese.`);
                     } else {
-                        showOk('Account creato. Non è stato possibile inviare l\'email di conferma: contatta il supporto per completare l\'attivazione.');
+                        showOk('Richiesta ricevuta, ma l\'invio delle email non è attivo sul server: contatta il supporto per completare l\'attivazione.');
                     }
                     setTimeout(() => { location.href = './login.html?registered=1'; }, 2800);
                 } else {

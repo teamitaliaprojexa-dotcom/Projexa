@@ -5,9 +5,11 @@ import crypto from 'crypto';
 import db from '../config/database.js';
 import authDb from '../config/authDatabase.js';
 import JWT_SECRET from '../config/jwt.js';
-import { sendMail, buildConfirmEmail, buildResetPasswordEmail, buildMagicLinkEmail, isMailerConfigured } from '../config/mailer.js';
+import { sendMail, buildConfirmEmail, buildResetPasswordEmail, buildMagicLinkEmail, buildAccountEsistenteEmail, isMailerConfigured } from '../config/mailer.js';
 import { requireAuth } from '../middleware/auth.js';
-import { signSessionToken, verifySessionToken, forgetSessionSignature, passwordSignature } from '../config/session.js';
+import { signSessionToken, verifySessionToken, forgetSessionSignature, passwordSignature,
+  issueSession, readSessionCookie, clearSessionCookie, revokeSessionToken } from '../config/session.js';
+import { readCookie, setCookie, clearCookie } from '../config/cookies.js';
 import { startOAuthLogin, checkOAuthState, deliverLoginToken, takeLoginToken } from '../config/oauthLogin.js';
 import { seedSettingsFromTemplate } from '../config/settingsSeed.js';
 import { registraAccesso } from '../config/audit.js';
@@ -17,6 +19,27 @@ import { registraAccesso } from '../config/audit.js';
 const LOG_LINKS = process.env.NODE_ENV !== 'production';
 
 const router = express.Router();
+
+// ==========================================
+// Nessuna risposta rivela se un'email è registrata
+// ==========================================
+// Login, magic link, password dimenticata e registrazione rispondono allo stesso modo
+// per email registrate e non registrate, e nello stesso tempo: il lavoro che dipende
+// dall'esistenza dell'account (ricerca del nome, invio dell'email) parte DOPO la risposta.
+// Così nessuno può usare le pagine pubbliche per scoprire chi usa Projexa.
+const LOGIN_ERROR = 'Email o password non corretti.';
+// Hash di una password casuale: con un'email sconosciuta il login esegue comunque un
+// confronto bcrypt, così la risposta arriva nello stesso tempo di una password sbagliata.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync(crypto.randomBytes(24).toString('hex'), 10);
+
+// Esegue fn dopo aver già risposto al browser; gli errori finiscono solo nel log.
+function inBackground(label, fn) {
+  setImmediate(() => {
+    Promise.resolve().then(fn).catch((e) => console.error(`❌ ${label}:`, e.message));
+  });
+}
+
+const appBaseUrl = () => process.env.APP_URL || process.env.BACKEND_URL || 'https://www.projexa.it';
 
 // ==========================================
 // Costruisce il nome visualizzato: name + " " + cognome.
@@ -57,32 +80,26 @@ router.post('/login', async (req, res) => {
   try {
     const { email, password, tenant_code } = req.body;
 
-    console.log(`[LOGIN] Attempting login for email: ${email}`);
-
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password required' });
+    if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ error: 'Email e password obbligatorie.' });
     }
 
     // FASE 1 (Projexa-Auth): trova l'utente per email, verifica password e scadenza licenza.
     const authRes = await authDb.query(
-      'SELECT id, email, password_hash, scadenza FROM users WHERE email = $1',
-      [email]
+      'SELECT id, email, password_hash, scadenza FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1',
+      [email.trim()]
     );
-    console.log(`[LOGIN] Auth query result: ${authRes.rows.length} rows found`);
-    if (authRes.rows.length === 0) {
-      // Email non censita: il frontend reindirizza alla pagina "Prova gratuita".
-      console.log(`[LOGIN] No user found with email: ${email}`);
-      registraAccesso(req, { evento: 'login', esito: 'ko', email, dettaglio: 'email non registrata' });
-      return res.status(404).json({ error: 'not_registered' });
-    }
     const authUser = authRes.rows[0];
 
-    const passwordMatch = await bcrypt.compare(password, authUser.password_hash);
-    console.log(`[LOGIN] Password match result: ${passwordMatch}`);
-    if (!passwordMatch) {
-      console.log(`[LOGIN] Password mismatch for user: ${email}`);
-      registraAccesso(req, { evento: 'login', esito: 'ko', userId: authUser.id, email, dettaglio: 'password errata' });
-      return res.status(401).json({ error: 'Invalid email or password' });
+    // Email sconosciuta e password errata: stessa risposta, stesso tempo (confronto bcrypt
+    // eseguito comunque). Il motivo vero resta solo nel log accessi.
+    const passwordMatch = await bcrypt.compare(password, authUser ? authUser.password_hash : DUMMY_PASSWORD_HASH);
+    if (!authUser || !passwordMatch) {
+      registraAccesso(req, {
+        evento: 'login', esito: 'ko', userId: authUser ? authUser.id : undefined, email,
+        dettaglio: authUser ? 'password errata' : 'email non registrata'
+      });
+      return res.status(401).json({ error: LOGIN_ERROR });
     }
 
     // Verifica scadenza licenza (scadenza è su Projexa-Auth)
@@ -156,7 +173,7 @@ router.post('/login', async (req, res) => {
 
     res.json({
       success: true,
-      token,
+      token: issueSession(req, res, token),
       user: {
         id: userData.id,
         email: userData.email,
@@ -167,8 +184,7 @@ router.post('/login', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ LOGIN ERROR:', error.message);
-    console.error('Stack:', error.stack);
-    res.status(500).json({ error: 'Internal server error', details: error.message });
+    res.status(500).json({ error: 'Errore durante l\'accesso: riprova tra poco.' });
   }
 });
 
@@ -203,10 +219,32 @@ router.post('/register', async (req, res) => {
       passwordHash = await bcrypt.hash(password, 10);
     }
 
-    // Email già registrata?
-    const exists = await authDb.query('SELECT id FROM users WHERE email = $1', [email]);
+    // Email già registrata: risposta identica a un'iscrizione nuova (non si rivela che
+    // l'account esiste). Al titolare arriva un'email con l'accesso e il link per
+    // reimpostare la password; non si crea nulla e non si modifica nulla.
+    const exists = await authDb.query('SELECT id, password_hash FROM users WHERE LOWER(email) = $1 LIMIT 1', [email]);
     if (exists.rows.length) {
-      return res.status(409).json({ error: 'Email già registrata. Effettua l\'accesso.' });
+      const esistente = exists.rows[0];
+      console.log(`[REGISTER] Iscrizione richiesta per un'email già registrata (utente ${esistente.id})`);
+      if (isMailerConfigured()) {
+        inBackground('REGISTER MAIL (account esistente)', async () => {
+          const p = await db.query('SELECT name FROM users WHERE id = $1', [esistente.id]);
+          const token = jwt.sign(
+            { uid: esistente.id, purpose: 'password-reset', sig: passwordHashSignature(esistente.password_hash) },
+            JWT_SECRET,
+            { expiresIn: `${RESET_TOKEN_HOURS}h` }
+          );
+          const { html, text } = buildAccountEsistenteEmail({
+            nome: (p.rows[0] && p.rows[0].name) || '',
+            loginUrl: `${appBaseUrl()}/login.html`,
+            resetUrl: `${appBaseUrl()}/reset-password.html?token=${encodeURIComponent(token)}`,
+            validHours: RESET_TOKEN_HOURS
+          });
+          await sendMail({ to: email, subject: 'Hai già un account Projexa', html, text,
+            log: { req, tipo: 'account_esistente', userId: esistente.id } });
+        });
+      }
+      return res.status(201).json({ success: true, method, email, emailSent: isMailerConfigured() });
     }
 
     // 1) Crea su Projexa-Auth con scadenza = IERI (data - 1 giorno): così l'utente NON può
@@ -251,26 +289,22 @@ router.post('/register', async (req, res) => {
 
     // Invia l'email di conferma iscrizione (double opt-in). Token firmato (JWT) valido 30 giorni.
     const confirmToken = jwt.sign({ uid: userId, purpose: 'signup-confirm' }, JWT_SECRET, { expiresIn: '30d' });
-    const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://www.projexa.it';
-    const confirmUrl = `${base}/prova-gratuita.html?token=${encodeURIComponent(confirmToken)}`;
+    const confirmUrl = `${appBaseUrl()}/prova-gratuita.html?token=${encodeURIComponent(confirmToken)}`;
     if (LOG_LINKS) console.log(`[REGISTER] Link di conferma per ${email}: ${confirmUrl}`); // solo in locale, per i test
 
-    let emailSent = false;
-    try {
-      if (isMailerConfigured()) {
+    // Invio dopo la risposta, come per l'email già registrata (stessi tempi di risposta).
+    if (isMailerConfigured()) {
+      inBackground('REGISTER MAIL ERROR', async () => {
         const { html, text } = buildConfirmEmail({ nome, confirmUrl });
         await sendMail({ to: email, subject: 'Conferma la tua iscrizione a Projexa', html, text,
           log: { req, tipo: 'conferma_iscrizione', userId } });
-        emailSent = true;
-      }
-    } catch (mailErr) {
-      console.error('❌ REGISTER MAIL ERROR:', mailErr.message);
+      });
     }
 
-    res.status(201).json({ success: true, method, email, emailSent });
+    res.status(201).json({ success: true, method, email, emailSent: isMailerConfigured() });
   } catch (error) {
     console.error('❌ REGISTER ERROR:', error.message);
-    res.status(500).json({ error: 'Errore durante la registrazione', details: error.message });
+    res.status(500).json({ error: 'Errore durante la registrazione: riprova tra poco.' });
   }
 });
 
@@ -385,7 +419,7 @@ router.post('/change-password', requireAuth, async (req, res) => {
     console.log(`[CHANGE-PASSWORD] Password aggiornata per utente ${userId}`);
     registraAccesso(req, { evento: 'cambio_password', userId, email: req.user.email, tenantId: req.user.tenant_id });
 
-    res.json({ success: true, token: signSessionToken(req.user, newHash) });
+    res.json({ success: true, token: issueSession(req, res, signSessionToken(req.user, newHash)) });
   } catch (error) {
     console.error('❌ CHANGE-PASSWORD ERROR:', error.message);
     res.status(500).json({ error: 'Errore durante il cambio password' });
@@ -436,38 +470,29 @@ router.post('/forgot-password', async (req, res) => {
       return res.status(429).json({ error: 'Troppe richieste. Riprova tra qualche minuto.' });
     }
 
-    const r = await authDb.query('SELECT id, password_hash FROM users WHERE email = $1', [email]);
-    if (r.rows.length === 0) {
-      console.log(`[FORGOT-PASSWORD] Email non registrata: ${email}`);
-      return res.json({ success: true }); // risposta neutra
-    }
-    const user = r.rows[0];
-
-    const token = jwt.sign(
-      { uid: user.id, purpose: 'password-reset', sig: passwordHashSignature(user.password_hash) },
-      JWT_SECRET,
-      { expiresIn: `${RESET_TOKEN_HOURS}h` }
-    );
-    const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://www.projexa.it';
-    const resetUrl = `${base}/reset-password.html?token=${encodeURIComponent(token)}`;
-    if (LOG_LINKS) console.log(`[FORGOT-PASSWORD] Link di reimpostazione per ${email}: ${resetUrl}`); // solo in locale
-
-    const p = await db.query('SELECT name FROM users WHERE id = $1', [user.id]);
-    const nome = (p.rows[0] && p.rows[0].name) || '';
-
-    let emailSent = false;
-    try {
-      if (isMailerConfigured()) {
-        const { html, text } = buildResetPasswordEmail({ nome, resetUrl, validHours: RESET_TOKEN_HOURS });
-        await sendMail({ to: email, subject: 'Reimposta la password di Projexa', html, text,
-          log: { req, tipo: 'reset_password', userId: user.id } });
-        emailSent = true;
-      }
-    } catch (mailErr) {
-      console.error('❌ FORGOT-PASSWORD MAIL ERROR:', mailErr.message);
+    if (!isMailerConfigured()) {
+      return res.status(503).json({ error: 'Invio email non configurato sul server.' });
     }
 
-    res.json({ success: true, emailSent });
+    // Risposta neutra e immediata; ricerca dell'account e invio avvengono dopo.
+    res.json({ success: true });
+    inBackground('FORGOT-PASSWORD MAIL ERROR', async () => {
+      const r = await authDb.query('SELECT id, email, password_hash FROM users WHERE LOWER(email) = $1 LIMIT 1', [email]);
+      const user = r.rows[0];
+      if (!user) return;
+      const token = jwt.sign(
+        { uid: user.id, purpose: 'password-reset', sig: passwordHashSignature(user.password_hash) },
+        JWT_SECRET,
+        { expiresIn: `${RESET_TOKEN_HOURS}h` }
+      );
+      const resetUrl = `${appBaseUrl()}/reset-password.html?token=${encodeURIComponent(token)}`;
+      if (LOG_LINKS) console.log(`[FORGOT-PASSWORD] Link di reimpostazione per ${email}: ${resetUrl}`); // solo in locale
+      const p = await db.query('SELECT name FROM users WHERE id = $1', [user.id]);
+      const nome = (p.rows[0] && p.rows[0].name) || '';
+      const { html, text } = buildResetPasswordEmail({ nome, resetUrl, validHours: RESET_TOKEN_HOURS });
+      await sendMail({ to: user.email, subject: 'Reimposta la password di Projexa', html, text,
+        log: { req, tipo: 'reset_password', userId: user.id } });
+    });
   } catch (error) {
     console.error('❌ FORGOT-PASSWORD ERROR:', error.message);
     res.status(500).json({ error: 'Errore durante la richiesta' });
@@ -558,43 +583,34 @@ router.post('/magic-link', async (req, res) => {
       return res.status(429).json({ error: 'Troppe richieste. Riprova tra qualche minuto.' });
     }
 
-    // L'email deve essere già registrata (Projexa-Auth).
-    const r = await authDb.query(
-      'SELECT id, email, password_hash, scadenza FROM users WHERE LOWER(email) = $1 LIMIT 1',
-      [email]
-    );
-    const user = r.rows[0];
-    if (!user) {
-      return res.status(404).json({ error: 'Email non presente in archivio: registrati con la prova gratuita.', code: 'not_registered' });
-    }
-    if (!checkLicenseExpiry(user).valid) {
-      return res.status(403).json({ error: 'La licenza di questo account è scaduta.' });
-    }
     if (!isMailerConfigured()) {
       return res.status(503).json({ error: 'Invio email non configurato sul server.' });
     }
 
-    const token = jwt.sign(
-      { uid: user.id, purpose: 'magic-link', sig: passwordHashSignature(user.password_hash), jti: crypto.randomUUID() },
-      JWT_SECRET,
-      { expiresIn: MAGIC_LINK_SECONDS }
-    );
-    const base = process.env.APP_URL || process.env.BACKEND_URL || 'https://www.projexa.it';
-    const magicUrl = `${base}/magic-link.html?token=${encodeURIComponent(token)}`;
-    if (LOG_LINKS) console.log(`[MAGIC-LINK] Link di accesso per ${email}: ${magicUrl}`); // solo in locale
-
-    const p = await db.query('SELECT name FROM users WHERE id = $1', [user.id]);
-    const nome = (p.rows[0] && p.rows[0].name) || '';
-    const { html, text } = buildMagicLinkEmail({ nome, magicUrl, validSeconds: MAGIC_LINK_SECONDS });
-    try {
+    // Risposta neutra e immediata: il link parte solo se l'email è registrata e la licenza
+    // è valida, ma il browser non lo sa (la pagina dice "se l'email è registrata...").
+    res.json({ success: true, validSeconds: MAGIC_LINK_SECONDS });
+    inBackground('MAGIC-LINK MAIL ERROR', async () => {
+      const r = await authDb.query(
+        'SELECT id, email, password_hash, scadenza FROM users WHERE LOWER(email) = $1 LIMIT 1',
+        [email]
+      );
+      const user = r.rows[0];
+      if (!user || !checkLicenseExpiry(user).valid) return;
+      const token = jwt.sign(
+        { uid: user.id, purpose: 'magic-link', sig: passwordHashSignature(user.password_hash), jti: crypto.randomUUID() },
+        JWT_SECRET,
+        { expiresIn: MAGIC_LINK_SECONDS }
+      );
+      const magicUrl = `${appBaseUrl()}/magic-link.html?token=${encodeURIComponent(token)}`;
+      if (LOG_LINKS) console.log(`[MAGIC-LINK] Link di accesso per ${email}: ${magicUrl}`); // solo in locale
+      const p = await db.query('SELECT name FROM users WHERE id = $1', [user.id]);
+      const nome = (p.rows[0] && p.rows[0].name) || '';
+      const { html, text } = buildMagicLinkEmail({ nome, magicUrl, validSeconds: MAGIC_LINK_SECONDS });
       await sendMail({ to: user.email, subject: 'Il tuo link di accesso a Projexa', html, text,
         log: { req, tipo: 'magic_link', userId: user.id } });
-    } catch (mailErr) {
-      console.error('❌ MAGIC-LINK MAIL ERROR:', mailErr.message);
-      return res.status(502).json({ error: 'Invio dell\'email non riuscito: riprova tra poco.' });
-    }
-    console.log(`[MAGIC-LINK] Link inviato all'utente ${user.id}`);
-    res.json({ success: true, validSeconds: MAGIC_LINK_SECONDS });
+      console.log(`[MAGIC-LINK] Link inviato all'utente ${user.id}`);
+    });
   } catch (error) {
     console.error('❌ MAGIC-LINK ERROR:', error.message);
     res.status(500).json({ error: 'Errore durante l\'invio del link' });
@@ -657,7 +673,7 @@ router.post('/magic-link/verify', async (req, res) => {
     registraAccesso(req, { evento: 'magic_link', userId: authUser.id, email: authUser.email, tenantId: tenant.id });
     res.json({
       success: true,
-      token: sessionToken,
+      token: issueSession(req, res, sessionToken),
       user: {
         id: authUser.id,
         email: authUser.email,
@@ -675,7 +691,7 @@ router.post('/magic-link/verify', async (req, res) => {
 // Verify token endpoint
 router.get('/verify', async (req, res) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = readSessionCookie(req);
     if (!token) {
       return res.status(401).json({ error: 'No token provided' });
     }
@@ -685,6 +701,23 @@ router.get('/verify', async (req, res) => {
   } catch (error) {
     res.status(401).json({ valid: false, error: 'Invalid token' });
   }
+});
+
+// Logout: la sessione del cookie viene revocata (non vale più nemmeno se copiata) e i
+// cookie di sessione e di impersonificazione vengono cancellati. Nessun requireAuth: deve
+// funzionare anche con una sessione già scaduta.
+router.post('/logout', async (req, res) => {
+  const token = readSessionCookie(req);
+  const adminToken = readCookie(req, IMPERSONATE_ADMIN_COOKIE);
+  try {
+    if (token) await revokeSessionToken(token);
+    if (adminToken) await revokeSessionToken(adminToken);
+  } catch (e) {
+    console.error('❌ LOGOUT ERROR:', e.message);
+  }
+  clearSessionCookie(req, res);
+  clearCookie(req, res, IMPERSONATE_ADMIN_COOKIE, IMPERSONATE_ADMIN_COOKIE_OPTS);
+  res.json({ success: true });
 });
 
 // Avvio del login con Google / Microsoft: "state" anti login-CSRF (vedi config/oauthLogin.js)
@@ -697,7 +730,7 @@ router.post('/oauth-exchange', async (req, res) => {
   if (!data || !data.t) return res.status(401).json({ error: 'Accesso non riuscito o scaduto: riprova' });
   try {
     await verifySessionToken(data.t);
-    res.json({ token: data.t, user: data.u || {} });
+    res.json({ token: issueSession(req, res, data.t), user: data.u || {} });
   } catch (e) {
     res.status(401).json({ error: 'Accesso non riuscito o scaduto: riprova' });
   }
@@ -899,6 +932,11 @@ router.get('/impersonate/users', requireAuth, requireAdmin, async (req, res) => 
   }
 });
 
+// Durante l'impersonificazione la sessione dell'admin resta in un cookie HttpOnly a parte,
+// per il pulsante "Ritorna" (/impersonate/return): il browser non la vede mai.
+const IMPERSONATE_ADMIN_COOKIE = 'px_session_admin';
+const IMPERSONATE_ADMIN_COOKIE_OPTS = { path: '/api/auth', sameSite: 'Strict' };
+
 // Genera un token impersonando l'utente scelto nel tenant scelto
 router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
   const { tenant_id, user_id } = req.body || {};
@@ -941,8 +979,14 @@ router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
       evento: 'impersonazione', userId: req.user.user_id, email: req.user.email, tenantId: tenant_id,
       dettaglio: `impersona ${email || user_id} (utente ${user_id}) nel tenant ${row.tenant_name || tenant_id}`
     });
+    // Sessione dell'admin da ripristinare al "Ritorna": solo alla prima impersonificazione,
+    // così passando da un utente impersonato all'altro si torna sempre all'admin.
+    if (!readCookie(req, IMPERSONATE_ADMIN_COOKIE)) {
+      setCookie(req, res, IMPERSONATE_ADMIN_COOKIE, readSessionCookie(req),
+        { ...IMPERSONATE_ADMIN_COOKIE_OPTS, maxAgeSec: Math.max(0, Number(req.user.exp || 0) - Math.floor(Date.now() / 1000)) });
+    }
     res.json({
-      token,
+      token: issueSession(req, res, token),
       user: {
         id: user_id,
         email,
@@ -952,6 +996,23 @@ router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// "Ritorna" dall'impersonificazione: ripristina la sessione dell'admin conservata nel
+// cookie px_session_admin. La sessione impersonata viene revocata.
+router.post('/impersonate/return', requireAuth, async (req, res) => {
+  const adminToken = readCookie(req, IMPERSONATE_ADMIN_COOKIE);
+  clearCookie(req, res, IMPERSONATE_ADMIN_COOKIE, IMPERSONATE_ADMIN_COOKIE_OPTS);
+  if (!adminToken) return res.status(401).json({ error: 'Sessione amministratore non disponibile: accedi di nuovo' });
+  try {
+    const admin = await verifySessionToken(adminToken);
+    if (Number(admin.id_roles) !== 1) throw Object.assign(new Error('ruolo'), { status: 401 });
+    await revokeSessionToken(readSessionCookie(req));
+    res.json({ token: issueSession(req, res, adminToken) });
+  } catch (e) {
+    if (e.status !== 401) console.error('❌ IMPERSONATE RETURN ERROR:', e.message);
+    res.status(401).json({ error: 'Sessione amministratore scaduta: accedi di nuovo' });
   }
 });
 

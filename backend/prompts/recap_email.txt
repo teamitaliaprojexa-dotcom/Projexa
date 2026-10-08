@@ -15,14 +15,14 @@ Ciao a tutti,
 
 di seguito il riepilogo della call di oggi, con le azioni concordate e le relative scadenze.
 
-1. TITOLO ARGOMENTO
-- punti discussi e decisioni prese
-(una sezione numerata per ogni argomento)
+Una sezione numerata per ogni argomento, con un titolo breve in maiuscolo che dice di cosa si parla (esempio: "1. GESTIONE TICKET E FIX APERTE"), seguito da punti elenco con quanto discusso e deciso. Raggruppa per argomento: lo stesso argomento non va ripetuto in più sezioni e lo stesso punto non va scritto due volte.
+
+Dopo tutte le sezioni, UNA SOLA volta:
 
 AZIONI IN CARICO
 
-Nome persona o gruppo
-- azione – scadenza (o "da definire")
+<Nome della persona o del gruppo>
+- <azione> – <scadenza, oppure "da definire">
 
 Resto a disposizione per qualsiasi chiarimento.
 

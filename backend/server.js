@@ -471,6 +471,17 @@ function userRoleLevel(req) {
   return (raw == null || String(raw).trim() === '' || !Number.isFinite(Number(raw))) ? 9999 : Number(raw);
 }
 
+// Nuovo campo creato da un non admin: id_roles scelto dalla tendina tra i ruoli dal
+// proprio in su (es. ruolo 70 -> 70, 80, 90…); senza scelta vale 90. Mai sotto il proprio.
+const NON_ADMIN_FIELD_ROLES_DEFAULT = 90;
+function nonAdminFieldRoles(req, requested) {
+  const own = userRoleLevel(req);
+  const n = Number(requested);
+  const chosen = (requested == null || String(requested).trim() === '' || !Number.isFinite(n))
+    ? NON_ADMIN_FIELD_ROLES_DEFAULT : n;
+  return Math.max(chosen, own);
+}
+
 // Livello richiesto da un tipo di campo (tipo_valore.id_roles): null = tutti i ruoli,
 // undefined = tipo inesistente.
 async function tipoValoreRoleLevel(code) {
@@ -5188,7 +5199,8 @@ app.post('/api/data/:table', requireAuth, async (req, res) => {
     // nella fascia di ordinamento >= 200 e con id_roles = ruolo di chi lo crea.
     if (FIELD_SOURCES.has(tableName) && !rawColumns && !isAdminUser(req) && dbKey === 'main') {
       assertStructureSourceAllowed(req, tableName);
-      if (tableColumns.has('id_roles')) data.id_roles = roleWriteValue(req);
+      if (tableColumns.has('id_roles')) data.id_roles = nonAdminFieldRoles(req, data.id_roles);
+      if (tableColumns.has('crypto')) data.crypto = 1; // i campi dei non admin nascono cifrati
       if (tableColumns.has('ordinamento') && !(Number(data.ordinamento) >= CUSTOM_ORD_BASE)) {
         const m = await pool.query(
           `SELECT MAX(ordinamento) AS m FROM "${tableName}" WHERE argument = $1 AND tenant_id = $2 AND ordinamento >= $3`,
@@ -8744,6 +8756,19 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
       if (ids.length) {
         await db.query(`UPDATE "${source}" SET id_roles_write = $1 WHERE id = ANY($2::uuid[])`, [roleWriteValue(req), ids]);
         r.rows.forEach((row) => { if ('id_roles_write' in row) row.id_roles_write = roleWriteValue(req); });
+        // Non admin: le righe del nuovo campo nascono cifrate (crypto = 1), valore iniziale compreso.
+        if (!isAdminUser(req)) {
+          const enc = await cryptoWrite(db, 'main', source, { valore2, crypto: 1 });
+          const setValore2 = valore2 != null && enc.valore2 !== valore2;
+          await db.query(
+            `UPDATE "${source}" SET crypto = 1${setValore2 ? ', valore2 = $2' : ''} WHERE id = ANY($1::uuid[])`,
+            setValore2 ? [ids, enc.valore2] : [ids]
+          );
+          r.rows.forEach((row) => {
+            if ('crypto' in row) row.crypto = 1;
+            if (setValore2 && 'valore2' in row) row.valore2 = valore2; // in risposta resta in chiaro
+          });
+        }
       }
       return r;
     };
@@ -8751,11 +8776,11 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
     const containerCampo = ((req.body && req.body.containerCampo) || 'Cliente').trim() || 'Cliente';
     // id_roles del nuovo campo (visibilità per ruolo); vuoto/assente = NULL (nessuna restrizione).
     const idRolesRaw = (req.body && req.body.id_roles);
-    // Non admin: niente nuovi campi nelle impostazioni; in clienti/progetti id_roles del
-    // campo = ruolo di chi lo crea (come id_roles_write).
+    // Non admin: niente nuovi campi nelle impostazioni; in clienti/progetti id_roles è
+    // quello scelto (dal proprio ruolo in su, default 90). id_roles_write = proprio ruolo.
     assertStructureSourceAllowed(req, source);
     const idRoles = !isAdminUser(req)
-      ? Number(roleWriteValue(req))
+      ? nonAdminFieldRoles(req, idRolesRaw)
       : ((idRolesRaw === '' || idRolesRaw == null) ? null : Number(idRolesRaw));
     if (!rawCampo) {
       return res.status(400).json({ error: 'nome campo richiesto' });
@@ -10445,12 +10470,10 @@ app.post('/api/gdpr/richiesta-cancellazione', requireAuth, async (req, res) => {
 // SQL EDITOR ENDPOINTS
 // ==========================================
 //
-// ATTENZIONE: questi endpoint eseguono SQL arbitrario sul database.
-// Sono ora protetti da requireAuth, ma restano uno strumento potente:
-// qualsiasi utente autenticato può leggere/modificare dati di TUTTI i tenant
-// (il raw SQL non può essere isolato per tenant). Andrebbero riservati a un
-// ruolo amministratore. Per disabilitarli del tutto in produzione imposta
-// la variabile d'ambiente DISABLE_SQL_EDITOR=true.
+// ATTENZIONE: questi endpoint eseguono SQL arbitrario sul database (riservati all'Admin):
+// possono leggere/modificare i dati di TUTTI i tenant e di tutti i database, compreso
+// Projexa-Auth. In produzione (VM) vanno spenti con DISABLE_SQL_EDITOR=true nel .env:
+// l'editor si usa in locale.
 
 const SQL_EDITOR_ENABLED = process.env.DISABLE_SQL_EDITOR !== 'true';
 
@@ -10459,6 +10482,30 @@ const SQL_EDITOR_ENABLED = process.env.DISABLE_SQL_EDITOR !== 'true';
 // su un pool finirebbero su connessioni diverse e non funzionerebbero.
 const activeTransactions = new Map();
 
+// Una transazione dimenticata (né Commit né Rollback) terrebbe occupata una connessione
+// del pool e i lock sulle righe toccate: dopo 5 minuti senza comandi viene annullata.
+const SQL_TX_IDLE_MS = 5 * 60 * 1000;
+const sqlTxTimers = new Map(); // txKey -> timer
+
+function touchSqlTransaction(txKey) {
+  clearTimeout(sqlTxTimers.get(txKey));
+  sqlTxTimers.set(txKey, setTimeout(async () => {
+    sqlTxTimers.delete(txKey);
+    const client = activeTransactions.get(txKey);
+    if (!client) return;
+    activeTransactions.delete(txKey);
+    try { await client.query('ROLLBACK'); } catch (e) { /* connessione già chiusa */ }
+    client.release();
+    console.warn(`[SQL] Transazione ${txKey} annullata dopo ${SQL_TX_IDLE_MS / 60000} minuti senza Commit/Rollback`);
+  }, SQL_TX_IDLE_MS));
+}
+
+function endSqlTransaction(txKey) {
+  clearTimeout(sqlTxTimers.get(txKey));
+  sqlTxTimers.delete(txKey);
+  activeTransactions.delete(txKey);
+}
+
 // Identifica l'utente in modo stabile (dal JWT verificato) per legare la transazione.
 function getTokenId(req) {
   return req.user?.user_id || req.user?.email || 'unknown';
@@ -10466,7 +10513,7 @@ function getTokenId(req) {
 
 function ensureSqlEditorEnabled(req, res, next) {
   if (!SQL_EDITOR_ENABLED) {
-    return res.status(403).json({ error: 'SQL editor disabilitato' });
+    return res.status(403).json({ error: 'SQL editor disattivato su questo server: usalo in locale' });
   }
   next();
 }
@@ -10493,6 +10540,8 @@ app.post('/api/sql/execute', requireAuth, requireAdmin, ensureSqlEditorEnabled, 
       await client.query('BEGIN');
       activeTransactions.set(txKey, client);
     }
+
+    if (client) touchSqlTransaction(txKey);
 
     // Esegui sul client della transazione se presente, altrimenti sul pool.
     const runner = client || pool;
@@ -10526,7 +10575,7 @@ app.post('/api/sql/commit', requireAuth, requireAdmin, ensureSqlEditorEnabled, a
     console.error('Commit Error:', error.message);
     res.status(400).json({ error: error.message });
   } finally {
-    activeTransactions.delete(txKey);
+    endSqlTransaction(txKey);
     client.release();
   }
 });
@@ -10547,7 +10596,7 @@ app.post('/api/sql/rollback', requireAuth, requireAdmin, ensureSqlEditorEnabled,
     console.error('Rollback Error:', error.message);
     res.status(400).json({ error: error.message });
   } finally {
-    activeTransactions.delete(txKey);
+    endSqlTransaction(txKey);
     client.release();
   }
 });

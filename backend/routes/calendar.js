@@ -14,7 +14,6 @@
 // SECRET, MICROSOFT_CLIENT_ID/SECRET/TENANT_ID): sullo stesso client basta aggiungere
 // il nuovo redirect URI e i nuovi scope (vedi fondo file / .env.example).
 import express from 'express';
-import crypto from 'crypto';
 import ical from 'node-ical';
 import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
@@ -28,6 +27,7 @@ import { encryptRowForWrite } from '../config/crypto.js';
 import { localRecapMode } from './ai.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
+import { startLinkState, checkLinkState } from '../config/oauthLinkState.js';
 import { isAllowedOrigin } from '../config/origins.js';
 import {
   getIntegration,
@@ -252,7 +252,9 @@ router.get('/status', requireAuth, async (req, res) => {
 // URL a cui aprire la finestra di consenso. Lo "state" è un JWT firmato che lega
 // l'autorizzazione all'utente, al provider e all'origine da cui è partita (stessa
 // tecnica usata da routes/jira.js): protegge da CSRF e dice al callback a chi
-// inviare l'esito via postMessage.
+// inviare l'esito via postMessage. Il nonce dello state è anche in un cookie del browser
+// che ha avviato il collegamento (config/oauthLinkState.js): un link di consenso generato
+// da un altro account non viene accettato.
 router.get('/:provider(google|outlook)/authorize-url', requireAuth, requireProvider, async (req, res) => {
   try {
     const cfg = req.calendarProvider;
@@ -276,7 +278,7 @@ router.get('/:provider(google|outlook)/authorize-url', requireAuth, requireProvi
         tid: req.user.tenant_id,
         provider: req.params.provider,
         origin,
-        nonce: crypto.randomBytes(8).toString('hex')
+        nonce: startLinkState(req, res, '/api/calendar')
       },
       JWT_SECRET,
       { expiresIn: '10m' }
@@ -336,6 +338,10 @@ router.get('/:provider(google|outlook)/callback', requireProvider, async (req, r
       return res.status(400).send(callbackPage(origin, { ok: false, provider: req.params.provider, error: 'state non valido o scaduto' }));
     }
     if (claims.origin && isAllowedOrigin(claims.origin)) origin = claims.origin;
+    if (!checkLinkState(req, res, '/api/calendar', claims.nonce)) {
+      console.warn(`[CALENDAR:${req.params.provider}] state non avviato da questo browser: collegamento rifiutato (utente ${claims.uid})`);
+      return res.status(400).send(callbackPage(origin, { ok: false, provider: req.params.provider, error: 'Collegamento non avviato da questo browser: riprova da Projexa' }));
+    }
     if (claims.provider !== req.params.provider) {
       return res.status(400).send(callbackPage(origin, { ok: false, provider: req.params.provider, error: 'provider non corrispondente' }));
     }

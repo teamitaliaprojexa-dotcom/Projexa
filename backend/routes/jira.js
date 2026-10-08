@@ -10,12 +10,12 @@
 // dell'utente su integr_tok_auth vengono cancellate e per riattivare l'integrazione
 // occorre rifare tutta la procedura di autorizzazione.
 import express from 'express';
-import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
 import { isAllowedOrigin } from '../config/origins.js';
+import { startLinkState, checkLinkState } from '../config/oauthLinkState.js';
 import {
   getIntegration,
   saveIntegration,
@@ -410,7 +410,8 @@ router.get('/status', requireAuth, async (req, res) => {
 
 // URL a cui aprire la finestra di consenso Atlassian. Lo "state" è un JWT firmato
 // che lega l'autorizzazione all'utente e all'origine da cui è partita: protegge da
-// CSRF e dice al callback a chi inviare l'esito.
+// CSRF e dice al callback a chi inviare l'esito. Il nonce è anche in un cookie del browser
+// che ha avviato il collegamento (config/oauthLinkState.js).
 router.get('/authorize-url', requireAuth, requireJiraEnabled, async (req, res) => {
   try {
     if (!isConfigured()) {
@@ -427,7 +428,7 @@ router.get('/authorize-url', requireAuth, requireJiraEnabled, async (req, res) =
     if (!origin) origin = new URL(BACKEND_URL).origin; // richiesta same-origin
 
     const state = jwt.sign(
-      { typ: 'oauth-state', uid: req.user.user_id, tid: req.user.tenant_id, email: req.user.email, origin, nonce: crypto.randomBytes(8).toString('hex') },
+      { typ: 'oauth-state', uid: req.user.user_id, tid: req.user.tenant_id, email: req.user.email, origin, nonce: startLinkState(req, res, '/api/jira') },
       JWT_SECRET,
       { expiresIn: '10m' }
     );
@@ -483,6 +484,10 @@ router.get('/callback', async (req, res) => {
       return res.status(400).send(callbackPage(origin, { ok: false, error: 'state non valido o scaduto' }));
     }
     if (claims.origin && isAllowedOrigin(claims.origin)) origin = claims.origin;
+    if (!checkLinkState(req, res, '/api/jira', claims.nonce)) {
+      console.warn(`[JIRA] state non avviato da questo browser: collegamento rifiutato (utente ${claims.uid})`);
+      return res.status(400).send(callbackPage(origin, { ok: false, error: 'Collegamento non avviato da questo browser: riprova da Projexa' }));
+    }
 
     if (error) {
       return res.status(400).send(callbackPage(origin, { ok: false, error: error_description || error }));

@@ -116,6 +116,7 @@ if (document.getElementById('logoutBtn')) {
 
   // Logout
   document.getElementById('logoutBtn').addEventListener('click', () => {
+    fetch(`${API_URL}/auth/logout`, { method: 'POST', keepalive: true }).catch(() => {});
     localStorage.removeItem('authToken');
     localStorage.removeItem('currentUser');
     localStorage.removeItem('currentTenant');

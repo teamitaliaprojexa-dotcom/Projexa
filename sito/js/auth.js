@@ -60,6 +60,8 @@ function setupLogout() {
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', () => {
+      // Il server revoca la sessione e cancella il cookie HttpOnly.
+      fetch(`${API_URL}/auth/logout`, { method: 'POST', keepalive: true }).catch(() => {});
       clearSession();
       window.location.href = 'login.html';
     });

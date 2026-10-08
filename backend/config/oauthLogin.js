@@ -8,6 +8,7 @@
 //    HttpOnly valido 60 secondi, che oauth-complete.html scambia subito con una POST a
 //    /api/auth/oauth-exchange. Il cookie si cancella al primo uso.
 import crypto from 'crypto';
+import { readCookie, cookieOptions, appendCookie } from './cookies.js';
 
 const STATE_COOKIE = 'px_oauth_state';
 const LOGIN_COOKIE = 'px_oauth_login';
@@ -37,25 +38,6 @@ const PROVIDERS = {
     }
   })
 };
-
-function readCookie(req, name) {
-  for (const part of String(req.headers.cookie || '').split(';')) {
-    const i = part.indexOf('=');
-    if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
-  }
-  return null;
-}
-
-function cookieOptions(req, path, maxAgeSec) {
-  // Lax: il cookie arriva anche quando il fornitore rimanda il browser al callback.
-  return [`Path=${path}`, `Max-Age=${maxAgeSec}`, 'HttpOnly', 'SameSite=Lax', req.secure ? 'Secure' : '']
-    .filter(Boolean).join('; ');
-}
-
-function appendCookie(res, value) {
-  const prev = res.getHeader('Set-Cookie');
-  res.setHeader('Set-Cookie', [...(prev ? [].concat(prev) : []), value]);
-}
 
 export function startOAuthLogin(req, res, provider) {
   const cfg = PROVIDERS[provider] && PROVIDERS[provider]();

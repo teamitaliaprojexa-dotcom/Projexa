@@ -408,7 +408,7 @@
                         <div class="form-group">
                             <div class="forgot-password">
                                 <label>Password</label>
-                                <a href="#">Dimenticata?</a>
+                                <a href="#" id="forgotPasswordLink" onclick="requestPasswordReset(event)">Dimenticata?</a>
                             </div>
                             <input type="password" id="passwordInput" placeholder="••••••••" required>
                         </div>
@@ -420,6 +420,10 @@
 
                         <button type="submit" class="btn btn-primary" id="loginBtn">Accedi</button>
                     </form>
+
+                    <p style="text-align:center; font-size:0.9rem; color:#6B7280; margin-top:0.9rem;">
+                        Non hai un account? <a href="./prova-gratuita.html" style="color:#3B82F6; font-weight:600; text-decoration:none;">Prova gratis per 1 mese</a>
+                    </p>
 
                     <div class="divider">
                         <span>Oppure continua con</span>
@@ -516,10 +520,10 @@
                 } else if (response.status === 300) {
                     loginData = { email, password };
                     showTenantModal(data.tenants);
-                } else if (response.status === 404) {
-                    // Email non censita: vai alla pagina "Prova gratuita" con l'email precompilata.
-                    window.location.href = `./prova-gratuita.html?email=${encodeURIComponent(email)}`;
                 } else {
+                    // Email sconosciuta o password errata: il server risponde allo stesso modo
+                    // (non rivela quali email sono registrate). Il link alla prova gratuita è
+                    // sempre visibile sotto il pulsante Accedi.
                     errorDiv.textContent = data.error || 'Errore durante l\'accesso';
                     errorDiv.style.display = 'block';
                 }
@@ -591,6 +595,38 @@
 
         // Magic link: invia all'email scritta nel campo "Email" un link di accesso
         // (valido 60 secondi, monouso). L'email deve essere già registrata.
+        // "Dimenticata?": invia il link per reimpostare la password all'email scritta nel campo.
+        // Risposta neutra: lo stesso messaggio sia per email registrate sia non registrate.
+        async function requestPasswordReset(event) {
+            if (event) event.preventDefault();
+            const emailEl = document.getElementById('emailInput');
+            const errorDiv = document.getElementById('errorMessage');
+            const okDiv = document.getElementById('successMessage');
+            const email = (emailEl.value || '').trim();
+            errorDiv.style.display = 'none';
+            okDiv.style.display = 'none';
+            if (!email || !emailEl.checkValidity()) {
+                errorDiv.textContent = 'Scrivi la tua email nel campo "Email", poi clicca su "Dimenticata?".';
+                errorDiv.style.display = 'block';
+                emailEl.focus();
+                return;
+            }
+            try {
+                const res = await fetch(`${API_URL}/auth/forgot-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                okDiv.textContent = `Se ${email} è registrata, riceverai a breve un'email con il link per impostare una nuova password (valido 1 ora).`;
+                okDiv.style.display = 'block';
+            } catch (e) {
+                errorDiv.textContent = e.message === 'Failed to fetch' ? 'Errore di connessione al server' : e.message;
+                errorDiv.style.display = 'block';
+            }
+        }
+
         async function requestMagicLink() {
             const emailEl = document.getElementById('emailInput');
             const errorDiv = document.getElementById('errorMessage');
@@ -614,7 +650,7 @@
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
-                okDiv.textContent = `Ti abbiamo inviato un link di accesso a ${email}. Aprilo entro ${data.validSeconds || 60} secondi: dopo scade.`;
+                okDiv.textContent = `Se ${email} è registrata, riceverai a breve un link di accesso. Aprilo entro ${data.validSeconds || 60} secondi: dopo scade.`;
                 okDiv.style.display = 'block';
             } catch (e) {
                 errorDiv.textContent = e.message === 'Failed to fetch' ? 'Errore di connessione al server' : e.message;
@@ -681,7 +717,7 @@
                 s.textContent = 'Iscrizione confermata! Prova gratuita di 1 mese attivata. Ora puoi accedere.';
                 s.style.display = 'block';
             } else if (p.get('registered') === '1') {
-                s.textContent = 'Registrazione completata! Ti abbiamo inviato un\'email: clicca su "Conferma iscrizione" per attivare la prova gratuita.';
+                s.textContent = 'Richiesta di iscrizione inviata! Controlla la tua email e segui le istruzioni per continuare.';
                 s.style.display = 'block';
             } else if (p.get('password_reset') === '1') {
                 // Ritorno da reset-password.html dopo "Password dimenticata".

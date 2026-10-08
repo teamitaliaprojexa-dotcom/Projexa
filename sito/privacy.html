@@ -76,10 +76,12 @@
     <p>Hai inoltre diritto di proporre reclamo all'Autorità Garante per la protezione dei dati personali (www.garanteprivacy.it).</p>
 
     <h2>8. Cookie e archiviazione locale</h2>
-    <p>Projexa utilizza <strong>archiviazione locale strettamente necessaria</strong> (localStorage) per mantenere la sessione di accesso: senza di essa il servizio non può funzionare, pertanto non richiede consenso.</p>
+    <p>Projexa utilizza <strong>cookie tecnici e archiviazione locale strettamente necessari</strong> (localStorage) per mantenere la sessione di accesso: senza di essi il servizio non può funzionare, pertanto non richiedono consenso.</p>
     <table>
       <tr><th>Elemento</th><th>Finalità</th><th>Tipo</th></tr>
-      <tr><td>authToken</td><td>Mantenere l'utente autenticato</td><td>Necessario</td></tr>
+      <tr><td>px_session (cookie)</td><td>Sessione di accesso, non leggibile dagli script della pagina; scade dopo 24 ore o al logout</td><td>Necessario</td></tr>
+      <tr><td>px_oauth_state, px_oauth_login, px_link_state (cookie)</td><td>Sicurezza dell'accesso e del collegamento con Google, Microsoft e Jira; durano al massimo 10 minuti</td><td>Necessario</td></tr>
+      <tr><td>authToken (localStorage)</td><td>Nome, ruolo e organizzazione dell'utente collegato, mostrati nelle pagine</td><td>Necessario</td></tr>
       <tr><td>currentUser / currentTenant</td><td>Sessione e organizzazione attiva</td><td>Necessario</td></tr>
       <tr><td>cookieConsent</td><td>Memorizzare la scelta sui cookie</td><td>Necessario</td></tr>
       <tr><td><span class="ph">[eventuali strumenti analitici]</span></td><td><span class="ph">[…]</span></td><td>Facoltativo (consenso)</td></tr>

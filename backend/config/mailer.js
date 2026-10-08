@@ -108,6 +108,42 @@ export function buildResetPasswordEmail({ nome, resetUrl, validHours = 1 }) {
   return { html, text };
 }
 
+// Costruisce l'email inviata quando qualcuno prova a registrarsi con un indirizzo già
+// presente: la pagina di registrazione risponde come per un'iscrizione nuova (per non
+// rivelare quali email sono registrate) e qui il vero titolare trova come accedere,
+// con un link per reimpostare la password.
+export function buildAccountEsistenteEmail({ nome, loginUrl, resetUrl, validHours = 1 }) {
+  const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const saluto = nome ? `Ciao ${esc(nome)},` : 'Ciao,';
+  const durata = validHours === 1 ? '1 ora' : `${validHours} ore`;
+  const html = `
+  <div style="font-family:Arial,Helvetica,sans-serif; max-width:520px; margin:0 auto; color:#111827;">
+    <div style="text-align:center; padding:16px 0;">
+      <div style="font-size:22px; font-weight:700; color:#059669;">Projexa</div>
+    </div>
+    <div style="background:#ffffff; border:1px solid #E5E7EB; border-radius:12px; padding:24px;">
+      <p>${saluto}</p>
+      <p>Abbiamo ricevuto una richiesta di <strong>iscrizione a Projexa</strong> con questo indirizzo email, ma <strong>hai già un account</strong>: non ne è stato creato un altro.</p>
+      <div style="text-align:center; margin:28px 0;">
+        <a href="${loginUrl}" style="background:#10B981; color:#ffffff; text-decoration:none; padding:12px 24px; border-radius:8px; font-weight:700; display:inline-block;">Accedi a Projexa</a>
+      </div>
+      <p>Non ricordi la password? <a href="${resetUrl}" style="color:#059669;">Imposta una nuova password</a> (link valido per ${durata}, utilizzabile una sola volta).</p>
+      <p style="font-size:13px; color:#6B7280;">Se non hai chiesto tu l'iscrizione, ignora questa email: il tuo account e la tua password non sono stati modificati.</p>
+    </div>
+    <p style="text-align:center; font-size:12px; color:#9CA3AF; margin-top:16px;">© Projexa</p>
+  </div>`;
+  const text = `${nome ? `Ciao ${nome},` : 'Ciao,'}
+
+Abbiamo ricevuto una richiesta di iscrizione a Projexa con questo indirizzo email, ma hai già un account: non ne è stato creato un altro.
+
+Accedi: ${loginUrl}
+Non ricordi la password? Imposta una nuova password (link valido per ${durata}, utilizzabile una sola volta):
+${resetUrl}
+
+Se non hai chiesto tu l'iscrizione, ignora questa email: il tuo account e la tua password non sono stati modificati.`;
+  return { html, text };
+}
+
 // Costruisce l'email del "Magic link": accesso a Projexa senza password.
 // Il link porta a magic-link.html con un token valido pochi secondi e monouso.
 export function buildMagicLinkEmail({ nome, magicUrl, validSeconds = 60 }) {

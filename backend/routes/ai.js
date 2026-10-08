@@ -690,11 +690,15 @@ export async function askOllamaRecap(buildPrompt, transcript, { meeting = false,
     for (let i = 0; i < pieces.length; i++) {
       const vals = { N: i + 1, TOT: pieces.length, CONTESTO: ctxText, TESTO: pieces[i] };
       const p = RECAP_CHUNK_PROMPT.replace(/\{\{(N|TOT|CONTESTO|TESTO)\}\}/g, (m, k) => String(vals[k]));
-      notes.push(`--- Parte ${i + 1} di ${pieces.length} ---\n${(await ollamaGenerate(p, ctxFor(p.length, notesTokens), notesTokens)).text}`);
+      notes.push((await ollamaGenerate(p, ctxFor(p.length, notesTokens), notesTokens)).text);
     }
-    return '(Appunti ricavati dalla trascrizione, riassunta a pezzi nell\'ordine della riunione. '
-      + 'Ogni argomento degli appunti deve comparire nel recap; le righe "AZIONE" vanno nelle azioni in carico '
-      + 'con la persona indicata; dove è scritto "scadenza non indicata" non inventare date.)\n\n'
+    // Niente intestazioni "Parte N" negli appunti: il modello le ricopiava come sezioni del
+    // recap (una per pezzo, ognuna con le sue azioni) invece di raggruppare per argomento.
+    return '(Appunti ricavati dalla trascrizione, in ordine cronologico: uno stesso argomento può '
+      + 'comparire in più punti. Nel recap raggruppa per ARGOMENTO, unisci i punti doppi, dai a ogni '
+      + 'sezione un titolo breve con il nome dell\'argomento e metti UNA SOLA sezione AZIONI IN CARICO '
+      + 'in fondo. Ogni argomento degli appunti deve comparire nel recap; le righe "AZIONE" vanno nelle '
+      + 'azioni in carico con la persona indicata; dove è scritto "scadenza non indicata" non inventare date.)\n\n'
       + notes.join('\n\n');
   };
 

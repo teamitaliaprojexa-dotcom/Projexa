@@ -1,15 +1,19 @@
-import { verifySessionToken } from '../config/session.js';
+import { verifySessionToken, readSessionCookie } from '../config/session.js';
 import { contestoDaRichiesta } from '../config/auditContext.js';
 
-// Middleware di autenticazione: verifica il token di sessione nell'header Authorization
-// (tipo "session" e password non cambiata dopo il login: vedi config/session.js).
-// In caso di token assente/non valido blocca la richiesta con 401.
+// Middleware di autenticazione: verifica il token di sessione del cookie HttpOnly px_session
+// (tipo "session", password non cambiata dopo il login, sessione non chiusa con il logout:
+// vedi config/session.js). In caso di token assente/non valido blocca la richiesta con 401.
 // Se valido, espone il payload decodificato su req.user (user_id, email, tenant_id, ...).
+//
+// Protezione CSRF: il cookie il browser lo allega da solo, l'header Authorization no.
+// Tutte le chiamate delle pagine Projexa lo inviano (con la vista dei claims come
+// segnaposto); un altro sito non può aggiungerlo senza passare dal CORS, che lo rifiuta.
+// Il cookie è anche SameSite=Strict: le richieste partite da altri siti non lo portano.
 export async function requireAuth(req, res, next) {
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const token = readSessionCookie(req);
 
-  if (!token) {
+  if (!token || !req.headers.authorization) {
     return res.status(401).json({ error: 'Autenticazione richiesta' });
   }
 

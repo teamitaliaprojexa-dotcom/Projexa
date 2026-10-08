@@ -1540,6 +1540,11 @@
         .parent-form-footer button { border: 0; border-radius: 7px; padding: 0.55rem 1.1rem; font-weight: 600; cursor: pointer; }
         .parent-form-save { background: #10B981; color: #fff; }
         .parent-form-cancel { background: #E5E7EB; color: #374151; }
+        /* Griglia (tipo 11) in modifica/inserimento: «Salva» in fondo disabilitato */
+        #parentFormDialog:has(.type11-grid-toolbar.type11-grid-editing) #parentFormSave,
+        #settingsDetailFlyout:has(.type11-grid-toolbar.type11-grid-editing) #settingsDetailSaveBtn {
+            opacity: 0.45; cursor: not-allowed; pointer-events: none;
+        }
         @media (prefers-reduced-motion: reduce) {
             .parent-form-overlay.open .parent-form-dialog { animation-duration: 0.01ms; }
         }
@@ -4575,6 +4580,8 @@
         function logout() {
             if (confirm('Sei sicuro di voler effettuare il logout?')) {
                 window.ProjexaKeepAlive?.stop?.();
+                // Il server revoca la sessione e cancella il cookie HttpOnly.
+                fetch(`${API_URL}/auth/logout`, { method: 'POST', keepalive: true }).catch(() => {});
                 // Rimuovi TUTTE le credenziali, non solo i dati profilo.
                 localStorage.removeItem('user');
                 localStorage.removeItem('authToken');
@@ -13640,6 +13647,7 @@
         async function saveParentForm() {
             if (!parentFormState) return;
             const content = document.getElementById('parentFormContent');
+            if (content?.querySelector('.type11-grid-toolbar.type11-grid-editing')) return; // griglia in modifica
             const save = document.getElementById('parentFormSave');
             const action = parentFormState.action || 'values';
             if (save) save.disabled = true;
@@ -17613,6 +17621,9 @@
                         if (deleteBtn) deleteBtn.style.display = isEditingNow ? 'none' : '';
                         if (saveBtn) saveBtn.style.display = isEditingNow ? '' : 'none';
                         if (cancelBtn) cancelBtn.style.display = isEditingNow ? '' : 'none';
+                        // Durante modifica/inserimento inline il «Salva» in fondo alla finestra
+                        // è disabilitato: si salva o annulla prima con i pulsanti della griglia.
+                        widget.querySelector('.type11-grid-toolbar')?.classList.toggle('type11-grid-editing', isEditingNow);
                     };
 
                     tableRows.forEach(rowEl => {
@@ -18203,6 +18214,7 @@
         function saveDetailChanges() {
             const listEl = document.getElementById('settingsDetailList');
             if (!listEl) return;
+            if (listEl.querySelector('.type11-grid-toolbar.type11-grid-editing')) return; // griglia in modifica
             const dirty = listEl.querySelectorAll('[data-setting-id][data-dirty="1"]');
             const hasGridSelections = !!listEl.querySelector('.type11-expire-check:checked');
             const isAdmin = Number(decodeJwtPayload().id_roles) === 1;
@@ -18781,12 +18793,34 @@
                             : (payload.columns || []).map(c => ({ colonna: c, valori: null }));
                     }
                 } catch (e) { /* ignore */ }
+                // Nuovo campo da non admin: crypto e id_roles_write non si vedono (li imposta il
+                // server: crypto = 1, id_roles_write = proprio ruolo); id_roles è una tendina con
+                // i ruoli dal proprio in su (default 90). Per l'admin il form resta invariato.
+                const nonAdminAdd = mode === 'add' && Number(decodeJwtPayload().id_roles) !== 1;
+                if (nonAdminAdd) {
+                    fields = fields.filter(f => !['crypto', 'id_roles_write'].includes(String(f.colonna).toLowerCase()));
+                }
                 if (fields.length === 0) {
                     fieldsEl.innerHTML = '<div style="color:var(--text-muted); font-size:0.85rem;">Nessun campo configurato per questo tipo_valore</div>';
                     return;
                 }
+                let roleOptions = [];
+                if (nonAdminAdd && fields.some(f => String(f.colonna).toLowerCase() === 'id_roles')) {
+                    try {
+                        const rr = await fetch(`${API_URL}/roles`, { headers: getAuthHeaders() });
+                        if (rr.ok) roleOptions = await rr.json(); // già filtrati dal proprio ruolo in su
+                    } catch (e) { /* ignore */ }
+                }
                 fieldsEl.innerHTML = fields.map(f => {
                     const c = f.colonna;
+                    if (nonAdminAdd && String(c).toLowerCase() === 'id_roles' && roleOptions.length) {
+                        const def = roleOptions.some(r => Number(r.id_roles) === 90) ? 90 : Number(roleOptions[roleOptions.length - 1].id_roles);
+                        const optionsHtml = roleOptions.map(r => `<option value="${escapeHtml(r.id_roles)}" ${Number(r.id_roles) === def ? 'selected' : ''}>${escapeHtml(r.id_roles)}${r.name ? ' - ' + escapeHtml(r.name) : ''}</option>`).join('');
+                        return `<div style="margin-bottom:.5rem;">
+                            <label style="display:block; font-size:.8rem; font-weight:600; margin-bottom:.2rem;">${escapeHtml(c)}</label>
+                            <select class="tvf-col" data-col="${escapeHtml(c)}" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">${optionsHtml}</select>
+                        </div>`;
+                    }
                     const existingVal = (mode === 'edit' && existingRow && Object.prototype.hasOwnProperty.call(existingRow, c))
                         ? existingRow[c] : '';
                     const current = existingVal == null ? '' : String(existingVal);
@@ -19778,9 +19812,20 @@
                 } catch (e) { showNotification('Errore di connessione', 'info'); }
             });
 
-            if (returnBtn) returnBtn.addEventListener('click', () => {
-                const orig = localStorage.getItem('originalToken');
-                if (orig) localStorage.setItem('authToken', orig);
+            if (returnBtn) returnBtn.addEventListener('click', async () => {
+                // La sessione dell'admin è in un cookie HttpOnly: la ripristina il server.
+                let data = {};
+                try {
+                    const res = await fetch(`${API_URL}/auth/impersonate/return`, { method: 'POST', headers: getAuthHeaders() });
+                    data = await res.json().catch(() => ({}));
+                    if (!res.ok || !data.token) throw new Error(data.error || 'Sessione amministratore scaduta');
+                } catch (e) {
+                    showNotification((e.message || 'Errore') + ': accedi di nuovo', 'info');
+                    ['authToken', 'user', 'originalToken', 'originalUser'].forEach((k) => localStorage.removeItem(k));
+                    setTimeout(() => { window.location.href = 'login.html'; }, 1200);
+                    return;
+                }
+                localStorage.setItem('authToken', data.token);
                 const origUser = localStorage.getItem('originalUser');
                 if (origUser) localStorage.setItem('user', origUser); else localStorage.removeItem('user');
                 localStorage.removeItem('originalToken');
