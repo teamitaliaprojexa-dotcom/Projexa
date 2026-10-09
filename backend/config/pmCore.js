@@ -604,7 +604,9 @@ export function fmt(n, dec = 1) {
 }
 export const euro = (n) => (n == null ? '-' : `${fmt(n, 2)} €`);
 
-// Progetti aperti del proprietario (esclusi gli «Annullato»), con il cliente.
+// Progetti aperti del proprietario, con il cliente. Esclusi gli «Annullato» e quelli con
+// «Anno» successivo all'anno in corso (es. i progetti del 2027 nel 2026: scelta dell'utente,
+// come l'indicatore Gestione Progetto). I progetti senza Anno restano.
 export async function progettiAperti(user) {
   const r = await db.query(
     `SELECT a.id::text AS id, a.client_id::text AS client_id, a.valore2 AS nome,
@@ -616,7 +618,13 @@ export async function progettiAperti(user) {
           SELECT 1 FROM projects sp
            WHERE sp.campo = 'Stato Progetto' AND sp.argument = a.id::text
              AND sp.tenant_id = a.tenant_id AND sp.user_id = a.user_id AND sp.scadenza >= CURRENT_DATE
-             AND LOWER(BTRIM(sp.valore2)) = 'annullato')`,
+             AND LOWER(BTRIM(sp.valore2)) = 'annullato')
+        AND NOT EXISTS (
+          SELECT 1 FROM projects an
+           WHERE an.campo = 'Anno' AND an.argument = a.id::text
+             AND an.tenant_id = a.tenant_id AND an.user_id = a.user_id AND an.scadenza >= CURRENT_DATE
+             AND regexp_replace(BTRIM(COALESCE(an.valore3::text, an.valore2, '')), '\\.0+$', '') ~ '^[0-9]{4}$'
+             AND regexp_replace(BTRIM(COALESCE(an.valore3::text, an.valore2, '')), '\\.0+$', '')::int > EXTRACT(YEAR FROM CURRENT_DATE))`,
     [user.tenant_id, user.user_id]
   );
   return r.rows
