@@ -6,7 +6,7 @@
 // proprio team: una sintesi interna (rec_meeting.recap_interno) e l'elenco delle attività che il
 // team deve fare (tabella rec_meeting_attivita), ognuna con owner e scadenza.
 // La trascrizione non dice chi parla, quindi l'owner lo propone l'AI solo se il testo è chiaro e
-// lo sceglie il PM (team del progetto della riunione o rubrica, o scritto a mano).
+// lo sceglie il PM tra le persone del team del progetto della riunione (o lo scrive a mano).
 // Dalla scheda: «Crea task» (tasks assegnati agli owner) ed «Email al team» (nel browser).
 //
 // AI = quella del recap (Impostazioni › AI › «AI generazione e-mail recap»), prompt RECAP_INTERNO
@@ -64,8 +64,8 @@ async function riunione(user, idCalendar) {
   return m;
 }
 
-// Persone proponibili come owner: il team del progetto della riunione (Kick-off, proj_componenti)
-// e la rubrica dell'utente. rubricaId serve ad assegnare il task al contatto giusto.
+// Persone proponibili come owner: SOLO il team del progetto della riunione (Kick-off,
+// proj_componenti), completato con la rubrica. rubricaId serve ad assegnare il task al contatto giusto.
 async function persone(user, m) {
   const rb = (await db.query(
     `SELECT id::text AS id, nominativo, email FROM rubrica
@@ -81,22 +81,20 @@ async function persone(user, m) {
       [user.tenant_id, user.user_id, m.project_id]
     )).rows.filter((x) => x.nominativo);
   }
+  // Solo le persone del team del progetto (scelta dell'utente, 2026-10-09): la rubrica serve
+  // a completarle (contatto per assegnare il task, email se nel team manca), abbinata per email
+  // o, in mancanza, per nominativo.
+  const perNome = new Map(rb.map((x) => [norm(x.nominativo), x]));
   const out = [];
   const visti = new Set();
   for (const t of team) {
-    const r = t.email ? perEmail.get(norm(t.email)) : null;
+    const r = (t.email && perEmail.get(norm(t.email))) || perNome.get(norm(t.nominativo)) || null;
     const k = norm(t.email || t.nominativo);
     if (visti.has(k)) continue;
     visti.add(k);
-    out.push({ nominativo: String(t.nominativo).trim(), email: t.email || '', rubricaId: r ? r.id : null, team: true });
+    out.push({ nominativo: String(t.nominativo).trim(), email: t.email || (r && r.email) || '', rubricaId: r ? r.id : null, team: true });
   }
-  for (const r of rb) {
-    const k = norm(r.email || r.nominativo);
-    if (visti.has(k)) continue;
-    visti.add(k);
-    out.push({ nominativo: String(r.nominativo).trim(), email: r.email || '', rubricaId: r.id, team: false });
-  }
-  return out.sort((a, b) => (b.team - a.team) || a.nominativo.localeCompare(b.nominativo, 'it'));
+  return out.sort((a, b) => a.nominativo.localeCompare(b.nominativo, 'it'));
 }
 
 // Owner scritto dall'AI -> persona conosciuta (nome completo, o cognome/nome se univoco).

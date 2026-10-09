@@ -9234,7 +9234,11 @@
                 interrotto: '<span style="color:#B45309"><i class="fas fa-circle-exclamation"></i> Generazione interrotta (riavvio del server): premi Genera di nuovo.</span>'
             };
             const generato = d.stato === 'pronto' || mi.righe.length || (d.sintesi || '').trim();
-            const opzioni = mi.persone.map((p) => `<option value="${escapeHtml(p.nominativo)}">${escapeHtml([p.email, p.team ? 'team del progetto' : 'rubrica'].filter(Boolean).join(' · '))}</option>`).join('');
+            const opzioni = mi.persone.map((p) => `<option value="${escapeHtml(p.nominativo)}">${escapeHtml(p.email || '')}</option>`).join('');
+            // Owner = solo le persone del team del progetto (Kick-off): se mancano, si spiega dove aggiungerle.
+            const avvisoTeam = !(d.riunione && d.riunione.project_id)
+                ? '<div class="mi-avviso" style="margin-top:0.4rem"><i class="fas fa-circle-info"></i> La riunione non è collegata a un progetto: scegli il progetto nella riga della riunione per avere le persone del team come owner.</div>'
+                : (mi.persone.length ? '' : '<div class="mi-avviso" style="margin-top:0.4rem"><i class="fas fa-circle-info"></i> Il progetto non ha persone nel team: aggiungile dal pulsante Kick-off della scheda progetto (sezione Teams). Intanto puoi scrivere a mano il nome dell\'owner.</div>');
             const daTask = mi.righe.filter((r) => !r.task_id).length;
             pane.innerHTML = `
                 <div class="mi-bar">
@@ -9247,7 +9251,7 @@
                 <div><div class="mi-sez">Sintesi per il team</div>
                     <textarea class="mi-sintesi" id="miSintesi" placeholder="La sintesi interna compare qui dopo la generazione; puoi anche scriverla o correggerla a mano.">${escapeHtml(d.sintesi || '')}</textarea></div>
                 <div>
-                    <div class="mi-sez" style="display:flex; align-items:center; gap:0.5rem;">Attività del team <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--text-muted);">· scegli l'owner di ogni attività (team del progetto o rubrica, o scrivilo)</span></div>
+                    <div class="mi-sez" style="display:flex; align-items:center; gap:0.5rem;">Attività del team <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--text-muted);">· scegli l'owner di ogni attività tra le persone del team del progetto (o scrivilo)</span></div>${avvisoTeam}
                     <datalist id="miPersone">${opzioni}</datalist>
                     ${mi.righe.length ? `<table class="mi-t"><thead><tr><th title="Selezionate per Crea task"><input type="checkbox" id="miTutte"></th><th style="width:16%">Argomento</th><th>Attività</th><th style="width:20%">Owner</th><th style="width:13%">Scadenza</th><th style="width:70px">Task</th><th></th></tr></thead><tbody>
                         ${mi.righe.map((r, i) => `<tr class="${r.task_id ? 'fatto' : ''}" data-i="${i}">
