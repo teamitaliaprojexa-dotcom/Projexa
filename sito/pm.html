@@ -230,7 +230,7 @@
                 <div class="pm-card">
                     <h2><i class="fas fa-triangle-exclamation"></i> Rischi <span class="azioni">
                         <label class="pm-nota" style="display:flex;align-items:center;gap:0.3rem"><input type="checkbox" id="raidTutte" ${raidTutte ? 'checked' : ''}> anche eliminati</label>
-                        <button class="pm-btn piccolo verde" id="btnEstrai" title="L'AI legge il recap di una riunione e propone rischi, decisioni e dipendenze"><i class="fas fa-wand-magic-sparkles"></i> Estrai dalle riunioni</button>${nuovo('rischio')}</span></h2>
+                        <button class="pm-btn piccolo verde" id="btnEstrai" title="L'AI legge il recap di una riunione e propone rischi, decisioni, dipendenze e Change Request (in bozza)"><i class="fas fa-wand-magic-sparkles"></i> Estrai dalle riunioni</button>${nuovo('rischio')}</span></h2>
                     <div style="display:grid; grid-template-columns: minmax(0,1fr) auto; gap:1.2rem; align-items:start">${tabRischi}${heatmap(rischi)}</div>
                 </div>
                 <div class="pm-griglia" style="margin-top:1rem">
@@ -302,9 +302,9 @@
             try { riunioni = await api(`/riunioni?projectId=${encodeURIComponent(projectId)}`); } catch (e) { toast(e.message, 'errore'); return; }
             if (!riunioni.length) { toast('Nessuna riunione con recap collegata a questo progetto', 'errore'); return; }
             const m = modale({
-                titolo: '<i class="fas fa-wand-magic-sparkles"></i> Rischi e decisioni dalle riunioni',
+                titolo: '<i class="fas fa-wand-magic-sparkles"></i> Rischi, decisioni e Change Request dalle riunioni',
                 larga: true,
-                corpo: `<p class="pm-nota" style="margin-top:0">Scegli una riunione del progetto: l'AI legge il recap (o la trascrizione) e propone rischi, decisioni e dipendenze. Rivedi tutto prima di salvare.</p>
+                corpo: `<p class="pm-nota" style="margin-top:0">Scegli una riunione del progetto: l'AI legge il recap (o la trascrizione) e propone rischi, decisioni, dipendenze e Change Request. Rivedi tutto prima di salvare: le Change Request vengono salvate sempre in <b>Bozza</b>.</p>
                     <label class="pm-form" style="display:block"><select class="pm-input" id="selRiunione">${riunioni.map((r) => `<option value="${esc(r.id_calendar)}">${dataIt(r.data)} – ${esc(r.oggetto)}${r.giaEstratta ? ' (già usata)' : ''}${r.haRecap ? '' : ' (solo trascrizione)'}</option>`).join('')}</select></label>
                     <div id="esitoEstrai" style="margin-top:0.9rem"></div>`,
                 pulsanti: [{ testo: 'Chiudi' },
@@ -323,14 +323,16 @@
                 try {
                     const r = await api('/raid/estrai', { metodo: 'POST', corpo: { projectId, id_calendar: idCal } });
                     proposte = r.elementi;
-                    if (!proposte.length) { box.innerHTML = '<div class="pm-vuoto">L\'AI non ha trovato rischi, decisioni o dipendenze in questa riunione.</div>'; return; }
-                    box.innerHTML = `<div class="pm-nota">Proposte di ${esc(r.ai)} · togli la spunta a quelle da non salvare, correggi titoli e valori.</div>
-                        <div class="pm-scroll"><table class="pm-t"><thead><tr><th></th><th>Tipo</th><th>Titolo e dettaglio</th><th>P</th><th>I</th><th>Owner / decisa da</th></tr></thead><tbody>
-                        ${proposte.map((x, i) => `<tr><td><input type="checkbox" data-i="${i}" ${x.esiste ? '' : 'checked'}></td><td><span class="pill">${TIPI[x.tipo].label}</span>${x.esiste ? '<div class="pm-nota">già presente</div>' : ''}</td>
-                            <td><input class="pm-input" data-c="titolo" data-i="${i}" value="${esc(x.titolo)}"><div class="pm-nota">${esc(x.descrizione)}${x.mitigazione ? ` · Risposta: ${esc(x.mitigazione)}` : ''}</div></td>
-                            <td>${x.tipo === 'rischio' ? `<select class="pm-input" data-c="probabilita" data-i="${i}">${opzioni15(x.probabilita, ETICH_P)}</select>` : ''}</td>
-                            <td>${x.tipo === 'rischio' ? `<select class="pm-input" data-c="impatto" data-i="${i}">${opzioni15(x.impatto, ETICH_I)}</select>` : ''}</td>
-                            <td><input class="pm-input" data-c="${x.tipo === 'decisione' ? 'decisa_da' : 'owner'}" data-i="${i}" value="${esc(x.tipo === 'decisione' ? x.decisa_da : x.owner)}"></td></tr>`).join('')}
+                    if (!proposte.length) { box.innerHTML = '<div class="pm-vuoto">L\'AI non ha trovato rischi, decisioni, dipendenze o Change Request in questa riunione.</div>'; return; }
+                    const eCr = (x) => x.tipo === 'change_request';
+                    const persona = (x) => (eCr(x) ? 'richiesta_da' : x.tipo === 'decisione' ? 'decisa_da' : 'owner');
+                    box.innerHTML = `<div class="pm-nota">Proposte di ${esc(r.ai)} · togli la spunta a quelle da non salvare, correggi titoli e valori. Per le Change Request: effort (${esc(unita)}) e slittamento in giorni solo se detti in riunione.</div>
+                        <div class="pm-scroll"><table class="pm-t"><thead><tr><th></th><th>Tipo</th><th>Titolo e dettaglio</th><th>Probabilità · effort</th><th>Impatto · giorni</th><th>Owner · decisa da · richiesta da</th></tr></thead><tbody>
+                        ${proposte.map((x, i) => `<tr><td><input type="checkbox" data-i="${i}" ${x.esiste ? '' : 'checked'}></td><td><span class="pill${eCr(x) ? ' bozza' : ''}">${eCr(x) ? 'Change Request' : TIPI[x.tipo].label}</span>${eCr(x) ? '<div class="pm-nota">in bozza</div>' : ''}${x.esiste ? '<div class="pm-nota">già presente</div>' : ''}</td>
+                            <td><input class="pm-input" data-c="titolo" data-i="${i}" value="${esc(x.titolo)}"><div class="pm-nota">${esc(x.descrizione)}${x.mitigazione ? ` · Risposta: ${esc(x.mitigazione)}` : ''}${x.motivo ? ` · Motivo: ${esc(x.motivo)}` : ''}</div></td>
+                            <td>${x.tipo === 'rischio' ? `<select class="pm-input" data-c="probabilita" data-i="${i}">${opzioni15(x.probabilita, ETICH_P)}</select>` : eCr(x) ? `<input class="pm-input" data-c="effort_delta" data-i="${i}" value="${x.effort_delta ?? ''}" placeholder="non detto" inputmode="decimal">` : ''}</td>
+                            <td>${x.tipo === 'rischio' ? `<select class="pm-input" data-c="impatto" data-i="${i}">${opzioni15(x.impatto, ETICH_I)}</select>` : eCr(x) ? `<input class="pm-input" data-c="giorni_delta" data-i="${i}" value="${x.giorni_delta ?? ''}" placeholder="non detto" inputmode="numeric">` : ''}</td>
+                            <td><input class="pm-input" data-c="${persona(x)}" data-i="${i}" value="${esc(x[persona(x)] || '')}"></td></tr>`).join('')}
                         </tbody></table></div>`;
                 } catch (e) { box.innerHTML = errore(e); }
             }
@@ -340,8 +342,9 @@
                 const scelti = [...mm.querySelectorAll('input[type="checkbox"][data-i]:checked')].map((c) => proposte[c.dataset.i]);
                 if (!scelti.length) throw new Error('Nessun elemento selezionato');
                 const r = await api('/raid/importa', { metodo: 'POST', corpo: { projectId, id_calendar: idCal, elementi: scelti } });
-                toast(`${r.creati} elementi aggiunti al registro`);
+                toast(r.changeRequest ? `${r.creati} elementi salvati, di cui ${r.changeRequest} Change Request in bozza` : `${r.creati} elementi aggiunti al registro`);
                 caricaRaid(); caricaPanoramica();
+                if (r.changeRequest && caricati.cr) caricaCr(); // scheda Change Request già aperta: si aggiorna
             }
         }
 
@@ -481,12 +484,13 @@
             const m = modale({
                 titolo: `<i class="fas fa-user"></i> ${nuovo ? 'Nuovo stakeholder' : esc(x.nominativo)}`,
                 corpo: `<div class="pm-form">
-                    <label class="largo">Nominativo<input name="nominativo" value="${esc(x.nominativo || '')}" list="stkProposte" autocomplete="off" placeholder="Scrivi o scegli dalla rubrica"></label>
-                    <datalist id="stkProposte"></datalist>
-                    <label>Email<input name="email" value="${esc(x.email || '')}"></label>
-                    <label>Ruolo nel progetto<input name="ruolo" value="${esc(x.ruolo || '')}" placeholder="es. Sponsor, Key user"></label>
                     <label>Organizzazione<select name="organizzazione">${Object.entries(ORG).map(([k, v]) => `<option value="${k}" ${k === (x.organizzazione || 'cliente') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
                     <label></label>
+                    <label class="largo">Nominativo<input name="nominativo" value="${esc(x.nominativo || '')}" list="stkProposte" autocomplete="off"><span class="pm-nota" id="stkFonte" style="font-weight:400"></span></label>
+                    <datalist id="stkProposte"></datalist>
+                    <label>Email<input name="email" value="${esc(x.email || '')}"></label>
+                    <label>Ruolo nel progetto<input name="ruolo" value="${esc(x.ruolo || '')}" list="stkRuoli" autocomplete="off" placeholder="Scegli dall'elenco o scrivi il ruolo"></label>
+                    <datalist id="stkRuoli"></datalist>
                     <label>Influenza sul progetto<select name="influenza">${opzioni15(x.influenza, ['minima', 'bassa', 'media', 'alta', 'decisiva'])}</select></label>
                     <label>Interesse per il progetto<select name="interesse">${opzioni15(x.interesse, ['minimo', 'basso', 'medio', 'alto', 'massimo'])}</select></label>
                     <label class="largo">Strategia (come gestirlo, cosa gli sta a cuore)<textarea name="strategia">${esc(x.strategia || '')}</textarea></label>
@@ -503,17 +507,43 @@
                 ]
             });
             if (sola) { m.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; }); return; }
-            try {
-                const prop = await api(`/stakeholder/proposte?projectId=${encodeURIComponent(projectId)}`);
-                m.querySelector('#stkProposte').innerHTML = prop.map((c) => `<option value="${esc(c.nominativo)}">${esc([c.ruolo, c.email, c.team ? 'nel team' : ''].filter(Boolean).join(' · '))}</option>`).join('');
-                m.querySelector('[name="nominativo"]').addEventListener('change', (e) => {
-                    const c = prop.find((y) => y.nominativo === e.target.value);
-                    if (!c) return;
-                    if (!m.querySelector('[name="email"]').value) m.querySelector('[name="email"]').value = c.email;
-                    if (!m.querySelector('[name="ruolo"]').value) m.querySelector('[name="ruolo"]').value = c.ruolo;
-                    if (c.team) m.querySelector('[name="organizzazione"]').value = 'interno';
-                });
-            } catch (e) { /* proposte facoltative */ }
+            // L'Organizzazione decide da dove arrivano i nominativi proposti: Cliente = Contatti del
+            // cliente del progetto, Interno = rubrica (prima il team del Kick-off), Fornitore = a mano.
+            // Si può sempre scrivere un nominativo che non è nell'elenco.
+            const selOrg = m.querySelector('[name="organizzazione"]');
+            const inNome = m.querySelector('[name="nominativo"]');
+            const elenco = m.querySelector('#stkProposte');
+            const fonteTxt = m.querySelector('#stkFonte');
+            const SEGNAPOSTO = { cliente: 'Scegli tra i contatti del cliente o scrivi il nominativo', interno: 'Scegli dalla rubrica o scrivi il nominativo', fornitore: 'Scrivi il nominativo' };
+            // Ruoli tipici proposti per «Ruolo nel progetto», secondo l'Organizzazione (testo libero ammesso).
+            const RUOLI = {
+                cliente: ['Sponsor', 'Referente di progetto del cliente', 'Key user', 'Utente finale', 'Referente IT', 'Responsabile HR', 'Responsabile amministrazione', 'Ufficio acquisti', 'Direzione', 'DPO / Privacy'],
+                interno: ['Project Manager', 'Consulente applicativo', 'Consulente tecnico', 'Sviluppatore', 'Account / Commerciale', 'Formatore', 'Supporto / Help desk', 'Responsabile di area'],
+                fornitore: ['Referente del fornitore', 'Consulente esterno', 'Partner tecnologico', 'Subappaltatore']
+            };
+            let prop = [];
+            async function caricaProposte() {
+                const fonte = selOrg.value;
+                m.querySelector('#stkRuoli').innerHTML = (RUOLI[fonte] || []).map((r) => `<option value="${esc(r)}"></option>`).join('');
+                inNome.placeholder = SEGNAPOSTO[fonte] || '';
+                prop = [];
+                elenco.innerHTML = '';
+                fonteTxt.textContent = '';
+                if (fonte === 'fornitore') return;
+                try {
+                    prop = await api(`/stakeholder/proposte?projectId=${encodeURIComponent(projectId)}&fonte=${encodeURIComponent(fonte)}`);
+                    elenco.innerHTML = prop.map((c) => `<option value="${esc(c.nominativo)}">${esc([c.ruolo, c.email, c.team ? 'nel team' : ''].filter(Boolean).join(' · '))}</option>`).join('');
+                    fonteTxt.textContent = prop.length ? '' : (fonte === 'cliente' ? 'Il cliente non ha contatti: scrivi il nominativo (oppure aggiungili nella sezione Contatti della scheda cliente).' : 'Nessun contatto in rubrica: scrivi il nominativo.');
+                } catch (e) { /* proposte facoltative: si scrive a mano */ }
+            }
+            selOrg.addEventListener('change', caricaProposte);
+            inNome.addEventListener('change', () => {
+                const c = prop.find((y) => y.nominativo === inNome.value);
+                if (!c) return;
+                if (!m.querySelector('[name="email"]').value) m.querySelector('[name="email"]').value = c.email;
+                if (!m.querySelector('[name="ruolo"]').value) m.querySelector('[name="ruolo"]').value = c.ruolo;
+            });
+            caricaProposte();
         }
 
         // ================= CHIUSURA =================

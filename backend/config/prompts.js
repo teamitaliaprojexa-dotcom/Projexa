@@ -60,7 +60,7 @@ export const PROMPT_FUNCTIONS = {
   },
   // Il formato della risposta (JSON) è già nel testo standard: se si personalizza, va tenuto.
   RAID_ESTRAZIONE: {
-    titolo: 'Rischi e decisioni dalla riunione',
+    titolo: 'Rischi, decisioni e change request dalla riunione',
     segnaposto: ['PROGETTO', 'OGGETTO', 'DATA_RIUNIONE', 'TESTO', 'GIA_PRESENTI']
   },
   CHIEDI_PROGETTO: {

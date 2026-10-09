@@ -251,18 +251,22 @@ router.post('/raid/estrai', async (req, res) => {
     const prog = await progettoUtente(req.user, projectId);
     const base = stripMarkdown(String(m.recap || '')).trim() || String(m.trascrizione || '').trim();
     if (!base) throw errore(400, 'La riunione non ha né recap né trascrizione');
-    const esistenti = await raidProgetto(req.user, prog.projectId);
-    const gia = esistenti.length ? esistenti.map((x) => `- (${x.tipo}) ${x.titolo}`).join('\n') : '(nessuno)';
+    const [esistenti, crEsistenti] = await Promise.all([raidProgetto(req.user, prog.projectId), crProgetto(req.user, prog.projectId)]);
+    const righeGia = [...esistenti.map((x) => `- (${x.tipo}) ${x.titolo}`), ...crEsistenti.map((x) => `- (change request ${x.codice || ''}) ${x.titolo}`)];
+    const gia = righeGia.length ? righeGia.join('\n') : '(nessuno)';
     const vars = {
       PROGETTO: prog.nome, OGGETTO: m.oggetto || 'Riunione', DATA_RIUNIONE: dataIt(m.data), TESTO: base.slice(0, 120000), GIA_PRESENTI: gia
     };
-    const tpl = (await getPromptFor('RAID_ESTRAZIONE', req.user)).testo;
+    let tpl = (await getPromptFor('RAID_ESTRAZIONE', req.user)).testo;
+    // Prompt salvato prima delle Change Request (standard già nel database o personalizzato):
+    // le istruzioni per riconoscerle si aggiungono qui, così funziona senza ritoccare il prompt.
+    if (!/change_request/i.test(tpl)) tpl += `\n\n${CR_ISTRUZIONI}`;
     const build = () => tpl.replace(/\{\{(PROGETTO|OGGETTO|DATA_RIUNIONE|TESTO|GIA_PRESENTI)\}\}/g, (x, k) => vars[k]);
     const r = await chiediAi(req.user, build, '', { json: true });
     const j = leggiJson(r.testo);
     if (!j) throw errore(502, `${r.label} non ha restituito un elenco leggibile: riprova`);
     const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9àèéìòù ]/g, '').replace(/\s+/g, ' ').trim();
-    const titoli = new Set(esistenti.map((x) => norm(x.titolo)));
+    const titoli = new Set([...esistenti, ...crEsistenti].map((x) => norm(x.titolo)));
     const mappa = (arr, tipo) => (Array.isArray(arr) ? arr : []).filter((x) => x && x.titolo).map((x) => ({
       tipo,
       titolo: String(x.titolo).slice(0, 500),
@@ -278,10 +282,27 @@ router.post('/raid/estrai', async (req, res) => {
     res.json({
       progetto: { id: prog.projectId, nome: prog.nome }, riunione: { id_calendar: m.id_calendar, oggetto: m.oggetto, data: m.data },
       ai: `${r.label}${r.model ? ` (${r.model})` : ''}`,
-      elementi: [...mappa(j.rischi, 'rischio'), ...mappa(j.decisioni, 'decisione'), ...mappa(j.dipendenze, 'dipendenza')]
+      elementi: [...mappa(j.rischi, 'rischio'), ...mappa(j.decisioni, 'decisione'), ...mappa(j.dipendenze, 'dipendenza'),
+        // Change Request: richieste del cliente che cambiano lo scope (diventano Bozze).
+        ...(Array.isArray(j.change_request) ? j.change_request : []).filter((x) => x && x.titolo).map((x) => ({
+          tipo: 'change_request',
+          titolo: String(x.titolo).slice(0, 500),
+          descrizione: x.descrizione ? String(x.descrizione) : '',
+          motivo: x.motivo ? String(x.motivo) : '',
+          richiesta_da: x.richiesta_da ? String(x.richiesta_da) : '',
+          effort_delta: numero(x.effort),
+          giorni_delta: Number.isFinite(numero(x.giorni)) ? Math.round(numero(x.giorni)) : null,
+          esiste: titoli.has(norm(x.titolo))
+        }))]
     });
   } catch (e) { invia(res, e, 'RAID_ESTRAI'); }
 });
+
+// Istruzioni per le Change Request, aggiunte ai prompt RAID_ESTRAZIONE salvati prima che esistessero.
+const CR_ISTRUZIONI = `IN PIÙ individua le CHANGE REQUEST: richieste del cliente (o concordate in riunione) che CAMBIANO LO SCOPE del progetto rispetto a quanto previsto: funzioni, moduli, report o attività in più o in meno, cambi di requisiti, spostamenti di date chiesti dal cliente. Non sono change request i chiarimenti, le attività già previste, i problemi da risolvere (quelli sono rischi o issue).
+Aggiungile all'oggetto JSON della risposta nella lista "change_request":
+"change_request": [{"titolo": "...", "descrizione": "cosa cambia rispetto allo scope", "motivo": "perché il cliente lo chiede", "richiesta_da": "chi l'ha chiesta", "effort": 0, "giorni": 0}]
+"effort" = ore o giornate in più se dette in riunione (negativo se in meno), altrimenti null; "giorni" = slittamento della data di fine se detto, altrimenti null. Non stimare tu effort o giorni: solo se sono detti. Lista vuota se non ce ne sono. Non ripetere le change request già presenti nell'elenco qui sopra.`;
 
 // Salva gli elementi confermati: { projectId, id_calendar, elementi: [...] }.
 router.post('/raid/importa', async (req, res) => {
@@ -291,13 +312,37 @@ router.post('/raid/importa', async (req, res) => {
     const b = req.body || {};
     const prog = await progettoUtente(req.user, b.projectId);
     const idCal = testo(b.id_calendar, 300);
-    const elementi = (Array.isArray(b.elementi) ? b.elementi : []).slice(0, 60).map((x) => datiRaid(x || {}));
-    if (!elementi.length) throw errore(400, 'Nessun elemento da salvare');
+    const tutti = (Array.isArray(b.elementi) ? b.elementi : []).slice(0, 60).filter(Boolean);
+    const crIn = tutti.filter((x) => x.tipo === 'change_request');
+    const elementi = tutti.filter((x) => x.tipo !== 'change_request').map((x) => datiRaid(x));
+    // Change Request dalla riunione: SEMPRE in Bozza (scelta dell'utente), data di richiesta =
+    // data della riunione, la riunione di origine nelle note. Importo e approvazione si
+    // completano nella scheda Change Request.
+    const cr = crIn.map((x) => ({ ...datiCr({ titolo: x.titolo, descrizione: x.descrizione, motivo: x.motivo, richiesta_da: x.richiesta_da, effort_delta: x.effort_delta, giorni_delta: x.giorni_delta }), stato: 'bozza', data_decisione: null }));
+    if (!elementi.length && !cr.length) throw errore(400, 'Nessun elemento da salvare');
+    if (cr.length) await richiedeTabella('pm_change_request');
+    let riunione = null;
+    if (idCal && cr.length) {
+      riunione = (await db.query('SELECT oggetto, data_calendar::text AS data FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1',
+        [req.user.tenant_id, req.user.user_id, idCal])).rows[0] || null;
+    }
     client = await db.connect();
     await client.query('BEGIN');
     for (const el of elementi) await inserisci(client, 'pm_raid', { ...baseRiga(req, prog), ...el, origine: 'riunione', id_calendar: idCal });
+    if (cr.length) {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pm_cr|${prog.projectId}`]);
+      let n = (await client.query(
+        'SELECT COUNT(*)::int AS n FROM pm_change_request WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3',
+        [req.user.tenant_id, req.user.user_id, prog.projectId])).rows[0].n;
+      const nota = riunione ? `Dalla riunione «${riunione.oggetto || 'Riunione'}» del ${dataIt(riunione.data)}` : 'Da una riunione';
+      for (const c of cr) {
+        n += 1;
+        await inserisci(client, 'pm_change_request', { ...baseRiga(req, prog), ...c, codice: `CR-${String(n).padStart(3, '0')}`,
+          data_richiesta: (riunione && riunione.data) || oggiIso(), note: nota });
+      }
+    }
     await client.query('COMMIT');
-    res.status(201).json({ creati: elementi.length });
+    res.status(201).json({ creati: elementi.length + cr.length, changeRequest: cr.length });
   } catch (e) {
     if (client) await client.query('ROLLBACK').catch(() => {});
     invia(res, e, 'RAID_IMPORTA');
@@ -402,11 +447,32 @@ router.get('/stakeholder', async (req, res) => {
     res.json({ stakeholder: conPermesso(req, await stakeholder(req, prog.projectId)), raci: await raci(req, prog.projectId), tabelle: await tabellaPresente('pm_stakeholder') });
   } catch (e) { invia(res, e, 'STK'); }
 });
-// Proposte: team del progetto (Kick-off) e rubrica, per non riscrivere nomi ed email.
+// Proposte di nominativi secondo l'Organizzazione scelta (fonte):
+//   cliente = i Contatti del cliente del progetto (tabella contacts, ruolo = qualifica);
+//   interno = la rubrica, prima le persone del team del Kick-off (proj_componenti);
+//   fornitore = nessuna proposta, il nominativo si scrive a mano.
 router.get('/stakeholder/proposte', async (req, res) => {
   try {
     const prog = await progettoUtente(req.user, pid(req));
     const q = String(req.query.q || '').trim().toLowerCase();
+    const fonte = String(req.query.fonte || 'interno');
+    const cerca = (x) => x.nominativo && (!q || `${x.nominativo} ${x.email || ''} ${x.ruolo || ''}`.toLowerCase().includes(q));
+    if (fonte === 'fornitore') return res.json([]);
+    if (fonte === 'cliente') {
+      if (!prog.clientId) return res.json([]);
+      const cc = await colonneTabella('contacts');
+      const colCliente = ['client_id', 'id_cliente'].find((c) => cc.has(c));
+      if (!colCliente) return res.json([]);
+      const colRuoloC = ['qualifica', 'ruolo', 'bu'].find((c) => cc.has(c));
+      const r = (await db.query(
+        `SELECT nominativo, ${cc.has('email') ? 'email' : "''"} AS email, ${colRuoloC ? `"${colRuoloC}"` : "''"} AS ruolo FROM contacts
+          WHERE tenant_id = $1 AND user_id = $2 AND "${colCliente}"::text = $3
+            ${cc.has('scadenza') ? 'AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)' : ''} LIMIT 2000`,
+        [req.user.tenant_id, req.user.user_id, prog.clientId])).rows;
+      return res.json(r.filter(cerca)
+        .map((x) => ({ nominativo: String(x.nominativo).trim(), email: x.email || '', ruolo: x.ruolo || '', team: false }))
+        .sort((a, b) => a.nominativo.localeCompare(b.nominativo, 'it')).slice(0, 50));
+    }
     const cols = await colonneTabella('rubrica');
     const colRuolo = ['ruolo', 'role', 'ruolo_progetto', 'qualifica', 'funzione'].find((c) => cols.has(c));
     const rb = (await db.query(
@@ -416,7 +482,7 @@ router.get('/stakeholder/proposte', async (req, res) => {
     const team = new Set((await db.query(
       `SELECT LOWER(email) AS e FROM proj_componenti WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
       [req.user.tenant_id, req.user.user_id, prog.projectId])).rows.map((x) => x.e));
-    const out = rb.filter((x) => x.nominativo && (!q || `${x.nominativo} ${x.email || ''} ${x.ruolo || ''}`.toLowerCase().includes(q)))
+    const out = rb.filter(cerca)
       .map((x) => ({ nominativo: x.nominativo, email: x.email || '', ruolo: x.ruolo || '', team: team.has(String(x.email || '').toLowerCase()) }))
       .sort((a, b) => (b.team - a.team) || a.nominativo.localeCompare(b.nominativo, 'it')).slice(0, 25);
     res.json(out);
