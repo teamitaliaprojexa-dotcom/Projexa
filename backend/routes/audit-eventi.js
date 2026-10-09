@@ -12,7 +12,7 @@ router.use(requireAuth);
 
 // L'email «Attività a tuo carico» della To-Do List NON si registra: Projexa ne prepara solo il
 // testo, l'invio lo fa l'utente.
-const TIPI = new Set(['recap', 'trascrizione']);
+const TIPI = new Set(['recap', 'trascrizione', 'recap_interno']);
 const SERVIZI = new Set(['gmail_web', 'programma_posta']);
 
 router.post('/email', (req, res) => {

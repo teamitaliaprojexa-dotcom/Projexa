@@ -24,6 +24,7 @@ import jobSchedulesRoutes from './routes/job-schedules.js';
 import auditLogRoutes from './routes/audit-log.js';
 import notificheRoutes from './routes/notifiche.js';
 import pmRoutes from './routes/pm.js';
+import recapInternoRoutes from './routes/recapInterno.js';
 import { notificheNuoviMySupport } from './jobs/notifiche.js';
 import auditEventiRoutes from './routes/audit-eventi.js';
 import { sendMail, buildRichiestaCancellazioneEmail, EMAIL_PROJEXA } from './config/mailer.js';
@@ -201,6 +202,8 @@ app.use('/api/chatbot', chatbotRoutes);
 // Cruscotto PM e Portfolio (funzioni da PM senior: salute, RAID, Change Request, stakeholder,
 // chiusura, documenti AI, Chiedi al progetto, briefing, baseline del Gantt): routes/pm.js.
 app.use('/api/pm', requireAuth, pmRoutes);
+// Recap interno della riunione (scheda «Recap interno» nella finestra del recap): routes/recapInterno.js.
+app.use('/api/recap-interno', requireAuth, recapInternoRoutes);
 // Migrazione Crypto (database-viewer): riservata agli amministratori.
 app.use('/api/crypto', requireAuth, requireAdmin, cryptoMigrationRoutes);
 

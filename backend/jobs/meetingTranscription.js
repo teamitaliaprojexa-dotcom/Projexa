@@ -477,7 +477,7 @@ export async function recapProviderName(user) {
   return setting && setting.valore2 ? String(setting.valore2).trim() : '';
 }
 
-async function recapSource(user, idCalendar) {
+export async function recapSource(user, idCalendar) {
   const row = (await db.query(
     `SELECT trascrizione, oggetto, data_calendar, orario_calendar FROM rec_meeting
       WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,

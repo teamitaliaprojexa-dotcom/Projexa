@@ -303,7 +303,7 @@ export async function notificaRiunione({ tenantId, userId, idCalendar, tipo }) {
     const oggetto = r.oggetto || '(riunione senza titolo)';
     await inserisci({
       tenantId, userId, fonte: 'riunione',
-      titolo: tipo === 'recap' ? `Recap pronto: ${oggetto}` : `Trascrizione completata: ${oggetto}`,
+      titolo: tipo === 'recap' ? `Recap pronto: ${oggetto}` : tipo === 'recap_interno' ? `Recap interno pronto: ${oggetto}` : `Trascrizione completata: ${oggetto}`,
       messaggio: [
         r.data ? `Riunione del ${r.data.split('-').reverse().join('/')}` : null,
         [cliente ? `Cliente: ${cliente}` : null, progetto ? `Progetto: ${progetto}` : null].filter(Boolean).join(' · ')

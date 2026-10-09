@@ -255,7 +255,9 @@ const TABLE_COLUMN_ALLOWLIST = {
   projects: new Set(['valore2']),
   issue: new Set(['richiedente', 'descrizione', 'owner', 'note']),
   // Riunioni registrate/trascritte (routes/calendar.js)
-  rec_meeting: new Set(['oggetto', 'mittente', 'trascrizione', 'recap', 'recap_html', 'email_a', 'email_cc']),
+  rec_meeting: new Set(['oggetto', 'mittente', 'trascrizione', 'recap', 'recap_html', 'email_a', 'email_cc', 'recap_interno']),
+  // Attività del recap interno (Supporto/CreaDB/recap_interno.sql)
+  rec_meeting_attivita: new Set(['argomento', 'descrizione', 'owner_nominativo', 'owner_email']),
   // Funzioni da PM senior (Supporto/CreaDB/pm_senior.sql): solo i testi liberi; tipo, stato,
   // codici e numeri restano in chiaro perché si filtrano e si contano in SQL.
   pm_raid: new Set(['titolo', 'descrizione', 'owner', 'mitigazione', 'decisa_da']),

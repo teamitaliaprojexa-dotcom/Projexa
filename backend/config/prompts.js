@@ -21,6 +21,13 @@ export const PROMPT_FUNCTIONS = {
     titolo: 'Recap email della riunione',
     segnaposto: ['TRASCRIZIONE', 'OGGETTO', 'DATA', 'UTENTE']
   },
+  // Finestra del recap › scheda «Recap interno» (routes/recapInterno.js): sintesi per il team +
+  // righe «- Argomento | Descrizione | Owner | Scadenza» lette dal server. TEAM = persone del
+  // team del progetto della riunione. Il formato delle righe va mantenuto.
+  RECAP_INTERNO: {
+    titolo: 'Recap interno della riunione (team di lavoro)',
+    segnaposto: ['TRASCRIZIONE', 'OGGETTO', 'DATA', 'UTENTE', 'TEAM']
+  },
   // Pulsante «Kick-off» della scheda progetto: istruzioni per compilare il template .pptx.
   // Il formato della risposta (JSON con le modifiche) lo aggiunge sempre il server.
   KICKOFF: {
