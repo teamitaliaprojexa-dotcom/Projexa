@@ -28,7 +28,7 @@ import { encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js
 import { SALTA_LOG_ON, SALTA_LOG_OFF, registraTestoRiunione } from '../config/audit.js';
 import { contestoAudit } from '../config/auditContext.js';
 import { notificaRiunione } from './notifiche.js';
-import { transcribeAudio, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap } from '../routes/ai.js';
+import { transcribeAudio, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate } from '../routes/ai.js';
 
 export const NOME_PROGRAMMA = 'meetingTranscription';
 
@@ -445,7 +445,7 @@ async function senzaLog(sql, params) {
 // recap, senza riavvii.
 // Segnaposto: {{TRASCRIZIONE}}, {{OGGETTO}}, {{DATA}}, {{UTENTE}}. Il recap sostituisce
 // quello eventualmente già presente.
-async function buildRecapPrompt(user, vars) {
+export async function buildRecapPrompt(user, vars) {
   let tpl = (await getPromptFor('RECAP_EMAIL', user)).testo;
   // Se il file non prevede il segnaposto, la trascrizione si aggiunge in fondo.
   if (!tpl.includes('{{TRASCRIZIONE}}')) tpl += '\n\nTrascrizione:\n{{TRASCRIZIONE}}';
@@ -465,16 +465,39 @@ function forceSubject(recap, vars) {
   return lines.join('\n');
 }
 
-// AI scelta nel campo "AI generazione e-mail recap" (settings.valore2), '' se non scelta.
-export async function recapProviderName(user) {
+async function valoreImpostazione(user, campo) {
   const setting = (await db.query(
     `SELECT valore2 FROM settings
       WHERE tenant_id = $1 AND user_id = $2
-        AND LOWER(BTRIM(campo)) IN ('ai generazione e-mail recap', '(*) ai generazione e-mail recap')
+        AND LOWER(BTRIM(campo)) IN ($3, '(*) ' || $3)
       LIMIT 1`,
-    [user.tenant_id, user.user_id]
+    [user.tenant_id, user.user_id, campo]
   )).rows[0];
   return setting && setting.valore2 ? String(setting.valore2).trim() : '';
+}
+
+// Voce "Chiedi sempre" dei campi «AI generazione e-mail recap» ed «Esecuzione Recap».
+export const isChiediSempre = (v) => /^chiedi/i.test(String(v || '').trim());
+
+// Valore del campo "AI generazione e-mail recap" così com'è (anche "Chiedi sempre"), '' se vuoto.
+export async function recapAiImpostata(user) {
+  return valoreImpostazione(user, 'ai generazione e-mail recap');
+}
+
+// AI da usare per le funzioni che non chiedono (recap interno, Dossier, email attività...):
+// quella del campo; con "Chiedi sempre" la prima AI con chiave collegata. '' se nessuna.
+export async function recapProviderName(user) {
+  const v = await recapAiImpostata(user);
+  if (!isChiediSempre(v)) return v;
+  const collegate = await aiCollegate(user.user_id);
+  return collegate.length ? collegate[0].nome : '';
+}
+
+// Campo "Esecuzione Recap": 'chiedi' | 'batch' | 'immediato' (vuoto = immediato, come prima).
+export async function recapEsecuzione(user) {
+  const v = await valoreImpostazione(user, 'esecuzione recap');
+  if (isChiediSempre(v)) return 'chiedi';
+  return /^batch/i.test(v) ? 'batch' : 'immediato';
 }
 
 export async function recapSource(user, idCalendar) {
@@ -515,14 +538,33 @@ export async function recapInProgress(user, ids) {
     );
     for (const x of r.rows) out.add(x.id_calendar);
   } catch (e) { /* tabella della coda non ancora creata */ }
+  for (const id of await recapBatchInCorso(user, ids)) out.add(id);
   return out;
+}
+
+// Riunioni con un recap in modalità Batch in attesa del fornitore (tabella rec_meeting_batch).
+export async function recapBatchInCorso(user, ids) {
+  if (!ids.length) return new Set();
+  try {
+    const r = await db.query(
+      // Solo i recap per il cliente (il recap interno ha la sua scheda): tipo assente = recap.
+      `SELECT DISTINCT id_calendar FROM rec_meeting_batch b
+        WHERE tenant_id = $1 AND user_id = $2 AND stato = 'in_corso' AND id_calendar = ANY($3::text[])
+          AND COALESCE(to_jsonb(b) ->> 'tipo', 'recap') = 'recap'`,
+      [user.tenant_id, user.user_id, ids]
+    );
+    return new Set(r.rows.map((x) => x.id_calendar));
+  } catch (e) {
+    return new Set(); // tabella non ancora creata (Supporto/CreaDB/recap_batch.sql)
+  }
 }
 
 // user: { tenant_id, user_id, email }. Restituisce { provider, model, length }.
 // origine: per il log (default: la richiesta in corso, altrimenti 'job:recap').
-export async function generateRecap(user, idCalendar, { origine = null } = {}) {
-  const providerName = await recapProviderName(user);
-  if (!providerName) throw httpError(400, 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"');
+// ai: AI scelta con il pulsante Recap ("Chiedi sempre"); senza, quella delle impostazioni.
+export async function generateRecap(user, idCalendar, { origine = null, ai = null } = {}) {
+  const providerName = ai || await recapAiImpostata(user);
+  if (!providerName || isChiediSempre(providerName)) throw httpError(400, 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"');
   const local = localRecapMode(providerName);
   const { transcript, vars, rules } = await recapSource(user, idCalendar);
 
@@ -537,6 +579,12 @@ export async function generateRecap(user, idCalendar, { origine = null } = {}) {
   } finally {
     recapRunning.delete(key);
   }
+  return salvaRecap(user, idCalendar, result, { rules, vars, origine });
+}
+
+// Salva il recap prodotto dall'AI (result: { text, label, model }) sulla riunione: correzioni,
+// oggetto, log e campanella. Usata anche dai recap in modalità Batch (jobs/recapBatch.js).
+export async function salvaRecap(user, idCalendar, result, { rules, vars, origine = null }) {
   // e sul recap prodotto (l'AI può riscrivere a modo suo un nome già corretto)
   const recap = forceSubject(stripMarkdown(applyCorrections(String(result.text || '').trim(), rules).text).trim(), vars);
   if (!recap) throw httpError(502, `${result.label} non ha restituito alcun testo`);
@@ -608,11 +656,15 @@ export async function enqueueLostNotes(user, idCalendar, notes) {
 }
 
 // Fine registrazione: quando i blocchi precedenti della riunione sono trascritti, recap.
-export async function enqueueFinalize(user, idCalendar) {
+// ai: AI scelta a mano con il pulsante Recap (es. "Recap Projexa (lento)"): il recap parte
+// comunque, anche con «Chiedi sempre». Senza: recap automatico secondo le impostazioni.
+export async function enqueueFinalize(user, idCalendar, { ai = null } = {}) {
+  const params = [user.tenant_id, user.user_id, user.email ? encRec(user.email) : null, idCalendar];
+  if (ai) params.push(ai);
   await db.query(
-    `INSERT INTO rec_meeting_chunks (tenant_id, user_id, user_email, id_calendar, kind)
-     VALUES ($1, $2, $3, $4, 'finalize')`,
-    [user.tenant_id, user.user_id, user.email ? encRec(user.email) : null, idCalendar]
+    `INSERT INTO rec_meeting_chunks (tenant_id, user_id, user_email, id_calendar, kind${ai ? ', recap_ai' : ''})
+     VALUES ($1, $2, $3, $4, 'finalize'${ai ? ', $5' : ''})`,
+    params
   );
   kickTranscriptionWorker();
 }
@@ -769,15 +821,35 @@ async function processFinalize(job) {
         WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
       [user.tenant_id, user.user_id, job.id_calendar]
     );
-    if (t.rows[0] && t.rows[0].has_tr) await generateRecap(user, job.id_calendar, { origine: 'job:recap' });
+    if (t.rows[0] && t.rows[0].has_tr) {
+      if (job.recap_ai) {
+        // Recap chiesto a mano con il pulsante (AI scelta lì): parte sempre, subito.
+        await generateRecap(user, job.id_calendar, { origine: 'job:recap', ai: job.recap_ai });
+      } else {
+        // Recap automatico: «Chiedi sempre» (AI o esecuzione) = nessun recap, resta il pulsante.
+        const ai = await recapAiImpostata(user);
+        const esecuzione = await recapEsecuzione(user);
+        if (isChiediSempre(ai) || esecuzione === 'chiedi') {
+          console.log(`[RECAP] ${job.id_calendar}: «Chiedi sempre», nessun recap automatico (resta il pulsante Recap)`);
+        } else if (esecuzione === 'batch' && ai && !localRecapMode(ai)) {
+          // Import dinamico: jobs/recapBatch.js importa a sua volta questo file.
+          const { inviaRecapBatch } = await import('./recapBatch.js');
+          await inviaRecapBatch(user, job.id_calendar, ai, { origine: 'job:recap' });
+        } else {
+          await generateRecap(user, job.id_calendar, { origine: 'job:recap' });
+        }
+      }
+    }
   } catch (error) {
     const attempts = (Number(job.attempts) || 0) + 1;
     if (isTemporary(error) && attempts < 10) {
+      const params = [user.tenant_id, user.user_id, user.email ? encRec(user.email) : null, job.id_calendar, attempts,
+        encRec(String(error.message || error).slice(0, 500))];
+      if (job.recap_ai) params.push(job.recap_ai);
       await db.query(
-        `INSERT INTO rec_meeting_chunks (tenant_id, user_id, user_email, id_calendar, kind, attempts, last_error, next_try_at)
-         VALUES ($1, $2, $3, $4, 'finalize', $5, $6, NOW() + interval '2 minutes')`,
-        [user.tenant_id, user.user_id, user.email ? encRec(user.email) : null, job.id_calendar, attempts,
-          encRec(String(error.message || error).slice(0, 500))]
+        `INSERT INTO rec_meeting_chunks (tenant_id, user_id, user_email, id_calendar, kind, attempts, last_error, next_try_at${job.recap_ai ? ', recap_ai' : ''})
+         VALUES ($1, $2, $3, $4, 'finalize', $5, $6, NOW() + interval '2 minutes'${job.recap_ai ? ', $7' : ''})`,
+        params
       );
       console.warn(`[RECAP] ${job.id_calendar}: tentativo ${attempts} fallito (${error.message}), nuovo tentativo tra 2 minuti`);
       return;

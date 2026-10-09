@@ -21,6 +21,7 @@ import { eseguiAggiornaIntegrazioni } from './aggiornaIntegrazioni.js';
 import { eseguiBackupDb, eseguiCopiaStaging, eseguiPuliziaVm } from './scriptVm.js';
 import { eseguiNotificheScadenze } from './notifiche.js';
 import { eseguiNotificheProgetti, eseguiDigestSettimanale } from './pmJobs.js';
+import { eseguiRecapBatch } from './recapBatch.js';
 import { conContestoAudit } from '../config/auditContext.js';
 
 // Job schedulabili: la chiave è il valore di job_schedules.job.
@@ -45,7 +46,9 @@ const JOBS = {
   // Funzioni da PM senior (jobs/pmJobs.js): fotografia giornaliera e notifiche proattive dei
   // progetti; digest settimanale via email a chi l'ha attivato. Per tutti i tenant.
   pm_notifiche_progetti: () => eseguiNotificheProgetti(),
-  pm_digest_settimanale: () => eseguiDigestSettimanale()
+  pm_digest_settimanale: () => eseguiDigestSettimanale(),
+  // Recap in modalità Batch (jobs/recapBatch.js): raccoglie quelli pronti, per tutti i tenant.
+  recap_batch: () => eseguiRecapBatch()
 };
 
 // Nomi dei job schedulabili (usati dalla pagina di gestione per l'elenco a discesa).
@@ -59,7 +62,8 @@ export const INFO_JOB = {
   pulizia_vm: { etichetta: 'Pulizia cache e log della VM', jira: false },
   notifiche_scadenze: { etichetta: 'Notifiche delle scadenze (To-Do)', jira: false },
   pm_notifiche_progetti: { etichetta: 'Salute progetti: notifiche e fotografia giornaliera', jira: false },
-  pm_digest_settimanale: { etichetta: 'Digest settimanale via email ai PM', jira: false }
+  pm_digest_settimanale: { etichetta: 'Digest settimanale via email ai PM', jira: false },
+  recap_batch: { etichetta: 'Recap in modalità Batch: raccoglie quelli pronti', jira: false }
 };
 
 export function schedulerAttivo() {

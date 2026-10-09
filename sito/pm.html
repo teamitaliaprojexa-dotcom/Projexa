@@ -43,6 +43,7 @@
         <section class="pm-pannello" id="p-chiedi"></section>
     </main>
 
+    <script src="js/ai-scelta.js"></script>
     <script src="js/pm-comune.js"></script>
     <script>
     (function () {
@@ -249,6 +250,8 @@
             p.querySelectorAll('tr.click[data-id]').forEach((tr) => tr.addEventListener('click', () => formRaid(r.find((x) => x.id === tr.dataset.id))));
             p.querySelector('#btnEstrai').addEventListener('click', () => estraiDaRiunione());
             if (qs.get('estrai') && !raidDati._estraiAperta) { raidDati._estraiAperta = true; estraiDaRiunione(qs.get('estrai')); }
+            // Da «Risultati AI»: proposte arrivate in modalità Batch, da rivedere e salvare.
+            if (qs.get('risultato') && !raidDati._estraiAperta) { raidDati._estraiAperta = true; estraiDaRiunione(null, qs.get('risultato')); }
         }
         // Scelta della persona (owner, decisa da, richiesta da): «Cliente» = Contatti del cliente del
         // progetto, «Interno» = persone del team del progetto (Kick-off, proj_componenti). Gli elenchi
@@ -334,7 +337,7 @@
             if (sola) m.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; });
         }
 
-        async function estraiDaRiunione(preselezione) {
+        async function estraiDaRiunione(preselezione, risultatoId) {
             let riunioni;
             try { riunioni = await api(`/riunioni?projectId=${encodeURIComponent(projectId)}`); } catch (e) { toast(e.message, 'errore'); return; }
             if (!riunioni.length) { toast('Nessuna riunione con recap collegata a questo progetto', 'errore'); return; }
@@ -353,12 +356,25 @@
                 const sel = m.querySelector('#selRiunione');
                 if ([...sel.options].some((o) => o.value === preselezione)) { sel.value = preselezione; analizza(m); }
             }
+            if (risultatoId) analizza(m);
             async function analizza(mm) {
                 const box = mm.querySelector('#esitoEstrai');
                 idCal = mm.querySelector('#selRiunione').value;
                 box.innerHTML = attesa('L\'AI sta leggendo la riunione…');
                 try {
-                    const [r] = await Promise.all([api('/raid/estrai', { metodo: 'POST', corpo: { projectId, id_calendar: idCal } }), caricaPersone()]);
+                    // Risultato già pronto (Batch) oppure richiesta all'AI (Impostazioni › AI › «AI Funzioni PM»).
+                    const daRisultato = risultatoId;
+                    risultatoId = null;
+                    const [r] = await Promise.all([
+                        daRisultato ? PM.risultatoAi(daRisultato).then((x) => x.risultato || {})
+                            : api('/raid/estrai', { metodo: 'POST', corpo: { projectId, id_calendar: idCal }, ai: 'pm_raid', titolo: dati && dati.progetto ? dati.progetto.nome : '' }),
+                        caricaPersone()]);
+                    if (r.batch) { proposte = null; box.innerHTML = `<div class="pm-nota"><i class="fas fa-hourglass-half"></i> ${esc(r.messaggio)}</div>`; return; }
+                    if (daRisultato && r.riunione) {
+                        idCal = r.riunione.id_calendar;
+                        const sel = mm.querySelector('#selRiunione');
+                        if ([...sel.options].some((o) => o.value === idCal)) sel.value = idCal;
+                    }
                     proposte = r.elementi;
                     if (!proposte.length) { box.innerHTML = '<div class="pm-vuoto">L\'AI non ha trovato rischi, decisioni, dipendenze o Change Request in questa riunione.</div>'; return; }
                     const eCr = (x) => x.tipo === 'change_request';
@@ -685,7 +701,8 @@
                 const att = aggiungi('ai', '<i class="fas fa-spinner fa-spin"></i> Sto guardando i dati del progetto…');
                 btn.disabled = true;
                 try {
-                    const r = await api('/chiedi', { metodo: 'POST', corpo: { projectId, domanda: q, storia } });
+                    const r = await api('/chiedi', { metodo: 'POST', corpo: { projectId, domanda: q, storia }, ai: 'pm_chiedi', titolo: dati && dati.progetto ? dati.progetto.nome : '' });
+                    if (r.batch) { att.innerHTML = `<i class="fas fa-hourglass-half"></i> ${esc(r.messaggio)}`; return; }
                     att.innerHTML = `<div class="pm-ai">${testoAiHtml(r.risposta)}</div><small>${esc(r.ai)}</small>`;
                     storia.push({ ruolo: 'io', testo: q }, { ruolo: 'ai', testo: r.risposta });
                 } catch (e) { att.innerHTML = `<span style="color:#DC2626">${esc(e.message)}</span>`; }
@@ -701,7 +718,8 @@
         async function apriBriefing(idCalendar) {
             const m = modale({ titolo: '<i class="fas fa-clipboard-list"></i> Briefing pre-riunione', larga: true, corpo: attesa('L\'AI prepara il briefing con azioni aperte, rischi, decisioni e ultimo recap…'), pulsanti: [{ testo: 'Chiudi' }] });
             try {
-                const r = await api('/briefing', { metodo: 'POST', corpo: { projectId, id_calendar: idCalendar && idCalendar !== '1' ? idCalendar : undefined } });
+                const r = await api('/briefing', { metodo: 'POST', corpo: { projectId, id_calendar: idCalendar && idCalendar !== '1' ? idCalendar : undefined }, ai: 'pm_briefing', titolo: dati && dati.progetto ? dati.progetto.nome : '' });
+                if (r.batch) { m.querySelector('.pm-modal-body').innerHTML = `<div class="pm-nota"><i class="fas fa-hourglass-half"></i> ${esc(r.messaggio)}</div>`; return; }
                 m.querySelector('.pm-modal-body').innerHTML = `<div class="pm-ai">${testoAiHtml(r.briefing)}</div><p class="pm-nota" style="margin-top:1rem">${esc(r.ai)}</p>`;
                 const foot = m.querySelector('.pm-modal-foot');
                 const copia = document.createElement('button');
@@ -731,8 +749,12 @@
                         if (!f) throw new Error('Scegli il template .docx');
                         if (!/\.docx$/i.test(f.name)) throw new Error('Il template deve essere un file .docx');
                         const dalV = mm.querySelector('#docDal')?.value || '';
+                        const sc = await ProjexaAi.scegli('pm_docx', { apiUrl: PM.API_URL, headers: PM.auth });
+                        if (!sc) return false;
                         mm.querySelector('.pm-modal-body').insertAdjacentHTML('beforeend', attesa('Genero il documento: può richiedere qualche minuto…'));
-                        const r = await fetch(`${PM.API_URL}/pm/documento/docx?${new URLSearchParams({ projectId, tipo, dal: dalV })}`, { method: 'POST', headers: { ...PM.auth(), 'Content-Type': 'application/octet-stream' }, body: await f.arrayBuffer() });
+                        const qsDoc = ProjexaAi.inQuery({ projectId, tipo, dal: dalV }, sc, `${titolo} ${dati && dati.progetto ? dati.progetto.nome : ''}`.trim());
+                        const r = await fetch(`${PM.API_URL}/pm/documento/docx?${qsDoc}`, { method: 'POST', headers: { ...PM.auth(), 'Content-Type': 'application/octet-stream' }, body: await f.arrayBuffer() });
+                        if (r.status === 202) { const d = await r.json().catch(() => ({})); toast(d.messaggio || 'Documento inviato in modalità Batch'); return; }
                         if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `Errore ${r.status}`); }
                         const nome = /filename\*=UTF-8''([^;]+)/.exec(r.headers.get('Content-Disposition') || '');
                         const a = document.createElement('a');

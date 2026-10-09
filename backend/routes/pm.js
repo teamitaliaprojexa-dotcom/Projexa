@@ -12,7 +12,8 @@
 //     stesso ruolo (o da admin), come nel resto dell'app;
 //   - le righe non si cancellano: «Elimina» le chiude (scadenza = ieri);
 //   - i testi liberi si cifrano a riposo (encryptRowForWrite, regole in config/crypto.js);
-//   - l'AI è quella di Impostazioni › AI (pmCore.aiPerPm); i prompt sono in app_prompts.
+//   - l'AI è quella di Impostazioni › AI › «AI Funzioni PM» (config/aiFunzioni.js, anche in Batch:
+//     jobs/aiLavori.js); i prompt sono in app_prompts.
 // ============================================================================
 import express from 'express';
 import db from '../config/database.js';
@@ -23,11 +24,13 @@ import * as OffertaDocx from '../config/offertaDocx.js';
 import { leggiRispostaAi } from '../config/kickoffPptx.js';
 import { speakerName, stripMarkdown } from '../jobs/meetingTranscription.js';
 import { costruisciDigest, emailUtente } from '../jobs/pmJobs.js';
+import { rottaAi } from '../jobs/aiLavori.js';
+import { infoAi } from '../config/aiFunzioni.js';
 import {
   UUID_RE, errore, oggiIso, dataIt, dataIso, numero, fmt, euro, tabellaPresente, colonneTabella,
   progettoUtente, schedaProgetto, campiProgetto, economiaProgetto, saluteProgetto, saluteTuttiProgetti, righeGantt, analisiGantt,
   raidProgetto, crProgetto, taskProgetto, issueProgetto, riunioniProgetto, contestoProgetto,
-  aiPerPm, chiediAi, leggiJson
+  chiediAi, leggiJson
 } from '../config/pmCore.js';
 
 const router = express.Router();
@@ -122,14 +125,16 @@ const pid = (req) => (req.query && req.query.projectId) || (req.body && req.body
 router.get('/progetto', async (req, res) => {
   try {
     const salute = await saluteProgetto(req.user, pid(req));
-    const ai = await aiPerPm(req.user);
+    // AI di Impostazioni › AI › «AI Funzioni PM» (vuoto = quella del recap; "Chiedi sempre").
+    const info = await infoAi(req.user, 'pm_documento');
+    const ai = info.nome ? { nome: info.nome, locale: info.locale } : null;
     // Campo Gantt (tipo 13) della scheda: serve al link «Apri il Gantt».
     const campi = await campiProgetto(req.user, salute.progetto.projectId);
     const g = (await db.query(
       `SELECT id::text AS id, campo FROM projects WHERE tenant_id = $1 AND user_id = $2 AND argument = ANY($3::text[])
           AND tipo_valore::text = '13' AND (scadenza IS NULL OR scadenza >= CURRENT_DATE) ORDER BY id LIMIT 1`,
       [req.user.tenant_id, req.user.user_id, campi.sezioni])).rows[0] || null;
-    res.json({ ...salute, oggi: oggiIso(), ai: ai ? { nome: ai.nome, locale: ai.locale } : null, tabelle: await tabellaPresente('pm_raid'),
+    res.json({ ...salute, oggi: oggiIso(), ai, tabelle: await tabellaPresente('pm_raid'),
       ganttCampo: g ? { fieldId: g.id, label: String(g.campo || '').replace(/^\(\*\)\s*/, '') } : null });
   } catch (e) { invia(res, e, 'PROGETTO'); }
 });
@@ -248,7 +253,7 @@ router.get('/riunione', async (req, res) => {
 
 // Proposta AI di rischi, decisioni e dipendenze dal recap (o dalla trascrizione) di una riunione.
 // Body: { projectId?, id_calendar }. Se la riunione è collegata a un progetto si usa quello.
-router.post('/raid/estrai', async (req, res) => {
+router.post('/raid/estrai', ...rottaAi('pm_raid', async (req, res) => {
   try {
     const idCal = String((req.body && req.body.id_calendar) || '').trim();
     if (!idCal) throw errore(400, 'Riunione non indicata');
@@ -273,7 +278,7 @@ router.post('/raid/estrai', async (req, res) => {
     // le istruzioni per riconoscerle si aggiungono qui, così funziona senza ritoccare il prompt.
     if (!/change_request/i.test(tpl)) tpl += `\n\n${CR_ISTRUZIONI}`;
     const build = () => tpl.replace(/\{\{(PROGETTO|OGGETTO|DATA_RIUNIONE|TESTO|GIA_PRESENTI)\}\}/g, (x, k) => vars[k]);
-    const r = await chiediAi(req.user, build, '', { json: true });
+    const r = await chiediAi(req.user, build, '', { json: true, ai: req.aiScelta });
     const j = leggiJson(r.testo);
     if (!j) throw errore(502, `${r.label} non ha restituito un elenco leggibile: riprova`);
     const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9àèéìòù ]/g, '').replace(/\s+/g, ' ').trim();
@@ -307,7 +312,7 @@ router.post('/raid/estrai', async (req, res) => {
         }))]
     });
   } catch (e) { invia(res, e, 'RAID_ESTRAI'); }
-});
+}));
 
 // Istruzioni per le Change Request, aggiunte ai prompt RAID_ESTRAZIONE salvati prima che esistessero.
 const CR_ISTRUZIONI = `IN PIÙ individua le CHANGE REQUEST: richieste del cliente (o concordate in riunione) che CAMBIANO LO SCOPE del progetto rispetto a quanto previsto: funzioni, moduli, report o attività in più o in meno, cambi di requisiti, spostamenti di date chiesti dal cliente. Non sono change request i chiarimenti, le attività già previste, i problemi da risolvere (quelli sono rischi o issue).
@@ -721,7 +726,7 @@ async function datiDocumento(req, projectId, tipo, dal, { conAi = true } = {}) {
       if (!t.includes('{{DATI}}')) t += '\n\nDATI\n{{DATI}}';
       return t.replace(/\{\{(DATI|DAL|DATA|UTENTE)\}\}/g, (x, k) => (k === 'DATI' ? d : vars[k]));
     };
-    const r = await chiediAi(req.user, build, dati);
+    const r = await chiediAi(req.user, build, dati, { ai: req.aiScelta });
     ai = { testo: stripMarkdown(r.testo).trim(), label: `${r.label}${r.model ? ` (${r.model})` : ''}`, errore: '' };
   } catch (e) {
     ai.errore = `Commento dell'AI non disponibile (${e.message}): il documento contiene solo i dati.`;
@@ -746,14 +751,14 @@ async function datiDocumento(req, projectId, tipo, dal, { conAi = true } = {}) {
   };
 }
 
-router.get('/documento', async (req, res) => {
+router.get('/documento', ...rottaAi('pm_documento', async (req, res) => {
   try {
     const prog = await progettoUtente(req.user, pid(req));
     const d = await datiDocumento(req, prog.projectId, String(req.query.tipo || 'status'), req.query.dal);
     delete d.datiAi;
     res.json(d);
   } catch (e) { invia(res, e, 'DOCUMENTO'); }
-});
+}));
 
 // Versione Word su template (.docx), come l'Offerta economica: il template arriva dal browser,
 // l'AI indica le modifiche ai paragrafi e alle tabelle, il file torna al browser (nulla salvato).
@@ -770,7 +775,7 @@ Rispondi SOLO con un oggetto JSON, senza testo prima o dopo, in questa forma:
 - "elimina": true toglie il paragrafo o la tabella.
 - Compila il template con i dati del progetto e con il commento richiesto dalle istruzioni (sostituisci i segnaposto, riempi le tabelle con rischi, milestone, attività, Change Request se il template le prevede). Includi solo gli elementi da cambiare. Niente Markdown nei testi.`;
 
-router.post('/documento/docx', express.raw({ type: 'application/octet-stream', limit: 40 * 1024 * 1024 }), async (req, res) => {
+router.post('/documento/docx', express.raw({ type: 'application/octet-stream', limit: 40 * 1024 * 1024 }), ...rottaAi('pm_docx', async (req, res) => {
   try {
     const prog = await progettoUtente(req.user, req.query.projectId);
     const tipo = String(req.query.tipo || 'status');
@@ -784,7 +789,7 @@ router.post('/documento/docx', express.raw({ type: 'application/octet-stream', l
     const tpl = (await getPromptFor(cfg.prompt, req.user)).testo;
     const istruzioni = tpl.replace(/\{\{(DATI|DAL|DATA|UTENTE)\}\}/g, (x, k) => (k === 'DATI' ? d.datiAi : k === 'DAL' ? dataIt(d.dal) : k === 'DATA' ? dataIt(d.data) : d.utente));
     const prompt = `${istruzioni}\n\nDOCUMENTO WORD DA COMPILARE: inserisci il commento (con i titoli della STRUTTURA) e i dati nei punti giusti del template.\n\n${DOCX_FORMATO}\n\nDOCUMENTO (testi attuali con i codici):\n${descrizione}`;
-    const r = await chiediAi(req.user, () => prompt, '', { json: true });
+    const r = await chiediAi(req.user, () => prompt, '', { json: true, ai: req.aiScelta });
     const modifiche = leggiRispostaAi(r.testo);
     const esito = await OffertaDocx.applicaModifiche(await OffertaDocx.leggiTemplate(req.body), modifiche);
     if (!esito.applicate) throw errore(502, `${r.label} non ha indicato modifiche applicabili al template: controlla il prompt e riprova`);
@@ -795,12 +800,12 @@ router.post('/documento/docx', express.raw({ type: 'application/octet-stream', l
     res.setHeader('X-Pm-Ai', encodeURIComponent(`${r.label}${r.model ? ` (${r.model})` : ''}`));
     res.send(esito.buffer);
   } catch (e) { invia(res, e, 'DOCUMENTO_DOCX'); }
-});
+}));
 
 // ============================================================================
 // CHIEDI AL PROGETTO
 // ============================================================================
-router.post('/chiedi', async (req, res) => {
+router.post('/chiedi', ...rottaAi('pm_chiedi', async (req, res) => {
   try {
     const b = req.body || {};
     const domanda = testo(b.domanda, 2000);
@@ -813,16 +818,16 @@ router.post('/chiedi', async (req, res) => {
     const tpl = (await getPromptFor('CHIEDI_PROGETTO', req.user)).testo;
     const vars = { DOMANDA: domanda, STORIA: storia, DATA: dataIt(oggiIso()), UTENTE: utente };
     const build = (d) => tpl.replace(/\{\{(DATI|DOMANDA|STORIA|DATA|UTENTE)\}\}/g, (x, k) => (k === 'DATI' ? d : vars[k]));
-    const r = await chiediAi(req.user, build, ctx.testo, { soloEsterna: true });
-    res.json({ risposta: stripMarkdown(r.testo).trim(), ai: `${r.label}${r.model ? ` (${r.model})` : ''}` });
+    const r = await chiediAi(req.user, build, ctx.testo, { soloEsterna: true, ai: req.aiScelta });
+    res.json({ domanda, progetto: prog.nome, risposta: stripMarkdown(r.testo).trim(), ai: `${r.label}${r.model ? ` (${r.model})` : ''}` });
   } catch (e) { invia(res, e, 'CHIEDI'); }
-});
+}));
 
 // ============================================================================
 // BRIEFING PRE-RIUNIONE
 // ============================================================================
 // Body: { projectId } oppure { id_calendar } di una riunione collegata a un progetto.
-router.post('/briefing', async (req, res) => {
+router.post('/briefing', ...rottaAi('pm_briefing', async (req, res) => {
   try {
     const b = req.body || {};
     let projectId = b.projectId;
@@ -845,13 +850,13 @@ router.post('/briefing', async (req, res) => {
     const tpl = (await getPromptFor('BRIEFING_RIUNIONE', req.user)).testo;
     const vars = { RIUNIONE: riunione ? `${riunione} sul progetto «${prog.nome}»` : ` sul progetto «${prog.nome}»`, DATA: dataIt(oggiIso()), UTENTE: utente };
     const build = (d) => tpl.replace(/\{\{(DATI|RIUNIONE|DATA|UTENTE)\}\}/g, (x, k) => (k === 'DATI' ? d : vars[k]));
-    const r = await chiediAi(req.user, build, ctx.testo);
+    const r = await chiediAi(req.user, build, ctx.testo, { ai: req.aiScelta });
     res.json({
       progetto: prog, semaforo: ctx.salute.semaforo, briefing: stripMarkdown(r.testo).trim(), ai: `${r.label}${r.model ? ` (${r.model})` : ''}`,
       azioni: ctx.task.slice(0, 30), rischi: ctx.raid.filter((x) => x.tipo === 'rischio' && x.stato !== 'chiuso').slice(0, 10).map((x) => ({ titolo: x.titolo, punteggio: x.punteggio, owner: x.owner }))
     });
   } catch (e) { invia(res, e, 'BRIEFING'); }
-});
+}));
 
 // ============================================================================
 // GANTT: analisi, baseline, completamento del progetto

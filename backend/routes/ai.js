@@ -17,7 +17,8 @@ import https from 'https';
 import Anthropic from '@anthropic-ai/sdk';
 import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
-import { getIntegration, saveIntegration, deleteIntegration } from '../config/integrations.js';
+import { getIntegration, saveIntegration, deleteIntegration, updateIntegrationElements, deleteIntegrationElement } from '../config/integrations.js';
+import { contestoAi } from '../config/aiContesto.js';
 import { prepareAttachments, attachmentsText, pdfToText, EXPORT_FORMATS } from '../config/aiAttachments.js';
 
 const router = express.Router();
@@ -37,6 +38,10 @@ export const PROVIDERS = {
   // "small" è incluso anche nel piano gratuito "Experiment" (il "large" no: errore tier_not_allowed).
   mistral: { provider: 'Mistral', label: 'Mistral', prefix: 'mistral', model: process.env.MISTRAL_MODEL || 'mistral-small-latest' }
 };
+
+// Versione scelta dall'utente in Impostazioni › AI (elemento "<prefix>_model" della sua
+// integrazione), altrimenti quella predefinita qui sopra.
+const modelloUtente = (cfg, el) => el[`${cfg.prefix}_model`] || cfg.model;
 
 function requireProvider(req, res, next) {
   const cfg = PROVIDERS[req.params.provider];
@@ -110,7 +115,7 @@ function promptWithText(prompt, atts) {
 // --- Claude (SDK ufficiale Anthropic) ---
 // fallbacks "default": se la richiesta viene rifiutata dai filtri di sicurezza, l'API la
 // ripete automaticamente su un modello alternativo (server-side, nessuna lista da gestire).
-async function askClaude(apiKey, prompt, atts = []) {
+async function askClaude(apiKey, prompt, atts = [], model = PROVIDERS.claude.model) {
   const client = new Anthropic({ apiKey, timeout: 120000, maxRetries: 1 });
   const binary = atts.filter((a) => a.kind === 'image' || a.kind === 'pdf');
   const content = binary.length
@@ -123,7 +128,7 @@ async function askClaude(apiKey, prompt, atts = []) {
     : promptWithText(prompt, atts);
   try {
     const response = await client.beta.messages.create({
-      model: PROVIDERS.claude.model,
+      model,
       max_tokens: 16000,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
@@ -162,7 +167,7 @@ const CHAT_COMPLETIONS_BASE = { chatgpt: 'https://api.openai.com/v1', mistral: '
 // chiamate restano identiche a prima.
 const TEMPERATURA_JSON = 0.2;
 
-async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}) {
+async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}, model = PROVIDERS[key].model) {
   const cfg = PROVIDERS[key];
   // Mistral non legge i PDF nella chat: se ne estrae il testo (i PDF scansionati, senza
   // testo, restano illeggibili). ChatGPT li riceve come file.
@@ -191,7 +196,7 @@ async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}) 
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: cfg.model,
+      model,
       messages: [{ role: 'user', content }],
       // ChatGPT (gpt-5) accetta solo la temperatura predefinita: lì solo il formato JSON.
       ...(opzioni.json ? { response_format: { type: 'json_object' } } : {}),
@@ -276,12 +281,275 @@ async function verifyGeminiKey(apiKey) {
   }, 'Gemini'), 'Gemini');
 }
 
+// m: modello da usare (scelto dall'utente o di ripiego); senza, quello predefinito.
 const ASK = {
-  chatgpt: (k, p, a, o) => askChatCompletions('chatgpt', k, p, a || [], o || {}),
-  mistral: (k, p, a, o) => askChatCompletions('mistral', k, p, a || [], o || {}),
-  claude: (k, p, a) => askClaude(k, p, a || []),
-  gemini: (k, p, a, o) => askGemini(k, p, null, a || [], o || {})
+  chatgpt: (k, p, a, o, m) => askChatCompletions('chatgpt', k, p, a || [], o || {}, m),
+  mistral: (k, p, a, o, m) => askChatCompletions('mistral', k, p, a || [], o || {}, m),
+  claude: (k, p, a, o, m) => askClaude(k, p, a || [], m),
+  // Col modello predefinito si passa null: askGemini gestisce così il modello ritirato.
+  gemini: (k, p, a, o, m) => askGemini(k, p, m && m !== PROVIDERS.gemini.model ? m : null, a || [], o || {})
 };
+
+// --- Elenco dei modelli disponibili con la chiave dell'utente (menu "Versione") ---
+// Si leggono dal fornitore, così l'elenco resta aggiornato senza toccare il codice; si
+// escludono i modelli che non rispondono a una richiesta di testo (immagini, audio,
+// embedding...) o che non funzionano con l'API usata da Projexa. Restituisce [{ id, nome }].
+async function listChatCompletionsModels(key, apiKey) {
+  const label = PROVIDERS[key].label;
+  const data = await readJson(await callApi(`${CHAT_COMPLETIONS_BASE[key]}/models`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    timeoutMs: 20000
+  }, label), label);
+  const rows = data.data || [];
+  if (key === 'chatgpt') {
+    // Esclusi anche le versioni datate (gpt-5-2025-08-07: uguali all'alias) e i modelli
+    // "-pro" / "deep-research" / "codex", disponibili solo con un'altra API di OpenAI.
+    return rows.map((r) => r.id)
+      .filter((id) => /^(gpt-|o\d|chatgpt-)/i.test(id))
+      .filter((id) => !/(embedding|whisper|tts|dall-e|image|audio|realtime|transcribe|moderation|search|instruct|codex|computer-use|deep-research|-pro\b|-\d{4}-\d{2}-\d{2}$)/i.test(id))
+      .map((id) => ({ id, nome: id }));
+  }
+  return rows
+    .filter((r) => !r.capabilities || r.capabilities.completion_chat)
+    .filter((r) => !r.deprecation && !/(embed|moderation|ocr)/i.test(r.id))
+    .map((r) => ({ id: r.id, nome: r.id }));
+}
+
+async function listClaudeModels(apiKey) {
+  const client = new Anthropic({ apiKey, timeout: 20000, maxRetries: 0 });
+  const out = [];
+  try {
+    for await (const m of client.models.list({ limit: 100 })) {
+      // I Claude 3 non accettano i 16.000 token di risposta chiesti da askClaude.
+      if (!/^claude-3/i.test(m.id)) out.push({ id: m.id, nome: m.display_name || m.id });
+    }
+  } catch (error) {
+    if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) throw httpError(400, 'Chiave API Claude non valida');
+    if (error instanceof Anthropic.APIError) throw httpError(502, `Elenco modelli Claude non disponibile: ${error.message}`);
+    throw error;
+  }
+  return out;
+}
+
+async function listGeminiModels(apiKey) {
+  const data = await readJson(await callApi('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', {
+    headers: { 'x-goog-api-key': apiKey },
+    timeoutMs: 20000
+  }, 'Gemini'), 'Gemini');
+  return (data.models || [])
+    .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+    .map((m) => ({ id: String(m.name || '').replace(/^models\//, ''), nome: m.displayName || '' }))
+    .filter((m) => /^gemini/i.test(m.id) && !/(embedding|tts|live|native-audio)/i.test(m.id))
+    .map((m) => ({ id: m.id, nome: m.nome && m.nome !== m.id ? `${m.nome} (${m.id})` : m.id }));
+}
+
+const LIST_MODELS = {
+  chatgpt: (k) => listChatCompletionsModels('chatgpt', k),
+  mistral: (k) => listChatCompletionsModels('mistral', k),
+  claude: listClaudeModels,
+  gemini: listGeminiModels
+};
+
+// --- Modalità BATCH (recap con «Esecuzione Recap» = Batch, vedi jobs/recapBatch.js) ---
+// Una richiesta sola per batch: il fornitore la elabora entro 24 ore (di solito pochi
+// minuti) a metà prezzo. invia -> id del batch; stato -> { stato: 'in_corso' | 'pronto' |
+// 'fallito', text, errore }.
+const BATCH_ID_RICHIESTA = 'recap';
+
+// Prima riga JSONL di un file di risultati (OpenAI / Mistral).
+async function primaRigaJsonl(base, fileId, apiKey, label) {
+  const res = await callApi(`${base}/files/${encodeURIComponent(fileId)}/content`, {
+    headers: { Authorization: `Bearer ${apiKey}` }, timeoutMs: 60000
+  }, label);
+  if (!res.ok) await readJson(res, label); // trasforma l'errore
+  const riga = (await res.text()).split('\n').find((l) => l.trim());
+  try { return riga ? JSON.parse(riga) : null; } catch { return null; }
+}
+
+async function caricaJsonl(base, apiKey, label, riga) {
+  const form = new FormData();
+  form.append('purpose', 'batch');
+  form.append('file', new Blob([`${JSON.stringify(riga)}\n`], { type: 'application/jsonl' }), 'recap.jsonl');
+  return readJson(await callApi(`${base}/files`, {
+    method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form, timeoutMs: 60000
+  }, label), label);
+}
+
+// Testo / errore da una riga di risultato "chat completions" (OpenAI e Mistral).
+function esitoRigaChat(riga, label) {
+  const body = riga && riga.response && riga.response.body;
+  const testo = body && body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content;
+  if (testo) return { stato: 'pronto', text: String(testo).trim() };
+  const err = (riga && riga.error && (riga.error.message || JSON.stringify(riga.error))) || (body && body.error && body.error.message);
+  return { stato: 'fallito', errore: `${label}: ${err || 'nessun testo nel risultato del batch'}` };
+}
+
+const BATCH = {
+  chatgpt: {
+    async invia(apiKey, model, prompt, opzioni = {}) {
+      const base = CHAT_COMPLETIONS_BASE.chatgpt;
+      const file = await caricaJsonl(base, apiKey, 'ChatGPT', {
+        custom_id: BATCH_ID_RICHIESTA, method: 'POST', url: '/v1/chat/completions',
+        body: { model, messages: [{ role: 'user', content: prompt }], ...(opzioni.json ? { response_format: { type: 'json_object' } } : {}) }
+      });
+      const b = await readJson(await callApi(`${base}/batches`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input_file_id: file.id, endpoint: '/v1/chat/completions', completion_window: '24h' })
+      }, 'ChatGPT'), 'ChatGPT');
+      return b.id;
+    },
+    async stato(apiKey, batchId) {
+      const base = CHAT_COMPLETIONS_BASE.chatgpt;
+      const b = await readJson(await callApi(`${base}/batches/${encodeURIComponent(batchId)}`, {
+        headers: { Authorization: `Bearer ${apiKey}` }, timeoutMs: 30000
+      }, 'ChatGPT'), 'ChatGPT');
+      if (['validating', 'in_progress', 'finalizing', 'cancelling'].includes(b.status)) return { stato: 'in_corso' };
+      if (b.status === 'completed') {
+        const fileId = b.output_file_id || b.error_file_id;
+        if (fileId) return esitoRigaChat(await primaRigaJsonl(base, fileId, apiKey, 'ChatGPT'), 'ChatGPT');
+      }
+      const dett = b.errors && b.errors.data && b.errors.data[0] && b.errors.data[0].message;
+      return { stato: 'fallito', errore: `ChatGPT: batch ${b.status}${dett ? ` (${dett})` : ''}` };
+    }
+  },
+  mistral: {
+    async invia(apiKey, model, prompt, opzioni = {}) {
+      const base = CHAT_COMPLETIONS_BASE.mistral;
+      const file = await caricaJsonl(base, apiKey, 'Mistral', {
+        custom_id: BATCH_ID_RICHIESTA,
+        body: { messages: [{ role: 'user', content: prompt }], ...(opzioni.json ? { response_format: { type: 'json_object' }, temperature: TEMPERATURA_JSON } : {}) }
+      });
+      const b = await readJson(await callApi(`${base}/batch/jobs`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input_files: [file.id], model, endpoint: '/v1/chat/completions' })
+      }, 'Mistral'), 'Mistral');
+      return b.id;
+    },
+    async stato(apiKey, batchId) {
+      const base = CHAT_COMPLETIONS_BASE.mistral;
+      const b = await readJson(await callApi(`${base}/batch/jobs/${encodeURIComponent(batchId)}`, {
+        headers: { Authorization: `Bearer ${apiKey}` }, timeoutMs: 30000
+      }, 'Mistral'), 'Mistral');
+      if (['QUEUED', 'RUNNING', 'CANCELLATION_REQUESTED'].includes(b.status)) return { stato: 'in_corso' };
+      if (b.status === 'SUCCESS') {
+        const fileId = b.output_file || b.error_file;
+        if (fileId) return esitoRigaChat(await primaRigaJsonl(base, fileId, apiKey, 'Mistral'), 'Mistral');
+      }
+      const dett = Array.isArray(b.errors) && b.errors[0] && b.errors[0].message;
+      return { stato: 'fallito', errore: `Mistral: batch ${b.status}${dett ? ` (${dett})` : ''}` };
+    }
+  },
+  claude: {
+    async invia(apiKey, model, prompt) {
+      // Claude non ha un "formato JSON": il prompt chiede già di rispondere solo in JSON.
+      const client = new Anthropic({ apiKey, timeout: 60000, maxRetries: 1 });
+      try {
+        const b = await client.messages.batches.create({
+          requests: [{ custom_id: BATCH_ID_RICHIESTA, params: { model, max_tokens: 16000, messages: [{ role: 'user', content: prompt }] } }]
+        });
+        return b.id;
+      } catch (error) {
+        if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) throw httpError(400, 'Chiave API Claude non valida o senza permessi');
+        if (error instanceof Anthropic.APIError) throw httpError(502, `Claude ${error.status || ''}: ${error.message}`);
+        throw error;
+      }
+    },
+    async stato(apiKey, batchId) {
+      const client = new Anthropic({ apiKey, timeout: 60000, maxRetries: 1 });
+      const b = await client.messages.batches.retrieve(batchId);
+      if (b.processing_status !== 'ended') return { stato: 'in_corso' };
+      for await (const r of await client.messages.batches.results(batchId)) {
+        const res = r.result || {};
+        if (res.type === 'succeeded') {
+          const text = (res.message.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n').trim();
+          return text ? { stato: 'pronto', text } : { stato: 'fallito', errore: 'Claude non ha restituito testo' };
+        }
+        const dett = res.error && res.error.error && res.error.error.message;
+        return { stato: 'fallito', errore: `Claude: richiesta ${res.type || 'non riuscita'}${dett ? ` (${dett})` : ''}` };
+      }
+      return { stato: 'fallito', errore: 'Claude: batch concluso senza risultati' };
+    }
+  },
+  gemini: {
+    async invia(apiKey, model, prompt, opzioni = {}) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:batchGenerateContent`;
+      const generationConfig = opzioni.json ? { generationConfig: { temperature: TEMPERATURA_JSON, responseMimeType: 'application/json' } } : {};
+      const op = await readJson(await callApi(url, {
+        method: 'POST',
+        headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batch: {
+            display_name: 'projexa-recap',
+            input_config: { requests: { requests: [{ request: { contents: [{ role: 'user', parts: [{ text: prompt }] }], ...generationConfig }, metadata: { key: BATCH_ID_RICHIESTA } }] } }
+          }
+        })
+      }, 'Gemini'), 'Gemini');
+      return op.name; // "batches/..."
+    },
+    async stato(apiKey, batchId) {
+      const nome = String(batchId).replace(/^\/+/, '');
+      const b = await readJson(await callApi(`https://generativelanguage.googleapis.com/v1beta/${nome}`, {
+        headers: { 'x-goog-api-key': apiKey }, timeoutMs: 30000
+      }, 'Gemini'), 'Gemini');
+      const stato = String((b.metadata && b.metadata.state) || b.state || '');
+      if (!b.done && !/SUCCEEDED|FAILED|CANCELLED|EXPIRED/.test(stato)) return { stato: 'in_corso' };
+      // Le risposte possono stare in response o in metadata.output (a seconda della versione).
+      const contenitore = (b.response && b.response.inlinedResponses) || (b.metadata && b.metadata.output && b.metadata.output.inlinedResponses) || {};
+      const risposte = Array.isArray(contenitore) ? contenitore : (contenitore.inlinedResponses || []);
+      const r = risposte[0];
+      if (r && r.response) {
+        const parts = ((r.response.candidates || [])[0] || {}).content;
+        const text = ((parts && parts.parts) || []).map((p) => p.text || '').join('').trim();
+        if (text) return { stato: 'pronto', text };
+      }
+      const dett = (r && r.error && r.error.message) || (b.error && b.error.message);
+      return { stato: 'fallito', errore: `Gemini: batch ${stato || 'concluso'} senza testo${dett ? ` (${dett})` : ''}` };
+    }
+  }
+};
+
+// Invia il prompt in modalità batch con la chiave (e la versione del modello) dell'utente.
+// Restituisce { batchId, model, label }.
+export async function inviaBatchAi(userId, providerName, prompt, opzioni = {}) {
+  const key = String(providerName || '').trim().toLowerCase();
+  const cfg = PROVIDERS[key];
+  if (!cfg) throw httpError(400, `L'AI «${providerName}» non supporta la modalità Batch`);
+  const el = await getIntegration(userId, cfg.provider);
+  const apiKey = el[`${cfg.prefix}_api_key`];
+  if (!apiKey) throw httpError(428, `${cfg.label} non collegato: attivalo da Impostazioni › AI`);
+  const model = modelloUtente(cfg, el);
+  return { batchId: await BATCH[key].invia(apiKey, model, prompt, opzioni), model, label: cfg.label };
+}
+
+export async function statoBatchAi(userId, providerName, batchId) {
+  const key = String(providerName || '').trim().toLowerCase();
+  const cfg = PROVIDERS[key];
+  if (!cfg) return { stato: 'fallito', errore: `AI «${providerName}» non riconosciuta` };
+  const el = await getIntegration(userId, cfg.provider);
+  const apiKey = el[`${cfg.prefix}_api_key`];
+  if (!apiKey) return { stato: 'fallito', errore: `${cfg.label} scollegato: chiave API non più disponibile` };
+  return { ...(await BATCH[key].stato(apiKey, batchId)), label: cfg.label };
+}
+
+// AI con chiave collegata dall'utente (per la scelta "Chiedi sempre" del recap): [{ nome, label }].
+export async function aiCollegate(userId) {
+  const out = [];
+  for (const key of Object.keys(PROVIDERS)) {
+    const cfg = PROVIDERS[key];
+    const el = await getIntegration(userId, cfg.provider);
+    if (el[`${cfg.prefix}_api_key`]) out.push({ nome: cfg.provider, label: cfg.label });
+  }
+  return out;
+}
+
+async function modelliDisponibili(key, apiKey) {
+  const visti = new Set();
+  return (await LIST_MODELS[key](apiKey))
+    .filter((m) => m.id && !visti.has(m.id) && visti.add(m.id))
+    .sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true }));
+}
 const VERIFY = {
   chatgpt: (k) => verifyChatCompletionsKey('chatgpt', k),
   mistral: (k) => verifyChatCompletionsKey('mistral', k),
@@ -312,7 +580,10 @@ router.get('/status', requireAuth, async (req, res) => {
     for (const key of Object.keys(PROVIDERS)) {
       const cfg = PROVIDERS[key];
       const el = await getIntegration(req.user.user_id, cfg.provider);
-      out[key] = { label: cfg.label, connected: !!el[`${cfg.prefix}_api_key`], enabled: !!enabled[key], model: cfg.model };
+      out[key] = {
+        label: cfg.label, connected: !!el[`${cfg.prefix}_api_key`], enabled: !!enabled[key],
+        model: modelloUtente(cfg, el), modelPredefinito: cfg.model, modelScelto: !!el[`${cfg.prefix}_model`]
+      };
     }
     res.json({ providers: out });
   } catch (error) {
@@ -328,11 +599,60 @@ router.post('/:provider/key', requireAuth, requireProvider, async (req, res) => 
     const apiKey = String((req.body && req.body.api_key) || '').trim();
     if (apiKey.length < 20 || /\s/.test(apiKey)) return res.status(400).json({ error: 'Chiave API non valida' });
     await VERIFY[req.params.provider](apiKey);
-    await saveIntegration(req.user.user_id, cfg.provider, TIPO_INTEGRAZIONE, { [`${cfg.prefix}_api_key`]: apiKey });
+    // Cambiando la chiave si conserva la versione del modello già scelta.
+    const prev = await getIntegration(req.user.user_id, cfg.provider);
+    await saveIntegration(req.user.user_id, cfg.provider, TIPO_INTEGRAZIONE, {
+      [`${cfg.prefix}_api_key`]: apiKey,
+      [`${cfg.prefix}_model`]: prev[`${cfg.prefix}_model`] || undefined
+    });
     console.log(`[AI:${req.params.provider}] ✓ Chiave collegata per l'utente ${req.user.user_id}`);
     res.json({ success: true });
   } catch (error) {
     console.error(`❌ AI_KEY (${req.params.provider}):`, error.message);
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// Menu "Versione" in Impostazioni › AI: modelli disponibili con la chiave dell'utente.
+router.get('/:provider/models', requireAuth, requireProvider, async (req, res) => {
+  const cfg = req.aiProvider;
+  try {
+    const el = await getIntegration(req.user.user_id, cfg.provider);
+    const apiKey = el[`${cfg.prefix}_api_key`];
+    if (!apiKey) return res.status(428).json({ error: `${cfg.label} non collegato: collega prima la chiave API` });
+    res.json({
+      models: await modelliDisponibili(req.params.provider, apiKey),
+      selected: el[`${cfg.prefix}_model`] || '',
+      predefinito: cfg.model
+    });
+  } catch (error) {
+    console.error(`❌ AI_MODELS (${req.params.provider}):`, error.message);
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// Salva la versione scelta; model vuoto = torna a quella predefinita di Projexa.
+router.post('/:provider/model', requireAuth, requireProvider, async (req, res) => {
+  const cfg = req.aiProvider;
+  const elemento = `${cfg.prefix}_model`;
+  try {
+    const model = String((req.body && req.body.model) || '').trim();
+    const el = await getIntegration(req.user.user_id, cfg.provider);
+    const apiKey = el[`${cfg.prefix}_api_key`];
+    if (!apiKey) return res.status(428).json({ error: `${cfg.label} non collegato: collega prima la chiave API` });
+    if (!model) {
+      await deleteIntegrationElement(req.user.user_id, cfg.provider, elemento);
+      return res.json({ success: true, model: cfg.model });
+    }
+    const disponibili = await modelliDisponibili(req.params.provider, apiKey);
+    if (!disponibili.some((m) => m.id === model)) {
+      return res.status(400).json({ error: `Il modello «${model.slice(0, 100)}» non è disponibile con la tua chiave ${cfg.label}` });
+    }
+    await updateIntegrationElements(req.user.user_id, cfg.provider, TIPO_INTEGRAZIONE, { [elemento]: model });
+    console.log(`[AI:${req.params.provider}] Versione ${model} scelta dall'utente ${req.user.user_id}`);
+    res.json({ success: true, model });
+  } catch (error) {
+    console.error(`❌ AI_MODEL (${req.params.provider}):`, error.message);
     res.status(error.status || 500).json({ error: error.message });
   }
 });
@@ -523,8 +843,8 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
 
     const key = req.params.provider;
     const { result, model } = await withAiRetry(
-      (m) => (m === cfg.model ? ASK[key](apiKey, prompt, atts) : askGemini(apiKey, prompt, m, atts)),
-      { label: cfg.label, model: cfg.model, fallbacks: key === 'gemini' ? geminiFallbackModels() : [], profile: 'interactive' }
+      (m) => ASK[key](apiKey, prompt, atts, {}, m),
+      { label: cfg.label, model: modelloUtente(cfg, el), fallbacks: key === 'gemini' ? geminiFallbackModels() : [], profile: 'interactive' }
     );
     res.json({
       provider: key, model, text: result.text, files: result.files || [], truncated: !!result.truncated,
@@ -545,6 +865,10 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
 // Usa la chiave API collegata dall'utente in Impostazioni › AI. Restituisce { text, label, model }.
 // opzioni: { json: true } per le risposte strutturate (vedi TEMPERATURA_JSON).
 export async function askAiProvider(userId, providerName, prompt, opzioni = {}) {
+  // Richiesta rigiocata da un "lavoro AI" in modalità Batch (jobs/aiLavori.js): la risposta
+  // arriva dalla Batch API del fornitore (metà prezzo, entro 24 ore).
+  const lavoro = contestoAi.getStore();
+  if (lavoro && lavoro.attendiBatch) return lavoro.attendiBatch(providerName, prompt, opzioni);
   const key = String(providerName || '').trim().toLowerCase();
   if (key === 'copilot') throw httpError(400, 'Copilot non è disponibile per il recap: scegli un\'altra AI');
   const cfg = PROVIDERS[key];
@@ -553,8 +877,8 @@ export async function askAiProvider(userId, providerName, prompt, opzioni = {}) 
   const apiKey = el[`${cfg.prefix}_api_key`];
   if (!apiKey) throw httpError(428, `${cfg.label} non collegato: attivalo da Impostazioni › AI`);
   const { result, model } = await withAiRetry(
-    (m) => (m === cfg.model ? ASK[key](apiKey, prompt, [], opzioni) : askGemini(apiKey, prompt, m, [], opzioni)),
-    { label: cfg.label, model: cfg.model, fallbacks: key === 'gemini' ? geminiFallbackModels() : [], profile: 'background' }
+    (m) => ASK[key](apiKey, prompt, [], opzioni, m),
+    { label: cfg.label, model: modelloUtente(cfg, el), fallbacks: key === 'gemini' ? geminiFallbackModels() : [], profile: 'background' }
   );
   return { text: result.text, label: cfg.label, model };
 }

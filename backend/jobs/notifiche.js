@@ -285,6 +285,24 @@ export async function notificheNuoviMySupport(righe) {
 }
 
 // ----------------------------------------------------------------------------
+// LAVORI AI IN BATCH (jobs/aiLavori.js): risultato pronto o non riuscito. La campanella
+// mostra «Apri» (tabella ai_lavori, riga_id = id del lavoro) che apre «Risultati AI».
+// ----------------------------------------------------------------------------
+export async function notificaLavoroAi({ tenantId, userId, lavoroId, operazione, titolo, ok, errore }) {
+  try {
+    await inserisci({
+      tenantId, userId, fonte: 'ai',
+      titolo: `${operazione} ${ok ? 'pronto' : 'non riuscito'}${titolo ? `: ${titolo}` : ''}`,
+      messaggio: ok ? 'Richiesta in modalità Batch completata: aprila da «Risultati AI».' : `Richiesta in modalità Batch non riuscita: ${String(errore || '').slice(0, 300)}`,
+      tabella: 'ai_lavori', rigaId: lavoroId
+    });
+  } catch (e) {
+    if (e.code === '42P01') { avvisaTabellaMancante(); return; }
+    console.error(`[NOTIFICHE] Notifica del lavoro AI ${lavoroId} non creata:`, e.message);
+  }
+}
+
+// ----------------------------------------------------------------------------
 // RIUNIONI: trascrizione completata e recap pronto (jobs/meetingTranscription.js, negli
 // stessi punti in cui si registra la riga unica del log). Destinatario: il proprietario
 // della riunione; nel testo l'oggetto, il cliente e il progetto se ci sono.
@@ -303,7 +321,11 @@ export async function notificaRiunione({ tenantId, userId, idCalendar, tipo }) {
     const oggetto = r.oggetto || '(riunione senza titolo)';
     await inserisci({
       tenantId, userId, fonte: 'riunione',
-      titolo: tipo === 'recap' ? `Recap pronto: ${oggetto}` : tipo === 'recap_interno' ? `Recap interno pronto: ${oggetto}` : `Trascrizione completata: ${oggetto}`,
+      titolo: tipo === 'recap' ? `Recap pronto: ${oggetto}`
+        : tipo === 'recap_interno' ? `Recap interno pronto: ${oggetto}`
+        // Recap in modalità Batch non riuscito (jobs/recapBatch.js): si rigenera col pulsante Recap.
+        : tipo === 'recap_fallito' ? `Recap non generato (Batch): ${oggetto}`
+        : `Trascrizione completata: ${oggetto}`,
       messaggio: [
         r.data ? `Riunione del ${r.data.split('-').reverse().join('/')}` : null,
         [cliente ? `Cliente: ${cliente}` : null, progetto ? `Progetto: ${progetto}` : null].filter(Boolean).join(' · ')

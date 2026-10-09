@@ -1970,7 +1970,7 @@
         .notif-item:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(15,23,42,0.08); border-color: #DCE3EC; }
         .notif-item.unread { background: linear-gradient(90deg, color-mix(in srgb, var(--notif-c) 7%, #fff) 0%, #fff 60%); border-color: color-mix(in srgb, var(--notif-c) 30%, #E8EDF3); }
         .notif-item.unread::before { opacity: 1; }
-        .notif-item.jira { --notif-c: #2563EB; } .notif-item.qlik { --notif-c: #059669; } .notif-item.scadenza { --notif-c: #EA580C; } .notif-item.riunione { --notif-c: #7C3AED; }
+        .notif-item.jira { --notif-c: #2563EB; } .notif-item.qlik { --notif-c: #059669; } .notif-item.scadenza { --notif-c: #EA580C; } .notif-item.riunione { --notif-c: #7C3AED; } .notif-item.ai { --notif-c: #0EA5E9; }
         .notif-item input { margin-top: 0.7rem; flex: 0 0 auto; cursor: pointer; width: 16px; height: 16px; accent-color: #3B82F6; }
         .notif-ico { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; font-size: 1rem; color: var(--notif-c); background: color-mix(in srgb, var(--notif-c) 12%, #fff); }
         .notif-body { flex: 1; min-width: 0; }
@@ -3510,6 +3510,21 @@
         .calendar-conn-on { background: #10B981; color: white; }
         .calendar-conn-ics { background: #0078D4; color: white; }
         .calendar-conn-off { background: #FEE2E2; color: #B91C1C; }
+        .calendar-conn-model { background: #EEF2FF; color: #4338CA; }
+        /* Finestra «Risultati AI» (lavori AI in Batch) */
+        .air-item { border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem 0.9rem; margin-bottom: 0.6rem; }
+        .air-item.focus { border-color: #0EA5E9; box-shadow: 0 0 0 3px rgba(14,165,233,0.15); }
+        .air-top { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+        .air-top b { color: var(--dark); }
+        .air-quando { margin-left: auto; font-size: 0.78rem; color: var(--text-muted); }
+        .air-stato { font-size: 0.72rem; font-weight: 700; border-radius: 999px; padding: 0.12rem 0.55rem; }
+        .air-stato.in_corso { background: #FEF3C7; color: #92400E; } .air-stato.pronto { background: #DCFCE7; color: #166534; }
+        .air-stato.errore { background: #FEE2E2; color: #B91C1C; } .air-stato.scaricato { background: #F1F5F9; color: #475569; }
+        .air-azioni { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.55rem; }
+        .air-azioni button { padding: 0.35rem 0.8rem; border-radius: 8px; border: 1px solid var(--border); background: white; cursor: pointer; font-size: 0.82rem; }
+        .air-azioni button.primario { background: #0EA5E9; border-color: #0EA5E9; color: white; font-weight: 600; }
+        .air-testo { white-space: pre-wrap; background: #F8FAFC; border-radius: 8px; padding: 0.7rem 0.85rem; margin-top: 0.55rem; font-size: 0.86rem; max-height: 320px; overflow: auto; }
+        .air-nota { font-size: 0.82rem; color: var(--text-muted); margin-top: 0.35rem; }
 
         /* Trascrizione / Recap: lente se su rec_meeting il testo è presente */
         .meeting-status {
@@ -3851,6 +3866,8 @@
             <li id="navAi_claude" class="nav-ai" style="display: none;"><a href="#" data-ai-open="claude" title="Claude"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 2h2l.6 6.2 3.6-5.1 1.6 1.2-3.2 5.4 5.8-2.4.7 1.9-6 1.9 6 1.3-.4 2-6.1-.8 4.9 3.8-1.3 1.6-5-3.9 1.3 6.2-2 .5-1.9-6-1.9 6-2-.5 1.3-6.2-5 3.9-1.3-1.6 4.9-3.8-6.1.8-.4-2 6-1.3-6-1.9.7-1.9 5.8 2.4L5.2 4.3l1.6-1.2 3.6 5.1L11 2Z"/></svg> <span>Claude</span></a></li>
             <li id="navAi_gemini" class="nav-ai" style="display: none;"><a href="#" data-ai-open="gemini" title="Gemini"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.6 5.3 4.7 9.4 10 10-5.3.6-9.4 4.7-10 10-.6-5.3-4.7-9.4-10-10 5.3-.6 9.4-4.7 10-10Z"/></svg> <span>Gemini</span></a></li>
             <li id="navAi_mistral" class="nav-ai" style="display: none;"><a href="#" data-ai-open="mistral" title="Mistral"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h4v4H3V3Zm14 0h4v4h-4V3ZM3 7h4v4H3V7Zm4 0h4v4H7V7Zm6 0h4v4h-4V7Zm4 0h4v4h-4V7ZM3 11h4v4H3v-4Zm6 0h6v4H9v-4Zm8 0h4v4h-4v-4ZM3 15h4v4H3v-4Zm14 0h4v4h-4v-4ZM1 19h8v2H1v-2Zm14 0h8v2h-8v-2Z"/></svg> <span>Mistral</span></a></li>
+            <!-- Risultati delle funzioni AI eseguite in modalità Batch (file da scaricare, testi, dossier...) -->
+            <li id="navAiRisultati"><a href="#" id="navAiRisultatiLink" title="Risultati delle richieste AI in modalità Batch"><i class="fas fa-inbox"></i> <span>Risultati AI</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
             <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 3 3.8 3 6v12c0 2.2 3.5 4 9 4s9-1.8 9-4V6c0-2.2-3.5-4-9-4Zm0 2c4.6 0 7 1.4 7 2s-2.4 2-7 2-7-1.4-7-2 2.4-2 7-2Zm0 16c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V18c0 .6-2.4 2-7 2Zm0-5c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V13c0 .6-2.4 2-7 2Z"/></svg> <span>Database</span></a></li>
             <!-- Monitor (schede Monitor VM, Schedulazioni, Log): admin del tenant PROJEXA, oppure in sola
@@ -6373,6 +6390,10 @@
                 return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
             };
             const dash = (v) => (v == null || String(v).trim() === '' ? '—' : String(v).trim());
+            // Impostazioni › AI › «AI Email attività» / «Esecuzione Email attività».
+            let sc;
+            try { sc = await ProjexaAi.scegli('email_attivita', { apiUrl: API_URL, headers: getAuthHeaders }); } catch (e) { showNotification(e.message, 'info'); return; }
+            if (!sc) return;
             const kind = calendarDefaultProvider === 'google' ? 'google' : 'mailto';
             // Gmail: la scheda si apre subito (dentro il clic), altrimenti dopo l'attesa dell'AI
             // il browser la bloccherebbe come popup; l'indirizzo si imposta a testo pronto.
@@ -6391,6 +6412,7 @@
                     method: 'POST',
                     headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                        ...sc, _titolo: name, _extra: { to },
                         nominativo: name,
                         tasks: tasks.map(t => ({
                             titolo: t.titile || t.title || '',
@@ -6402,6 +6424,12 @@
                     })
                 });
                 const x = await r.json().catch(() => ({}));
+                if (r.status === 202) {
+                    // Batch: niente email adesso; testo e pulsante «Apri email» in «Risultati AI».
+                    if (tab && !tab.closed) tab.close();
+                    showNotification(x.messaggio || 'Email inviata all\'AI in modalità Batch', 'info');
+                    return;
+                }
                 if (!r.ok) throw new Error(x.error || `Errore ${r.status}`);
                 body = String(x.testo || '').replace(/\r\n?/g, '\n').trim();
                 // Prima riga "Oggetto: ..." (come nel recap): diventa l'oggetto dell'email.
@@ -8425,9 +8453,72 @@
         }
 
         const serverRecapIcon = '<i class="fas fa-hourglass-half meeting-queued" title="Recap Projexa in preparazione sul server: può richiedere diversi minuti, anche a pagina chiusa"></i>';
+        const batchRecapIcon = '<i class="fas fa-hourglass-half meeting-queued" title="Recap in modalità Batch: arriva entro 24 ore (di solito pochi minuti), anche a pagina chiusa"></i>';
+
+        // «Chiedi sempre» in Impostazioni › AI (AI generazione e-mail recap / Esecuzione Recap):
+        // prima di partire si chiede AI e/o esecuzione. Risolve { ai, esecuzione }, oppure null
+        // se l'utente annulla. Senza "Chiedi sempre" risolve subito {} (si usano le impostazioni).
+        async function askRecapChoices() {
+            const res = await fetch(`${API_URL}/calendar/meetings/managed/recap-opzioni`, { headers: calendarAuthHeaders() });
+            const opz = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(opz.error || `Errore ${res.status}`);
+            if (!opz.chiediAi && !opz.chiediEsecuzione) return {};
+            if (opz.chiediAi && !(opz.aiDisponibili || []).length) throw new Error('Nessuna AI disponibile: collega una chiave in Impostazioni › AI');
+            return new Promise((resolve) => {
+                const modal = document.getElementById('recapChoiceModal');
+                const aiRow = document.getElementById('recapChoiceAiRow');
+                const aiSel = document.getElementById('recapChoiceAi');
+                const esRow = document.getElementById('recapChoiceEsRow');
+                const esNote = document.getElementById('recapChoiceEsNote');
+                const ok = document.getElementById('recapChoiceConfirm');
+                const cancel = document.getElementById('recapChoiceCancel');
+                const lista = opz.aiDisponibili || [];
+                aiRow.style.display = opz.chiediAi ? '' : 'none';
+                aiSel.innerHTML = lista.map((a) => `<option value="${escapeHtml(a.nome)}">${escapeHtml(a.label)}</option>`).join('');
+                const esRadio = () => modal.querySelector('input[name="recapChoiceEs"]:checked');
+                // Il Batch serve solo alle AI con chiave: con Recap Projexa (gratuito) non si chiede.
+                const aggiorna = () => {
+                    const scelta = opz.chiediAi ? lista.find((a) => a.nome === aiSel.value) : { batch: !/^recap projexa/i.test(opz.ai || '') };
+                    const conBatch = !!(scelta && scelta.batch);
+                    esRow.style.display = opz.chiediEsecuzione && conBatch ? '' : 'none';
+                    esNote.style.display = opz.chiediEsecuzione && !conBatch ? '' : 'none';
+                };
+                aiSel.onchange = aggiorna;
+                const immediato = modal.querySelector('input[name="recapChoiceEs"][value="immediato"]');
+                if (immediato) immediato.checked = true;
+                aggiorna();
+                const close = (answer) => {
+                    modal.classList.remove('open');
+                    ok.removeEventListener('click', onOk);
+                    cancel.removeEventListener('click', onCancel);
+                    modal.removeEventListener('click', onBackdrop);
+                    resolve(answer);
+                };
+                const onOk = () => {
+                    const out = {};
+                    if (opz.chiediAi) out.ai = aiSel.value;
+                    if (opz.chiediEsecuzione) out.esecuzione = esRow.style.display === 'none' ? 'immediato' : ((esRadio() && esRadio().value) || 'immediato');
+                    close(out);
+                };
+                const onCancel = () => close(null);
+                const onBackdrop = (e) => { if (e.target === modal) close(null); };
+                ok.addEventListener('click', onOk);
+                cancel.addEventListener('click', onCancel);
+                modal.addEventListener('click', onBackdrop);
+                modal.classList.add('open');
+            });
+        }
 
         async function startRecap(eventId, title) {
             if (!eventId || manualRecapRunning.has(eventId)) return;
+            let scelte;
+            try {
+                scelte = await askRecapChoices();
+            } catch (e) {
+                showNotification('Recap non generato: ' + ((e && e.message) || String(e)), 'info');
+                return;
+            }
+            if (!scelte) return; // annullato
             manualRecapRunning.add(eventId);
             document.querySelectorAll(`.meeting-genrecap-btn[data-event-id="${CSS.escape(eventId)}"]`).forEach((b) => {
                 b.disabled = true;
@@ -8437,11 +8528,12 @@
                 const res = await fetch(`${API_URL}/calendar/meetings/managed/recap`, {
                     method: 'POST',
                     headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id_calendar: eventId })
+                    body: JSON.stringify({ id_calendar: eventId, ...scelte })
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
-                if (data.queued) showNotification('Recap Projexa in preparazione sul server: può richiedere diversi minuti. Riceverai l\'avviso "Recap pronto".', 'info');
+                if (data.batch) showNotification(`Recap inviato a ${data.provider} in modalità Batch (costo dimezzato): arriva entro 24 ore, di solito in pochi minuti. Riceverai l'avviso "Recap pronto".`, 'info');
+                else if (data.queued) showNotification('Recap Projexa in preparazione sul server: può richiedere diversi minuti. Riceverai l\'avviso "Recap pronto".', 'info');
                 else showRecapReady(eventId, title, data.provider);
             } catch (e) {
                 showNotification('Recap non generato: ' + ((e && e.message) || String(e)), 'info');
@@ -8453,6 +8545,144 @@
                 refreshMeetingStatuses(); // sparisce il pulsante, compare la lente in "Recap"
             }
         }
+
+        // === RISULTATI AI: richieste delle funzioni AI eseguite in modalità Batch (jobs/aiLavori.js) ===
+        // File (Kick-off, Offerta, Word dei documenti PM): «Scarica», poi il server lo cancella.
+        // Dati: testo con Copia / Apri email, oppure il pulsante che apre la pagina della funzione.
+        const airDettagli = new Map();
+        const airQuando = (v) => (v ? new Date(v).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }) : '');
+        const AIR_STATI = { in_corso: 'In attesa dell\'AI', pronto: 'Pronto', errore: 'Non riuscito', scaricato: 'Scaricato' };
+
+        async function apriRisultatiAi(focusId) {
+            const modal = document.getElementById('aiRisultatiModal');
+            const body = document.getElementById('aiRisultatiBody');
+            modal.classList.add('open');
+            body.innerHTML = '<div class="air-nota"><i class="fas fa-spinner fa-spin"></i> Carico…</div>';
+            try {
+                const r = await fetch(`${API_URL}/ai-lavori`, { headers: getAuthHeaders() });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                const lavori = d.lavori || [];
+                if (!lavori.length) { body.innerHTML = '<div class="air-nota">Nessuna richiesta in modalità Batch negli ultimi 7 giorni. Le funzioni AI con «Esecuzione» = Batch (Impostazioni › AI) mettono qui i loro risultati.</div>'; return; }
+                body.innerHTML = lavori.map((l) => `<div class="air-item${l.id === focusId ? ' focus' : ''}" data-id="${escapeHtml(l.id)}">
+                    <div class="air-top"><span class="air-stato ${escapeHtml(l.stato)}">${escapeHtml(AIR_STATI[l.stato] || l.stato)}</span>
+                        <b>${escapeHtml(l.etichetta)}</b>${l.titolo ? `<span>· ${escapeHtml(l.titolo)}</span>` : ''}
+                        <span class="air-quando">${escapeHtml(l.provider)} · ${escapeHtml(airQuando(l.creato))}${l.concluso ? ` → ${escapeHtml(airQuando(l.concluso))}` : ''}</span></div>
+                    <div class="air-dett"></div>
+                    <div class="air-azioni"></div></div>`).join('');
+                lavori.forEach((l) => airDisegna(body.querySelector(`.air-item[data-id="${CSS.escape(l.id)}"]`), l));
+                const f = focusId && body.querySelector(`.air-item[data-id="${CSS.escape(focusId)}"]`);
+                if (f) f.scrollIntoView({ block: 'center' });
+            } catch (e) {
+                body.innerHTML = `<div class="air-nota" style="color:#B91C1C">${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        async function airDettaglio(id) {
+            if (airDettagli.has(id)) return airDettagli.get(id);
+            const r = await fetch(`${API_URL}/ai-lavori/${encodeURIComponent(id)}`, { headers: getAuthHeaders() });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+            airDettagli.set(id, d);
+            return d;
+        }
+
+        async function airDisegna(el, l) {
+            const dett = el.querySelector('.air-dett');
+            const az = el.querySelector('.air-azioni');
+            const bottoni = [];
+            if (l.stato === 'in_corso') dett.innerHTML = '<div class="air-nota"><i class="fas fa-hourglass-half"></i> L\'AI sta elaborando la richiesta (entro 24 ore, di solito pochi minuti). Ricevi la notifica quando è pronta.</div>';
+            if (l.stato === 'errore') dett.innerHTML = `<div class="air-nota" style="color:#B91C1C">${escapeHtml(l.errore)}</div>`;
+            if (l.stato === 'scaricato') dett.innerHTML = '<div class="air-nota">File già scaricato: è stato cancellato dal server.</div>';
+            if (l.stato === 'pronto' && l.file) {
+                dett.innerHTML = `<div class="air-nota"><i class="fas fa-file"></i> ${escapeHtml(l.fileNome || 'File pronto')} · dopo il download viene cancellato dal server.</div>`;
+                bottoni.push(['<i class="fas fa-download"></i> Scarica', 'primario', () => airScarica(l)]);
+            } else if (l.stato === 'pronto') {
+                try {
+                    const d = await airDettaglio(l.id);
+                    const ris = d.risultato || {};
+                    const testoBox = (t) => `<div class="air-testo">${escapeHtml(t || '')}</div>`;
+                    const copia = (t) => ['<i class="fas fa-copy"></i> Copia', '', async () => { await navigator.clipboard.writeText(t || ''); showNotification('Testo copiato', 'success'); }];
+                    if (l.operazione === 'email_attivita') {
+                        dett.innerHTML = testoBox(ris.testo);
+                        bottoni.push(['<i class="fas fa-envelope"></i> Apri email', 'primario', () => airApriEmail(ris.testo, (d.richiesta.extra && d.richiesta.extra.to) || [])], copia(ris.testo));
+                    } else if (l.operazione === 'pm_chiedi') {
+                        dett.innerHTML = `<div class="air-nota"><b>Domanda:</b> ${escapeHtml(ris.domanda || (d.richiesta.body && d.richiesta.body.domanda) || '')}</div>${testoBox(ris.risposta)}<div class="air-nota">${escapeHtml(ris.ai || '')}</div>`;
+                        bottoni.push(copia(ris.risposta));
+                    } else if (l.operazione === 'pm_briefing') {
+                        dett.innerHTML = `${testoBox(ris.briefing)}<div class="air-nota">${escapeHtml(ris.ai || '')}</div>`;
+                        bottoni.push(copia(ris.briefing));
+                    } else if (l.operazione === 'dossier') {
+                        bottoni.push(['<i class="fas fa-folder-open"></i> Apri dossier', 'primario', () => window.open(`dossier-cliente.html?lavoro=${encodeURIComponent(l.id)}`, '_blank')]);
+                    } else if (l.operazione === 'pm_documento') {
+                        bottoni.push(['<i class="fas fa-file-lines"></i> Apri documento', 'primario', () => window.open(`pm-documento.html?${new URLSearchParams({ lavoro: l.id, tipo: (d.richiesta.query && d.richiesta.query.tipo) || 'status' })}`, '_blank')]);
+                    } else if (l.operazione === 'pm_raid') {
+                        const pid = (ris.progetto && ris.progetto.id) || '';
+                        dett.innerHTML = `<div class="air-nota">${escapeHtml(String((ris.elementi || []).length))} proposte da rivedere e salvare nel Cruscotto PM.</div>`;
+                        bottoni.push(['<i class="fas fa-list-check"></i> Apri le proposte', 'primario', () => window.open(`pm.html?${new URLSearchParams({ projectId: pid, tab: 'raid', risultato: l.id })}`, '_blank')]);
+                    }
+                } catch (e) { dett.innerHTML = `<div class="air-nota" style="color:#B91C1C">${escapeHtml(e.message)}</div>`; }
+            }
+            bottoni.push(['<i class="fas fa-trash"></i> Elimina', '', () => airElimina(l)]);
+            az.innerHTML = '';
+            bottoni.forEach(([html, cls, fn]) => {
+                const b = document.createElement('button');
+                b.type = 'button'; b.innerHTML = html; if (cls) b.className = cls;
+                b.addEventListener('click', fn);
+                az.appendChild(b);
+            });
+        }
+
+        async function airScarica(l) {
+            try {
+                const r = await fetch(`${API_URL}/ai-lavori/${encodeURIComponent(l.id)}/file`, { headers: getAuthHeaders() });
+                if (!r.ok) { const x = await r.json().catch(() => ({})); throw new Error(x.error || `Errore ${r.status}`); }
+                const m = /filename\*=UTF-8''([^;]+)/i.exec(r.headers.get('Content-Disposition') || '');
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(await r.blob());
+                a.download = m ? decodeURIComponent(m[1]) : (l.fileNome || 'risultato');
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+                showNotification('File scaricato: è stato cancellato dal server', 'success');
+            } catch (e) { showNotification('Download non riuscito: ' + e.message, 'info'); }
+            apriRisultatiAi(l.id);
+        }
+
+        async function airElimina(l) {
+            if (!confirm(`Eliminare «${l.etichetta}${l.titolo ? ` · ${l.titolo}` : ''}»?${l.stato === 'in_corso' ? ' La richiesta è ancora in corso: il risultato andrà perso.' : ''}`)) return;
+            try {
+                const r = await fetch(`${API_URL}/ai-lavori/${encodeURIComponent(l.id)}`, { method: 'DELETE', headers: getAuthHeaders() });
+                if (!r.ok) { const x = await r.json().catch(() => ({})); throw new Error(x.error || `Errore ${r.status}`); }
+                airDettagli.delete(l.id);
+            } catch (e) { showNotification(e.message, 'info'); }
+            apriRisultatiAi();
+        }
+
+        // Email «Attività a tuo carico» pronta (Batch): stessa apertura del pulsante della To-Do.
+        function airApriEmail(testo, to) {
+            let body = String(testo || '').replace(/\r\n?/g, '\n').trim();
+            let subject = 'Attività a tuo carico';
+            const subj = /^oggetto\s*:\s*(.+)\n+/i.exec(body);
+            if (subj) { subject = subj[1].trim() || subject; body = body.slice(subj[0].length).trim(); }
+            const kind = calendarDefaultProvider === 'google' ? 'google' : 'mailto';
+            const build = (b) => kind === 'google'
+                ? `https://mail.google.com/mail/?view=cm&fs=1${to.length ? `&to=${encodeURIComponent(to.join(','))}` : ''}&su=${encodeURIComponent(subject)}${b ? `&body=${encodeURIComponent(b)}` : ''}`
+                : `mailto:${to.map(encodeURIComponent).join(';')}?subject=${encodeURIComponent(subject)}${b ? `&body=${encodeURIComponent(b.replace(/\n/g, '\r\n'))}` : ''}`;
+            let url = build(body);
+            if (url.length > EMAIL_URL_MAX[kind]) {
+                url = build('');
+                if (navigator.clipboard) navigator.clipboard.writeText(body).catch(() => {});
+                showNotification('Testo lungo: è stato copiato negli appunti, incollalo nell\'email con Ctrl+V', 'info');
+            }
+            if (kind === 'mailto') window.location.href = url;
+            else window.open(url, '_blank', 'noopener');
+        }
+
+        // Delega sul documento: la finestra è definita più in basso nella pagina.
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('#navAiRisultatiLink')) { e.preventDefault(); apriRisultatiAi(); return; }
+            if (e.target.closest('#aiRisultatiClose') || e.target.id === 'aiRisultatiModal') document.getElementById('aiRisultatiModal').classList.remove('open');
+        });
 
         function runManualRecap(btn) {
             return startRecap(btn.dataset.eventId, btn.closest('.meeting-card')?.dataset.title);
@@ -8518,7 +8748,7 @@
                     // durante una generazione in corso il pulsante "Recap…" non va sovrascritto
                     if (!manualRecapRunning.has(ev.id)) {
                         const canRecap = m && m.has_trascrizione && !m.has_recap && !m.pending && !recording;
-                        setStatusCell(row, 'meeting-status-genrecap', m && m.recap_running && !m.has_recap ? serverRecapIcon : (canRecap ? manualRecapButton(ev.id) : ''));
+                        setStatusCell(row, 'meeting-status-genrecap', m && m.recap_running && !m.has_recap ? (m.recap_batch ? batchRecapIcon : serverRecapIcon) : (canRecap ? manualRecapButton(ev.id) : ''));
                     }
                     const queued = m && m.pending > 0
                         ? `<i class="fas fa-hourglass-half meeting-queued" title="Trascrizione in corso sul server: ${m.pending} blocc${m.pending === 1 ? 'o' : 'hi'} in coda"></i>`
@@ -9232,6 +9462,8 @@
                 miDisegna();
                 // Generazione in corso: si ricontrolla ogni 6 secondi finché la scheda è aperta.
                 if (d.stato === 'in_corso' && document.getElementById('mtInterno').style.display !== 'none') mi.timer = setTimeout(() => miCarica(idCal), 6000);
+                // In attesa del Batch: ricontrollo ogni 30 secondi (a scheda chiusa ci pensa il server).
+                if (d.stato === 'batch' && document.getElementById('mtInterno').style.display !== 'none') mi.timer = setTimeout(() => miCarica(idCal), 30000);
             } catch (e) {
                 pane.innerHTML = `<div class="mi-avviso">${escapeHtml(e.message)}</div>`;
             }
@@ -9245,6 +9477,7 @@
             const lento = d.ai && d.ai.locale;
             const STATI = {
                 in_corso: `<i class="fas fa-spinner fa-spin"></i> Recap interno in preparazione${lento ? ' con Recap Projexa (lento): può richiedere molti minuti, puoi chiudere la finestra e ricevi la notifica' : '…'}`,
+                batch: '<i class="fas fa-hourglass-half"></i> Recap interno inviato in modalità Batch (costo dimezzato): arriva entro 24 ore, di solito in pochi minuti. Puoi chiudere la finestra: ricevi la notifica in campanella.',
                 pronto: `Generato il ${escapeHtml(dt(d.il))}${d.ai && d.ai.nome ? ` · AI: ${escapeHtml(d.ai.nome)}` : ''}`,
                 errore: `<span style="color:#B91C1C"><i class="fas fa-triangle-exclamation"></i> Generazione non riuscita: ${escapeHtml(d.errore || '')}</span>`,
                 interrotto: '<span style="color:#B45309"><i class="fas fa-circle-exclamation"></i> Generazione interrotta (riavvio del server): premi Genera di nuovo.</span>'
@@ -9351,12 +9584,16 @@
             const b = document.getElementById('miGenera');
             if (b) b.disabled = true;
             try {
+                // Stesse regole del pulsante Recap: con «Chiedi sempre» si sceglie AI e/o esecuzione.
+                const scelte = await askRecapChoices();
+                if (!scelte) { if (b) b.disabled = false; return; }
                 const r = await fetch(`${API_URL}/recap-interno/genera`, {
                     method: 'POST', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id_calendar: mi.idCal })
+                    body: JSON.stringify({ id_calendar: mi.idCal, ...scelte })
                 });
                 const d = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                if (d.batch) showNotification(`Recap interno inviato a ${d.provider} in modalità Batch: arriva entro 24 ore, di solito in pochi minuti.`, 'info');
                 mi.dirty = false;
                 await miCarica(mi.idCal);
             } catch (err) {
@@ -10728,7 +10965,8 @@
                 const s = aiStatus[el.dataset.aiProvider] || {};
                 const toggle = el.parentElement && el.parentElement.querySelector('.ai-toggle');
                 if (s.connected) {
-                    el.innerHTML = `<span class="calendar-conn-account"><i class="fas fa-check-circle" style="color:#10B981;"></i> chiave API collegata</span>`;
+                    el.innerHTML = `<span class="calendar-conn-account"><i class="fas fa-check-circle" style="color:#10B981;"></i> chiave API collegata</span>`
+                        + `<button type="button" class="calendar-conn-btn calendar-conn-model" data-ai-action="model" data-ai-provider="${el.dataset.aiProvider}" title="Scegli la versione del modello"><i class="fas fa-sliders-h"></i> Versione: ${escapeHtml(s.model || 'predefinita')}</button>`;
                 } else if (toggle && toggle.checked) {
                     el.innerHTML = `<span class="calendar-conn-account">non collegato</span>`
                         + `<button type="button" class="calendar-conn-btn calendar-conn-on" data-ai-action="connect" data-ai-provider="${el.dataset.aiProvider}"><i class="fas fa-key"></i> Collega</button>`;
@@ -10844,7 +11082,81 @@
             }
         });
 
+        // Finestra "Versione": modelli disponibili con la chiave dell'utente (letti dal
+        // fornitore); "Predefinita" = quella scelta da Projexa.
+        async function chooseAiModel(key) {
+            const info = AI_INFO[key];
+            const s = aiStatus[key] || {};
+            const modal = document.getElementById('aiModelModal');
+            const select = document.getElementById('aiModelSelect');
+            const msg = document.getElementById('aiModelError');
+            const ok = document.getElementById('aiModelConfirm');
+            const cancel = document.getElementById('aiModelCancel');
+            document.getElementById('aiModelTitleText').textContent = `Versione di ${info.label}`;
+            select.innerHTML = '<option>Caricamento dei modelli…</option>';
+            select.disabled = true;
+            ok.disabled = true;
+            msg.textContent = '';
+            const close = () => {
+                modal.classList.remove('open');
+                ok.removeEventListener('click', onOk);
+                cancel.removeEventListener('click', close);
+                modal.removeEventListener('click', onBackdrop);
+            };
+            const onOk = async () => {
+                ok.disabled = true;
+                msg.style.color = 'var(--text-muted)';
+                msg.textContent = 'Salvataggio…';
+                try {
+                    const res = await fetch(`${API_URL}/ai/${key}/model`, {
+                        method: 'POST',
+                        headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ model: select.value })
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                    close();
+                    showNotification(`${info.label}: versione ${data.model}`, 'success');
+                    await fetchAiStatus();
+                    renderAiSettingsStatus();
+                } catch (e) {
+                    msg.style.color = '#B91C1C';
+                    msg.textContent = e.message;
+                    ok.disabled = false;
+                }
+            };
+            const onBackdrop = (e) => { if (e.target === modal) close(); };
+            ok.addEventListener('click', onOk);
+            cancel.addEventListener('click', close);
+            modal.addEventListener('click', onBackdrop);
+            modal.classList.add('open');
+            try {
+                const res = await fetch(`${API_URL}/ai/${key}/models`, { headers: calendarAuthHeaders() });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                const opts = [`<option value="">Predefinita di Projexa (${escapeHtml(data.predefinito || s.modelPredefinito || '')})</option>`];
+                const ids = (data.models || []).map((m) => m.id);
+                if (data.selected && !ids.includes(data.selected)) opts.push(`<option value="${escapeHtml(data.selected)}">${escapeHtml(data.selected)} (non più disponibile)</option>`);
+                (data.models || []).forEach((m) => opts.push(`<option value="${escapeHtml(m.id)}">${escapeHtml(m.nome || m.id)}</option>`));
+                select.innerHTML = opts.join('');
+                select.value = data.selected || '';
+                select.disabled = false;
+                ok.disabled = false;
+            } catch (e) {
+                select.innerHTML = '<option>Elenco non disponibile</option>';
+                msg.style.color = '#B91C1C';
+                msg.textContent = e.message;
+            }
+        }
+
         document.addEventListener('click', (e) => {
+            const v = e.target.closest && e.target.closest('[data-ai-action="model"]');
+            if (v) {
+                e.preventDefault();
+                e.stopPropagation();
+                chooseAiModel(v.dataset.aiProvider);
+                return;
+            }
             const b = e.target.closest && e.target.closest('[data-ai-action="connect"]');
             if (b) {
                 e.preventDefault();
@@ -11662,8 +11974,8 @@
             const delBtn = document.getElementById('notifDelBtn');
             const countEl = document.getElementById('notifCount');
             const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines', progetto: 'fas fa-gauge-high' };
-            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione', progetto: 'Progetto' };
+            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines', progetto: 'fas fa-gauge-high', ai: 'fas fa-wand-magic-sparkles' };
+            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione', progetto: 'Progetto', ai: 'AI' };
             let elenco = [];
 
             function mostraConteggio(n) {
@@ -11712,6 +12024,7 @@
                             <span class="notif-when">${esc(quando(n.aggiornata_il || n.creata_il))}</span>
                             ${n.letta ? '' : '<span class="notif-dot" title="Da leggere"></span>'}
                             ${n.tabella === 'tasks' && n.riga_id ? `<button type="button" class="notif-go" data-vai="${esc(n.riga_id)}" title="Apri la To-Do">Vai <i class="fas fa-arrow-right"></i></button>` : ''}
+                            ${n.tabella === 'ai_lavori' && n.riga_id ? `<button type="button" class="notif-go" data-ai-lavoro="${esc(n.riga_id)}" title="Apri in Risultati AI">Apri <i class="fas fa-arrow-right"></i></button>` : ''}
                             ${n.fonte === 'progetto' && n.riga_id ? `<a class="notif-go" href="pm.html?projectId=${encodeURIComponent(n.riga_id)}" title="Apri il Cruscotto PM del progetto" style="text-decoration:none">Vai <i class="fas fa-arrow-right"></i></a>` : ''}
                             ${n.vai ? `<button type="button" class="notif-go" data-vai-dest="${esc(n.id)}" title="${n.vai.projectId ? 'Apri il progetto' : 'Apri il cliente'}${n.vai.fieldId ? ' e la sua griglia' : ''}">Vai <i class="fas fa-arrow-right"></i></button>` : ''}
                         </div>
@@ -11825,6 +12138,15 @@
                         n.letta = true;
                     }
                     if (n && n.vai) apriDestinazione(n.vai).catch(() => showNotification('Impossibile aprire la destinazione', 'info'));
+                    return;
+                }
+                const aiLav = e.target.closest('[data-ai-lavoro]');
+                if (aiLav) {
+                    const item = aiLav.closest('.notif-item');
+                    if (item && item.classList.contains('unread')) {
+                        azione('lette', { ids: [item.dataset.id] }).then(() => aggiornaConteggio()).catch(() => {});
+                    }
+                    apriRisultatiAi(aiLav.dataset.aiLavoro);
                     return;
                 }
                 const vai = e.target.closest('[data-vai]');
@@ -13368,17 +13690,29 @@
         async function koGenera() {
             const gen = document.getElementById('koGenera');
             if (!koFile || gen.disabled) return;
+            // Impostazioni › AI › «AI Slide Kick-Off» / «Esecuzione Kick-Off»: "Chiedi sempre" = finestra di scelta.
+            let sc;
+            try { sc = await ProjexaAi.scegli('kickoff', { apiUrl: API_URL, headers: getAuthHeaders }); } catch (e) { showNotification('Kick-off: ' + e.message, 'info'); return; }
+            if (!sc) return;
             gen.disabled = true;
             gen.classList.add('in-corso');
             gen.innerHTML = '<i class="fas fa-spinner"></i> Generazione…';
             document.getElementById('koFoot').textContent = 'L\'AI prepara le slide e poi le ricontrolla (revisione): può richiedere qualche minuto.';
             document.getElementById('koEsito').innerHTML = '';
             try {
-                const r = await fetch(`${API_URL}/projects/kickoff/genera?projectId=${encodeURIComponent(koProjectId)}`, {
+                const qs = ProjexaAi.inQuery({ projectId: koProjectId }, sc, document.getElementById('koSub')?.textContent || '');
+                const r = await fetch(`${API_URL}/projects/kickoff/genera?${qs}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/octet-stream', ...getAuthHeaders() },
                     body: koFile
                 });
+                if (r.status === 202) {
+                    // Batch: il file arriva in «Risultati AI» con la notifica in campanella.
+                    const x = await r.json().catch(() => ({}));
+                    document.getElementById('koEsito').innerHTML = `<div class="ko-esito"><span class="ko-esito-testo"><i class="fas fa-hourglass-half"></i> ${escapeHtml(x.messaggio || 'Richiesta inviata in Batch')}</span></div>`;
+                    showNotification('Kick-off inviato in modalità Batch', 'info');
+                    return;
+                }
                 if (!r.ok) {
                     const d = await r.json().catch(() => ({}));
                     throw new Error(d.error || (r.status === 413 ? 'Template troppo grande' : `Errore ${r.status}`));
@@ -13532,17 +13866,27 @@
         async function ofGenera() {
             const gen = document.getElementById('ofGenera');
             if (!ofFile || gen.disabled) return;
+            let sc;
+            try { sc = await ProjexaAi.scegli('offerta', { apiUrl: API_URL, headers: getAuthHeaders }); } catch (e) { showNotification('Offerta economica: ' + e.message, 'info'); return; }
+            if (!sc) return;
             gen.disabled = true;
             gen.classList.add('in-corso');
             gen.innerHTML = '<i class="fas fa-spinner"></i> Generazione…';
             document.getElementById('ofFoot').textContent = 'L\'AI compila l\'offerta e poi la ricontrolla (revisione): può richiedere qualche minuto.';
             document.getElementById('ofEsito').innerHTML = '';
             try {
-                const r = await fetch(`${API_URL}/projects/offerta/genera?projectId=${encodeURIComponent(ofProjectId)}`, {
+                const qs = ProjexaAi.inQuery({ projectId: ofProjectId }, sc, document.getElementById('ofSub')?.textContent || '');
+                const r = await fetch(`${API_URL}/projects/offerta/genera?${qs}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/octet-stream', ...getAuthHeaders() },
                     body: ofFile
                 });
+                if (r.status === 202) {
+                    const x = await r.json().catch(() => ({}));
+                    document.getElementById('ofEsito').innerHTML = `<div class="ko-esito"><span class="ko-esito-testo"><i class="fas fa-hourglass-half"></i> ${escapeHtml(x.messaggio || 'Richiesta inviata in Batch')}</span></div>`;
+                    showNotification('Offerta economica inviata in modalità Batch', 'info');
+                    return;
+                }
                 if (!r.ok) {
                     const x = await r.json().catch(() => ({}));
                     throw new Error(x.error || (r.status === 413 ? 'Template troppo grande' : `Errore ${r.status}`));
@@ -20747,6 +21091,55 @@
             </div>
         </div>
     </div>
+    <div id="recapChoiceModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="recapChoiceTitle">
+        <div class="task-modal-card" style="width: min(460px, calc(94vw * var(--ui-zoom-inv, 1)));">
+            <div class="task-modal-header">
+                <h3 id="recapChoiceTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-envelope-open-text" style="color: #0EA5E9;"></i> Genera il recap</h3>
+            </div>
+            <div style="padding: 1.25rem; display: flex; flex-direction: column; gap: 0.9rem;">
+                <div id="recapChoiceAiRow" style="display: flex; flex-direction: column; gap: 0.4rem;">
+                    <label for="recapChoiceAi" style="font-size: 0.9rem; color: var(--dark); font-weight: 600;">AI da usare</label>
+                    <select id="recapChoiceAi" style="padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem;"></select>
+                </div>
+                <div id="recapChoiceEsRow" style="display: flex; flex-direction: column; gap: 0.4rem;">
+                    <span style="font-size: 0.9rem; color: var(--dark); font-weight: 600;">Esecuzione</span>
+                    <label style="font-size: 0.88rem; color: var(--dark); display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;"><input type="radio" name="recapChoiceEs" value="immediato" checked> <span><b>Immediato</b> – il recap è pronto in pochi secondi, al prezzo normale.</span></label>
+                    <label style="font-size: 0.88rem; color: var(--dark); display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;"><input type="radio" name="recapChoiceEs" value="batch"> <span><b>Batch (50% off)</b> – costa la metà, ma arriva entro 24 ore (di solito pochi minuti), anche a pagina chiusa.</span></label>
+                </div>
+                <p id="recapChoiceEsNote" style="margin: 0; font-size: 0.8rem; color: var(--text-muted); display: none;">Recap Projexa è gratuito: parte subito sul server, senza modalità Batch.</p>
+            </div>
+            <div class="task-modal-footer">
+                <button id="recapChoiceCancel" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
+                <button id="recapChoiceConfirm" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #0EA5E9; color: white; font-weight: 600; cursor: pointer;">Genera</button>
+            </div>
+        </div>
+    </div>
+    <div id="aiRisultatiModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="aiRisultatiTitle">
+        <div class="task-modal-card" style="width: min(980px, calc(96vw * var(--ui-zoom-inv, 1))); max-height: calc(92vh * var(--ui-zoom-inv, 1)); display: flex; flex-direction: column;">
+            <div class="task-modal-header">
+                <h3 id="aiRisultatiTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-inbox" style="color: #0EA5E9;"></i> Risultati AI <small style="font-weight:400;color:var(--text-muted);font-size:0.78rem;">richieste in modalità Batch · conservate 7 giorni</small></h3>
+                <button id="aiRisultatiClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="aiRisultatiBody" style="padding: 1rem 1.25rem; overflow: auto; flex: 1;"></div>
+        </div>
+    </div>
+    <div id="aiModelModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="aiModelTitle">
+        <div class="task-modal-card" style="width: min(480px, calc(94vw * var(--ui-zoom-inv, 1)));">
+            <div class="task-modal-header">
+                <h3 id="aiModelTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-sliders-h" style="color: #4338CA;"></i> <span id="aiModelTitleText">Versione AI</span></h3>
+            </div>
+            <div style="padding: 1.25rem; display: flex; flex-direction: column; gap: 0.6rem;">
+                <label for="aiModelSelect" style="font-size: 0.9rem; color: var(--dark); font-weight: 600;">Modello da usare</label>
+                <select id="aiModelSelect" style="padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem;"></select>
+                <p style="margin: 0; font-size: 0.78rem; color: var(--text-muted);">L'elenco mostra i modelli disponibili con la tua chiave API. Vale per tutte le funzioni di Projexa che usano questa AI (finestra AI, recap, Kick-off, Offerta, Dossier...). I modelli più grandi sono più precisi ma più lenti e costosi; le versioni "mini", "small" o "lite" costano meno.</p>
+                <p id="aiModelError" style="margin: 0; font-size: 0.85rem; min-height: 1.1em;"></p>
+            </div>
+            <div class="task-modal-footer">
+                <button id="aiModelCancel" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
+                <button id="aiModelConfirm" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #4338CA; color: white; font-weight: 600; cursor: pointer;">Salva</button>
+            </div>
+        </div>
+    </div>
     <div id="aiChatModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="aiChatTitle">
         <div class="task-modal-card" style="width: min(1520px, calc(96vw * var(--ui-zoom-inv, 1))); max-height: calc(94vh * var(--ui-zoom-inv, 1));">
             <div class="task-modal-header">
@@ -20925,6 +21318,7 @@
             <div class="kpi-modal-body" id="kpiModalBody"></div>
         </div>
     </div>
+    <script src="js/ai-scelta.js"></script>
     <script src="js/privacy.js"></script>
     <script src="js/jira.js"></script>
     <script src="js/integrazioni.js"></script>

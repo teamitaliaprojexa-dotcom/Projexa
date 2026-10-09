@@ -18,8 +18,11 @@ import express from 'express';
 import db from '../config/database.js';
 import { encryptRowForWrite } from '../config/crypto.js';
 import { getPromptFor } from '../config/prompts.js';
-import { askAiProvider, localRecapMode, askOllamaRecap } from './ai.js';
-import { recapSource, recapProviderName, applyCorrections, stripMarkdown, encRec } from '../jobs/meetingTranscription.js';
+import { askAiProvider, localRecapMode, askOllamaRecap, PROVIDERS as AI_PROVIDERS } from './ai.js';
+import {
+  recapSource, recapAiImpostata, recapEsecuzione, isChiediSempre, applyCorrections, stripMarkdown, encRec
+} from '../jobs/meetingTranscription.js';
+import { inviaPromptBatch, controllaRecapBatchUtente } from '../jobs/recapBatch.js';
 import { parseDueDate } from '../jobs/recapTasks.js';
 import { notificaRiunione } from '../jobs/notifiche.js';
 
@@ -153,12 +156,9 @@ async function impostaStato(user, idCalendar, stato, erroreTesto = null) {
   );
 }
 
-// Generazione completa (in background). Le attività già trasformate in task restano; le altre
-// si sostituiscono con quelle nuove.
-async function genera(user, idCalendar) {
+// Dati per il prompt: riunione, trascrizione corretta, persone del team e build(testo) -> prompt.
+async function prepara(user, idCalendar) {
   const m = await riunione(user, idCalendar);
-  const providerName = await recapProviderName(user);
-  if (!providerName) throw errore(400, 'Scegli l\'AI in Impostazioni › AI › «AI generazione e-mail recap»');
   const { transcript, vars, rules } = await recapSource(user, idCalendar);
   const elenco = await persone(user, m);
   const team = elenco.filter((p) => p.team);
@@ -166,12 +166,31 @@ async function genera(user, idCalendar) {
   let tpl = (await getPromptFor('RECAP_INTERNO', user)).testo;
   if (!tpl.includes('{{TRASCRIZIONE}}')) tpl += '\n\nTrascrizione:\n{{TRASCRIZIONE}}';
   const build = (t) => tpl.replace(/\{\{(TRASCRIZIONE|OGGETTO|DATA|UTENTE|TEAM)\}\}/g, (x, k) => (k === 'TRASCRIZIONE' ? t : (varsInt[k] || '')));
+  return { m, transcript, vars, rules, elenco, build };
+}
+
+// Generazione completa (in background) con l'AI indicata. Le attività già trasformate in task
+// restano; le altre si sostituiscono con quelle nuove.
+async function genera(user, idCalendar, providerName) {
+  const p = await prepara(user, idCalendar);
   const r = localRecapMode(providerName) === 'server'
-    ? await askOllamaRecap(async (t) => build(t), transcript, { meeting: true, contesto: vars.OGGETTO })
-    : await askAiProvider(user.user_id, providerName, build(transcript));
-  const testo = applyCorrections(String(r.text || '').trim(), rules).text;
+    ? await askOllamaRecap(async (t) => p.build(t), p.transcript, { meeting: true, contesto: p.vars.OGGETTO })
+    : await askAiProvider(user.user_id, providerName, p.build(p.transcript));
+  await salvaInterno(user, idCalendar, p, r.text, r.label);
+}
+
+// Recap interno in modalità Batch arrivato dall'AI (jobs/recapBatch.js).
+export async function completaRecapInternoBatch(user, idCalendar, testo, label) {
+  await salvaInterno(user, idCalendar, await prepara(user, idCalendar), testo, label);
+}
+export async function erroreRecapInternoBatch(user, idCalendar, messaggio) {
+  await impostaStato(user, idCalendar, 'errore', String(messaggio || 'Batch non riuscito').slice(0, 1000));
+}
+
+async function salvaInterno(user, idCalendar, { m, elenco, rules }, testoAi, label) {
+  const testo = applyCorrections(String(testoAi || '').trim(), rules).text;
   const { sintesi, attivita } = leggiRecapInterno(testo, m.data);
-  if (!sintesi && !attivita.length) throw errore(502, `${r.label} non ha restituito un recap interno leggibile: riprova`);
+  if (!sintesi && !attivita.length) throw errore(502, `${label} non ha restituito un recap interno leggibile: riprova`);
 
   const client = await db.connect();
   try {
@@ -210,7 +229,7 @@ async function genera(user, idCalendar) {
     client.release();
   }
   await notificaRiunione({ tenantId: user.tenant_id, userId: user.user_id, idCalendar, tipo: 'recap_interno' });
-  console.log(`[RECAP INTERNO] ✓ ${attivita.length} attività con ${r.label} per la riunione ${idCalendar}`);
+  console.log(`[RECAP INTERNO] ✓ ${attivita.length} attività con ${label} per la riunione ${idCalendar}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -220,7 +239,9 @@ router.get('/', async (req, res) => {
   try {
     const m = await riunione(req.user, req.query.id_calendar);
     const pronte = await tabellePronte();
-    const ai = await recapProviderName(req.user);
+    // Con «Chiedi sempre» l'AI la sceglie l'utente a ogni generazione: non se ne mostra una.
+    const impostata = await recapAiImpostata(req.user);
+    const ai = isChiediSempre(impostata) ? '' : impostata;
     if (!pronte) return res.json({ tabelle: false, stato: null, attivita: [], riunione: m, ai: { nome: ai, locale: localRecapMode(ai) === 'server' } });
     const r = (await db.query(
       `SELECT recap_interno, recap_interno_stato, recap_interno_il, recap_interno_errore FROM rec_meeting
@@ -228,6 +249,8 @@ router.get('/', async (req, res) => {
       [req.user.tenant_id, req.user.user_id, m.id_calendar]
     )).rows[0] || {};
     let stato = r.recap_interno_stato || null;
+    // In attesa del Batch: si controlla subito presso l'AI (in background).
+    if (stato === 'batch') controllaRecapBatchUtente(req.user);
     // «in corso» rimasto da un riavvio del server: la generazione si è interrotta.
     if (stato === 'in_corso' && !inCorso.has(chiave(req.user, m.id_calendar))) stato = 'interrotto';
     const att = (await db.query(
@@ -256,13 +279,36 @@ router.post('/genera', async (req, res) => {
     await richiedeTabelle();
     const m = await riunione(req.user, req.body && req.body.id_calendar);
     if (!m.ha_trascrizione) throw errore(400, 'La riunione non ha ancora una trascrizione');
-    if (!(await recapProviderName(req.user))) throw errore(400, 'Scegli l\'AI in Impostazioni › AI › «AI generazione e-mail recap»');
+    // Stesse regole del pulsante Recap: con «Chiedi sempre» AI ed esecuzione arrivano dalla
+    // finestra di scelta (body.ai, body.esecuzione).
+    const b = req.body || {};
+    let providerName = await recapAiImpostata(req.user);
+    if (isChiediSempre(providerName)) {
+      providerName = String(b.ai || '').trim();
+      if (!providerName) throw errore(400, 'Scegli l\'AI da usare per il recap interno');
+    }
+    if (!providerName) throw errore(400, 'Scegli l\'AI in Impostazioni › AI › «AI generazione e-mail recap»');
+    const locale = localRecapMode(providerName) === 'server';
+    if (!locale && !AI_PROVIDERS[providerName.toLowerCase()]) throw errore(400, `AI «${providerName}» non utilizzabile per il recap interno`);
+    let esecuzione = await recapEsecuzione(req.user);
+    if (esecuzione === 'chiedi') {
+      esecuzione = String(b.esecuzione || '').trim().toLowerCase();
+      if (!['immediato', 'batch'].includes(esecuzione)) throw errore(400, 'Scegli se eseguire il recap interno Immediato o in Batch');
+    }
     const k = chiave(req.user, m.id_calendar);
     if (inCorso.has(k)) throw errore(409, 'Il recap interno di questa riunione è già in preparazione');
+    const user = { tenant_id: req.user.tenant_id, user_id: req.user.user_id, email: req.user.email, id_roles: req.user.id_roles };
+    // Batch (non per Recap Projexa, già gratuito): metà prezzo, risposta entro 24 ore; la
+    // raccoglie jobs/recapBatch.js (o il controllo all'apertura della scheda).
+    if (esecuzione === 'batch' && !locale) {
+      const p = await prepara(user, m.id_calendar);
+      const r = await inviaPromptBatch(user, m.id_calendar, providerName, p.build(p.transcript), { tipo: 'recap_interno' });
+      await impostaStato(req.user, m.id_calendar, 'batch');
+      return res.status(202).json({ avviato: true, batch: true, provider: r.provider });
+    }
     inCorso.add(k);
     await impostaStato(req.user, m.id_calendar, 'in_corso');
-    const user = { tenant_id: req.user.tenant_id, user_id: req.user.user_id, email: req.user.email, id_roles: req.user.id_roles };
-    genera(user, m.id_calendar)
+    genera(user, m.id_calendar, providerName)
       .catch(async (e) => {
         console.error(`❌ RECAP_INTERNO ${m.id_calendar}:`, e.message);
         await impostaStato(user, m.id_calendar, 'errore', String(e.message || e).slice(0, 1000)).catch(() => {});

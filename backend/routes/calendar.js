@@ -19,12 +19,13 @@ import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
 import {
   encRec, enqueueChunk, enqueueLostNotes, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices,
-  recapProviderName, recapInProgress, loadCorrections, applyCorrections, applyCorrectionsHtml, stripMarkdown, speakerName,
-  copiaTrascrizioneCondivisa
+  recapInProgress, recapBatchInCorso, loadCorrections, applyCorrections, applyCorrectionsHtml, stripMarkdown, speakerName,
+  copiaTrascrizioneCondivisa, recapAiImpostata, recapEsecuzione, isChiediSempre
 } from '../jobs/meetingTranscription.js';
+import { inviaRecapBatch, controllaRecapBatchUtente } from '../jobs/recapBatch.js';
 import { parseRecapActions, parseDueDate, ownerVariants } from '../jobs/recapTasks.js';
 import { encryptRowForWrite } from '../config/crypto.js';
-import { localRecapMode } from './ai.js';
+import { localRecapMode, aiCollegate, PROVIDERS as AI_PROVIDERS } from './ai.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
 import { startLinkState, checkLinkState } from '../config/oauthLinkState.js';
@@ -1071,8 +1072,14 @@ router.post('/meetings/managed/status', requireAuth, async (req, res) => {
     const map = await getManagedMeetings(req.user, ids);
     const pending = await pendingChunks(req.user, ids);
     const recapRunning = await recapInProgress(req.user, ids);
+    const recapBatch = await recapBatchInCorso(req.user, ids);
+    // Recap Batch in attesa: si controllano subito presso l'AI (in background); il recap
+    // pronto compare al prossimo aggiornamento della lista.
+    if (recapBatch.size) controllaRecapBatchUtente(req.user);
     const out = {};
-    for (const [id, row] of map) out[id] = { ...row, pending: pending.get(id) || 0, recap_running: recapRunning.has(id) };
+    for (const [id, row] of map) {
+      out[id] = { ...row, pending: pending.get(id) || 0, recap_running: recapRunning.has(id), recap_batch: recapBatch.has(id) };
+    }
     res.json({ meetings: out });
   } catch (error) {
     console.error('❌ REC_MEETING_STATUS:', error.message);
@@ -1290,18 +1297,60 @@ router.post('/meetings/managed/finalize', requireAuth, async (req, res) => {
 // Pulsante azzurro "Recap" della dashboard. Il recap automatico a fine registrazione lo
 // genera invece la coda (jobs/meetingTranscription.js). Stessa logica: AI scelta in
 // Impostazioni › AI, prompt backend/prompts/recap_email.txt.
+// Cosa chiedere premendo il pulsante: AI (se «AI generazione e-mail recap» = "Chiedi sempre",
+// elenco delle AI con chiave collegata + Recap Projexa) ed esecuzione (se «Esecuzione Recap» =
+// "Chiedi Sempre").
+router.get('/meetings/managed/recap-opzioni', requireAuth, async (req, res) => {
+  try {
+    const ai = await recapAiImpostata(req.user);
+    const esecuzione = await recapEsecuzione(req.user);
+    const chiediAi = isChiediSempre(ai);
+    res.json({
+      ai, chiediAi, esecuzione, chiediEsecuzione: esecuzione === 'chiedi',
+      aiDisponibili: chiediAi
+        ? [...(await aiCollegate(req.user.user_id)).map((x) => ({ nome: x.nome, label: x.label, batch: true })),
+          { nome: 'Recap Projexa (lento)', label: 'Recap Projexa (lento, gratuito)', batch: false }]
+        : []
+    });
+  } catch (error) {
+    console.error('❌ REC_MEETING_RECAP_OPZIONI:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// body: { id_calendar, ai?, esecuzione? } - ai ed esecuzione servono solo quando le
+// impostazioni dicono "Chiedi sempre" (scelti nella finestra del pulsante).
 router.post('/meetings/managed/recap', requireAuth, async (req, res) => {
   try {
-    const idCalendar = String((req.body && req.body.id_calendar) || '').trim();
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
     if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    let providerName = await recapAiImpostata(req.user);
+    if (isChiediSempre(providerName)) {
+      providerName = String(b.ai || '').trim();
+      if (!providerName) return res.status(400).json({ error: 'Scegli l\'AI da usare per il recap' });
+    }
+    if (!providerName) return res.status(400).json({ error: 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"' });
+    const locale = localRecapMode(providerName) === 'server';
+    if (!locale && !AI_PROVIDERS[providerName.toLowerCase()]) return res.status(400).json({ error: `AI «${providerName}» non utilizzabile per il recap` });
+    let esecuzione = await recapEsecuzione(req.user);
+    if (esecuzione === 'chiedi') {
+      esecuzione = String(b.esecuzione || '').trim().toLowerCase();
+      if (!['immediato', 'batch'].includes(esecuzione)) return res.status(400).json({ error: 'Scegli se eseguire il recap Immediato o in Batch' });
+    }
     // Recap Projexa (lento): troppi minuti per una richiesta HTTP, va nella coda in background
     // (stessa strada del recap automatico); la griglia mostra la clessidra e poi "Recap pronto".
-    const providerName = await recapProviderName(req.user);
-    if (localRecapMode(providerName) === 'server') {
-      await enqueueFinalize(req.user, idCalendar);
+    // Non ha la modalità Batch (è già gratuito).
+    if (locale) {
+      await enqueueFinalize(req.user, idCalendar, { ai: providerName });
       return res.status(202).json({ success: true, queued: true, provider: providerName });
     }
-    const result = await generateRecap(req.user, idCalendar);
+    // Batch: costo dimezzato, il recap arriva entro 24 ore (job recap_batch, jobs/recapBatch.js).
+    if (esecuzione === 'batch') {
+      const r = await inviaRecapBatch(req.user, idCalendar, providerName);
+      return res.status(202).json({ success: true, batch: true, provider: r.provider, model: r.model });
+    }
+    const result = await generateRecap(req.user, idCalendar, { ai: providerName });
     res.json({ success: true, ...result });
   } catch (error) {
     console.error('❌ REC_MEETING_RECAP:', error.message);

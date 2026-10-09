@@ -81,6 +81,7 @@
     <div class="avvisi" id="avvisi"></div>
     <div class="pagina" id="pagina"><div class="caricamento"><i class="fas fa-spinner fa-spin"></i> Raccolgo i dati del cliente e l'AI scrive la sintesi: può volerci qualche istante…</div></div>
 
+    <script src="js/ai-scelta.js"></script>
     <script>
         const API_URL = location.origin + '/api';
         const $ = (id) => document.getElementById(id);
@@ -180,14 +181,37 @@
             if (qs.get('anno')) filtroQs.set('anno', qs.get('anno'));
             if (!localStorage.getItem('authToken')) { location.href = 'index.html'; return; }
             try {
-                const [r, logoTenant, logoCliente] = await Promise.all([
-                    fetch(`${API_URL}/clients/dossier?${filtroQs.toString()}`, { headers: auth() }),
-                    logo('/tenant-logo'),
-                    logo(`/client-logos/${encodeURIComponent(clientId)}`)
-                ]);
-                const d = await r.json().catch(() => ({}));
-                if (r.status === 401) { location.href = 'index.html'; return; }
-                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                let d, logoTenant, logoCliente;
+                if (qs.get('lavoro')) {
+                    // Dossier arrivato in modalità Batch («Risultati AI» della dashboard).
+                    const rl = await fetch(`${API_URL}/ai-lavori/${encodeURIComponent(qs.get('lavoro'))}`, { headers: auth() });
+                    const l = await rl.json().catch(() => ({}));
+                    if (rl.status === 401) { location.href = 'index.html'; return; }
+                    if (!rl.ok) throw new Error(l.error || `Errore ${rl.status}`);
+                    if (l.stato !== 'pronto' || !l.risultato) throw new Error(l.stato === 'in_corso' ? 'Il dossier non è ancora pronto' : (l.errore || 'Dossier non disponibile'));
+                    d = l.risultato;
+                    const cid = (l.richiesta && l.richiesta.query && l.richiesta.query.clientId) || '';
+                    [logoTenant, logoCliente] = await Promise.all([logo('/tenant-logo'), cid ? logo(`/client-logos/${encodeURIComponent(cid)}`) : null]);
+                } else {
+                    // AI ed esecuzione: Impostazioni › AI › «AI Dossier Cliente» / «Esecuzione Dossier».
+                    const sc = await ProjexaAi.scegli('dossier', { apiUrl: API_URL, headers: auth });
+                    if (!sc) { $('pagina').innerHTML = '<div class="caricamento">Dossier annullato: chiudi la scheda o ricarica la pagina.</div>'; return; }
+                    const qsDos = ProjexaAi.inQuery(filtroQs, sc, qs.get('nome') || '');
+                    const [r, lt, lc] = await Promise.all([
+                        fetch(`${API_URL}/clients/dossier?${qsDos.toString()}`, { headers: auth() }),
+                        logo('/tenant-logo'),
+                        logo(`/client-logos/${encodeURIComponent(clientId)}`)
+                    ]);
+                    d = await r.json().catch(() => ({}));
+                    if (r.status === 401) { location.href = 'index.html'; return; }
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                    if (r.status === 202) {
+                        $('pagina').innerHTML = `<div class="caricamento"><i class="fas fa-hourglass-half"></i> ${esc(d.messaggio)}</div>`;
+                        $('stato').textContent = 'Dossier in preparazione (Batch)';
+                        return;
+                    }
+                    logoTenant = lt; logoCliente = lc;
+                }
                 document.title = `Dossier Cliente - ${d.cliente.nome}`;
 
                 const avvisi = [];

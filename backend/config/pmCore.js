@@ -770,8 +770,11 @@ export async function aiPerPm(user, { soloEsterna = false } = {}) {
 }
 
 // build(dati) -> prompt completo. Con l'AI locale i dati vengono riassunti a pezzi.
-export async function chiediAi(user, build, dati, { json = false, soloEsterna = false } = {}) {
-  const ai = await aiPerPm(user, { soloEsterna: soloEsterna || json });
+// ai: AI già scelta per la richiesta (req.aiScelta da Impostazioni › AI › «AI Funzioni PM»,
+// vedi config/aiFunzioni.js e jobs/aiLavori.js); senza, la prima AI disponibile (aiPerPm).
+export async function chiediAi(user, build, dati, { json = false, soloEsterna = false, ai: scelta = null } = {}) {
+  if (scelta && !scelta.nome && scelta.errore) throw errore(428, scelta.errore);
+  const ai = scelta && scelta.nome ? { nome: scelta.nome, locale: !!scelta.locale, label: scelta.label } : await aiPerPm(user, { soloEsterna: soloEsterna || json });
   if (!ai) {
     throw errore(428, json || soloEsterna
       ? 'Serve un\'AI con chiave API (ChatGPT, Claude, Gemini o Mistral): sceglila in Impostazioni › AI › «AI generazione e-mail recap» (o «AI Slide Kick-Off») e collega la sua chiave'

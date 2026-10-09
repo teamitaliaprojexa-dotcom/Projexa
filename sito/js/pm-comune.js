@@ -9,7 +9,16 @@
     };
     if (!localStorage.getItem('authToken')) location.href = 'index.html';
 
-    async function api(percorso, { metodo = 'GET', corpo, raw = false } = {}) {
+    // ai = operazione AI (config/aiFunzioni.js del backend): prima si chiede AI/esecuzione se le
+    // Impostazioni dicono "Chiedi sempre" (js/ai-scelta.js). Risposta 202 = inviata in Batch:
+    // torna { batch: true, messaggio }. Annullando la scelta: errore con annullata = true.
+    async function api(percorso, { metodo = 'GET', corpo, raw = false, ai = null, titolo = '' } = {}) {
+        if (ai && window.ProjexaAi) {
+            const sc = await window.ProjexaAi.scegli(ai, { apiUrl: API_URL, headers: auth });
+            if (!sc) throw Object.assign(new Error('Operazione annullata'), { annullata: true });
+            if (metodo === 'GET') percorso += (percorso.includes('?') ? '&' : '?') + window.ProjexaAi.inQuery({}, sc, titolo).toString();
+            else corpo = { ...(corpo || {}), ...sc, ...(titolo ? { _titolo: titolo } : {}) };
+        }
         const opz = { method: metodo, headers: { ...auth() } };
         if (corpo !== undefined) { opz.headers['Content-Type'] = 'application/json'; opz.body = JSON.stringify(corpo); }
         const r = await fetch(`${API_URL}/pm${percorso}`, opz);
@@ -17,6 +26,17 @@
         if (raw) return r;
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+        if (r.status === 202 && d.batch) return { ...d, batch: true };
+        return d;
+    }
+
+    // Risultato salvato di una richiesta in Batch («Risultati AI» della dashboard).
+    async function risultatoAi(id) {
+        const r = await fetch(`${API_URL}/ai-lavori/${encodeURIComponent(id)}`, { headers: { ...auth() } });
+        if (r.status === 401) { location.href = 'index.html'; throw new Error('Sessione scaduta'); }
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+        if (d.stato !== 'pronto') throw new Error(d.stato === 'in_corso' ? 'Il risultato non è ancora pronto' : (d.errore || 'Risultato non disponibile'));
         return d;
     }
 
@@ -103,5 +123,5 @@
         return out;
     }
 
-    window.PM = { API_URL, esc, auth, api, fmt, euro, dataIt, badge, SEMAFORO, toast, testoAiHtml, modale, valori };
+    window.PM = { API_URL, esc, auth, api, risultatoAi, fmt, euro, dataIt, badge, SEMAFORO, toast, testoAiHtml, modale, valori };
 })();

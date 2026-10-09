@@ -29,9 +29,11 @@ import { notificheNuoviMySupport } from './jobs/notifiche.js';
 import auditEventiRoutes from './routes/audit-eventi.js';
 import { sendMail, buildRichiestaCancellazioneEmail, EMAIL_PROJEXA } from './config/mailer.js';
 import { regoleColonne, metaColonna, etichetteColonne, etichetteValori, opzioniColonna, applicaRegoleScrittura, ordineGriglia, filtroSopraGriglia, TABELLE_VERIFICA, etichettaComune } from './config/gridColumnRules.js';
-import { kickTranscriptionWorker, recapProviderName, speakerName, stripMarkdown } from './jobs/meetingTranscription.js';
-import { askAiProvider, PROVIDERS as AI_PROVIDERS, localRecapMode, askOllamaRecap } from './routes/ai.js';
-import { getIntegration } from './config/integrations.js';
+import { kickTranscriptionWorker, speakerName, stripMarkdown } from './jobs/meetingTranscription.js';
+import { rottaAi, avviaLavoriAi } from './jobs/aiLavori.js';
+import { infoAi } from './config/aiFunzioni.js';
+import aiLavoriRoutes from './routes/aiLavori.js';
+import { askAiProvider, askOllamaRecap } from './routes/ai.js';
 import { getPromptFor } from './config/prompts.js';
 import { leggiTemplate, descriviTemplate, applicaModifiche, leggiRispostaAi, leggiRevisioneAi, testoRisultante, spostamentiRichiesti } from './config/kickoffPptx.js';
 import * as OffertaDocx from './config/offertaDocx.js';
@@ -204,6 +206,8 @@ app.use('/api/chatbot', chatbotRoutes);
 app.use('/api/pm', requireAuth, pmRoutes);
 // Recap interno della riunione (scheda «Recap interno» nella finestra del recap): routes/recapInterno.js.
 app.use('/api/recap-interno', requireAuth, recapInternoRoutes);
+// Risultati delle funzioni AI eseguite in Batch e scelta "Chiedi sempre" (jobs/aiLavori.js).
+app.use('/api/ai-lavori', aiLavoriRoutes);
 // Migrazione Crypto (database-viewer): riservata agli amministratori.
 app.use('/api/crypto', requireAuth, requireAdmin, cryptoMigrationRoutes);
 
@@ -1238,19 +1242,19 @@ app.put('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
 
 // To-Do List › filtro «Assegnato a» › «Invia email»: testo dell'email «Attività a tuo
 // carico» scritto dall'AI con il prompt TASK_IN_CARICO (app_prompts, editor dei prompt).
-// AI = quella di Impostazioni › AI › «AI generazione e-mail recap», anche «Recap Projexa
-// (lento)». Body: { nominativo, tasks: [{ titolo, cliente, progetto, descrizione, scadenza }] }
+// AI ed esecuzione = Impostazioni › AI › «AI Email attività» / «Esecuzione Email attività»
+// (config/aiFunzioni.js; anche «Recap Projexa (lento)»; in Batch: jobs/aiLavori.js).
+// Body: { nominativo, tasks: [{ titolo, cliente, progetto, descrizione, scadenza }] }
 // con le task filtrate nella pagina (dati dell'utente stesso, mandati alla sua AI).
 // Risposta: { testo, ai }. L'email la apre il browser, come per il recap.
-app.post('/api/dashboard/tasks/email-in-carico', requireAuth, async (req, res) => {
+app.post('/api/dashboard/tasks/email-in-carico', requireAuth, ...rottaAi('email_attivita', async (req, res) => {
   try {
     const b = req.body || {};
     const pulito = (v, max) => String(v == null ? '' : v).replace(/\r\n?/g, '\n').trim().slice(0, max);
     const nominativo = pulito(b.nominativo, 255);
     const tasks = Array.isArray(b.tasks) ? b.tasks.slice(0, 200) : [];
     if (!nominativo || !tasks.length) return res.status(400).json({ error: 'Nessuna attività da inviare' });
-    const providerName = await recapProviderName(req.user);
-    if (!providerName) return res.status(400).json({ error: 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"' });
+    const providerName = req.aiScelta.nome;
 
     const elenco = tasks.map((t, i) => [
       `${i + 1}. ${pulito(t.titolo, 500) || '(senza titolo)'}`,
@@ -1271,17 +1275,17 @@ app.post('/api/dashboard/tasks/email-in-carico', requireAuth, async (req, res) =
       if (!tpl.includes('{{TASK}}')) tpl += '\n\nAttività:\n{{TASK}}';
       return tpl.replace(/\{\{(NOMINATIVO|TASK|DATA|UTENTE)\}\}/g, (m, k) => (k === 'TASK' ? task : vars[k] || ''));
     };
-    const result = localRecapMode(providerName) === 'server'
+    const result = req.aiScelta.locale
       ? await askOllamaRecap(async (text) => build(text), elenco)
       : await askAiProvider(req.user.user_id, providerName, build(elenco));
     const testo = stripMarkdown(String(result.text || '')).trim();
     if (!testo) return res.status(502).json({ error: `${result.label || providerName} non ha restituito alcun testo` });
-    res.json({ testo, ai: result.label || providerName });
+    res.json({ testo, ai: result.label || providerName, nominativo });
   } catch (error) {
     console.error('[TASK IN CARICO]', error.message);
     res.status(error.statusCode || error.status || 500).json({ error: error.message });
   }
-});
+}));
 
 // Eliminazione di una task dalla To-Do List: solo task dello stesso tenant e utente, e solo
 // se il ruolo del contesto può modificarla (id_roles_write). L'eliminazione resta nel log
@@ -2728,22 +2732,6 @@ Rispondi SOLO con un oggetto JSON, senza testo prima o dopo, in questa forma:
 - Foto: per le persone del team segnate "[foto disponibile]" il sistema inserisce da solo la foto nella forma (es. il cerchio) del blocco in cui compare la loro email. Per questo ogni persona deve stare in un blocco suo, con la sua email scritta nella casella del blocco; non serve nessuna modifica per la foto.
 - Includi solo gli elementi da cambiare. Non usare markdown nei testi.`;
 
-// AI scelta in Impostazioni › AI: il primo dei campi indicati che ha un valore (settings.valore2).
-async function koProviderName(req, campi = ['AI Slide Kick-Off']) {
-  for (const campo of campi) {
-    const c = String(campo).trim().toLowerCase();
-    const r = (await db.query(
-      `SELECT valore2 FROM settings
-        WHERE tenant_id = $1 AND user_id = $2
-          AND lower(btrim(campo)) IN ($3, '(*) ' || $3)
-          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
-        ORDER BY id LIMIT 1`,
-      [req.user.tenant_id, req.user.user_id, c]
-    )).rows[0];
-    if (r && r.valore2 && String(r.valore2).trim()) return String(r.valore2).trim();
-  }
-  return '';
-}
 
 // Colonna del ruolo della persona in rubrica: la prima presente tra questi nomi, null se
 // la tabella non ce l'ha.
@@ -2791,13 +2779,9 @@ const koTeamOut = (req, rows) => rows
 app.get('/api/projects/kickoff', requireAuth, async (req, res) => {
   try {
     const prog = await ckpProgetto(req, req.query && req.query.projectId);
-    const nome = await koProviderName(req);
-    const cfg = AI_PROVIDERS[koNorm(nome)];
-    let connessa = false;
-    if (cfg) {
-      const el = await getIntegration(req.user.user_id, cfg.provider);
-      connessa = !!el[`${cfg.prefix}_api_key`];
-    }
+    // AI di Impostazioni › AI › «AI Slide Kick-Off» (vuoto = quella del recap; "Chiedi sempre").
+    const { nome, supportata: aiOk, connessa } = await infoAi(req.user, 'kickoff');
+    const cfg = aiOk ? true : null;
     res.json({
       licenze: prog.licenze,
       team: koTeamOut(req, await koTeam(req, prog)),
@@ -2892,16 +2876,15 @@ app.delete('/api/projects/kickoff/team/:id', requireAuth, async (req, res) => {
 
 // «Genera»: corpo = il file .pptx (application/octet-stream), projectId e nome in query.
 // Risposta: il .pptx modificato da scaricare.
+// AI ed esecuzione: «AI Slide Kick-Off» / «Esecuzione Kick-Off» (rottaAi, jobs/aiLavori.js).
 app.post('/api/projects/kickoff/genera', requireAuth,
   express.raw({ type: 'application/octet-stream', limit: KO_MAX_TEMPLATE }),
-  async (req, res) => {
+  ...rottaAi('kickoff', async (req, res) => {
     const t0 = Date.now();
     try {
       const prog = await ckpProgetto(req, req.query && req.query.projectId);
       if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Scegli il file Template (.pptx)' });
-      const nomeAi = await koProviderName(req);
-      if (!nomeAi) return res.status(400).json({ error: 'Scegli l\'AI in Impostazioni › AI › «AI Slide Kick-Off»' });
-      if (!AI_PROVIDERS[koNorm(nomeAi)]) return res.status(400).json({ error: `L'AI «${nomeAi}» non può generare le slide: scegli ChatGPT, Claude, Gemini o Mistral in Impostazioni › AI › «AI Slide Kick-Off»` });
+      const nomeAi = req.aiScelta.nome;
 
       const template = await leggiTemplate(req.body);
       const descrizione = descriviTemplate(template);
@@ -3067,7 +3050,7 @@ ${descrizioneBozza}`;
       console.error('❌ KICKOFF:', error.message);
       res.status(error.statusCode || error.status || 500).json({ error: error.message });
     }
-  });
+  }));
 
 // ==========================================
 // OFFERTA ECONOMICA DEL PROGETTO (pulsante accanto a Kick-off nella scheda progetto)
@@ -3080,7 +3063,6 @@ ${descrizioneBozza}`;
 // dell'AI sulla bozza, file finale: tutto in memoria, nulla salvato sul server.
 const OF_CAMPI = { importo: 'Importo', sconto: 'Sconto Applicato', importoNonScontato: 'Importo non scontato', effort: 'Effort Totale', preventivo: 'Preventivo' };
 const OF_CAMPI_CLIENTE = { ragioneSociale: 'Ragione Sociale', codiceFiscale: 'Cod fiscale', partitaIva: 'P.iva' };
-const OF_CAMPI_AI = ['AI Offerta Economica', 'AI Slide Kick-Off'];
 const ofNormCampo = (c) => String(c || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
 
 const OF_FORMATO = `FORMATO DELLA RISPOSTA (obbligatorio)
@@ -3234,15 +3216,11 @@ async function ofInvoice(req, prog, cfg, aOre = false) {
   return { colonne: usate.map(nomeColonna), righe: r.rows.map((x) => usate.map((c) => fmt(etichetteValori(tabella, { ...x })[c]))) };
 }
 
+// AI dell'Offerta: «AI Offerta Economica», poi «AI Slide Kick-Off», poi quella del recap
+// (config/aiFunzioni.js); "Chiedi sempre" la fa scegliere a ogni generazione.
 async function ofAiInfo(req) {
-  const nome = await koProviderName(req, OF_CAMPI_AI);
-  const cfg = AI_PROVIDERS[koNorm(nome)];
-  let connessa = false;
-  if (cfg) {
-    const el = await getIntegration(req.user.user_id, cfg.provider);
-    connessa = !!el[`${cfg.prefix}_api_key`];
-  }
-  return { nome, supportata: !!cfg, connessa };
+  const { nome, supportata, connessa } = await infoAi(req.user, 'offerta');
+  return { nome, supportata, connessa };
 }
 
 app.get('/api/projects/offerta', requireAuth, async (req, res) => {
@@ -3255,16 +3233,15 @@ app.get('/api/projects/offerta', requireAuth, async (req, res) => {
   }
 });
 
+// AI ed esecuzione: «AI Offerta Economica» / «Esecuzione Offerta Economica» (rottaAi).
 app.post('/api/projects/offerta/genera', requireAuth,
   express.raw({ type: 'application/octet-stream', limit: KO_MAX_TEMPLATE }),
-  async (req, res) => {
+  ...rottaAi('offerta', async (req, res) => {
     const t0 = Date.now();
     try {
       const prog = await ckpProgetto(req, req.query && req.query.projectId);
       if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: 'Scegli il file Template (.docx)' });
-      const ai = await ofAiInfo(req);
-      if (!ai.nome) return res.status(400).json({ error: 'Scegli l\'AI in Impostazioni › AI («AI Offerta Economica» oppure «AI Slide Kick-Off»)' });
-      if (!ai.supportata) return res.status(400).json({ error: `L'AI «${ai.nome}» non può generare l'offerta: scegli ChatGPT, Claude, Gemini o Mistral` });
+      const ai = req.aiScelta;
 
       const template = await OffertaDocx.leggiTemplate(req.body);
       const descrizione = OffertaDocx.descriviTemplate(template);
@@ -3360,7 +3337,7 @@ ${bozza}`;
       console.error('❌ OFFERTA:', error.message);
       res.status(error.statusCode || error.status || 500).json({ error: error.message });
     }
-  });
+  }));
 
 // Contatori nella testata del progetto: righe non scadute (scadenza vuota o >= oggi) del
 // progetto, per tenant e utente del contesto. Task = Tkt Jira (task_app), Quotazioni
@@ -7216,7 +7193,8 @@ app.get('/api/clients/dossier/colonne', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/clients/dossier', requireAuth, async (req, res) => {
+// AI ed esecuzione: «AI Dossier Cliente» / «Esecuzione Dossier» (rottaAi, jobs/aiLavori.js).
+app.get('/api/clients/dossier', requireAuth, ...rottaAi('dossier', async (req, res) => {
   try {
     const { clientId, owner } = await dosAccesso(req, req.query.clientId);
     // Scelta all'apertura: modo=attivi (default) oppure modo=tutti (anche chiusi, senza controllo
@@ -7369,8 +7347,8 @@ app.get('/api/clients/dossier', requireAuth, async (req, res) => {
     const oggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Rome' });
     const utente = String(await speakerName(req.user) || '').trim() || req.user.email || '';
     let ai = { testo: '', label: '', errore: '' };
-    const providerName = await recapProviderName(req.user);
-    if (!providerName) ai.errore = 'Nessuna AI scelta in Impostazioni › AI › «AI generazione e-mail recap»: il dossier è senza sintesi.';
+    const providerName = req.aiScelta.nome;
+    if (!providerName) ai.errore = `${req.aiScelta.errore || 'Nessuna AI scelta in Impostazioni › AI › «AI Dossier Cliente»'}: il dossier è senza sintesi.`;
     else if (!resto.trim()) ai.errore = 'Prompt «Dossier Cliente» non disponibile: il dossier è senza sintesi.';
     else {
       const build = (dati) => {
@@ -7379,7 +7357,7 @@ app.get('/api/clients/dossier', requireAuth, async (req, res) => {
         return tpl.replace(/\{\{(DATI|DATA|UTENTE)\}\}/g, (m, k) => (k === 'DATI' ? dati : k === 'DATA' ? oggi : utente));
       };
       try {
-        const r = localRecapMode(providerName) === 'server'
+        const r = req.aiScelta.locale
           ? await askOllamaRecap(async (t) => build(t), datiAi)
           : await askAiProvider(req.user.user_id, providerName, build(datiAi));
         ai = { testo: stripMarkdown(String(r.text || '')).trim(), label: r.label || providerName, errore: '' };
@@ -7393,7 +7371,7 @@ app.get('/api/clients/dossier', requireAuth, async (req, res) => {
     console.error('[DOSSIER CLIENTE]', error.message);
     res.status(error.statusCode || error.status || 500).json({ error: error.message });
   }
-});
+}));
 
 app.get('/api/client-logos/:clientId', requireAuth, async (req, res) => {
   try {
@@ -11257,6 +11235,8 @@ app.listen(PORT, () => {
   avviaScheduler();
   // Log accessi/variazioni: invio della coda audit_outbox a Oracle (solo con AUDIT_ORACLE_ENABLED=true).
   avviaInvioAudit();
+  // Lavori AI in Batch: ripresa dopo un riavvio e pulizia dei file temporanei (jobs/aiLavori.js).
+  avviaLavoriAi();
 });
 
 // Graceful shutdown

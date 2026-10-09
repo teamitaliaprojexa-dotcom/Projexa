@@ -73,6 +73,7 @@
     <div id="avvisi"></div>
     <div class="pagina" id="pagina"><div class="caricamento"><i class="fas fa-spinner fa-spin"></i> Raccolgo i dati del progetto e l'AI scrive il commento: può volerci qualche istante…</div></div>
 
+    <script src="js/ai-scelta.js"></script>
     <script src="js/pm-comune.js"></script>
     <script>
     (async function () {
@@ -91,7 +92,12 @@
             ? `<table><thead><tr>${testa.map((t, i) => `<th${num.includes(i) ? ' class="n"' : ''}>${esc(t)}</th>`).join('')}</tr></thead><tbody>${righe.map((r) => `<tr>${r.map((v, i) => `<td${num.includes(i) ? ' class="n"' : ''}>${v}</td>`).join('')}</tr>`).join('')}</tbody></table>`
             : '<p class="vuoto">Nessuna voce.</p>');
         try {
-            const d = await api(`/documento?${new URLSearchParams({ projectId: qs.get('projectId') || '', tipo, dal: qs.get('dal') || '' })}`);
+            // ?lavoro= : documento arrivato in modalità Batch («Risultati AI»); altrimenti richiesta con
+            // AI ed esecuzione di Impostazioni › AI › «AI Funzioni PM» ("Chiedi sempre": finestra di scelta).
+            const d = qs.get('lavoro')
+                ? (await PM.risultatoAi(qs.get('lavoro'))).risultato
+                : await api(`/documento?${new URLSearchParams({ projectId: qs.get('projectId') || '', tipo, dal: qs.get('dal') || '' })}`, { ai: 'pm_documento' });
+            if (d.batch) { pagina.innerHTML = `<div class="caricamento"><i class="fas fa-hourglass-half"></i> ${esc(d.messaggio)}</div>`; return; }
             const [logoTenant, logoCliente] = await Promise.all([logo('/tenant-logo'), d.progetto.clientId ? logo(`/client-logos/${encodeURIComponent(d.progetto.clientId)}`) : null]);
             document.title = `${d.titolo} - ${d.progetto.nome}`;
             document.getElementById('tTitolo').textContent = d.titolo;

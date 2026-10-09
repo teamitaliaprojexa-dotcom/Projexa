@@ -162,6 +162,16 @@ export async function updateIntegrationElements(userId, provider, tipo, elements
   }
 }
 
+// Cancella un solo elemento dell'integrazione (es. la versione del modello AI scelta,
+// per tornare a quella predefinita), lasciando intatti gli altri.
+export async function deleteIntegrationElement(userId, provider, elemento) {
+  const result = await authDb.query(
+    `DELETE FROM integr_tok_auth WHERE user_id = $1 AND lower(provider_integrazione) = lower($2) AND elemento = $3`,
+    [userId, provider, elemento]
+  );
+  return result.rowCount;
+}
+
 // Cancella tutte le righe dell'integrazione per quell'utente (disconnessione o
 // disattivazione del flag in settings). Restituisce il numero di righe rimosse.
 export async function deleteIntegration(userId, provider) {
