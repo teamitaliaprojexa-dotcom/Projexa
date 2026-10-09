@@ -7572,6 +7572,22 @@
             }
         }
 
+        // dashboard.html?openTask=<id>: apre la finestra «Modifica task» di quella To-Do (link dal
+        // Cruscotto PM, scheda RAID, Azioni aperte). L'URL si ripulisce: un refresh non la riapre.
+        async function apriToDoDaUrl() {
+            const id = new URLSearchParams(location.search).get('openTask');
+            if (!id) return;
+            history.replaceState(null, '', location.pathname);
+            let task = todoData.find((row) => String(row.__task_id) === String(id));
+            if (!task) {
+                await loadTodoData();
+                task = todoData.find((row) => String(row.__task_id) === String(id));
+            }
+            if (!task) { showNotification('To-Do non trovata: potrebbe essere stata eliminata o chiusa', 'info'); return; }
+            document.getElementById('todoList')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            openTaskModal(task);
+        }
+
         async function loadTodoData() {
             try {
                 const tasksResponse = await fetch(`${API_URL}/dashboard/tasks`, { headers: getAuthHeaders() });
@@ -20542,6 +20558,7 @@
 
             // Carica dati dalle API
             await loadDataFromAPI();
+            apriToDoDaUrl(); // link da Cruscotto PM › RAID › Azioni aperte: apre la To-Do in modifica
 
             initTodoList();
             await initRevenueChart(); // carica anni disponibili + dati kpi_fatturazione filtrati

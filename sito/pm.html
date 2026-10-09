@@ -214,8 +214,11 @@
         function renderRaid(p) {
             const r = raidDati.raid;
             const per = (t) => r.filter((x) => x.tipo === t);
-            const riga = (x, cols) => `<tr class="click${x.stato === 'chiuso' ? ' chiuso' : ''}" data-id="${esc(x.id)}">${cols(x)}</tr>`;
-            const origine = (x) => (x.origine === 'riunione' ? ' <span class="pill riunione" title="Estratto da una riunione"><i class="fas fa-microphone-lines"></i></span>' : '');
+            const riga = (x, cols) => `<tr class="click${x.stato === 'chiuso' || x.riga_chiusa ? ' chiuso' : ''}" data-id="${esc(x.id)}">${cols(x)}</tr>`;
+            // Riga tolta dal registro: scadenza = giorno prima della chiusura.
+            const chiusaIl = (x) => { const d = new Date(Date.parse(`${x.scadenza_riga}T00:00:00Z`) + 86400000); return isNaN(d) ? '' : dataIt(d.toISOString().slice(0, 10)); };
+            const origine = (x) => (x.origine === 'riunione' ? ' <span class="pill riunione" title="Estratto da una riunione"><i class="fas fa-microphone-lines"></i></span>' : '')
+                + (x.riga_chiusa ? ` <span class="pill rifiutata" title="Tolta dal registro: aprila per riaprirla">fuori registro dal ${chiusaIl(x)}</span>` : '');
             const rischi = per('rischio').sort((a, b) => (a.stato === 'chiuso') - (b.stato === 'chiuso') || (b.punteggio || 0) - (a.punteggio || 0));
             const tabRischi = rischi.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th class="n">Punti</th><th>Rischio</th><th class="n">P</th><th class="n">I</th><th>Owner</th><th>Risposta</th><th>Revisione</th><th>Stato</th></tr></thead><tbody>
                 ${rischi.map((x) => riga(x, () => `<td class="n">${x.punteggio ? `<span class="punti ${classePunti(x.punteggio)}">${x.punteggio}</span>` : '–'}</td><td><b>${esc(x.titolo)}</b>${origine(x)}${x.descrizione ? `<div class="pm-nota">${esc(x.descrizione)}</div>` : ''}</td><td class="n">${x.probabilita || '–'}</td><td class="n">${x.impatto || '–'}</td><td>${esc(x.owner || '')}</td><td>${esc(x.mitigazione || '')}</td><td>${dataIt(x.data_revisione)}${x.data_revisione && x.data_revisione < (dati ? dati.oggi : '') && x.stato !== 'chiuso' ? ' <i class="fas fa-bell" style="color:#DC2626" title="Da rivedere"></i>' : ''}</td><td><span class="pill ${x.stato}">${STATI[x.stato] || x.stato}</span></td>`)).join('')}</tbody></table></div>`
@@ -223,13 +226,13 @@
             const tabSemplice = (lista, conData) => (lista.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr>${conData ? '<th>Data</th>' : ''}<th>Titolo</th><th>${conData ? 'Decisa da' : 'Owner'}</th><th>Stato</th></tr></thead><tbody>
                 ${lista.map((x) => riga(x, () => `${conData ? `<td>${dataIt(x.data_revisione)}</td>` : ''}<td><b>${esc(x.titolo)}</b>${origine(x)}${x.tipo === 'assunzione' ? ' <span class="pill">assunzione</span>' : ''}${x.descrizione ? `<div class="pm-nota">${esc(x.descrizione)}</div>` : ''}</td><td>${esc(conData ? x.decisa_da || '' : x.owner || '')}</td><td><span class="pill ${x.stato}">${STATI[x.stato] || x.stato}</span></td>`)).join('')}</tbody></table></div>`
                 : '<div class="pm-vuoto">Nessun elemento.</div>');
-            const azioni = raidDati.task.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Azione</th><th>Assegnata a</th><th>Scadenza</th></tr></thead><tbody>${raidDati.task.map((t) => `<tr><td><b>${esc(t.titolo)}</b>${t.descrizione ? `<div class="pm-nota">${esc(t.descrizione.slice(0, 220))}</div>` : ''}</td><td>${esc(t.assegnato || '–')}</td><td style="color:${t.scaduta ? '#DC2626' : 'inherit'}">${dataIt(t.scadenza) || '–'}${t.scaduta ? ' (scaduta)' : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="pm-vuoto">Nessuna azione aperta sul progetto.</div>';
+            const azioni = raidDati.task.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Azione</th><th>Assegnata a</th><th>Scadenza</th></tr></thead><tbody>${raidDati.task.map((t) => `<tr><td><a class="pm-link" href="dashboard.html?openTask=${encodeURIComponent(t.id)}" target="_blank" rel="noopener" title="Apri la To-Do in modifica (nuova scheda)"><b>${esc(t.titolo)}</b> <i class="fas fa-up-right-from-square" style="font-size:0.7em"></i></a>${t.descrizione ? `<div class="pm-nota">${esc(t.descrizione.slice(0, 220))}</div>` : ''}</td><td>${esc(t.assegnato || '–')}</td><td style="color:${t.scaduta ? '#DC2626' : 'inherit'}">${dataIt(t.scadenza) || '–'}${t.scaduta ? ' (scaduta)' : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="pm-vuoto">Nessuna azione aperta sul progetto.</div>';
             const issue = raidDati.issue.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Issue</th><th>Priorità</th><th>Owner</th><th>Stato</th></tr></thead><tbody>${raidDati.issue.map((i) => `<tr><td>${esc(String(i.descrizione || '').slice(0, 300))}</td><td>${esc(i.priorita || '')}</td><td>${esc(i.owner || '')}</td><td>${esc(i.stato || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="pm-vuoto">Nessuna issue aperta sul progetto.</div>';
             const nuovo = (t) => `<button class="pm-btn piccolo" data-nuovo="${t}"><i class="fas fa-plus"></i> ${TIPI[t].label}</button>`;
             p.innerHTML = `${raidDati.tabelle ? '' : sqlMancante()}
                 <div class="pm-card">
                     <h2><i class="fas fa-triangle-exclamation"></i> Rischi <span class="azioni">
-                        <label class="pm-nota" style="display:flex;align-items:center;gap:0.3rem"><input type="checkbox" id="raidTutte" ${raidTutte ? 'checked' : ''}> anche eliminati</label>
+                        <label class="pm-nota" style="display:flex;align-items:center;gap:0.3rem" title="Mostra anche le righe tolte dal registro con «Togli dal registro» (scadenza passata). I rischi con Stato «Chiuso» si vedono sempre."><input type="checkbox" id="raidTutte" ${raidTutte ? 'checked' : ''}> anche chiusi (scaduti)</label>
                         <button class="pm-btn piccolo verde" id="btnEstrai" title="L'AI legge il recap di una riunione e propone rischi, decisioni, dipendenze e Change Request (in bozza)"><i class="fas fa-wand-magic-sparkles"></i> Estrai dalle riunioni</button>${nuovo('rischio')}</span></h2>
                     <div style="display:grid; grid-template-columns: minmax(0,1fr) auto; gap:1.2rem; align-items:start">${tabRischi}${heatmap(rischi)}</div>
                 </div>
@@ -247,10 +250,43 @@
             p.querySelector('#btnEstrai').addEventListener('click', () => estraiDaRiunione());
             if (qs.get('estrai') && !raidDati._estraiAperta) { raidDati._estraiAperta = true; estraiDaRiunione(qs.get('estrai')); }
         }
+        // Scelta della persona (owner, decisa da, richiesta da): «Cliente» = Contatti del cliente del
+        // progetto, «Interno» = persone del team del progetto (Kick-off, proj_componenti). Gli elenchi
+        // si leggono una volta (API /stakeholder/proposte) e stanno in due datalist della pagina; il
+        // nome si può sempre scrivere a mano. Si salva il nome (campo di testo).
+        const PERSONE = {};
+        const ORG_DEF = { rischio: 'team', assunzione: 'team', dipendenza: 'cliente', decisione: 'cliente', change_request: 'cliente' };
+        async function caricaPersone() {
+            for (const fonte of ['cliente', 'team']) {
+                let dl = document.getElementById(`dl-${fonte}`);
+                if (!dl) { dl = document.createElement('datalist'); dl.id = `dl-${fonte}`; document.body.appendChild(dl); }
+                if (PERSONE[fonte]) continue;
+                try {
+                    PERSONE[fonte] = await api(`/stakeholder/proposte?projectId=${encodeURIComponent(projectId)}&fonte=${fonte}`);
+                    dl.innerHTML = PERSONE[fonte].map((p) => `<option value="${esc(p.nominativo)}">${esc([p.ruolo, p.email].filter(Boolean).join(' · '))}</option>`).join('');
+                } catch (e) { PERSONE[fonte] = []; }
+            }
+        }
+        // Se il nome è già in uno dei due elenchi, parte da quello; altrimenti dal default del tipo.
+        const fonteDi = (valore, def) => {
+            const v = String(valore || '').trim().toLowerCase();
+            if (v) for (const f of ['team', 'cliente']) if ((PERSONE[f] || []).some((p) => p.nominativo.toLowerCase() === v)) return f;
+            return def;
+        };
+        function campoPersona(attr, valore, def, extra = '') {
+            const fonte = fonteDi(valore, def);
+            return `<span class="pm-persona"><select class="pm-input pm-org" title="Da quale elenco scegliere il nome"><option value="cliente" ${fonte === 'cliente' ? 'selected' : ''}>Cliente</option><option value="team" ${fonte === 'team' ? 'selected' : ''}>Interno</option></select><input class="pm-input" ${attr} list="dl-${fonte}" autocomplete="off" value="${esc(valore || '')}" ${extra}></span>`;
+        }
+        document.addEventListener('change', (e) => {
+            if (!e.target.matches || !e.target.matches('.pm-org')) return;
+            const inp = e.target.parentElement.querySelector('input');
+            if (inp) { inp.setAttribute('list', `dl-${e.target.value}`); inp.focus(); }
+        });
         const opzioni15 = (v, etichette) => `<option value="">–</option>${[1, 2, 3, 4, 5].map((n) => `<option value="${n}" ${Number(v) === n ? 'selected' : ''}>${n} – ${etichette[n - 1]}</option>`).join('')}`;
         const ETICH_P = ['molto bassa', 'bassa', 'media', 'alta', 'molto alta'];
         const ETICH_I = ['trascurabile', 'basso', 'medio', 'alto', 'molto alto'];
-        function formRaid(x) {
+        async function formRaid(x) {
+            await caricaPersone();
             const nuovo = !x.id;
             const t = x.tipo || 'rischio';
             const sola = !nuovo && x.puoModificare === false;
@@ -261,16 +297,17 @@
                 <label class="largo">Descrizione<textarea name="descrizione">${esc(x.descrizione || '')}</textarea></label>
                 <label data-per="rischio">Probabilità<select name="probabilita">${opzioni15(x.probabilita, ETICH_P)}</select></label>
                 <label data-per="rischio">Impatto<select name="impatto">${opzioni15(x.impatto, ETICH_I)}</select></label>
-                <label data-per="rischio dipendenza assunzione">Owner<input name="owner" value="${esc(x.owner || '')}"></label>
+                <label data-per="rischio dipendenza assunzione">Owner${campoPersona('name="owner"', x.owner, ORG_DEF[t] || 'team')}</label>
                 <label data-per="rischio">Prossima revisione<input type="date" name="data_revisione" value="${esc(x.data_revisione || '')}"></label>
                 <label data-per="decisione">Data della decisione<input type="date" name="data_revisione" value="${esc(x.data_revisione || '')}"></label>
-                <label data-per="decisione">Decisa da<input name="decisa_da" value="${esc(x.decisa_da || '')}"></label>
+                <label data-per="decisione">Decisa da${campoPersona('name="decisa_da"', x.decisa_da, 'cliente')}</label>
                 <label class="largo" data-per="rischio decisione"><span data-lbl>Risposta al rischio (come mitigarlo)</span><textarea name="mitigazione">${esc(x.mitigazione || '')}</textarea></label>`;
             const m = modale({
                 titolo: `<i class="fas ${TIPI[t].ico}"></i> ${nuovo ? 'Nuovo elemento RAID' : esc(x.codice || TIPI[t].label)}`,
                 corpo: `${sola ? '<div class="pm-avviso">Sola lettura: il tuo ruolo non può modificare questo elemento.</div>' : ''}<div class="pm-form">${campi}</div>`,
                 pulsanti: [
-                    ...(!nuovo && !sola ? [{ testo: '<i class="fas fa-trash"></i> Elimina', classe: 'pericolo', azione: async () => { if (!confirm('Eliminare questo elemento dal registro?')) return false; await api(`/raid/${x.id}?projectId=${encodeURIComponent(projectId)}`, { metodo: 'DELETE' }); toast('Eliminato'); caricaRaid(); } }] : []),
+                    ...(!nuovo && !sola && x.riga_chiusa ? [{ testo: '<i class="fas fa-rotate-left"></i> Riapri', classe: 'verde', azione: async () => { await api(`/raid/${x.id}/riapri?projectId=${encodeURIComponent(projectId)}`, { metodo: 'POST' }); toast('Riga di nuovo nel registro'); caricaRaid(); caricaPanoramica(); } }] : []),
+                    ...(!nuovo && !sola && !x.riga_chiusa ? [{ testo: '<i class="fas fa-box-archive"></i> Togli dal registro', classe: 'pericolo', azione: async () => { if (!confirm('Togliere questo elemento dal registro? Non viene cancellato: resta visibile con «anche chiusi (scaduti)» e si può riaprire. Per un rischio superato usa invece lo Stato «Chiuso».')) return false; await api(`/raid/${x.id}?projectId=${encodeURIComponent(projectId)}`, { metodo: 'DELETE' }); toast('Tolto dal registro'); caricaRaid(); caricaPanoramica(); } }] : []),
                     { testo: 'Annulla' },
                     ...(!sola ? [{ testo: '<i class="fas fa-floppy-disk"></i> Salva', classe: 'primario', azione: async (mm) => {
                         const v = valori(mm);
@@ -321,18 +358,19 @@
                 idCal = mm.querySelector('#selRiunione').value;
                 box.innerHTML = attesa('L\'AI sta leggendo la riunione…');
                 try {
-                    const r = await api('/raid/estrai', { metodo: 'POST', corpo: { projectId, id_calendar: idCal } });
+                    const [r] = await Promise.all([api('/raid/estrai', { metodo: 'POST', corpo: { projectId, id_calendar: idCal } }), caricaPersone()]);
                     proposte = r.elementi;
                     if (!proposte.length) { box.innerHTML = '<div class="pm-vuoto">L\'AI non ha trovato rischi, decisioni, dipendenze o Change Request in questa riunione.</div>'; return; }
                     const eCr = (x) => x.tipo === 'change_request';
                     const persona = (x) => (eCr(x) ? 'richiesta_da' : x.tipo === 'decisione' ? 'decisa_da' : 'owner');
+                    const ETICH_PERSONA = { owner: 'Owner', decisa_da: 'Decisa da', richiesta_da: 'Richiesta da' };
                     box.innerHTML = `<div class="pm-nota">Proposte di ${esc(r.ai)} · togli la spunta a quelle da non salvare, correggi titoli e valori. Per le Change Request: effort (${esc(unita)}) e slittamento in giorni solo se detti in riunione.</div>
-                        <div class="pm-scroll"><table class="pm-t"><thead><tr><th></th><th>Tipo</th><th>Titolo e dettaglio</th><th>Probabilità · effort</th><th>Impatto · giorni</th><th>Owner · decisa da · richiesta da</th></tr></thead><tbody>
+                        <div class="pm-scroll"><table class="pm-t"><thead><tr><th></th><th>Tipo</th><th>Titolo e dettaglio</th><th>Probabilità · effort</th><th>Impatto · giorni</th><th title="Una sola persona per riga: per Rischio e Dipendenza l'owner, per Decisione chi ha deciso, per Change Request chi l'ha richiesta">Persona</th></tr></thead><tbody>
                         ${proposte.map((x, i) => `<tr><td><input type="checkbox" data-i="${i}" ${x.esiste ? '' : 'checked'}></td><td><span class="pill${eCr(x) ? ' bozza' : ''}">${eCr(x) ? 'Change Request' : TIPI[x.tipo].label}</span>${eCr(x) ? '<div class="pm-nota">in bozza</div>' : ''}${x.esiste ? '<div class="pm-nota">già presente</div>' : ''}</td>
                             <td><input class="pm-input" data-c="titolo" data-i="${i}" value="${esc(x.titolo)}"><div class="pm-nota">${esc(x.descrizione)}${x.mitigazione ? ` · Risposta: ${esc(x.mitigazione)}` : ''}${x.motivo ? ` · Motivo: ${esc(x.motivo)}` : ''}</div></td>
                             <td>${x.tipo === 'rischio' ? `<select class="pm-input" data-c="probabilita" data-i="${i}">${opzioni15(x.probabilita, ETICH_P)}</select>` : eCr(x) ? `<input class="pm-input" data-c="effort_delta" data-i="${i}" value="${x.effort_delta ?? ''}" placeholder="non detto" inputmode="decimal">` : ''}</td>
                             <td>${x.tipo === 'rischio' ? `<select class="pm-input" data-c="impatto" data-i="${i}">${opzioni15(x.impatto, ETICH_I)}</select>` : eCr(x) ? `<input class="pm-input" data-c="giorni_delta" data-i="${i}" value="${x.giorni_delta ?? ''}" placeholder="non detto" inputmode="numeric">` : ''}</td>
-                            <td><input class="pm-input" data-c="${persona(x)}" data-i="${i}" value="${esc(x[persona(x)] || '')}"></td></tr>`).join('')}
+                            <td style="min-width:260px">${campoPersona(`data-c="${persona(x)}" data-i="${i}"`, x[persona(x)], ORG_DEF[x.tipo] || 'team', `placeholder="${ETICH_PERSONA[persona(x)]}" title="${ETICH_PERSONA[persona(x)]}${x.tipo === 'rischio' ? ': chi segue il rischio e la sua risposta' : x.tipo === 'dipendenza' ? ': da chi dipendete (chi deve consegnare)' : ''}"`)}</td></tr>`).join('')}
                         </tbody></table></div>`;
                 } catch (e) { box.innerHTML = errore(e); }
             }
@@ -377,7 +415,8 @@
             p.querySelector('#nuovaCr').addEventListener('click', () => formCr({}));
             p.querySelectorAll('tr.click').forEach((tr) => tr.addEventListener('click', () => formCr(l.find((x) => x.id === tr.dataset.id))));
         }
-        function formCr(x) {
+        async function formCr(x) {
+            await caricaPersone();
             const nuovo = !x.id;
             const sola = !nuovo && x.puoModificare === false;
             const m = modale({
@@ -386,7 +425,7 @@
                     <label class="largo">Titolo<input name="titolo" value="${esc(x.titolo || '')}"></label>
                     <label class="largo">Descrizione della modifica<textarea name="descrizione">${esc(x.descrizione || '')}</textarea></label>
                     <label class="largo">Motivo<textarea name="motivo" style="min-height:50px">${esc(x.motivo || '')}</textarea></label>
-                    <label>Richiesta da<input name="richiesta_da" value="${esc(x.richiesta_da || '')}"></label>
+                    <label>Richiesta da${campoPersona('name="richiesta_da"', x.richiesta_da, 'cliente')}</label>
                     <label>Data richiesta<input type="date" name="data_richiesta" value="${esc(x.data_richiesta || dati?.oggi || '')}"></label>
                     <label>Effort in più (${esc(crDati.unita)}, negativo se in meno)<input name="effort_delta" value="${x.effort_delta ?? ''}" inputmode="decimal"></label>
                     <label>Importo in più (€)<input name="importo_delta" value="${x.importo_delta ?? ''}" inputmode="decimal"></label>
@@ -709,6 +748,11 @@
             });
         }
 
+        // Tornando sul Cruscotto (dopo aver modificato una To-Do nella dashboard) la scheda RAID si
+        // aggiorna, se è aperta e non c'è una finestra in corso.
+        window.addEventListener('focus', () => {
+            if (caricati.raid && pannello('raid').classList.contains('on') && !document.querySelector('.pm-modal-mask')) caricaRaid();
+        });
         const CARICA = { panoramica: caricaPanoramica, raid: caricaRaid, cr: caricaCr, stakeholder: caricaStakeholder, chiusura: caricaChiusura, chiedi: caricaChiedi };
         // Da una riunione (finestra del recap): progetto della riunione, scheda RAID, estrazione.
         if (!projectId && qs.get('da_riunione')) {

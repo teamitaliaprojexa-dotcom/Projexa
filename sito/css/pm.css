@@ -73,6 +73,10 @@ table.pm-t tr.click:hover td { background: #F9FAFB; }
 .pill.aperto, .pill.bozza { background: #EEF2FF; color: #3730A3; } .pill.in_corso, .pill.inviata { background: var(--pm-giallo-bg); color: var(--pm-giallo); }
 .pill.chiuso, .pill.approvata { background: var(--pm-verde-bg); color: var(--pm-verde); } .pill.rifiutata { background: var(--pm-rosso-bg); color: var(--pm-rosso); }
 .pill.riunione { background: #F5F3FF; color: #6D28D9; }
+/* Scelta della persona: Cliente (contatti del cliente) / Interno (team del progetto) + nome */
+.pm-persona { display: flex; gap: 4px; min-width: 0; }
+.pm-persona select.pm-org, .pm-form .pm-persona select.pm-org { flex: 0 0 92px; width: 92px; padding-left: 0.35rem; padding-right: 0.2rem; font-size: 0.8rem; }
+.pm-persona input { flex: 1 1 auto; min-width: 0; }
 .heat { display: grid; grid-template-columns: 26px repeat(5, 1fr); gap: 3px; font-size: 0.72rem; max-width: 360px; }
 .heat div { aspect-ratio: 1.6; border-radius: 5px; display: grid; place-items: center; font-weight: 700; color: #111827; }
 .heat .ax { background: none; color: var(--pm-tenue); font-weight: 600; aspect-ratio: auto; }
@@ -131,3 +135,6 @@ table.pm-t tr.click:hover td { background: #F9FAFB; }
 @media print {
     .pm-top, .pm-tabs { display: none; }
 }
+/* Titolo cliccabile (es. Azioni aperte del RAID: apre la To-Do nella dashboard) */
+.pm-link { color: inherit; text-decoration: none; }
+.pm-link:hover b { color: var(--pm-primario); text-decoration: underline; }

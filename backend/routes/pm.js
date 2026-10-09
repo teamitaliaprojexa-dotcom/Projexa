@@ -198,6 +198,17 @@ router.put('/raid/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { invia(res, e, 'RAID_UPD'); }
 });
+// Riapre una riga tolta dal registro (scadenza di nuovo «nessuna scadenza»).
+router.post('/raid/:id/riapri', async (req, res) => {
+  try {
+    await richiedeTabella('pm_raid');
+    const prog = await progettoUtente(req.user, pid(req));
+    await aggiorna(req, 'pm_raid', req.params.id, prog.projectId, {});
+    await db.query(`UPDATE pm_raid SET scadenza = '2099-12-31', updated_at = now() WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`,
+      [req.params.id, req.user.tenant_id, req.user.user_id]);
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'RAID_RIAPRI'); }
+});
 router.delete('/raid/:id', async (req, res) => {
   try {
     await richiedeTabella('pm_raid');
@@ -458,6 +469,19 @@ router.get('/stakeholder/proposte', async (req, res) => {
     const fonte = String(req.query.fonte || 'interno');
     const cerca = (x) => x.nominativo && (!q || `${x.nominativo} ${x.email || ''} ${x.ruolo || ''}`.toLowerCase().includes(q));
     if (fonte === 'fornitore') return res.json([]);
+    // team = SOLO le persone del team del progetto (proj_componenti, Kick-off), completate con
+    // email della rubrica: elenco «Interno» degli owner nel RAID e nelle Change Request.
+    if (fonte === 'team') {
+      const t = (await db.query(
+        `SELECT nominativo, email FROM proj_componenti
+          WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+        [req.user.tenant_id, req.user.user_id, prog.projectId])).rows;
+      const visti = new Set();
+      return res.json(t.filter((x) => x.nominativo && !visti.has(String(x.nominativo).trim().toLowerCase()) && visti.add(String(x.nominativo).trim().toLowerCase()))
+        .filter(cerca)
+        .map((x) => ({ nominativo: String(x.nominativo).trim(), email: x.email || '', ruolo: '', team: true }))
+        .sort((a, b) => a.nominativo.localeCompare(b.nominativo, 'it')));
+    }
     if (fonte === 'cliente') {
       if (!prog.clientId) return res.json([]);
       const cc = await colonneTabella('contacts');

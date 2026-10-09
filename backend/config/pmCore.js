@@ -332,6 +332,8 @@ export async function raidProgetto(user, projectId, { tutte = false } = {}) {
   const r = await db.query(
     `SELECT id::text AS id, tipo, titolo, descrizione, probabilita, impatto, owner, mitigazione,
             data_revisione::text AS data_revisione, decisa_da, stato, origine, id_calendar, id_roles_write,
+            -- riga tolta dal registro (pulsante «Togli dal registro» = scadenza a ieri): visibile solo con «anche chiusi»
+            (scadenza IS NOT NULL AND scadenza < CURRENT_DATE) AS riga_chiusa, scadenza::text AS scadenza_riga,
             created_at, updated_at
        FROM pm_raid
       WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3
