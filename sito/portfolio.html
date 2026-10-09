@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - Portfolio</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/pm.css">
+    <!--
+      PORTFOLIO (voce «Portfolio» della barra laterale): salute di tutti i progetti aperti del PM
+      (semaforo e 5 indicatori, previsione a finire), timeline di tutti i progetti con baseline e
+      milestone, preferenze del digest settimanale via email e delle notifiche proattive.
+      API: GET /api/pm/portfolio, /api/pm/preferenze, /api/pm/digest/* (backend/routes/pm.js).
+    -->
+    <style>
+        .filtri { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.9rem; align-items: center; }
+        .filtri button.sel { outline: 2px solid var(--pm-primario); }
+        .riepilogo { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.7rem; margin-bottom: 1rem; }
+        .riepilogo .pm-card { padding: 0.7rem 0.9rem; cursor: pointer; }
+        .riepilogo b { font-size: 1.6rem; display: block; }
+        .mini-ind { display: inline-flex; gap: 3px; }
+        .mini-ind span { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+        .mini-ind .verde { background: #10B981; } .mini-ind .giallo { background: #F59E0B; } .mini-ind .rosso { background: #EF4444; } .mini-ind .nd { background: #D1D5DB; }
+        .tl { position: relative; overflow-x: auto; }
+        .tl-riga { display: grid; grid-template-columns: 260px 1fr; align-items: center; border-bottom: 1px solid #F3F4F6; min-height: 34px; }
+        .tl-nome { font-size: 0.8rem; padding: 0.25rem 0.5rem 0.25rem 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tl-nome a { color: inherit; text-decoration: none; }
+        .tl-nome a:hover { color: var(--pm-primario); }
+        .tl-area { position: relative; height: 30px; }
+        .tl-bar { position: absolute; top: 8px; height: 14px; border-radius: 4px; opacity: 0.85; }
+        .tl-bar.verde { background: #10B981; } .tl-bar.giallo { background: #F59E0B; } .tl-bar.rosso { background: #EF4444; } .tl-bar.nd { background: #9CA3AF; }
+        .tl-base { position: absolute; top: 24px; height: 3px; background: #111827; opacity: 0.45; border-radius: 2px; }
+        .tl-ms { position: absolute; top: 9px; width: 12px; height: 12px; transform: translateX(-6px) rotate(45deg); background: #4F46E5; border: 2px solid #fff; box-shadow: 0 0 0 1px #4F46E5; }
+        .tl-ms.ok { background: #10B981; box-shadow: 0 0 0 1px #10B981; } .tl-ms.ko { background: #EF4444; box-shadow: 0 0 0 1px #EF4444; }
+        .tl-oggi { position: absolute; top: 0; bottom: 0; width: 2px; background: #DC2626; z-index: 2; }
+        .tl-mesi { display: grid; grid-template-columns: 260px 1fr; font-size: 0.7rem; color: var(--pm-tenue); text-transform: uppercase; }
+        .tl-mesi .scala { position: relative; height: 20px; }
+        .tl-mesi .scala span { position: absolute; top: 2px; border-left: 1px solid #E5E7EB; padding-left: 3px; height: 18px; }
+        .pref { display: flex; flex-direction: column; gap: 0.6rem; }
+        .pref label { display: flex; gap: 0.5rem; align-items: flex-start; }
+        .pref input { margin-top: 3px; }
+    </style>
+</head>
+<body>
+    <div class="pm-top">
+        <a class="pm-btn" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
+        <h1><i class="fas fa-layer-group"></i> Portfolio progetti</h1>
+        <span class="sub" id="sottotitolo"></span>
+        <span class="spazio"></span>
+        <button class="pm-btn" id="aggiorna"><i class="fas fa-rotate"></i> Aggiorna</button>
+    </div>
+    <main class="pm-main">
+        <div id="contenuto"><div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> Calcolo la salute di tutti i tuoi progetti…</div></div>
+    </main>
+    <script src="js/pm-comune.js"></script>
+    <script>
+    (function () {
+        const { esc, api, fmt, dataIt, badge, toast, modale } = PM;
+        let dati = null, filtro = null;
+        const box = document.getElementById('contenuto');
+        const link = (p) => `pm.html?projectId=${encodeURIComponent(p.projectId)}`;
+
+        async function carica() {
+            box.innerHTML = '<div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> Calcolo la salute di tutti i tuoi progetti…</div>';
+            try {
+                const [d, pref] = await Promise.all([api('/portfolio'), api('/preferenze').catch(() => ({ digest: false, notifiche_prog: true, tabelle: false }))]);
+                dati = d;
+                dati.pref = pref;
+                render();
+            } catch (e) { box.innerHTML = `<div class="pm-errore">${esc(e.message)}</div>`; }
+        }
+
+        function render() {
+            const tutti = dati.progetti;
+            const conta = (s) => tutti.filter((x) => x.semaforo === s).length;
+            document.getElementById('sottotitolo').textContent = `${tutti.length} progetti aperti · aggiornato al ${dataIt(dati.oggi)}`;
+            const lista = filtro ? tutti.filter((x) => x.semaforo === filtro) : tutti;
+            const ordine = { rosso: 0, giallo: 1, nd: 2, verde: 3 };
+            lista.sort((a, b) => ordine[a.semaforo] - ordine[b.semaforo] || String(a.progetto.cliente).localeCompare(String(b.progetto.cliente), 'it'));
+            const card = (s, t, ico) => `<div class="pm-card" data-f="${s}" style="${filtro === s ? 'outline:2px solid #4F46E5' : ''}"><span class="sem sem-${s}"><i class="fas ${ico}"></i> ${t}</span><b>${conta(s)}</b></div>`;
+            const righe = lista.map((x) => {
+                const e = x.eac || {};
+                const ind = (x.indicatori || []).map((i) => `<span class="${i.stato}" title="${esc(i.titolo)}: ${esc(i.nota)}"></span>`).join('');
+                const peggiori = (x.indicatori || []).filter((i) => i.stato === x.semaforo && x.semaforo !== 'verde').map((i) => `${i.titolo}: ${i.nota}`).join(' · ');
+                return `<tr class="click" data-href="${esc(link(x.progetto))}">
+                    <td>${badge(x.semaforo)}</td>
+                    <td><b>${esc(x.progetto.nome)}</b><div class="pm-nota">${esc(x.progetto.cliente || '')}${x.tipologia ? ` · ${esc(x.tipologia)}` : ''}</div></td>
+                    <td><span class="mini-ind">${ind}</span>${peggiori ? `<div class="pm-nota" style="max-width:420px">${esc(peggiori)}</div>` : ''}</td>
+                    <td class="n">${e.completamento != null ? `${fmt(e.completamento, 0)}%` : '–'}</td>
+                    <td class="n">${e.bac ? `${fmt(e.ac)} / ${fmt(e.bac)} ${esc(e.unita === 'ore' ? 'h' : 'gg')}` : '–'}</td>
+                    <td class="n" style="color:${e.percPrevista > 100 ? '#DC2626' : 'inherit'}">${e.percPrevista != null ? `${fmt(e.percPrevista, 0)}%` : '–'}</td>
+                    <td>${dataIt(x.end) || dataIt(x.gantt && x.gantt.fine) || '–'}</td>
+                    <td class="n">${x.conteggi ? x.conteggi.rischiAperti : '–'}</td>
+                    <td class="n">${x.conteggi ? `${x.conteggi.taskAperti}${x.conteggi.taskScaduti ? ` <span style="color:#DC2626">(${x.conteggi.taskScaduti})</span>` : ''}` : '–'}</td>
+                </tr>`;
+            }).join('');
+            const p = dati.pref;
+            box.innerHTML = `
+                <div class="riepilogo">${card('rosso', 'Rossi', 'fa-circle-xmark')}${card('giallo', 'Gialli', 'fa-circle-exclamation')}${card('verde', 'Verdi', 'fa-circle-check')}${card('nd', 'Dati insufficienti', 'fa-circle-question')}</div>
+                <div class="pm-card">
+                    <h2><i class="fas fa-heart-pulse"></i> Salute dei progetti ${filtro ? `<span class="pill">solo ${filtro}</span> <button class="pm-btn piccolo" id="togliFiltro">mostra tutti</button>` : ''}</h2>
+                    ${lista.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Stato</th><th>Progetto</th><th>Indicatori (budget, tempi, rischi, issue, commerciale)</th><th class="n">Compl.</th><th class="n">Speso / budget</th><th class="n">A finire</th><th>Fine</th><th class="n">Rischi</th><th class="n">Azioni (scadute)</th></tr></thead><tbody>${righe}</tbody></table></div>` : '<div class="pm-vuoto">Nessun progetto.</div>'}
+                </div>
+                <div class="pm-card">
+                    <h2><i class="fas fa-chart-gantt"></i> Timeline del portfolio <span class="pm-nota">(barra = periodo del progetto, linea scura = baseline, ◆ milestone, linea rossa = oggi)</span></h2>
+                    <div class="tl" id="timeline"></div>
+                </div>
+                <div class="pm-card">
+                    <h2><i class="fas fa-envelope-open-text"></i> Avvisi e digest</h2>
+                    ${p.tabelle === false ? '<div class="pm-avviso">Per salvare le preferenze va eseguito lo script Supporto/CreaDB/pm_senior.sql.</div>' : ''}
+                    <div class="pref">
+                        <label><input type="checkbox" id="prefDigest" ${p.digest ? 'checked' : ''}> <span><b>Digest settimanale via email</b><br><span class="pm-nota">Ogni lunedì mattina: progetti rossi e gialli, To-Do scadute e della settimana, riunioni con recap non inviato, ordini da sollecitare, rischi, Change Request in attesa, milestone delle prossime 2 settimane.</span></span></label>
+                        <label><input type="checkbox" id="prefNotif" ${p.notifiche_prog !== false ? 'checked' : ''}> <span><b>Notifiche dei progetti in campanella</b><br><span class="pm-nota">Budget all'80% e superato, stima a finire oltre il 110%, data di fine superata, attività in ritardo, milestone superate o raggiunte (si può fatturare), rischi da rivedere, progetto diventato rosso.</span></span></label>
+                    </div>
+                    <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.9rem">
+                        <button class="pm-btn primario" id="salvaPref"><i class="fas fa-floppy-disk"></i> Salva</button>
+                        <button class="pm-btn" id="anteprima"><i class="fas fa-eye"></i> Anteprima del digest</button>
+                        <button class="pm-btn" id="prova"><i class="fas fa-paper-plane"></i> Inviamelo adesso</button>
+                    </div>
+                </div>`;
+            box.querySelectorAll('.riepilogo [data-f]').forEach((c) => c.addEventListener('click', () => { filtro = filtro === c.dataset.f ? null : c.dataset.f; render(); }));
+            box.querySelector('#togliFiltro')?.addEventListener('click', () => { filtro = null; render(); });
+            box.querySelectorAll('tr[data-href]').forEach((tr) => tr.addEventListener('click', () => { location.href = tr.dataset.href; }));
+            timeline(box.querySelector('#timeline'), lista);
+            box.querySelector('#salvaPref').addEventListener('click', async (e) => {
+                e.currentTarget.disabled = true;
+                try { await api('/preferenze', { metodo: 'PUT', corpo: { digest: box.querySelector('#prefDigest').checked, notifiche_prog: box.querySelector('#prefNotif').checked } }); toast('Preferenze salvate'); }
+                catch (err) { toast(err.message, 'errore'); } finally { e.currentTarget.disabled = false; }
+            });
+            box.querySelector('#anteprima').addEventListener('click', async () => {
+                const m = modale({ titolo: '<i class="fas fa-envelope"></i> Anteprima del digest', larga: true, corpo: '<div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> Preparo il digest…</div>', pulsanti: [{ testo: 'Chiudi' }] });
+                try { const d = await api('/digest/anteprima'); m.querySelector('.pm-modal-body').innerHTML = `<p class="pm-nota">Oggetto: <b>${esc(d.oggetto)}</b></p>${d.html}`; }
+                catch (err) { m.querySelector('.pm-modal-body').innerHTML = `<div class="pm-errore">${esc(err.message)}</div>`; }
+            });
+            box.querySelector('#prova').addEventListener('click', async (e) => {
+                e.currentTarget.disabled = true;
+                try { const r = await api('/digest/prova', { metodo: 'POST' }); toast(`Digest inviato a ${r.email}`); }
+                catch (err) { toast(err.message, 'errore'); } finally { e.currentTarget.disabled = false; }
+            });
+        }
+
+        function timeline(el, lista) {
+            const conDate = lista.filter((x) => (x.start || (x.gantt && x.gantt.inizio)) && (x.end || (x.gantt && x.gantt.fine)));
+            if (!conDate.length) { el.innerHTML = '<div class="pm-vuoto">Nessun progetto con date di inizio e fine (campi Start/End o Gantt).</div>'; return; }
+            const ini = (x) => x.start || x.gantt.inizio, fin = (x) => x.end || x.gantt.fine;
+            const ms = (iso) => Date.parse(`${iso}T00:00:00Z`);
+            let min = Math.min(...conDate.map((x) => ms(ini(x)))), max = Math.max(...conDate.map((x) => Math.max(ms(fin(x)), x.gantt && x.gantt.baselineFine ? ms(x.gantt.baselineFine) : 0)));
+            const oggi = ms(dati.oggi);
+            min = Math.min(min, oggi); max = Math.max(max, oggi);
+            const d0 = new Date(min); d0.setUTCDate(1); min = d0.getTime();
+            const span = Math.max(1, max - min);
+            const pc = (t) => `${((t - min) / span) * 100}%`;
+            const mesi = [];
+            for (let d = new Date(min); d.getTime() <= max; d.setUTCMonth(d.getUTCMonth() + 1)) mesi.push(new Date(d));
+            const passo = mesi.length > 18 ? 3 : 1;
+            el.innerHTML = `<div style="min-width:820px">
+                <div class="tl-mesi"><div></div><div class="scala">${mesi.filter((_, i) => i % passo === 0).map((d) => `<span style="left:${pc(d.getTime())}">${d.toLocaleDateString('it-IT', { month: 'short', year: '2-digit', timeZone: 'UTC' })}</span>`).join('')}</div></div>
+                ${conDate.map((x) => {
+                    const a = ms(ini(x)), b = ms(fin(x));
+                    const base = x.gantt && x.gantt.baselineFine ? `<div class="tl-base" style="left:${pc(a)}; width:calc(${pc(ms(x.gantt.baselineFine))} - ${pc(a)})" title="Baseline fino al ${dataIt(x.gantt.baselineFine)}"></div>` : '';
+                    const mil = (x.gantt ? x.gantt.milestone : []).filter((m) => m.data).map((m) => `<div class="tl-ms ${m.raggiunta ? 'ok' : (m.scaduta ? 'ko' : '')}" style="left:${pc(ms(m.data))}" title="${esc(m.nome)} – ${dataIt(m.data)}${m.raggiunta ? ' (raggiunta)' : ''}"></div>`).join('');
+                    return `<div class="tl-riga"><div class="tl-nome" title="${esc(x.progetto.cliente)} · ${esc(x.progetto.nome)}"><a href="${esc(link(x.progetto))}">${badge(x.semaforo, ' ')} ${esc(x.progetto.nome)}</a> <span class="pm-nota">${esc(x.progetto.cliente || '')}</span></div>
+                        <div class="tl-area"><div class="tl-oggi" style="left:${pc(oggi)}"></div><div class="tl-bar ${x.semaforo}" style="left:${pc(a)}; width:calc(${pc(Math.max(b, a + 86400000))} - ${pc(a)})" title="${dataIt(ini(x))} → ${dataIt(fin(x))}"></div>${base}${mil}</div></div>`;
+                }).join('')}</div>`;
+        }
+
+        document.getElementById('aggiorna').addEventListener('click', carica);
+        carica();
+    })();
+    </script>
+</body>
+</html>

@@ -23,6 +23,7 @@ import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
 import jobSchedulesRoutes from './routes/job-schedules.js';
 import auditLogRoutes from './routes/audit-log.js';
 import notificheRoutes from './routes/notifiche.js';
+import pmRoutes from './routes/pm.js';
 import { notificheNuoviMySupport } from './jobs/notifiche.js';
 import auditEventiRoutes from './routes/audit-eventi.js';
 import { sendMail, buildRichiestaCancellazioneEmail, EMAIL_PROJEXA } from './config/mailer.js';
@@ -197,6 +198,9 @@ app.use('/api/notifiche', notificheRoutes);
 app.use('/api/audit', auditEventiRoutes);
 // Assistente "Projexa" della dashboard (Gemini + Manuale Utente): tutti gli utenti.
 app.use('/api/chatbot', chatbotRoutes);
+// Cruscotto PM e Portfolio (funzioni da PM senior: salute, RAID, Change Request, stakeholder,
+// chiusura, documenti AI, Chiedi al progetto, briefing, baseline del Gantt): routes/pm.js.
+app.use('/api/pm', requireAuth, pmRoutes);
 // Migrazione Crypto (database-viewer): riservata agli amministratori.
 app.use('/api/crypto', requireAuth, requireAdmin, cryptoMigrationRoutes);
 
@@ -2084,6 +2088,26 @@ async function ckpConteggioRighe(pool, req, prog, c, cache) {
   const campo = String(c.campo_verif || '').trim();
   if (!tabella || !campo || c.operatore_verif == null || String(c.operatore_verif).trim() === '') return null;
   if (!(TABELLE_VERIFICA.find((t) => t.id === tabella) || {}).righe) return null;
+  // Licenze del cliente: licenze attive (Elenco Licenze) del cliente del progetto, confrontate
+  // per nome (conf_licenze_app.description).
+  if (tabella === 'licenze_app') {
+    const kl = 'licenze_app|nomi';
+    if (!cache.has(kl)) {
+      let nomi = [];
+      if (prog.clientId) {
+        const colsL = await getTableColumns('licenze_app', pool);
+        nomi = (await pool.query(
+          `SELECT cl.description AS v FROM licenze_app la JOIN conf_licenze_app cl ON cl.id = la.licenza_id
+            WHERE la.tenant_id = $1 AND la.user_id = $2 AND la.client_id = $3
+              AND (la.scadenza IS NULL OR la.scadenza >= CURRENT_DATE)${colsL.has('active') ? ' AND la.active IS TRUE' : ''}`,
+          [req.user.tenant_id, req.user.user_id, prog.clientId]
+        )).rows.map((x) => x.v);
+      }
+      cache.set(kl, nomi);
+    }
+    const nomi = cache.get(kl);
+    return { totali: nomi.length, ok: nomi.filter((v) => ckpConfronta(v, c.operatore_verif, c.risultato_verif, 'licenza', false)).length };
+  }
   const col = String(c.colonna_verif || campo).trim();
   const kt = `${tabella}|tipo|${col}`;
   if (!cache.has(kt)) {
@@ -3997,7 +4021,12 @@ const GANTT_COLUMNS = ['argomento1', 'ordinamento1', 'argomento2', 'ordinamento2
   'data_inizio', 'data_fine', 'dipendenza', 'colore',
   'nr_mesi', 'nr_giorni', 'stato', 'avanzamento', 'rischio',
   'owner', 'nominativo', 'note_interne', 'mostra_cliente',
-  'name_arg1', 'name_arg2', 'name_arg3', 'name_arg4'];
+  'name_arg1', 'name_arg2', 'name_arg3', 'name_arg4',
+  // Supporto/CreaDB/pm_senior.sql: milestone (modificabile) e baseline (sola lettura: la
+  // scrive solo «Congela baseline», POST /api/pm/gantt/baseline). Se le colonne non ci sono
+  // ancora vengono ignorate.
+  'milestone', 'baseline_inizio', 'baseline_fine'];
+const GANTT_SOLO_LETTURA = new Set(['baseline_inizio', 'baseline_fine']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function resolveGanttContext(fieldId, req, needWrite) {
@@ -4018,10 +4047,12 @@ async function resolveGanttContext(fieldId, req, needWrite) {
 }
 
 // Filtra i valori ricevuti dal browser sulle sole colonne del Gantt ('' -> NULL).
-function ganttCleanValues(values) {
+function ganttCleanValues(values, tableColumns = null) {
   const data = {};
   for (const [k, v] of Object.entries(values || {})) {
-    if (GANTT_COLUMNS.includes(k)) data[k] = (v === '' || v === undefined) ? null : v;
+    if (!GANTT_COLUMNS.includes(k) || GANTT_SOLO_LETTURA.has(k)) continue;
+    if (tableColumns && !tableColumns.has(k)) continue;
+    data[k] = (v === '' || v === undefined) ? null : v;
   }
   return data;
 }
@@ -4149,7 +4180,7 @@ app.post('/api/projects/gantt-activity/batch', requireAuth, async (req, res) => 
 
       for (const ins of inserts) {
         const tempId = String(ins?.tempId || '').trim();
-        let data = ganttCleanValues(ins?.values);
+        let data = ganttCleanValues(ins?.values, ganttColumns);
         if (Object.prototype.hasOwnProperty.call(data, 'dipendenza')) {
           data.dipendenza = resolveDep(data.dipendenza, tempId);
         }
@@ -4175,7 +4206,7 @@ app.post('/api/projects/gantt-activity/batch', requireAuth, async (req, res) => 
         if (!rowId) {
           throw Object.assign(new Error('Id da aggiornare non valido'), { statusCode: 400 });
         }
-        let data = ganttCleanValues(upd?.values);
+        let data = ganttCleanValues(upd?.values, ganttColumns);
         if (Object.prototype.hasOwnProperty.call(data, 'dipendenza')) {
           data.dipendenza = resolveDep(data.dipendenza, rowId);
         }

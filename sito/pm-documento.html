@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - Documento di progetto</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!--
+      STATUS REPORT (SAL) e VERBALE DI CHIUSURA da stampare o salvare in PDF, aperti dal Cruscotto PM
+      (pm.html). ?projectId=&tipo=status|chiusura&dal=AAAA-MM-GG. Dati da GET /api/pm/documento:
+      numeri e tabelle li compone Projexa, il commento lo scrive l'AI (prompt STATUS_REPORT /
+      VERBALE_CHIUSURA). Il semaforo e i dati economici interni (effort, stima a finire) si
+      possono togliere prima di stampare con le caselle in alto.
+    -->
+    <style>
+        @page { size: A4 portrait; margin: 12mm; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; color: #1F2937; background: #E5E7EB; font-size: 11.5px; }
+        .toolbar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; padding: 0.7rem 1.2rem; background: #fff; border-bottom: 1px solid #E5E7EB; font-size: 13px; }
+        .toolbar .t { font-weight: 700; color: #3730A3; }
+        .toolbar .stato { color: #6B7280; flex: 1; }
+        .toolbar label { display: flex; align-items: center; gap: 0.3rem; }
+        .btn { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.5rem 1rem; border: none; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; background: #4F46E5; color: #fff; }
+        .btn:disabled { opacity: 0.5; cursor: wait; }
+        .avviso { max-width: 210mm; margin: 0.8rem auto 0; background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; border-radius: 8px; padding: 0.5rem 0.8rem; font-size: 12px; }
+        .pagina { width: 210mm; max-width: 100%; min-height: 297mm; margin: 0.8rem auto 2rem; background: #fff; padding: 12mm 14mm; box-shadow: 0 4px 20px rgba(0,0,0,0.12); }
+        .caricamento { text-align: center; padding: 4rem 1rem; color: #6B7280; font-size: 14px; }
+        .testata { display: grid; grid-template-columns: 170px 1fr 170px; align-items: center; gap: 1rem; padding-bottom: 5mm; border-bottom: 2px solid #4F46E5; }
+        .logo { height: 70px; display: flex; align-items: center; }
+        .logo.dx { justify-content: flex-end; }
+        .logo img { max-height: 70px; max-width: 170px; object-fit: contain; }
+        .titolo { text-align: center; }
+        .titolo h1 { font-size: 20px; color: #312E81; letter-spacing: 0.03em; }
+        .titolo .prj { font-size: 14px; font-weight: 700; margin-top: 2px; }
+        .titolo .sub { font-size: 10.5px; color: #6B7280; margin-top: 3px; }
+        .riquadri { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3mm; margin: 5mm 0 2mm; }
+        .riq { border: 1px solid #E5E7EB; border-radius: 6px; padding: 2mm 3mm; }
+        .riq small { display: block; color: #6B7280; font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; }
+        .riq b { font-size: 13px; }
+        .sem { display: inline-block; padding: 0.5mm 2.5mm; border-radius: 99px; font-weight: 700; font-size: 11px; }
+        .sem.verde { background: #ECFDF5; color: #059669; } .sem.giallo { background: #FFFBEB; color: #B45309; } .sem.rosso { background: #FEF2F2; color: #DC2626; } .sem.nd { background: #F3F4F6; color: #6B7280; }
+        h2 { font-size: 13px; color: #312E81; margin: 6mm 0 2mm; padding-bottom: 1mm; border-bottom: 1px solid #E0E7FF; }
+        .ai h4 { font-size: 12px; color: #312E81; margin: 4mm 0 1mm; }
+        .ai p { margin: 1mm 0; line-height: 1.5; }
+        .ai ul, .ai ol { padding-left: 5mm; margin: 1mm 0; line-height: 1.5; }
+        table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 1mm; }
+        th { text-align: left; background: #EEF2FF; color: #3730A3; font-size: 9.5px; text-transform: uppercase; padding: 1.4mm 2mm; }
+        td { padding: 1.4mm 2mm; border-bottom: 1px solid #F3F4F6; vertical-align: top; }
+        td.n, th.n { text-align: right; white-space: nowrap; }
+        .vuoto { color: #9CA3AF; font-style: italic; }
+        .firme { display: grid; grid-template-columns: 1fr 1fr; gap: 15mm; margin-top: 14mm; }
+        .firme div { border-top: 1px solid #9CA3AF; padding-top: 2mm; text-align: center; color: #6B7280; font-size: 10px; }
+        .piede { margin-top: 8mm; display: flex; justify-content: space-between; color: #9CA3AF; font-size: 9px; border-top: 1px solid #E5E7EB; padding-top: 2mm; }
+        .nascondi-interni .interno { display: none !important; }
+        .nascondi-sem .semaforo { display: none !important; }
+        @media print {
+            body { background: #fff; }
+            .toolbar, .avviso { display: none; }
+            .pagina { box-shadow: none; margin: 0; padding: 0; width: auto; min-height: 0; }
+            h2 { break-after: avoid; }
+            tr { break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <span class="t" id="tTitolo">Documento di progetto</span>
+        <span class="stato" id="stato">Preparazione in corso…</span>
+        <label title="Effort in ore o giornate, stima a finire, efficienza: dati interni"><input type="checkbox" id="chkInterni"> Mostra dati economici interni</label>
+        <label><input type="checkbox" id="chkSem" checked> Mostra semaforo</label>
+        <button class="btn" id="stampa" disabled><i class="fas fa-print"></i> Stampa / Salva PDF</button>
+    </div>
+    <div id="avvisi"></div>
+    <div class="pagina" id="pagina"><div class="caricamento"><i class="fas fa-spinner fa-spin"></i> Raccolgo i dati del progetto e l'AI scrive il commento: può volerci qualche istante…</div></div>
+
+    <script src="js/pm-comune.js"></script>
+    <script>
+    (async function () {
+        const { esc, api, fmt, euro, dataIt, testoAiHtml } = PM;
+        const qs = new URLSearchParams(location.search);
+        const tipo = qs.get('tipo') === 'chiusura' ? 'chiusura' : 'status';
+        const pagina = document.getElementById('pagina');
+        document.body.classList.add('nascondi-interni');
+        document.getElementById('chkInterni').addEventListener('change', (e) => document.body.classList.toggle('nascondi-interni', !e.target.checked));
+        document.getElementById('chkSem').addEventListener('change', (e) => document.body.classList.toggle('nascondi-sem', !e.target.checked));
+        document.getElementById('stampa').addEventListener('click', () => window.print());
+        const logo = async (url) => {
+            try { const r = await fetch(`${PM.API_URL}${url}`, { headers: PM.auth() }); return r.ok ? URL.createObjectURL(await r.blob()) : null; } catch { return null; }
+        };
+        const tab = (testa, righe, num = []) => (righe.length
+            ? `<table><thead><tr>${testa.map((t, i) => `<th${num.includes(i) ? ' class="n"' : ''}>${esc(t)}</th>`).join('')}</tr></thead><tbody>${righe.map((r) => `<tr>${r.map((v, i) => `<td${num.includes(i) ? ' class="n"' : ''}>${v}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+            : '<p class="vuoto">Nessuna voce.</p>');
+        try {
+            const d = await api(`/documento?${new URLSearchParams({ projectId: qs.get('projectId') || '', tipo, dal: qs.get('dal') || '' })}`);
+            const [logoTenant, logoCliente] = await Promise.all([logo('/tenant-logo'), d.progetto.clientId ? logo(`/client-logos/${encodeURIComponent(d.progetto.clientId)}`) : null]);
+            document.title = `${d.titolo} - ${d.progetto.nome}`;
+            document.getElementById('tTitolo').textContent = d.titolo;
+            if (d.ai.errore) document.getElementById('avvisi').innerHTML = `<div class="avviso"><i class="fas fa-circle-info"></i> ${esc(d.ai.errore)}</div>`;
+            const e = d.eac, g = d.gantt, s = d.scheda;
+            const SEM = { verde: 'In linea', giallo: 'Attenzione', rosso: 'Critico', nd: 'n.d.' };
+            const compl = e.completamento != null ? `${fmt(e.completamento, 0)}%` : '–';
+            let html = `<div class="testata">
+                <div class="logo">${logoTenant ? `<img src="${logoTenant}" alt="">` : ''}</div>
+                <div class="titolo"><h1>${esc(d.titolo.toUpperCase())}</h1><div class="prj">${esc(d.progetto.cliente ? `${d.progetto.cliente} · ` : '')}${esc(d.progetto.nome)}</div>
+                    <div class="sub">${tipo === 'status' ? `Periodo dal ${dataIt(d.dal)} al ${dataIt(d.data)}` : `Aggiornato al ${dataIt(d.data)}`} · Project Manager: ${esc(d.utente)}</div></div>
+                <div class="logo dx">${logoCliente ? `<img src="${logoCliente}" alt="">` : ''}</div></div>
+                <div class="riquadri">
+                    <div class="riq semaforo"><small>Stato del progetto</small><span class="sem ${d.semaforo}">${SEM[d.semaforo]}</span></div>
+                    <div class="riq"><small>Completamento</small><b>${compl}</b></div>
+                    <div class="riq"><small>Periodo</small><b style="font-size:11px">${dataIt(s.start) || '?'} → ${dataIt(s.end) || '?'}</b></div>
+                    <div class="riq"><small>${g.baselineFine ? 'Fine prevista / baseline' : 'Fine prevista'}</small><b style="font-size:11px">${dataIt(g.fine || s.end) || '–'}${g.baselineFine ? ` / ${dataIt(g.baselineFine)}` : ''}</b></div>
+                    <div class="riq interno"><small>Effort speso / budget (${esc(e.unita)})</small><b>${fmt(e.ac)} / ${fmt(e.bac)}</b></div>
+                    <div class="riq interno"><small>Stima a finire</small><b>${e.eac != null ? `${fmt(e.eac)} (${fmt(e.percPrevista, 0)}%)` : '–'}</b></div>
+                    <div class="riq interno"><small>Efficienza (CPI)</small><b>${e.cpi != null ? fmt(e.cpi, 2) : '–'}</b></div>
+                    <div class="riq interno"><small>Change Request approvate</small><b>${d.cr.filter((x) => x.stato === 'approvata').length}</b></div>
+                </div>
+                <div class="semaforo interno">${tab(['Indicatore', 'Stato', 'Dettaglio'], d.indicatori.map((i) => [esc(i.titolo), `<span class="sem ${i.stato}">${SEM[i.stato]}</span>`, esc(i.nota)]))}</div>`;
+            if (d.ai.testo) html += `<div class="ai">${testoAiHtml(d.ai.testo)}</div>`;
+            html += `<h2>Milestone</h2>${tab(['Milestone', 'Data prevista', 'Baseline', 'Stato'], g.milestone.map((m) => [esc(m.nome), dataIt(m.data), dataIt(m.baseline) || '–', m.raggiunta ? 'Raggiunta' : (m.scaduta ? 'Superata, non raggiunta' : 'Da raggiungere')]))}`;
+            if (tipo === 'status') {
+                html += `<h2>Attività completate nel periodo</h2>${tab(['Attività', 'Fine', 'Responsabile'], d.svolte.map((a) => [esc(a.nome), dataIt(a.fine), esc(a.owner || '')]))}`;
+                html += `<h2>Attività in corso e dei prossimi 30 giorni</h2>${tab(['Attività', 'Inizio', 'Fine', 'Avanzamento', 'Responsabile'], d.prossime.map((a) => [`${a.milestone ? '◆ ' : ''}${esc(a.nome)}`, dataIt(a.inizio), dataIt(a.fine), `${a.avanzamento}%`, esc(a.owner || '')]), [3])}`;
+                if (g.inRitardo.length) html += `<h2>Attività in ritardo</h2>${tab(['Attività', 'Fine prevista', 'Avanzamento', 'Ritardo'], g.inRitardo.map((a) => [esc(a.nome), dataIt(a.fine), `${a.avanzamento}%`, `${a.giorni} gg`]), [2, 3])}`;
+            }
+            html += `<h2>Rischi principali</h2>${tab(['Rischio', 'Punteggio', 'Responsabile', 'Azione di risposta'], d.rischi.slice(0, 12).map((r) => [esc(r.titolo), r.punteggio ?? '–', esc(r.owner || ''), esc(r.mitigazione || '')]), [1])}`;
+            html += `<h2>${tipo === 'status' ? 'Decisioni del periodo' : 'Decisioni prese'}</h2>${tab(['Data', 'Decisione', 'Decisa da'], d.decisioni.map((x) => [dataIt(x.data), esc(x.titolo), esc(x.decisa_da || '')]))}`;
+            html += `<h2>Change Request</h2>${tab(['Codice', 'Titolo', 'Stato', 'Importo', 'Tempi'], d.cr.map((x) => [esc(x.codice || ''), esc(x.titolo), esc(x.stato), euro(x.importo), x.giorni != null ? `${x.giorni} gg` : '–']), [3, 4])}`;
+            html += `<h2>Azioni aperte</h2>${tab(['Azione', 'Assegnata a', 'Scadenza'], d.azioni.slice(0, 40).map((a) => [esc(a.titolo), esc(a.assegnato || '–'), `${dataIt(a.scadenza) || '–'}${a.scaduta ? ' (scaduta)' : ''}`]))}`;
+            if (tipo === 'chiusura') {
+                const c = d.chiusura || {};
+                html += `<h2>Accettazione e soddisfazione</h2>${tab(['Voce', 'Valore'], [
+                    ['Accettazione del cliente', `${dataIt(c.data_accettazione) || 'non ancora registrata'}${c.accettato_da ? ` – ${esc(c.accettato_da)}` : ''}`],
+                    ['Soddisfazione del cliente', c.soddisfazione ? `${'★'.repeat(c.soddisfazione)}${'☆'.repeat(5 - c.soddisfazione)} (${c.soddisfazione}/5)${c.nota_soddisfazione ? ` – ${esc(c.nota_soddisfazione)}` : ''}` : 'non indicata'],
+                    ['Obiettivi raggiunti', esc(c.obiettivi_raggiunti || '–')],
+                    ['Attività residue', esc(c.attivita_residue || '–')]
+                ])}`;
+                html += `<h2>Lessons learned</h2>${tab(['Tipo', 'Categoria', 'Lezione', 'Raccomandazione'], d.lessons.map((l) => [l.tipo === 'positivo' ? 'Ha funzionato' : 'Da migliorare', esc(l.categoria || ''), esc(l.testo), esc(l.raccomandazione || '')]))}`;
+                html += '<div class="firme"><div>Per il fornitore (Project Manager)</div><div>Per il cliente (accettazione)</div></div>';
+            }
+            html += `<div class="piede"><span>Projexa · ${esc(d.titolo)} · ${esc(d.progetto.nome)}</span><span>${dataIt(d.data)}${d.ai.label ? ` · commento: ${esc(d.ai.label)}` : ''}</span></div>`;
+            pagina.innerHTML = html;
+            document.getElementById('stato').textContent = 'Pronto: controlla e stampa (salva come PDF dalla finestra di stampa).';
+            document.getElementById('stampa').disabled = false;
+        } catch (err) {
+            pagina.innerHTML = `<div class="caricamento" style="color:#B91C1C"><i class="fas fa-triangle-exclamation"></i> ${esc(err.message)}</div>`;
+            document.getElementById('stato').textContent = 'Documento non disponibile';
+        }
+    })();
+    </script>
+</body>
+</html>

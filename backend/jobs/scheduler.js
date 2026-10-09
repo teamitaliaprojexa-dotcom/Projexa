@@ -20,6 +20,7 @@ import db from '../config/database.js';
 import { eseguiAggiornaIntegrazioni } from './aggiornaIntegrazioni.js';
 import { eseguiBackupDb, eseguiCopiaStaging, eseguiPuliziaVm } from './scriptVm.js';
 import { eseguiNotificheScadenze } from './notifiche.js';
+import { eseguiNotificheProgetti, eseguiDigestSettimanale } from './pmJobs.js';
 import { conContestoAudit } from '../config/auditContext.js';
 
 // Job schedulabili: la chiave è il valore di job_schedules.job.
@@ -40,7 +41,11 @@ const JOBS = {
   // Pulizia di cache e log della VM che non si puliscono da soli (vedi scriptVm.js).
   pulizia_vm: () => eseguiPuliziaVm(),
   // Notifiche delle scadenze (To-Do), per tutti i tenant: vedi jobs/notifiche.js.
-  notifiche_scadenze: () => eseguiNotificheScadenze()
+  notifiche_scadenze: () => eseguiNotificheScadenze(),
+  // Funzioni da PM senior (jobs/pmJobs.js): fotografia giornaliera e notifiche proattive dei
+  // progetti; digest settimanale via email a chi l'ha attivato. Per tutti i tenant.
+  pm_notifiche_progetti: () => eseguiNotificheProgetti(),
+  pm_digest_settimanale: () => eseguiDigestSettimanale()
 };
 
 // Nomi dei job schedulabili (usati dalla pagina di gestione per l'elenco a discesa).
@@ -52,7 +57,9 @@ export const INFO_JOB = {
   backup_db: { etichetta: 'Backup database VM su Object Storage', jira: false },
   copia_staging_neon: { etichetta: 'Copia database VM su staging Neon', jira: false },
   pulizia_vm: { etichetta: 'Pulizia cache e log della VM', jira: false },
-  notifiche_scadenze: { etichetta: 'Notifiche delle scadenze (To-Do)', jira: false }
+  notifiche_scadenze: { etichetta: 'Notifiche delle scadenze (To-Do)', jira: false },
+  pm_notifiche_progetti: { etichetta: 'Salute progetti: notifiche e fotografia giornaliera', jira: false },
+  pm_digest_settimanale: { etichetta: 'Digest settimanale via email ai PM', jira: false }
 };
 
 export function schedulerAttivo() {

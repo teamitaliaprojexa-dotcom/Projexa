@@ -255,7 +255,14 @@ const TABLE_COLUMN_ALLOWLIST = {
   projects: new Set(['valore2']),
   issue: new Set(['richiedente', 'descrizione', 'owner', 'note']),
   // Riunioni registrate/trascritte (routes/calendar.js)
-  rec_meeting: new Set(['oggetto', 'mittente', 'trascrizione', 'recap', 'recap_html', 'email_a', 'email_cc'])
+  rec_meeting: new Set(['oggetto', 'mittente', 'trascrizione', 'recap', 'recap_html', 'email_a', 'email_cc']),
+  // Funzioni da PM senior (Supporto/CreaDB/pm_senior.sql): solo i testi liberi; tipo, stato,
+  // codici e numeri restano in chiaro perché si filtrano e si contano in SQL.
+  pm_raid: new Set(['titolo', 'descrizione', 'owner', 'mitigazione', 'decisa_da']),
+  pm_change_request: new Set(['titolo', 'descrizione', 'motivo', 'richiesta_da', 'note']),
+  pm_stakeholder: new Set(['nominativo', 'email', 'ruolo', 'strategia', 'comunicazione']),
+  pm_chiusura: new Set(['accettato_da', 'nota_soddisfazione', 'obiettivi_raggiunti', 'attivita_residue']),
+  pm_lesson: new Set(['testo', 'raccomandazione'])
 };
 
 // Decide se una colonna è cifrabile e, in caso contrario, perché (serve alla UI).

@@ -744,6 +744,17 @@
         .proj-ck.proj-of:focus-visible { outline-color: #FCD34D; }
         .proj-of .proj-ck-img { width: 40px; filter: drop-shadow(0 3px 5px rgba(180,140,40,0.35)); }
         .proj-of .proj-ck-lbl { text-align: center; }
+        /* Pulsante Cruscotto PM (accanto a Offerta economica): stessa card, toni indaco */
+        .proj-ck.proj-pm { background: linear-gradient(145deg, #EEF2FF 0%, #E0E7FF 55%, #F5F3FF 100%); color: #312E81;
+            box-shadow: 0 4px 14px rgba(79,70,229,0.16), inset 0 0 0 1px rgba(79,70,229,0.16); }
+        .proj-ck.proj-pm:hover { box-shadow: 0 10px 24px rgba(79,70,229,0.26), inset 0 0 0 1px rgba(79,70,229,0.24); }
+        .proj-ck.proj-pm:focus-visible { outline-color: #A5B4FC; }
+        .proj-pm-ico { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-size: 1.35rem; color: #fff;
+            background: linear-gradient(145deg, #6366F1, #4338CA); box-shadow: 0 3px 8px rgba(79,70,229,0.35); transition: transform 0.2s; }
+        .proj-ck.proj-pm:hover .proj-pm-ico { transform: scale(1.06) rotate(-6deg); }
+        /* Briefing pre-riunione accanto a cliente/progetto della riunione */
+        .meeting-briefing { border: 1px solid #C7D2FE; background: #EEF2FF; color: #4338CA; border-radius: 6px; width: 26px; height: 26px; cursor: pointer; display: inline-grid; place-items: center; font-size: 0.75rem; flex: 0 0 auto; }
+        .meeting-briefing:hover { background: #E0E7FF; }
         /* Finestra Offerta economica: dati economici e griglia Invoice in sola lettura */
         .of-dati { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.5rem; }
         .of-dato { background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 9px; padding: 0.4rem 0.6rem; }
@@ -1879,6 +1890,8 @@
         .ckc-chip { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.73rem; font-weight: 600; border-radius: 999px; padding: 0.2rem 0.6rem; white-space: nowrap; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
         .ckc-chip.ver { background: #ECFDF5; color: #059669; }
         .ckc-chip.none { background: #F1F5F9; color: #94A3B8; }
+        /* Condizione della fase impostata: imbuto colorato nella testata */
+        .ckc-ibtn.on { color: var(--c, #4F46E5); background: #EEF2FF; }
         .ckc-step .ckc-ibtn { width: 25px; height: 25px; border-radius: 8px; font-size: 0.85rem; }
         .ckc-step .ckc-grip { padding: 0.2rem 0.35rem; }
         .ckc-step .acts { display: flex; gap: 0.1rem; opacity: 0.55; transition: opacity 0.15s; }
@@ -3782,6 +3795,8 @@
             <!-- Reporting: nascosto finché "Mostra Reporting" (Impostazioni › Preferenze) non è attivo -->
             <li id="navReporting" data-dash-flag="reporting" class="dash-flag-off"><a href="reporting.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10h3v10H4Zm6.5 0V4h3v16h-3ZM17 20v-7h3v7h-3Z"/></svg> <span>Reporting</span></a></li>
             <li id="navIssue" data-dash-flag="issue"><a href="issue.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1.1 15.5h-2.2v-2.2h2.2v2.2Zm0-4.2h-2.2V6.5h2.2v6.8Z"/></svg> <span>Issue</span></a></li>
+            <!-- Portfolio (funzioni da PM senior): salute di tutti i progetti, timeline, digest settimanale -->
+            <li id="navPortfolio"><a href="portfolio.html" title="Salute di tutti i tuoi progetti"><i class="fas fa-layer-group"></i> <span>Portfolio</span></a></li>
             <li class="nav-projects" style="position: relative;">
                 <a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5.5C2 4.7 2.7 4 3.5 4h6l2 2h9c.8 0 1.5.7 1.5 1.5v11c0 .8-.7 1.5-1.5 1.5h-17C2.7 20 2 19.3 2 18.5v-13Z"/></svg> <span>Progetti clienti</span></a>
                 <div class="settings-flyout">
@@ -8966,6 +8981,11 @@
             const modal = document.getElementById('recapTasksModal');
             const close = () => modal.classList.remove('open');
             document.getElementById('meetingTextTasks')?.addEventListener('click', openRecapTasks);
+            // Rischi e decisioni: Cruscotto PM del progetto della riunione, scheda RAID, estrazione AI.
+            document.getElementById('meetingTextRaid')?.addEventListener('click', () => {
+                const id = document.getElementById('meetingTextModal').dataset.eventId || '';
+                if (id) window.open(`pm.html?${new URLSearchParams({ da_riunione: id })}`, '_blank');
+            });
             document.getElementById('recapTasksClose')?.addEventListener('click', close);
             document.getElementById('recapTasksCancel')?.addEventListener('click', close);
             document.getElementById('recapTasksSave')?.addEventListener('click', saveRecapTasks);
@@ -9280,6 +9300,7 @@
             show('meetingTextUpload', true);
             show('meetingTextFix', true);
             show('meetingTextTasks', isRecap);     // Crea task: solo nel recap
+            show('meetingTextRaid', isRecap);      // Rischi e decisioni (Cruscotto PM): solo nel recap
             show('meetingTextAudio', !isRecap);    // file audio: solo trascrizione
             modal.dataset.title = btn.dataset.title || '';
             document.getElementById('meetingTextTitleText').textContent = `${isRecap ? 'Recap' : 'Trascrizione'} — ${btn.dataset.title || ''}`;
@@ -9326,7 +9347,7 @@
             modal.dataset.eventId = '';
             modal.dataset.field = field;
             modal.dataset.title = title;
-            ['meetingTextUpload', 'meetingTextAudio', 'meetingTextFix', 'meetingTextTasks', 'meetingTextClear', 'meetingTextEmail'].forEach((id) => {
+            ['meetingTextUpload', 'meetingTextAudio', 'meetingTextFix', 'meetingTextTasks', 'meetingTextRaid', 'meetingTextClear', 'meetingTextEmail'].forEach((id) => {
                 const el = document.getElementById(id);
                 if (el) el.style.display = 'none';
             });
@@ -11051,7 +11072,8 @@
             const projectId = assign.dataset.projectId || '';
             assign.innerHTML = `
                 <select class="meeting-assign-client" title="Cliente" aria-label="Cliente" disabled><option>Caricamento…</option></select>
-                <select class="meeting-assign-project" title="Progetto" aria-label="Progetto" disabled><option value="">— progetto —</option></select>`;
+                <select class="meeting-assign-project" title="Progetto" aria-label="Progetto" disabled><option value="">— progetto —</option></select>
+                <button type="button" class="meeting-briefing" title="Briefing pre-riunione: agenda, azioni aperte, rischi e domande per il cliente (AI)"><i class="fas fa-clipboard-list"></i></button>`;
             const clientSel = assign.querySelector('.meeting-assign-client');
             const projectSel = assign.querySelector('.meeting-assign-project');
             clientSel.innerHTML = meetingOptions(await getMeetingClients(), clientId, '— cliente —');
@@ -11308,8 +11330,8 @@
             const delBtn = document.getElementById('notifDelBtn');
             const countEl = document.getElementById('notifCount');
             const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines' };
-            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione' };
+            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines', progetto: 'fas fa-gauge-high' };
+            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione', progetto: 'Progetto' };
             let elenco = [];
 
             function mostraConteggio(n) {
@@ -11358,6 +11380,7 @@
                             <span class="notif-when">${esc(quando(n.aggiornata_il || n.creata_il))}</span>
                             ${n.letta ? '' : '<span class="notif-dot" title="Da leggere"></span>'}
                             ${n.tabella === 'tasks' && n.riga_id ? `<button type="button" class="notif-go" data-vai="${esc(n.riga_id)}" title="Apri la To-Do">Vai <i class="fas fa-arrow-right"></i></button>` : ''}
+                            ${n.fonte === 'progetto' && n.riga_id ? `<a class="notif-go" href="pm.html?projectId=${encodeURIComponent(n.riga_id)}" title="Apri il Cruscotto PM del progetto" style="text-decoration:none">Vai <i class="fas fa-arrow-right"></i></a>` : ''}
                             ${n.vai ? `<button type="button" class="notif-go" data-vai-dest="${esc(n.id)}" title="${n.vai.projectId ? 'Apri il progetto' : 'Apri il cliente'}${n.vai.fieldId ? ' e la sua griglia' : ''}">Vai <i class="fas fa-arrow-right"></i></button>` : ''}
                         </div>
                     </div>`).join('')
@@ -12416,7 +12439,11 @@
                 // Offerta economica: subito dopo Kick-off (vedi OFFERTA ECONOMICA DEL PROGETTO)
                 '<button type="button" class="proj-ck proj-of" id="projOffertaBtn" title="Offerta economica del progetto: documento Word compilato dall\'AI">' +
                 '<img class="proj-ck-img" src="offerta.webp" alt="">' +
-                '<span class="proj-ck-lbl">Offerta economica</span></button>';
+                '<span class="proj-ck-lbl">Offerta economica</span></button>' +
+                // Cruscotto PM (sito/pm.html): salute, RAID, Change Request, stakeholder, chiusura, AI
+                '<button type="button" class="proj-ck proj-pm" id="projCruscottoBtn" title="Cruscotto PM: salute del progetto, rischi e decisioni, Change Request, stakeholder, chiusura, Status Report e domande all\'AI">' +
+                '<span class="proj-pm-ico"><i class="fas fa-gauge-high"></i></span>' +
+                '<span class="proj-ck-lbl">Cruscotto PM</span></button>';
         }
         // Posizione del pulsante: nello spazio libero della riga di Descrizione (subito dopo il
         // campo); se la riga è piena o in riordino, nella testata del progetto.
@@ -13206,6 +13233,21 @@
                 ofDisegna();
             }
         }
+        // Cruscotto PM: pagina pm.html del progetto aperto (stesso progetto della scheda).
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#projCruscottoBtn')) return;
+            if (!currentDetailArgument) return;
+            location.href = `pm.html?projectId=${encodeURIComponent(currentDetailArgument)}`;
+        });
+        // Briefing pre-riunione dalla riga della riunione: serve il progetto collegato.
+        document.addEventListener('click', (e) => {
+            const b = e.target.closest('.meeting-briefing');
+            if (!b) return;
+            const assign = b.closest('.meeting-assign');
+            const projectId = assign && assign.dataset.projectId;
+            if (!projectId) { showNotification('Briefing: scegli prima il progetto della riunione', 'info'); return; }
+            window.open(`pm.html?${new URLSearchParams({ projectId, briefing: assign.dataset.eventId || '1' })}`, '_blank');
+        });
         document.addEventListener('click', async (e) => {
             const btn = e.target.closest('#projOffertaBtn');
             if (!btn) return;
@@ -17150,7 +17192,9 @@
                 { id: 'clients', label: 'Clienti', chip: 'Cliente', frase: 'il cliente ha' },
                 { id: 'projects', label: 'Progetti', chip: 'Progetto', frase: 'il progetto ha' },
                 { id: 'cl_quotazioni', label: 'Quotazioni', chip: 'Quotazioni', frase: 'almeno una quotazione del progetto ha' },
-                { id: 'task_app', label: 'Task di sviluppo', chip: 'Task di sviluppo', frase: 'almeno un task di sviluppo del progetto ha' }
+                { id: 'task_app', label: 'Task di sviluppo', chip: 'Task di sviluppo', frase: 'almeno un task di sviluppo del progetto ha' },
+                // Elenco Licenze del cliente (licenze attive): vera se almeno una licenza la rispetta.
+                { id: 'licenze_app', label: 'Licenze del cliente', chip: 'Licenze cliente', frase: 'almeno una licenza attiva del cliente ha' }
             ];
             const dove = (id) => DOVE.find(x => x.id === id) || { label: id, chip: id, frase: 'il campo' };
             const chip = (ver) => ver && ver.campo
@@ -17193,6 +17237,7 @@
                             <div class="ckc-phase-title">${editing && f.canWrite
                                 ? `<input value="${escapeHtml(f.titolo)}" data-titolo-fase="${f.uid}" placeholder="Titolo della fase" maxlength="255">`
                                 : `<span class="ro">${escapeHtml(f.titolo)}</span>`}<div class="ckc-meta">${f.attivita.length} attività${f.ver && f.ver.campo ? ' · ' + chip(f.ver) : ''}</div></div>
+                            ${editing || (f.ver && f.ver.campo) ? `<button type="button" class="ckc-ibtn${f.ver && f.ver.campo ? ' on' : ''}" data-cond-fase="${f.uid}" title="Condizione della fase: se è falsa, nel progetto non compaiono né la fase né le sue attività"><i class="fas fa-filter"></i></button>` : ''}
                             <button type="button" class="ckc-ibtn ckc-collapse" data-collapse="${f.uid}" title="Comprimi"><i class="fas fa-chevron-down"></i></button>
                             ${editing ? `<button type="button" class="ckc-ibtn danger" data-del-fase="${f.uid}" title="Elimina fase"><i class="fas fa-trash-can"></i></button>` : ''}
                         </div>
@@ -17211,14 +17256,19 @@
             const trovaAtt = (uid) => { for (const f of fasi()) { const a = f.attivita.find(x => x.uid === Number(uid)); if (a) return { f, a }; } return {}; };
 
             // ---- Pannello di dettaglio
-            async function apri(f, a) {
-                selezione = { fase: f, att: a };
-                root.querySelectorAll('.ckc-step').forEach(s => s.classList.toggle('sel', Number(s.dataset.att) === a.uid));
+            // a = attività; senza attività il pannello è quello della FASE (stessa condizione: se è
+            // falsa, nel progetto restano fuori la fase e tutte le sue attività, vedi ckpRighePreviste).
+            async function apri(f, attivita) {
+                const isFase = !attivita;
+                const a = attivita || f;
+                selezione = { fase: f, att: attivita || null };
+                root.querySelectorAll('.ckc-step').forEach(s => s.classList.toggle('sel', !isFase && Number(s.dataset.att) === a.uid));
                 const d = ckcDrawer();
                 d._onClose = () => { selezione = null; root.querySelectorAll('.ckc-step.sel').forEach(s => s.classList.remove('sel')); };
                 const ro = !editing || !a.canWrite;
-                document.getElementById('ckcDTitle').textContent = `Attività della fase «${f.titolo}»`;
-                document.getElementById('ckcDDel').style.display = ro ? 'none' : '';
+                document.getElementById('ckcDTitle').textContent = isFase ? `Fase «${f.titolo}»` : `Attività della fase «${f.titolo}»`;
+                // La fase si elimina dal cestino della sua testata (chiede conferma per le attività).
+                document.getElementById('ckcDDel').style.display = ro || isFase ? 'none' : '';
                 document.getElementById('ckcDDel').onclick = () => { elimina(a.uid); d._chiudi(); };
                 const body = document.getElementById('ckcDBody');
                 const disegnaDettaglio = async () => {
@@ -17230,7 +17280,9 @@
                     body.innerHTML = `
                         <div class="ckc-field"><label>Descrizione</label><textarea id="ckcFDesc" rows="2" maxlength="255" ${ro ? 'readonly' : ''}>${escapeHtml(a.titolo)}</textarea></div>
                         <div class="ckc-field"><label>Tipo verifica</label><input value="selezione" readonly></div>
-                        <div class="ckc-swrow"><div><b>Condizione</b><small>La voce entra nella check list del progetto solo se un campo del cliente, del progetto, delle sue quotazioni o dei suoi task di sviluppo ha il valore atteso</small></div>
+                        <div class="ckc-swrow"><div><b>Condizione${isFase ? ' della fase' : ''}</b><small>${isFase
+                            ? 'La fase, con tutte le sue attività, entra nella check list del progetto solo se la condizione è vera (es. il cliente ha una certa licenza). Le attività possono avere in più una condizione loro.'
+                            : 'La voce entra nella check list del progetto solo se un campo del cliente, del progetto, delle sue quotazioni, dei suoi task di sviluppo o una licenza del cliente ha il valore atteso'}</small></div>
                             <label class="toggle-switch"><input type="checkbox" id="ckcFVer" ${on ? 'checked' : ''} ${dis}><span class="toggle-slider"></span></label></div>
                         ${on ? `<div class="ckc-verbox">
                             <div class="ckc-field"><label>Dove</label><div class="ckc-seg ckc-seg-dove" id="ckcFTab">
@@ -17242,11 +17294,11 @@
                                 ? `<div class="ckc-seg" id="ckcFRisSeg"><button type="button" data-r="true" class="${a.ver.risultato === 'true' ? 'on' : ''}" ${dis}>vero</button><button type="button" data-r="false" class="${a.ver.risultato === 'false' ? 'on' : ''}" ${dis}>falso</button></div>`
                                 : `<input id="ckcFRis" value="${escapeHtml(a.ver.risultato || '')}" placeholder="Valore atteso" ${ro ? 'readonly' : ''}>`}</div>
                             <div class="ckc-preview">${campo
-                                ? `Voce inserita solo se <b>${escapeHtml(dove(a.ver.tabella).frase.replace(/ ha$/, ''))}</b> ha <b>${escapeHtml(campo.display)}</b> ${escapeHtml(opLabel(a.ver.operatore) || '…')} <b>${escapeHtml(risLabel(a.ver.risultato) || '…')}</b>`
+                                ? `${isFase ? 'Fase e attività inserite' : 'Voce inserita'} solo se <b>${escapeHtml(dove(a.ver.tabella).frase.replace(/ ha$/, ''))}</b> ha <b>${escapeHtml(campo.display)}</b> ${escapeHtml(opLabel(a.ver.operatore) || '…')} <b>${escapeHtml(risLabel(a.ver.risultato) || '…')}</b>`
                                 : 'Scegli il campo da verificare.'}</div>
                         </div>` : ''}`;
                     if (ro) return;
-                    const aggiornaRiga = () => { segna(); disegna(); root.querySelectorAll('.ckc-step').forEach(s => s.classList.toggle('sel', Number(s.dataset.att) === a.uid)); };
+                    const aggiornaRiga = () => { segna(); disegna(); root.querySelectorAll('.ckc-step').forEach(s => s.classList.toggle('sel', !isFase && Number(s.dataset.att) === a.uid)); };
                     body.querySelector('#ckcFDesc').addEventListener('input', (e) => { a.titolo = e.target.value; aggiornaRiga(); });
                     body.querySelector('#ckcFVer').addEventListener('change', (e) => { a.ver = e.target.checked ? { tabella: '', campo: '', operatore: '', risultato: '' } : null; aggiornaRiga(); disegnaDettaglio(); });
                     body.querySelector('#ckcFTab')?.addEventListener('click', (e) => { const b = e.target.closest('[data-v]'); if (!b) return; a.ver.tabella = b.dataset.v; a.ver.campo = ''; a.ver.risultato = ''; aggiornaRiga(); disegnaDettaglio(); });
@@ -17305,6 +17357,8 @@
                     if (!confirm(f.attivita.length ? `Eliminare la fase «${f.titolo}» e le sue ${f.attivita.length} attività?` : `Eliminare la fase «${f.titolo}»?`)) return;
                     dati[tip] = fasi().filter(x => x !== f); segna(); disegna(); return;
                 }
+                const condF = e.target.closest('[data-cond-fase]');
+                if (condF) { const f = trovaFase(condF.dataset.condFase); if (f) apri(f, null); return; }
                 const col = e.target.closest('[data-collapse]');
                 if (col) { col.closest('.ckc-phase').classList.toggle('closed'); return; }
                 const step = e.target.closest('.ckc-step');
@@ -17439,7 +17493,7 @@
                 const corpo = {};
                 for (const t of sporche) {
                     corpo[t] = (dati[t] || []).map(f => ({
-                        id: f.id, titolo: f.titolo, ver: f.ver,
+                        id: f.id, titolo: f.titolo, ver: f.ver && f.ver.campo ? f.ver : null,
                         attivita: f.attivita.map(a => ({ id: a.id, titolo: a.titolo, ver: a.ver && a.ver.campo ? a.ver : null }))
                     }));
                 }
@@ -20142,6 +20196,7 @@
                     <button id="meetingTextSave" type="button" class="mt-btn mt-primary" style="display: none;" title="Salva il recap modificato, con la formattazione e i destinatari dell'email"><i class="fas fa-floppy-disk"></i> Salva</button>
                     <button id="meetingTextEmail" type="button" class="mt-btn" style="display: none;" title="Apri una nuova email con destinatari, oggetto e testo (Outlook del computer o Gmail, secondo il calendario default)"><i class="fas fa-envelope"></i> Email</button>
                     <button id="meetingTextTasks" type="button" class="mt-btn mt-green" style="display: none;" title="Crea i task dalle tue righe di &quot;AZIONI IN CARICO&quot; (li rivedi prima di salvarli)"><i class="fas fa-list-check"></i> Crea task</button>
+                    <button id="meetingTextRaid" type="button" class="mt-btn" style="display: none;" title="L'AI propone rischi, decisioni e dipendenze da registrare nel Cruscotto PM del progetto della riunione"><i class="fas fa-shield-halved"></i> Rischi e decisioni</button>
                     <button id="meetingTextFix" type="button" class="mt-btn" title="Applica al testo le correzioni automatiche (parole sbagliate → giuste) impostate per te e per il cliente della riunione"><i class="fas fa-spell-check"></i> Applica correzioni</button>
                     <button id="meetingTextUpload" type="button" class="mt-btn" title="Carica un file .txt o .vtt: sostituisce il testo di questa riunione"><i class="fas fa-upload"></i> Carica file</button>
                     <button id="meetingTextAudio" type="button" class="mt-btn" style="display: none;" title="Carica un file audio (.mp3, .wav, .m4a…): viene trascritto sul server e il testo si aggiunge alla trascrizione"><i class="fas fa-file-audio"></i> Trascrivi audio</button>

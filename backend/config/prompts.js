@@ -47,6 +47,29 @@ export const PROMPT_FUNCTIONS = {
     titolo: 'Dossier Cliente',
     segnaposto: ['DATI', 'DATA', 'UTENTE'],
     colonne: true
+  },
+  // Funzioni da PM senior (Cruscotto PM, routes/pm.js). DATI = il progetto in testo
+  // (scheda, salute, budget, Gantt, RAID, Change Request, azioni, issue, recap).
+  STATUS_REPORT: {
+    titolo: 'Status Report (SAL) del progetto',
+    segnaposto: ['DATI', 'DAL', 'DATA', 'UTENTE']
+  },
+  VERBALE_CHIUSURA: {
+    titolo: 'Verbale di chiusura del progetto',
+    segnaposto: ['DATI', 'DATA', 'UTENTE']
+  },
+  // Il formato della risposta (JSON) è già nel testo standard: se si personalizza, va tenuto.
+  RAID_ESTRAZIONE: {
+    titolo: 'Rischi e decisioni dalla riunione',
+    segnaposto: ['PROGETTO', 'OGGETTO', 'DATA_RIUNIONE', 'TESTO', 'GIA_PRESENTI']
+  },
+  CHIEDI_PROGETTO: {
+    titolo: 'Chiedi al progetto',
+    segnaposto: ['DATI', 'DOMANDA', 'STORIA', 'DATA', 'UTENTE']
+  },
+  BRIEFING_RIUNIONE: {
+    titolo: 'Briefing pre-riunione',
+    segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE']
   }
 };
 

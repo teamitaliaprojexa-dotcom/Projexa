@@ -51,7 +51,11 @@ export const TABELLE_VERIFICA = [
   { id: 'clients', display: 'Clienti' },
   { id: 'projects', display: 'Progetti' },
   { id: 'cl_quotazioni', display: 'Quotazioni', righe: true },
-  { id: 'task_app', display: 'Task di sviluppo', righe: true }
+  { id: 'task_app', display: 'Task di sviluppo', righe: true },
+  // Elenco Licenze del cliente (2026-10-09): righe del CLIENTE del progetto (non del progetto),
+  // un solo campo verificabile, il nome della licenza (conf_licenze_app.description), così
+  // la condizione si scrive con il nome che l'utente vede (es. «uguale Moduli Presenze»).
+  { id: 'licenze_app', display: 'Licenze del cliente', righe: true, perCliente: true }
 ];
 
 // Colonne tecniche delle tabelle a righe: non sono campi da verificare.
@@ -205,6 +209,7 @@ export async function opzioniColonna(db, tableName, column, ctx, dep) {
 // colonna = la colonna stessa, tipo '1' per le colonne sì/no (risultato vero/falso).
 export async function campiVerifica(db, tabella, ctx) {
   const def = TABELLE_VERIFICA.find((t) => t.id === tabella);
+  if (tabella === 'licenze_app') return [{ id: 'licenza', display: 'Nome della licenza', colonna: 'licenza', tipo: '' }];
   if (def && def.righe) {
     const c = await db.query(
       `SELECT column_name, data_type FROM information_schema.columns

@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projexa - Cruscotto PM</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/pm.css">
+    <!--
+      CRUSCOTTO PM del progetto (pulsante «Cruscotto PM» nella scheda progetto della dashboard).
+      Schede: Panoramica (semaforo di salute, previsione a finire, tempi e Gantt), RAID (rischi,
+      decisioni, dipendenze + azioni e issue), Change Request, Stakeholder e RACI, Chiusura
+      (accettazione, soddisfazione, lessons learned, verbale), Chiedi al progetto (AI).
+      In alto: Briefing pre-riunione e Status Report. API: /api/pm (backend/routes/pm.js).
+    -->
+</head>
+<body>
+    <div class="pm-top">
+        <button class="pm-btn" id="indietro" title="Torna alla scheda del progetto"><i class="fas fa-arrow-left"></i> Progetto</button>
+        <h1><i class="fas fa-gauge-high"></i> <span id="titolo">Cruscotto PM</span></h1>
+        <span id="semTop"></span>
+        <span class="sub" id="sottotitolo"></span>
+        <span class="spazio"></span>
+        <button class="pm-btn" id="btnBriefing" title="Briefing da leggere prima della prossima riunione (AI)"><i class="fas fa-clipboard-list"></i> Briefing riunione</button>
+        <button class="pm-btn primario" id="btnStatus" title="Status Report (SAL) del progetto, scritto con l'AI"><i class="fas fa-file-lines"></i> Status Report</button>
+        <a class="pm-btn" href="portfolio.html" title="Tutti i tuoi progetti"><i class="fas fa-layer-group"></i> Portfolio</a>
+    </div>
+    <nav class="pm-tabs" id="tabs">
+        <button class="pm-tab on" data-tab="panoramica"><i class="fas fa-heart-pulse"></i> Panoramica</button>
+        <button class="pm-tab" data-tab="raid"><i class="fas fa-shield-halved"></i> RAID <span class="cnt" id="cntRaid"></span></button>
+        <button class="pm-tab" data-tab="cr"><i class="fas fa-code-pull-request"></i> Change Request <span class="cnt" id="cntCr"></span></button>
+        <button class="pm-tab" data-tab="stakeholder"><i class="fas fa-users"></i> Stakeholder e RACI</button>
+        <button class="pm-tab" data-tab="chiusura"><i class="fas fa-flag-checkered"></i> Chiusura</button>
+        <button class="pm-tab" data-tab="chiedi"><i class="fas fa-comments"></i> Chiedi al progetto</button>
+    </nav>
+    <main class="pm-main">
+        <div id="avvisi"></div>
+        <section class="pm-pannello on" id="p-panoramica"><div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> Calcolo la salute del progetto…</div></section>
+        <section class="pm-pannello" id="p-raid"></section>
+        <section class="pm-pannello" id="p-cr"></section>
+        <section class="pm-pannello" id="p-stakeholder"></section>
+        <section class="pm-pannello" id="p-chiusura"></section>
+        <section class="pm-pannello" id="p-chiedi"></section>
+    </main>
+
+    <script src="js/pm-comune.js"></script>
+    <script>
+    (function () {
+        const { esc, api, fmt, euro, dataIt, badge, toast, testoAiHtml, modale, valori } = PM;
+        const qs = new URLSearchParams(location.search);
+        const projectId = qs.get('projectId') || '';
+        let dati = null;          // risposta di /progetto
+        let unita = 'giorni';
+        const caricati = {};      // schede già caricate
+
+        // ---------------- navigazione ----------------
+        document.getElementById('indietro').addEventListener('click', () => {
+            if (!dati) { location.href = 'dashboard.html'; return; }
+            const p = new URLSearchParams({ openProject: projectId, clientId: dati.progetto.clientId || '', projectName: dati.progetto.nome || '', clientName: dati.progetto.cliente || '' });
+            location.href = `dashboard.html?${p.toString()}`;
+        });
+        const tabs = document.getElementById('tabs');
+        function apriTab(nome) {
+            tabs.querySelectorAll('.pm-tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === nome));
+            document.querySelectorAll('.pm-pannello').forEach((p) => p.classList.toggle('on', p.id === `p-${nome}`));
+            if (!caricati[nome]) { caricati[nome] = true; CARICA[nome] && CARICA[nome](); }
+            history.replaceState(null, '', `${location.pathname}?${new URLSearchParams({ ...Object.fromEntries(qs), tab: nome }).toString()}`);
+        }
+        tabs.addEventListener('click', (e) => { const b = e.target.closest('.pm-tab'); if (b) apriTab(b.dataset.tab); });
+
+        const pannello = (id) => document.getElementById(`p-${id}`);
+        const attesa = (t) => `<div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> ${esc(t)}</div>`;
+        const errore = (e) => `<div class="pm-errore"><i class="fas fa-triangle-exclamation"></i> ${esc(e.message || e)}</div>`;
+        const sqlMancante = () => '<div class="pm-avviso"><i class="fas fa-database"></i> Funzione non ancora attiva: va eseguito lo script <b>Supporto/CreaDB/pm_senior.sql</b> sul database. Fino ad allora vedi i dati ma non puoi salvare.</div>';
+
+        // ================= PANORAMICA =================
+        async function caricaPanoramica() {
+            const p = pannello('panoramica');
+            try {
+                dati = await api(`/progetto?projectId=${encodeURIComponent(projectId)}`);
+                unita = dati.eac.unita;
+                document.title = `Cruscotto PM - ${dati.progetto.nome}`;
+                document.getElementById('titolo').textContent = dati.progetto.nome;
+                document.getElementById('sottotitolo').textContent = `${dati.progetto.cliente || ''}${dati.progetto.aperto ? '' : ' · progetto chiuso'}`;
+                document.getElementById('semTop').innerHTML = badge(dati.semaforo);
+                const c = dati.conteggi;
+                document.getElementById('cntRaid').textContent = c.rischiAperti || '';
+                document.getElementById('cntCr').textContent = c.crAperte || '';
+                if (!dati.tabelle) document.getElementById('avvisi').innerHTML = sqlMancante();
+                renderPanoramica(p);
+            } catch (e) { p.innerHTML = errore(e); }
+        }
+
+        function renderPanoramica(p) {
+            const d = dati, e = d.eac, g = d.gantt, s = d.scheda;
+            const testoSem = { verde: 'Il progetto è in linea', giallo: 'Ci sono punti di attenzione', rosso: 'Il progetto richiede un intervento', nd: 'Dati insufficienti per un giudizio' };
+            const ind = d.indicatori.map((i) => `<div class="pm-ind-riga"><div><b>${esc(i.titolo)}</b><br>${badge(i.stato)}</div><div>${esc(i.nota)}</div></div>`).join('');
+            // Barra budget: speso, oltre il budget, stima a finire (rosso), budget (nero).
+            let barra = '<div class="pm-vuoto">Compila l\'offerta effort nei Costi Progetto per vedere il budget.</div>';
+            if (e.bac > 0) {
+                const scala = Math.max(e.bac, e.ac, e.eac || 0) * 1.05;
+                const pc = (v) => `${Math.min(100, (v / scala) * 100)}%`;
+                barra = `<div class="pm-barra" title="Speso ${fmt(e.ac)} su ${fmt(e.bac)} ${unita}">
+                        <div class="speso" style="width:${pc(Math.min(e.ac, e.bac))}"></div>
+                        ${e.ac > e.bac ? `<div class="oltre" style="left:${pc(e.bac)}; width:calc(${pc(e.ac)} - ${pc(e.bac)})"></div>` : ''}
+                        <div class="bac" style="left:${pc(e.bac)}"></div>
+                        ${e.eac != null ? `<div class="eac" style="left:${pc(e.eac)}" title="Stima a finire ${fmt(e.eac)}"></div>` : ''}
+                    </div>
+                    <div class="pm-legenda"><span><i style="background:#818CF8"></i>Speso</span><span><i style="background:#111827"></i>Budget</span>${e.eac != null ? '<span><i style="background:#DC2626"></i>Stima a finire</span>' : ''}</div>`;
+            }
+            const compl = e.completamento != null ? `${fmt(e.completamento, 0)}%${e.fonteCompletamento === 'gantt' ? ' (dal Gantt)' : ''}` : '–';
+            const ritmo = e.ritmoGiorno ? `<p class="pm-nota"><i class="fas fa-gauge"></i> Ritmo delle ultime settimane: ${fmt(e.ritmoGiorno, 2)} ${unita} al giorno${e.esaurimentoBudget ? ` · budget esaurito intorno al <b>${dataIt(e.esaurimentoBudget)}</b>` : ''}${e.finePrevista ? ` · lavoro finito intorno al <b>${dataIt(e.finePrevista)}</b>` : ''}</p>`
+                : '<p class="pm-nota"><i class="fas fa-circle-info"></i> Il ritmo di consumo e la data di esaurimento del budget compaiono dopo una settimana di fotografie giornaliere (job sul server).</p>';
+            const ms = g.milestone.length ? `<table class="pm-t"><thead><tr><th>Milestone</th><th>Data</th><th>Baseline</th><th>Stato</th></tr></thead><tbody>${g.milestone.map((m) => `<tr><td>◆ ${esc(m.nome)}</td><td>${dataIt(m.data)}</td><td>${m.baseline ? `${dataIt(m.baseline)}${m.scostamento ? ` <span class="pill ${m.scostamento > 0 ? 'rifiutata' : 'approvata'}">${m.scostamento > 0 ? '+' : ''}${m.scostamento} gg</span>` : ''}` : '–'}</td><td>${m.raggiunta ? '<span class="pill approvata">raggiunta</span>' : (m.scaduta ? '<span class="pill rifiutata">superata</span>' : '<span class="pill">da fare</span>')}</td></tr>`).join('')}</tbody></table>`
+                : '<div class="pm-vuoto">Nessuna milestone: nel Gantt apri un\'attività e attiva «Milestone».</div>';
+            const ritardi = g.inRitardo.length ? `<ul>${g.inRitardo.slice(0, 8).map((r) => `<li><b>${esc(r.nome)}</b>: doveva finire il ${dataIt(r.fine)}, ${r.avanzamento}% (${r.giorni} gg di ritardo)${r.owner ? ` · ${esc(r.owner)}` : ''}</li>`).join('')}</ul>` : '<div class="pm-vuoto">Nessuna attività in ritardo.</div>';
+            const voci = d.economia.voci.length ? `<table class="pm-t"><thead><tr><th>Voce</th><th class="n">Offerta</th><th class="n">Speso</th><th class="n">%</th></tr></thead><tbody>${d.economia.voci.map((v) => `<tr><td>${esc(v.voce)}</td><td class="n">${fmt(v.offerta)}</td><td class="n">${fmt(v.speso)}</td><td class="n" style="color:${v.offerta && v.speso > v.offerta ? '#DC2626' : 'inherit'}">${v.offerta ? `${fmt((v.speso / v.offerta) * 100, 0)}%` : '–'}</td></tr>`).join('')}</tbody></table>` : '<div class="pm-vuoto">Nessuna voce nei Costi Progetto.</div>';
+            const gLink = d.ganttCampo ? `gantt.html?${new URLSearchParams({ fieldId: d.ganttCampo.fieldId, clientId: d.progetto.clientId || '', label: d.ganttCampo.label, projectId, projectName: d.progetto.nome, clientName: d.progetto.cliente || '' })}` : '';
+            p.innerHTML = `
+            <div class="pm-griglia">
+                <div class="pm-card">
+                    <h2><i class="fas fa-heart-pulse"></i> Salute del progetto</h2>
+                    <div class="pm-semaforo-grande"><div class="pm-luce ${d.semaforo}"><i class="fas ${PM.SEMAFORO[d.semaforo].ico}"></i></div>
+                        <div><b style="font-size:1.05rem">${esc(testoSem[d.semaforo])}</b><div class="pm-nota">Il semaforo prende il colore peggiore dei 5 indicatori. Aggiornato a ogni apertura.</div></div></div>
+                    <div class="pm-ind" style="margin-top:0.8rem">${ind}</div>
+                </div>
+                <div class="pm-card">
+                    <h2><i class="fas fa-chart-line"></i> Previsione a finire <span class="pm-nota">(${esc(unita)})</span></h2>
+                    <div class="pm-kpi">
+                        <div><small>Budget</small><b>${fmt(e.bac)}</b>${e.crDelta ? `<div class="pm-nota">di cui CR ${e.crDelta > 0 ? '+' : ''}${fmt(e.crDelta)}</div>` : ''}</div>
+                        <div><small>Speso</small><b>${fmt(e.ac)}</b></div>
+                        <div><small>Completamento</small><b>${compl}</b></div>
+                        <div><small>Stima a finire</small><b style="color:${e.percPrevista > 100 ? '#DC2626' : 'inherit'}">${fmt(e.eac)}</b>${e.percPrevista != null ? `<div class="pm-nota">${fmt(e.percPrevista, 0)}% del budget</div>` : ''}</div>
+                        <div><small>Mancano</small><b>${fmt(e.etc)}</b></div>
+                        <div><small>Margine a finire</small><b style="color:${e.vac < 0 ? '#DC2626' : '#059669'}">${e.vac != null ? `${e.vac > 0 ? '+' : ''}${fmt(e.vac)}` : '–'}</b>${e.valoreEuro != null ? `<div class="pm-nota">≈ ${euro(e.valoreEuro)}</div>` : ''}</div>
+                        <div><small>Efficienza (CPI)</small><b style="color:${e.cpi != null && e.cpi < 0.95 ? '#DC2626' : 'inherit'}">${e.cpi != null ? fmt(e.cpi, 2) : '–'}</b><div class="pm-nota">1 = in linea</div></div>
+                    </div>
+                    ${barra}
+                    ${ritmo}
+                    <p class="pm-nota">Stima a finire = speso ÷ completamento. Se il completamento della scheda manca si usa quello calcolato dal Gantt.</p>
+                </div>
+            </div>
+            <div class="pm-griglia" style="margin-top:1rem">
+                <div class="pm-card">
+                    <h2><i class="fas fa-calendar-days"></i> Tempi e Gantt <span class="azioni">${gLink ? `<a class="pm-btn piccolo" href="${esc(gLink)}"><i class="fas fa-chart-gantt"></i> Apri il Gantt</a>` : ''}</span></h2>
+                    <div class="pm-kpi">
+                        <div><small>Periodo (scheda)</small><b style="font-size:0.9rem">${dataIt(s.start) || '?'} → ${dataIt(s.end) || '?'}</b></div>
+                        <div><small>Gantt</small><b style="font-size:0.9rem">${g.inizio ? `${dataIt(g.inizio)} → ${dataIt(g.fine)}` : 'vuoto'}</b></div>
+                        <div><small>Baseline fine</small><b style="font-size:0.9rem">${g.baselineFine ? dataIt(g.baselineFine) : 'non fissata'}</b>${g.scostamentoGiorni ? `<div class="pm-nota" style="color:${g.scostamentoGiorni > 0 ? '#DC2626' : '#059669'}">${g.scostamentoGiorni > 0 ? '+' : ''}${g.scostamentoGiorni} giorni</div>` : ''}</div>
+                        <div><small>Completamento Gantt</small><b>${g.completamento != null ? `${fmt(g.completamento, 0)}%` : '–'}</b><div class="pm-nota">scheda: ${s.completamento != null ? `${fmt(s.completamento, 0)}%` : '–'}</div></div>
+                        <div><small>Percorso critico</small><b>${g.critico.length}</b><div class="pm-nota">attività senza margine</div></div>
+                    </div>
+                    <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin:0.8rem 0">
+                        <button class="pm-btn piccolo" id="btnBaseline" ${g.attivita ? '' : 'disabled'} title="Copia le date attuali di tutte le attività come piano di riferimento"><i class="fas fa-snowflake"></i> ${g.baselineFine ? 'Aggiorna la baseline' : 'Congela la baseline'}</button>
+                        <button class="pm-btn piccolo" id="btnCompl" ${g.completamento != null ? '' : 'disabled'} title="Scrive nel campo Completamento della scheda il valore calcolato dal Gantt"><i class="fas fa-percent"></i> Porta ${g.completamento != null ? `${fmt(g.completamento, 0)}%` : ''} nella scheda</button>
+                    </div>
+                    <b style="font-size:0.85rem">Attività in ritardo</b>${ritardi}
+                </div>
+                <div class="pm-card"><h2><i class="fas fa-gem"></i> Milestone</h2>${ms}</div>
+                <div class="pm-card"><h2><i class="fas fa-coins"></i> Effort per voce di costo</h2>${voci}</div>
+            </div>`;
+            p.querySelector('#btnBaseline').addEventListener('click', async (ev) => {
+                const testo = g.baselineFine
+                    ? 'La baseline attuale verrà sostituita con le date di oggi: lo scostamento ripartirà da zero. Procedere?'
+                    : 'Le date attuali di tutte le attività diventano il piano di riferimento (baseline): da qui in poi Projexa misura gli slittamenti. Procedere?';
+                if (!confirm(testo)) return;
+                ev.currentTarget.disabled = true;
+                try { const r = await api('/gantt/baseline', { metodo: 'POST', corpo: { projectId } }); toast(`Baseline fissata su ${r.attivita} attività`); caricaPanoramica(); }
+                catch (err) { toast(err.message, 'errore'); ev.currentTarget.disabled = false; }
+            });
+            p.querySelector('#btnCompl').addEventListener('click', async (ev) => {
+                ev.currentTarget.disabled = true;
+                try { const r = await api('/gantt/completamento', { metodo: 'POST', corpo: { projectId } }); toast(`Completamento della scheda: ${r.completamento}%`); caricaPanoramica(); }
+                catch (err) { toast(err.message, 'errore'); ev.currentTarget.disabled = false; }
+            });
+        }
+
+        // ================= RAID =================
+        let raidDati = null, raidTutte = false;
+        const TIPI = {
+            rischio: { label: 'Rischio', plurale: 'Rischi', ico: 'fa-triangle-exclamation' },
+            decisione: { label: 'Decisione', plurale: 'Decisioni', ico: 'fa-gavel' },
+            dipendenza: { label: 'Dipendenza', plurale: 'Dipendenze', ico: 'fa-link' },
+            assunzione: { label: 'Assunzione', plurale: 'Assunzioni', ico: 'fa-lightbulb' }
+        };
+        const STATI = { aperto: 'Aperto', in_corso: 'In corso', chiuso: 'Chiuso' };
+        const classePunti = (n) => (n >= 15 ? 'alto' : n >= 8 ? 'medio' : 'basso');
+        async function caricaRaid() {
+            const p = pannello('raid');
+            p.innerHTML = attesa('Carico il registro RAID…');
+            try { raidDati = await api(`/raid?projectId=${encodeURIComponent(projectId)}${raidTutte ? '&tutte=1' : ''}`); renderRaid(p); }
+            catch (e) { p.innerHTML = errore(e); }
+        }
+        function heatmap(rischi) {
+            const aperti = rischi.filter((r) => r.stato !== 'chiuso' && r.probabilita && r.impatto);
+            const colore = (pr, im) => { const n = pr * im; return n >= 15 ? '#FCA5A5' : n >= 8 ? '#FDE68A' : '#BBF7D0'; };
+            let h = '';
+            for (let pr = 5; pr >= 1; pr--) {
+                h += `<div class="ax">${pr}</div>`;
+                for (let im = 1; im <= 5; im++) {
+                    const n = aperti.filter((r) => r.probabilita === pr && r.impatto === im).length;
+                    h += `<div style="background:${colore(pr, im)}; opacity:${n ? 1 : 0.45}" title="Probabilità ${pr} × impatto ${im}: ${n} rischi">${n || ''}</div>`;
+                }
+            }
+            h += '<div class="ax"></div>' + [1, 2, 3, 4, 5].map((i) => `<div class="ax">${i}</div>`).join('');
+            return `<div><div class="heat">${h}</div><div class="pm-nota" style="margin-top:0.3rem">↑ probabilità · → impatto (rischi aperti)</div></div>`;
+        }
+        function renderRaid(p) {
+            const r = raidDati.raid;
+            const per = (t) => r.filter((x) => x.tipo === t);
+            const riga = (x, cols) => `<tr class="click${x.stato === 'chiuso' ? ' chiuso' : ''}" data-id="${esc(x.id)}">${cols(x)}</tr>`;
+            const origine = (x) => (x.origine === 'riunione' ? ' <span class="pill riunione" title="Estratto da una riunione"><i class="fas fa-microphone-lines"></i></span>' : '');
+            const rischi = per('rischio').sort((a, b) => (a.stato === 'chiuso') - (b.stato === 'chiuso') || (b.punteggio || 0) - (a.punteggio || 0));
+            const tabRischi = rischi.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th class="n">Punti</th><th>Rischio</th><th class="n">P</th><th class="n">I</th><th>Owner</th><th>Risposta</th><th>Revisione</th><th>Stato</th></tr></thead><tbody>
+                ${rischi.map((x) => riga(x, () => `<td class="n">${x.punteggio ? `<span class="punti ${classePunti(x.punteggio)}">${x.punteggio}</span>` : '–'}</td><td><b>${esc(x.titolo)}</b>${origine(x)}${x.descrizione ? `<div class="pm-nota">${esc(x.descrizione)}</div>` : ''}</td><td class="n">${x.probabilita || '–'}</td><td class="n">${x.impatto || '–'}</td><td>${esc(x.owner || '')}</td><td>${esc(x.mitigazione || '')}</td><td>${dataIt(x.data_revisione)}${x.data_revisione && x.data_revisione < (dati ? dati.oggi : '') && x.stato !== 'chiuso' ? ' <i class="fas fa-bell" style="color:#DC2626" title="Da rivedere"></i>' : ''}</td><td><span class="pill ${x.stato}">${STATI[x.stato] || x.stato}</span></td>`)).join('')}</tbody></table></div>`
+                : '<div class="pm-vuoto">Nessun rischio registrato.</div>';
+            const tabSemplice = (lista, conData) => (lista.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr>${conData ? '<th>Data</th>' : ''}<th>Titolo</th><th>${conData ? 'Decisa da' : 'Owner'}</th><th>Stato</th></tr></thead><tbody>
+                ${lista.map((x) => riga(x, () => `${conData ? `<td>${dataIt(x.data_revisione)}</td>` : ''}<td><b>${esc(x.titolo)}</b>${origine(x)}${x.tipo === 'assunzione' ? ' <span class="pill">assunzione</span>' : ''}${x.descrizione ? `<div class="pm-nota">${esc(x.descrizione)}</div>` : ''}</td><td>${esc(conData ? x.decisa_da || '' : x.owner || '')}</td><td><span class="pill ${x.stato}">${STATI[x.stato] || x.stato}</span></td>`)).join('')}</tbody></table></div>`
+                : '<div class="pm-vuoto">Nessun elemento.</div>');
+            const azioni = raidDati.task.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Azione</th><th>Assegnata a</th><th>Scadenza</th></tr></thead><tbody>${raidDati.task.map((t) => `<tr><td><b>${esc(t.titolo)}</b>${t.descrizione ? `<div class="pm-nota">${esc(t.descrizione.slice(0, 220))}</div>` : ''}</td><td>${esc(t.assegnato || '–')}</td><td style="color:${t.scaduta ? '#DC2626' : 'inherit'}">${dataIt(t.scadenza) || '–'}${t.scaduta ? ' (scaduta)' : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="pm-vuoto">Nessuna azione aperta sul progetto.</div>';
+            const issue = raidDati.issue.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Issue</th><th>Priorità</th><th>Owner</th><th>Stato</th></tr></thead><tbody>${raidDati.issue.map((i) => `<tr><td>${esc(String(i.descrizione || '').slice(0, 300))}</td><td>${esc(i.priorita || '')}</td><td>${esc(i.owner || '')}</td><td>${esc(i.stato || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="pm-vuoto">Nessuna issue aperta sul progetto.</div>';
+            const nuovo = (t) => `<button class="pm-btn piccolo" data-nuovo="${t}"><i class="fas fa-plus"></i> ${TIPI[t].label}</button>`;
+            p.innerHTML = `${raidDati.tabelle ? '' : sqlMancante()}
+                <div class="pm-card">
+                    <h2><i class="fas fa-triangle-exclamation"></i> Rischi <span class="azioni">
+                        <label class="pm-nota" style="display:flex;align-items:center;gap:0.3rem"><input type="checkbox" id="raidTutte" ${raidTutte ? 'checked' : ''}> anche eliminati</label>
+                        <button class="pm-btn piccolo verde" id="btnEstrai" title="L'AI legge il recap di una riunione e propone rischi, decisioni e dipendenze"><i class="fas fa-wand-magic-sparkles"></i> Estrai dalle riunioni</button>${nuovo('rischio')}</span></h2>
+                    <div style="display:grid; grid-template-columns: minmax(0,1fr) auto; gap:1.2rem; align-items:start">${tabRischi}${heatmap(rischi)}</div>
+                </div>
+                <div class="pm-griglia" style="margin-top:1rem">
+                    <div class="pm-card"><h2><i class="fas fa-gavel"></i> Decisioni <span class="azioni">${nuovo('decisione')}</span></h2>${tabSemplice(per('decisione'), true)}</div>
+                    <div class="pm-card"><h2><i class="fas fa-link"></i> Dipendenze e assunzioni <span class="azioni">${nuovo('dipendenza')}${nuovo('assunzione')}</span></h2>${tabSemplice([...per('dipendenza'), ...per('assunzione')], false)}</div>
+                </div>
+                <div class="pm-griglia" style="margin-top:1rem">
+                    <div class="pm-card"><h2><i class="fas fa-list-check"></i> Azioni aperte <span class="pm-nota">(dalla To-Do List)</span></h2>${azioni}</div>
+                    <div class="pm-card"><h2><i class="fas fa-bug"></i> Issue aperte <span class="pm-nota">(dalla sezione Issue)</span></h2>${issue}</div>
+                </div>`;
+            p.querySelector('#raidTutte').addEventListener('change', (e) => { raidTutte = e.target.checked; caricaRaid(); });
+            p.querySelectorAll('[data-nuovo]').forEach((b) => b.addEventListener('click', () => formRaid({ tipo: b.dataset.nuovo })));
+            p.querySelectorAll('tr.click[data-id]').forEach((tr) => tr.addEventListener('click', () => formRaid(r.find((x) => x.id === tr.dataset.id))));
+            p.querySelector('#btnEstrai').addEventListener('click', () => estraiDaRiunione());
+            if (qs.get('estrai') && !raidDati._estraiAperta) { raidDati._estraiAperta = true; estraiDaRiunione(qs.get('estrai')); }
+        }
+        const opzioni15 = (v, etichette) => `<option value="">–</option>${[1, 2, 3, 4, 5].map((n) => `<option value="${n}" ${Number(v) === n ? 'selected' : ''}>${n} – ${etichette[n - 1]}</option>`).join('')}`;
+        const ETICH_P = ['molto bassa', 'bassa', 'media', 'alta', 'molto alta'];
+        const ETICH_I = ['trascurabile', 'basso', 'medio', 'alto', 'molto alto'];
+        function formRaid(x) {
+            const nuovo = !x.id;
+            const t = x.tipo || 'rischio';
+            const sola = !nuovo && x.puoModificare === false;
+            const campi = `
+                <label>Tipo<select name="tipo">${Object.entries(TIPI).map(([k, v]) => `<option value="${k}" ${k === t ? 'selected' : ''}>${v.label}</option>`).join('')}</select></label>
+                <label>Stato<select name="stato">${Object.entries(STATI).map(([k, v]) => `<option value="${k}" ${k === (x.stato || 'aperto') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+                <label class="largo">Titolo<input name="titolo" value="${esc(x.titolo || '')}" maxlength="500" required></label>
+                <label class="largo">Descrizione<textarea name="descrizione">${esc(x.descrizione || '')}</textarea></label>
+                <label data-per="rischio">Probabilità<select name="probabilita">${opzioni15(x.probabilita, ETICH_P)}</select></label>
+                <label data-per="rischio">Impatto<select name="impatto">${opzioni15(x.impatto, ETICH_I)}</select></label>
+                <label data-per="rischio dipendenza assunzione">Owner<input name="owner" value="${esc(x.owner || '')}"></label>
+                <label data-per="rischio">Prossima revisione<input type="date" name="data_revisione" value="${esc(x.data_revisione || '')}"></label>
+                <label data-per="decisione">Data della decisione<input type="date" name="data_revisione" value="${esc(x.data_revisione || '')}"></label>
+                <label data-per="decisione">Decisa da<input name="decisa_da" value="${esc(x.decisa_da || '')}"></label>
+                <label class="largo" data-per="rischio decisione"><span data-lbl>Risposta al rischio (come mitigarlo)</span><textarea name="mitigazione">${esc(x.mitigazione || '')}</textarea></label>`;
+            const m = modale({
+                titolo: `<i class="fas ${TIPI[t].ico}"></i> ${nuovo ? 'Nuovo elemento RAID' : esc(x.codice || TIPI[t].label)}`,
+                corpo: `${sola ? '<div class="pm-avviso">Sola lettura: il tuo ruolo non può modificare questo elemento.</div>' : ''}<div class="pm-form">${campi}</div>`,
+                pulsanti: [
+                    ...(!nuovo && !sola ? [{ testo: '<i class="fas fa-trash"></i> Elimina', classe: 'pericolo', azione: async () => { if (!confirm('Eliminare questo elemento dal registro?')) return false; await api(`/raid/${x.id}?projectId=${encodeURIComponent(projectId)}`, { metodo: 'DELETE' }); toast('Eliminato'); caricaRaid(); } }] : []),
+                    { testo: 'Annulla' },
+                    ...(!sola ? [{ testo: '<i class="fas fa-floppy-disk"></i> Salva', classe: 'primario', azione: async (mm) => {
+                        const v = valori(mm);
+                        const tipo = v.tipo;
+                        // Due campi data con lo stesso nome: vale quello visibile per il tipo.
+                        const dataVis = [...mm.querySelectorAll('[name="data_revisione"]')].find((el) => el.closest('label').style.display !== 'none');
+                        v.data_revisione = dataVis ? dataVis.value : '';
+                        if (!v.titolo.trim()) throw new Error('Il titolo è obbligatorio');
+                        if (tipo !== 'rischio') { v.probabilita = ''; v.impatto = ''; }
+                        const corpo = { ...v, projectId };
+                        if (nuovo) await api('/raid', { metodo: 'POST', corpo }); else await api(`/raid/${x.id}`, { metodo: 'PUT', corpo });
+                        toast('Salvato'); caricaRaid(); caricaPanoramica();
+                    } }] : [])
+                ]
+            });
+            const aggiornaCampi = () => {
+                const tipo = m.querySelector('[name="tipo"]').value;
+                m.querySelectorAll('[data-per]').forEach((el) => { el.style.display = el.dataset.per.split(' ').includes(tipo) ? '' : 'none'; });
+                const lbl = m.querySelector('[data-lbl]');
+                if (lbl) lbl.textContent = tipo === 'decisione' ? 'Motivazione e alternative scartate' : 'Risposta al rischio (come mitigarlo)';
+            };
+            m.querySelector('[name="tipo"]').addEventListener('change', aggiornaCampi);
+            aggiornaCampi();
+            if (sola) m.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; });
+        }
+
+        async function estraiDaRiunione(preselezione) {
+            let riunioni;
+            try { riunioni = await api(`/riunioni?projectId=${encodeURIComponent(projectId)}`); } catch (e) { toast(e.message, 'errore'); return; }
+            if (!riunioni.length) { toast('Nessuna riunione con recap collegata a questo progetto', 'errore'); return; }
+            const m = modale({
+                titolo: '<i class="fas fa-wand-magic-sparkles"></i> Rischi e decisioni dalle riunioni',
+                larga: true,
+                corpo: `<p class="pm-nota" style="margin-top:0">Scegli una riunione del progetto: l'AI legge il recap (o la trascrizione) e propone rischi, decisioni e dipendenze. Rivedi tutto prima di salvare.</p>
+                    <label class="pm-form" style="display:block"><select class="pm-input" id="selRiunione">${riunioni.map((r) => `<option value="${esc(r.id_calendar)}">${dataIt(r.data)} – ${esc(r.oggetto)}${r.giaEstratta ? ' (già usata)' : ''}${r.haRecap ? '' : ' (solo trascrizione)'}</option>`).join('')}</select></label>
+                    <div id="esitoEstrai" style="margin-top:0.9rem"></div>`,
+                pulsanti: [{ testo: 'Chiudi' },
+                    { testo: '<i class="fas fa-wand-magic-sparkles"></i> Analizza', classe: 'verde', azione: async (mm) => { await analizza(mm); return false; } },
+                    { testo: '<i class="fas fa-floppy-disk"></i> Salva selezionati', classe: 'primario', azione: async (mm) => salvaProposte(mm) }]
+            });
+            let proposte = null, idCal = null;
+            if (preselezione) {
+                const sel = m.querySelector('#selRiunione');
+                if ([...sel.options].some((o) => o.value === preselezione)) { sel.value = preselezione; analizza(m); }
+            }
+            async function analizza(mm) {
+                const box = mm.querySelector('#esitoEstrai');
+                idCal = mm.querySelector('#selRiunione').value;
+                box.innerHTML = attesa('L\'AI sta leggendo la riunione…');
+                try {
+                    const r = await api('/raid/estrai', { metodo: 'POST', corpo: { projectId, id_calendar: idCal } });
+                    proposte = r.elementi;
+                    if (!proposte.length) { box.innerHTML = '<div class="pm-vuoto">L\'AI non ha trovato rischi, decisioni o dipendenze in questa riunione.</div>'; return; }
+                    box.innerHTML = `<div class="pm-nota">Proposte di ${esc(r.ai)} · togli la spunta a quelle da non salvare, correggi titoli e valori.</div>
+                        <div class="pm-scroll"><table class="pm-t"><thead><tr><th></th><th>Tipo</th><th>Titolo e dettaglio</th><th>P</th><th>I</th><th>Owner / decisa da</th></tr></thead><tbody>
+                        ${proposte.map((x, i) => `<tr><td><input type="checkbox" data-i="${i}" ${x.esiste ? '' : 'checked'}></td><td><span class="pill">${TIPI[x.tipo].label}</span>${x.esiste ? '<div class="pm-nota">già presente</div>' : ''}</td>
+                            <td><input class="pm-input" data-c="titolo" data-i="${i}" value="${esc(x.titolo)}"><div class="pm-nota">${esc(x.descrizione)}${x.mitigazione ? ` · Risposta: ${esc(x.mitigazione)}` : ''}</div></td>
+                            <td>${x.tipo === 'rischio' ? `<select class="pm-input" data-c="probabilita" data-i="${i}">${opzioni15(x.probabilita, ETICH_P)}</select>` : ''}</td>
+                            <td>${x.tipo === 'rischio' ? `<select class="pm-input" data-c="impatto" data-i="${i}">${opzioni15(x.impatto, ETICH_I)}</select>` : ''}</td>
+                            <td><input class="pm-input" data-c="${x.tipo === 'decisione' ? 'decisa_da' : 'owner'}" data-i="${i}" value="${esc(x.tipo === 'decisione' ? x.decisa_da : x.owner)}"></td></tr>`).join('')}
+                        </tbody></table></div>`;
+                } catch (e) { box.innerHTML = errore(e); }
+            }
+            async function salvaProposte(mm) {
+                if (!proposte) throw new Error('Prima premi «Analizza»');
+                mm.querySelectorAll('[data-c]').forEach((el) => { proposte[el.dataset.i][el.dataset.c] = el.value; });
+                const scelti = [...mm.querySelectorAll('input[type="checkbox"][data-i]:checked')].map((c) => proposte[c.dataset.i]);
+                if (!scelti.length) throw new Error('Nessun elemento selezionato');
+                const r = await api('/raid/importa', { metodo: 'POST', corpo: { projectId, id_calendar: idCal, elementi: scelti } });
+                toast(`${r.creati} elementi aggiunti al registro`);
+                caricaRaid(); caricaPanoramica();
+            }
+        }
+
+        // ================= CHANGE REQUEST =================
+        let crDati = null;
+        const STATI_CR = { bozza: 'Bozza', inviata: 'Inviata al cliente', approvata: 'Approvata', rifiutata: 'Rifiutata' };
+        async function caricaCr() {
+            const p = pannello('cr');
+            p.innerHTML = attesa('Carico le Change Request…');
+            try { crDati = await api(`/cr?projectId=${encodeURIComponent(projectId)}`); renderCr(p); } catch (e) { p.innerHTML = errore(e); }
+        }
+        function renderCr(p) {
+            const l = crDati.cr, u = crDati.unita;
+            const app = l.filter((x) => x.stato === 'approvata');
+            const somma = (arr, k) => arr.reduce((s, x) => s + (Number(x[k]) || 0), 0);
+            p.innerHTML = `${crDati.tabelle ? '' : sqlMancante()}
+                <div class="pm-card">
+                    <h2><i class="fas fa-code-pull-request"></i> Change Request <span class="azioni"><button class="pm-btn piccolo primario" id="nuovaCr"><i class="fas fa-plus"></i> Nuova Change Request</button></span></h2>
+                    <div class="pm-kpi" style="margin-bottom:0.9rem">
+                        <div><small>Approvate</small><b>${app.length}</b></div>
+                        <div><small>Effort approvato</small><b>${somma(app, 'effort_delta') > 0 ? '+' : ''}${fmt(somma(app, 'effort_delta'))} ${esc(u)}</b></div>
+                        <div><small>Importo approvato</small><b>${euro(somma(app, 'importo_delta'))}</b></div>
+                        <div><small>Slittamento approvato</small><b>${somma(app, 'giorni_delta')} gg</b></div>
+                        <div><small>In attesa</small><b>${l.filter((x) => x.stato === 'bozza' || x.stato === 'inviata').length}</b></div>
+                    </div>
+                    ${l.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Codice</th><th>Titolo</th><th>Stato</th><th>Richiesta</th><th class="n">Effort (${esc(u)})</th><th class="n">Importo</th><th class="n">Tempi</th><th>Decisione</th></tr></thead><tbody>
+                        ${l.map((x) => `<tr class="click" data-id="${esc(x.id)}"><td><b>${esc(x.codice || '')}</b></td><td><b>${esc(x.titolo)}</b>${x.motivo ? `<div class="pm-nota">${esc(x.motivo)}</div>` : ''}</td><td><span class="pill ${x.stato}">${STATI_CR[x.stato]}</span></td><td>${dataIt(x.data_richiesta)}${x.richiesta_da ? `<div class="pm-nota">${esc(x.richiesta_da)}</div>` : ''}</td><td class="n">${x.effort_delta != null ? `${x.effort_delta > 0 ? '+' : ''}${fmt(x.effort_delta)}` : '–'}</td><td class="n">${euro(x.importo_delta)}</td><td class="n">${x.giorni_delta != null ? `${x.giorni_delta > 0 ? '+' : ''}${x.giorni_delta} gg` : '–'}</td><td>${dataIt(x.data_decisione)}</td></tr>`).join('')}
+                    </tbody></table></div>` : '<div class="pm-vuoto">Nessuna Change Request. Registra qui ogni richiesta del cliente che cambia lo scope: le CR approvate aumentano il budget usato per la salute e la previsione a finire.</div>'}
+                </div>`;
+            p.querySelector('#nuovaCr').addEventListener('click', () => formCr({}));
+            p.querySelectorAll('tr.click').forEach((tr) => tr.addEventListener('click', () => formCr(l.find((x) => x.id === tr.dataset.id))));
+        }
+        function formCr(x) {
+            const nuovo = !x.id;
+            const sola = !nuovo && x.puoModificare === false;
+            const m = modale({
+                titolo: `<i class="fas fa-code-pull-request"></i> ${nuovo ? 'Nuova Change Request' : esc(`${x.codice || ''} ${x.titolo}`)}`,
+                corpo: `${sola ? '<div class="pm-avviso">Sola lettura: il tuo ruolo non può modificare questa Change Request.</div>' : ''}<div class="pm-form">
+                    <label class="largo">Titolo<input name="titolo" value="${esc(x.titolo || '')}"></label>
+                    <label class="largo">Descrizione della modifica<textarea name="descrizione">${esc(x.descrizione || '')}</textarea></label>
+                    <label class="largo">Motivo<textarea name="motivo" style="min-height:50px">${esc(x.motivo || '')}</textarea></label>
+                    <label>Richiesta da<input name="richiesta_da" value="${esc(x.richiesta_da || '')}"></label>
+                    <label>Data richiesta<input type="date" name="data_richiesta" value="${esc(x.data_richiesta || dati?.oggi || '')}"></label>
+                    <label>Effort in più (${esc(crDati.unita)}, negativo se in meno)<input name="effort_delta" value="${x.effort_delta ?? ''}" inputmode="decimal"></label>
+                    <label>Importo in più (€)<input name="importo_delta" value="${x.importo_delta ?? ''}" inputmode="decimal"></label>
+                    <label>Slittamento della fine (giorni)<input name="giorni_delta" value="${x.giorni_delta ?? ''}" inputmode="numeric"></label>
+                    <label>Stato<select name="stato">${Object.entries(STATI_CR).map(([k, v]) => `<option value="${k}" ${k === (x.stato || 'bozza') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+                    <label>Data decisione del cliente<input type="date" name="data_decisione" value="${esc(x.data_decisione || '')}"></label>
+                    <label class="largo">Note<textarea name="note" style="min-height:50px">${esc(x.note || '')}</textarea></label></div>
+                    <p class="pm-nota">Approvata o rifiutata senza data: Projexa mette la data di oggi. Le CR approvate sommano effort, importo e giorni al budget del progetto nel Cruscotto (la scheda e i Costi Progetto non vengono modificati).</p>`,
+                pulsanti: [
+                    ...(!nuovo && !sola ? [{ testo: '<i class="fas fa-trash"></i> Elimina', classe: 'pericolo', azione: async () => { if (!confirm('Eliminare questa Change Request?')) return false; await api(`/cr/${x.id}?projectId=${encodeURIComponent(projectId)}`, { metodo: 'DELETE' }); toast('Eliminata'); caricaCr(); caricaPanoramica(); } }] : []),
+                    { testo: 'Annulla' },
+                    ...(!sola ? [{ testo: '<i class="fas fa-floppy-disk"></i> Salva', classe: 'primario', azione: async (mm) => {
+                        const v = { ...valori(mm), projectId };
+                        if (!v.titolo.trim()) throw new Error('Il titolo è obbligatorio');
+                        if (nuovo) await api('/cr', { metodo: 'POST', corpo: v }); else await api(`/cr/${x.id}`, { metodo: 'PUT', corpo: v });
+                        toast('Change Request salvata'); caricaCr(); caricaPanoramica();
+                    } }] : [])
+                ]
+            });
+            if (sola) m.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; });
+        }
+
+        // ================= STAKEHOLDER E RACI =================
+        let stkDati = null;
+        const ORG = { cliente: 'Cliente', interno: 'Interno', fornitore: 'Fornitore' };
+        async function caricaStakeholder() {
+            const p = pannello('stakeholder');
+            p.innerHTML = attesa('Carico gli stakeholder…');
+            try { stkDati = await api(`/stakeholder?projectId=${encodeURIComponent(projectId)}`); renderStakeholder(p); } catch (e) { p.innerHTML = errore(e); }
+        }
+        function quadrante(s) {
+            const inf = s.influenza || 0, int = s.interesse || 0;
+            if (!inf || !int) return 'da valutare';
+            if (inf >= 3 && int >= 3) return 'gestire da vicino';
+            if (inf >= 3) return 'tenere soddisfatto';
+            if (int >= 3) return 'tenere informato';
+            return 'monitorare';
+        }
+        function renderStakeholder(p) {
+            const l = stkDati.stakeholder;
+            const punti = l.filter((s) => s.influenza && s.interesse).map((s) => `<span class="pt" style="left:${((s.interesse - 0.5) / 5) * 100}%; bottom:${((s.influenza - 0.5) / 5) * 100}%" title="${esc(s.nominativo)}: influenza ${s.influenza}, interesse ${s.interesse}">${esc(s.nominativo.split(' ')[0])}</span>`).join('');
+            p.innerHTML = `${stkDati.tabelle ? '' : sqlMancante()}
+                <div class="pm-griglia">
+                    <div class="pm-card" style="grid-column: span 2; min-width:0">
+                        <h2><i class="fas fa-users"></i> Stakeholder <span class="azioni"><button class="pm-btn piccolo primario" id="nuovoStk"><i class="fas fa-plus"></i> Stakeholder</button></span></h2>
+                        ${l.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Nominativo</th><th>Ruolo</th><th>Organizzazione</th><th class="n">Influenza</th><th class="n">Interesse</th><th>Strategia</th><th>Comunicazione</th></tr></thead><tbody>
+                        ${l.map((s) => `<tr class="click" data-id="${esc(s.id)}"><td><b>${esc(s.nominativo)}</b>${s.email ? `<div class="pm-nota">${esc(s.email)}</div>` : ''}</td><td>${esc(s.ruolo || '')}</td><td>${ORG[s.organizzazione] || ''}</td><td class="n">${s.influenza || '–'}</td><td class="n">${s.interesse || '–'}</td><td><span class="pill">${quadrante(s)}</span>${s.strategia ? `<div class="pm-nota">${esc(s.strategia)}</div>` : ''}</td><td>${esc(s.comunicazione || '')}</td></tr>`).join('')}</tbody></table></div>`
+                        : '<div class="pm-vuoto">Nessuno stakeholder: aggiungi sponsor, key user, referenti IT del cliente e le persone interne.</div>'}
+                    </div>
+                    <div class="pm-card">
+                        <h2><i class="fas fa-border-all"></i> Influenza / interesse</h2>
+                        <div class="matrice"><div class="q q1">Tenere soddisfatti</div><div class="q q2">Gestire da vicino</div><div class="q q3">Monitorare</div><div class="q q4">Tenere informati</div>${punti}</div>
+                        <div class="pm-nota" style="margin-top:0.3rem">↑ influenza · → interesse</div>
+                    </div>
+                </div>
+                <div class="pm-card" style="margin-top:1rem">
+                    <h2><i class="fas fa-table-cells"></i> Matrice RACI <span class="azioni"><button class="pm-btn piccolo" id="raciRiga"><i class="fas fa-plus"></i> Attività</button><button class="pm-btn piccolo primario" id="raciSalva"><i class="fas fa-floppy-disk"></i> Salva matrice</button></span></h2>
+                    <p class="pm-nota" style="margin-top:0">R = esegue · A = responsabile finale (uno solo per riga) · C = consultato · I = informato.</p>
+                    <div class="pm-scroll" id="raciBox"></div>
+                </div>`;
+            p.querySelector('#nuovoStk').addEventListener('click', () => formStk({}));
+            p.querySelectorAll('tr.click').forEach((tr) => tr.addEventListener('click', () => formStk(l.find((x) => x.id === tr.dataset.id))));
+            let righe = stkDati.raci.map((r) => ({ attivita: r.attivita, ruoli: { ...r.ruoli } }));
+            if (!righe.length && dati) righe = (dati.gantt.milestone || []).map((m) => ({ attivita: m.nome, ruoli: {} }));
+            const box = p.querySelector('#raciBox');
+            const disegna = () => {
+                if (!l.length) { box.innerHTML = '<div class="pm-vuoto">Aggiungi prima gli stakeholder: diventano le colonne della matrice.</div>'; return; }
+                box.innerHTML = `<table class="raci"><thead><tr><th class="att">Attività / deliverable</th>${l.map((s) => `<th class="st" title="${esc(s.ruolo || '')}">${esc(s.nominativo)}</th>`).join('')}<th></th></tr></thead><tbody>
+                    ${righe.map((r, i) => `<tr><td class="att"><input class="pm-input" data-att="${i}" value="${esc(r.attivita)}" placeholder="es. Analisi dei requisiti"></td>
+                        ${l.map((s) => `<td class="${r.ruoli[s.id] || ''}"><select data-r="${i}" data-s="${esc(s.id)}"><option value=""></option>${['R', 'A', 'C', 'I'].map((v) => `<option ${r.ruoli[s.id] === v ? 'selected' : ''}>${v}</option>`).join('')}</select></td>`).join('')}
+                        <td><button class="pm-btn piccolo pericolo" data-del="${i}" title="Togli la riga"><i class="fas fa-xmark"></i></button></td></tr>`).join('')}
+                    </tbody></table>${righe.length ? '' : '<div class="pm-vuoto">Nessuna attività: premi «Attività».</div>'}`;
+            };
+            disegna();
+            box.addEventListener('input', (e) => { if (e.target.dataset.att != null) righe[e.target.dataset.att].attivita = e.target.value; });
+            box.addEventListener('change', (e) => {
+                const s = e.target;
+                if (s.dataset.r == null) return;
+                const r = righe[s.dataset.r];
+                if (s.value === 'A') Object.keys(r.ruoli).forEach((k) => { if (r.ruoli[k] === 'A' && k !== s.dataset.s) { r.ruoli[k] = 'R'; toast('Una sola «A» per attività: la precedente è diventata «R»'); } });
+                if (s.value) r.ruoli[s.dataset.s] = s.value; else delete r.ruoli[s.dataset.s];
+                disegna();
+            });
+            box.addEventListener('click', (e) => { const b = e.target.closest('[data-del]'); if (b) { righe.splice(Number(b.dataset.del), 1); disegna(); } });
+            p.querySelector('#raciRiga').addEventListener('click', () => { righe.push({ attivita: '', ruoli: {} }); disegna(); box.querySelector(`[data-att="${righe.length - 1}"]`)?.focus(); });
+            p.querySelector('#raciSalva').addEventListener('click', async (e) => {
+                e.currentTarget.disabled = true;
+                try { await api('/raci', { metodo: 'PUT', corpo: { projectId, righe: righe.filter((r) => r.attivita.trim()) } }); toast('Matrice RACI salvata'); }
+                catch (err) { toast(err.message, 'errore'); } finally { e.currentTarget.disabled = false; }
+            });
+        }
+        async function formStk(x) {
+            const nuovo = !x.id;
+            const sola = !nuovo && x.puoModificare === false;
+            const m = modale({
+                titolo: `<i class="fas fa-user"></i> ${nuovo ? 'Nuovo stakeholder' : esc(x.nominativo)}`,
+                corpo: `<div class="pm-form">
+                    <label class="largo">Nominativo<input name="nominativo" value="${esc(x.nominativo || '')}" list="stkProposte" autocomplete="off" placeholder="Scrivi o scegli dalla rubrica"></label>
+                    <datalist id="stkProposte"></datalist>
+                    <label>Email<input name="email" value="${esc(x.email || '')}"></label>
+                    <label>Ruolo nel progetto<input name="ruolo" value="${esc(x.ruolo || '')}" placeholder="es. Sponsor, Key user"></label>
+                    <label>Organizzazione<select name="organizzazione">${Object.entries(ORG).map(([k, v]) => `<option value="${k}" ${k === (x.organizzazione || 'cliente') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+                    <label></label>
+                    <label>Influenza sul progetto<select name="influenza">${opzioni15(x.influenza, ['minima', 'bassa', 'media', 'alta', 'decisiva'])}</select></label>
+                    <label>Interesse per il progetto<select name="interesse">${opzioni15(x.interesse, ['minimo', 'basso', 'medio', 'alto', 'massimo'])}</select></label>
+                    <label class="largo">Strategia (come gestirlo, cosa gli sta a cuore)<textarea name="strategia">${esc(x.strategia || '')}</textarea></label>
+                    <label class="largo">Comunicazione (canale e frequenza)<input name="comunicazione" value="${esc(x.comunicazione || '')}" placeholder="es. SAL mensile, email settimanale"></label></div>`,
+                pulsanti: [
+                    ...(!nuovo && !sola ? [{ testo: '<i class="fas fa-trash"></i> Elimina', classe: 'pericolo', azione: async () => { if (!confirm('Togliere questo stakeholder?')) return false; await api(`/stakeholder/${x.id}?projectId=${encodeURIComponent(projectId)}`, { metodo: 'DELETE' }); toast('Tolto'); caricaStakeholder(); } }] : []),
+                    { testo: 'Annulla' },
+                    ...(!sola ? [{ testo: '<i class="fas fa-floppy-disk"></i> Salva', classe: 'primario', azione: async (mm) => {
+                        const v = { ...valori(mm), projectId };
+                        if (!v.nominativo.trim()) throw new Error('Il nominativo è obbligatorio');
+                        if (nuovo) await api('/stakeholder', { metodo: 'POST', corpo: v }); else await api(`/stakeholder/${x.id}`, { metodo: 'PUT', corpo: v });
+                        toast('Stakeholder salvato'); caricaStakeholder();
+                    } }] : [])
+                ]
+            });
+            if (sola) { m.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; }); return; }
+            try {
+                const prop = await api(`/stakeholder/proposte?projectId=${encodeURIComponent(projectId)}`);
+                m.querySelector('#stkProposte').innerHTML = prop.map((c) => `<option value="${esc(c.nominativo)}">${esc([c.ruolo, c.email, c.team ? 'nel team' : ''].filter(Boolean).join(' · '))}</option>`).join('');
+                m.querySelector('[name="nominativo"]').addEventListener('change', (e) => {
+                    const c = prop.find((y) => y.nominativo === e.target.value);
+                    if (!c) return;
+                    if (!m.querySelector('[name="email"]').value) m.querySelector('[name="email"]').value = c.email;
+                    if (!m.querySelector('[name="ruolo"]').value) m.querySelector('[name="ruolo"]').value = c.ruolo;
+                    if (c.team) m.querySelector('[name="organizzazione"]').value = 'interno';
+                });
+            } catch (e) { /* proposte facoltative */ }
+        }
+
+        // ================= CHIUSURA =================
+        let chDati = null;
+        async function caricaChiusura() {
+            const p = pannello('chiusura');
+            p.innerHTML = attesa('Carico i dati di chiusura…');
+            try { chDati = await api(`/chiusura?projectId=${encodeURIComponent(projectId)}`); renderChiusura(p); } catch (e) { p.innerHTML = errore(e); }
+        }
+        function renderChiusura(p) {
+            const c = chDati.chiusura || {};
+            const sola = chDati.chiusura && chDati.chiusura.puoModificare === false;
+            const lez = (x, mie) => `<div class="lezione ${x.tipo}"${mie ? ` data-id="${esc(x.id)}"` : ''}><div class="meta">${x.tipo === 'positivo' ? '<i class="fas fa-thumbs-up" style="color:#059669"></i> Ha funzionato' : '<i class="fas fa-wrench" style="color:#B45309"></i> Da migliorare'}${x.categoria ? ` · ${esc(x.categoria)}` : ''}${!mie && x.progetto ? ` · progetto ${esc(x.progetto)}` : ''}
+                ${mie && x.puoModificare !== false ? ' · <a href="#" data-del-lez="' + esc(x.id) + '">elimina</a>' : ''}</div><div>${esc(x.testo)}</div>${x.raccomandazione ? `<div class="pm-nota"><i class="fas fa-arrow-right"></i> ${esc(x.raccomandazione)}</div>` : ''}</div>`;
+            p.innerHTML = `${chDati.tabelle ? '' : sqlMancante()}
+                <div class="pm-griglia">
+                    <div class="pm-card">
+                        <h2><i class="fas fa-flag-checkered"></i> Chiusura del progetto</h2>
+                        ${sola ? '<div class="pm-avviso">Sola lettura per il tuo ruolo.</div>' : ''}
+                        <div class="pm-form" id="formCh">
+                            <label>Accettazione del cliente (data)<input type="date" name="data_accettazione" value="${esc(c.data_accettazione || '')}"></label>
+                            <label>Accettato da<input name="accettato_da" value="${esc(c.accettato_da || '')}"></label>
+                            <label class="largo">Soddisfazione del cliente<span class="stelle" id="stelle">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-v="${n}" class="${c.soddisfazione >= n ? 'on' : ''}" title="${n} su 5"><i class="fas fa-star"></i></button>`).join('')}</span><input type="hidden" name="soddisfazione" value="${c.soddisfazione || ''}"></label>
+                            <label class="largo">Nota sulla soddisfazione<textarea name="nota_soddisfazione" style="min-height:50px">${esc(c.nota_soddisfazione || '')}</textarea></label>
+                            <label class="largo">Obiettivi raggiunti<textarea name="obiettivi_raggiunti">${esc(c.obiettivi_raggiunti || '')}</textarea></label>
+                            <label class="largo">Attività residue e passaggio al supporto<textarea name="attivita_residue">${esc(c.attivita_residue || '')}</textarea></label>
+                        </div>
+                        <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.9rem">
+                            <button class="pm-btn primario" id="salvaCh" ${sola ? 'disabled' : ''}><i class="fas fa-floppy-disk"></i> Salva</button>
+                            <button class="pm-btn" id="verbale"><i class="fas fa-file-signature"></i> Verbale di chiusura</button>
+                        </div>
+                        <p class="pm-nota">Il progetto si chiude poi con il pulsante arancione «Chiudi Progetto» della scheda.</p>
+                    </div>
+                    <div class="pm-card">
+                        <h2><i class="fas fa-graduation-cap"></i> Lessons learned</h2>
+                        <div class="pm-form">
+                            <label>Tipo<select class="pm-input" id="lezTipo"><option value="migliorare">Da migliorare</option><option value="positivo">Ha funzionato</option></select></label>
+                            <label>Categoria<select class="pm-input" id="lezCat"><option value="">–</option>${['Pianificazione', 'Cliente', 'Team', 'Tecnica', 'Commerciale', 'Comunicazione', 'Qualità', 'Fornitori'].map((x) => `<option>${x}</option>`).join('')}</select></label>
+                            <label class="largo">Cosa è successo<textarea class="pm-input" id="lezTesto" style="min-height:55px"></textarea></label>
+                            <label class="largo">Raccomandazione per i prossimi progetti<input class="pm-input" id="lezRacc"></label>
+                        </div>
+                        <button class="pm-btn piccolo primario" id="lezAggiungi" style="margin:0.6rem 0 0.9rem"><i class="fas fa-plus"></i> Aggiungi lezione</button>
+                        ${chDati.lessons.length ? chDati.lessons.map((x) => lez(x, true)).join('') : '<div class="pm-vuoto">Nessuna lezione registrata. Si possono scrivere anche durante il progetto.</div>'}
+                    </div>
+                    <div class="pm-card">
+                        <h2><i class="fas fa-book-open"></i> Dai progetti simili</h2>
+                        <p class="pm-nota" style="margin-top:0">Lezioni dei tuoi altri progetti con tipologia «${esc(chDati.tipologia || '–')}»: rileggile all'avvio.</p>
+                        ${chDati.simili.length ? chDati.simili.map((x) => lez(x, false)).join('') : '<div class="pm-vuoto">Nessuna lezione dai progetti con la stessa tipologia.</div>'}
+                    </div>
+                </div>`;
+            const form = p.querySelector('#formCh');
+            if (sola) form.querySelectorAll('input, textarea').forEach((el) => { el.disabled = true; });
+            p.querySelector('#stelle').addEventListener('click', (e) => {
+                const b = e.target.closest('button'); if (!b || sola) return;
+                const v = Number(b.dataset.v);
+                form.querySelector('[name="soddisfazione"]').value = v;
+                p.querySelectorAll('#stelle button').forEach((x) => x.classList.toggle('on', Number(x.dataset.v) <= v));
+            });
+            p.querySelector('#salvaCh').addEventListener('click', async (e) => {
+                e.currentTarget.disabled = true;
+                try { await api('/chiusura', { metodo: 'PUT', corpo: { ...valori(form), projectId } }); toast('Dati di chiusura salvati'); }
+                catch (err) { toast(err.message, 'errore'); } finally { e.currentTarget.disabled = false; }
+            });
+            p.querySelector('#verbale').addEventListener('click', () => sceltaDocumento('chiusura'));
+            p.querySelector('#lezAggiungi').addEventListener('click', async (e) => {
+                const testo = p.querySelector('#lezTesto').value.trim();
+                if (!testo) { toast('Scrivi la lezione appresa', 'errore'); return; }
+                e.currentTarget.disabled = true;
+                try {
+                    await api('/lesson', { metodo: 'POST', corpo: { projectId, tipo: p.querySelector('#lezTipo').value, categoria: p.querySelector('#lezCat').value, testo, raccomandazione: p.querySelector('#lezRacc').value } });
+                    toast('Lezione aggiunta'); caricaChiusura();
+                } catch (err) { toast(err.message, 'errore'); e.currentTarget.disabled = false; }
+            });
+            p.querySelectorAll('[data-del-lez]').forEach((a) => a.addEventListener('click', async (e) => {
+                e.preventDefault();
+                if (!confirm('Eliminare questa lezione?')) return;
+                try { await api(`/lesson/${a.dataset.delLez}?projectId=${encodeURIComponent(projectId)}`, { metodo: 'DELETE' }); caricaChiusura(); } catch (err) { toast(err.message, 'errore'); }
+            }));
+        }
+
+        // ================= CHIEDI AL PROGETTO =================
+        const storia = [];
+        function caricaChiedi() {
+            const p = pannello('chiedi');
+            p.innerHTML = `<div class="pm-card" style="max-width:980px">
+                <h2><i class="fas fa-comments"></i> Chiedi al progetto</h2>
+                <p class="pm-nota" style="margin-top:0">L'AI risponde usando i dati del progetto: scheda, salute, budget, Gantt, rischi, decisioni, Change Request, azioni, issue e i recap delle ultime riunioni. Serve un'AI con chiave API (Impostazioni › AI).</p>
+                <div class="pm-chat" id="chat"></div>
+                <div class="pm-suggerimenti" id="sugg">${['Perché il progetto è in questo stato?', 'Siamo nel budget? Quanto manca a finire?', 'Cosa abbiamo deciso nelle ultime riunioni?', 'Quali sono le azioni scadute e di chi sono?', 'Quali rischi devo affrontare questa settimana?', 'Cosa devo chiedere al cliente?'].map((s) => `<button type="button">${esc(s)}</button>`).join('')}</div>
+                <div class="pm-chat-in"><textarea id="domanda" placeholder="Scrivi una domanda sul progetto… (Invio per inviare, Maiusc+Invio per andare a capo)"></textarea><button class="pm-btn primario" id="invia"><i class="fas fa-paper-plane"></i></button></div>
+            </div>`;
+            const chat = p.querySelector('#chat'), dom = p.querySelector('#domanda'), btn = p.querySelector('#invia');
+            const aggiungi = (ruolo, html) => { const d = document.createElement('div'); d.className = `pm-msg ${ruolo}`; d.innerHTML = html; chat.appendChild(d); chat.scrollTop = chat.scrollHeight; return d; };
+            aggiungi('ai', 'Ciao! Chiedimi qualsiasi cosa su questo progetto.');
+            async function invia(testo) {
+                const q = String(testo || dom.value).trim();
+                if (!q) return;
+                dom.value = '';
+                aggiungi('io', esc(q));
+                const att = aggiungi('ai', '<i class="fas fa-spinner fa-spin"></i> Sto guardando i dati del progetto…');
+                btn.disabled = true;
+                try {
+                    const r = await api('/chiedi', { metodo: 'POST', corpo: { projectId, domanda: q, storia } });
+                    att.innerHTML = `<div class="pm-ai">${testoAiHtml(r.risposta)}</div><small>${esc(r.ai)}</small>`;
+                    storia.push({ ruolo: 'io', testo: q }, { ruolo: 'ai', testo: r.risposta });
+                } catch (e) { att.innerHTML = `<span style="color:#DC2626">${esc(e.message)}</span>`; }
+                finally { btn.disabled = false; dom.focus(); }
+            }
+            btn.addEventListener('click', () => invia());
+            dom.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); invia(); } });
+            p.querySelector('#sugg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) invia(b.textContent); });
+        }
+
+        // ================= BRIEFING E DOCUMENTI =================
+        document.getElementById('btnBriefing').addEventListener('click', () => apriBriefing());
+        async function apriBriefing(idCalendar) {
+            const m = modale({ titolo: '<i class="fas fa-clipboard-list"></i> Briefing pre-riunione', larga: true, corpo: attesa('L\'AI prepara il briefing con azioni aperte, rischi, decisioni e ultimo recap…'), pulsanti: [{ testo: 'Chiudi' }] });
+            try {
+                const r = await api('/briefing', { metodo: 'POST', corpo: { projectId, id_calendar: idCalendar && idCalendar !== '1' ? idCalendar : undefined } });
+                m.querySelector('.pm-modal-body').innerHTML = `<div class="pm-ai">${testoAiHtml(r.briefing)}</div><p class="pm-nota" style="margin-top:1rem">${esc(r.ai)}</p>`;
+                const foot = m.querySelector('.pm-modal-foot');
+                const copia = document.createElement('button');
+                copia.className = 'pm-btn'; copia.innerHTML = '<i class="fas fa-copy"></i> Copia';
+                copia.addEventListener('click', async () => { await navigator.clipboard.writeText(r.briefing); toast('Briefing copiato'); });
+                foot.prepend(copia);
+            } catch (e) { m.querySelector('.pm-modal-body').innerHTML = errore(e); }
+        }
+        document.getElementById('btnStatus').addEventListener('click', () => sceltaDocumento('status'));
+
+        function sceltaDocumento(tipo) {
+            const oggi = new Date();
+            const dal = new Date(oggi.getTime() - 14 * 86400000).toISOString().slice(0, 10);
+            const titolo = tipo === 'status' ? 'Status Report (SAL)' : 'Verbale di chiusura';
+            modale({
+                titolo: `<i class="fas fa-file-lines"></i> ${titolo}`,
+                corpo: `${tipo === 'status' ? `<label class="pm-form" style="display:block"><span style="font-size:0.8rem;font-weight:600">Periodo: dal</span><input type="date" class="pm-input" id="docDal" value="${dal}" style="max-width:200px"></label>` : ''}
+                    <p class="pm-nota">L'AI scrive il commento; numeri, tabelle, rischi, milestone e Change Request li mette Projexa.</p>
+                    <div style="display:grid; gap:0.7rem; margin-top:0.6rem">
+                        <div class="pm-card" style="margin:0"><b><i class="fas fa-print"></i> Anteprima da stampare o salvare in PDF</b><div class="pm-nota">Si apre in una nuova scheda.</div></div>
+                        <div class="pm-card" style="margin:0"><b><i class="fas fa-file-word" style="color:#2563EB"></i> Su un tuo template Word (.docx)</b><div class="pm-nota">L'AI compila il template come per l'Offerta economica. Il file non resta su Projexa.</div>
+                            <input type="file" id="docTpl" accept=".docx" style="margin-top:0.5rem"></div>
+                    </div>`,
+                pulsanti: [{ testo: 'Annulla' },
+                    { testo: '<i class="fas fa-file-word"></i> Genera Word', azione: async (mm) => {
+                        const f = mm.querySelector('#docTpl').files[0];
+                        if (!f) throw new Error('Scegli il template .docx');
+                        if (!/\.docx$/i.test(f.name)) throw new Error('Il template deve essere un file .docx');
+                        const dalV = mm.querySelector('#docDal')?.value || '';
+                        mm.querySelector('.pm-modal-body').insertAdjacentHTML('beforeend', attesa('Genero il documento: può richiedere qualche minuto…'));
+                        const r = await fetch(`${PM.API_URL}/pm/documento/docx?${new URLSearchParams({ projectId, tipo, dal: dalV })}`, { method: 'POST', headers: { ...PM.auth(), 'Content-Type': 'application/octet-stream' }, body: await f.arrayBuffer() });
+                        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `Errore ${r.status}`); }
+                        const nome = /filename\*=UTF-8''([^;]+)/.exec(r.headers.get('Content-Disposition') || '');
+                        const a = document.createElement('a');
+                        a.href = URL.createObjectURL(await r.blob());
+                        a.download = nome ? decodeURIComponent(nome[1]) : `${titolo}.docx`;
+                        a.click();
+                        toast('Documento pronto');
+                    } },
+                    { testo: '<i class="fas fa-print"></i> Anteprima', classe: 'primario', azione: (mm) => {
+                        const dalV = mm.querySelector('#docDal')?.value || '';
+                        window.open(`pm-documento.html?${new URLSearchParams({ projectId, tipo, dal: dalV })}`, '_blank');
+                    } }]
+            });
+        }
+
+        const CARICA = { panoramica: caricaPanoramica, raid: caricaRaid, cr: caricaCr, stakeholder: caricaStakeholder, chiusura: caricaChiusura, chiedi: caricaChiedi };
+        // Da una riunione (finestra del recap): progetto della riunione, scheda RAID, estrazione.
+        if (!projectId && qs.get('da_riunione')) {
+            api(`/riunione?id_calendar=${encodeURIComponent(qs.get('da_riunione'))}`)
+                .then((r) => { location.replace(`pm.html?${new URLSearchParams({ projectId: r.projectId, tab: 'raid', estrai: qs.get('da_riunione') })}`); })
+                .catch((e) => { pannello('panoramica').innerHTML = errore(e); });
+            return;
+        }
+        if (!projectId) { pannello('panoramica').innerHTML = errore('Progetto non indicato: apri il Cruscotto PM dalla scheda del progetto.'); return; }
+        caricati.panoramica = true;
+        caricaPanoramica().then(() => {
+            const t = qs.get('tab');
+            if (t && t !== 'panoramica' && CARICA[t]) apriTab(t);
+            if (qs.get('briefing')) apriBriefing(qs.get('briefing'));
+        });
+    })();
+    </script>
+</body>
+</html>

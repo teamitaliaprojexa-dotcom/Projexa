@@ -152,6 +152,14 @@
         /* Area gantt (per riga) */
         .gantt-cell { position: relative; height: 100%; flex: 0 0 auto; }
         .gantt-grid-line { position: absolute; top: 0; bottom: 0; width: 1px; background: #EEF1F5; }
+        /* Funzioni da PM senior: milestone (rombo), baseline (barra grigia sotto), percorso critico */
+        .gantt-bar.gantt-ms { position: absolute; top: 12px; width: 18px; height: 18px; min-width: 0; transform: translateX(-9px) rotate(45deg); border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.25); z-index: 1; }
+        .gantt-base { position: absolute; top: calc(var(--row-h) - 9px); height: 5px; border-radius: 3px; background: #6B7280; opacity: 0.55; }
+        .gantt-bar.critico, .gantt-ms.critico { box-shadow: 0 0 0 2px #DC2626; }
+        .node-btn.critico { outline: 2px solid #DC2626; outline-offset: 1px; }
+        .ms-mark { color: #4F46E5; margin-right: 3px; }
+        .pm-info { font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; }
+        .btn.on { background: #FEE2E2; border-color: #FCA5A5; color: #991B1B; }
         .gantt-bar {
             position: absolute;
             top: 10px;
@@ -280,6 +288,9 @@
         </span>
         <button class="btn" id="copyBtn" style="display:none;"><i class="fas fa-copy"></i> Copia progetto da</button>
         <!-- Export Excel: disponibile sia in visualizzazione sia in modifica -->
+        <button class="btn" id="baselineBtn" style="display:none;" title="Mostra la baseline (piano congelato) sotto le barre"><i class="fas fa-snowflake"></i> Baseline</button>
+        <button class="btn" id="criticoBtn" style="display:none;" title="Evidenzia in rosso le attività senza margine: se slittano, slitta la fine del progetto"><i class="fas fa-route"></i> Percorso critico</button>
+        <span class="pm-info" id="pmInfo"></span>
         <button class="btn" id="exportBtn" title="Scarica il Gantt nel modello Excel"><i class="fas fa-file-excel" style="color:#16A34A;"></i> Esporta Excel</button>
         <span class="spacer"></span>
         <span class="autosave-wrap">
@@ -361,6 +372,13 @@
             <div>
                 <label for="cfgNote">Note interne</label>
                 <textarea id="cfgNote" rows="3"></textarea>
+            </div>
+            <div class="cfg-toggle-row" id="cfgMilestoneRow" style="display:none;">
+                <div>
+                    <label for="cfgMilestone" style="margin-bottom:2px;">Milestone</label>
+                    <div class="cfg-hint">Traguardo del progetto (rombo nel Gantt, alla data di fine): finisce nel Cruscotto PM, nello Status Report e negli avvisi</div>
+                </div>
+                <label class="toggle-switch"><input type="checkbox" id="cfgMilestone"><span class="toggle-slider"></span></label>
             </div>
             <div class="cfg-toggle-row">
                 <div>
@@ -495,7 +513,10 @@
             'data_inizio', 'data_fine', 'dipendenza', 'colore',
             'nr_mesi', 'nr_giorni', 'stato', 'avanzamento', 'rischio',
             'owner', 'nominativo', 'note_interne', 'mostra_cliente',
-            'name_arg1', 'name_arg2', 'name_arg3', 'name_arg4'];
+            'name_arg1', 'name_arg2', 'name_arg3', 'name_arg4', 'milestone'];
+        // Cruscotto PM (api/pm/gantt): analisi del progetto (percorso critico, completamento) e
+        // disponibilità di milestone/baseline (colonne di Supporto/CreaDB/pm_senior.sql).
+        let ganttPm = null, projectIdPm = '', mostraBaseline = false, mostraCritico = false;
         // Colonne aggiuntive della tabella, modificabili dal flyout Configurazione.
         const GANTT_EXTRA_COLS = ['nr_mesi', 'nr_giorni', 'stato', 'avanzamento',
             'rischio', 'owner', 'nominativo', 'note_interne'];
@@ -593,6 +614,10 @@
                 GANTT_EXTRA_COLS.forEach(col => { node[col] = row[col] ?? null; });
                 // Colonna aggiunta dopo: le righe preesistenti possono avere NULL -> visibile.
                 node.mostra_cliente = !(row.mostra_cliente === false || row.mostra_cliente === 'f' || row.mostra_cliente === 'false');
+                // Milestone: null se la colonna non c'è ancora (così non risulta mai "modificata").
+                node.milestone = row.milestone == null ? null : (row.milestone === true || row.milestone === 't' || row.milestone === 'true');
+                node.baseline_inizio = row.baseline_inizio || null;
+                node.baseline_fine = row.baseline_fine || null;
                 const parent = level > 1 ? lastAtLevel[level - 2] : null;
                 if (parent) { node.parent = parent; parent.children.push(node); }
                 else tree.push(node);
@@ -626,6 +651,7 @@
             v.colore = level === 1 ? (node.colore || null) : null;
             GANTT_EXTRA_COLS.forEach(col => { v[col] = node[col] ?? null; });
             v.mostra_cliente = node.mostra_cliente !== false;
+            v.milestone = node.milestone == null ? null : !!node.milestone;
             // Le etichette delle colonne sono di progetto: replicate su ogni riga.
             colLabels.forEach((label, i) => { v['name_arg' + (i + 1)] = label; });
             return v;
@@ -713,6 +739,8 @@
                         .forEach(el => { el.dataset.nodeId = realId; });
                 });
                 showToast('Salvato');
+                clearTimeout(window.__pmTimer);
+                window.__pmTimer = setTimeout(caricaAnalisiPm, 800);
             } catch (e) {
                 showToast('Errore nel salvataggio: ' + e.message);
             } finally {
@@ -893,9 +921,10 @@
                 html += `<div class="wbs-row" data-node-id="${escapeHtml(node.id)}">`;
                 for (let i = 1; i <= modelCols; i++) {
                     if (i === level) {
-                        html += `<div class="cell"><button type="button" class="node-btn" draggable="true" data-node-id="${escapeHtml(node.id)}" data-level="${level}"
+                        const critico = mostraCritico && ganttPm && ganttPm.critico.includes(node.id);
+                        html += `<div class="cell"><button type="button" class="node-btn${critico ? ' critico' : ''}" draggable="true" data-node-id="${escapeHtml(node.id)}" data-level="${level}"
                             style="border-color:${color}; color:${color}; background:${tint(rootColor(node), 0.9)};">
-                            <span class="node-text">${escapeHtml(node.name || '(senza nome)')}</span>
+                            <span class="node-text">${node.milestone ? '<i class="fas fa-diamond ms-mark"></i>' : ''}${escapeHtml(node.name || '(senza nome)')}</span>
                         </button></div>`;
                     } else {
                         html += '<div class="cell"></div>';
@@ -910,13 +939,25 @@
                         if (i % lineStep === 0) html += `<div class="gantt-grid-line" style="left:${s.x}px;"></div>`;
                     });
                     const a = parseDate(node.data_inizio), b = parseDate(node.data_fine);
-                    if (a || b) {
+                    const critico = mostraCritico && ganttPm && ganttPm.critico.includes(node.id) ? ' critico' : '';
+                    // Baseline (piano congelato): barra grigia sottile sotto quella attuale.
+                    const ba = parseDate(node.baseline_inizio), bb = parseDate(node.baseline_fine);
+                    if (mostraBaseline && (ba || bb)) {
+                        const bx = timelineX(range, ba || bb);
+                        const bw = Math.max(4, timelineX(range, addDays(bb || ba, 1)) - bx);
+                        html += `<div class="gantt-base" style="left:${bx}px; width:${bw}px;" title="Baseline: ${escapeHtml(String(node.baseline_inizio || '').slice(0, 10))} → ${escapeHtml(String(node.baseline_fine || '').slice(0, 10))}"></div>`;
+                    }
+                    if (node.milestone && (a || b)) {
+                        // Milestone: rombo alla data di fine (o di inizio se manca la fine).
+                        const x = timelineX(range, addDays(b || a, 1));
+                        html += `<div class="gantt-ms gantt-bar${critico}" data-node-id="${escapeHtml(node.id)}" style="left:${x}px; width:18px; padding:0; background:${color};" title="Milestone: ${escapeHtml(node.name || '')}"></div>`;
+                    } else if (a || b) {
                         const start = a || b, end = b || a;
                         const x = timelineX(range, start);
                         // La barra copre anche l'ultimo giorno: si estende fino all'inizio
                         // del giorno successivo alla data di fine.
                         const w = Math.max(8, timelineX(range, addDays(end, 1)) - x);
-                        html += `<div class="gantt-bar" data-node-id="${escapeHtml(node.id)}" style="left:${x}px; width:${w}px; background:${color};">${escapeHtml(node.name || '')}</div>`;
+                        html += `<div class="gantt-bar${critico}" data-node-id="${escapeHtml(node.id)}" style="left:${x}px; width:${w}px; background:${color};">${escapeHtml(node.name || '')}</div>`;
                     }
                     html += '</div>';
                 }
@@ -1132,6 +1173,8 @@
                 document.getElementById(inputId).value = node[col] == null ? '' : node[col];
             });
             document.getElementById('cfgMostraCliente').checked = node.mostra_cliente !== false;
+            document.getElementById('cfgMilestoneRow').style.display = ganttPm && ganttPm.milestoneDisponibile ? '' : 'none';
+            document.getElementById('cfgMilestone').checked = node.milestone === true;
             const dep = node.dipendenza ? findNode(node.dipendenza) : null;
             document.getElementById('cfgDepName').textContent = dep ? (dep.name || '(senza nome)') : 'Nessuna';
             document.getElementById('cfgAddChild').style.display = level < modelCols ? '' : 'none';
@@ -1191,6 +1234,44 @@
             selectedNode.mostra_cliente = document.getElementById('cfgMostraCliente').checked;
             scheduleSave();
             if (ganttVisible) { render(); closeFlyout(); } // la riga esce dalla vista gantt
+        });
+
+        document.getElementById('cfgMilestone').addEventListener('change', () => {
+            if (!selectedNode) return;
+            selectedNode.milestone = document.getElementById('cfgMilestone').checked;
+            scheduleSave(); render();
+        });
+
+        // ===== Cruscotto PM: analisi (percorso critico, completamento), baseline =====
+        async function caricaAnalisiPm() {
+            if (!projectIdPm) return;
+            try {
+                ganttPm = await fetch(`${location.origin}/api/pm/gantt?projectId=${encodeURIComponent(projectIdPm)}`, { headers: getAuthHeaders() })
+                    .then((r) => (r.ok ? r.json() : null));
+            } catch (e) { ganttPm = null; }
+            const info = document.getElementById('pmInfo');
+            if (!ganttPm) { info.textContent = ''; return; }
+            document.getElementById('criticoBtn').style.display = ganttPm.conDate ? '' : 'none';
+            document.getElementById('baselineBtn').style.display = ganttPm.baselineDisponibile && ganttPm.baselineFine ? '' : 'none';
+            const parti = [];
+            if (ganttPm.completamento != null) parti.push(`Completamento ${Math.round(ganttPm.completamento)}%`);
+            if (ganttPm.inRitardo && ganttPm.inRitardo.length) parti.push(`${ganttPm.inRitardo.length} in ritardo`);
+            if (ganttPm.scostamentoGiorni) parti.push(`${ganttPm.scostamentoGiorni > 0 ? '+' : ''}${ganttPm.scostamentoGiorni} gg sulla baseline`);
+            info.textContent = parti.join(' · ');
+            if (selectedNode) fillFlyout(selectedNode);
+            if (mostraCritico || mostraBaseline) render();
+        }
+        document.getElementById('criticoBtn').addEventListener('click', (e) => {
+            mostraCritico = !mostraCritico;
+            e.currentTarget.classList.toggle('on', mostraCritico);
+            if (mostraCritico && !ganttVisible) document.getElementById('ganttToggleBtn').click();
+            else render();
+        });
+        document.getElementById('baselineBtn').addEventListener('click', (e) => {
+            mostraBaseline = !mostraBaseline;
+            e.currentTarget.classList.toggle('on', mostraBaseline);
+            if (mostraBaseline && !ganttVisible) document.getElementById('ganttToggleBtn').click();
+            else render();
         });
 
         // Scelta della dipendenza: si clicca sul pulsante da cui questa attività dipende.
@@ -1454,6 +1535,8 @@
                     showToast('Attività in sola lettura per il tuo ruolo');
                 }
                 buildTree(Array.isArray(payload.rows) ? payload.rows : []);
+                projectIdPm = (payload.context && payload.context.projectId) || urlParams.get('projectId') || '';
+                caricaAnalisiPm();
                 // Modello: preferenza salvata, altrimenti la profondità dei dati (min 2)
                 let deepest = 0;
                 forEachNode(n => { deepest = Math.max(deepest, nodeLevel(n)); });
