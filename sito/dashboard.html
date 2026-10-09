@@ -1555,6 +1555,8 @@
         .parent-form-save { background: #10B981; color: #fff; }
         .parent-form-cancel { background: #E5E7EB; color: #374151; }
         /* Clienti/progetti di un collaboratore del team del Manager (sola lettura) */
+        /* Griglia raggiunta dal «Vai» di una notifica: evidenziata per un attimo */
+        .type11-grid-row.notif-target { box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.55); border-radius: 10px; transition: box-shadow 0.4s; }
         .team-badge {
             display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px;
             background: #EDE9FE; color: #5B21B6; font-size: 0.68rem; font-weight: 600;
@@ -11356,6 +11358,7 @@
                             <span class="notif-when">${esc(quando(n.aggiornata_il || n.creata_il))}</span>
                             ${n.letta ? '' : '<span class="notif-dot" title="Da leggere"></span>'}
                             ${n.tabella === 'tasks' && n.riga_id ? `<button type="button" class="notif-go" data-vai="${esc(n.riga_id)}" title="Apri la To-Do">Vai <i class="fas fa-arrow-right"></i></button>` : ''}
+                            ${n.vai ? `<button type="button" class="notif-go" data-vai-dest="${esc(n.id)}" title="${n.vai.projectId ? 'Apri il progetto' : 'Apri il cliente'}${n.vai.fieldId ? ' e la sua griglia' : ''}">Vai <i class="fas fa-arrow-right"></i></button>` : ''}
                         </div>
                     </div>`).join('')
                     : '<div class="notif-empty"><i class="fas fa-bell-slash"></i>Nessuna notifica</div>';
@@ -11417,9 +11420,58 @@
                 else showNotification('To-Do non trovata: potrebbe essere stata eliminata', 'info');
             }
 
+            // «Vai» di Jira (task, quotazioni) e MySupport: apre la scheda del progetto (se la riga ha
+            // un progetto) o del cliente, attraversa i Nodi Padre (path) e apre la griglia (fieldId).
+            const attendi = async (cond, ms = 8000) => {
+                const fine = Date.now() + ms;
+                while (Date.now() < fine) { const x = cond(); if (x) return x; await new Promise(r => setTimeout(r, 150)); }
+                return null;
+            };
+            async function apriDestinazione(v) {
+                panel.classList.remove('open');
+                btn.setAttribute('aria-expanded', 'false');
+                closeParentForm();
+                detailNavStack = [];
+                const listEl = document.getElementById('settingsDetailList');
+                if (listEl) listEl.innerHTML = '';
+                if (v.projectId) {
+                    await renderProjectList(v.clientId, v.clientName || '');
+                    openProjectDetail(v.projectId, v.projectName || '', v.clientId);
+                } else {
+                    currentContainerCampo = 'Cliente';
+                    currentClientId = v.clientId;
+                    openDetailFlyout('clients', v.clientId, v.clientName || '');
+                }
+                // Attesa del dettaglio caricato (righe con data-row-id).
+                if (!await attendi(() => listEl && listEl.querySelector('[data-row-id]'))) return;
+                for (let i = 0; i < (v.path || []).length; i++) {
+                    const nodo = v.path[i];
+                    await openParentForm(nodo.id, nodo.campo, null, i > 0);
+                }
+                if (!v.fieldId) return;
+                const box = (v.path || []).length ? document.getElementById('parentFormContent') : listEl;
+                const widget = await attendi(() => box && box.querySelector(`.type11-grid-widget[data-grid-field-id="${CSS.escape(String(v.fieldId))}"]`));
+                const riga = widget && widget.closest('.type11-grid-row');
+                if (!riga) return;
+                if (riga.classList.contains('collapsed')) riga.querySelector('.type11-bar')?.click();
+                riga.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                riga.classList.add('notif-target');
+                setTimeout(() => riga.classList.remove('notif-target'), 2500);
+            }
+
             // Clic sulla notifica (non sulla casella): diventa letta.
             list.addEventListener('click', async (e) => {
                 if (e.target.matches('input[data-id]')) { aggiornaStrumenti(); return; }
+                const vaiDest = e.target.closest('[data-vai-dest]');
+                if (vaiDest) {
+                    const n = elenco.find((x) => x.id === vaiDest.dataset.vaiDest);
+                    if (n && !n.letta) {
+                        azione('lette', { ids: [n.id] }).then(() => aggiornaConteggio()).catch(() => {});
+                        n.letta = true;
+                    }
+                    if (n && n.vai) apriDestinazione(n.vai).catch(() => showNotification('Impossibile aprire la destinazione', 'info'));
+                    return;
+                }
                 const vai = e.target.closest('[data-vai]');
                 if (vai) {
                     const item = vai.closest('.notif-item');
