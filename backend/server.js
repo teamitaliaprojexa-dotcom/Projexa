@@ -8465,7 +8465,31 @@ app.get('/api/reporting/table-fields/:area', requireAuth, async (req, res) => {
     await assertReportingEnabled(req);
     if (!REPORTING_TABLES[req.params.area]) return res.status(404).json({ error: 'Area non trovata' });
     const { columns } = await reportingTableColumns(req.params.area);
-    res.json(columns.map((c) => ({ campo: reportingColumnLabel(c.name), key: c.name, custom: false, group: false, parent: null, parentKey: null })));
+    const fields = columns.map((c) => ({ campo: reportingColumnLabel(c.name), key: c.name, custom: false, group: false, parent: null, parentKey: null }));
+    // Manager con un team: per prima la colonna «Utente» (nominativo di chi possiede la riga).
+    // La To do List resta personale e non la prevede.
+    if (req.params.area !== 'todo' && (await reportingOwners(req)).length > 1) {
+      fields.unshift({ campo: 'Utente', key: 'Utente', custom: false, group: false, parent: null, parentKey: null });
+    }
+    res.json(fields);
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Manager e team: il Reporting di un Manager comprende i dati propri e dei collaboratori
+// diretti (campo «Manager»); ?scope=mine li limita ai propri. La To do List resta personale.
+async function reportingOwners(req) {
+  return String(req.query.scope || '') === 'mine' ? [String(req.user.user_id)] : await selfAndTeamIds(req);
+}
+// Collaboratori del team (per mostrare nella pagina la scelta «Miei / Miei + team»).
+app.get('/api/reporting/team', requireAuth, async (req, res) => {
+  try {
+    await assertReportingEnabled(req);
+    const ids = await teamMemberIds(req);
+    const names = await userDisplayNames(ids);
+    res.json({ members: ids.map((id) => ({ id, name: names.get(id) || '' }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'it', { sensitivity: 'base' })) });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -8489,12 +8513,13 @@ app.get('/api/reporting/fields/:source(clients|projects)', requireAuth, async (r
     await assertReportingEnabled(req);
     const source = req.params.source;
     const area = REPORTING_AREAS[source];
+    const owners = await reportingOwners(req);
     const r = await db.query(
       `SELECT CASE WHEN p.argument = $4 THEN NULL ELSE p.campo END AS parent,
               f.campo, f.tipo_valore, MIN(f.ordinamento) AS ordinamento
          FROM "${source}" f
          JOIN "${source}" p ON p.id::text = f.argument
-        WHERE f.tenant_id = $1 AND f.user_id = $2
+        WHERE f.tenant_id = $1 AND f.user_id::text = ANY($2::text[])
           AND f.campo IS NOT NULL AND BTRIM(f.campo) <> '' AND f.argument <> $4
           -- Visibilità per ruolo (id_roles più basso = più privilegi): es. ruolo 70 vede
           -- i campi 70/80/90 e quelli senza id_roles, non i 69. Vale anche per il Nodo Padre.
@@ -8502,9 +8527,11 @@ app.get('/api/reporting/fields/:source(clients|projects)', requireAuth, async (r
           AND (p.argument = $4 OR p.id_roles IS NULL OR p.id_roles >= $3)
         GROUP BY 1, 2, 3
         ORDER BY MIN(f.ordinamento) NULLS LAST, 2`,
-      [req.user.tenant_id, req.user.user_id, reportingRoleLevel(req), area.root]
+      [req.user.tenant_id, owners, reportingRoleLevel(req), area.root]
     );
-    const first = area.firstFields.map((f) => ({ ...f, custom: false, tipo_valore: '2', group: false, parent: null, parentKey: null }));
+    // Con un team: anche «Utente», cioè di chi è il cliente/progetto (proprio o del collaboratore).
+    const firstFields = owners.length > 1 ? [...area.firstFields, { campo: 'Utente', key: 'Utente' }] : area.firstFields;
+    const first = firstFields.map((f) => ({ ...f, custom: false, tipo_valore: '2', group: false, parent: null, parentKey: null }));
     res.json(first.concat(r.rows
       .filter((x) => String(x.tipo_valore).trim() === '0' || !REPORTING_EXCLUDED_TYPES.has(String(x.tipo_valore).trim()))
       .filter((x) => !isReportingAppoName(x.campo)) // campi di appoggio "appo…"
@@ -8538,11 +8565,11 @@ async function reportingValues(req, source, ids, keys) {
             f.tipo_valore, f.valore1, f.valore2, f.valore3
        FROM "${source}" f
        JOIN "${source}" p ON p.id::text = f.argument
-      WHERE f.tenant_id = $1 AND f.user_id = $2 AND f.master_id = ANY($3::uuid[])
+      WHERE f.tenant_id = $1 AND f.user_id::text = ANY($2::text[]) AND f.master_id = ANY($3::uuid[])
         AND f.argument <> $6 AND f.campo = ANY($4::text[])
         AND (f.id_roles IS NULL OR f.id_roles >= $5)
         AND (p.argument = $6 OR p.id_roles IS NULL OR p.id_roles >= $5)`,
-    [req.user.tenant_id, req.user.user_id, ids, keys, reportingRoleLevel(req), root]
+    [req.user.tenant_id, await reportingOwners(req), ids, keys, reportingRoleLevel(req), root]
   );
   const fmtNumber = (n) => {
     if (n == null || n === '') return '';
@@ -8595,19 +8622,22 @@ app.get('/api/reporting/data', requireAuth, async (req, res) => {
       return ` AND (${col} IS NULL OR ${col} >= CURRENT_DATE)`;
     };
 
+    const owners = await reportingOwners(req);
     const clients = sortByName((await db.query(
-      `SELECT id, valore2 AS name FROM clients
-        WHERE argument = 'Cliente' AND campo = 'Cliente' AND tenant_id = $1 AND user_id = $2
+      `SELECT id, valore2 AS name, user_id::text AS owner_id FROM clients
+        WHERE argument = 'Cliente' AND campo = 'Cliente' AND tenant_id = $1 AND user_id::text = ANY($2::text[])
           ${expiryCond('clients', 'scadenza')}`,
-      [req.user.tenant_id, req.user.user_id]
+      [req.user.tenant_id, owners]
     )).rows);
+    // «Utente»: nome del proprietario di cliente/progetto (dati propri o del team).
+    const ownerNames = await userDisplayNames(owners);
     const clientIds = clients.map((c) => c.id);
     const projects = withProjects
       ? sortByName((await db.query(
-        `SELECT id, valore2 AS name, client_id FROM projects
-          WHERE argument = 'Progetto' AND campo = 'Progetto' AND tenant_id = $1 AND user_id = $2
+        `SELECT id, valore2 AS name, client_id, user_id::text AS owner_id FROM projects
+          WHERE argument = 'Progetto' AND campo = 'Progetto' AND tenant_id = $1 AND user_id::text = ANY($2::text[])
             ${expiryCond('projects', 'scadenza')}`,
-        [req.user.tenant_id, req.user.user_id]
+        [req.user.tenant_id, owners]
       )).rows)
       : [];
     const groupBy = (list, key) => {
@@ -8618,7 +8648,7 @@ app.get('/api/reporting/data', requireAuth, async (req, res) => {
     const projectsByClient = groupBy(projects, 'client_id');
 
     // Valori EAV di clienti e progetti.
-    const keysOf = (area) => fields.filter((f) => f.area === area && !['Cliente', 'Progetto'].includes(f.key)).map((f) => f.key);
+    const keysOf = (area) => fields.filter((f) => f.area === area && !['Cliente', 'Progetto', 'Utente'].includes(f.key)).map((f) => f.key);
     const clientValues = await reportingValues(req, 'clients', clientIds, keysOf('clients'));
     const projectValues = await reportingValues(req, 'projects', projects.map((p) => p.id), keysOf('projects'));
 
@@ -8658,8 +8688,11 @@ app.get('/api/reporting/data', requireAuth, async (req, res) => {
         }
       });
       const hasProject = info.all.has('project_id');
-      const params = [req.user.tenant_id, req.user.user_id, clientIds];
-      const conds = ['d.tenant_id = $1', 'd.user_id = $2', 'd.client_id = ANY($3::uuid[])'];
+      // «Utente»: proprietario della riga (nominativo), letto da d.user_id.
+      if (fields.some((f) => f.area === area && f.key === 'Utente')) selects.push('d.user_id::text AS "__owner"');
+      // To do List sempre personale; le altre tabelle anche dei collaboratori del team.
+      const params = [req.user.tenant_id, area === 'todo' ? [String(req.user.user_id)] : owners, clientIds];
+      const conds = ['d.tenant_id = $1', 'd.user_id::text = ANY($2::text[])', 'd.client_id = ANY($3::uuid[])'];
       if (info.all.has('scadenza')) {
         const cond = expiryCond(area, 'd.scadenza').replace(/^ AND /, '');
         if (cond) conds.push(cond);
@@ -8678,18 +8711,23 @@ app.get('/api/reporting/data', requireAuth, async (req, res) => {
         byProject: withProjects && hasProject,
         byClientRows: groupBy(rows, 'client_id'),
         byProjectRows: hasProject ? groupBy(rows.filter((r) => r.project_id), 'project_id') : new Map(),
-        fmt: (row, key) => (row && Object.prototype.hasOwnProperty.call(row, key) ? fmtCell(row[key], types.get(key)) : '')
+        fmt: (row, key) => {
+          if (key === 'Utente') return row ? (ownerNames.get(row.__owner) || '') : '';
+          return row && Object.prototype.hasOwnProperty.call(row, key) ? fmtCell(row[key], types.get(key)) : '';
+        }
       });
     }
 
     const cell = (f, client, project, detail) => {
       if (f.area === 'clients') {
         if (f.key === 'Cliente') return client.name || '';
+        if (f.key === 'Utente') return ownerNames.get(client.owner_id) || '';
         return clientValues.get(reportingCellKey(client.id, f.parentKey, f.key)) ?? '';
       }
       if (f.area === 'projects') {
         if (!project) return '';
         if (f.key === 'Progetto') return project.name || '';
+        if (f.key === 'Utente') return ownerNames.get(project.owner_id) || '';
         return projectValues.get(reportingCellKey(project.id, f.parentKey, f.key)) ?? '';
       }
       const t = tables.find((x) => x.area === f.area);

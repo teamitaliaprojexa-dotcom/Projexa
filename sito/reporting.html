@@ -317,6 +317,9 @@
         /* Intestazione: azioni del report a destra */
         .header-actions { margin-left: auto; display: flex; gap: 0.5rem; }
         .header-actions[hidden] { display: none; }
+        .scope-wrap { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--text-muted); }
+        .scope-wrap[hidden] { display: none; }
+        .scope-wrap select { padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; }
         .btn-primary { background: var(--primary); border-color: var(--primary); color: white; }
         .btn-primary:hover { background: var(--primary-dark); }
         .report-name { font-size: 0.9rem; font-weight: 500; color: var(--text-muted); margin-left: 0.3rem; }
@@ -342,6 +345,13 @@
         <h1><i class="fas fa-chart-column"></i> Reporting <span class="report-name" id="currentReportName"></span></h1>
         <!-- Azioni sul report corrente: salva (chiede il nome) e scarica i dati mostrati -->
         <div class="header-actions" id="headerActions" hidden>
+            <!-- Manager: dati propri o anche dei collaboratori del team (campo «Manager»). Visibile solo con un team. -->
+            <label class="scope-wrap" id="scopeWrap" hidden title="Il team è formato da chi ti ha indicato come Manager">Dati
+                <select id="scopeSel">
+                    <option value="team">Miei + team</option>
+                    <option value="mine">Solo miei</option>
+                </select>
+            </label>
             <button type="button" class="btn btn-primary" id="btnSaveReport" title="Salva il report (colonne, ordinamento e filtri)"><i class="fas fa-floppy-disk"></i> Salva</button>
             <button type="button" class="btn" id="btnExcel" title="Scarica le righe mostrate in Excel"><i class="fas fa-file-excel" style="color:#16A34A;"></i> Excel</button>
             <button type="button" class="btn" id="btnCsv" title="Scarica le righe mostrate in CSV"><i class="fas fa-file-csv" style="color:#2563EB;"></i> CSV</button>
@@ -442,9 +452,29 @@
                 document.getElementById('headerActions').hidden = false;
                 document.getElementById('reportTabs').hidden = false;
                 renderGrid();
+                initScope();
             } catch (e) {
                 showState('fa-triangle-exclamation', 'Errore di connessione');
             }
+        }
+
+        // Ambito dei dati per un Manager: "team" = propri + collaboratori diretti, "mine" = solo propri.
+        // Senza collaboratori la scelta non compare e il server usa comunque solo i propri dati.
+        function scopeParam() {
+            const wrap = document.getElementById('scopeWrap');
+            return wrap && !wrap.hidden ? `&scope=${encodeURIComponent(document.getElementById('scopeSel').value)}` : '';
+        }
+        async function initScope() {
+            try {
+                const res = await fetch(`${API_URL}/reporting/team`, { headers: authHeaders() });
+                const data = res.ok ? await res.json() : {};
+                const members = Array.isArray(data.members) ? data.members : [];
+                if (!members.length) return;
+                const wrap = document.getElementById('scopeWrap');
+                wrap.title = 'Team: ' + members.map(m => m.name).join(', ');
+                wrap.hidden = false;
+                document.getElementById('scopeSel').addEventListener('change', () => loadGridData());
+            } catch (e) { /* senza team: solo i propri dati */ }
         }
 
         function esc(s) {
@@ -849,7 +879,7 @@
             try {
                 const q = encodeURIComponent(JSON.stringify(gridColumns.map(c => ({ area: c.area, key: c.key, parentKey: c.parentKey || null }))));
                 const st = encodeURIComponent(JSON.stringify(Object.fromEntries(Object.keys(AREAS).map(a => [a, statusOf(a)]))));
-                const res = await fetch(`${API_URL}/reporting/data?fields=${q}&status=${st}`, { headers: authHeaders() });
+                const res = await fetch(`${API_URL}/reporting/data?fields=${q}&status=${st}${scopeParam()}`, { headers: authHeaders() });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
                 if (seq !== loadSeq) return; // nel frattempo le colonne sono cambiate
