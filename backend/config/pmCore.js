@@ -148,6 +148,9 @@ export async function campiProgetto(user, projectId, { tutti = false } = {}) {
     aOre,
     riga,
     get: (nome) => { const x = riga(nome); return x ? valoreCampo(x) : ''; },
+    // Data di un campo: nei campi «sì/no + data» (tipo 22) valore1 è solo la casella e la data
+    // sta in valore2, quindi si prende la prima colonna che contiene davvero una data.
+    data: (nome) => { const x = riga(nome); return x ? (dataIso(x.valore2) || dataIso(x.valore3) || dataIso(x.valore1)) : null; },
     sezioni: ids
   };
 }
@@ -160,8 +163,8 @@ export async function schedaProgetto(user, projectId) {
     aOre: c.aOre,
     unita: c.aOre ? 'ore' : 'giorni',
     descrizione: c.get('Descrizione'),
-    start: dataIso(c.get('Start')),
-    end: dataIso(c.get('End')),
+    start: c.data('Start'),
+    end: c.data('End'),
     stato,
     anno: c.get('Anno').replace(/\.0+$/, ''),
     tipo: c.get('Tipo'),
@@ -170,8 +173,8 @@ export async function schedaProgetto(user, projectId) {
     completamento: numero(c.get('Completamento')),
     importo: numero(c.get('Importo')),
     effortTotale: numero(c.get('Effort Totale')),
-    offertaInviata: dataIso(c.get('Offerta inviata al Cliente')),
-    ordineRicevuto: dataIso(c.get('Ordine Ricevuto')),
+    offertaInviata: c.data('Offerta inviata al Cliente'),
+    ordineRicevuto: c.data('Ordine Ricevuto'),
     richiedente: c.get('Richiedente'),
     campi: c
   };
@@ -488,11 +491,16 @@ export async function saluteProgetto(user, projectId, { prog = null, scheda = nu
       const perc = (ac / bac) * 100;
       stato = 'verde';
       nota = `Speso ${fmt(ac)} su ${fmt(bac)} ${unita} (${fmt(perc, 0)}%)${crDelta ? `, di cui ${fmt(crDelta)} da Change Request approvate` : ''}`;
+      // Sotto il 15% di completamento la stima a finire (speso ÷ completamento) oscilla troppo
+      // (a inizio progetto poche ore danno subito +40%): si mostra ma non cambia il colore.
+      const stimaAffidabile = eac.percPrevista != null && completamento != null && completamento >= 15;
       if (ac > bac) { stato = 'rosso'; nota += ': budget superato'; }
-      else if (eac.percPrevista != null && eac.percPrevista > 110) { stato = 'rosso'; nota += `: a finire previsto ${fmt(eac.percPrevista, 0)}% del budget`; }
-      else if ((eac.percPrevista != null && eac.percPrevista > 100) || (perc >= 80 && (completamento == null || completamento < 80))) {
+      else if (stimaAffidabile && eac.percPrevista > 110) { stato = 'rosso'; nota += `: a finire previsto ${fmt(eac.percPrevista, 0)}% del budget`; }
+      else if ((stimaAffidabile && eac.percPrevista > 100) || (perc >= 80 && (completamento == null || completamento < 80))) {
         stato = 'giallo';
-        nota += eac.percPrevista != null && eac.percPrevista > 100 ? `: a finire previsto ${fmt(eac.percPrevista, 0)}% del budget` : ': speso oltre l\'80% con lavoro ancora da completare';
+        nota += stimaAffidabile && eac.percPrevista > 100 ? `: a finire previsto ${fmt(eac.percPrevista, 0)}% del budget` : ': speso oltre l\'80% con lavoro ancora da completare';
+      } else if (eac.percPrevista != null && !stimaAffidabile) {
+        nota += `; stima a finire ${fmt(eac.percPrevista, 0)}% del budget, ancora poco affidabile (completamento sotto il 15%)`;
       }
     }
     ind.push({ chiave: 'budget', titolo: 'Budget', stato, nota });

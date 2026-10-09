@@ -89,7 +89,7 @@ export async function eseguiNotificheProgetti() {
         const avvisi = [];
         if (e.bac > 0 && e.ac > e.bac) avvisi.push(['budget100', 'Budget superato', `${nome}: speso ${fmt(e.ac)} ${u} su ${fmt(e.bac)} previsti`]);
         else if (e.bac > 0 && e.ac >= 0.8 * e.bac) avvisi.push(['budget80', 'Budget all\'80%', `${nome}: speso ${fmt(e.ac)} ${u} su ${fmt(e.bac)} (${fmt((e.ac / e.bac) * 100, 0)}%)`]);
-        if (e.percPrevista != null && e.percPrevista > 110) avvisi.push([`eac110|${oggi.slice(0, 7)}`, 'Stima a finire oltre il budget', `${nome}: a finire previsto ${fmt(e.percPrevista, 0)}% del budget (${fmt(e.eac)} ${u} su ${fmt(e.bac)})`]);
+        if (e.percPrevista != null && e.percPrevista > 110 && e.completamento != null && e.completamento >= 15) avvisi.push([`eac110|${oggi.slice(0, 7)}`, 'Stima a finire oltre il budget', `${nome}: a finire previsto ${fmt(e.percPrevista, 0)}% del budget (${fmt(e.eac)} ${u} su ${fmt(e.bac)})`]);
         const end = s.scheda.end;
         if (end && end < oggi && (e.completamento == null || e.completamento < 100)) avvisi.push([`end|${end}`, 'Data di fine superata', `${nome}: la fine prevista era il ${dataIt(end)} e il progetto non è completato`]);
         for (const a of s.gantt.inRitardo.slice(0, 10)) avvisi.push([`ritardo|${a.id}|${a.fine}`, 'Attività in ritardo', `${nome}: «${a.nome}» doveva finire il ${dataIt(a.fine)} (avanzamento ${a.avanzamento}%)`]);

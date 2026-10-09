@@ -93,6 +93,11 @@
 
         function renderPanoramica(p) {
             const d = dati, e = d.eac, g = d.gantt, s = d.scheda;
+            // Stessa soglia del semaforo (pmCore.js): sotto il 15% di completamento la stima a
+            // finire si mostra in grigio, come indicazione e non come allarme.
+            const affidabile = e.completamento != null && e.completamento >= 15, GRIGIO = '#6B7280';
+            // Valore con l'unità del progetto (ore con Gestione a HH, altrimenti giorni).
+            const conU = (v) => (v == null ? '–' : `${fmt(v)} <span style="font-size:0.75em;font-weight:600;color:#6B7280">${unita === 'ore' ? 'ore' : 'gg'}</span>`);
             const testoSem = { verde: 'Il progetto è in linea', giallo: 'Ci sono punti di attenzione', rosso: 'Il progetto richiede un intervento', nd: 'Dati insufficienti per un giudizio' };
             const ind = d.indicatori.map((i) => `<div class="pm-ind-riga"><div><b>${esc(i.titolo)}</b><br>${badge(i.stato)}</div><div>${esc(i.nota)}</div></div>`).join('');
             // Barra budget: speso, oltre il budget, stima a finire (rosso), budget (nero).
@@ -114,7 +119,7 @@
             const ms = g.milestone.length ? `<table class="pm-t"><thead><tr><th>Milestone</th><th>Data</th><th>Baseline</th><th>Stato</th></tr></thead><tbody>${g.milestone.map((m) => `<tr><td>◆ ${esc(m.nome)}</td><td>${dataIt(m.data)}</td><td>${m.baseline ? `${dataIt(m.baseline)}${m.scostamento ? ` <span class="pill ${m.scostamento > 0 ? 'rifiutata' : 'approvata'}">${m.scostamento > 0 ? '+' : ''}${m.scostamento} gg</span>` : ''}` : '–'}</td><td>${m.raggiunta ? '<span class="pill approvata">raggiunta</span>' : (m.scaduta ? '<span class="pill rifiutata">superata</span>' : '<span class="pill">da fare</span>')}</td></tr>`).join('')}</tbody></table>`
                 : '<div class="pm-vuoto">Nessuna milestone: nel Gantt apri un\'attività e attiva «Milestone».</div>';
             const ritardi = g.inRitardo.length ? `<ul>${g.inRitardo.slice(0, 8).map((r) => `<li><b>${esc(r.nome)}</b>: doveva finire il ${dataIt(r.fine)}, ${r.avanzamento}% (${r.giorni} gg di ritardo)${r.owner ? ` · ${esc(r.owner)}` : ''}</li>`).join('')}</ul>` : '<div class="pm-vuoto">Nessuna attività in ritardo.</div>';
-            const voci = d.economia.voci.length ? `<table class="pm-t"><thead><tr><th>Voce</th><th class="n">Offerta</th><th class="n">Speso</th><th class="n">%</th></tr></thead><tbody>${d.economia.voci.map((v) => `<tr><td>${esc(v.voce)}</td><td class="n">${fmt(v.offerta)}</td><td class="n">${fmt(v.speso)}</td><td class="n" style="color:${v.offerta && v.speso > v.offerta ? '#DC2626' : 'inherit'}">${v.offerta ? `${fmt((v.speso / v.offerta) * 100, 0)}%` : '–'}</td></tr>`).join('')}</tbody></table>` : '<div class="pm-vuoto">Nessuna voce nei Costi Progetto.</div>';
+            const voci = d.economia.voci.length ? `<table class="pm-t"><thead><tr><th>Voce</th><th class="n">Offerta (${unita === 'ore' ? 'ore' : 'gg'})</th><th class="n">Speso (${unita === 'ore' ? 'ore' : 'gg'})</th><th class="n">%</th></tr></thead><tbody>${d.economia.voci.map((v) => `<tr><td>${esc(v.voce)}</td><td class="n">${fmt(v.offerta)}</td><td class="n">${fmt(v.speso)}</td><td class="n" style="color:${v.offerta && v.speso > v.offerta ? '#DC2626' : 'inherit'}">${v.offerta ? `${fmt((v.speso / v.offerta) * 100, 0)}%` : '–'}</td></tr>`).join('')}</tbody></table>` : '<div class="pm-vuoto">Nessuna voce nei Costi Progetto.</div>';
             const gLink = d.ganttCampo ? `gantt.html?${new URLSearchParams({ fieldId: d.ganttCampo.fieldId, clientId: d.progetto.clientId || '', label: d.ganttCampo.label, projectId, projectName: d.progetto.nome, clientName: d.progetto.cliente || '' })}` : '';
             p.innerHTML = `
             <div class="pm-griglia">
@@ -125,17 +130,18 @@
                     <div class="pm-ind" style="margin-top:0.8rem">${ind}</div>
                 </div>
                 <div class="pm-card">
-                    <h2><i class="fas fa-chart-line"></i> Previsione a finire <span class="pm-nota">(${esc(unita)})</span></h2>
+                    <h2><i class="fas fa-chart-line"></i> Previsione a finire <span class="pm-nota">(in ${esc(unita)}${unita === 'ore' ? ': Gestione a HH' : ''})</span></h2>
                     <div class="pm-kpi">
-                        <div><small>Budget</small><b>${fmt(e.bac)}</b>${e.crDelta ? `<div class="pm-nota">di cui CR ${e.crDelta > 0 ? '+' : ''}${fmt(e.crDelta)}</div>` : ''}</div>
-                        <div><small>Speso</small><b>${fmt(e.ac)}</b></div>
+                        <div><small>Budget</small><b>${conU(e.bac)}</b>${e.crDelta ? `<div class="pm-nota">di cui CR ${e.crDelta > 0 ? '+' : ''}${conU(e.crDelta)}</div>` : ''}</div>
+                        <div><small>Speso</small><b>${conU(e.ac)}</b></div>
                         <div><small>Completamento</small><b>${compl}</b></div>
-                        <div><small>Stima a finire</small><b style="color:${e.percPrevista > 100 ? '#DC2626' : 'inherit'}">${fmt(e.eac)}</b>${e.percPrevista != null ? `<div class="pm-nota">${fmt(e.percPrevista, 0)}% del budget</div>` : ''}</div>
-                        <div><small>Mancano</small><b>${fmt(e.etc)}</b></div>
-                        <div><small>Margine a finire</small><b style="color:${e.vac < 0 ? '#DC2626' : '#059669'}">${e.vac != null ? `${e.vac > 0 ? '+' : ''}${fmt(e.vac)}` : '–'}</b>${e.valoreEuro != null ? `<div class="pm-nota">≈ ${euro(e.valoreEuro)}</div>` : ''}</div>
-                        <div><small>Efficienza (CPI)</small><b style="color:${e.cpi != null && e.cpi < 0.95 ? '#DC2626' : 'inherit'}">${e.cpi != null ? fmt(e.cpi, 2) : '–'}</b><div class="pm-nota">1 = in linea</div></div>
+                        <div><small>Stima a finire</small><b style="color:${!affidabile ? GRIGIO : (e.percPrevista > 100 ? '#DC2626' : 'inherit')}">${conU(e.eac)}</b>${e.percPrevista != null ? `<div class="pm-nota">${fmt(e.percPrevista, 0)}% del budget${affidabile ? '' : ' · poco affidabile'}</div>` : ''}</div>
+                        <div><small>Mancano</small><b style="color:${affidabile ? 'inherit' : GRIGIO}">${conU(e.etc)}</b></div>
+                        <div><small>Margine a finire</small><b style="color:${!affidabile ? GRIGIO : (e.vac < 0 ? '#DC2626' : '#059669')}">${e.vac != null ? `${e.vac > 0 ? '+' : ''}${conU(e.vac)}` : '–'}</b>${e.valoreEuro != null ? `<div class="pm-nota">≈ ${euro(e.valoreEuro)}</div>` : ''}</div>
+                        <div><small>Efficienza (CPI)</small><b style="color:${!affidabile ? GRIGIO : (e.cpi != null && e.cpi < 0.95 ? '#DC2626' : 'inherit')}">${e.cpi != null ? fmt(e.cpi, 2) : '–'}</b><div class="pm-nota">1 = in linea</div></div>
                     </div>
                     ${barra}
+                    ${e.eac != null && !affidabile ? `<p class="pm-avviso" style="margin:0.6rem 0"><i class="fas fa-circle-info"></i> Completamento sotto il 15%: la stima a finire è ancora poco affidabile (pochi punti di completamento la cambiano molto) e non colora il semaforo. Aggiorna il completamento reale per renderla significativa.</p>` : ''}
                     ${ritmo}
                     <p class="pm-nota">Stima a finire = speso ÷ completamento. Se il completamento della scheda manca si usa quello calcolato dal Gantt.</p>
                 </div>

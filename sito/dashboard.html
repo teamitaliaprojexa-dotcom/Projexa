@@ -752,6 +752,12 @@
         .proj-pm-ico { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-size: 1.35rem; color: #fff;
             background: linear-gradient(145deg, #6366F1, #4338CA); box-shadow: 0 3px 8px rgba(79,70,229,0.35); transition: transform 0.2s; }
         .proj-ck.proj-pm:hover .proj-pm-ico { transform: scale(1.06) rotate(-6deg); }
+        /* Completamento a consuntivo accanto al campo Completamento della scheda progetto */
+        .compl-cons { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
+        .compl-cons-val { background: #EEF2FF; color: #3730A3; border-radius: 999px; padding: 0.1rem 0.55rem; }
+        .compl-cons-btn { border: 1px solid #C7D2FE; background: #fff; color: #4338CA; border-radius: 6px; width: 22px; height: 22px; display: inline-grid; place-items: center; font-size: 0.7rem; cursor: pointer; padding: 0; }
+        .compl-cons-btn:hover { background: #EEF2FF; }
+        .compl-cons-btn:disabled { opacity: 0.6; cursor: wait; }
         /* Briefing pre-riunione accanto a cliente/progetto della riunione */
         .meeting-briefing { border: 1px solid #C7D2FE; background: #EEF2FF; color: #4338CA; border-radius: 6px; width: 26px; height: 26px; cursor: pointer; display: inline-grid; place-items: center; font-size: 0.75rem; flex: 0 0 auto; }
         .meeting-briefing:hover { background: #E0E7FF; }
@@ -12203,10 +12209,13 @@
             openProjectDetail(projectId, params.get('projectName') || '', clientId);
         }
 
+        // Progetto aperto nel dettaglio (id della riga «Progetto»): resta valido anche nelle sezioni.
+        let pmProgettoAperto = null;
         // Livello 3: dettaglio del progetto (campi EAV, 5 colonne). Riusa openDetailFlyout.
         function openProjectDetail(projectId, name, clientId, isClosed = false) {
             if (currentView) detailNavStack.push(currentView);
             projectClientId = clientId;
+            pmProgettoAperto = projectId; // per il «Completamento a consuntivo» anche dentro le sezioni
             currentProjectClosed = !!isClosed;
             currentProjectShowAllFields = false;
             detailMaxCols = 5;
@@ -13233,6 +13242,55 @@
                 ofDisegna();
             }
         }
+        // «Completamento a consuntivo» accanto al campo Completamento della scheda progetto:
+        // GET /api/pm/consuntivo = speso ÷ budget (Costi Progetto + Change Request approvate);
+        // «Aggiorna» = POST /api/pm/consuntivo/completamento, scrive quel valore nel campo.
+        // I segnaposto .compl-cons compaiono a ogni disegno della scheda: li riempie l'observer.
+        async function caricaComplConsuntivo(el) {
+            el.dataset.caricato = '1';
+            try {
+                const r = await fetch(`${API_URL}/pm/consuntivo?projectId=${encodeURIComponent(el.dataset.project)}`, { headers: getAuthHeaders() });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok || d.perc == null) { el.remove(); return; }
+                const u = d.unita === 'ore' ? 'ore' : 'gg';
+                const p = Number(d.perc).toLocaleString('it-IT', { maximumFractionDigits: 2 });
+                el.innerHTML = `<span class="compl-cons-val" title="Percentuale a consuntivo: ${escapeHtml(String(d.speso))} ${u} spese su ${escapeHtml(String(d.budget))} ${u} di budget (Costi Progetto + Change Request approvate)">a consuntivo <b>${p}%</b></span>`
+                    + `<button type="button" class="compl-cons-btn" title="Aggiorna: scrive ${p}% nel campo Completamento"><i class="fas fa-rotate"></i></button>`;
+            } catch (e) { el.remove(); }
+        }
+        new MutationObserver(() => {
+            document.querySelectorAll('.compl-cons:not([data-caricato])').forEach(caricaComplConsuntivo);
+        }).observe(document.body, { childList: true, subtree: true });
+        document.addEventListener('click', async (e) => {
+            const b = e.target.closest('.compl-cons-btn');
+            if (!b) return;
+            e.preventDefault(); e.stopPropagation();
+            const box = b.closest('.compl-cons');
+            b.disabled = true;
+            b.querySelector('i').classList.add('fa-spin');
+            try {
+                const r = await fetch(`${API_URL}/pm/consuntivo/completamento`, {
+                    method: 'POST', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ projectId: box.dataset.project })
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                const val = Number(d.completamento).toFixed(2);
+                // Valore a video: in vista il testo, in modifica la casella del campo.
+                const riga = box.closest('.settings-detail-row') || box.parentElement;
+                const testo = riga && riga.querySelector('.compl-val');
+                if (testo) testo.textContent = `${val}%`;
+                const inp = riga && riga.querySelector(`input[data-setting-id="${CSS.escape(box.dataset.settingId)}"]`);
+                if (inp) inp.value = val;
+                showNotification(`Completamento aggiornato a ${Number(d.completamento).toLocaleString('it-IT', { maximumFractionDigits: 2 })}%`, 'success');
+            } catch (err) {
+                showNotification('Completamento: ' + err.message, 'info');
+            } finally {
+                b.disabled = false;
+                b.querySelector('i').classList.remove('fa-spin');
+            }
+        });
+
         // Cruscotto PM: pagina pm.html del progetto aperto (stesso progetto della scheda).
         document.addEventListener('click', (e) => {
             if (!e.target.closest('#projCruscottoBtn')) return;
@@ -18372,10 +18430,15 @@
                 // Percentuale (numerico intero) -> valore3. In modifica: input numerico + "%";
                 // in vista: mostra "X%".
                 const v = (row.valore3 == null || row.valore3 === '') ? '' : row.valore3;
+                // «Completamento» del progetto: accanto, la % a consuntivo (speso ÷ budget dei Costi
+                // Progetto, riempita da caricaComplConsuntivo) con il pulsante per copiarla nel campo.
+                const consuntivo = currentDetailSource === 'projects' && pmProgettoAperto
+                    && String(row.campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase() === 'completamento'
+                    ? `<span class="compl-cons" data-project="${escapeHtml(pmProgettoAperto)}" data-setting-id="${id}"></span>` : '';
                 if (mode === 'edit') {
-                    input = `<span style="display:flex; align-items:center; gap:6px; flex:1 1 0; min-width:0;"><input type="number" step="1" data-setting-id="${id}" data-field="valore3" value="${escapeHtml(v)}" style="flex:1 1 0; min-width:0;"><span style="color:var(--text-muted);">%</span></span>`;
+                    input = `<span style="display:flex; align-items:center; gap:6px; flex:1 1 0; min-width:0;"><input type="number" step="1" data-setting-id="${id}" data-field="valore3" value="${escapeHtml(v)}" style="flex:1 1 0; min-width:0;"><span style="color:var(--text-muted);">%</span>${consuntivo}</span>`;
                 } else {
-                    input = `<span>${v === '' ? '' : escapeHtml(v) + '%'}</span>`;
+                    input = `<span style="display:inline-flex; align-items:center; gap:10px; flex-wrap:wrap;"><span class="compl-val">${v === '' ? '' : escapeHtml(v) + '%'}</span>${consuntivo}</span>`;
                 }
             } else if (tipo === 9) {
                 // Multi-selezione: opzioni da lookup_values (row.lookup_options), selezionati in valore2 (sep ;).

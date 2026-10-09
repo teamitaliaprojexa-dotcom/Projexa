@@ -25,7 +25,7 @@ import { speakerName, stripMarkdown } from '../jobs/meetingTranscription.js';
 import { costruisciDigest, emailUtente } from '../jobs/pmJobs.js';
 import {
   UUID_RE, errore, oggiIso, dataIt, dataIso, numero, fmt, euro, tabellaPresente, colonneTabella,
-  progettoUtente, schedaProgetto, campiProgetto, saluteProgetto, saluteTuttiProgetti, righeGantt, analisiGantt,
+  progettoUtente, schedaProgetto, campiProgetto, economiaProgetto, saluteProgetto, saluteTuttiProgetti, righeGantt, analisiGantt,
   raidProgetto, crProgetto, taskProgetto, issueProgetto, riunioniProgetto, contestoProgetto,
   aiPerPm, chiediAi, leggiJson
 } from '../config/pmCore.js';
@@ -795,20 +795,52 @@ router.post('/gantt/baseline', async (req, res) => {
 });
 
 // Scrive nel campo «Completamento» della scheda il completamento calcolato dal Gantt.
+// Scrive il campo «Completamento» della scheda (valore3), con i permessi della riga.
+async function scriviCompletamento(req, projectId, valore) {
+  const campi = await campiProgetto(req.user, projectId);
+  const riga = campi.riga('Completamento');
+  if (!riga) throw errore(404, 'Il progetto non ha il campo «Completamento»');
+  if (!isAdmin(req) && !String(riga.id_roles_write ?? '').split(/[;,\s]+/).includes(ruolo(req))) throw errore(403, READ_ONLY);
+  await db.query('UPDATE projects SET valore3 = $1 WHERE id::text = $2 AND tenant_id = $3 AND user_id = $4',
+    [valore, riga.id, req.user.tenant_id, req.user.user_id]);
+}
+
 router.post('/gantt/completamento', async (req, res) => {
   try {
     const prog = await progettoUtente(req.user, pid(req));
     const a = analisiGantt(await righeGantt(req.user, prog.projectId));
     if (a.completamento == null) throw errore(400, 'Il Gantt non ha attività da cui calcolare il completamento');
-    const campi = await campiProgetto(req.user, prog.projectId);
-    const riga = campi.riga('Completamento');
-    if (!riga) throw errore(404, 'Il progetto non ha il campo «Completamento»');
-    if (!isAdmin(req) && !String(riga.id_roles_write ?? '').split(/[;,\s]+/).includes(ruolo(req))) throw errore(403, READ_ONLY);
     const valore = Math.round(a.completamento);
-    await db.query('UPDATE projects SET valore3 = $1 WHERE id::text = $2 AND tenant_id = $3 AND user_id = $4',
-      [valore, riga.id, req.user.tenant_id, req.user.user_id]);
+    await scriviCompletamento(req, prog.projectId, valore);
     res.json({ ok: true, completamento: valore });
   } catch (e) { invia(res, e, 'GANTT_COMPL'); }
+});
+
+// Completamento «a consuntivo» (accanto al campo Completamento della scheda): speso ÷ budget,
+// con budget = offerta effort dei Costi Progetto + effort delle Change Request approvate,
+// stesse regole del Cruscotto. null se il budget è vuoto.
+async function consuntivo(user, projectId) {
+  const [eco, cr] = await Promise.all([economiaProgetto(user, projectId), crProgetto(user, projectId)]);
+  const budget = eco.offerta + cr.filter((x) => x.stato === 'approvata').reduce((s, x) => s + (Number(x.effort_delta) || 0), 0);
+  const perc = budget > 0 ? Math.round((eco.speso / budget) * 10000) / 100 : null;
+  return { perc, speso: eco.speso, budget, unita: eco.aOre ? 'ore' : 'giorni' };
+}
+router.get('/consuntivo', async (req, res) => {
+  try {
+    const prog = await progettoUtente(req.user, pid(req));
+    res.json(await consuntivo(req.user, prog.projectId));
+  } catch (e) { invia(res, e, 'CONSUNTIVO'); }
+});
+// «Aggiorna»: porta nel campo Completamento la percentuale a consuntivo (al massimo 100).
+router.post('/consuntivo/completamento', async (req, res) => {
+  try {
+    const prog = await progettoUtente(req.user, pid(req));
+    const c = await consuntivo(req.user, prog.projectId);
+    if (c.perc == null) throw errore(400, 'Manca l\'offerta effort nei Costi Progetto: non si può calcolare la percentuale a consuntivo');
+    const valore = Math.min(100, c.perc);
+    await scriviCompletamento(req, prog.projectId, valore);
+    res.json({ ok: true, completamento: valore, ...c });
+  } catch (e) { invia(res, e, 'CONSUNTIVO_COMPL'); }
 });
 
 // ============================================================================
