@@ -604,9 +604,10 @@ export function fmt(n, dec = 1) {
 }
 export const euro = (n) => (n == null ? '-' : `${fmt(n, 2)} €`);
 
-// Progetti aperti del proprietario, con il cliente. Esclusi gli «Annullato» e quelli con
+// Progetti aperti del proprietario, con il cliente. Esclusi gli «Annullato», quelli con
 // «Anno» successivo all'anno in corso (es. i progetti del 2027 nel 2026: scelta dell'utente,
-// come l'indicatore Gestione Progetto). I progetti senza Anno restano.
+// come l'indicatore Gestione Progetto) e quelli con Tipologia «Previsione». I progetti senza
+// Anno restano. Vale per Portfolio, digest e notifiche dei progetti.
 export async function progettiAperti(user) {
   const r = await db.query(
     `SELECT a.id::text AS id, a.client_id::text AS client_id, a.valore2 AS nome,
@@ -624,7 +625,13 @@ export async function progettiAperti(user) {
            WHERE an.campo = 'Anno' AND an.argument = a.id::text
              AND an.tenant_id = a.tenant_id AND an.user_id = a.user_id AND an.scadenza >= CURRENT_DATE
              AND regexp_replace(BTRIM(COALESCE(an.valore3::text, an.valore2, '')), '\\.0+$', '') ~ '^[0-9]{4}$'
-             AND regexp_replace(BTRIM(COALESCE(an.valore3::text, an.valore2, '')), '\\.0+$', '')::int > EXTRACT(YEAR FROM CURRENT_DATE))`,
+             AND regexp_replace(BTRIM(COALESCE(an.valore3::text, an.valore2, '')), '\\.0+$', '')::int > EXTRACT(YEAR FROM CURRENT_DATE))
+        -- Tipologia «Previsione»: non è ancora un progetto reale (scelta dell'utente, come Offerte e ordini).
+        AND NOT EXISTS (
+          SELECT 1 FROM projects t
+           WHERE t.argument = a.id::text AND LOWER(BTRIM(t.campo)) IN ('tipologia', '(*) tipologia')
+             AND t.tenant_id = a.tenant_id AND t.user_id = a.user_id AND t.scadenza >= CURRENT_DATE
+             AND LOWER(BTRIM(t.valore2)) = 'previsione')`,
     [user.tenant_id, user.user_id]
   );
   return r.rows
