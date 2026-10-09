@@ -520,8 +520,24 @@ export async function inviaBatchAi(userId, providerName, prompt, opzioni = {}) {
   const apiKey = el[`${cfg.prefix}_api_key`];
   if (!apiKey) throw httpError(428, `${cfg.label} non collegato: attivalo da Impostazioni › AI`);
   const model = modelloUtente(cfg, el);
-  return { batchId: await BATCH[key].invia(apiKey, model, prompt, opzioni), model, label: cfg.label };
+  try {
+    return { batchId: await BATCH[key].invia(apiKey, model, prompt, opzioni), model, label: cfg.label };
+  } catch (e) {
+    // Piano che non permette il Batch: Gemini gratuito (400 "Precondition check failed" =
+    // fatturazione non attiva, oppure 429 sulla richiesta batch), modello non incluso nel piano
+    // (Mistral "tier_not_allowed"). Chi chiama ripiega sull'esecuzione Immediata.
+    const msg = String(e.message || '');
+    const nonDisponibile = (e.upstreamStatus === 400 && /precondition/i.test(msg))
+      || /tier_not_allowed|non è incluso nel tuo piano|billing|free tier/i.test(msg)
+      || (key === 'gemini' && (e.status === 429 || e.upstreamStatus === 429));
+    if (nonDisponibile) {
+      throw Object.assign(new Error(`${cfg.label}: il tuo piano non permette la modalità Batch (serve un piano a pagamento), eseguito in modalità Immediata`),
+        { status: 409, code: 'BATCH_NON_DISPONIBILE', dettaglio: msg });
+    }
+    throw e;
+  }
 }
+export const isBatchNonDisponibile = (e) => !!(e && e.code === 'BATCH_NON_DISPONIBILE');
 
 export async function statoBatchAi(userId, providerName, batchId) {
   const key = String(providerName || '').trim().toLowerCase();
@@ -868,7 +884,8 @@ export async function askAiProvider(userId, providerName, prompt, opzioni = {}) 
   // Richiesta rigiocata da un "lavoro AI" in modalità Batch (jobs/aiLavori.js): la risposta
   // arriva dalla Batch API del fornitore (metà prezzo, entro 24 ore).
   const lavoro = contestoAi.getStore();
-  if (lavoro && lavoro.attendiBatch) return lavoro.attendiBatch(providerName, prompt, opzioni);
+  // opzioni.immediato: ripiego quando il piano dell'AI non permette il Batch.
+  if (lavoro && lavoro.attendiBatch && !opzioni.immediato) return lavoro.attendiBatch(providerName, prompt, opzioni);
   const key = String(providerName || '').trim().toLowerCase();
   if (key === 'copilot') throw httpError(400, 'Copilot non è disponibile per il recap: scegli un\'altra AI');
   const cfg = PROVIDERS[key];

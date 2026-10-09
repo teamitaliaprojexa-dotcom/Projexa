@@ -288,12 +288,14 @@ export async function notificheNuoviMySupport(righe) {
 // LAVORI AI IN BATCH (jobs/aiLavori.js): risultato pronto o non riuscito. La campanella
 // mostra «Apri» (tabella ai_lavori, riga_id = id del lavoro) che apre «Risultati AI».
 // ----------------------------------------------------------------------------
-export async function notificaLavoroAi({ tenantId, userId, lavoroId, operazione, titolo, ok, errore }) {
+export async function notificaLavoroAi({ tenantId, userId, lavoroId, operazione, titolo, ok, errore, nota }) {
   try {
     await inserisci({
       tenantId, userId, fonte: 'ai',
       titolo: `${operazione} ${ok ? 'pronto' : 'non riuscito'}${titolo ? `: ${titolo}` : ''}`,
-      messaggio: ok ? 'Richiesta in modalità Batch completata: aprila da «Risultati AI».' : `Richiesta in modalità Batch non riuscita: ${String(errore || '').slice(0, 300)}`,
+      messaggio: ok
+        ? (nota ? `${String(nota).slice(0, 300)}. Aprila da «Risultati AI».` : 'Richiesta in modalità Batch completata: aprila da «Risultati AI».')
+        : `Richiesta in modalità Batch non riuscita: ${String(errore || '').slice(0, 300)}`,
       tabella: 'ai_lavori', rigaId: lavoroId
     });
   } catch (e) {

@@ -37,7 +37,7 @@ import { askAiProvider, askOllamaRecap } from './routes/ai.js';
 import { getPromptFor } from './config/prompts.js';
 import { leggiTemplate, descriviTemplate, applicaModifiche, leggiRispostaAi, leggiRevisioneAi, testoRisultante, spostamentiRichiesti } from './config/kickoffPptx.js';
 import * as OffertaDocx from './config/offertaDocx.js';
-import { avviaScheduler } from './jobs/scheduler.js';
+import { avviaScheduler, schedulerAttivo } from './jobs/scheduler.js';
 import { avviaInvioAudit } from './jobs/auditShipper.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
@@ -11236,7 +11236,7 @@ app.listen(PORT, () => {
   // Log accessi/variazioni: invio della coda audit_outbox a Oracle (solo con AUDIT_ORACLE_ENABLED=true).
   avviaInvioAudit();
   // Lavori AI in Batch: ripresa dopo un riavvio e pulizia dei file temporanei (jobs/aiLavori.js).
-  avviaLavoriAi();
+  avviaLavoriAi({ conSchedulatore: schedulerAttivo() });
 });
 
 // Graceful shutdown

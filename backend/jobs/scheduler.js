@@ -22,6 +22,7 @@ import { eseguiBackupDb, eseguiCopiaStaging, eseguiPuliziaVm } from './scriptVm.
 import { eseguiNotificheScadenze } from './notifiche.js';
 import { eseguiNotificheProgetti, eseguiDigestSettimanale } from './pmJobs.js';
 import { eseguiRecapBatch } from './recapBatch.js';
+import { eseguiGiroLavoriAi } from './aiLavori.js';
 import { conContestoAudit } from '../config/auditContext.js';
 
 // Job schedulabili: la chiave è il valore di job_schedules.job.
@@ -48,7 +49,10 @@ const JOBS = {
   pm_notifiche_progetti: () => eseguiNotificheProgetti(),
   pm_digest_settimanale: () => eseguiDigestSettimanale(),
   // Recap in modalità Batch (jobs/recapBatch.js): raccoglie quelli pronti, per tutti i tenant.
-  recap_batch: () => eseguiRecapBatch()
+  recap_batch: () => eseguiRecapBatch(),
+  // Lavori AI in Batch (Kick-off, Offerta, Dossier, funzioni PM...: jobs/aiLavori.js): ripresa
+  // di quelli interrotti da un riavvio e pulizia di risultati e file oltre 7 giorni.
+  lavori_ai: () => eseguiGiroLavoriAi()
 };
 
 // Nomi dei job schedulabili (usati dalla pagina di gestione per l'elenco a discesa).
@@ -63,7 +67,8 @@ export const INFO_JOB = {
   notifiche_scadenze: { etichetta: 'Notifiche delle scadenze (To-Do)', jira: false },
   pm_notifiche_progetti: { etichetta: 'Salute progetti: notifiche e fotografia giornaliera', jira: false },
   pm_digest_settimanale: { etichetta: 'Digest settimanale via email ai PM', jira: false },
-  recap_batch: { etichetta: 'Recap in modalità Batch: raccoglie quelli pronti', jira: false }
+  recap_batch: { etichetta: 'Recap in modalità Batch: raccoglie quelli pronti', jira: false },
+  lavori_ai: { etichetta: 'Lavori AI in Batch: ripresa e pulizia', jira: false }
 };
 
 export function schedulerAttivo() {

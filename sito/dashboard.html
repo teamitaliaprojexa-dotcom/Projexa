@@ -3512,7 +3512,12 @@
         .calendar-conn-off { background: #FEE2E2; color: #B91C1C; }
         .calendar-conn-model { background: #EEF2FF; color: #4338CA; }
         /* Finestra «Risultati AI» (lavori AI in Batch) */
-        .air-item { border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem 0.9rem; margin-bottom: 0.6rem; }
+        .air-item { border: 1px solid var(--border); border-radius: 10px; padding: 0.6rem 0.9rem; margin-bottom: 0.45rem; }
+        .air-item .air-top { cursor: pointer; }
+        .air-item .air-top:hover b { color: #0284C7; }
+        .air-item .air-freccia { color: var(--text-muted); transition: transform 0.15s; }
+        .air-item.aperto .air-freccia { transform: rotate(90deg); }
+        .air-item:not(.aperto) .air-dett, .air-item:not(.aperto) .air-azioni { display: none; }
         .air-item.focus { border-color: #0EA5E9; box-shadow: 0 0 0 3px rgba(14,165,233,0.15); }
         .air-top { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
         .air-top b { color: var(--dark); }
@@ -8532,6 +8537,7 @@
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                if (data.nota) showNotification(data.nota, 'info');
                 if (data.batch) showNotification(`Recap inviato a ${data.provider} in modalità Batch (costo dimezzato): arriva entro 24 ore, di solito in pochi minuti. Riceverai l'avviso "Recap pronto".`, 'info');
                 else if (data.queued) showNotification('Recap Projexa in preparazione sul server: può richiedere diversi minuti. Riceverai l\'avviso "Recap pronto".', 'info');
                 else showRecapReady(eventId, title, data.provider);
@@ -8550,29 +8556,45 @@
         // File (Kick-off, Offerta, Word dei documenti PM): «Scarica», poi il server lo cancella.
         // Dati: testo con Copia / Apri email, oppure il pulsante che apre la pagina della funzione.
         const airDettagli = new Map();
+        const airAperti = new Set(); // righe aperte (restano aperte agli aggiornamenti automatici)
+        let airElenco = new Map();
         const airQuando = (v) => (v ? new Date(v).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }) : '');
         const AIR_STATI = { in_corso: 'In attesa dell\'AI', pronto: 'Pronto', errore: 'Non riuscito', scaricato: 'Scaricato' };
 
-        async function apriRisultatiAi(focusId) {
+        // Aggiornamento automatico ogni 30 secondi finché la finestra è aperta e ci sono richieste
+        // ancora in attesa dell'AI (il server controlla il fornitore ogni minuto).
+        let airTimer = null;
+        let airFocus = null;
+        async function apriRisultatiAi(focusId, silenzioso = false) {
             const modal = document.getElementById('aiRisultatiModal');
             const body = document.getElementById('aiRisultatiBody');
+            clearTimeout(airTimer);
+            if (focusId !== undefined) airFocus = focusId;
+            if (focusId === null) airAperti.clear(); // dal menu: elenco tutto chiuso
+            focusId = airFocus;
             modal.classList.add('open');
-            body.innerHTML = '<div class="air-nota"><i class="fas fa-spinner fa-spin"></i> Carico…</div>';
+            if (!silenzioso) body.innerHTML = '<div class="air-nota"><i class="fas fa-spinner fa-spin"></i> Carico…</div>';
             try {
                 const r = await fetch(`${API_URL}/ai-lavori`, { headers: getAuthHeaders() });
                 const d = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
                 const lavori = d.lavori || [];
                 if (!lavori.length) { body.innerHTML = '<div class="air-nota">Nessuna richiesta in modalità Batch negli ultimi 7 giorni. Le funzioni AI con «Esecuzione» = Batch (Impostazioni › AI) mettono qui i loro risultati.</div>'; return; }
-                body.innerHTML = lavori.map((l) => `<div class="air-item${l.id === focusId ? ' focus' : ''}" data-id="${escapeHtml(l.id)}">
-                    <div class="air-top"><span class="air-stato ${escapeHtml(l.stato)}">${escapeHtml(AIR_STATI[l.stato] || l.stato)}</span>
+                if (focusId) airAperti.add(focusId);
+                body.innerHTML = `<div class="air-nota" style="margin:0 0 0.6rem">${lavori.length} richiest${lavori.length === 1 ? 'a' : 'e'} · clicca una riga per aprirla</div>` + lavori.map((l) => `<div class="air-item${l.id === focusId ? ' focus' : ''}${airAperti.has(l.id) ? ' aperto' : ''}" data-id="${escapeHtml(l.id)}">
+                    <div class="air-top" title="Apri / chiudi"><i class="fas fa-chevron-right air-freccia"></i><span class="air-stato ${escapeHtml(l.stato)}">${escapeHtml(AIR_STATI[l.stato] || l.stato)}</span>
                         <b>${escapeHtml(l.etichetta)}</b>${l.titolo ? `<span>· ${escapeHtml(l.titolo)}</span>` : ''}
                         <span class="air-quando">${escapeHtml(l.provider)} · ${escapeHtml(airQuando(l.creato))}${l.concluso ? ` → ${escapeHtml(airQuando(l.concluso))}` : ''}</span></div>
                     <div class="air-dett"></div>
                     <div class="air-azioni"></div></div>`).join('');
-                lavori.forEach((l) => airDisegna(body.querySelector(`.air-item[data-id="${CSS.escape(l.id)}"]`), l));
+                airElenco = new Map(lavori.map((l) => [l.id, l]));
+                // Il contenuto si carica solo per le righe aperte (le altre al primo clic).
+                lavori.filter((l) => airAperti.has(l.id)).forEach((l) => airDisegna(body.querySelector(`.air-item[data-id="${CSS.escape(l.id)}"]`), l));
                 const f = focusId && body.querySelector(`.air-item[data-id="${CSS.escape(focusId)}"]`);
-                if (f) f.scrollIntoView({ block: 'center' });
+                if (f && !silenzioso) f.scrollIntoView({ block: 'center' });
+                if (lavori.some((l) => l.stato === 'in_corso')) {
+                    airTimer = setTimeout(() => { if (modal.classList.contains('open')) apriRisultatiAi(undefined, true); }, 30000);
+                }
             } catch (e) {
                 body.innerHTML = `<div class="air-nota" style="color:#B91C1C">${escapeHtml(e.message)}</div>`;
             }
@@ -8588,14 +8610,18 @@
         }
 
         async function airDisegna(el, l) {
+            if (!el) return;
+            el.dataset.disegnato = '1';
             const dett = el.querySelector('.air-dett');
             const az = el.querySelector('.air-azioni');
             const bottoni = [];
             if (l.stato === 'in_corso') dett.innerHTML = '<div class="air-nota"><i class="fas fa-hourglass-half"></i> L\'AI sta elaborando la richiesta (entro 24 ore, di solito pochi minuti). Ricevi la notifica quando è pronta.</div>';
             if (l.stato === 'errore') dett.innerHTML = `<div class="air-nota" style="color:#B91C1C">${escapeHtml(l.errore)}</div>`;
             if (l.stato === 'scaricato') dett.innerHTML = '<div class="air-nota">File già scaricato: è stato cancellato dal server.</div>';
+            // Pronto con una nota (es. Batch non permesso dal piano dell'AI: eseguito Immediato).
+            const notaPronto = l.stato === 'pronto' && l.errore ? `<div class="air-nota" style="color:#B45309"><i class="fas fa-circle-info"></i> ${escapeHtml(l.errore)}</div>` : '';
             if (l.stato === 'pronto' && l.file) {
-                dett.innerHTML = `<div class="air-nota"><i class="fas fa-file"></i> ${escapeHtml(l.fileNome || 'File pronto')} · dopo il download viene cancellato dal server.</div>`;
+                dett.innerHTML = `<div class="air-nota"><i class="fas fa-file"></i> ${escapeHtml(l.fileNome || 'File pronto')} · dopo il download viene cancellato dal server.</div>${notaPronto}`;
                 bottoni.push(['<i class="fas fa-download"></i> Scarica', 'primario', () => airScarica(l)]);
             } else if (l.stato === 'pronto') {
                 try {
@@ -8621,6 +8647,7 @@
                         dett.innerHTML = `<div class="air-nota">${escapeHtml(String((ris.elementi || []).length))} proposte da rivedere e salvare nel Cruscotto PM.</div>`;
                         bottoni.push(['<i class="fas fa-list-check"></i> Apri le proposte', 'primario', () => window.open(`pm.html?${new URLSearchParams({ projectId: pid, tab: 'raid', risultato: l.id })}`, '_blank')]);
                     }
+                    if (notaPronto) dett.insertAdjacentHTML('beforeend', notaPronto);
                 } catch (e) { dett.innerHTML = `<div class="air-nota" style="color:#B91C1C">${escapeHtml(e.message)}</div>`; }
             }
             bottoni.push(['<i class="fas fa-trash"></i> Elimina', '', () => airElimina(l)]);
@@ -8654,6 +8681,7 @@
                 const r = await fetch(`${API_URL}/ai-lavori/${encodeURIComponent(l.id)}`, { method: 'DELETE', headers: getAuthHeaders() });
                 if (!r.ok) { const x = await r.json().catch(() => ({})); throw new Error(x.error || `Errore ${r.status}`); }
                 airDettagli.delete(l.id);
+                airAperti.delete(l.id);
             } catch (e) { showNotification(e.message, 'info'); }
             apriRisultatiAi();
         }
@@ -8680,8 +8708,22 @@
 
         // Delega sul documento: la finestra è definita più in basso nella pagina.
         document.addEventListener('click', (e) => {
-            if (e.target.closest('#navAiRisultatiLink')) { e.preventDefault(); apriRisultatiAi(); return; }
-            if (e.target.closest('#aiRisultatiClose') || e.target.id === 'aiRisultatiModal') document.getElementById('aiRisultatiModal').classList.remove('open');
+            if (e.target.closest('#navAiRisultatiLink')) { e.preventDefault(); apriRisultatiAi(null); return; }
+            if (e.target.closest('#aiRisultatiAggiorna')) { apriRisultatiAi(undefined, true); return; }
+            const top = e.target.closest('#aiRisultatiBody .air-top');
+            if (top) {
+                const item = top.closest('.air-item');
+                const id = item.dataset.id;
+                if (item.classList.toggle('aperto')) {
+                    airAperti.add(id);
+                    if (!item.dataset.disegnato && airElenco.has(id)) airDisegna(item, airElenco.get(id));
+                } else airAperti.delete(id);
+                return;
+            }
+            if (e.target.closest('#aiRisultatiClose') || e.target.id === 'aiRisultatiModal') {
+                clearTimeout(airTimer);
+                document.getElementById('aiRisultatiModal').classList.remove('open');
+            }
         });
 
         function runManualRecap(btn) {
@@ -9594,6 +9636,7 @@
                 const d = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
                 if (d.batch) showNotification(`Recap interno inviato a ${d.provider} in modalità Batch: arriva entro 24 ore, di solito in pochi minuti.`, 'info');
+                if (d.nota) showNotification(d.nota, 'info');
                 mi.dirty = false;
                 await miCarica(mi.idCal);
             } catch (err) {
@@ -21118,6 +21161,7 @@
         <div class="task-modal-card" style="width: min(980px, calc(96vw * var(--ui-zoom-inv, 1))); max-height: calc(92vh * var(--ui-zoom-inv, 1)); display: flex; flex-direction: column;">
             <div class="task-modal-header">
                 <h3 id="aiRisultatiTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-inbox" style="color: #0EA5E9;"></i> Risultati AI <small style="font-weight:400;color:var(--text-muted);font-size:0.78rem;">richieste in modalità Batch · conservate 7 giorni</small></h3>
+                <button id="aiRisultatiAggiorna" type="button" title="Aggiorna l'elenco" style="margin-left:auto; margin-right:0.75rem; padding:0.35rem 0.8rem; border:1px solid var(--border); border-radius:8px; background:white; cursor:pointer; font-size:0.82rem;"><i class="fas fa-rotate"></i> Aggiorna</button>
                 <button id="aiRisultatiClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
             </div>
             <div id="aiRisultatiBody" style="padding: 1rem 1.25rem; overflow: auto; flex: 1;"></div>

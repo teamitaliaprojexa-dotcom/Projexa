@@ -300,11 +300,18 @@ router.post('/genera', async (req, res) => {
     const user = { tenant_id: req.user.tenant_id, user_id: req.user.user_id, email: req.user.email, id_roles: req.user.id_roles };
     // Batch (non per Recap Projexa, già gratuito): metà prezzo, risposta entro 24 ore; la
     // raccoglie jobs/recapBatch.js (o il controllo all'apertura della scheda).
+    let nota = '';
     if (esecuzione === 'batch' && !locale) {
-      const p = await prepara(user, m.id_calendar);
-      const r = await inviaPromptBatch(user, m.id_calendar, providerName, p.build(p.transcript), { tipo: 'recap_interno' });
-      await impostaStato(req.user, m.id_calendar, 'batch');
-      return res.status(202).json({ avviato: true, batch: true, provider: r.provider });
+      try {
+        const p = await prepara(user, m.id_calendar);
+        const r = await inviaPromptBatch(user, m.id_calendar, providerName, p.build(p.transcript), { tipo: 'recap_interno' });
+        await impostaStato(req.user, m.id_calendar, 'batch');
+        return res.status(202).json({ avviato: true, batch: true, provider: r.provider });
+      } catch (e) {
+        // Piano senza Batch (es. Gemini gratuito): si genera subito, al prezzo normale.
+        if (e.code !== 'BATCH_NON_DISPONIBILE') throw e;
+        nota = e.message;
+      }
     }
     inCorso.add(k);
     await impostaStato(req.user, m.id_calendar, 'in_corso');
@@ -314,7 +321,7 @@ router.post('/genera', async (req, res) => {
         await impostaStato(user, m.id_calendar, 'errore', String(e.message || e).slice(0, 1000)).catch(() => {});
       })
       .finally(() => inCorso.delete(k));
-    res.status(202).json({ avviato: true });
+    res.status(202).json({ avviato: true, nota });
   } catch (e) { invia(res, e, 'GENERA'); }
 });
 

@@ -25,7 +25,7 @@ import { encryptValue, hasEncryptionKey, isEncrypted } from '../config/crypto.js
 import { contestoAi } from '../config/aiContesto.js';
 import { conContestoAudit } from '../config/auditContext.js';
 import { risolviAi, OPERAZIONI } from '../config/aiFunzioni.js';
-import { inviaBatchAi, statoBatchAi } from '../routes/ai.js';
+import { inviaBatchAi, statoBatchAi, askAiProvider, isBatchNonDisponibile } from '../routes/ai.js';
 import { notificaLavoroAi } from './notifiche.js';
 
 const SERVER = os.hostname();
@@ -158,8 +158,19 @@ async function attendiBatch(lavoro, providerName, prompt, opzioni = {}) {
        FROM ai_lavori_passi WHERE lavoro_id = $1 AND chiave = $2`,
     [lavoro.id, chiave, String(SCADENZA_ORE)]
   )).rows[0];
+  // Piano senza Batch (es. Gemini gratuito): tutto il lavoro prosegue in modalità Immediata.
+  const subito = () => askAiProvider(lavoro.user_id, providerName, prompt, { ...opzioni, immediato: true });
+  if (!passo && lavoro.ripiego) return subito();
   if (!passo) {
-    const inv = await inviaBatchAi(lavoro.user_id, providerName, prompt, opzioni);
+    let inv;
+    try {
+      inv = await inviaBatchAi(lavoro.user_id, providerName, prompt, opzioni);
+    } catch (e) {
+      if (!isBatchNonDisponibile(e)) throw e;
+      lavoro.ripiego = e.message;
+      console.warn(`[AI BATCH] Lavoro ${lavoro.id}: ${e.message} (${e.dettaglio || ''})`);
+      return subito();
+    }
     await db.query(
       `INSERT INTO ai_lavori_passi (lavoro_id, chiave, provider, model, batch_id) VALUES ($1, $2, $3, $4, $5)`,
       [lavoro.id, chiave, providerName, inv.model, inv.batchId]
@@ -249,17 +260,17 @@ export async function eseguiLavoro(id) {
         try { return [k, decodeURIComponent(String(v))]; } catch { return [k, String(v)]; }
       }));
       await db.query(
-        `UPDATE ai_lavori SET stato = 'pronto', file_path = $2, file_nome = $3, file_mime = $4, risultato = $5, concluso_il = now(), heartbeat = now() WHERE id = $1`,
-        [l.id, percorso, cifra(nome), String(res.getHeader('content-type') || 'application/octet-stream'), cifra(JSON.stringify({ info }))]
+        `UPDATE ai_lavori SET stato = 'pronto', file_path = $2, file_nome = $3, file_mime = $4, risultato = $5, errore = $6, concluso_il = now(), heartbeat = now() WHERE id = $1`,
+        [l.id, percorso, cifra(nome), String(res.getHeader('content-type') || 'application/octet-stream'), cifra(JSON.stringify({ info })), l.ripiego || null]
       );
     } else {
       await db.query(
-        `UPDATE ai_lavori SET stato = 'pronto', risultato = $2, concluso_il = now(), heartbeat = now() WHERE id = $1`,
-        [l.id, cifra(JSON.stringify(res.corpo === undefined ? {} : res.corpo))]
+        `UPDATE ai_lavori SET stato = 'pronto', risultato = $2, errore = $3, concluso_il = now(), heartbeat = now() WHERE id = $1`,
+        [l.id, cifra(JSON.stringify(res.corpo === undefined ? {} : res.corpo)), l.ripiego || null]
       );
     }
-    console.log(`[AI BATCH] ✓ Lavoro ${l.id} (${l.operazione}) pronto`);
-    await notificaLavoroAi({ tenantId: l.tenant_id, userId: l.user_id, lavoroId: l.id, operazione: OPERAZIONI[l.operazione].etichetta, titolo: l.titolo, ok: true });
+    console.log(`[AI BATCH] ✓ Lavoro ${l.id} (${l.operazione}) pronto${l.ripiego ? ' (eseguito Immediato: Batch non disponibile)' : ''}`);
+    await notificaLavoroAi({ tenantId: l.tenant_id, userId: l.user_id, lavoroId: l.id, operazione: OPERAZIONI[l.operazione].etichetta, titolo: l.titolo, ok: true, nota: l.ripiego });
   } catch (e) {
     if (!l) throw e;
     console.error(`❌ [AI BATCH] Lavoro ${l.id} (${l.operazione}):`, e.message);
@@ -274,13 +285,18 @@ export async function eseguiLavoro(id) {
 // ----------------------------------------------------------------------------
 // RIPRESA DOPO UN RIAVVIO E PULIZIA (ogni 5 minuti, su ogni server per i suoi lavori)
 // ----------------------------------------------------------------------------
-async function giro() {
+// Restituisce il report (job «lavori_ai» dello schedulatore, pagina Monitor › Schedulazioni).
+export async function eseguiGiroLavoriAi() {
+  const report = { ok: true, server: SERVER, inCorso: 0, ripresi: 0, eliminati: 0 };
   try {
+    report.inCorso = (await db.query(
+      `SELECT count(*)::int AS n FROM ai_lavori WHERE stato = 'in_corso' AND server = $1`, [SERVER])).rows[0].n;
     const r = await db.query(
       `SELECT id::text AS id FROM ai_lavori WHERE stato = 'in_corso' AND server = $1
           AND (heartbeat IS NULL OR heartbeat < now() - interval '3 minutes')`,
       [SERVER]
     );
+    report.ripresi = r.rows.filter((x) => !inEsecuzione.has(x.id)).length;
     for (const x of r.rows) eseguiLavoro(x.id).catch((e) => console.error(`❌ [AI BATCH] ripresa ${x.id}:`, e.message));
     // Pulizia: lavori (e file) più vecchi di GIORNI_CONSERVAZIONE giorni.
     const vecchi = await db.query(
@@ -291,13 +307,20 @@ async function giro() {
     for (const v of vecchi.rows) {
       if (v.file_path) await fs.rm(v.file_path, { force: true }).catch(() => {});
       await db.query('DELETE FROM ai_lavori WHERE id = $1', [v.id]);
+      report.eliminati += 1;
     }
   } catch (e) {
-    if (e.code !== '42P01') console.error('❌ [AI BATCH] giro di controllo:', e.message);
+    if (e.code === '42P01') return { ...report, nota: 'Tabella ai_lavori non ancora creata (Supporto/CreaDB/ai_lavori.sql)' };
+    console.error('❌ [AI BATCH] giro di controllo:', e.message);
+    throw e;
   }
+  return report;
 }
 
-export function avviaLavoriAi() {
+// All'avvio si riprendono subito i lavori interrotti. Il giro periodico lo fa lo schedulatore
+// (job «lavori_ai», sulla VM); dove lo schedulatore è spento (backend locale) un timer interno.
+export function avviaLavoriAi({ conSchedulatore = false } = {}) {
+  const giro = () => eseguiGiroLavoriAi().catch(() => {});
   setTimeout(giro, 15000);
-  setInterval(giro, 5 * 60 * 1000);
+  if (!conSchedulatore) setInterval(giro, 5 * 60 * 1000);
 }

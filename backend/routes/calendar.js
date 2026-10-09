@@ -1346,12 +1346,19 @@ router.post('/meetings/managed/recap', requireAuth, async (req, res) => {
       return res.status(202).json({ success: true, queued: true, provider: providerName });
     }
     // Batch: costo dimezzato, il recap arriva entro 24 ore (job recap_batch, jobs/recapBatch.js).
+    let nota = '';
     if (esecuzione === 'batch') {
-      const r = await inviaRecapBatch(req.user, idCalendar, providerName);
-      return res.status(202).json({ success: true, batch: true, provider: r.provider, model: r.model });
+      try {
+        const r = await inviaRecapBatch(req.user, idCalendar, providerName);
+        return res.status(202).json({ success: true, batch: true, provider: r.provider, model: r.model });
+      } catch (e) {
+        // Piano senza Batch (es. Gemini gratuito): si genera subito, al prezzo normale.
+        if (e.code !== 'BATCH_NON_DISPONIBILE') throw e;
+        nota = e.message;
+      }
     }
     const result = await generateRecap(req.user, idCalendar, { ai: providerName });
-    res.json({ success: true, ...result });
+    res.json({ success: true, ...result, nota });
   } catch (error) {
     console.error('❌ REC_MEETING_RECAP:', error.message);
     res.status(error.status || 500).json({ error: error.message, code: error.code });

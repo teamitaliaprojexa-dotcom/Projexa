@@ -834,7 +834,14 @@ async function processFinalize(job) {
         } else if (esecuzione === 'batch' && ai && !localRecapMode(ai)) {
           // Import dinamico: jobs/recapBatch.js importa a sua volta questo file.
           const { inviaRecapBatch } = await import('./recapBatch.js');
-          await inviaRecapBatch(user, job.id_calendar, ai, { origine: 'job:recap' });
+          try {
+            await inviaRecapBatch(user, job.id_calendar, ai, { origine: 'job:recap' });
+          } catch (e) {
+            // Piano senza Batch (es. Gemini gratuito): recap subito, al prezzo normale.
+            if (e.code !== 'BATCH_NON_DISPONIBILE') throw e;
+            console.warn(`[RECAP] ${job.id_calendar}: ${e.message}`);
+            await generateRecap(user, job.id_calendar, { origine: 'job:recap' });
+          }
         } else {
           await generateRecap(user, job.id_calendar, { origine: 'job:recap' });
         }
