@@ -162,6 +162,14 @@ function registerRateLimit(req, res, next) {
 
 // Serve static files from sito folder
 const sitoPath = path.join(__dirname, '../sito');
+// Database viewer: solo in locale (localhost). Altrove risponde 404, anche se il file esiste.
+const SOLO_LOCALE = new Set(['/database-viewer.html', '/js/database-viewer.js']);
+app.use((req, res, next) => {
+  if (!SOLO_LOCALE.has(req.path)) return next();
+  const host = String(req.hostname || '').toLowerCase();
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return next();
+  res.status(404).send('Not found');
+});
 app.use(express.static(sitoPath));
 console.log(`📁 Serving static files from: ${sitoPath}`);
 

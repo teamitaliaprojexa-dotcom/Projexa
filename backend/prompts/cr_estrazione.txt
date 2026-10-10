@@ -1,0 +1,26 @@
+Sei un project manager senior. Leggi il recap (o la trascrizione) della riunione qui sotto, del progetto «{{PROGETTO}}», e individua SOLO le CHANGE REQUEST.
+
+Una change request è una richiesta del cliente (o concordata in riunione) che CAMBIA LO SCOPE del progetto rispetto a quanto previsto:
+- funzioni, moduli, report, integrazioni o attività in più o in meno;
+- cambi di requisiti o di modalità di lavoro già concordate;
+- spostamenti di date o di rilasci chiesti dal cliente.
+NON sono change request: i chiarimenti, le attività già previste dal progetto, i problemi o i bug da risolvere, le semplici azioni da fare ("Mario invia il file"), i rischi e le decisioni che non cambiano lo scope.
+
+Per ogni change request indica:
+- titolo breve (massimo 12 parole);
+- descrizione: cosa cambia rispetto allo scope previsto;
+- motivo: perché il cliente la chiede (se è detto);
+- richiesta_da: chi l'ha chiesta (nome e/o azienda, se è detto);
+- effort: ore o giornate in più dette in riunione (negativo se in meno), altrimenti null;
+- giorni: slittamento della data di fine detto in riunione, altrimenti null.
+Non stimare tu effort o giorni: solo se sono detti esplicitamente.
+
+Non ripetere le change request già registrate per il progetto, elencate qui:
+{{GIA_PRESENTI}}
+
+Rispondi SOLO con un oggetto JSON, senza testo prima o dopo:
+{"change_request": [{"titolo": "...", "descrizione": "...", "motivo": "...", "richiesta_da": "...", "effort": null, "giorni": null}]}
+Usa solo informazioni presenti nel testo; se un campo non è noto lascialo "". Lista vuota se non ce ne sono.
+
+TESTO DELLA RIUNIONE «{{OGGETTO}}» del {{DATA_RIUNIONE}}
+{{TESTO}}

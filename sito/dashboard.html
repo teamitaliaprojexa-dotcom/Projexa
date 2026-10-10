@@ -29,7 +29,7 @@
             --border: #E5E7EB;
             --text-muted: #6B7280;
             --radius: 8px;
-            --sidebar-w: 250px;   /* larghezza corrente della sidebar (250px aperta, 70px minimizzata) */
+            --sidebar-w: 0px;     /* niente barra a sinistra: la navigazione è nel dock in basso */
         }
 
         body {
@@ -2155,9 +2155,6 @@
         .gp-panel { border: 1px solid #eef2f7; border-radius: 14px; }
         /* Elenco progetti del cliente: matita per rinominare (più visibile al passaggio del mouse) */
         .proj-row .flyout-item-label { flex: 1 1 auto; min-width: 0; }
-        .proj-rename-btn { flex: 0 0 auto; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 7px; margin-right: 0.35rem; border-radius: 5px; font-size: 0.78rem; opacity: 0.45; }
-        .proj-row:hover .proj-rename-btn { opacity: 1; }
-        .proj-rename-btn:hover { background: #e5e7eb; color: var(--primary); }
         /* KPI Offerte e ordini (stesse schede cliente di Gestione Progetto) */
         .gpo-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 0.75rem; padding: 0.6rem; border-radius: 10px; }
         .gpo-row + .gpo-row { border-top: 1px solid #f1f5f9; border-radius: 0; }
@@ -3720,7 +3717,18 @@
             border-radius: 6px;
         }
         .meetings-date-btn:hover { background: rgba(66, 133, 244, 0.12); }
+        .meetings-date-wrap { position: relative; display: inline-flex; }
         .meetings-date-input { position: absolute; left: 0; top: 100%; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+        /* iPad/telefoni: Safari apre il calendario solo se si tocca direttamente il campo data
+           (showPicker su un campo nascosto non fa nulla). Il campo, invisibile, copre l'icona. */
+        @media (hover: none), (pointer: coarse) {
+            .meetings-date-input {
+                top: 0; width: 100%; height: 100%; z-index: 2;
+                pointer-events: auto; cursor: pointer;
+                font-size: 16px; /* sotto i 16px iOS ingrandisce la pagina al tocco */
+                -webkit-appearance: none; appearance: none; border: 0; padding: 0; margin: 0; background: transparent;
+            }
+        }
         .meetings-today-btn {
             margin-left: 0.5rem;
             padding: 0.15rem 0.6rem;
@@ -3783,7 +3791,7 @@
         /* RESPONSIVE */
         @media (max-width: 768px) {
             :root {
-                --sidebar-w: 70px !important;   /* sotto i 768px la sidebar è sempre ridotta (vince anche sullo style inline impostato via JS) */
+                --sidebar-w: 0px !important;    /* dock in basso: nessuna barra a sinistra */
             }
 
             .sidebar {
@@ -3814,6 +3822,358 @@
                 grid-column: auto !important;
             }
         }
+
+        /* ==================================================================
+           DOCK IN BASSO (stile macOS) - sostituisce la sidebar di sinistra (2026-10-10)
+           ------------------------------------------------------------------
+           La barra resta l'<aside class="sidebar"> con le stesse voci e gli stessi
+           script: qui cambia solo l'aspetto. Regole messe in fondo per prevalere su
+           quelle della vecchia sidebar.
+           - Niente transform/backdrop-filter sulla .sidebar né sui <li>: i flyout
+             (position: fixed) sono figli e li userebbero come riferimento. Il vetro
+             è sullo pseudo-elemento ::before.
+           - Ingrandimento: lo script initDock imposta --s (1..1.6) su ogni pulsante.
+           - Flyout Clienti/Progetti/Impostazioni: salgono dal pulsante (--pop-left,
+             --pop-origin e --arrow-x calcolati da positionDockPopover).
+           - Pannello di dettaglio: grande, sopra il dock; elenco progetti di un
+             cliente (.dock-side) a destra dell'elenco clienti.
+           ================================================================== */
+        :root {
+            --dock-size: 46px;     /* lato delle icone a riposo */
+            --dock-h: 78px;        /* ingombro del dock dal fondo dello schermo */
+        }
+
+        .main, .main.minimized {
+            width: 100% !important;
+            margin-left: 0 !important;
+            padding-bottom: calc(var(--dock-h) + 1.5rem);
+        }
+
+        .sidebar, .sidebar.minimized {
+            top: auto;
+            bottom: 10px;
+            left: 0;
+            right: 0;
+            margin: 0 auto;
+            width: max-content;
+            max-width: calc(calc(100vw * var(--ui-zoom-inv, 1)) - 24px);
+            height: auto;
+            background: transparent;
+            border: none;
+            overflow: visible;
+            z-index: 400;
+        }
+        .sidebar::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            border-radius: 22px;
+            background: rgba(255, 255, 255, 0.55);
+            -webkit-backdrop-filter: blur(22px) saturate(180%);
+            backdrop-filter: blur(22px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.7);
+            box-shadow: 0 12px 40px rgba(15, 23, 42, 0.22), 0 1px 3px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+        }
+        .sidebar .sidebar-header { display: none; }
+
+        .sidebar .sidebar-menu {
+            flex-direction: row;
+            align-items: flex-end;
+            gap: 6px;
+            padding: 7px 10px 10px;
+            overflow: visible;
+        }
+        .sidebar .sidebar-menu li {
+            border: none !important;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+        }
+        /* Spaziatore della vecchia sidebar = separatore verticale del dock */
+        .sidebar .sidebar-menu li[aria-hidden="true"] {
+            flex: 0 0 1px !important;
+            align-self: stretch;
+            width: 1px;
+            margin: 6px 4px 2px;
+            background: rgba(15, 23, 42, 0.18);
+        }
+
+        /* Pulsante = icona "app" quadrata con angoli arrotondati */
+        .sidebar .sidebar-menu li > a,
+        .sidebar.minimized .sidebar-menu li > a {
+            --tile: linear-gradient(180deg, #94A3B8, #475569);
+            width: calc(var(--dock-size) * var(--s, 1));
+            height: calc(var(--dock-size) * var(--s, 1));
+            padding: 0 !important;
+            border: none !important;
+            border-radius: 23%;
+            justify-content: center;
+            align-items: center;
+            flex-direction: row;
+            gap: 0;
+            background: var(--tile) !important;
+            color: #fff !important;
+            font-weight: 400 !important;
+            box-shadow: 0 3px 8px rgba(15, 23, 42, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+            transition: width 0.14s ease-out, height 0.14s ease-out, filter 0.15s ease;
+        }
+        .sidebar .sidebar-menu li > a:active { filter: brightness(0.82); }
+        .sidebar .sidebar-menu li > a > i,
+        .sidebar .sidebar-menu li > a > .sidebar-icon {
+            width: 52%;
+            height: 52%;
+            flex: 0 0 auto;
+            font-size: calc(var(--dock-size) * var(--s, 1) * 0.46);
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform: none !important;
+            filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.18)) !important;
+        }
+        .sidebar .sidebar-menu li > a > img.dock-logo {
+            width: 74%;
+            height: 74%;
+            object-fit: contain;
+        }
+
+        /* Nome della voce: etichetta scura sopra l'icona, come nel Dock */
+        .sidebar .sidebar-menu li > a > span {
+            display: block !important;
+            position: absolute;
+            bottom: calc(100% + 12px);
+            left: 50%;
+            transform: translateX(-50%) !important;
+            padding: 3px 10px;
+            border-radius: 7px;
+            background: rgba(30, 30, 34, 0.86);
+            color: #fff;
+            font-size: 12.5px;
+            font-weight: 500;
+            line-height: 1.5;
+            white-space: nowrap;
+            text-shadow: none !important;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.15s ease !important;
+        }
+        .sidebar .sidebar-menu li > a:hover > span { opacity: 1; }
+        .sidebar .sidebar-menu li.open > a > span { opacity: 0; }
+
+        /* Puntino sotto le voci aperte (e sotto la Dashboard, la pagina corrente) */
+        .sidebar .sidebar-menu li::after {
+            content: '';
+            position: absolute;
+            bottom: -7px;
+            left: 50%;
+            width: 4px;
+            height: 4px;
+            margin-left: -2px;
+            border-radius: 50%;
+            background: rgba(15, 23, 42, 0.6);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        .sidebar .sidebar-menu li[aria-hidden="true"]::after { display: none; }
+        .sidebar .sidebar-menu li.open::after,
+        .sidebar .sidebar-menu li.flyout-active::after,
+        .sidebar .sidebar-menu li:has(> a.active)::after { opacity: 1; }
+
+        /* Rimbalzo al clic (come l'avvio di un'app) */
+        @keyframes dockBounce {
+            0%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-20px); }
+            55% { transform: translateY(0); }
+            75% { transform: translateY(-8px); }
+        }
+        .sidebar .sidebar-menu li.dock-bounce > a { animation: dockBounce 0.75s cubic-bezier(0.3, 0.7, 0.4, 1); }
+
+        /* Colori delle icone */
+        .sidebar .sidebar-menu > li:first-child > a { --tile: linear-gradient(180deg, #FFFFFF, #E5E7EB); }
+        .sidebar .sidebar-menu li.nav-clients > a { --tile: linear-gradient(180deg, #60A5FA, #2563EB); }
+        .sidebar #navReporting > a { --tile: linear-gradient(180deg, #FDBA74, #EA580C); }
+        .sidebar #navIssue > a { --tile: linear-gradient(180deg, #FCA5A5, #DC2626); }
+        .sidebar #navPortfolio > a { --tile: linear-gradient(180deg, #A5B4FC, #4F46E5); }
+        .sidebar .sidebar-menu li.nav-projects > a { --tile: linear-gradient(180deg, #FCD34D, #F59E0B); }
+        .sidebar #navJira > a { --tile: linear-gradient(180deg, #FFFFFF, #EEF2F7); }
+        .sidebar #navQlik > a { --tile: linear-gradient(180deg, #FFFFFF, #EEF2F7); }
+        /* ChatGPT: icona tonda già completa (immagine fornita), senza tessera quadrata */
+        .sidebar #navAi_chatgpt > a { --tile: transparent; box-shadow: none; border-radius: 50%; }
+        .sidebar .sidebar-menu li > a > img.dock-app-icon { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 3px 5px rgba(15, 23, 42, 0.28)); }
+        .sidebar #navAi_claude > a { --tile: linear-gradient(180deg, #FAF6EE, #EFE7DA); }
+        .sidebar #navAi_gemini > a { --tile: linear-gradient(180deg, #FFFFFF, #EEF2F7); }
+        .sidebar #navAi_mistral > a { --tile: linear-gradient(180deg, #FFFFFF, #EEF2F7); }
+        /* Loghi ufficiali (Jira, Qlik, Claude, Gemini, Mistral: tracciati Simple Icons 16.34.0,
+           licenza CC0): un po' più grandi e senza l'ombra bianca delle icone a tinta unita */
+        .sidebar .sidebar-menu li > a > .brand-icon { width: 58%; height: 58%; filter: none !important; }
+        .sidebar #navAiRisultati > a { --tile: linear-gradient(180deg, #FFFFFF, #EEF2F7); }
+        .sidebar .sidebar-menu li > a > .dock-ai-icon { width: 86%; height: 86%; }
+        .sidebar #navDatabase > a { --tile: linear-gradient(180deg, #94A3B8, #334155); }
+        .sidebar #navMonitor > a { --tile: linear-gradient(180deg, #64748B, #0F172A); }
+        .sidebar #navRecord > a { --tile: linear-gradient(180deg, #FFFFFF, #E5E7EB); }
+        .sidebar .sidebar-menu li.nav-settings > a { --tile: linear-gradient(180deg, #D1D5DB, #6B7280); }
+
+        /* Flyout di primo livello: salgono dal pulsante con un effetto "a molla" */
+        .sidebar .settings-flyout {
+            top: auto;
+            left: var(--pop-left, 50%);
+            bottom: calc(var(--dock-h) + 12px);
+            width: var(--menu-w, 320px);
+            height: min(640px, calc(70vh * var(--ui-zoom-inv, 1)));
+            overflow: visible;
+            opacity: 0;
+            transform: translateY(40px) scale(0.25);
+            transform-origin: var(--pop-origin, 50%) 100%;
+            transition: transform 0.42s cubic-bezier(0.2, 1.28, 0.36, 1), opacity 0.2s ease;
+        }
+        .sidebar .nav-settings.open .settings-flyout,
+        .sidebar .nav-clients.open .settings-flyout,
+        .sidebar .nav-projects.open .settings-flyout {
+            width: var(--menu-w, 320px);
+            opacity: 1;
+            transform: none;
+        }
+        .sidebar .settings-flyout-inner {
+            width: 100%;
+            height: 100%;
+            border: 1px solid rgba(15, 23, 42, 0.1);
+            border-radius: 14px;
+            box-shadow: 0 22px 60px rgba(15, 23, 42, 0.3), 0 2px 8px rgba(15, 23, 42, 0.12);
+        }
+        /* Freccetta che punta al pulsante del dock */
+        .sidebar .settings-flyout::after {
+            content: '';
+            position: absolute;
+            bottom: -7px;
+            left: var(--arrow-x, 50%);
+            width: 14px;
+            height: 14px;
+            margin-left: -7px;
+            background: white;
+            border-right: 1px solid rgba(15, 23, 42, 0.1);
+            border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+            transform: rotate(45deg);
+            transition: background 0.3s ease;
+        }
+        .sidebar .detail-open .settings-flyout::after { background: #f3f4f6; }
+
+        /* Elenchi Clienti e Progetti clienti: ogni cliente è una "card" con contorno */
+        .sidebar .settings-flyout ul li[data-client-id] {
+            margin: 0 2px 7px;
+            padding: 0.55rem 0.8rem;
+            border: 1.5px solid #A9B6C8;
+            border-radius: 10px;
+            background: linear-gradient(180deg, #FFFFFF, #F8FAFC);
+            box-shadow: 0 2px 5px rgba(15, 23, 42, 0.12);
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease, background 0.18s ease;
+        }
+        .sidebar .settings-flyout ul li[data-client-id]:last-child { border-bottom: 1.5px solid #A9B6C8; }
+        .sidebar .settings-flyout ul li[data-client-id]:hover {
+            border-color: var(--primary);
+            background: #F5F9FF;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.18);
+            transform: translateY(-1px);
+        }
+        /* Il "salto" 3D del nome non serve più: si solleva la card intera */
+        .sidebar .settings-flyout ul li[data-client-id] > .flyout-item-label,
+        .sidebar .settings-flyout ul li[data-client-id]:hover > .flyout-item-label {
+            transform: none;
+            text-shadow: none;
+        }
+        .sidebar .settings-flyout ul li[data-client-id].active-client {
+            border-color: #10B981;
+            background: #ECFDF5;
+            box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+            color: #065F46;
+        }
+        .sidebar .settings-flyout ul li.flyout-group-head { margin: 0.8rem 2px 7px; }
+
+        /* Elenco progetti del cliente (a destra dell'elenco clienti): stesse card dei clienti */
+        .settings-detail-flyout.dock-side .settings-detail-link.proj-row {
+            width: auto;
+            margin: 0 2px 7px;
+            padding: 0.55rem 0.8rem;
+            border: 1.5px solid #A9B6C8;
+            border-radius: 10px;
+            background: linear-gradient(180deg, #FFFFFF, #F8FAFC);
+            box-shadow: 0 2px 5px rgba(15, 23, 42, 0.12);
+            color: var(--dark);
+            font-size: 0.9rem;
+            font-weight: 400;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease, background 0.18s ease;
+        }
+        .settings-detail-flyout.dock-side .settings-detail-link.proj-row:hover {
+            border-color: var(--primary);
+            background: #F5F9FF;
+            color: var(--primary);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.18);
+            transform: translateY(-1px);
+        }
+        .settings-detail-flyout.dock-side .settings-detail-link.proj-row:hover .parent-arrow { color: var(--primary); }
+        .settings-detail-flyout.dock-side .settings-detail-link.proj-row > .flyout-item-label,
+        .settings-detail-flyout.dock-side .settings-detail-link.proj-row:hover > .flyout-item-label {
+            transform: none;
+            text-shadow: none;
+        }
+
+        /* Pannello di dettaglio (cliente, progetto, impostazione): grande, sopra il dock */
+        .settings-detail-flyout,
+        .settings-detail-flyout.near-sidebar {
+            left: 12px;
+            right: 12px;
+            top: 12px;
+            bottom: calc(var(--dock-h) + 12px);
+            height: auto;
+            opacity: 0;
+            transform: translateY(50px) scale(0.94);
+            transform-origin: 50% 100%;
+            transition: transform 0.42s cubic-bezier(0.2, 1.15, 0.36, 1), opacity 0.22s ease;
+        }
+        .settings-detail-flyout.open,
+        .settings-detail-flyout.near-sidebar.open {
+            width: auto !important;
+            opacity: 1;
+            transform: none;
+        }
+        .settings-detail-flyout-inner {
+            height: 100%;
+            border: 1px solid rgba(15, 23, 42, 0.1);
+            border-radius: 16px;
+            box-shadow: 0 22px 60px rgba(15, 23, 42, 0.28), 0 2px 8px rgba(15, 23, 42, 0.1);
+        }
+        .settings-detail-flyout > .flyout-resizer { display: none; }
+        /* Elenco progetti di un cliente: a destra dell'elenco clienti, stessa altezza */
+        .settings-detail-flyout.dock-side,
+        .settings-detail-flyout.dock-side.open {
+            left: var(--side-left, 50%);
+            right: auto;
+            top: auto;
+            width: 360px !important;
+            height: min(640px, calc(70vh * var(--ui-zoom-inv, 1)));
+            transform-origin: 0% 100%;
+        }
+        .settings-detail-flyout.dock-side:not(.open) { transform: translateX(-30px) scale(0.6); }
+        .settings-detail-flyout.dock-side .settings-detail-flyout-inner { border-radius: 14px; }
+
+        /* Chiusura "genio": la finestra resta visibile ma non cliccabile mentre rientra */
+        .dock-closing, .dock-closing * { pointer-events: none !important; }
+        .dock-no-anim, .dock-no-anim * { transition: none !important; }
+        /* Il pannello di dettaglio si chiude dal dock: la X non serve più */
+        #detailCloseBtn { display: none !important; }
+
+        @media (max-width: 768px) {
+            :root { --dock-size: 38px; --dock-h: 66px; }
+            .sidebar .sidebar-menu { overflow-x: auto; overflow-y: visible; gap: 4px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .sidebar .sidebar-menu li > a,
+            .sidebar .settings-flyout,
+            .settings-detail-flyout { transition: opacity 0.15s ease !important; }
+            .sidebar .sidebar-menu li.dock-bounce > a { animation: none; }
+        }
     </style>
 </head>
 <body>
@@ -3828,7 +4188,7 @@
         </div>
 
         <ul class="sidebar-menu">
-            <li><a href="#" class="active"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 11h2.25v9h5.5v-5.5h3.5V20h5.5v-9h2.25L12 3Z"/></svg> <span>Dashboard</span></a></li>
+            <li><a href="#" class="active"><img class="dock-logo" src="Logo_Projexa.png" alt=""> <span>Dashboard</span></a></li>
             <li class="nav-clients" style="position: relative;">
                 <a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm6.5-1a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20v-2.5C2 14.5 5.1 12 9 12s7 2.5 7 5.5V20H2Zm15.5 0v-2.5c0-1.7-.7-3.2-1.9-4.4 3.3.1 6.4 1.8 6.4 4.4V20h-4.5Z"/></svg> <span>Clienti</span></a>
                 <div class="settings-flyout">
@@ -3861,18 +4221,18 @@
                 </div>
             </li>
             <!-- Jira: visibile solo se il flag settings (campo='Jira', valore1=true) è attivo. Gestita da js/jira.js -->
-            <li id="navJira" style="display: none;"><a href="#"><i class="fab fa-jira"></i> <span>Jira</span></a></li>
+            <li id="navJira" style="display: none;"><a href="#"><svg class="sidebar-icon brand-icon" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="dockJira" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2684FF"/><stop offset="1" stop-color="#0052CC"/></linearGradient></defs><path fill="url(#dockJira)" d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0Z"/></svg> <span>Jira</span></a></li>
             <!-- Qlik: visibile solo se il flag settings (campo='Qlik', valore1=true) è attivo per il
                  tenant_id/user_id del login. Gestita da js/Qlik_voucher.js (import voucher da Excel). -->
-            <li id="navQlik" style="display: none;"><a href="#" id="navQlikLink"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19h18v2H1V3h2v16Zm2-3.4 4.2-4.2 3 3L18.6 8H16V6h6v6h-2V9.4l-7.8 7.8-3-3L6.4 17 5 15.6Z"/></svg> <span>Qlik</span></a></li>
+            <li id="navQlik" style="display: none;"><a href="#" id="navQlikLink"><svg class="sidebar-icon brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="#009848" d="m23.7515 20.1367-3.13-2.6326c1.0862-1.7307 1.7303-3.7745 1.7303-5.9655 0-6.1684-5.008-11.1764-11.176-11.1764S0 5.3702 0 11.5386c0 6.168 5.008 11.176 11.1759 11.176 2.3934 0 4.6216-.7552 6.4443-2.0438l3.3324 2.7988s.4974.4236.921-.0738l1.9884-2.3568c-.0186 0 .3864-.4968-.1105-.9023zm-5.7078-8.598c0 3.7926-3.0747 6.8672-6.8678 6.8672-3.7926 0-6.8678-3.0746-6.8678-6.8673 0-3.793 3.0752-6.8678 6.8678-6.8678 3.7931 0 6.8678 3.0747 6.8678 6.8678zm-11.287 0c0-2.4304 1.9702-4.4006 4.4006-4.4006 2.4303 0 4.4005 1.9702 4.4005 4.4005 0 2.4304-1.9702 4.4006-4.4005 4.4006-2.4304 0-4.4005-1.9702-4.4005-4.4006z"/></svg> <span>Qlik</span></a></li>
             <!-- AI (ChatGPT, Claude, Gemini, Mistral): visibili solo se abilitate in Impostazioni › AI (toggle on + chiave API collegata).
                  Il clic apre la finestra di richiesta/risposta (aiChatModal). -->
-            <li id="navAi_chatgpt" class="nav-ai" style="display: none;"><a href="#" data-ai-open="chatgpt" title="ChatGPT"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5a4.6 4.6 0 0 1 4.4 3.2 4.6 4.6 0 0 1 4.3 6.6 4.6 4.6 0 0 1-3 7.2 4.6 4.6 0 0 1-7.6.8 4.6 4.6 0 0 1-6.8-3.3 4.6 4.6 0 0 1-.1-7.3A4.6 4.6 0 0 1 12 2.5Zm0 2a2.6 2.6 0 0 0-2.6 2.4l3.6 2.1 2.6-1.5A2.6 2.6 0 0 0 12 4.5Zm-5.3 2.9a2.6 2.6 0 0 0-.9 3.5l3.6-2.1V5.8a2.6 2.6 0 0 0-2.7 1.6Zm10.6 1.4-3.6 2.1v3l2.6 1.5a2.6 2.6 0 0 0 1-6.6ZM12 10.3 10.5 11.2v1.6l1.5.9 1.5-.9v-1.6L12 10.3Zm-6.3 2.4a2.6 2.6 0 0 0 3 3.4l3.6-2.1-2.6-1.5-4 .2Zm8.3 2.7-3.6 2.1a2.6 2.6 0 0 0 5.2-.5V16l-1.6-.6Z"/></svg> <span>ChatGPT</span></a></li>
-            <li id="navAi_claude" class="nav-ai" style="display: none;"><a href="#" data-ai-open="claude" title="Claude"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 2h2l.6 6.2 3.6-5.1 1.6 1.2-3.2 5.4 5.8-2.4.7 1.9-6 1.9 6 1.3-.4 2-6.1-.8 4.9 3.8-1.3 1.6-5-3.9 1.3 6.2-2 .5-1.9-6-1.9 6-2-.5 1.3-6.2-5 3.9-1.3-1.6 4.9-3.8-6.1.8-.4-2 6-1.3-6-1.9.7-1.9 5.8 2.4L5.2 4.3l1.6-1.2 3.6 5.1L11 2Z"/></svg> <span>Claude</span></a></li>
-            <li id="navAi_gemini" class="nav-ai" style="display: none;"><a href="#" data-ai-open="gemini" title="Gemini"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.6 5.3 4.7 9.4 10 10-5.3.6-9.4 4.7-10 10-.6-5.3-4.7-9.4-10-10 5.3-.6 9.4-4.7 10-10Z"/></svg> <span>Gemini</span></a></li>
-            <li id="navAi_mistral" class="nav-ai" style="display: none;"><a href="#" data-ai-open="mistral" title="Mistral"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h4v4H3V3Zm14 0h4v4h-4V3ZM3 7h4v4H3V7Zm4 0h4v4H7V7Zm6 0h4v4h-4V7Zm4 0h4v4h-4V7ZM3 11h4v4H3v-4Zm6 0h6v4H9v-4Zm8 0h4v4h-4v-4ZM3 15h4v4H3v-4Zm14 0h4v4h-4v-4ZM1 19h8v2H1v-2Zm14 0h8v2h-8v-2Z"/></svg> <span>Mistral</span></a></li>
+            <li id="navAi_chatgpt" class="nav-ai" style="display: none;"><a href="#" data-ai-open="chatgpt" title="ChatGPT"><img class="dock-app-icon" src="chatgpt-icon.png" alt=""> <span>ChatGPT</span></a></li>
+            <li id="navAi_claude" class="nav-ai" style="display: none;"><a href="#" data-ai-open="claude" title="Claude"><svg class="sidebar-icon brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="#D97757" d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg> <span>Claude</span></a></li>
+            <li id="navAi_gemini" class="nav-ai" style="display: none;"><a href="#" data-ai-open="gemini" title="Gemini"><svg class="sidebar-icon brand-icon" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="dockGemini" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4796E3"/><stop offset="0.55" stop-color="#9177C7"/><stop offset="1" stop-color="#CA6673"/></linearGradient></defs><path fill="url(#dockGemini)" d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"/></svg> <span>Gemini</span></a></li>
+            <li id="navAi_mistral" class="nav-ai" style="display: none;"><a href="#" data-ai-open="mistral" title="Mistral"><svg class="sidebar-icon brand-icon" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="dockMistral" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFD800"/><stop offset="0.35" stop-color="#FFAF00"/><stop offset="0.65" stop-color="#FF8205"/><stop offset="1" stop-color="#E10500"/></linearGradient></defs><path fill="url(#dockMistral)" d="M17.143 3.429v3.428h-3.429v3.429h-3.428V6.857H6.857V3.43H3.43v13.714H0v3.428h10.286v-3.428H6.857v-3.429h3.429v3.429h3.429v-3.429h3.428v3.429h-3.428v3.428H24v-3.428h-3.43V3.429z"/></svg> <span>Mistral</span></a></li>
             <!-- Risultati delle funzioni AI eseguite in modalità Batch (file da scaricare, testi, dossier...) -->
-            <li id="navAiRisultati"><a href="#" id="navAiRisultatiLink" title="Risultati delle richieste AI in modalità Batch"><i class="fas fa-inbox"></i> <span>Risultati AI</span></a></li>
+            <li id="navAiRisultati"><a href="#" id="navAiRisultatiLink" title="Risultati delle richieste AI in modalità Batch"><svg class="sidebar-icon brand-icon dock-ai-icon" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="#111827" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17.83 12.92L19.90 13.25L21.98 13.58"/><circle cx="22.52" cy="13.67" r="0.55"/><path d="M17.26 14.68L18.46 15.29L19.40 16.38"/><circle cx="19.88" cy="16.66" r="0.55"/><path d="M16.17 16.17L17.66 17.66L19.14 19.14"/><circle cx="19.53" cy="19.53" r="0.55"/><path d="M14.68 17.26L15.29 18.46L16.38 19.40"/><circle cx="16.66" cy="19.88" r="0.55"/><path d="M12.92 17.83L13.25 19.90L13.58 21.98"/><circle cx="13.67" cy="22.52" r="0.55"/><path d="M11.08 17.83L10.87 19.16L10.12 20.39"/><circle cx="10.00" cy="20.93" r="0.55"/><path d="M9.32 17.26L8.37 19.13L7.41 21.00"/><circle cx="7.17" cy="21.49" r="0.55"/><path d="M7.83 16.17L6.87 17.13L6.31 18.45"/><circle cx="5.95" cy="18.86" r="0.55"/><path d="M6.74 14.68L4.87 15.63L3.00 16.59"/><circle cx="2.51" cy="16.83" r="0.55"/><path d="M6.17 12.92L4.84 13.13L3.44 12.81"/><circle cx="2.89" cy="12.86" r="0.55"/><path d="M6.17 11.08L4.10 10.75L2.02 10.42"/><circle cx="1.48" cy="10.33" r="0.55"/><path d="M6.74 9.32L5.54 8.71L4.11 8.59"/><circle cx="3.60" cy="8.37" r="0.55"/><path d="M7.83 7.83L6.34 6.34L4.86 4.86"/><circle cx="4.47" cy="4.47" r="0.55"/><path d="M9.32 6.74L8.71 5.54L8.59 4.11"/><circle cx="8.37" cy="3.60" r="0.55"/><path d="M11.08 6.17L10.75 4.10L10.42 2.02"/><circle cx="10.33" cy="1.48" r="0.55"/><path d="M12.92 6.17L13.13 4.84L12.81 3.44"/><circle cx="12.86" cy="2.89" r="0.55"/><path d="M14.68 6.74L15.63 4.87L16.59 3.00"/><circle cx="16.83" cy="2.51" r="0.55"/><path d="M16.17 7.83L17.13 6.87L18.45 6.31"/><circle cx="18.86" cy="5.95" r="0.55"/><path d="M17.26 9.32L19.13 8.37L21.00 7.41"/><circle cx="21.49" cy="7.17" r="0.55"/><path d="M17.83 11.08L19.16 10.87L20.39 10.12"/><circle cx="20.93" cy="10.00" r="0.55"/></g><circle cx="12" cy="12" r="6.1" fill="#111827"/><text x="12" y="14.35" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="6.4" fill="#FFFFFF">AI</text></svg> <span>Risultati AI</span></a></li>
             <li aria-hidden="true" style="flex: 1; border: none; min-height: 0;"></li>
             <li id="navDatabase" style="display: none;"><a href="database-viewer.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.5 2 3 3.8 3 6v12c0 2.2 3.5 4 9 4s9-1.8 9-4V6c0-2.2-3.5-4-9-4Zm0 2c4.6 0 7 1.4 7 2s-2.4 2-7 2-7-1.4-7-2 2.4-2 7-2Zm0 16c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V18c0 .6-2.4 2-7 2Zm0-5c-4.6 0-7-1.4-7-2v-2.7c1.6 1 4 1.7 7 1.7s5.4-.7 7-1.7V13c0 .6-2.4 2-7 2Z"/></svg> <span>Database</span></a></li>
             <!-- Monitor (schede Monitor VM, Schedulazioni, Log): admin del tenant PROJEXA, oppure in sola
@@ -4242,8 +4602,7 @@
             <div data-dash-flag="calendario" style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
                     <div class="section-title" style="margin: 0; position: relative;">
-                        <button id="meetingsDateBtn" type="button" class="meetings-date-btn" title="Scegli il giorno delle riunioni" aria-label="Scegli il giorno delle riunioni"><i class="fas fa-calendar-alt"></i></button>
-                        <input id="meetingsDatePicker" type="date" class="meetings-date-input" tabindex="-1" aria-hidden="true">
+                        <span class="meetings-date-wrap"><button id="meetingsDateBtn" type="button" class="meetings-date-btn" title="Scegli il giorno delle riunioni" aria-label="Scegli il giorno delle riunioni"><i class="fas fa-calendar-alt"></i></button><input id="meetingsDatePicker" type="date" class="meetings-date-input" tabindex="-1" aria-hidden="true"></span>
                         <span id="meetingsTitle">Riunioni</span>
                         <button id="meetingsTodayBtn" type="button" class="meetings-today-btn" style="display: none;" title="Torna alle riunioni di oggi">Oggi</button>
                         <label id="meetingsShowAllWrap" class="meetings-show-all" title="Spuntato: tutte le riunioni di oggi, anche quelle già passate. Tolto: solo da adesso in poi."><input id="meetingsShowAll" type="checkbox"> Mostra tutti</label>
@@ -7393,33 +7752,240 @@
         // === SIDEBAR TOGGLE ===
         // Aggiorna la variabile CSS --sidebar-w (usata per posizionare i flyout subito
         // dopo la sidebar) in base allo stato aperto/minimizzato della sidebar stessa.
-        function syncSidebarWidthVar(isMinimized) {
-            document.documentElement.style.setProperty('--sidebar-w', isMinimized ? '70px' : '250px');
+        // Dock in basso: la barra non occupa più spazio a sinistra (--sidebar-w = 0).
+        function syncSidebarWidthVar() {
+            document.documentElement.style.setProperty('--sidebar-w', '0px');
         }
 
         function initSidebarToggle() {
-            const toggleBtn = document.getElementById('sidebarToggle');
-            const sidebar = document.querySelector('.sidebar');
-            const main = document.querySelector('.main');
+            // Dock in basso: nessuno stato "minimizzato" (lo stato salvato della vecchia sidebar si ignora).
+            document.querySelector('.sidebar')?.classList.remove('minimized');
+            document.querySelector('.main')?.classList.remove('minimized');
+            syncSidebarWidthVar();
+            initDock();
+        }
 
-            if (toggleBtn) {
-                toggleBtn.addEventListener('click', () => {
-                    sidebar.classList.toggle('minimized');
-                    main.classList.toggle('minimized');
-                    
-                    // Salva lo stato nel localStorage
-                    const isMinimized = sidebar.classList.contains('minimized');
-                    localStorage.setItem('sidebarMinimized', isMinimized);
-                    syncSidebarWidthVar(isMinimized);
+        // === DOCK IN BASSO (stile macOS) ===
+        // Le coordinate di getBoundingClientRect sono in pixel dello schermo, mentre le
+        // proprietà CSS degli elementi nel body vengono moltiplicate per lo zoom
+        // dell'interfaccia (js/ui-scale.js): si divide sempre per uiZoom().
+        const dockZoom = () => (typeof window.uiZoom === 'function' ? window.uiZoom() : 1) || 1;
+        const dockMenuW = (fly) => parseFloat(getComputedStyle(fly).width) || 320;
+
+        // Flyout di primo livello (Clienti, Progetti, Impostazioni): centrato sul pulsante
+        // del dock (senza uscire dallo schermo), con freccetta e origine dell'animazione
+        // sul pulsante.
+        function positionDockPopover(nav) {
+            const a = nav && nav.querySelector(':scope > a');
+            const fly = nav && nav.querySelector(':scope > .settings-flyout');
+            if (!a || !fly) return;
+            const z = dockZoom();
+            const r = a.getBoundingClientRect();
+            const vw = window.innerWidth / z;
+            const w = dockMenuW(fly);
+            const centro = (r.left + r.width / 2) / z;
+            const left = Math.max(12, Math.min(centro - w / 2, vw - w - 12));
+            const dx = Math.max(16, Math.min(centro - left, w - 16));
+            fly.style.setProperty('--pop-left', left + 'px');
+            fly.style.setProperty('--arrow-x', dx + 'px');
+            fly.style.setProperty('--pop-origin', dx + 'px');
+        }
+
+        // Elenco progetti di un cliente: subito a destra dell'elenco clienti (se non c'è
+        // spazio resta attaccato al bordo destro dello schermo).
+        function positionDockSide(flyout, navProj) {
+            const fly = navProj && navProj.querySelector(':scope > .settings-flyout');
+            if (!flyout || !fly) return;
+            const z = dockZoom();
+            const vw = window.innerWidth / z;
+            const left = (parseFloat(fly.style.getPropertyValue('--pop-left')) || 12) + dockMenuW(fly) + 12;
+            flyout.style.setProperty('--side-left', Math.max(12, Math.min(left, vw - 360 - 12)) + 'px');
+        }
+
+        function initDock() {
+            const dock = document.querySelector('.sidebar');
+            const menu = dock && dock.querySelector('.sidebar-menu');
+            if (!menu) return;
+            const MAX = 0.6;      // ingrandimento massimo (+60%) sotto il mouse
+            const RAGGIO = 140;   // distanza (px schermo) entro cui le icone vicine crescono
+            const riduci = window.matchMedia('(prefers-reduced-motion: reduce)');
+            const tiles = () => [...menu.querySelectorAll(':scope > li > a')].filter(a => a.offsetParent !== null);
+            const azzera = () => tiles().forEach(a => a.style.removeProperty('--s'));
+
+            // Ingrandimento "a onda": cresce l'icona sotto il mouse e, meno, le vicine.
+            // Fermo mentre un elenco è aperto, così il dock non sale sotto l'elenco.
+            let raf = 0, ultimaX = 0;
+            menu.addEventListener('mousemove', (e) => {
+                ultimaX = e.clientX;
+                if (raf) return;
+                raf = requestAnimationFrame(() => {
+                    raf = 0;
+                    if (riduci.matches || menu.querySelector(':scope > li.open')) { azzera(); return; }
+                    tiles().forEach(a => {
+                        const r = a.getBoundingClientRect();
+                        const d = Math.abs(ultimaX - (r.left + r.width / 2));
+                        const k = Math.max(0, 1 - d / RAGGIO);
+                        a.style.setProperty('--s', (1 + MAX * Math.sin(k * Math.PI / 2) ** 2).toFixed(3));
+                    });
                 });
+            });
+            menu.addEventListener('mouseleave', azzera);
 
-                // Ripristina lo stato dal localStorage
-                const wasMinimized = localStorage.getItem('sidebarMinimized') === 'true';
-                if (wasMinimized) {
-                    sidebar.classList.add('minimized');
-                    main.classList.add('minimized');
+            // Rimbalzo al clic, come all'avvio di un'app.
+            menu.addEventListener('click', (e) => {
+                const a = e.target.closest('.sidebar-menu > li > a');
+                if (!a || riduci.matches) return;
+                const li = a.parentElement;
+                li.classList.remove('dock-bounce');
+                void a.offsetWidth; // riparte l'animazione anche con clic ravvicinati
+                li.classList.add('dock-bounce');
+                azzera();
+            });
+            menu.addEventListener('animationend', (e) => {
+                if (e.animationName === 'dockBounce') e.target.parentElement?.classList.remove('dock-bounce');
+            });
+
+            // Clic sulla pagina: chiude gli elenchi del dock (non il pannello di dettaglio,
+            // che si chiude dal dock o con la X, per non perdere modifiche in corso).
+            const detail = document.getElementById('settingsDetailFlyout');
+            const dettaglioGrande = () => !!(detail && detail.classList.contains('open') && !detail.classList.contains('dock-side'));
+            document.querySelector('.main')?.addEventListener('mousedown', () => {
+                if (dettaglioGrande()) return;
+                if (menu.querySelector(':scope > li.open') || detail?.classList.contains('open')) closeAllFlyouts();
+            });
+            document.addEventListener('keydown', (e) => {
+                if (e.key !== 'Escape' || dettaglioGrande()) return;
+                if (document.querySelector('.modal.open, .ckp-overlay.open')) return;
+                if (menu.querySelector(':scope > li.open')) closeAllFlyouts();
+            });
+
+            // Il pannello di dettaglio torna grande appena mostra altro che l'elenco progetti.
+            if (detail) new MutationObserver(() => {
+                if (detail.classList.contains('dock-side') && currentView && currentView.kind !== 'projectList') detail.classList.remove('dock-side');
+            }).observe(detail, { attributes: true, attributeFilter: ['class'] });
+
+            // Ridimensionamento della finestra o cambio di zoom: riallinea gli elenchi aperti.
+            const riallinea = () => {
+                menu.querySelectorAll(':scope > li.open').forEach(positionDockPopover);
+                if (detail?.classList.contains('dock-side')) positionDockSide(detail, menu.querySelector(':scope > li.nav-projects'));
+            };
+            window.addEventListener('resize', riallinea);
+            window.addEventListener('ui-zoom-change', riallinea);
+            initDockGenie(menu);
+        }
+
+        // Chiusura "genio" (come le finestre del Mac che rientrano nel Dock): quando una
+        // finestra aperta dal dock perde la classe 'open', la si rimette visibile per la
+        // durata dell'animazione (classe dock-closing, senza clic) e la si risucchia dentro
+        // l'icona: prima la base si stringe a imbuto verso l'icona, poi tutto scende e
+        // sparisce. Al termine si rimettono le classi decise dal codice che l'ha chiusa.
+        // Agganciato con MutationObserver: nessuna funzione di chiusura va modificata.
+        function initDockGenie(menu) {
+            const riduci = window.matchMedia('(prefers-reduced-motion: reduce)');
+            let ultimaIcona = null; // ultimo pulsante del dock cliccato (es. quale AI)
+            menu.addEventListener('click', (e) => {
+                const a = e.target.closest('.sidebar-menu > li > a');
+                if (a) ultimaIcona = a;
+            }, true);
+            const visibile = (a) => !!(a && a.offsetParent !== null);
+            const icona = (sel) => document.querySelector(sel);
+            const detail = document.getElementById('settingsDetailFlyout');
+
+            // Elemento osservato -> { parte animata, icona di destinazione, sfondo da sfumare }
+            const bersagli = new Map();
+            const inChiusura = new Map(); // el -> { anims, finale, parte }
+
+            const termina = (el, applicaFinale) => {
+                const c = inChiusura.get(el);
+                if (!c) return;
+                inChiusura.delete(el);
+                // Niente transizioni CSS nel passaggio allo stato chiuso (eviterebbe un lampo).
+                c.parte.classList.add('dock-no-anim');
+                if (applicaFinale) el.className = c.finale;
+                else el.classList.remove('dock-closing');
+                el.classList.add('dock-no-anim');
+                osserva.takeRecords();
+                void el.offsetWidth;
+                c.anims.forEach(a => a.cancel());
+                requestAnimationFrame(() => {
+                    el.classList.remove('dock-no-anim');
+                    c.parte.classList.remove('dock-no-anim');
+                    osserva.takeRecords();
+                });
+            };
+
+            const chiudiAGenio = (el, vecchie) => {
+                const cfg = bersagli.get(el);
+                const a = cfg && cfg.icona();
+                if (riduci.matches || !visibile(a)) return;
+                const finale = el.className;
+                // Rimette lo stato aperto (con le stesse classi di prima) per l'animazione.
+                el.className = vecchie + ' dock-closing';
+                osserva.takeRecords();
+                const parte = cfg.parte(el);
+                const R = parte.getBoundingClientRect();
+                const I = a.getBoundingClientRect();
+                if (!R.width || !R.height) { el.className = finale; osserva.takeRecords(); return; }
+                const z = dockZoom();
+                const pct = (x) => Math.max(0, Math.min(100, ((x - R.left) / R.width) * 100)).toFixed(2) + '%';
+                const lB = pct(I.left), rB = pct(I.right);
+                const ox = (I.left + I.width / 2 - R.left) / z;
+                const dy = (I.top + I.height / 2 - R.bottom) / z;
+                const origine = ox + 'px 100%';
+                const anims = [parte.animate([
+                    { offset: 0, transformOrigin: origine, transform: 'none', clipPath: 'polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)', opacity: 1 },
+                    { offset: 0.42, transformOrigin: origine, transform: 'none', clipPath: 'polygon(0% 0%, 100% 0%, ' + rB + ' 100%, ' + lB + ' 100%)', opacity: 1 },
+                    { offset: 1, transformOrigin: origine, transform: 'translateY(' + dy + 'px) scaleY(0.03)', clipPath: 'polygon(' + lB + ' 0%, ' + rB + ' 0%, ' + rB + ' 100%, ' + lB + ' 100%)', opacity: 0.35 }
+                ], { duration: 560, easing: 'cubic-bezier(0.5, 0, 0.75, 0.25)', fill: 'forwards' })];
+                if (cfg.sfondo) anims.push(el.animate([{ backgroundColor: getComputedStyle(el).backgroundColor }, { backgroundColor: 'rgba(15, 23, 42, 0)' }], { duration: 420, fill: 'forwards' }));
+                inChiusura.set(el, { anims, finale, parte });
+                anims[0].finished.then(() => termina(el, true)).catch(() => {});
+            };
+
+            const osserva = new MutationObserver((records) => {
+                records.forEach((r) => {
+                    const el = r.target;
+                    if (inChiusura.has(el)) { termina(el, false); return; } // riaperta o cambiata nel frattempo
+                    const prima = ' ' + (r.oldValue || '') + ' ';
+                    if (prima.includes(' open ') && !el.classList.contains('open')) {
+                        chiudiAGenio(el, (r.oldValue || '').replace(/\bdock-(closing|no-anim)\b/g, '').trim());
+                    }
+                });
+            });
+            const registra = (el, cfg) => {
+                if (!el || bersagli.has(el)) return;
+                bersagli.set(el, cfg);
+                osserva.observe(el, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
+            };
+
+            // Elenchi del dock (la classe 'open' è sul <li>, si anima il flyout)
+            ['.nav-clients', '.nav-projects', '.nav-settings'].forEach((sel) => {
+                const li = document.querySelector('.sidebar ' + sel);
+                if (li) registra(li, { parte: (el) => el.querySelector(':scope > .settings-flyout'), icona: () => li.querySelector(':scope > a') });
+            });
+            // Pannello di dettaglio / elenco progetti: rientra nell'icona da cui è partito
+            registra(detail, {
+                parte: (el) => el,
+                icona: () => {
+                    const src = (currentView && currentView.kind === 'projectList') ? 'projects' : (currentDetailSource || 'projects');
+                    return icona('.sidebar .nav-' + src + ' > a') || icona('.sidebar .nav-projects > a');
                 }
-                syncSidebarWidthVar(wasMinimized);
+            });
+            // Finestre (task-modal): si anima la scheda, lo sfondo scuro sfuma
+            const modale = (id, iconaFn) => registra(document.getElementById(id), { parte: (el) => el.querySelector('.task-modal-card') || el, icona: iconaFn, sfondo: true });
+            modale('aiChatModal', () => (ultimaIcona && ultimaIcona.matches('[data-ai-open]') && visibile(ultimaIcona)) ? ultimaIcona
+                : [...document.querySelectorAll('.sidebar [data-ai-open]')].find(visibile));
+            modale('aiRisultatiModal', () => icona('#navAiRisultatiLink'));
+            modale('newRecordingModal', () => icona('#navRecordLink'));
+            // Jira: il pannello a tutto schermo viene creato al primo uso
+            const agganciaJira = () => {
+                const j = document.querySelector('.jira-flyout');
+                if (j) registra(j, { parte: (el) => el, icona: () => icona('#navJira > a') });
+                return !!j;
+            };
+            if (!agganciaJira()) {
+                const mo = new MutationObserver(() => { if (agganciaJira()) mo.disconnect(); });
+                mo.observe(document.body, { childList: true });
             }
         }
 
@@ -8240,6 +8806,15 @@
                 picker.focus();
                 picker.click();
             });
+            // Touch (iPad): si tocca direttamente il campo data, quindi il giorno corrente va
+            // preimpostato qui (il clic sul pulsante sotto non arriva).
+            const preimposta = () => {
+                if (!picker) return;
+                const pad = (n) => String(n).padStart(2, '0');
+                const t = new Date();
+                picker.value = meetingsDate || `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+            };
+            picker?.addEventListener('pointerdown', preimposta);
             picker?.addEventListener('change', () => { if (picker.value) setMeetingsDate(picker.value); });
             document.getElementById('meetingsTodayBtn')?.addEventListener('click', () => setMeetingsDate(null));
             const showAll = document.getElementById('meetingsShowAll');
@@ -8642,10 +9217,10 @@
                         bottoni.push(['<i class="fas fa-folder-open"></i> Apri dossier', 'primario', () => window.open(`dossier-cliente.html?lavoro=${encodeURIComponent(l.id)}`, '_blank')]);
                     } else if (l.operazione === 'pm_documento') {
                         bottoni.push(['<i class="fas fa-file-lines"></i> Apri documento', 'primario', () => window.open(`pm-documento.html?${new URLSearchParams({ lavoro: l.id, tipo: (d.richiesta.query && d.richiesta.query.tipo) || 'status' })}`, '_blank')]);
-                    } else if (l.operazione === 'pm_raid') {
+                    } else if (l.operazione === 'pm_raid' || l.operazione === 'pm_cr') {
                         const pid = (ris.progetto && ris.progetto.id) || '';
                         dett.innerHTML = `<div class="air-nota">${escapeHtml(String((ris.elementi || []).length))} proposte da rivedere e salvare nel Cruscotto PM.</div>`;
-                        bottoni.push(['<i class="fas fa-list-check"></i> Apri le proposte', 'primario', () => window.open(`pm.html?${new URLSearchParams({ projectId: pid, tab: 'raid', risultato: l.id })}`, '_blank')]);
+                        bottoni.push(['<i class="fas fa-list-check"></i> Apri le proposte', 'primario', () => window.open(`pm.html?${new URLSearchParams({ projectId: pid, tab: l.operazione === 'pm_cr' ? 'cr' : 'raid', risultato: l.id })}`, '_blank')]);
                     }
                     if (notaPronto) dett.insertAdjacentHTML('beforeend', notaPronto);
                 } catch (e) { dett.innerHTML = `<div class="air-nota" style="color:#B91C1C">${escapeHtml(e.message)}</div>`; }
@@ -12246,7 +12821,9 @@
             const isAdmin = Number(claims.id_roles) === 1;
             const dbNav = document.getElementById('navDatabase');
             if (dbNav) {
-                dbNav.style.display = isAdmin ? '' : 'none';
+                // Il database viewer esiste solo in locale (localhost).
+                const locale = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+                dbNav.style.display = (isAdmin && locale) ? '' : 'none';
             }
             // Monitor: admin del tenant PROJEXA, oppure utenti in sola lettura (lo dice il server).
             const projexa = String(claims.tenant_name || '').trim().toUpperCase() === 'PROJEXA';
@@ -12799,9 +13376,13 @@
             // barra laterale, a prescindere che il flyout clienti (livello 1) sia aperto o
             // meno (es. tornando indietro da un progetto con "‹" il livello 1 può risultare
             // chiuso, e prima il pannello restava "staccato" lasciando un vuoto).
-            flyout.classList.add('near-sidebar', 'open');
-            document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open');
-            document.querySelector('.nav-projects')?.classList.add('flyout-active');
+            // Dock: l'elenco clienti resta aperto e i progetti si aprono alla sua destra.
+            const navProj = document.querySelector('.nav-projects');
+            if (navProj && !navProj.classList.contains('open')) { positionDockPopover(navProj); navProj.classList.add('open'); }
+            navProj?.classList.add('flyout-active');
+            navProj?.classList.remove('detail-open');
+            positionDockSide(flyout, navProj);
+            flyout.classList.add('near-sidebar', 'dock-side', 'open');
             titleEl.textContent = clientName || 'Progetti';
             hideDetailManagement();
             updateBackButton();
@@ -12814,41 +13395,17 @@
                 // Cliente di un collaboratore del team (sola lettura): niente nuovi progetti.
                 const teamClient = !!document.querySelector(`#projectClientsList li[data-client-id="${CSS.escape(String(clientId))}"][data-client-team="1"], #clientsList li[data-client-id="${CSS.escape(String(clientId))}"][data-client-team="1"]`);
                 const addBtn = teamClient ? '' : `<button id="projAddBtn" type="button" style="margin-bottom:0.75rem; padding:0.4rem 0.7rem; background:#3B82F6; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">+ Nuovo progetto</button>`;
-                // Progetti del team: etichetta «Team: …» e niente rinomina (si aprono in sola lettura).
-                const rows = (projects || []).map(p => `<div class="settings-detail-link proj-row" data-proj-id="${escapeHtml(p.id)}" data-proj-name="${escapeHtml(p.name)}"><span class="flyout-item-label">${escapeHtml(p.name)}${teamBadgeHtml(p)}</span>${p.team ? '' : `<button type="button" class="proj-rename-btn" title="Rinomina il progetto" aria-label="Rinomina ${escapeHtml(p.name)}"><i class="fas fa-pen"></i></button>`}<span class="parent-arrow">›</span></div>`).join('')
+                // Progetti del team: etichetta «Team: …» (si aprono in sola lettura).
+                const rows = (projects || []).map(p => `<div class="settings-detail-link proj-row" data-proj-id="${escapeHtml(p.id)}" data-proj-name="${escapeHtml(p.name)}"><span class="flyout-item-label">${escapeHtml(p.name)}${teamBadgeHtml(p)}</span><span class="parent-arrow">›</span></div>`).join('')
                     || '<div style="color: var(--text-muted);">Nessun progetto</div>';
                 listEl.innerHTML = addBtn + rows;
                 listEl.querySelectorAll('.proj-row').forEach(r => r.addEventListener('click', (e) => {
                     e.stopPropagation(); // evita l'handler delegato di .settings-detail-link (clienti)
-                    if (e.target.closest('.proj-rename-btn')) { renameProject(r.dataset.projId, r.dataset.projName, clientId, clientName); return; }
                     openProjectDetail(r.dataset.projId, r.dataset.projName, clientId);
                 }));
                 const ab = document.getElementById('projAddBtn');
                 if (ab) ab.addEventListener('click', () => openNewProjectForm(clientId, clientName));
             } catch (e) { listEl.innerHTML = '<div style="color: var(--text-muted);">Errore di connessione</div>'; }
-        }
-
-        // Rinomina (matita nell'elenco progetti): PUT /projects/:id/name, il server mantiene la
-        // cifratura del nome. Poi si ricarica l'elenco (e i KPI, con l'aggiornamento automatico).
-        async function renameProject(projectId, currentName, clientId, clientName) {
-            const nuovo = prompt('Nuovo nome del progetto:', currentName || '');
-            if (nuovo == null) return;
-            const name = nuovo.replace(/\s+/g, ' ').trim();
-            if (!name || name === currentName) return;
-            try {
-                const res = await fetch(`${API_URL}/projects/${encodeURIComponent(projectId)}/name`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                    body: JSON.stringify({ name })
-                });
-                if (res.ok) {
-                    showNotification('Progetto rinominato', 'success');
-                    renderProjectList(clientId, clientName);
-                } else {
-                    const e = await res.json().catch(() => ({}));
-                    showNotification('Errore: ' + (e.error || res.status), 'info');
-                }
-            } catch (e) { showNotification('Errore di connessione', 'info'); }
         }
 
         // Form "Nuovo progetto": nome + modello (progetto esistente o standard) -> POST /projects.
@@ -14149,11 +14706,13 @@
         // scalata: diventerebbero più alti della finestra e le voci in fondo uscirebbero fuori.
         // Compensiamo impostando l'altezza a (finestra reale / zoom) così restano alti quanto
         // lo schermo; con overflow-y:auto le voci in basso risalgono e diventano scorribili.
+        // Dock in basso (2026-10-10): dock, elenchi e pannello di dettaglio hanno altezze
+        // proprie nel CSS (già compensate con --ui-zoom-inv), quindi qui si tolgono soltanto
+        // eventuali altezze in linea: imporre l'altezza dello schermo allungherebbe il dock
+        // fino in cima alla pagina.
         function adjustFixedHeightsForZoom() {
-            const z = currentUiZoom || 1;
-            const h = Math.round(window.innerHeight / z);
             document.querySelectorAll('.sidebar, .settings-flyout, .settings-detail-flyout, .settings-flyout-inner, .settings-detail-flyout-inner')
-                .forEach(el => { el.style.height = h + 'px'; });
+                .forEach(el => { el.style.removeProperty('height'); });
         }
         // Adatta la scala dell'interfaccia (zoom) in base a
         // Settings > Preferenze > Dimensioni (tipo_valore=30, valore2='schermo').
@@ -14858,7 +15417,7 @@
             document.querySelector('.nav-settings')?.classList.remove('open', 'detail-open', 'flyout-active');
             document.querySelector('.nav-clients')?.classList.remove('open', 'detail-open', 'flyout-active');
             document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open', 'flyout-active');
-            document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar', 'contacts-wide');
+            document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar', 'contacts-wide', 'dock-side');
             projectDetailActive = false;
             projectClientId = null;
             currentProjectClosed = false;
@@ -16204,7 +16763,7 @@
             currentView = { kind: 'detail', source, argument, label, containerCampo: currentContainerCampo };
             updateBackButton();
             flyout.classList.add('open', 'near-sidebar');
-            flyout.classList.remove('contacts-wide'); // la vista standard non è allargata
+            flyout.classList.remove('contacts-wide', 'dock-side'); // la vista standard non è allargata
             setDetailColumns(1); // default; il conteggio reale viene impostato dopo il caricamento
             // Il dettaglio è sempre attaccato alla sidebar: chiude il primo flyout da cui si è
             // aperto (Impostazioni, Clienti o Progetti), così resta visibile solo il pannello
@@ -19450,7 +20009,8 @@
             const detailFlyout = document.getElementById('settingsDetailFlyout');
             if (!nav) return;
 
-            const sameFirstFlyoutOpen = nav.classList.contains('open') || nav.classList.contains('flyout-active');
+            // (un elenco che sta rientrando nel dock con l'animazione conta come già chiuso)
+            const sameFirstFlyoutOpen = (nav.classList.contains('open') && !nav.classList.contains('dock-closing')) || nav.classList.contains('flyout-active');
             const sameDetailOpen = detailFlyout?.classList.contains('open') &&
                 (currentDetailSource === source || (source === 'projects' && projectDetailActive));
 
@@ -19460,6 +20020,7 @@
             }
 
             closeAllFlyouts();
+            positionDockPopover(nav);
             nav.classList.add('open', 'flyout-active');
         }
 
@@ -19586,7 +20147,7 @@
                 detailMaxCols = 5;
                 projectClientId = null;
                 currentProjectManageByHoursValue = null;
-                document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar');
+                document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar', 'dock-side');
                 document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open', 'flyout-active');
                 closeBtn.style.display = 'none';
             });
@@ -20188,7 +20749,7 @@
                     currentProjectClosed = false;
                     currentProjectShowAllFields = false;
                     currentProjectManageByHoursValue = null;
-                    document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar');
+                    document.getElementById('settingsDetailFlyout')?.classList.remove('open', 'near-sidebar', 'dock-side');
                     document.querySelector('.nav-projects')?.classList.remove('open', 'detail-open', 'flyout-active');
                     const detailCloseBtn = document.getElementById('detailCloseBtn');
                     if (detailCloseBtn) detailCloseBtn.style.display = 'none';

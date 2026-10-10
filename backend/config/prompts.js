@@ -70,6 +70,11 @@ export const PROMPT_FUNCTIONS = {
     titolo: 'Rischi, decisioni e change request dalla riunione',
     segnaposto: ['PROGETTO', 'OGGETTO', 'DATA_RIUNIONE', 'TESTO', 'GIA_PRESENTI']
   },
+  // Pulsante «Estrai dalle riunioni» della scheda Change Request: solo CR (JSON nel testo standard).
+  CR_ESTRAZIONE: {
+    titolo: 'Change request dalla riunione',
+    segnaposto: ['PROGETTO', 'OGGETTO', 'DATA_RIUNIONE', 'TESTO', 'GIA_PRESENTI']
+  },
   CHIEDI_PROGETTO: {
     titolo: 'Chiedi al progetto',
     segnaposto: ['DATI', 'DOMANDA', 'STORIA', 'DATA', 'UTENTE']

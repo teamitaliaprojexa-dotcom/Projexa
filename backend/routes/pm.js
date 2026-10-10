@@ -281,8 +281,7 @@ router.post('/raid/estrai', ...rottaAi('pm_raid', async (req, res) => {
     const r = await chiediAi(req.user, build, '', { json: true, ai: req.aiScelta });
     const j = leggiJson(r.testo);
     if (!j) throw errore(502, `${r.label} non ha restituito un elenco leggibile: riprova`);
-    const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9àèéìòù ]/g, '').replace(/\s+/g, ' ').trim();
-    const titoli = new Set([...esistenti, ...crEsistenti].map((x) => norm(x.titolo)));
+    const titoli = new Set([...esistenti, ...crEsistenti].map((x) => normTitolo(x.titolo)));
     const mappa = (arr, tipo) => (Array.isArray(arr) ? arr : []).filter((x) => x && x.titolo).map((x) => ({
       tipo,
       titolo: String(x.titolo).slice(0, 500),
@@ -293,25 +292,66 @@ router.post('/raid/estrai', ...rottaAi('pm_raid', async (req, res) => {
       mitigazione: x.mitigazione ? String(x.mitigazione) : '',
       decisa_da: x.decisa_da ? String(x.decisa_da) : '',
       data_revisione: tipo === 'decisione' ? (dataIso(x.data) || m.data) : null,
-      esiste: titoli.has(norm(x.titolo))
+      esiste: titoli.has(normTitolo(x.titolo))
     }));
     res.json({
       progetto: { id: prog.projectId, nome: prog.nome }, riunione: { id_calendar: m.id_calendar, oggetto: m.oggetto, data: m.data },
       ai: `${r.label}${r.model ? ` (${r.model})` : ''}`,
       elementi: [...mappa(j.rischi, 'rischio'), ...mappa(j.decisioni, 'decisione'), ...mappa(j.dipendenze, 'dipendenza'),
         // Change Request: richieste del cliente che cambiano lo scope (diventano Bozze).
-        ...(Array.isArray(j.change_request) ? j.change_request : []).filter((x) => x && x.titolo).map((x) => ({
-          tipo: 'change_request',
-          titolo: String(x.titolo).slice(0, 500),
-          descrizione: x.descrizione ? String(x.descrizione) : '',
-          motivo: x.motivo ? String(x.motivo) : '',
-          richiesta_da: x.richiesta_da ? String(x.richiesta_da) : '',
-          effort_delta: numero(x.effort),
-          giorni_delta: Number.isFinite(numero(x.giorni)) ? Math.round(numero(x.giorni)) : null,
-          esiste: titoli.has(norm(x.titolo))
-        }))]
+        ...proposteCr(j, titoli)]
     });
   } catch (e) { invia(res, e, 'RAID_ESTRAI'); }
+}));
+
+const normTitolo = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9àèéìòù ]/g, '').replace(/\s+/g, ' ').trim();
+// Change Request proposte dall'AI (lista "change_request" del JSON); titoli = già presenti (normalizzati).
+function proposteCr(j, titoli) {
+  return (Array.isArray(j.change_request) ? j.change_request : []).filter((x) => x && x.titolo).map((x) => ({
+    tipo: 'change_request',
+    titolo: String(x.titolo).slice(0, 500),
+    descrizione: x.descrizione ? String(x.descrizione) : '',
+    motivo: x.motivo ? String(x.motivo) : '',
+    richiesta_da: x.richiesta_da ? String(x.richiesta_da) : '',
+    effort_delta: numero(x.effort),
+    giorni_delta: Number.isFinite(numero(x.giorni)) ? Math.round(numero(x.giorni)) : null,
+    esiste: titoli.has(normTitolo(x.titolo))
+  }));
+}
+
+// Solo Change Request dal recap (o dalla trascrizione) di una riunione: pulsante «Estrai dalle
+// riunioni» della scheda Change Request, prompt CR_ESTRAZIONE. Body: { projectId?, id_calendar }.
+// Si salvano con /raid/importa (sempre in Bozza).
+router.post('/cr/estrai', ...rottaAi('pm_cr', async (req, res) => {
+  try {
+    const idCal = String((req.body && req.body.id_calendar) || '').trim();
+    if (!idCal) throw errore(400, 'Riunione non indicata');
+    const m = (await db.query(
+      `SELECT id_calendar, oggetto, data_calendar::text AS data, recap, trascrizione, project_id::text AS project_id
+         FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, idCal])).rows[0];
+    if (!m) throw errore(404, 'Riunione non gestita con Projexa');
+    const projectId = m.project_id || pid(req);
+    if (!projectId) throw errore(400, 'Collega prima la riunione a un progetto (tendina Progetto nella riga della riunione)');
+    const prog = await progettoUtente(req.user, projectId);
+    const base = stripMarkdown(String(m.recap || '')).trim() || String(m.trascrizione || '').trim();
+    if (!base) throw errore(400, 'La riunione non ha né recap né trascrizione');
+    const esistenti = await crProgetto(req.user, prog.projectId);
+    const gia = esistenti.length ? esistenti.map((x) => `- ${x.codice || ''} ${x.titolo}`).join('\n') : '(nessuna)';
+    const vars = {
+      PROGETTO: prog.nome, OGGETTO: m.oggetto || 'Riunione', DATA_RIUNIONE: dataIt(m.data), TESTO: base.slice(0, 120000), GIA_PRESENTI: gia
+    };
+    const tpl = (await getPromptFor('CR_ESTRAZIONE', req.user)).testo;
+    const build = () => tpl.replace(/\{\{(PROGETTO|OGGETTO|DATA_RIUNIONE|TESTO|GIA_PRESENTI)\}\}/g, (x, k) => vars[k]);
+    const r = await chiediAi(req.user, build, '', { json: true, ai: req.aiScelta });
+    const j = leggiJson(r.testo);
+    if (!j) throw errore(502, `${r.label} non ha restituito un elenco leggibile: riprova`);
+    res.json({
+      progetto: { id: prog.projectId, nome: prog.nome }, riunione: { id_calendar: m.id_calendar, oggetto: m.oggetto, data: m.data },
+      ai: `${r.label}${r.model ? ` (${r.model})` : ''}`,
+      elementi: proposteCr(j, new Set(esistenti.map((x) => normTitolo(x.titolo))))
+    });
+  } catch (e) { invia(res, e, 'CR_ESTRAI'); }
 }));
 
 // Istruzioni per le Change Request, aggiunte ai prompt RAID_ESTRAZIONE salvati prima che esistessero.
@@ -324,7 +364,6 @@ Aggiungile all'oggetto JSON della risposta nella lista "change_request":
 router.post('/raid/importa', async (req, res) => {
   let client;
   try {
-    await richiedeTabella('pm_raid');
     const b = req.body || {};
     const prog = await progettoUtente(req.user, b.projectId);
     const idCal = testo(b.id_calendar, 300);
@@ -336,6 +375,7 @@ router.post('/raid/importa', async (req, res) => {
     // completano nella scheda Change Request.
     const cr = crIn.map((x) => ({ ...datiCr({ titolo: x.titolo, descrizione: x.descrizione, motivo: x.motivo, richiesta_da: x.richiesta_da, effort_delta: x.effort_delta, giorni_delta: x.giorni_delta }), stato: 'bozza', data_decisione: null }));
     if (!elementi.length && !cr.length) throw errore(400, 'Nessun elemento da salvare');
+    if (elementi.length) await richiedeTabella('pm_raid');
     if (cr.length) await richiedeTabella('pm_change_request');
     let riunione = null;
     if (idCal && cr.length) {

@@ -213,7 +213,8 @@
             return `<div><div class="heat">${h}</div><div class="pm-nota" style="margin-top:0.3rem">↑ probabilità · → impatto (rischi aperti)</div></div>`;
         }
         function renderRaid(p) {
-            const r = raidDati.raid;
+            // Senza «anche chiusi» si nascondono sia le righe con Stato «Chiuso» sia quelle tolte dal registro.
+            const r = raidTutte ? raidDati.raid : raidDati.raid.filter((x) => x.stato !== 'chiuso');
             const per = (t) => r.filter((x) => x.tipo === t);
             const riga = (x, cols) => `<tr class="click${x.stato === 'chiuso' || x.riga_chiusa ? ' chiuso' : ''}" data-id="${esc(x.id)}">${cols(x)}</tr>`;
             // Riga tolta dal registro: scadenza = giorno prima della chiusura.
@@ -233,7 +234,7 @@
             p.innerHTML = `${raidDati.tabelle ? '' : sqlMancante()}
                 <div class="pm-card">
                     <h2><i class="fas fa-triangle-exclamation"></i> Rischi <span class="azioni">
-                        <label class="pm-nota" style="display:flex;align-items:center;gap:0.3rem" title="Mostra anche le righe tolte dal registro con «Togli dal registro» (scadenza passata). I rischi con Stato «Chiuso» si vedono sempre."><input type="checkbox" id="raidTutte" ${raidTutte ? 'checked' : ''}> anche chiusi (scaduti)</label>
+                        <label class="pm-nota" style="display:flex;align-items:center;gap:0.3rem" title="Mostra anche le righe con Stato «Chiuso» e quelle tolte dal registro con «Togli dal registro» (scadenza passata)."><input type="checkbox" id="raidTutte" ${raidTutte ? 'checked' : ''}> anche chiusi (scaduti)</label>
                         <button class="pm-btn piccolo verde" id="btnEstrai" title="L'AI legge il recap di una riunione e propone rischi, decisioni, dipendenze e Change Request (in bozza)"><i class="fas fa-wand-magic-sparkles"></i> Estrai dalle riunioni</button>${nuovo('rischio')}</span></h2>
                     <div style="display:grid; grid-template-columns: minmax(0,1fr) auto; gap:1.2rem; align-items:start">${tabRischi}${heatmap(rischi)}</div>
                 </div>
@@ -251,7 +252,7 @@
             p.querySelector('#btnEstrai').addEventListener('click', () => estraiDaRiunione());
             if (qs.get('estrai') && !raidDati._estraiAperta) { raidDati._estraiAperta = true; estraiDaRiunione(qs.get('estrai')); }
             // Da «Risultati AI»: proposte arrivate in modalità Batch, da rivedere e salvare.
-            if (qs.get('risultato') && !raidDati._estraiAperta) { raidDati._estraiAperta = true; estraiDaRiunione(null, qs.get('risultato')); }
+            if (qs.get('risultato') && qs.get('tab') !== 'cr' && !raidDati._estraiAperta) { raidDati._estraiAperta = true; estraiDaRiunione(null, qs.get('risultato')); }
         }
         // Scelta della persona (owner, decisa da, richiesta da): «Cliente» = Contatti del cliente del
         // progetto, «Interno» = persone del team del progetto (Kick-off, proj_componenti). Gli elenchi
@@ -337,15 +338,18 @@
             if (sola) m.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; });
         }
 
-        async function estraiDaRiunione(preselezione, risultatoId) {
+        // soloCr = pulsante della scheda Change Request: solo CR, prompt CR_ESTRAZIONE («AI Funzioni PM»).
+        async function estraiDaRiunione(preselezione, risultatoId, soloCr = false) {
             let riunioni;
             try { riunioni = await api(`/riunioni?projectId=${encodeURIComponent(projectId)}`); } catch (e) { toast(e.message, 'errore'); return; }
             if (!riunioni.length) { toast('Nessuna riunione con recap collegata a questo progetto', 'errore'); return; }
             const m = modale({
-                titolo: '<i class="fas fa-wand-magic-sparkles"></i> Rischi, decisioni e Change Request dalle riunioni',
+                titolo: soloCr ? '<i class="fas fa-wand-magic-sparkles"></i> Change Request dalle riunioni' : '<i class="fas fa-wand-magic-sparkles"></i> Rischi, decisioni e Change Request dalle riunioni',
                 larga: true,
-                corpo: `<p class="pm-nota" style="margin-top:0">Scegli una riunione del progetto: l'AI legge il recap (o la trascrizione) e propone rischi, decisioni, dipendenze e Change Request. Rivedi tutto prima di salvare: le Change Request vengono salvate sempre in <b>Bozza</b>.</p>
-                    <label class="pm-form" style="display:block"><select class="pm-input" id="selRiunione">${riunioni.map((r) => `<option value="${esc(r.id_calendar)}">${dataIt(r.data)} – ${esc(r.oggetto)}${r.giaEstratta ? ' (già usata)' : ''}${r.haRecap ? '' : ' (solo trascrizione)'}</option>`).join('')}</select></label>
+                corpo: `<p class="pm-nota" style="margin-top:0">${soloCr
+                        ? "Scegli una riunione del progetto: l'AI legge il recap (o la trascrizione) e propone le Change Request, cioè le richieste che cambiano lo scope. Rivedi tutto prima di salvare: vengono salvate sempre in <b>Bozza</b>."
+                        : "Scegli una riunione del progetto: l'AI legge il recap (o la trascrizione) e propone rischi, decisioni, dipendenze e Change Request. Rivedi tutto prima di salvare: le Change Request vengono salvate sempre in <b>Bozza</b>."}</p>
+                    <label class="pm-form" style="display:block"><select class="pm-input" id="selRiunione">${riunioni.map((r) => `<option value="${esc(r.id_calendar)}">${dataIt(r.data)} – ${esc(r.oggetto)}${r.giaEstratta && !soloCr ? ' (già usata)' : ''}${r.haRecap ? '' : ' (solo trascrizione)'}</option>`).join('')}</select></label>
                     <div id="esitoEstrai" style="margin-top:0.9rem"></div>`,
                 pulsanti: [{ testo: 'Chiudi' },
                     { testo: '<i class="fas fa-wand-magic-sparkles"></i> Analizza', classe: 'verde', azione: async (mm) => { await analizza(mm); return false; } },
@@ -367,7 +371,7 @@
                     risultatoId = null;
                     const [r] = await Promise.all([
                         daRisultato ? PM.risultatoAi(daRisultato).then((x) => x.risultato || {})
-                            : api('/raid/estrai', { metodo: 'POST', corpo: { projectId, id_calendar: idCal }, ai: 'pm_raid', titolo: dati && dati.progetto ? dati.progetto.nome : '' }),
+                            : api(soloCr ? '/cr/estrai' : '/raid/estrai', { metodo: 'POST', corpo: { projectId, id_calendar: idCal }, ai: soloCr ? 'pm_cr' : 'pm_raid', titolo: dati && dati.progetto ? dati.progetto.nome : '' }),
                         caricaPersone()]);
                     if (r.batch) { proposte = null; box.innerHTML = `<div class="pm-nota"><i class="fas fa-hourglass-half"></i> ${esc(r.messaggio)}</div>`; return; }
                     if (daRisultato && r.riunione) {
@@ -376,7 +380,7 @@
                         if ([...sel.options].some((o) => o.value === idCal)) sel.value = idCal;
                     }
                     proposte = r.elementi;
-                    if (!proposte.length) { box.innerHTML = '<div class="pm-vuoto">L\'AI non ha trovato rischi, decisioni, dipendenze o Change Request in questa riunione.</div>'; return; }
+                    if (!proposte.length) { box.innerHTML = `<div class="pm-vuoto">L'AI non ha trovato ${soloCr ? 'Change Request' : 'rischi, decisioni, dipendenze o Change Request'} in questa riunione.</div>`; return; }
                     const eCr = (x) => x.tipo === 'change_request';
                     const persona = (x) => (eCr(x) ? 'richiesta_da' : x.tipo === 'decisione' ? 'decisa_da' : 'owner');
                     const ETICH_PERSONA = { owner: 'Owner', decisa_da: 'Decisa da', richiesta_da: 'Richiesta da' };
@@ -396,14 +400,15 @@
                 const scelti = [...mm.querySelectorAll('input[type="checkbox"][data-i]:checked')].map((c) => proposte[c.dataset.i]);
                 if (!scelti.length) throw new Error('Nessun elemento selezionato');
                 const r = await api('/raid/importa', { metodo: 'POST', corpo: { projectId, id_calendar: idCal, elementi: scelti } });
-                toast(r.changeRequest ? `${r.creati} elementi salvati, di cui ${r.changeRequest} Change Request in bozza` : `${r.creati} elementi aggiunti al registro`);
-                caricaRaid(); caricaPanoramica();
+                toast(soloCr ? `${r.changeRequest} Change Request salvate in bozza` : r.changeRequest ? `${r.creati} elementi salvati, di cui ${r.changeRequest} Change Request in bozza` : `${r.creati} elementi aggiunti al registro`);
+                if (caricati.raid) caricaRaid();
+                caricaPanoramica();
                 if (r.changeRequest && caricati.cr) caricaCr(); // scheda Change Request già aperta: si aggiorna
             }
         }
 
         // ================= CHANGE REQUEST =================
-        let crDati = null;
+        let crDati = null, crEstraiAperta = false;
         const STATI_CR = { bozza: 'Bozza', inviata: 'Inviata al cliente', approvata: 'Approvata', rifiutata: 'Rifiutata' };
         async function caricaCr() {
             const p = pannello('cr');
@@ -416,7 +421,7 @@
             const somma = (arr, k) => arr.reduce((s, x) => s + (Number(x[k]) || 0), 0);
             p.innerHTML = `${crDati.tabelle ? '' : sqlMancante()}
                 <div class="pm-card">
-                    <h2><i class="fas fa-code-pull-request"></i> Change Request <span class="azioni"><button class="pm-btn piccolo primario" id="nuovaCr"><i class="fas fa-plus"></i> Nuova Change Request</button></span></h2>
+                    <h2><i class="fas fa-code-pull-request"></i> Change Request <span class="azioni"><button class="pm-btn piccolo verde" id="btnEstraiCr" title="L'AI legge il recap di una riunione e propone le Change Request (in bozza)"><i class="fas fa-wand-magic-sparkles"></i> Estrai dalle riunioni</button><button class="pm-btn piccolo primario" id="nuovaCr"><i class="fas fa-plus"></i> Nuova Change Request</button></span></h2>
                     <div class="pm-kpi" style="margin-bottom:0.9rem">
                         <div><small>Approvate</small><b>${app.length}</b></div>
                         <div><small>Effort approvato</small><b>${somma(app, 'effort_delta') > 0 ? '+' : ''}${fmt(somma(app, 'effort_delta'))} ${esc(u)}</b></div>
@@ -429,6 +434,9 @@
                     </tbody></table></div>` : '<div class="pm-vuoto">Nessuna Change Request. Registra qui ogni richiesta del cliente che cambia lo scope: le CR approvate aumentano il budget usato per la salute e la previsione a finire.</div>'}
                 </div>`;
             p.querySelector('#nuovaCr').addEventListener('click', () => formCr({}));
+            p.querySelector('#btnEstraiCr').addEventListener('click', () => estraiDaRiunione(null, null, true));
+            // Da «Risultati AI»: Change Request arrivate in modalità Batch, da rivedere e salvare.
+            if (qs.get('tab') === 'cr' && qs.get('risultato') && !crEstraiAperta) { crEstraiAperta = true; estraiDaRiunione(null, qs.get('risultato'), true); }
             p.querySelectorAll('tr.click').forEach((tr) => tr.addEventListener('click', () => formCr(l.find((x) => x.id === tr.dataset.id))));
         }
         async function formCr(x) {
