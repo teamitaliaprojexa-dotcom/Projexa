@@ -32,6 +32,7 @@ import {
   raidProgetto, crProgetto, taskProgetto, issueProgetto, riunioniProgetto, contestoProgetto,
   chiediAi, leggiJson
 } from '../config/pmCore.js';
+import { economiaEuro, normVoce, VALUTE, CATEGORIE_ESTERNE } from '../config/pmEconomia.js';
 
 const router = express.Router();
 
@@ -469,6 +470,96 @@ router.delete('/cr/:id', async (req, res) => {
     await chiudi(req, 'pm_change_request', req.params.id, prog.projectId);
     res.json({ ok: true });
   } catch (e) { invia(res, e, 'CR_DEL'); }
+});
+
+// ============================================================================
+// ECONOMIA IN DENARO (Earned Value in euro, margine, costi esterni, valuta)
+// Calcoli in config/pmEconomia.js, tabelle in Supporto/CreaDB/pm_economia.sql.
+// ============================================================================
+async function richiedeEconomia(nome) {
+  if (!(await tabellaPresente(nome))) throw errore(503, 'Funzione non ancora attiva: va eseguito lo script Supporto/CreaDB/pm_economia.sql sul database');
+}
+router.get('/economia', async (req, res) => {
+  try {
+    const prog = await progettoUtente(req.user, pid(req));
+    const ec = await economiaEuro(req.user, prog.projectId, { prog });
+    res.json({ ...ec, esterni: conPermesso(req, ec.esterni), categorie: CATEGORIE_ESTERNE });
+  } catch (e) { invia(res, e, 'ECONOMIA'); }
+});
+// Valuta del contratto e cambio (1 EUR = cambio unità della valuta).
+router.put('/economia/impostazioni', async (req, res) => {
+  try {
+    await richiedeEconomia('pm_economia');
+    const prog = await progettoUtente(req.user, pid(req));
+    const b = req.body || {};
+    const valuta = String(b.valuta || 'EUR').trim().toUpperCase();
+    if (!VALUTE.includes(valuta)) throw errore(400, `Valuta non ammessa: ${valuta}`);
+    const cambio = valuta === 'EUR' ? null : decimale(b.cambio);
+    if (cambio != null && cambio <= 0) throw errore(400, 'Il cambio deve essere maggiore di zero');
+    await db.query(
+      `INSERT INTO pm_economia (tenant_id, user_id, project_id, valuta, cambio) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (tenant_id, user_id, project_id) DO UPDATE SET valuta = EXCLUDED.valuta, cambio = EXCLUDED.cambio, updated_at = now()`,
+      [req.user.tenant_id, req.user.user_id, prog.projectId, valuta, cambio]);
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'ECONOMIA_IMP'); }
+});
+// Costo interno di una voce dei Costi Progetto: vale per tutti i progetti dell'utente.
+// Vuoto = toglie il costo.
+router.put('/economia/costo-interno', async (req, res) => {
+  try {
+    await richiedeEconomia('pm_costo_interno');
+    const b = req.body || {};
+    const voce = normVoce(b.voce);
+    if (!voce) throw errore(400, 'Voce non indicata');
+    const gg = decimale(b.costo_gg), hh = decimale(b.costo_hh);
+    if ((gg != null && gg < 0) || (hh != null && hh < 0)) throw errore(400, 'Il costo non può essere negativo');
+    if (gg == null && hh == null) {
+      await db.query('DELETE FROM pm_costo_interno WHERE tenant_id = $1 AND user_id = $2 AND voce = $3', [req.user.tenant_id, req.user.user_id, voce]);
+    } else {
+      await db.query(
+        `INSERT INTO pm_costo_interno (tenant_id, user_id, voce, costo_gg, costo_hh) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (tenant_id, user_id, voce) DO UPDATE SET costo_gg = EXCLUDED.costo_gg, costo_hh = EXCLUDED.costo_hh, updated_at = now()`,
+        [req.user.tenant_id, req.user.user_id, voce, gg, hh]);
+    }
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'ECONOMIA_COSTO'); }
+});
+function datiEsterno(b, parziale = false) {
+  const d = {};
+  const set = (k, v) => { if (!parziale || Object.prototype.hasOwnProperty.call(b, k)) d[k] = v; };
+  set('categoria', scelta(b.categoria, Object.keys(CATEGORIE_ESTERNE), 'fornitore'));
+  set('descrizione', testo(b.descrizione, 1000));
+  set('fornitore', testo(b.fornitore, 300));
+  set('data', dataOpz(b.data));
+  set('previsto', decimale(b.previsto));
+  set('effettivo', decimale(b.effettivo));
+  set('note', testo(b.note));
+  if ((!parziale || 'descrizione' in d) && !d.descrizione) throw errore(400, 'La descrizione è obbligatoria');
+  return d;
+}
+router.post('/economia/esterni', async (req, res) => {
+  try {
+    await richiedeEconomia('pm_costo_esterno');
+    const prog = await progettoUtente(req.user, pid(req));
+    const id = await inserisci(db, 'pm_costo_esterno', { ...baseRiga(req, prog), ...datiEsterno(req.body || {}) });
+    res.status(201).json({ id });
+  } catch (e) { invia(res, e, 'ESTERNO_NEW'); }
+});
+router.put('/economia/esterni/:id', async (req, res) => {
+  try {
+    await richiedeEconomia('pm_costo_esterno');
+    const prog = await progettoUtente(req.user, pid(req));
+    await aggiorna(req, 'pm_costo_esterno', req.params.id, prog.projectId, datiEsterno(req.body || {}, true));
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'ESTERNO_UPD'); }
+});
+router.delete('/economia/esterni/:id', async (req, res) => {
+  try {
+    await richiedeEconomia('pm_costo_esterno');
+    const prog = await progettoUtente(req.user, pid(req));
+    await chiudi(req, 'pm_costo_esterno', req.params.id, prog.projectId);
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'ESTERNO_DEL'); }
 });
 
 // ============================================================================

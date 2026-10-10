@@ -2262,13 +2262,23 @@
         }
 
         .kpi-card {
+            position: relative;
             cursor: pointer;
-            transition: box-shadow 0.2s, transform 0.2s;
+            transition: box-shadow 0.25s ease, transform 0.3s cubic-bezier(0.34, 1.4, 0.64, 1);
         }
 
+        /* Mini KPI sotto il mouse: zoom del 25%, sopra ai vicini, con un'ombra più marcata */
         .kpi-card:hover {
-            box-shadow: 0 4px 14px rgba(0,0,0,0.08);
-            transform: translateY(-1px);
+            z-index: 5;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+            transform: scale(1.25);
+        }
+        /* Prima e ultima colonna (griglia da 10) crescono verso l'interno, senza uscire dalla pagina */
+        #dashboardKpiGrid .kpi-card:nth-child(10n + 1) { transform-origin: left center; }
+        #dashboardKpiGrid .kpi-card:nth-child(10n) { transform-origin: right center; }
+        @media (prefers-reduced-motion: reduce) {
+            .kpi-card { transition: box-shadow 0.2s ease; }
+            .kpi-card:hover { transform: none; }
         }
 
         .kpi-main-row {
@@ -4163,6 +4173,52 @@
         .dock-no-anim, .dock-no-anim * { transition: none !important; }
         /* Il pannello di dettaglio si chiude dal dock: la X non serve più */
         #detailCloseBtn { display: none !important; }
+
+        /* Pannello «durante la riunione» (a sinistra: il registratore è in basso a destra) */
+        .meeting-panel {
+            position: fixed; left: 12px; top: 12px; bottom: calc(var(--dock-h) + 12px); z-index: 780;
+            width: min(460px, calc(calc(100vw * var(--ui-zoom-inv, 1)) - 24px));
+            display: flex; flex-direction: column; background: #fff; border: 1px solid rgba(15, 23, 42, 0.1);
+            border-radius: 16px; box-shadow: 0 22px 60px rgba(15, 23, 42, 0.25);
+            transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none;
+            transition: transform 0.38s cubic-bezier(0.2, 1.1, 0.36, 1), opacity 0.2s ease;
+        }
+        .meeting-panel.open { transform: none; opacity: 1; pointer-events: auto; }
+        .mp-head { display: flex; align-items: flex-start; gap: 0.4rem; padding: 0.9rem 1rem 0.7rem; border-bottom: 1px solid var(--border); }
+        .mp-titoli { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+        .mp-eti { font-size: 0.7rem; font-weight: 700; color: #6366F1; text-transform: uppercase; letter-spacing: 0.04em; }
+        .mp-titoli strong { font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mp-sub { font-size: 0.8rem; color: var(--text-muted); }
+        .mp-sub a { color: #4F46E5; text-decoration: none; font-weight: 600; }
+        .mp-head button { border: none; background: transparent; color: var(--text-muted); cursor: pointer; padding: 0.3rem 0.4rem; border-radius: 6px; }
+        .mp-head button:hover { background: #F3F4F6; color: var(--dark); }
+        .mp-body { flex: 1; overflow-y: auto; padding: 0.6rem 0.9rem 1rem; font-size: 0.84rem; }
+        .mp-sez { border-bottom: 1px solid #F1F5F9; padding: 0.35rem 0; }
+        .mp-sez > summary { cursor: pointer; font-weight: 700; color: #312E81; padding: 0.35rem 0; list-style: none; display: flex; align-items: center; gap: 0.45rem; }
+        .mp-sez > summary::-webkit-details-marker { display: none; }
+        .mp-n { margin-left: auto; background: #EEF2FF; color: #4F46E5; border-radius: 999px; font-size: 0.72rem; padding: 0 0.5rem; }
+        .mp-meta { margin: 0 0 0.4rem; color: var(--text-muted); font-size: 0.78rem; }
+        .mp-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+        .mp-lista li { border: 1px solid #E5E7EB; border-radius: 10px; padding: 0.45rem 0.6rem; background: #FAFAFB; }
+        .mp-lista label { display: flex; gap: 0.55rem; align-items: flex-start; cursor: pointer; }
+        .mp-lista input { margin-top: 0.2rem; width: 16px; height: 16px; flex: 0 0 auto; accent-color: #10B981; }
+        .mp-lista span { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+        .mp-lista em { font-style: normal; color: #4B5563; }
+        .mp-lista small { color: var(--text-muted); font-size: 0.74rem; }
+        .mp-lista li.fatto { background: #ECFDF5; border-color: #A7F3D0; }
+        .mp-lista li.fatto b, .mp-lista li.fatto em { text-decoration: line-through; color: #6B7280; }
+        .mp-scaduta { color: #DC2626; font-weight: 600; }
+        .mp-recap { margin-top: 0.5rem; font-size: 0.8rem; }
+        .mp-recap summary { cursor: pointer; color: #4F46E5; font-weight: 600; }
+        .mp-recap div { margin-top: 0.4rem; padding: 0.5rem 0.6rem; background: #F9FAFB; border-radius: 8px; max-height: 260px; overflow-y: auto; line-height: 1.45; }
+        .mp-tab { overflow-x: auto; }
+        .mp-tab table { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
+        .mp-tab th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 0.25rem 0.35rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+        .mp-tab td { padding: 0.3rem 0.35rem; border-bottom: 1px solid #F3F4F6; vertical-align: top; }
+        .mp-vuoto { color: #9CA3AF; font-style: italic; padding: 0.3rem 0; }
+        .mp-errore { color: #B91C1C; font-style: normal; }
+        .meeting-linea-btn { border: none; background: #EEF2FF; color: #4F46E5; border-radius: 6px; padding: 0.2rem 0.4rem; margin-left: 0.3rem; cursor: pointer; }
+        .meeting-linea-btn:hover { background: #4F46E5; color: #fff; }
 
         @media (max-width: 768px) {
             :root { --dock-size: 38px; --dock-h: 66px; }
@@ -10683,6 +10739,120 @@
             });
         }
 
+        // === PANNELLO «DURANTE LA RIUNIONE» (linea da seguire) ===
+        // Si apre da solo quando si registra una riunione collegata a un cliente, oppure con il
+        // pulsante "percorso" della riga o del riquadro di registrazione. Contenuto da
+        // /api/meeting-panel (server.js): attività della riunione precedente con la casella
+        // «fatto», To-Do, task Jira, quotazioni e quesiti MySupport del cliente/progetto.
+        let meetingPanelId = null;
+        async function openMeetingPanel(idCalendar, { auto = false } = {}) {
+            const panel = document.getElementById('meetingPanel');
+            const body = document.getElementById('meetingPanelBody');
+            if (!panel || !body || !idCalendar) return;
+            meetingPanelId = idCalendar;
+            if (!auto) {
+                body.innerHTML = '<div class="mp-vuoto"><i class="fas fa-spinner fa-spin"></i> Carico la linea della riunione…</div>';
+                panel.classList.add('open');
+            }
+            let d;
+            try {
+                const r = await fetch(`${API_URL}/meeting-panel?id_calendar=${encodeURIComponent(idCalendar)}`, { headers: getAuthHeaders() });
+                d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+            } catch (e) {
+                if (!auto) body.innerHTML = `<div class="mp-vuoto mp-errore">${escapeHtml(e.message)}</div>`;
+                return;
+            }
+            if (meetingPanelId !== idCalendar) return; // nel frattempo è stata aperta un'altra riunione
+            // Apertura automatica solo per le riunioni con un cliente.
+            if (d.senzaCliente) {
+                if (auto) return;
+                document.getElementById('meetingPanelTitle').textContent = d.riunione.oggetto || 'Riunione';
+                document.getElementById('meetingPanelSub').textContent = '';
+                body.innerHTML = '<div class="mp-vuoto">Collega la riunione a un <b>cliente</b> (e a un progetto) con le tendine della riga: qui compariranno attività, To-Do, task Jira, quotazioni e quesiti MySupport.</div>';
+                return;
+            }
+            renderMeetingPanel(d);
+            panel.classList.add('open');
+        }
+
+        function renderMeetingPanel(d) {
+            const body = document.getElementById('meetingPanelBody');
+            const r = d.riunione;
+            document.getElementById('meetingPanelTitle').textContent = r.oggetto || 'Riunione';
+            document.getElementById('meetingPanelSub').innerHTML = `${escapeHtml(r.cliente || '')}${r.progetto ? ` · ${escapeHtml(r.progetto)}` : ''}`
+                + (r.projectId ? ` · <a href="pm.html?projectId=${encodeURIComponent(r.projectId)}" target="_blank" rel="noopener">Cruscotto PM <i class="fas fa-up-right-from-square"></i></a>` : '');
+            const dataIt = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '');
+            const sez = (titolo, icona, n, html, aperta = true) =>
+                `<details class="mp-sez"${aperta ? ' open' : ''}><summary><i class="fas ${icona}"></i> ${titolo}${n != null ? ` <span class="mp-n">${n}</span>` : ''}</summary>${html}</details>`;
+
+            // 1. Dalla riunione precedente
+            let prec = '<div class="mp-vuoto">Nessuna riunione precedente con recap per questo ' + (r.projectId ? 'progetto' : 'cliente') + '.</div>';
+            let nPrec = null;
+            if (d.precedente) {
+                const p = d.precedente;
+                const att = p.attivita.length ? `<ul class="mp-lista">${p.attivita.map((a) => `<li class="${a.fatto ? 'fatto' : ''}">
+                        <label><input type="checkbox" data-mp-att="${escapeHtml(a.id)}" ${a.fatto ? 'checked' : ''} ${d.puoSegnareAttivita ? '' : 'disabled title="Per segnare le attività va eseguito lo script pm_economia.sql"'}>
+                        <span><b>${escapeHtml(a.argomento || a.descrizione)}</b>${a.argomento && a.descrizione ? `<em>${escapeHtml(a.descrizione)}</em>` : ''}
+                        <small>${a.owner ? `<i class="fas fa-user"></i> ${escapeHtml(a.owner)}` : '<i class="fas fa-user-slash"></i> senza owner'}${a.scadenza ? ` · entro il ${dataIt(a.scadenza)}` : ''}${a.task_id ? ' · To-Do creata' : ''}</small></span></label></li>`).join('')}</ul>`
+                    : '<div class="mp-vuoto">Nessuna attività del recap interno per quella riunione.</div>';
+                nPrec = p.attivita.length ? `${p.attivita.filter((a) => a.fatto).length}/${p.attivita.length}` : null;
+                prec = `<p class="mp-meta">${escapeHtml(p.oggetto)} del ${dataIt(p.data)}</p>${att}`
+                    + (p.recap ? `<details class="mp-recap"><summary>Recap di quella riunione</summary><div>${escapeHtml(p.recap).replace(/\n/g, '<br>')}</div></details>` : '');
+            }
+
+            // 2. To-Do
+            const aperte = d.todo.filter((t) => !t.fatto).length;
+            const todo = d.todo.length ? `<ul class="mp-lista">${d.todo.map((t) => `<li class="${t.fatto ? 'fatto' : ''}">
+                    <label><input type="checkbox" data-mp-task="${escapeHtml(t.id)}" ${t.fatto ? 'checked' : ''}>
+                    <span><b>${escapeHtml(t.titolo || '')}</b>${t.descrizione ? `<em>${escapeHtml(String(t.descrizione).slice(0, 220))}</em>` : ''}
+                    <small>${t.assegnato ? `<i class="fas fa-user"></i> ${escapeHtml(t.assegnato)}` : 'non assegnata'}${t.scadenza ? ` · <span class="${t.scaduta ? 'mp-scaduta' : ''}">scadenza ${dataIt(t.scadenza)}${t.scaduta ? ' (scaduta)' : ''}</span>` : ''}</small></span></label></li>`).join('')}</ul>`
+                : '<div class="mp-vuoto">Nessuna To-Do aperta.</div>';
+
+            // 3. Task Jira, quotazioni, MySupport
+            const ICONE = { task: 'fa-list-check', quotazioni: 'fa-file-invoice-dollar', mysupport: 'fa-headset' };
+            const altre = d.sezioni.map((s) => sez(escapeHtml(s.titolo), ICONE[s.key] || 'fa-table', s.righe.length,
+                s.righe.length ? `<div class="mp-tab"><table><thead><tr>${s.colonne.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>
+                    <tbody>${s.righe.map((v) => `<tr>${v.map((x) => `<td>${escapeHtml(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+                    : '<div class="mp-vuoto">Niente di aperto.</div>', s.righe.length > 0)).join('');
+
+            body.innerHTML = sez('Dalla riunione precedente', 'fa-clock-rotate-left', nPrec, prec)
+                + sez('To-Do', 'fa-square-check', aperte, todo) + altre;
+        }
+
+        function initMeetingPanel() {
+            const panel = document.getElementById('meetingPanel');
+            if (!panel) return;
+            document.getElementById('meetingPanelClose')?.addEventListener('click', () => panel.classList.remove('open'));
+            document.getElementById('meetingPanelRefresh')?.addEventListener('click', () => { if (meetingPanelId) openMeetingPanel(meetingPanelId); });
+            document.getElementById('meetingRecorderPanel')?.addEventListener('click', () => {
+                if (meetingRec && meetingRec.eventId) openMeetingPanel(meetingRec.eventId);
+            });
+            document.addEventListener('click', (e) => {
+                const b = e.target.closest('.meeting-linea-btn');
+                if (b) { e.preventDefault(); openMeetingPanel(b.dataset.eventId); }
+            });
+            // Caselle «fatto»: attività della riunione precedente e To-Do.
+            panel.addEventListener('change', async (e) => {
+                const box = e.target.closest('input[data-mp-att], input[data-mp-task]');
+                if (!box) return;
+                const att = box.dataset.mpAtt;
+                const url = att ? `${API_URL}/meeting-panel/attivita/${encodeURIComponent(att)}` : `${API_URL}/meeting-panel/task/${encodeURIComponent(box.dataset.mpTask)}`;
+                box.disabled = true;
+                try {
+                    const r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }, body: JSON.stringify({ fatto: box.checked }) });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                    box.closest('li')?.classList.toggle('fatto', box.checked);
+                    // La To-Do della dashboard resta allineata.
+                    if (!att && typeof loadTodoData === 'function') loadDashboardTasks();
+                } catch (err) {
+                    box.checked = !box.checked;
+                    showNotification('Errore: ' + err.message, 'info');
+                } finally { box.disabled = false; }
+            });
+        }
+
         function showMeetingRecorder(title) {
             const ui = recUi();
             ui.title.textContent = title;
@@ -11085,6 +11255,8 @@
             // Riga rec_meeting della riunione (creata se non esiste ancora)
             try {
                 await ensureManagedMeeting(btn);
+                // Linea della riunione: si apre da sola se la riunione ha un cliente.
+                openMeetingPanel(rec.eventId, { auto: true });
             } catch (e) {
                 rec.display.getTracks().forEach((t) => t.stop());
                 rec.starting = false;
@@ -12485,7 +12657,7 @@
                     <div class="meeting-duration">${escapeHtml(durationStr)}</div>
                     <div class="meeting-time"><i class="fas fa-clock"></i> ${escapeHtml(timeStr)}</div>
                     ${providerBadge}
-                    <div class="meeting-manage">${(meetingLink || event.manual || isRecordingMeeting(event.id)) ? `<button type="button" class="meeting-rec-btn${isRecordingMeeting(event.id) ? ' recording' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">${recButtonLabel(isRecordingMeeting(event.id))}</button>` : ''}</div>
+                    <div class="meeting-manage">${(meetingLink || event.manual || isRecordingMeeting(event.id)) ? `<button type="button" class="meeting-rec-btn${isRecordingMeeting(event.id) ? ' recording' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">${recButtonLabel(isRecordingMeeting(event.id))}</button>` : ''}${event.managed && event.client_id ? `<button type="button" class="meeting-linea-btn" data-event-id="${escapeHtml(event.id || '')}" title="Linea della riunione: attività della volta scorsa, To-Do, Jira, quotazioni, MySupport" aria-label="Linea della riunione"><i class="fas fa-route"></i></button>` : ''}</div>
                     <div class="meeting-title"${event.manual ? ' data-renamable="1"' : ''} title="${escapeHtml(event.manual ? tooltip + '\n(doppio clic per rinominare)' : tooltip)}">${escapeHtml(title)}</div>
                     <div class="meeting-status meeting-status-genrecap">${event.has_trascrizione && !event.has_recap ? manualRecapButton(event.id) : ''}</div>
                     <div class="meeting-status meeting-status-trascrizione">${event.has_trascrizione ? meetingTextButton(event, 'trascrizione', title) : (isRecordingMeeting(event.id) ? '' : meetingUploadButton('trascrizione'))}</div>
@@ -21480,6 +21652,7 @@
             initMeetingText();
             initRecapTasks();
             initMeetingsDate();
+            initMeetingPanel();
             initNewRecording();
             await loadTenantHeaderLogo();
             await loadPageLabels();
@@ -21632,6 +21805,7 @@
         <div class="meeting-recorder-head">
             <span class="meeting-recorder-dot" id="meetingRecorderDot"></span>
             <strong id="meetingRecorderTitle">Riunione</strong>
+            <button id="meetingRecorderPanel" type="button" aria-label="Linea della riunione" title="Linea della riunione: attività, To-Do, Jira, quotazioni, MySupport"><i class="fas fa-route"></i></button>
             <button id="meetingRecorderClose" type="button" aria-label="Chiudi" title="Chiudi"><i class="fas fa-times"></i></button>
         </div>
         <p id="meetingRecorderStatus" class="meeting-recorder-status"></p>
@@ -21647,6 +21821,15 @@
             <button id="meetingRecorderStop" type="button" class="meeting-recorder-stop" style="display: none;"><i class="fas fa-stop"></i> Ferma</button>
         </div>
     </div>
+    <!-- Pannello «durante la riunione»: linea da seguire (initMeetingPanel / openMeetingPanel) -->
+    <aside id="meetingPanel" class="meeting-panel" aria-label="Linea della riunione">
+        <div class="mp-head">
+            <div class="mp-titoli"><span class="mp-eti"><i class="fas fa-route"></i> Linea della riunione</span><strong id="meetingPanelTitle">Riunione</strong><span id="meetingPanelSub" class="mp-sub"></span></div>
+            <button id="meetingPanelRefresh" type="button" title="Aggiorna" aria-label="Aggiorna"><i class="fas fa-rotate"></i></button>
+            <button id="meetingPanelClose" type="button" title="Chiudi" aria-label="Chiudi"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="meetingPanelBody" class="mp-body"></div>
+    </aside>
     <div id="audioDevicesModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="audioDevicesTitle">
         <div class="task-modal-card" style="width: min(520px, calc(94vw * var(--ui-zoom-inv, 1)));">
             <div class="task-modal-header">

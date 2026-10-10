@@ -264,7 +264,9 @@ const TABLE_COLUMN_ALLOWLIST = {
   pm_change_request: new Set(['titolo', 'descrizione', 'motivo', 'richiesta_da', 'note']),
   pm_stakeholder: new Set(['nominativo', 'email', 'ruolo', 'strategia', 'comunicazione']),
   pm_chiusura: new Set(['accettato_da', 'nota_soddisfazione', 'obiettivi_raggiunti', 'attivita_residue']),
-  pm_lesson: new Set(['testo', 'raccomandazione'])
+  pm_lesson: new Set(['testo', 'raccomandazione']),
+  // Economia del progetto (Supporto/CreaDB/pm_economia.sql): importi e categorie in chiaro (si sommano in SQL)
+  pm_costo_esterno: new Set(['descrizione', 'fornitore', 'note'])
 };
 
 // Decide se una colonna è cifrabile e, in caso contrario, perché (serve alla UI).

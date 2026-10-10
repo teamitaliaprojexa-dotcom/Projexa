@@ -682,6 +682,12 @@ export async function contestoProgetto(user, projectId, { riunioni = 5, dal = nu
     + (e.eac != null ? `, stima a finire ${fmt(e.eac)} (${fmt(e.percPrevista, 0)}% del budget), mancano ${fmt(e.etc)}` : ', stima a finire non calcolabile (manca il completamento)')
     + (e.cpi != null ? `, indice di efficienza CPI ${fmt(e.cpi, 2)}` : ''));
   if (salute.economia.voci.length) L.push(`Voci di costo: ${salute.economia.voci.map((v) => `${v.voce} ${fmt(v.speso)}/${fmt(v.offerta)}`).join('; ')}`);
+  // Economia in denaro (config/pmEconomia.js, import dinamico: i due moduli si usano a vicenda).
+  try {
+    const { economiaEuro, testoEconomia } = await import('./pmEconomia.js');
+    const te = testoEconomia(await economiaEuro(user, projectId, { prog, scheda }));
+    if (te) L.push(te);
+  } catch (err) { console.error('PM contesto economia:', err.message); }
   L.push('');
   if (righe.length) {
     const g = salute.gantt;

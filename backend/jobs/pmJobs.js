@@ -19,6 +19,7 @@ import authDb from '../config/authDatabase.js';
 import notifDb from '../config/notifDatabase.js';
 import { encryptValue } from '../config/crypto.js';
 import { sendMail } from '../config/mailer.js';
+import { fotografiaEuro } from '../config/pmEconomia.js';
 import {
   saluteTuttiProgetti, tabellaPresente, oggiIso, dataIt, fmt, giorniTra
 } from '../config/pmCore.js';
@@ -82,6 +83,8 @@ export async function eseguiNotificheProgetti() {
             [user.tenant_id, user.user_id, pid, oggi, s.eac.bac || 0, s.eac.ac || 0, s.eac.completamento, s.semaforo]
           );
           report.fotografie += 1;
+          // Valori in euro per la curva a S (se pm_economia.sql è stato eseguito).
+          try { await fotografiaEuro(user, pid, oggi); } catch (e) { report.errori.push(`euro ${pid}: ${e.message}`); }
         }
         if (!pref.notifiche_prog) continue;
         const e = s.eac;

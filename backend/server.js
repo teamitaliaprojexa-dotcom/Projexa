@@ -7187,6 +7187,160 @@ app.get('/api/clients/dossier/anni', requireAuth, async (req, res) => {
   }
 });
 
+// ==========================================
+// PANNELLO «DURANTE LA RIUNIONE» (2026-10-10)
+// ==========================================
+// Una "linea da seguire" mentre si registra una riunione collegata a un cliente (e a un
+// progetto): attività della riunione precedente con owner e casella «fatto», To-Do aperte,
+// task Jira (task_app), quotazioni e quesiti MySupport del cliente. Le sezioni Jira,
+// quotazioni e MySupport usano lo stesso lettore del Dossier Cliente (dosRighe), con le
+// colonne predefinite. Pagina: sito/dashboard.html (pannello laterale). SQL per la casella
+// «fatto» delle attività: Supporto/CreaDB/pm_economia.sql (rec_meeting_attivita.completata).
+const PANNELLO_SEZIONI = ['task', 'quotazioni', 'mysupport'];
+const PANNELLO_CHIUSO = /^(chius|closed|done|risolt|resolved|rilasciat|released|annullat|cancel|completat|rifiutat|rejected|scadut)/i;
+
+app.get('/api/meeting-panel', requireAuth, async (req, res) => {
+  try {
+    const idCal = String(req.query.id_calendar || '').trim();
+    if (!idCal) return res.status(400).json({ error: 'id_calendar richiesto' });
+    const m = (await db.query(
+      `SELECT id_calendar, oggetto, data_calendar::text AS data, orario_calendar::text AS orario,
+              client_id::text AS client_id, project_id::text AS project_id
+         FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, idCal])).rows[0];
+    if (!m) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    const riunione = { id_calendar: m.id_calendar, oggetto: m.oggetto || 'Riunione', data: m.data, clientId: m.client_id, projectId: m.project_id };
+    if (!m.client_id) return res.json({ riunione, senzaCliente: true });
+    const acc = await clientAccess(m.client_id, req, false);
+    if (!acc) return res.status(403).json({ error: 'Cliente non accessibile' });
+    const owner = acc.ownerUserId;
+    riunione.cliente = (await resolveClientDescriptions([m.client_id], req.user.tenant_id)).get(m.client_id) || 'Cliente';
+    if (m.project_id) {
+      const p = (await db.query(`SELECT valore2 AS nome FROM projects WHERE id::text = $1 AND tenant_id = $2 AND argument = 'Progetto' AND campo = 'Progetto' LIMIT 1`,
+        [m.project_id, req.user.tenant_id])).rows[0];
+      riunione.progetto = p ? p.nome : '';
+    }
+
+    // Riunione precedente dello stesso progetto (o dello stesso cliente se non c'è progetto),
+    // con recap o attività: la più recente prima di questa.
+    let precedente = null;
+    const prev = (await db.query(
+      `SELECT r.id_calendar, r.oggetto, r.data_calendar::text AS data, r.recap
+         FROM rec_meeting r
+        WHERE r.tenant_id = $1 AND r.user_id = $2 AND r.id_calendar <> $3
+          AND ${m.project_id ? 'r.project_id::text = $4' : 'r.client_id::text = $4'}
+          AND (r.data_calendar < $5::date OR (r.data_calendar = $5::date AND COALESCE(r.orario_calendar, '00:00') < COALESCE($6::time, '23:59')))
+        ORDER BY r.data_calendar DESC NULLS LAST, r.orario_calendar DESC NULLS LAST
+        LIMIT 5`,
+      [req.user.tenant_id, req.user.user_id, idCal, m.project_id || m.client_id, m.data || '2999-12-31', m.orario || null])).rows;
+    const colsAtt = await getTableColumns('rec_meeting_attivita');
+    const conAttivita = colsAtt.size > 0;
+    for (const r of prev) {
+      let attivita = [];
+      if (conAttivita) {
+        attivita = (await db.query(
+          `SELECT a.id::text AS id, a.argomento, a.descrizione, a.owner_nominativo AS owner, a.scadenza::text AS scadenza,
+                  ${colsAtt.has('completata') ? 'a.completata' : 'false AS completata'}, a.task_id::text AS task_id, t.status AS task_stato
+             FROM rec_meeting_attivita a
+             LEFT JOIN tasks t ON t.id = a.task_id AND t.tenant_id = a.tenant_id
+            WHERE a.tenant_id = $1 AND a.user_id = $2 AND a.id_calendar = $3
+            ORDER BY a.ordine, a.created_at`,
+          [req.user.tenant_id, req.user.user_id, r.id_calendar])).rows
+          .map((a) => ({ ...a, fatto: !!a.completata || a.task_stato === 'completed' }));
+      }
+      const recap = stripMarkdown(String(r.recap || '')).trim();
+      if (!recap && !attivita.length) continue; // né recap né attività: si guarda la precedente
+      precedente = { id_calendar: r.id_calendar, oggetto: r.oggetto || 'Riunione', data: r.data, recap: recap.slice(0, 6000), attivita };
+      break;
+    }
+
+    // To-Do aperte del progetto (o del cliente), più quelle chiuse negli ultimi 7 giorni
+    // (si vede cosa è stato fatto dall'ultima volta).
+    const todo = (await db.query(
+      `SELECT t.id::text AS id, t.titile AS titolo, t.description AS descrizione, t.status AS stato, t.due_date::text AS scadenza,
+              COALESCE(rb.nominativo, t.assigned_to_text) AS assegnato
+         FROM tasks t
+         LEFT JOIN rubrica rb ON rb.id = t.assigned_to AND rb.tenant_id = t.tenant_id
+        WHERE t.tenant_id = $1 AND t.user_id = $2 AND ${m.project_id ? 't.project_id::text = $3' : 't.client_id::text = $3'}
+          AND (t.scadenza IS NULL OR t.scadenza >= CURRENT_DATE)
+          AND (COALESCE(t.status, 'todo') <> 'completed' OR t.updated_at >= now() - interval '7 days')
+        ORDER BY (t.status = 'completed'), t.due_date NULLS LAST
+        LIMIT 100`,
+      [req.user.tenant_id, req.user.user_id, m.project_id || m.client_id])).rows
+      .map((t) => ({ ...t, fatto: t.stato === 'completed', scaduta: t.stato !== 'completed' && !!t.scadenza && t.scadenza < new Date().toISOString().slice(0, 10) }));
+
+    // Task Jira, quotazioni e MySupport del cliente (solo quelli non chiusi).
+    const sezioni = [];
+    for (const key of PANNELLO_SEZIONI) {
+      const sez = DOS_SEZIONI.find((s) => s.key === key);
+      try {
+        const d = await dosColonneSezione(req, sez);
+        if (!d.cols.length) continue;
+        const colonne = sez.default.filter((c) => d.cols.includes(c));
+        if (!colonne.length) continue;
+        const righe = await dosRighe(req, owner, m.client_id, sez, colonne, d, {});
+        const usate = (righe[0] && righe[0]._cols) || colonne;
+        const iStato = usate.findIndex((c) => /^stato/i.test(c));
+        sezioni.push({
+          key, titolo: key === 'task' ? 'Task Jira' : sez.titolo,
+          colonne: usate.map((c) => d.label(c)),
+          righe: righe
+            .filter((x) => !sez.perProgetto || !m.project_id || !x.progetto || x.progetto === m.project_id)
+            .filter((x) => iStato < 0 || !PANNELLO_CHIUSO.test(String(x.valori[iStato] || '').trim()))
+            .slice(0, 80)
+            .map((x) => x.valori)
+        });
+      } catch (e) { console.error(`PANNELLO_RIUNIONE ${key}:`, e.message); }
+    }
+    res.json({ riunione, precedente, todo, sezioni, puoSegnareAttivita: colsAtt.has('completata') });
+  } catch (error) {
+    console.error('❌ PANNELLO_RIUNIONE:', error.message);
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Casella «fatto» di un'attività della riunione (se ha un task, anche il task si chiude/riapre).
+app.put('/api/meeting-panel/attivita/:id', requireAuth, async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!DOS_UUID.test(id)) return res.status(400).json({ error: 'Id non valido' });
+    if (!(await getTableColumns('rec_meeting_attivita')).has('completata')) {
+      return res.status(503).json({ error: 'Funzione non ancora attiva: va eseguito lo script Supporto/CreaDB/pm_economia.sql sul database' });
+    }
+    const fatto = req.body && req.body.fatto === true;
+    const r = await db.query(
+      `UPDATE rec_meeting_attivita SET completata = $4, completata_il = CASE WHEN $4 THEN now() ELSE NULL END, updated_at = now()
+        WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3 RETURNING task_id`,
+      [id, req.user.tenant_id, req.user.user_id, fatto]);
+    if (!r.rowCount) return res.status(404).json({ error: 'Attività non trovata' });
+    if (r.rows[0].task_id) {
+      await db.query(`UPDATE tasks SET status = $4, updated_at = now() WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+        [r.rows[0].task_id, req.user.tenant_id, req.user.user_id, fatto ? 'completed' : 'in_progress']);
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('❌ PANNELLO_ATTIVITA:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Casella «fatto» di una To-Do dal pannello: completata / di nuovo in corso.
+app.put('/api/meeting-panel/task/:id', requireAuth, async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!DOS_UUID.test(id)) return res.status(400).json({ error: 'Id non valido' });
+    const fatto = req.body && req.body.fatto === true;
+    const r = await db.query(
+      `UPDATE tasks SET status = $4, updated_at = now() WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`,
+      [id, req.user.tenant_id, req.user.user_id, fatto ? 'completed' : 'in_progress']);
+    if (!r.rowCount) return res.status(404).json({ error: 'To-Do non trovata' });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('❌ PANNELLO_TASK:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/clients/dossier/colonne', requireAuth, async (req, res) => {
   try {
     const out = [];

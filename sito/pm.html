@@ -9,7 +9,8 @@
     <!--
       CRUSCOTTO PM del progetto (pulsante «Cruscotto PM» nella scheda progetto della dashboard).
       Schede: Panoramica (semaforo di salute, previsione a finire, tempi e Gantt), RAID (rischi,
-      decisioni, dipendenze + azioni e issue), Change Request, Stakeholder e RACI, Chiusura
+      decisioni, dipendenze + azioni e issue), Change Request, Economia (valore guadagnato in euro,
+      CPI/SPI, margine, costi esterni, valuta), Stakeholder e RACI, Chiusura
       (accettazione, soddisfazione, lessons learned, verbale), Chiedi al progetto (AI).
       In alto: Briefing pre-riunione e Status Report. API: /api/pm (backend/routes/pm.js).
     -->
@@ -29,6 +30,7 @@
         <button class="pm-tab on" data-tab="panoramica"><i class="fas fa-heart-pulse"></i> Panoramica</button>
         <button class="pm-tab" data-tab="raid"><i class="fas fa-shield-halved"></i> RAID <span class="cnt" id="cntRaid"></span></button>
         <button class="pm-tab" data-tab="cr"><i class="fas fa-code-pull-request"></i> Change Request <span class="cnt" id="cntCr"></span></button>
+        <button class="pm-tab" data-tab="economia"><i class="fas fa-euro-sign"></i> Economia</button>
         <button class="pm-tab" data-tab="stakeholder"><i class="fas fa-users"></i> Stakeholder e RACI</button>
         <button class="pm-tab" data-tab="chiusura"><i class="fas fa-flag-checkered"></i> Chiusura</button>
         <button class="pm-tab" data-tab="chiedi"><i class="fas fa-comments"></i> Chiedi al progetto</button>
@@ -38,6 +40,7 @@
         <section class="pm-pannello on" id="p-panoramica"><div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> Calcolo la salute del progetto…</div></section>
         <section class="pm-pannello" id="p-raid"></section>
         <section class="pm-pannello" id="p-cr"></section>
+        <section class="pm-pannello" id="p-economia"></section>
         <section class="pm-pannello" id="p-stakeholder"></section>
         <section class="pm-pannello" id="p-chiusura"></section>
         <section class="pm-pannello" id="p-chiedi"></section>
@@ -472,6 +475,211 @@
             if (sola) m.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; });
         }
 
+        // ================= ECONOMIA (valore in euro, margine, costi esterni, valuta) =================
+        // API /api/pm/economia (backend/config/pmEconomia.js). Earned Value in euro: il valore
+        // viene dalle tariffe dei Costi Progetto (prezzo al cliente); il margine dal costo
+        // interno delle voci e dai costi esterni.
+        let ecoDati = null;
+        async function caricaEconomia() {
+            const p = pannello('economia');
+            if (!ecoDati) p.innerHTML = attesa('Calcolo l\'economia del progetto…');
+            try { ecoDati = await api(`/economia?projectId=${encodeURIComponent(projectId)}`); renderEconomia(p); } catch (e) { p.innerHTML = errore(e); }
+        }
+        const ecoSqlMancante = () => '<div class="pm-avviso"><i class="fas fa-database"></i> Costi interni, costi esterni e valuta non sono ancora attivi: va eseguito lo script <b>Supporto/CreaDB/pm_economia.sql</b> sul database. Il valore guadagnato (CPI e SPI) si vede già.</div>';
+        // Indici: 1 = in linea. Sopra 0,95 verde, fino a 0,85 giallo, sotto rosso.
+        const statoIndice = (v) => (v == null ? 'nd' : v >= 0.95 ? 'verde' : v >= 0.85 ? 'giallo' : 'rosso');
+
+        function renderEconomia(p) {
+            const d = ecoDati, e = d.ev, m = d.margine, imp = d.impostazioni;
+            const u = d.unita === 'ore' ? 'ore' : 'gg';
+            const val = imp.valuta && imp.valuta !== 'EUR' && imp.cambio ? imp : null;
+            // Importo in euro + (se c'è) l'equivalente nella valuta del contratto.
+            const eur = (v) => (v == null ? '–' : `${euro(v)}${val ? `<em class="eco-val">${fmt(v * val.cambio, 0)} ${esc(val.valuta)}</em>` : ''}`);
+            const tile = (titolo, valore, spiega, stato = '') => `<div class="eco-tile${stato ? ` eco-${stato}` : ''}"><small>${titolo}</small><b>${valore}</b>${spiega ? `<span>${spiega}</span>` : ''}</div>`;
+            const perc = (v) => (v == null ? '' : ` (${fmt(v, 1)}%)`);
+            const grigio = !e.affidabile;
+
+            // Avvisi sui dati che mancano.
+            const note = [];
+            if (!e.bac) note.push('Nei Costi Progetto mancano effort offerto e tariffe (e la scheda non ha l\'Importo): senza budget non si calcola il valore guadagnato.');
+            if (e.bac && e.completamento == null) note.push('Manca il <b>Completamento</b> del progetto (scheda o Gantt): senza, non si sa quanto lavoro è stato fatto e CPI/SPI non si calcolano.');
+            if (e.bac && !e.piano) note.push('Mancano le date del piano (Gantt o Start/End della scheda): lo SPI non si calcola.');
+            if (e.piano && e.piano.fonte === 'gantt') note.push('Lo SPI usa le date <b>attuali</b> del Gantt: congela la baseline nel Gantt per misurare il ritardo rispetto al piano approvato.');
+            if (e.piano && e.piano.fonte === 'scheda') note.push('Senza Gantt il piano è una crescita uniforme fra Start ed End della scheda.');
+            if (e.fonteBudget === 'importo') note.push('Le voci dei Costi Progetto non hanno tariffe: come budget si usa l\'Importo della scheda.');
+            if (grigio && e.completamento != null) note.push('Completamento sotto il 15%: gli indici oscillano molto, leggili come indicazione.');
+
+            const cpiTesto = e.cpi == null ? 'Non calcolabile' : `Ogni euro consumato produce <b>${fmt(e.cpi * 100, 0)} centesimi</b> di lavoro`;
+            const spiTesto = e.spi == null ? 'Non calcolabile' : `Il lavoro fatto è il <b>${fmt(e.spi * 100, 0)}%</b> di quello previsto a oggi`;
+            const vacTesto = e.vac == null ? '' : e.vac < 0 ? `Si finirebbe <b>${euro(-e.vac)}</b> sopra il budget` : `Si finirebbe <b>${euro(e.vac)}</b> sotto il budget`;
+            const tcpiTesto = e.tcpi == null ? '' : e.tcpi > 1 ? `Per restare nel budget, da qui in poi ogni euro deve rendere ${fmt(e.tcpi * 100, 0)} centesimi` : 'Il budget residuo basta anche con l\'efficienza attuale';
+
+            const indici = `<div class="pm-card">
+                <h2><i class="fas fa-scale-balanced"></i> Valore guadagnato (Earned Value)</h2>
+                <div class="eco-indici">
+                    ${tile('CPI · costi', e.cpi == null ? '–' : fmt(e.cpi, 2), cpiTesto, grigio ? 'nd' : statoIndice(e.cpi))}
+                    ${tile('SPI · tempi', e.spi == null ? '–' : fmt(e.spi, 2), spiTesto, grigio ? 'nd' : statoIndice(e.spi))}
+                    ${tile('Stima a finire', eur(e.eac), vacTesto, e.vac == null || grigio ? '' : e.vac < 0 ? 'rosso' : 'verde')}
+                </div>
+                <div class="eco-griglia">
+                    ${tile('Budget (BAC)', eur(e.bac), e.crImporto ? `di cui CR approvate ${euro(e.crImporto)}` : (e.fonteBudget === 'importo' ? 'dall\'Importo della scheda' : 'effort offerto × tariffe'))}
+                    ${tile('Pianificato a oggi (PV)', eur(e.pv), e.pvPerc != null ? `${fmt(e.pvPerc, 0)}% del lavoro previsto` : '')}
+                    ${tile('Guadagnato (EV)', eur(e.ev), e.completamento != null ? `completamento ${fmt(e.completamento, 0)}%${e.fonteCompletamento === 'gantt' ? ' (dal Gantt)' : ''}` : '')}
+                    ${tile('Consumato (AC)', eur(e.ac), `${fmt(d.effort.speso)} ${u} × tariffa`)}
+                    ${tile('Da spendere a finire', eur(e.etc), tcpiTesto)}
+                </div>
+                ${note.length ? `<ul class="eco-note">${note.map((x) => `<li>${x}</li>`).join('')}</ul>` : ''}
+                <details class="eco-spiega"><summary>Come si leggono</summary>
+                    <p><b>CPI</b> = guadagnato ÷ consumato: sotto 1 si spende più di quanto si produce. <b>SPI</b> = guadagnato ÷ pianificato: sotto 1 si è in ritardo sul piano. <b>Stima a finire</b> = budget ÷ CPI, cioè quanto costerà il progetto se l'efficienza resta questa. Il valore è a prezzo cliente (tariffe dei Costi Progetto); il margine è nel riquadro sotto.</p>
+                </details>
+            </div>`;
+
+            const curva = `<div class="pm-card"><h2><i class="fas fa-chart-line"></i> Curva a S: pianificato, guadagnato, consumato</h2>${curvaS(d)}</div>`;
+
+            const scontoTesto = e.sconto == null || Math.abs(e.sconto) < 1 ? '' : e.sconto > 0 ? `sconto di ${euro(e.sconto)} sul valore a tariffa` : `${euro(-e.sconto)} sopra il valore a tariffa`;
+            const margine = `<div class="pm-card">
+                <h2><i class="fas fa-sack-dollar"></i> Margine</h2>
+                <div class="eco-griglia">
+                    ${tile('Ricavo', eur(m.ricavo), m.fonteRicavo === 'importo' ? `Importo della scheda${e.crImporto ? ' + CR approvate' : ''}${scontoTesto ? ` · ${scontoTesto}` : ''}` : 'valore a tariffa (manca l\'Importo)')}
+                    ${tile('Costo previsto', eur(m.costoPrevisto), m.costoPrevisto == null ? 'imposta i costi interni delle voci' : `interno ${euro(m.interni.previsto)} + esterni ${euro(m.esterni.previsto)}`)}
+                    ${tile('Margine previsto', m.previsto == null ? '–' : `${eur(m.previsto)}`, m.previsto == null ? '' : `${fmt(m.previstoPerc, 1)}% del ricavo`, m.previsto == null ? '' : m.previsto < 0 ? 'rosso' : m.previstoPerc < 10 ? 'giallo' : 'verde')}
+                    ${tile('Costo a finire', eur(m.costoAFinire), m.costoAFinire == null ? '' : `speso finora ${euro(m.costoSpeso)}`)}
+                    ${tile('Margine a finire', m.aFinire == null ? '–' : eur(m.aFinire), m.aFinire == null ? '' : `${fmt(m.aFinirePerc, 1)}% del ricavo`, m.aFinire == null ? '' : m.aFinire < 0 ? 'rosso' : m.aFinirePerc < 10 ? 'giallo' : 'verde')}
+                </div>
+                ${m.vociSenzaCosto ? `<p class="pm-nota"><i class="fas fa-circle-info"></i> ${m.vociSenzaCosto} ${m.vociSenzaCosto === 1 ? 'voce non ha' : 'voci non hanno'} il costo interno: scrivilo nella tabella sotto per un margine completo.</p>` : ''}
+                <p class="pm-nota">Costo a finire: il costo interno speso proiettato sul completamento, più i costi esterni (il maggiore fra previsto ed effettivo). L'effort delle CR approvate entra al costo interno medio.</p>
+            </div>`;
+
+            const scrivibile = d.tabelle;
+            const voci = d.voci.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Voce</th><th class="n">Offerta (${u})</th><th class="n">Speso (${u})</th><th class="n">Tariffa</th><th class="n">Valore offerto</th><th class="n">Valore consumato</th><th class="n" title="Costo interno di un'unità (giornata o ora): vale per tutti i tuoi progetti">Costo interno</th><th class="n">Costo previsto</th><th class="n">Margine</th></tr></thead><tbody>
+                ${d.voci.map((v, i) => `<tr><td><b>${esc(v.voce)}</b></td><td class="n">${fmt(v.offerta)}</td><td class="n">${fmt(v.speso)}</td><td class="n">${v.tariffa != null ? `${euro(v.tariffa)}/${v.hh ? 'h' : 'gg'}` : '–'}</td><td class="n">${euro(v.valoreOfferto)}</td><td class="n">${euro(v.valoreSpeso)}</td>
+                    <td class="n"><input class="pm-input eco-costo" data-i="${i}" inputmode="decimal" placeholder="€/${v.hh ? 'h' : 'gg'}" value="${v.costoUnita != null ? fmt(v.costoUnita, 2) : ''}" ${scrivibile ? '' : 'disabled'} title="Costo interno per ${v.hh ? 'ora' : 'giornata'}: premi Invio o esci dal campo per salvare"></td>
+                    <td class="n">${euro(v.costoPrevisto)}</td><td class="n">${v.margine == null ? '–' : `${euro(v.margine)}${perc(v.marginePerc)}`}</td></tr>`).join('')}
+                </tbody></table></div>
+                <p class="pm-nota">Le tariffe sono il prezzo al cliente (Costi Progetto). Il <b>costo interno</b> di una voce vale per tutti i tuoi progetti con quella voce.</p>`
+                : '<div class="pm-vuoto">Nessuna voce nei Costi Progetto.</div>';
+
+            const est = d.esterni;
+            const esterni = `<div class="pm-card">
+                <h2><i class="fas fa-truck-ramp-box"></i> Costi esterni <span class="azioni"><button class="pm-btn piccolo primario" id="ecoNuovoEst" ${scrivibile ? '' : 'disabled'}><i class="fas fa-plus"></i> Costo esterno</button></span></h2>
+                ${est.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Data</th><th>Categoria</th><th>Descrizione</th><th>Fornitore</th><th class="n">Previsto</th><th class="n">Effettivo</th></tr></thead><tbody>
+                    ${est.map((x) => `<tr class="click" data-id="${esc(x.id)}"><td>${dataIt(x.data)}</td><td><span class="pill">${esc(x.categoriaLabel)}</span></td><td><b>${esc(x.descrizione)}</b>${x.note ? `<div class="pm-nota">${esc(x.note)}</div>` : ''}</td><td>${esc(x.fornitore || '')}</td><td class="n">${euro(x.previsto)}</td><td class="n">${euro(x.effettivo)}</td></tr>`).join('')}
+                    <tr><td colspan="4"><b>Totale</b></td><td class="n"><b>${euro(m.esterni.previsto)}</b></td><td class="n"><b>${euro(m.esterni.effettivo)}</b></td></tr>
+                    </tbody></table></div>`
+                : '<div class="pm-vuoto">Nessun costo esterno. Registra qui fornitori, subappalti, trasferte e licenze del progetto: entrano nel margine.</div>'}
+            </div>`;
+
+            const valuta = `<div class="pm-card">
+                <h2><i class="fas fa-coins"></i> Valuta del contratto</h2>
+                <div class="eco-valuta">
+                    <label>Valuta <select class="pm-input" id="ecoValuta" ${scrivibile ? '' : 'disabled'}>${imp.valute.map((x) => `<option ${x === imp.valuta ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+                    <label id="ecoCambioWrap" style="${imp.valuta === 'EUR' ? 'display:none' : ''}">1 EUR = <input class="pm-input" id="ecoCambio" inputmode="decimal" style="width:8rem" value="${imp.cambio != null ? String(imp.cambio).replace('.', ',') : ''}" ${scrivibile ? '' : 'disabled'}> <span id="ecoCambioCod">${esc(imp.valuta)}</span></label>
+                    <button class="pm-btn piccolo primario" id="ecoSalvaValuta" ${scrivibile ? '' : 'disabled'}><i class="fas fa-floppy-disk"></i> Salva</button>
+                </div>
+                <p class="pm-nota">I dati di Projexa sono in euro: con una valuta diversa, ogni importo mostra sotto anche il valore nella valuta del contratto, al cambio indicato.</p>
+            </div>`;
+
+            p.innerHTML = `${scrivibile ? '' : ecoSqlMancante()}${indici}${curva}
+                <div class="pm-griglia" style="margin-top:1rem">${margine}${valuta}</div>
+                <div class="pm-card" style="margin-top:1rem"><h2><i class="fas fa-users-gear"></i> Voci dei Costi Progetto</h2>${voci}</div>
+                ${esterni}`;
+
+            // Costo interno: si salva all'uscita dal campo o con Invio.
+            p.querySelectorAll('.eco-costo').forEach((inp) => {
+                const salva = async () => {
+                    const v = d.voci[inp.dataset.i];
+                    const vecchio = v.costoUnita != null ? fmt(v.costoUnita, 2) : '';
+                    if (inp.value.trim() === vecchio) return;
+                    try {
+                        await api('/economia/costo-interno', { metodo: 'PUT', corpo: { voce: v.voce, [v.hh ? 'costo_hh' : 'costo_gg']: inp.value.trim() } });
+                        toast(inp.value.trim() ? 'Costo interno salvato' : 'Costo interno tolto');
+                        caricaEconomia();
+                    } catch (e) { toast(e.message, 'errore'); }
+                };
+                inp.addEventListener('change', salva);
+                inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); } });
+            });
+            p.querySelector('#ecoNuovoEst')?.addEventListener('click', () => formEsterno({}));
+            p.querySelectorAll('tr.click[data-id]').forEach((tr) => tr.addEventListener('click', () => formEsterno(est.find((x) => x.id === tr.dataset.id))));
+            const selV = p.querySelector('#ecoValuta');
+            selV?.addEventListener('change', () => {
+                p.querySelector('#ecoCambioWrap').style.display = selV.value === 'EUR' ? 'none' : '';
+                p.querySelector('#ecoCambioCod').textContent = selV.value;
+            });
+            p.querySelector('#ecoSalvaValuta')?.addEventListener('click', async () => {
+                try {
+                    await api('/economia/impostazioni', { metodo: 'PUT', corpo: { projectId, valuta: selV.value, cambio: p.querySelector('#ecoCambio').value } });
+                    toast('Valuta salvata');
+                    caricaEconomia();
+                } catch (e) { toast(e.message, 'errore'); }
+            });
+        }
+
+        // Curva a S in SVG: pianificato (piano/baseline), guadagnato e consumato nel tempo.
+        function curvaS(d) {
+            const e = d.ev, piano = d.curva.piano, storia = d.curva.storia;
+            if (!e.bac || (!piano.length && storia.length < 2)) return '<div class="pm-vuoto">La curva compare quando il progetto ha budget e date del piano (Gantt o Start/End).</div>';
+            const W = 900, H = 260, L = 70, R = 16, T = 14, B = 34;
+            const ms = (iso) => Date.parse(`${iso}T00:00:00Z`);
+            const date = [...piano.map((x) => x.d), ...storia.map((x) => x.d)];
+            const x0 = Math.min(...date.map(ms)), x1 = Math.max(...date.map(ms), x0 + 86400000);
+            const ymax = Math.max(e.bac, ...storia.map((x) => Math.max(x.ac || 0, x.ev || 0))) * 1.08;
+            const X = (iso) => L + ((ms(iso) - x0) / (x1 - x0)) * (W - L - R);
+            const Y = (v) => T + (1 - v / ymax) * (H - T - B);
+            const linea = (punti, cls) => (punti.length > 1 ? `<polyline class="${cls}" points="${punti.map((p) => `${X(p.d).toFixed(1)},${Y(p.v).toFixed(1)}`).join(' ')}"/>` : '');
+            const pv = piano.map((x) => ({ d: x.d, v: x.v }));
+            const ev = storia.filter((x) => x.ev != null).map((x) => ({ d: x.d, v: x.ev }));
+            const ac = storia.filter((x) => x.ac != null).map((x) => ({ d: x.d, v: x.ac }));
+            const tacche = [0, 0.25, 0.5, 0.75, 1].map((f) => f * e.bac);
+            const oggiX = X(d.oggi);
+            const punto = (arr, cls) => (arr.length ? `<circle class="${cls}" cx="${X(arr[arr.length - 1].d).toFixed(1)}" cy="${Y(arr[arr.length - 1].v).toFixed(1)}" r="4"/>` : '');
+            const stimate = storia.some((x) => x.stimata && x.d !== d.oggi);
+            return `<svg class="eco-curva" viewBox="0 0 ${W} ${H}" role="img" aria-label="Curva a S del progetto">
+                    ${tacche.map((v) => `<line class="griglia" x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/><text class="asse" x="${L - 6}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end">${fmt(v / 1000, 0)}k</text>`).join('')}
+                    <line class="bac" x1="${L}" x2="${W - R}" y1="${Y(e.bac).toFixed(1)}" y2="${Y(e.bac).toFixed(1)}"/>
+                    <line class="oggi" x1="${oggiX.toFixed(1)}" x2="${oggiX.toFixed(1)}" y1="${T}" y2="${H - B}"/>
+                    <text class="asse" x="${oggiX.toFixed(1)}" y="${H - B + 14}" text-anchor="middle">oggi</text>
+                    <text class="asse" x="${L}" y="${H - 6}">${dataIt(new Date(x0).toISOString().slice(0, 10))}</text>
+                    <text class="asse" x="${W - R}" y="${H - 6}" text-anchor="end">${dataIt(new Date(x1).toISOString().slice(0, 10))}</text>
+                    ${linea(pv, 'pv')}${linea(ac, 'ac')}${linea(ev, 'ev')}${punto(ac, 'ac-p')}${punto(ev, 'ev-p')}
+                </svg>
+                <div class="pm-legenda"><span><i style="background:#6366F1"></i>Pianificato (PV)</span><span><i style="background:#059669"></i>Guadagnato (EV)</span><span><i style="background:#DC2626"></i>Consumato (AC)</span><span><i style="background:#111827"></i>Budget (BAC)</span></div>
+                ${stimate ? '<p class="pm-nota">I giorni prima dell\'attivazione dei valori in euro sono stimati dalle ore spese alla tariffa media di oggi.</p>' : ''}
+                ${storia.length < 3 ? '<p class="pm-nota">Guadagnato e consumato si allungano giorno per giorno con la fotografia giornaliera del server.</p>' : ''}`;
+        }
+
+        function formEsterno(x) {
+            const nuovo = !x.id;
+            const sola = !nuovo && x.puoModificare === false;
+            const cat = ecoDati.categorie || {};
+            const m = modale({
+                titolo: `<i class="fas fa-truck-ramp-box"></i> ${nuovo ? 'Nuovo costo esterno' : esc(x.descrizione)}`,
+                corpo: `${sola ? '<div class="pm-avviso">Sola lettura: il tuo ruolo non può modificare questo costo.</div>' : ''}<div class="pm-form">
+                    <label>Categoria<select name="categoria">${Object.entries(cat).map(([k, v]) => `<option value="${k}" ${k === (x.categoria || 'fornitore') ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></label>
+                    <label>Data<input type="date" name="data" value="${esc(x.data || '')}"></label>
+                    <label class="largo">Descrizione<input name="descrizione" value="${esc(x.descrizione || '')}" placeholder="es. Sviluppo integrazione SAP, volo Milano-Londra, licenze 2027"></label>
+                    <label class="largo">Fornitore<input name="fornitore" value="${esc(x.fornitore || '')}"></label>
+                    <label>Previsto (€)<input name="previsto" inputmode="decimal" value="${x.previsto != null ? String(x.previsto).replace('.', ',') : ''}"></label>
+                    <label>Effettivo (€)<input name="effettivo" inputmode="decimal" value="${x.effettivo != null ? String(x.effettivo).replace('.', ',') : ''}"></label>
+                    <label class="largo">Note<textarea name="note">${esc(x.note || '')}</textarea></label>
+                </div>`,
+                pulsanti: [
+                    ...(!nuovo && !sola ? [{ testo: '<i class="fas fa-trash"></i> Elimina', classe: 'pericolo', azione: async () => {
+                        await api(`/economia/esterni/${encodeURIComponent(x.id)}?projectId=${encodeURIComponent(projectId)}`, { metodo: 'DELETE' });
+                        toast('Costo eliminato'); caricaEconomia();
+                    } }] : []),
+                    { testo: 'Annulla' },
+                    ...(sola ? [] : [{ testo: '<i class="fas fa-floppy-disk"></i> Salva', classe: 'primario', azione: async (mm) => {
+                        const b = { ...valori(mm), projectId };
+                        if (nuovo) await api('/economia/esterni', { metodo: 'POST', corpo: b });
+                        else await api(`/economia/esterni/${encodeURIComponent(x.id)}`, { metodo: 'PUT', corpo: b });
+                        toast('Costo salvato'); caricaEconomia();
+                    } }])
+                ]
+            });
+            if (sola) m.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; });
+        }
+
         // ================= STAKEHOLDER E RACI =================
         let stkDati = null;
         const ORG = { cliente: 'Cliente', interno: 'Interno', fornitore: 'Fornitore' };
@@ -783,7 +991,7 @@
         window.addEventListener('focus', () => {
             if (caricati.raid && pannello('raid').classList.contains('on') && !document.querySelector('.pm-modal-mask')) caricaRaid();
         });
-        const CARICA = { panoramica: caricaPanoramica, raid: caricaRaid, cr: caricaCr, stakeholder: caricaStakeholder, chiusura: caricaChiusura, chiedi: caricaChiedi };
+        const CARICA = { panoramica: caricaPanoramica, raid: caricaRaid, cr: caricaCr, economia: caricaEconomia, stakeholder: caricaStakeholder, chiusura: caricaChiusura, chiedi: caricaChiedi };
         // Da una riunione (finestra del recap): progetto della riunione, scheda RAID, estrazione.
         if (!projectId && qs.get('da_riunione')) {
             api(`/riunione?id_calendar=${encodeURIComponent(qs.get('da_riunione'))}`)
