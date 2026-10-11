@@ -20026,8 +20026,12 @@
                 ? `<select class="span-sel" title="Colonne occupate" style="flex:0 0 auto; width:auto; padding:2px 4px; font-size:0.72rem;">${[1, 2, 3].map(n => `<option value="${n}" ${span === n ? 'selected' : ''}>${n} col</option>`).join('')}</select>`
                 : '';
 
-            const type11Class = (tipo === 11 || tipo === 13) ? ' type11-grid-row' : '';
-            return `<div class="settings-detail-row${type11Class}" data-row-id="${id}" data-campo="${campo}" data-span="${span}"${spanStyle}>${checkbox}${label}${input}${spanSel}</div>${extraRow}`;
+            // Licenze da Attivare in visualizzazione (etichette): riga di campo normale, su tutta
+            // la larghezza, così le etichette stanno su una riga accanto al nome del campo.
+            const projLicChips = input.includes('data-proj-lic-field');
+            const type11Class = (tipo === 11 || tipo === 13) && !projLicChips ? ' type11-grid-row' : '';
+            const rowStyle = projLicChips ? ' style="grid-column: 1 / -1;"' : spanStyle;
+            return `<div class="settings-detail-row${type11Class}" data-row-id="${id}" data-campo="${campo}" data-span="${span}"${rowStyle}>${checkbox}${label}${input}${spanSel}</div>${extraRow}`;
         }
 
         // Punto di ingresso del pulsante "Salva" nel flyout di dettaglio: se l'utente è admin

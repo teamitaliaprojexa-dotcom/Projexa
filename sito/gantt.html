@@ -337,6 +337,11 @@
                     <input type="number" id="cfgFormazione" step="0.01">
                 </div>
             </div>
+            <!-- Totale: solo per gli argomenti (livello 1), nascosto sulle sotto attività -->
+            <div id="cfgTotaleRow">
+                <label for="cfgTotale">Totale</label>
+                <input type="number" id="cfgTotale" step="0.01">
+            </div>
             <div>
                 <label for="cfgColor">Colore di riempimento (solo Argomento 1)</label>
                 <input type="color" id="cfgColor" value="#3B82F6">
@@ -529,16 +534,16 @@
             'nr_mesi', 'nr_giorni', 'stato', 'avanzamento', 'rischio',
             'owner', 'nominativo', 'note_interne', 'mostra_cliente',
             'name_arg1', 'name_arg2', 'name_arg3', 'name_arg4', 'milestone',
-            'analisi', 'configurazione', 'formazione'];
+            'analisi', 'configurazione', 'formazione', 'totale'];
         // Cruscotto PM (api/pm/gantt): analisi del progetto (percorso critico, completamento) e
         // disponibilità di milestone/baseline (colonne di Supporto/CreaDB/pm_senior.sql).
         let ganttPm = null, projectIdPm = '', mostraBaseline = false, mostraCritico = false;
         // Colonne aggiuntive della tabella, modificabili dal flyout Configurazione.
         const GANTT_EXTRA_COLS = ['nr_mesi', 'nr_giorni', 'stato', 'avanzamento',
             'rischio', 'owner', 'nominativo', 'note_interne',
-            'analisi', 'configurazione', 'formazione'];
-        // Numerici con 2 decimali (proj_activity NUMERIC(12,2)).
-        const GANTT_DECIMAL_COLS = new Set(['analisi', 'configurazione', 'formazione']);
+            'analisi', 'configurazione', 'formazione', 'totale'];
+        // Numerici con 2 decimali (proj_activity NUMERIC(12,2)). totale: solo livello 1.
+        const GANTT_DECIMAL_COLS = new Set(['analisi', 'configurazione', 'formazione', 'totale']);
         const DEFAULT_COLOR = '#3B82F6';
         const DEFAULT_COL_LABELS = ['Argomento 1', 'Argomento 2', 'Argomento 3', 'Argomento 4'];
         // Etichette delle 4 colonne: valgono per l'intero progetto e vengono scritte in
@@ -1191,6 +1196,7 @@
             EXTRA_FIELD_INPUTS.forEach(([inputId, col]) => {
                 document.getElementById(inputId).value = node[col] == null ? '' : node[col];
             });
+            document.getElementById('cfgTotaleRow').style.display = level === 1 ? '' : 'none';
             document.getElementById('cfgMostraCliente').checked = node.mostra_cliente !== false;
             document.getElementById('cfgMilestoneRow').style.display = ganttPm && ganttPm.milestoneDisponibile ? '' : 'none';
             document.getElementById('cfgMilestone').checked = node.milestone === true;
@@ -1233,7 +1239,8 @@
             ['cfgNote', 'note_interne'],
             ['cfgAnalisi', 'analisi'],
             ['cfgConfigurazione', 'configurazione'],
-            ['cfgFormazione', 'formazione']
+            ['cfgFormazione', 'formazione'],
+            ['cfgTotale', 'totale']
         ];
         EXTRA_FIELD_INPUTS.forEach(([inputId, col]) => {
             document.getElementById(inputId).addEventListener('change', () => {

@@ -4096,7 +4096,7 @@ const GANTT_COLUMNS = ['argomento1', 'ordinamento1', 'argomento2', 'ordinamento2
   // ancora vengono ignorate.
   'milestone', 'baseline_inizio', 'baseline_fine',
   // Effort per attività, NUMERIC(12,2) (colonne aggiunte a mano il 2026-10-11).
-  'analisi', 'configurazione', 'formazione'];
+  'analisi', 'configurazione', 'formazione', 'totale'];
 const GANTT_SOLO_LETTURA = new Set(['baseline_inizio', 'baseline_fine']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
