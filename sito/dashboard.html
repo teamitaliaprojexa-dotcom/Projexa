@@ -19289,6 +19289,8 @@
                 </div>` : `<div class="type11-grid-toolbar">
                     <span class="type11-grid-selection" style="color:var(--text-muted); font-size:0.8rem; flex:1;">${editOnly ? 'Modifica contemporaneamente tutte le righe' : 'Seleziona una riga per eliminarla oppure modifica tutte'}</span>
                     ${editOnly ? '' : '<button type="button" class="type11-grid-add primary">+ Nuova riga</button>'}
+                    ${!editOnly && source === 'projects' && String(payload.tabella || '').toLowerCase() === 'proj_licenze'
+                        ? '<button type="button" class="type11-grid-compila" title="Aggiunge le licenze attive del cliente (Elenco Licenze) con il loro referente">Compila</button>' : ''}
                     <button type="button" class="type11-grid-edit${editOnly ? ' primary' : ''}"${records.some(rowWritable) ? '' : ' disabled'}>Modifica tutte</button>
                     ${editOnly ? '' : '<button type="button" class="type11-grid-delete danger" disabled>Elimina</button>'}
                     <button type="button" class="type11-grid-save-inline primary" style="display:none;">Salva</button>
@@ -19362,6 +19364,7 @@
                     // colonne (e lo stesso ordine) già mostrate in visualizzazione nella griglia.
                     const orderedMeta = await type11VisibleColumnsMeta(widget, visibleColumns, lockedColumns);
                     const addBtn = widget.querySelector('.type11-grid-add');
+                    const compilaBtn = widget.querySelector('.type11-grid-compila');
                     const saveBtn = widget.querySelector('.type11-grid-save-inline');
                     const cancelBtn = widget.querySelector('.type11-grid-cancel-inline');
                     const editOptionsCache = new Map();
@@ -19373,6 +19376,7 @@
                     const setToolbarEditingState = (isEditingNow, keepAdd = false) => {
                         if (selectionLabel) selectionLabel.style.display = isEditingNow ? 'none' : '';
                         if (addBtn) addBtn.style.display = isEditingNow && !keepAdd ? 'none' : '';
+                        if (compilaBtn) compilaBtn.style.display = isEditingNow ? 'none' : '';
                         if (editBtn) editBtn.style.display = isEditingNow ? 'none' : '';
                         if (deleteBtn) deleteBtn.style.display = isEditingNow ? 'none' : '';
                         if (saveBtn) saveBtn.style.display = isEditingNow ? '' : 'none';
@@ -19421,6 +19425,30 @@
                         editingIsNew = true;
                         setToolbarEditingState(true, true);
                         tr.querySelector('.type11-editor-field:not([disabled])')?.focus();
+                    });
+
+                    // "Compila" (solo griglia Licenze del progetto, proj_licenze): aggiunge le
+                    // licenze attive del cliente con il referente, senza doppioni.
+                    compilaBtn?.addEventListener('click', async () => {
+                        if (editingRows.length) return;
+                        compilaBtn.disabled = true;
+                        try {
+                            const res = await fetch(`${API_URL}/projects/grid-widget/proj-licenze/compila`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                                body: JSON.stringify({ fieldId })
+                            });
+                            const data = await res.json().catch(() => ({}));
+                            if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                            showNotification(!data.attive
+                                ? 'Il cliente non ha licenze attive in Elenco Licenze'
+                                : `Licenze aggiunte: ${data.inserite}${data.giaPresenti ? ` (già presenti: ${data.giaPresenti})` : ''}`,
+                                data.inserite ? 'success' : 'info');
+                            await loadType11Grid(widget);
+                        } catch (e) {
+                            showNotification('Errore: ' + e.message, 'error');
+                            compilaBtn.disabled = false;
+                        }
                     });
 
                     // "Modifica tutte": rende contemporaneamente editabili tutte le righe
@@ -19624,6 +19652,23 @@
         function hydrateType11Grids(root) {
             if (!root) return;
             root.querySelectorAll('.type11-grid-widget').forEach(widget => loadType11Grid(widget));
+            root.querySelectorAll('[data-proj-lic-field]').forEach(el => loadProjLicenzeChips(el));
+        }
+
+        // «Licenze da Attivare» in visualizzazione: etichette delle licenze attive del progetto,
+        // lette dalla stessa API della griglia (licenza_id arriva già come nome della licenza).
+        async function loadProjLicenzeChips(el) {
+            try {
+                const query = new URLSearchParams({ fieldId: el.dataset.projLicField, clientId: projectClientId || '' });
+                const res = await fetch(`${API_URL}/projects/grid-widget?${query.toString()}`, { headers: getAuthHeaders() });
+                if (!res.ok) { el.textContent = ''; return; }
+                const payload = await res.json();
+                const rows = Array.isArray(payload.rows) ? payload.rows : [];
+                const nomi = [...new Set(rows.map(r => String(type11CellValue(r, 'licenza_id') ?? '').trim()).filter(Boolean))];
+                el.innerHTML = nomi.map(n => `<span class="ms-chip">${escapeHtml(n)}</span>`).join('');
+            } catch (e) {
+                el.textContent = '';
+            }
         }
 
         // Renderizza una riga: "campo" a sinistra, input del valore a destra in base a tipo_valore.
@@ -19853,6 +19898,13 @@
                 } else {
                     input = `<span class="ms-chips-view">${selected.length ? msChipsHtml(selected) : ''}</span>`;
                 }
+            } else if (tipo === 11 && mode !== 'edit' && currentDetailSource === 'projects'
+                && String(row.tabella || '').trim().toLowerCase() === 'proj_licenze') {
+                // Griglia «Licenze da Attivare» (proj_licenze) senza «Abilita modifica»: si vede
+                // come un campo a elenco (etichette delle licenze, come il tipo 18). Le etichette
+                // si leggono dalla griglia dopo il render (loadProjLicenzeChips); in modifica
+                // torna la griglia normale.
+                input = `<span class="ms-chips-view" data-proj-lic-field="${id}"></span>`;
             } else if (tipo === 11 || tipo === 13) {
                 // Griglia: tabella e colonne arrivano dalla riga del contesto corrente
                 // (settings, clients o projects). Il caricamento avviene dopo il render.

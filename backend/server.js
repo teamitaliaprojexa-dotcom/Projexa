@@ -2020,15 +2020,31 @@ async function ckpProgetto(req, projectId, pool = db) {
       ORDER BY id LIMIT 1`,
     [id, req.user.tenant_id, req.user.user_id]
   )).rows[0];
-  // Licenze del progetto (campo «Licenze da attivare», tipo 18: valori uniti da ", ").
-  const l = (await pool.query(
-    `SELECT valore2 FROM projects
-      WHERE argument = $1 AND tenant_id = $2 AND user_id = $3 AND lower(btrim(campo)) IN ('licenze da attivare', '(*) licenze da attivare')
-        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
-      ORDER BY id LIMIT 1`,
-    [id, req.user.tenant_id, req.user.user_id]
-  )).rows[0];
-  const licenze = [...new Set(String((l && l.valore2) || '').split(',').map((x) => x.trim()).filter(Boolean))];
+  // Licenze del progetto: dal 2026-10-11 le righe attive della griglia «Licenze da Attivare»
+  // (proj_licenze, nome = conf_licenze_app.description). Se la tabella non c'è o il progetto
+  // non ha righe, il vecchio campo «Licenze da attivare» (tipo 18: valori uniti da ", ").
+  let licenze = [];
+  // Controllo preventivo invece di try/catch: un errore SQL dentro una transazione la annullerebbe.
+  if ((await pool.query(`SELECT to_regclass('public.proj_licenze') IS NOT NULL AS c`)).rows[0].c) {
+    licenze = (await pool.query(
+      `SELECT cl.description AS v FROM proj_licenze pl JOIN conf_licenze_app cl ON cl.id = pl.licenza_id
+        WHERE pl.project_id::text = $1 AND pl.tenant_id = $2 AND pl.user_id = $3
+          AND (pl.scadenza IS NULL OR pl.scadenza >= CURRENT_DATE)
+        ORDER BY pl.id`,
+      [id, req.user.tenant_id, req.user.user_id]
+    )).rows.map((x) => String(x.v || '').trim());
+  }
+  if (!licenze.length) {
+    const l = (await pool.query(
+      `SELECT valore2 FROM projects
+        WHERE argument = $1 AND tenant_id = $2 AND user_id = $3 AND lower(btrim(campo)) IN ('licenze da attivare', '(*) licenze da attivare')
+          AND tipo_valore::text = '18' AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+        ORDER BY id LIMIT 1`,
+      [id, req.user.tenant_id, req.user.user_id]
+    )).rows[0];
+    licenze = String((l && l.valore2) || '').split(',');
+  }
+  licenze = [...new Set(licenze.map((x) => x.trim()).filter(Boolean))];
   return { projectId: id, clientId: p.client_id, tipologia: t && t.valore2 ? String(t.valore2).trim() : '', licenze };
 }
 
@@ -3998,6 +4014,71 @@ app.delete('/api/:source(settings|clients|projects)/grid-widget/row', requireAut
 });
 
 // ============================================================================
+// "Compila" della griglia Licenze del progetto (campo tipo 11 su proj_licenze):
+// copia nel progetto le licenze ATTIVE del cliente (licenze_app: stesso tenant, utente
+// proprietario e cliente, active = true, non scadute), con licenza e referente.
+// Le licenze già presenti nel progetto (righe non scadute) non vengono duplicate.
+// ============================================================================
+app.post('/api/projects/grid-widget/proj-licenze/compila', requireAuth, async (req, res) => {
+  let client;
+  try {
+    const fieldId = String((req.body && req.body.fieldId) || '').trim();
+    const ctx = await resolveGridWidgetContext('projects', fieldId, req, true);
+    if (ctx.tableName !== 'proj_licenze') {
+      return res.status(400).json({ error: 'Compila è disponibile solo sulla griglia delle licenze del progetto' });
+    }
+    if (ctx.readOnly) return res.status(403).json({ error: READ_ONLY_ERROR });
+    const projectId = String(ctx.config.argument || '').trim();
+    if (!UUID_RE.test(projectId) || !ctx.clientId) {
+      return res.status(400).json({ error: 'Progetto o cliente non disponibile' });
+    }
+    // Lettura dal pool: referente arriva già decifrato.
+    const licenze = (await db.query(
+      `SELECT licenza_id, referente FROM licenze_app
+        WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
+          AND active IS TRUE AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+        ORDER BY id`,
+      [req.user.tenant_id, ctx.effectiveUserId, ctx.clientId]
+    )).rows;
+    if (!licenze.length) return res.json({ inserite: 0, giaPresenti: 0, attive: 0 });
+
+    const presenti = new Set((await db.query(
+      `SELECT licenza_id FROM proj_licenze
+        WHERE tenant_id = $1 AND user_id = $2 AND project_id = $3
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+      [req.user.tenant_id, ctx.effectiveUserId, projectId]
+    )).rows.map((r) => String(r.licenza_id)));
+
+    client = await db.connect();
+    await client.query('BEGIN');
+    let inserite = 0, giaPresenti = 0;
+    for (const l of licenze) {
+      const key = String(l.licenza_id);
+      if (presenti.has(key)) { giaPresenti += 1; continue; }
+      presenti.add(key); // stessa licenza ripetuta in licenze_app: una sola riga
+      const data = {
+        tenant_id: req.user.tenant_id,
+        user_id: ctx.effectiveUserId,
+        client_id: ctx.clientId,
+        project_id: projectId,
+        licenza_id: l.licenza_id,
+        referente: l.referente ?? null
+      };
+      stampRoleWrite(req, data, ctx.tableColumns); // modificabile dal ruolo di chi compila
+      await insertRowEncrypted(client, 'main', 'proj_licenze', data);
+      inserite += 1;
+    }
+    await client.query('COMMIT');
+    res.json({ inserite, giaPresenti, attive: licenze.length });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    res.status(error.statusCode || 500).json({ error: error.message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// ============================================================================
 // GANTT (tipo_valore = 13): la pagina gantt.html si appoggia SEMPRE alla tabella
 // proj_activity. Il contesto (tenant/utente/cliente/progetto) e l'autorizzazione
 // derivano dal campo tipo 13 (fieldId) esattamente come per la griglia tipo 11;
@@ -4013,7 +4094,9 @@ const GANTT_COLUMNS = ['argomento1', 'ordinamento1', 'argomento2', 'ordinamento2
   // Supporto/CreaDB/pm_senior.sql: milestone (modificabile) e baseline (sola lettura: la
   // scrive solo «Congela baseline», POST /api/pm/gantt/baseline). Se le colonne non ci sono
   // ancora vengono ignorate.
-  'milestone', 'baseline_inizio', 'baseline_fine'];
+  'milestone', 'baseline_inizio', 'baseline_fine',
+  // Effort per attività, NUMERIC(12,2) (colonne aggiunte a mano il 2026-10-11).
+  'analisi', 'configurazione', 'formazione'];
 const GANTT_SOLO_LETTURA = new Set(['baseline_inizio', 'baseline_fine']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

@@ -323,6 +323,20 @@
                 <label for="cfgName">Nome</label>
                 <input type="text" id="cfgName">
             </div>
+            <div class="row2">
+                <div>
+                    <label for="cfgAnalisi">Analisi</label>
+                    <input type="number" id="cfgAnalisi" step="0.01">
+                </div>
+                <div>
+                    <label for="cfgConfigurazione">Configurazione</label>
+                    <input type="number" id="cfgConfigurazione" step="0.01">
+                </div>
+                <div>
+                    <label for="cfgFormazione">Formazione</label>
+                    <input type="number" id="cfgFormazione" step="0.01">
+                </div>
+            </div>
             <div>
                 <label for="cfgColor">Colore di riempimento (solo Argomento 1)</label>
                 <input type="color" id="cfgColor" value="#3B82F6">
@@ -514,13 +528,17 @@
             'data_inizio', 'data_fine', 'dipendenza', 'colore',
             'nr_mesi', 'nr_giorni', 'stato', 'avanzamento', 'rischio',
             'owner', 'nominativo', 'note_interne', 'mostra_cliente',
-            'name_arg1', 'name_arg2', 'name_arg3', 'name_arg4', 'milestone'];
+            'name_arg1', 'name_arg2', 'name_arg3', 'name_arg4', 'milestone',
+            'analisi', 'configurazione', 'formazione'];
         // Cruscotto PM (api/pm/gantt): analisi del progetto (percorso critico, completamento) e
         // disponibilità di milestone/baseline (colonne di Supporto/CreaDB/pm_senior.sql).
         let ganttPm = null, projectIdPm = '', mostraBaseline = false, mostraCritico = false;
         // Colonne aggiuntive della tabella, modificabili dal flyout Configurazione.
         const GANTT_EXTRA_COLS = ['nr_mesi', 'nr_giorni', 'stato', 'avanzamento',
-            'rischio', 'owner', 'nominativo', 'note_interne'];
+            'rischio', 'owner', 'nominativo', 'note_interne',
+            'analisi', 'configurazione', 'formazione'];
+        // Numerici con 2 decimali (proj_activity NUMERIC(12,2)).
+        const GANTT_DECIMAL_COLS = new Set(['analisi', 'configurazione', 'formazione']);
         const DEFAULT_COLOR = '#3B82F6';
         const DEFAULT_COL_LABELS = ['Argomento 1', 'Argomento 2', 'Argomento 3', 'Argomento 4'];
         // Etichette delle 4 colonne: valgono per l'intero progetto e vengono scritte in
@@ -1212,7 +1230,10 @@
             ['cfgRischio', 'rischio'],
             ['cfgOwner', 'owner'],
             ['cfgNominativo', 'nominativo'],
-            ['cfgNote', 'note_interne']
+            ['cfgNote', 'note_interne'],
+            ['cfgAnalisi', 'analisi'],
+            ['cfgConfigurazione', 'configurazione'],
+            ['cfgFormazione', 'formazione']
         ];
         EXTRA_FIELD_INPUTS.forEach(([inputId, col]) => {
             document.getElementById(inputId).addEventListener('change', () => {
@@ -1220,6 +1241,10 @@
                 let value = document.getElementById(inputId).value;
                 if (col === 'avanzamento') {
                     value = value === '' ? null : Math.max(0, Math.min(100, parseInt(value, 10) || 0));
+                } else if (GANTT_DECIMAL_COLS.has(col)) {
+                    const n = Number(String(value).trim().replace(',', '.'));
+                    value = String(value).trim() === '' || !Number.isFinite(n) ? null : Math.round(n * 100) / 100;
+                    document.getElementById(inputId).value = value == null ? '' : value;
                 } else {
                     value = String(value).trim() || null;
                 }
