@@ -4302,6 +4302,96 @@ app.post('/api/projects/gantt-activity/copy', requireAuth, async (req, res) => {
   }
 });
 
+// "Genera": crea il Gantt di un progetto vuoto dalle fasi [Licenze] della Check List.
+//   - Check List del progetto presente (chek_list): le sue righe attive delle sezioni licenza
+//     (licenza valorizzata), nello stesso ordine della finestra Check List;
+//   - Check List vuota: le righe che la Check List genererebbe (ckpRighePreviste, stessa
+//     configurazione, condizioni e licenze del progetto), sempre solo le sezioni licenza.
+// Ogni fase (figlio 0) diventa un'attività di livello 1 (argomento1), le sue attività
+// (figlio > 0) le attività di livello 2 (argomento2). Date, colori e risorse restano vuoti.
+app.post('/api/projects/gantt-activity/genera', requireAuth, async (req, res) => {
+  try {
+    const fieldId = String((req.body && req.body.fieldId) || '').trim();
+    const ctx = await resolveGanttContext(fieldId, req, true);
+    const existing = await db.query(
+      `SELECT 1 FROM ${GANTT_TABLE}
+       WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3 AND project_id = $4 LIMIT 1`,
+      [ctx.tenantId, ctx.userId, ctx.clientId, ctx.projectId]
+    );
+    if (existing.rows.length) {
+      return res.status(409).json({ error: 'Il progetto contiene già delle attività' });
+    }
+    // Le funzioni della Check List lavorano sull'utente proprietario delle righe del progetto.
+    const reqProg = { ...req, user: { ...req.user, user_id: ctx.userId } };
+    const prog = await ckpProgetto(reqProg, ctx.projectId);
+    const checkList = await ckpRighe(reqProg, prog);
+    let righe = checkList.filter((r) => r.licenza);
+    let origine = 'checklist';
+    if (!checkList.length) {
+      origine = 'configurazione';
+      righe = (await ckpRighePreviste(db, reqProg, prog))
+        .filter((r) => r.licenza)
+        .sort((a, b) => (Number(a.ordinamento) - Number(b.ordinamento))
+          || (Number(a.padre || 0) - Number(b.padre || 0)) || (Number(a.figlio || 0) - Number(b.figlio || 0)));
+    }
+    if (!righe.length) {
+      return res.status(400).json({ error: origine === 'checklist'
+        ? 'La Check List del progetto non ha fasi [Licenze]'
+        : 'Nessuna fase [Licenze] da generare: controlla la Tipologia, le «Licenze da attivare» del progetto e la configurazione della Check List' });
+    }
+
+    // Albero: una fase per sezione (padre + licenza), le attività sotto la loro fase.
+    const fasi = [];
+    const perSezione = new Map();
+    for (const r of righe) {
+      const k = `${r.padre}|${r.licenza}`;
+      let fase = perSezione.get(k);
+      if (!fase) {
+        fase = { titolo: '', attivita: [] };
+        perSezione.set(k, fase);
+        fasi.push(fase);
+      }
+      const titolo = String(r.description || '').trim();
+      if (Number(r.figlio || 0) === 0) fase.titolo = titolo;
+      else if (titolo) fase.attivita.push(titolo);
+    }
+
+    const ganttColumns = await getTableColumns(GANTT_TABLE);
+    const client = await db.connect();
+    let inserite = 0;
+    try {
+      await client.query('BEGIN');
+      const inserisci = async (values) => {
+        let data = { ...values, tenant_id: ctx.tenantId, user_id: ctx.userId, client_id: ctx.clientId, project_id: ctx.projectId };
+        stampRoleWrite(req, data, ganttColumns);
+        data = await cryptoWrite(client, 'main', GANTT_TABLE, data);
+        const cols = Object.keys(data);
+        await client.query(
+          `INSERT INTO ${GANTT_TABLE} (${cols.map((c) => `"${assertValidIdentifier(c)}"`).join(', ')})
+           VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')})`,
+          cols.map((c) => data[c])
+        );
+        inserite += 1;
+      };
+      for (const [i, fase] of fasi.entries()) {
+        await inserisci({ argomento1: (fase.titolo || 'Fase').slice(0, 255), ordinamento1: i + 1 });
+        for (const [j, titolo] of fase.attivita.entries()) {
+          await inserisci({ argomento2: titolo.slice(0, 255), ordinamento1: i + 1, ordinamento2: j + 1 });
+        }
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+    res.json({ inserite, fasi: fasi.length, origine });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 // Estrae uno o più clientId dalla query string: supporta sia parametri ripetuti
 // (?clientId=a&clientId=b) sia valore singolo con lista separata da virgole
 // (?clientId=a,b). Ritorna sempre un array (vuoto = nessun filtro cliente).

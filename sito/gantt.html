@@ -256,7 +256,7 @@
         }
         .toast.show { opacity: 1; }
         /* Sola visualizzazione (mode=view): nascosti i comandi di modifica e salvataggio */
-        .gantt-readonly #addBtn, .gantt-readonly #copyBtn, .gantt-readonly #copyBtnEmpty,
+        .gantt-readonly #addBtn, .gantt-readonly #copyBtn, .gantt-readonly #copyBtnEmpty, .gantt-readonly #generaBtnEmpty,
         .gantt-readonly .autosave-wrap, .gantt-readonly #saveBtn,
         .gantt-readonly #cfgDepPick, .gantt-readonly #cfgDepClear, .gantt-readonly #cfgAddChild,
         .gantt-readonly .flyout-foot { display: none !important; }
@@ -303,7 +303,8 @@
     <div class="main-scroll" id="mainScroll">
         <div class="empty-state" id="emptyState">
             <h3>Nessuna attività in questo progetto</h3>
-            <p>Puoi copiare la struttura (argomenti e ordinamento) da un altro progetto, oppure creare le attività da zero scegliendo il modello in alto e usando il pulsante <b>Aggiungi</b>.</p>
+            <p>Puoi generare le attività dalle fasi [Licenze] della Check List con <b>Genera</b>, copiare la struttura (argomenti e ordinamento) da un altro progetto, oppure creare le attività da zero scegliendo il modello in alto e usando il pulsante <b>Aggiungi</b>.</p>
+            <button class="btn blue" id="generaBtnEmpty" title="Crea le attività dalle fasi [Licenze] della Check List del progetto"><i class="fas fa-wand-magic-sparkles"></i> Genera</button>
             <button class="btn blue" id="copyBtnEmpty"><i class="fas fa-copy"></i> Copia progetto da</button>
         </div>
         <div class="board" id="board"></div>
@@ -1496,6 +1497,24 @@
         document.getElementById('copyBtn').addEventListener('click', openCopyModal);
         document.getElementById('copyBtnEmpty').addEventListener('click', openCopyModal);
         document.getElementById('copyCancel').addEventListener('click', () => document.getElementById('copyModal').classList.remove('open'));
+
+        // ===== "Genera": attività dalle fasi [Licenze] della Check List (solo progetto vuoto) =====
+        document.getElementById('generaBtnEmpty').addEventListener('click', async () => {
+            const btn = document.getElementById('generaBtnEmpty');
+            const original = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generazione…';
+            try {
+                const r = await api('/projects/gantt-activity/genera', { method: 'POST', body: JSON.stringify({ fieldId }) });
+                showToast(`Create ${r.inserite} attività (${r.fasi} fasi) ${r.origine === 'checklist' ? 'dalla Check List' : 'dalla configurazione della Check List'}`);
+                await loadData();
+            } catch (e) {
+                showToast('Errore: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = original;
+            }
+        });
 
         document.getElementById('copyClientSel').addEventListener('change', () => {
             const clientId = document.getElementById('copyClientSel').value;

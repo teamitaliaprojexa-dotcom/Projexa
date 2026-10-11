@@ -17738,7 +17738,7 @@
         // resta un numero (è l'effort, non un importo).
         const TYPE11_CURRENCY_COLUMNS = new Set(['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
             'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre', 'totale',
-            'consuntivo_hh', 'consuntivo_gg', 'importo_scontato_hh', 'importo_scontato_gg',
+            'consuntivo_hh', 'consuntivo_gg', 'consuntivo_fatt_hh', 'consuntivo_fatt_gg', 'importo_scontato_hh', 'importo_scontato_gg',
             'offerta_hh', 'offerta_gg', 'offerta_diff_hh', 'offerta_diff_gg']);
 
         // Colonne in euro, riconosciute dal nome tecnico (non dall'etichetta).
@@ -19151,6 +19151,17 @@
                     ? payload.columns
                     : columns;
                 const records = Array.isArray(payload.rows) ? payload.rows : (Array.isArray(payload) ? payload : []);
+                // Griglia Invoice: "Importo Scontato" (importo_scontato_hh/gg) si mostra solo se
+                // almeno una riga ha un importo diverso dall'Offerta (offerta_hh/gg) della stessa unità.
+                if (String(payload.tabella || '').toLowerCase() === 'invoice') {
+                    const num = v => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+                    visibleColumns = visibleColumns.filter(column => {
+                        const m = /^importo_scontato_(hh|gg)$/i.exec(String(column));
+                        if (!m) return true;
+                        const offerta = 'offerta_' + m[1].toLowerCase();
+                        return records.some(r => Math.abs(num(type11CellValue(r, column)) - num(type11CellValue(r, offerta))) >= 0.005);
+                    });
+                }
                 type11SetupHeader(widget, records);
                 const hasProjectIdColumn = visibleColumns.some(column => String(column).toLowerCase() === 'project_id');
                 const projectOptions = hasProjectIdColumn ? await type11ProjectOptions(context.clientId) : [];
