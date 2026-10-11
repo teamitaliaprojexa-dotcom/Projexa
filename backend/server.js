@@ -4101,11 +4101,39 @@ const GANTT_COLUMNS = ['argomento1', 'ordinamento1', 'argomento2', 'ordinamento2
   // ancora vengono ignorate.
   'milestone', 'baseline_inizio', 'baseline_fine',
   // Effort per attività, NUMERIC(12,2) (colonne aggiunte a mano il 2026-10-11).
-  'analisi', 'configurazione', 'formazione', 'totale'];
+  'analisi', 'configurazione', 'formazione', 'totale',
+  // Supporto/CreaDB/proj_activity_effettivo.sql: effettivo (a mano) e marginalità/sforamento
+  // (calcolati dalla pagina Gantt rispetto alla stima).
+  'effettivo', 'marginalita', 'sforamento'];
 const GANTT_SOLO_LETTURA = new Set(['baseline_inizio', 'baseline_fine']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function resolveGanttContext(fieldId, req, needWrite) {
+  // Senza campo tipo 13: Gantt aperto dal pulsante «Gantt» della scheda progetto, con il solo
+  // projectId. Stesse regole del campo: proprietario del progetto, oppure Manager del suo team
+  // in sola lettura.
+  if (!fieldId) {
+    const projectId = String((req.query && req.query.projectId) || (req.body && req.body.projectId) || '').trim();
+    if (!UUID_RE.test(projectId)) {
+      throw Object.assign(new Error('Parametro projectId richiesto'), { statusCode: 400 });
+    }
+    const p = (await db.query(
+      `SELECT id::text AS id, client_id::text AS client_id, user_id FROM projects
+        WHERE id::text = $1 AND tenant_id = $2 AND argument = 'Progetto' AND campo = 'Progetto' LIMIT 1`,
+      [projectId, req.user.tenant_id]
+    )).rows[0];
+    if (!p) throw Object.assign(new Error('Progetto non trovato'), { statusCode: 404 });
+    let readOnly = false;
+    if (String(p.user_id) !== String(req.user.user_id)) {
+      if (needWrite || !(await isTeamMember(p.user_id, req))) {
+        throw Object.assign(new Error('Non autorizzato'), { statusCode: 403 });
+      }
+      readOnly = true;
+    }
+    if (needWrite) assertCanWriteTable(req, GANTT_TABLE);
+    if (!p.client_id) throw Object.assign(new Error('Contesto client_id non disponibile'), { statusCode: 400 });
+    return { tenantId: req.user.tenant_id, userId: String(p.user_id), clientId: p.client_id, projectId: p.id, readOnly };
+  }
   const ctx = await resolveGridWidgetContext('projects', fieldId, req, needWrite);
   if (String(ctx.config.tipo_valore) !== '13') {
     throw Object.assign(new Error('Il campo non è di tipo 13 (Gantt)'), { statusCode: 400 });

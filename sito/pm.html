@@ -95,6 +95,23 @@
             } catch (e) { p.innerHTML = errore(e); }
         }
 
+        // Effettivo / Marginalità / Sforamento scritti nel Gantt (solo attività con l'Effettivo):
+        // totali e attività che hanno superato la stima.
+        function consuntivoGantt(c, conU) {
+            if (!c) return '<div class="pm-vuoto">Nessun effettivo: nel Gantt apri un\'attività e compila «Effettivo».</div>';
+            const sforate = c.sforate && c.sforate.length
+                ? `<table class="pm-t" style="margin-top:0.6rem"><thead><tr><th>Attività sforate</th><th class="n">Stima</th><th class="n">Effettivo</th><th class="n">Sforamento</th></tr></thead><tbody>${c.sforate.slice(0, 10).map((x) => `<tr><td>${esc(x.nome)}${x.owner ? `<div class="pm-nota">${esc(x.owner)}</div>` : ''}</td><td class="n">${fmt(x.stima)}</td><td class="n">${fmt(x.effettivo)}</td><td class="n" style="color:#DC2626">+${fmt(x.sforamento)}</td></tr>`).join('')}</tbody></table>`
+                : '<p class="pm-nota"><i class="fas fa-check" style="color:#059669"></i> Nessuna attività oltre la stima.</p>';
+            return `<div class="pm-kpi">
+                    <div><small>Stima</small><b>${conU(c.stima)}</b><div class="pm-nota">${c.attivita} attività con effettivo</div></div>
+                    <div><small>Effettivo</small><b style="color:${c.perc > 100 ? '#DC2626' : 'inherit'}">${conU(c.effettivo)}</b>${c.perc != null ? `<div class="pm-nota">${fmt(c.perc, 0)}% della stima</div>` : ''}</div>
+                    <div><small>Marginalità</small><b style="color:#059669">${conU(c.marginalita)}</b></div>
+                    <div><small>Sforamento</small><b style="color:${c.sforamento > 0 ? '#DC2626' : 'inherit'}">${conU(c.sforamento)}</b></div>
+                    <div><small>Saldo</small><b style="color:${c.netto < 0 ? '#DC2626' : '#059669'}">${c.netto > 0 ? '+' : ''}${conU(c.netto)}</b><div class="pm-nota">marginalità − sforamento</div></div>
+                </div>${sforate}
+                <p class="pm-nota">Stima = Analisi + Configurazione + Formazione dell'attività (senza valori, il Totale). Saldo negativo oltre il 10% della stima colora di giallo l'indicatore Budget, oltre il 25% di rosso.</p>`;
+        }
+
         function renderPanoramica(p) {
             const d = dati, e = d.eac, g = d.gantt, s = d.scheda;
             // Stessa soglia del semaforo (pmCore.js): sotto il 15% di completamento la stima a
@@ -125,7 +142,8 @@
             const ritardi = g.inRitardo.length ? `<ul>${g.inRitardo.slice(0, 8).map((r) => `<li><b>${esc(r.nome)}</b>: doveva finire il ${dataIt(r.fine)}, ${r.avanzamento}% (${r.giorni} gg di ritardo)${r.owner ? ` · ${esc(r.owner)}` : ''}</li>`).join('')}</ul>` : '<div class="pm-vuoto">Nessuna attività in ritardo.</div>';
             const conFatt = d.economia.fatturato != null;
             const voci = d.economia.voci.length ? `<table class="pm-t"><thead><tr><th>Voce</th><th class="n">Offerta (${unita === 'ore' ? 'ore' : 'gg'})</th><th class="n">Speso (${unita === 'ore' ? 'ore' : 'gg'})</th><th class="n">%</th>${conFatt ? `<th class="n" title="Voucher Qlik in stato «Chiuso»">Fatturato (${unita === 'ore' ? 'ore' : 'gg'})</th>` : ''}</tr></thead><tbody>${d.economia.voci.map((v) => `<tr><td>${esc(v.voce)}</td><td class="n">${fmt(v.offerta)}</td><td class="n">${fmt(v.speso)}</td><td class="n" style="color:${v.offerta && v.speso > v.offerta ? '#DC2626' : 'inherit'}">${v.offerta ? `${fmt((v.speso / v.offerta) * 100, 0)}%` : '–'}</td>${conFatt ? `<td class="n">${fmt(v.fatturato)}</td>` : ''}</tr>`).join('')}</tbody></table>` : '<div class="pm-vuoto">Nessuna voce nei Costi Progetto.</div>';
-            const gLink = d.ganttCampo ? `gantt.html?${new URLSearchParams({ fieldId: d.ganttCampo.fieldId, clientId: d.progetto.clientId || '', label: d.ganttCampo.label, projectId, projectName: d.progetto.nome, clientName: d.progetto.cliente || '' })}` : '';
+            // Il Gantt si apre dal progetto (projectId), anche senza il campo griglia tipo 13 nella scheda.
+            const gLink = `gantt.html?${new URLSearchParams({ clientId: d.progetto.clientId || '', label: d.ganttCampo ? d.ganttCampo.label : 'Gantt', projectId, projectName: d.progetto.nome, clientName: d.progetto.cliente || '' })}`;
             p.innerHTML = `
             <div class="pm-griglia">
                 <div class="pm-card">
@@ -170,6 +188,7 @@
                 </div>
                 <div class="pm-card"><h2><i class="fas fa-gem"></i> Milestone</h2>${ms}</div>
                 <div class="pm-card"><h2><i class="fas fa-coins"></i> Effort per voce di costo</h2>${voci}</div>
+                <div class="pm-card"><h2><i class="fas fa-scale-balanced"></i> Effettivo contro stima <span class="pm-nota">(attività del Gantt)</span></h2>${consuntivoGantt(g.consuntivo, conU)}</div>
             </div>`;
             p.querySelector('#btnBaseline').addEventListener('click', async (ev) => {
                 const testo = g.baselineFine

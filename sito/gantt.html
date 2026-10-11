@@ -65,7 +65,9 @@
         .ec-diff.pos { color: #059669; }
         .ec-diff.neg { color: #DC2626; }
         .proj-sum { width: 897px; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 6px; }
-        .proj-sum-row { display: grid; grid-template-columns: 110px 1fr 120px; align-items: center; gap: 8px; font-size: 0.75rem; }
+        .proj-sum-row { display: grid; grid-template-columns: 110px 1fr 52px 120px; align-items: center; gap: 8px; font-size: 0.75rem; }
+        .proj-sum-row .avz { text-align: right; font-size: 0.72rem; font-weight: 700; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .proj-sum-row .avz.done { color: #059669; }
         .proj-sum-row .lbl { font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; font-size: 0.68rem; }
         .proj-sum-row .trk { height: 14px; background: #EEF2F7; border-radius: 7px; overflow: hidden; }
         .proj-sum-row .fil { display: block; height: 100%; border-radius: 7px; }
@@ -183,6 +185,12 @@
         .eff-avz.done { color: #059669; }
         .eff-val small { color: var(--text-muted); font-size: 0.62rem; }
         .eff-val { flex: 0 0 84px; text-align: right; font-size: 0.68rem; color: var(--dark); font-variant-numeric: tabular-nums; }
+        /* Colonna Effettivo / Marginalità / Sforamento */
+        .cons-head { flex: 0 0 150px; width: 150px; padding: 0 8px 8px; font-size: 0.7rem; font-weight: 600; color: var(--text-muted); display: flex; align-items: flex-end; }
+        .wbs-row .cons-cell { flex: 0 0 150px; width: 150px; padding: 0 8px; display: flex; flex-direction: column; justify-content: center; font-size: 0.68rem; font-variant-numeric: tabular-nums; line-height: 1.3; }
+        .cons-cell .cons-eff { color: var(--dark); font-weight: 600; }
+        .cons-cell .pos { color: #059669; }
+        .cons-cell .neg { color: #DC2626; }
         .eff-bar.big { height: 16px; }
         .eff-bar.big .eff-track { height: 14px; border-radius: 5px; }
         .eff-bar.big .eff-val { font-weight: 700; font-size: 0.75rem; }
@@ -256,19 +264,25 @@
         }
         .flyout.open { right: 0; }
         .flyout-head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.2rem; border-bottom: 1px solid var(--border); font-weight: 700; }
-        .flyout-body { flex: 1; overflow: auto; padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: 0.9rem; }
-        .flyout-body label { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px; }
+        .flyout-body { flex: 1; overflow: auto; padding: 0.8rem 1.2rem; display: flex; flex-direction: column; gap: 0.45rem; }
+        .flyout-body label { font-size: 0.72rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 2px; }
         .flyout-body input[type=text], .flyout-body input[type=date], .flyout-body input[type=number], .flyout-body textarea,
         .flyout-body select {
-            width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.85rem;
+            width: 100%; padding: 0.15rem 0.45rem; border: 1px solid #D1D5DB; border-radius: 5px; font-size: 0.78rem; line-height: 1.3;
         }
-        .flyout-body select { background: white; height: 38px; }
+        .flyout-body input[type=text], .flyout-body input[type=date], .flyout-body input[type=number] { height: 24px; }
+        .flyout-body select { background: white; height: 24px; padding-top: 0; padding-bottom: 0; }
         .flyout-body textarea { resize: vertical; font-family: inherit; }
+        .flyout-body input[readonly] { background: #F3F4F6; color: var(--dark); }
+        .flyout-body input.cfg-calc.pos { color: #059669; font-weight: 600; }
+        .flyout-body input.cfg-calc.neg { color: #DC2626; font-weight: 600; }
         .flyout-body .row2 { display: flex; gap: 10px; }
         .flyout-body .row2 > div { flex: 1; min-width: 0; }
+        /* Etichette su una riga sola: i campi affiancati restano allineati */
+        .flyout-body .row2 label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .flyout-body .cfg-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
         .flyout-body .cfg-hint { font-size: 0.72rem; color: var(--text-muted); line-height: 1.3; }
-        .flyout-body input[type=color] { width: 54px; height: 32px; padding: 2px; border: 1px solid #D1D5DB; border-radius: 6px; background: white; cursor: pointer; }
+        .flyout-body input[type=color] { width: 40px; height: 22px; padding: 2px; border: 1px solid #D1D5DB; border-radius: 6px; background: white; cursor: pointer; }
         .flyout-foot { padding: 1rem 1.2rem; border-top: 1px solid var(--border); display: flex; gap: 0.5rem; flex-wrap: wrap; }
         .dep-current { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
         .dep-current .dep-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dark); }
@@ -294,6 +308,79 @@
         .gantt-readonly .autosave-wrap, .gantt-readonly #saveBtn,
         .gantt-readonly #cfgDepPick, .gantt-readonly #cfgDepClear, .gantt-readonly #cfgAddChild,
         .gantt-readonly .flyout-foot { display: none !important; }
+        .gantt-readonly #moreWrap { display: none !important; }
+
+        /* ===== Layout moderno (2026-10-11) ===== */
+        body { background: #F4F6FA; }
+        .topbar { gap: 0.5rem; padding: 0.55rem 1.2rem; box-shadow: 0 1px 2px rgba(15,23,42,0.04); }
+        .tb-title { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+        .tb-title .title { font-size: 1rem; margin: 0; }
+        .tb-sub { font-size: 0.74rem; color: var(--text-muted); display: flex; gap: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 420px; }
+        .save-state { display: inline-flex; align-items: center; gap: 4px; }
+        .save-state.ok { color: #059669; }
+        .save-state.pending { color: #B45309; }
+        .icon-btn { width: 34px; height: 34px; display: inline-grid; place-items: center; border: 1px solid #D1D5DB; border-radius: 8px; background: white; color: #4B5563; cursor: pointer; font-size: 0.9rem; flex: 0 0 auto; }
+        .icon-btn:hover { background: #F3F4F6; color: var(--dark); }
+        .icon-btn.on { background: #FEE2E2; border-color: #FCA5A5; color: #991B1B; }
+        .seg { display: inline-flex; border: 1px solid #D1D5DB; border-radius: 8px; overflow: hidden; background: white; flex: 0 0 auto; }
+        .seg button { border: 0; background: transparent; padding: 0.4rem 0.7rem; font-size: 0.8rem; color: #4B5563; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+        .seg button + button { border-left: 1px solid #E5E7EB; }
+        .seg button:hover { background: #F3F4F6; }
+        .seg button.on { background: #DBEAFE; color: var(--primary-dark); font-weight: 600; }
+        select.model-sel { height: 34px; border-radius: 8px; }
+        .topbar .btn { height: 34px; border-radius: 8px; }
+        .more-wrap { position: relative; }
+        .more-menu { display: none; position: absolute; right: 0; top: calc(100% + 6px); min-width: 250px; background: white; border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 30px rgba(15,23,42,0.14); padding: 6px; z-index: 40; }
+        .more-menu.open { display: block; }
+        .more-item { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 0; background: transparent; padding: 0.5rem 0.6rem; border-radius: 6px; font-size: 0.83rem; color: var(--dark); cursor: pointer; text-align: left; }
+        .more-item i { width: 16px; color: var(--text-muted); margin-right: 6px; }
+        .more-item:hover { background: #F3F4F6; }
+        .more-item.danger, .more-item.danger i { color: #B91C1C; }
+
+        /* Schede di riepilogo sopra le attività */
+        /* Stima progetto larga (circa 1.030 px), le altre schede compatte accanto */
+        .kpi-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; }
+        .kpi { flex: 0 0 132px; background: white; border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; min-width: 0; }
+        .kpi.wide { flex: 0 1 1030px; }
+        .kpi small { display: block; font-size: 0.7rem; color: var(--text-muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .kpi b { font-size: 1.15rem; font-weight: 700; color: var(--dark); font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .kpi.wide b { font-size: 1.35rem; }
+        .kpi .kpi-note { font-size: 0.7rem; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .kpi .pos { color: #059669; } .kpi .neg { color: #DC2626; } .kpi .warn { color: #B45309; }
+        .kpi .proj-sum-row { grid-template-columns: 1fr 52px; margin-top: 6px; }
+
+        /* Tabella delle attività */
+        .wbs-card { background: white; border: 1px solid var(--border); border-radius: 12px; min-width: max-content; overflow: hidden; }
+        .wbs-card .board-head { height: 52px; background: #F9FAFB; border-bottom: 1px solid var(--border); }
+        .wbs-card .eff-head, .wbs-card .cons-head { font-weight: 700; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.02em; }
+        .wbs-row { border-bottom: 1px solid #F1F3F7; }
+        .wbs-row:hover { background: #F8FAFF; }
+        .wbs-row.lvl1 { background: #FCFCFE; box-shadow: inset 4px 0 0 var(--stripe, var(--primary)); }
+        .wbs-row.lvl1 .node-btn { font-weight: 700; }
+        .cell-in { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; white-space: nowrap; }
+        .tg-btn { width: 18px; height: 18px; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; padding: 0; font-size: 0.7rem; flex: 0 0 auto; border-radius: 4px; }
+        .tg-btn:hover { background: #EEF2F7; color: var(--dark); }
+        .tg-spacer { width: 18px; flex: 0 0 auto; }
+        .pill { font-size: 0.66rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+        .pill.warn { background: #FEF3C7; color: #92400E; }
+        .pill.ok { background: #D1FAE5; color: #065F46; }
+        .pill.neg { background: #FEE2E2; color: #991B1B; }
+        .pill.mut { background: #EEF2F7; color: #475569; }
+        .pill.acc { background: #DBEAFE; color: #1E40AF; }
+        /* Colonna «Attività» ad albero: nomi come testo, non come pulsanti bordati */
+        .board-head .tree-head { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 0 8px 10px 34px; min-width: 0; align-self: flex-end; white-space: nowrap; }
+        .tree-head .tree-title { font-size: 0.78rem; font-weight: 700; color: var(--dark); margin-right: 6px; }
+        .tree-head .tree-sep { font-size: 0.65rem; color: #CBD5E1; }
+        .board-head .tree-head .col-head { flex: 0 0 auto; width: auto; padding: 1px 4px; font-size: 0.68rem; border-radius: 4px; }
+        .board-head .tree-head .col-head:hover { background: #EEF2F7; }
+        .wbs-row .tree-cell { padding-right: 8px; }
+        .tree-cell .node-btn { border: 0 !important; background: transparent !important; color: var(--dark); min-width: 0; padding: 0.2rem 0.35rem; border-radius: 6px; font-size: 0.85rem; font-weight: 400; max-width: 360px; }
+        .tree-cell .node-btn:hover { background: #EEF2F7 !important; }
+        .tree-cell .node-btn.lv1 { font-weight: 700; font-size: 0.88rem; }
+        .tree-cell .node-btn.ms { color: var(--text-muted); }
+        .tree-cell .done-ck { color: #059669; font-size: 0.85rem; }
+        .av { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 0.6rem; font-weight: 700; flex: 0 0 auto; }
+
         .gantt-readonly .title::after {
             content: 'Sola visualizzazione'; margin-left: 10px; padding: 2px 8px;
             border-radius: 999px; background: #E0E7FF; color: #3730A3;
@@ -302,37 +389,46 @@
     </style>
 </head>
 <body>
+    <!-- Barra in alto: titolo e stato del salvataggio, viste (Elenco/Timeline, scala), icone,
+         menu «⋯» (copia, cancella tutto, salvataggio automatico) e un solo pulsante colorato. -->
     <div class="topbar">
-        <button class="btn" id="backBtn" title="Torna al progetto di partenza"><i class="fas fa-arrow-left"></i> Torna al Progetto</button>
-        <span class="title" id="pageTitle">Gantt</span>
+        <button class="icon-btn" id="backBtn" title="Torna al progetto di partenza"><i class="fas fa-arrow-left"></i></button>
+        <div class="tb-title">
+            <span class="title" id="pageTitle">Gantt</span>
+            <span class="tb-sub"><span id="projSub"></span><span class="save-state" id="saveState"></span></span>
+        </div>
+        <span class="spacer"></span>
         <select class="model-sel" id="modelSel" title="Modello (numero di colonne)">
             <option value="2">2 colonne</option>
             <option value="3">3 colonne</option>
             <option value="4">4 colonne</option>
         </select>
-        <button class="btn blue" id="addBtn"><i class="fas fa-plus"></i> Aggiungi</button>
-        <button class="btn" id="ganttToggleBtn"><i class="fas fa-chart-gantt"></i> Mostra gantt</button>
-        <span class="cal-view-wrap" id="calViewWrap" style="display:none;">
-            <span>Vista calendario</span>
-            <select class="model-sel" id="calViewSel" title="Scala temporale del gantt">
-                <option value="day">Giorno</option>
-                <option value="week">Settimane</option>
-                <option value="month">Mese</option>
-            </select>
-        </span>
-        <button class="btn" id="copyBtn" style="display:none;"><i class="fas fa-copy"></i> Copia progetto da</button>
-        <button class="btn danger" id="svuotaBtn" style="display:none;" title="Elimina tutte le attività del Gantt"><i class="fas fa-trash"></i> Cancella</button>
+        <div class="seg" title="Elenco delle attività o timeline con le barre nel tempo">
+            <button type="button" id="viewListBtn" class="on"><i class="fas fa-list"></i> Elenco</button>
+            <button type="button" id="ganttToggleBtn"><i class="fas fa-chart-gantt"></i> Timeline</button>
+        </div>
+        <div class="seg" id="calViewWrap" style="display:none;" title="Scala temporale della timeline">
+            <button type="button" data-cal="day">Giorni</button>
+            <button type="button" data-cal="week">Settimane</button>
+            <button type="button" data-cal="month">Mesi</button>
+        </div>
+        <button class="icon-btn" id="baselineBtn" style="display:none;" title="Baseline: mostra il piano congelato sotto le barre"><i class="fas fa-snowflake"></i></button>
+        <button class="icon-btn" id="criticoBtn" style="display:none;" title="Percorso critico: evidenzia in rosso le attività senza margine (se slittano, slitta la fine del progetto)"><i class="fas fa-route"></i></button>
         <!-- Export Excel: disponibile sia in visualizzazione sia in modifica -->
-        <button class="btn" id="baselineBtn" style="display:none;" title="Mostra la baseline (piano congelato) sotto le barre"><i class="fas fa-snowflake"></i> Baseline</button>
-        <button class="btn" id="criticoBtn" style="display:none;" title="Evidenzia in rosso le attività senza margine: se slittano, slitta la fine del progetto"><i class="fas fa-route"></i> Percorso critico</button>
-        <span class="pm-info" id="pmInfo"></span>
-        <button class="btn" id="exportBtn" title="Scarica il Gantt nel modello Excel"><i class="fas fa-file-excel" style="color:#16A34A;"></i> Esporta Excel</button>
-        <span class="spacer"></span>
-        <span class="autosave-wrap">
-            <span>Salvataggio automatico</span>
-            <label class="toggle-switch"><input type="checkbox" id="autosaveToggle" checked><span class="toggle-slider"></span></label>
-        </span>
+        <button class="icon-btn" id="exportBtn" title="Esporta il Gantt nel modello Excel"><i class="fas fa-file-excel" style="color:#16A34A;"></i></button>
+        <div class="more-wrap" id="moreWrap">
+            <button class="icon-btn" id="moreBtn" title="Altre azioni"><i class="fas fa-ellipsis"></i></button>
+            <div class="more-menu" id="moreMenu">
+                <button type="button" class="more-item" id="copyBtn" style="display:none;"><i class="fas fa-copy"></i> Copia progetto da…</button>
+                <button type="button" class="more-item danger" id="svuotaBtn" style="display:none;" title="Elimina tutte le attività del Gantt"><i class="fas fa-trash"></i> Cancella tutte le attività</button>
+                <label class="more-item autosave-wrap">
+                    <span><i class="fas fa-cloud-arrow-up"></i> Salvataggio automatico</span>
+                    <span class="toggle-switch"><input type="checkbox" id="autosaveToggle" checked><span class="toggle-slider"></span></span>
+                </label>
+            </div>
+        </div>
         <button class="btn primary" id="saveBtn" style="display:none;" disabled><i class="fas fa-floppy-disk"></i> Salva</button>
+        <button class="btn blue" id="addBtn"><i class="fas fa-plus"></i> Attività</button>
     </div>
 
     <div class="main-scroll" id="mainScroll">
@@ -364,7 +460,7 @@
                     <input type="number" id="cfgAnalisi" step="0.01">
                 </div>
                 <div>
-                    <label for="cfgConfigurazione">Configurazione</label>
+                    <label for="cfgConfigurazione" title="Configurazione">Config.</label>
                     <input type="number" id="cfgConfigurazione" step="0.01">
                 </div>
                 <div>
@@ -377,7 +473,23 @@
                 <label for="cfgTotale">Totale</label>
                 <input type="number" id="cfgTotale" step="0.01">
             </div>
-            <div>
+            <!-- Effettivo a mano sulle attività senza figli; marginalità/sforamento calcolati
+                 (sulle attività con sotto attività tutti e tre = somma dei figli) -->
+            <div class="row2">
+                <div>
+                    <label for="cfgEffettivo">Effettivo</label>
+                    <input type="number" id="cfgEffettivo" step="0.01">
+                </div>
+                <div>
+                    <label for="cfgMarginalita" title="Stima − effettivo, quando l'effettivo è sotto la stima">Marginalità</label>
+                    <input type="text" id="cfgMarginalita" readonly tabindex="-1" class="cfg-calc">
+                </div>
+                <div>
+                    <label for="cfgSforamento" title="Effettivo − stima, quando l'effettivo supera la stima">Sforamento</label>
+                    <input type="text" id="cfgSforamento" readonly tabindex="-1" class="cfg-calc">
+                </div>
+            </div>
+            <div id="cfgColorRow">
                 <label for="cfgColor">Colore di riempimento (solo Argomento 1)</label>
                 <input type="color" id="cfgColor" value="#3B82F6">
                 <span id="cfgColorHint" style="font-size:0.75rem; color:var(--text-muted); margin-left:8px;"></span>
@@ -442,7 +554,7 @@
             </div>
             <div>
                 <label for="cfgNote">Note interne</label>
-                <textarea id="cfgNote" rows="3"></textarea>
+                <textarea id="cfgNote" rows="2"></textarea>
             </div>
             <div class="cfg-toggle-row" id="cfgMilestoneRow" style="display:none;">
                 <div>
@@ -531,6 +643,11 @@
         const API_URL = location.origin + '/api';
         const urlParams = new URLSearchParams(location.search);
         const fieldId = urlParams.get('fieldId') || '';
+        // Contesto per le API: il campo tipo 13 della scheda (fieldId) oppure, aperto dal
+        // pulsante «Gantt» della scheda progetto, il solo progetto (projectId).
+        const ctxBody = fieldId ? { fieldId } : { projectId: urlParams.get('projectId') || '' };
+        const ctxQs = new URLSearchParams(ctxBody).toString();
+        const ganttKey = fieldId || ('p:' + (urlParams.get('projectId') || '')); // preferenze locali
         const pageLabel = urlParams.get('label') || 'Gantt';
         // mode=view (pulsante "Visualizza" della dashboard): sola lettura. Niente pulsanti
         // di modifica e, soprattutto, nessun salvataggio verso il server.
@@ -544,7 +661,7 @@
             return token ? { 'Authorization': `Bearer ${token}` } : {};
         }
         if (!localStorage.getItem('authToken')) location.href = 'login.html';
-        if (!fieldId) document.addEventListener('DOMContentLoaded', () => showToast('Parametro fieldId mancante'));
+        if (!fieldId && !urlParams.get('projectId')) document.addEventListener('DOMContentLoaded', () => showToast('Progetto mancante'));
 
         document.getElementById('pageTitle').textContent = pageLabel;
 
@@ -597,16 +714,18 @@
             'nr_mesi', 'nr_giorni', 'stato', 'avanzamento', 'rischio',
             'owner', 'nominativo', 'note_interne', 'mostra_cliente',
             'name_arg1', 'name_arg2', 'name_arg3', 'name_arg4', 'milestone',
-            'analisi', 'configurazione', 'formazione', 'totale'];
+            'analisi', 'configurazione', 'formazione', 'totale',
+            'effettivo', 'marginalita', 'sforamento'];
         // Cruscotto PM (api/pm/gantt): analisi del progetto (percorso critico, completamento) e
         // disponibilità di milestone/baseline (colonne di Supporto/CreaDB/pm_senior.sql).
         let ganttPm = null, projectIdPm = '', mostraBaseline = false, mostraCritico = false;
         // Colonne aggiuntive della tabella, modificabili dal flyout Configurazione.
         const GANTT_EXTRA_COLS = ['nr_mesi', 'nr_giorni', 'stato', 'avanzamento',
             'rischio', 'owner', 'nominativo', 'note_interne',
-            'analisi', 'configurazione', 'formazione', 'totale'];
+            'analisi', 'configurazione', 'formazione', 'totale',
+            'effettivo', 'marginalita', 'sforamento'];
         // Numerici con 2 decimali (proj_activity NUMERIC(12,2)). totale: solo livello 1.
-        const GANTT_DECIMAL_COLS = new Set(['analisi', 'configurazione', 'formazione', 'totale']);
+        const GANTT_DECIMAL_COLS = new Set(['analisi', 'configurazione', 'formazione', 'totale', 'effettivo']);
         const DEFAULT_COLOR = '#3B82F6';
         const DEFAULT_COL_LABELS = ['Argomento 1', 'Argomento 2', 'Argomento 3', 'Argomento 4'];
         // Etichette delle 4 colonne: valgono per l'intero progetto e vengono scritte in
@@ -659,7 +778,7 @@
         // su questo campo, altrimenti l'etichetta predefinita.
         function loadColLabels(rows) {
             let stored = [];
-            try { stored = JSON.parse(localStorage.getItem('ganttColLabels:' + fieldId) || '[]'); } catch (e) { /* ignore */ }
+            try { stored = JSON.parse(localStorage.getItem('ganttColLabels:' + ganttKey) || '[]'); } catch (e) { /* ignore */ }
             colLabels = DEFAULT_COL_LABELS.map((def, i) => {
                 const fromDb = (rows || [])
                     .map(r => r['name_arg' + (i + 1)])
@@ -669,7 +788,7 @@
         }
 
         function saveColLabelsLocally() {
-            try { localStorage.setItem('ganttColLabels:' + fieldId, JSON.stringify(colLabels)); } catch (e) { /* ignore */ }
+            try { localStorage.setItem('ganttColLabels:' + ganttKey, JSON.stringify(colLabels)); } catch (e) { /* ignore */ }
         }
 
         // Costruisce l'albero dalle righe già ordinate (ordinamento1..4).
@@ -737,11 +856,38 @@
             v.dipendenza = node.dipendenza || null;
             v.colore = level === 1 ? (node.colore || null) : null;
             GANTT_EXTRA_COLS.forEach(col => { v[col] = node[col] ?? null; });
+            Object.assign(v, consuntivoNodo(node));
             v.mostra_cliente = node.mostra_cliente !== false;
             v.milestone = node.milestone == null ? null : !!node.milestone;
             // Le etichette delle colonne sono di progetto: replicate su ogni riga.
             colLabels.forEach((label, i) => { v['name_arg' + (i + 1)] = label; });
             return v;
+        }
+
+        // Effettivo, marginalità e sforamento di un nodo (stessa unità dell'effort).
+        //   Attività senza sotto attività: effettivo scritto a mano; stima = analisi +
+        //   configurazione + formazione (senza valori: totale); marginalità = stima − effettivo
+        //   se l'effettivo è sotto la stima, sforamento = effettivo − stima se la supera.
+        //   Attività con sotto attività: i tre valori sono la somma di quelli dei figli.
+        // Senza effettivo i tre valori restano vuoti.
+        function consuntivoNodo(node) {
+            const num = v => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+            const r2 = v => (v == null ? null : Math.round(v * 100) / 100);
+            if (node.children.length) {
+                let eff = null, marg = null, sfor = null;
+                node.children.forEach(c => {
+                    const x = consuntivoNodo(c);
+                    if (x.effettivo != null) eff = (eff || 0) + x.effettivo;
+                    if (x.marginalita != null) marg = (marg || 0) + x.marginalita;
+                    if (x.sforamento != null) sfor = (sfor || 0) + x.sforamento;
+                });
+                return { effettivo: r2(eff), marginalita: r2(marg), sforamento: r2(sfor) };
+            }
+            const eff = num(node.effettivo);
+            if (eff == null) return { effettivo: null, marginalita: null, sforamento: null };
+            const parti = ['analisi', 'configurazione', 'formazione'].map(c => num(node[c])).filter(v => v != null);
+            const stima = parti.length ? parti.reduce((a, b) => a + b, 0) : (num(node.totale) || 0);
+            return { effettivo: r2(eff), marginalita: r2(Math.max(0, stima - eff)), sforamento: r2(Math.max(0, eff - stima)) };
         }
 
         // ===== Salvataggio (automatico o manuale) =====
@@ -774,7 +920,16 @@
             const auto = document.getElementById('autosaveToggle').checked;
             const saveBtn = document.getElementById('saveBtn');
             saveBtn.style.display = auto ? 'none' : '';
-            saveBtn.disabled = !hasPending();
+            const pending = hasPending();
+            saveBtn.disabled = !pending;
+            // Stato del salvataggio accanto al titolo (prima era l'interruttore in vista).
+            const st = document.getElementById('saveState');
+            if (st && !readOnly) {
+                st.className = 'save-state ' + (pending ? 'pending' : 'ok');
+                st.innerHTML = pending
+                    ? `<i class="fas fa-circle" style="font-size:0.45rem"></i> ${auto ? 'salvataggio…' : 'modifiche da salvare'}`
+                    : '<i class="fas fa-check"></i> salvato';
+            }
         }
 
         // Chiamata dopo OGNI modifica: con salvataggio automatico attivo scrive
@@ -802,7 +957,7 @@
             try {
                 const result = await api('/projects/gantt-activity/batch', {
                     method: 'POST',
-                    body: JSON.stringify({ fieldId, ...pending })
+                    body: JSON.stringify({ ...ctxBody, ...pending })
                 });
                 const idMap = result.idMap || {};
                 if (result.checklistAggiornate) {
@@ -828,7 +983,10 @@
                     board.querySelectorAll(`[data-node-id="${CSS.escape(tempId)}"]`)
                         .forEach(el => { el.dataset.nodeId = realId; });
                 });
-                showToast('Salvato');
+                board.querySelectorAll('[data-toggle-id]').forEach(el => {
+                    if (idMap[el.dataset.toggleId]) el.dataset.toggleId = idMap[el.dataset.toggleId];
+                });
+                // Niente avviso «Salvato»: lo stato si legge accanto al titolo (updateSaveUi).
                 clearTimeout(window.__pmTimer);
                 window.__pmTimer = setTimeout(caricaAnalisiPm, 800);
             } catch (e) {
@@ -1015,35 +1173,75 @@
                 fatto += e.fatto;
             });
             const pct = totale > 0 ? Math.min(100, (fatto / totale) * 100) : 0;
-            const barre = !(totale > 0) ? '' : `<div class="proj-sum">
-                <div class="proj-sum-row" title="Somma dei Totali degli argomenti"><span class="lbl">Progetto</span><span class="trk"><span class="fil" style="width:100%; background:${EFF_TOT_COLOR};"></span></span><span class="num">${fmtEff(totale)} <small>(100%)</small></span></div>
-                <div class="proj-sum-row" title="Somma di valore × Avanzamento % delle singole attività"><span class="lbl">Avanzamento</span><span class="trk"><span class="fil" style="width:${pct.toFixed(1)}%; background:var(--secondary);"></span></span><span class="num">${fmtEff(Math.round(fatto * 100) / 100)} <small>(${Math.round(pct)}%)</small></span></div>
-            </div>`;
-            const econ = economiaHtml(totale);
-            return barre || econ ? `<div class="proj-sum-wrap">${barre}${econ}</div>` : '';
+            // Una sola barra, come le sotto attività: lunga quanto il totale del progetto (100%),
+            // colore pieno per la parte fatta, chiaro per quella che manca, con la % accanto.
+            const pctTondo = Math.round(pct);
+            const r2 = v => Math.round(v * 100) / 100;
+            const schede = [];
+            // 1. Progetto: totale (100%) con la stessa barra di avanzamento delle attività.
+            if (totale > 0) {
+                schede.push(`<div class="kpi wide" title="Somma dei Totali degli argomenti · fatto ${escapeHtml(fmtEff(r2(fatto)))} (somma di valore × Avanzamento % delle attività)">
+                    <small>Stima progetto</small><b>${fmtEff(totale)}</b>
+                    <div class="proj-sum-row"><span class="trk"><span class="fil" style="width:100%; background:linear-gradient(to right, ${EFF_TOT_COLOR} ${pct.toFixed(1)}%, ${EFF_TOT_COLOR}40 ${pct.toFixed(1)}%);"></span></span><span class="avz${pctTondo >= 100 ? ' done' : ''}">${pctTondo >= 100 ? '<i class="fas fa-check"></i> ' : ''}${pctTondo}%</span></div>
+                    <div class="kpi-note">fatto ${fmtEff(r2(fatto))}</div></div>`);
+            }
+            // 2. Completamento e ritardi (analisi del Cruscotto PM).
+            if (ganttPm && (ganttPm.completamento != null || (ganttPm.inRitardo && ganttPm.inRitardo.length))) {
+                const rit = (ganttPm.inRitardo || []).length;
+                const note = [rit ? `<span class="warn">${rit} in ritardo</span>` : 'nessun ritardo'];
+                if (ganttPm.scostamentoGiorni) note.push(`<span class="${ganttPm.scostamentoGiorni > 0 ? 'neg' : 'pos'}">${ganttPm.scostamentoGiorni > 0 ? '+' : ''}${ganttPm.scostamentoGiorni} gg sulla baseline</span>`);
+                schede.push(`<div class="kpi" title="Completamento calcolato dal Gantt (avanzamento pesato sulla durata)"><small>Completamento</small><b>${ganttPm.completamento != null ? Math.round(ganttPm.completamento) + '%' : '–'}</b><div class="kpi-note">${note.join(' · ')}</div></div>`);
+            }
+            // 3-4. Consuntivo e fatturato dai Costi Progetto (solo progetti a consuntivo).
+            const e = ganttEconomia;
+            const n = v => (v == null || !Number.isFinite(Number(v)) ? null : r2(Number(v)));
+            if (e) {
+                const cons = n(e.consuntivo), fatt = n(e.fatturato);
+                const disp = totale > 0 && cons != null ? r2(totale - cons) : null;
+                schede.push(`<div class="kpi" title="Ore/giornate spese (Costi Progetto, import Qlik)"><small>Consuntivo</small><b>${cons == null ? '—' : fmtEff(cons)}</b>${disp != null ? `<div class="kpi-note ${disp < 0 ? 'neg' : 'pos'}">${disp < 0 ? `${fmtEff(-disp)} oltre la stima` : `${fmtEff(disp)} disponibili`}</div>` : ''}</div>`);
+                schede.push(`<div class="kpi" title="Consuntivo fatturato: voucher Qlik in stato «Chiuso»"><small>Fatturato</small><b>${fatt == null ? '—' : fmtEff(fatt)}</b>${fatt != null && cons ? `<div class="kpi-note">${Math.round((fatt / cons) * 100)}% del consuntivo</div>` : ''}</div>`);
+            }
+            // 5. Effettivo / marginalità / sforamento scritti nelle attività.
+            let eff = null, marg = 0, sfor = 0;
+            tree.forEach(root => { const c = consuntivoNodo(root); if (c.effettivo != null) { eff = (eff || 0) + c.effettivo; marg += c.marginalita || 0; sfor += c.sforamento || 0; } });
+            // Tre schede separate; senza nessun Effettivo scritto mostrano «—».
+            const vuoto = eff == null;
+            schede.push(`<div class="kpi" title="Somma dell'Effettivo scritto nelle attività"><small>Effettivo</small><b>${vuoto ? '—' : fmtEff(r2(eff))}</b><div class="kpi-note">${vuoto ? 'non compilato' : 'ore/giorni usati'}</div></div>`);
+            schede.push(`<div class="kpi" title="Stima − effettivo, sulle attività che hanno usato meno della stima"><small>Marginalità</small><b class="${!vuoto && marg > 0 ? 'pos' : ''}">${vuoto ? '—' : fmtEff(r2(marg))}</b><div class="kpi-note">sotto la stima</div></div>`);
+            schede.push(`<div class="kpi" title="Effettivo − stima, sulle attività che hanno superato la stima"><small>Sforamento</small><b class="${!vuoto && sfor > 0 ? 'neg' : ''}">${vuoto ? '—' : fmtEff(r2(sfor))}</b><div class="kpi-note">oltre la stima</div></div>`);
+            return schede.length ? `<div class="kpi-row">${schede.join('')}</div>` : '';
         }
 
-        // Consuntivo e consuntivo fatturato dai Costi Progetto (proj_worker) e differenza rispetto
-        // al totale del progetto nel Gantt (barra «Progetto»): positiva = ancora disponibile,
-        // negativa = oltre il totale.
-        function economiaHtml(totale) {
-            const e = ganttEconomia;
-            if (!e) return '';
-            const n = v => (v == null || !Number.isFinite(Number(v)) ? null : Math.round(Number(v) * 100) / 100);
-            const tot = totale > 0 ? totale : null;
-            const diff = v => {
-                if (tot == null || v == null) return '<span class="ec-diff"></span>';
-                const d = Math.round((tot - v) * 100) / 100;
-                const cls = d < 0 ? 'neg' : 'pos';
-                const tit = `${fmtEff(tot)} − ${fmtEff(v)}: ${d < 0 ? 'oltre il totale del progetto' : 'ancora disponibile'}`;
-                return `<span class="ec-diff ${cls}" title="${tit}">${d > 0 ? '+' : ''}${fmtEff(d)}</span>`;
-            };
-            const riga = (lbl, v, tit) => `<div class="ec-row" title="${tit}"><span class="ec-lbl">${lbl}</span><span class="ec-val">${v == null ? '—' : fmtEff(v)}</span>${diff(v)}</div>`;
-            return `<div class="ec-box">
-                ${tot != null ? `<div class="ec-row"><span></span><span></span><span class="ec-diff ec-head">Δ su ${fmtEff(tot)}</span></div>` : ''}
-                ${riga('Consuntivo', n(e.consuntivo), 'Ore/giornate spese (Costi Progetto, import Qlik)')}
-                ${riga('Fatturato', n(e.fatturato), 'Consuntivo fatturato: voucher Qlik in stato «Chiuso»')}
-            </div>`;
+        // Argomenti chiusi con la freccia (preferenza locale del browser, per progetto).
+        const collapsed = new Set((() => { try { return JSON.parse(localStorage.getItem('ganttChiusi:' + ganttKey) || '[]'); } catch (e) { return []; } })());
+        function salvaChiusi() { try { localStorage.setItem('ganttChiusi:' + ganttKey, JSON.stringify([...collapsed])); } catch (e) { /* ignore */ } }
+
+        // Badge accanto al pulsante: sugli argomenti attività in ritardo o «Completato»; sulle
+        // attività senza figli lo sforamento sulla stima e le iniziali del nominativo.
+        function badgeNodo(node, ritardo, cons) {
+            let out = '';
+            if (node.children.length) {
+                if (nodeLevel(node) === 1) {
+                    const ids = subtreeIds(node).map(String);
+                    const nRit = ids.filter(id => ritardo.has(id)).length;
+                    const foglie = [];
+                    forEachNode(n => { if (!n.children.length) foglie.push(n); }, node.children);
+                    if (nRit) out += `<span class="pill warn" title="Attività con data di fine passata e non completate">${nRit} in ritardo</span>`;
+                    else if (foglie.length && foglie.every(f => Number(f.avanzamento) >= 100)) out += '<span class="pill ok"><i class="fas fa-check"></i> Completato</span>';
+                    else if (foglie.some(f => Number(f.avanzamento) > 0)) out += '<span class="pill acc">In corso</span>';
+                    else out += '<span class="pill mut">Da iniziare</span>';
+                }
+                return out;
+            }
+            if (Number(node.avanzamento) >= 100) out += '<i class="fas fa-circle-check done-ck" title="Completata"></i>';
+            if (ritardo.has(String(node.id))) out += '<span class="pill warn" title="Data di fine passata e attività non completata">in ritardo</span>';
+            if (cons && cons.sforamento > 0) out += `<span class="pill neg" title="Effettivo oltre la stima">+${escapeHtml(fmtEff(cons.sforamento))}</span>`;
+            const nome = String(node.nominativo || '').trim();
+            if (nome) {
+                const iniz = nome.split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0].toUpperCase()).join('');
+                out += `<span class="av" title="${escapeHtml(nome)}${node.owner ? ` (${escapeHtml(node.owner)})` : ''}" style="background:${tint(rootColor(node), 0.82)}; color:${rootColor(node)};">${escapeHtml(iniz)}</span>`;
+            }
+            return out;
         }
 
         function render() {
@@ -1066,12 +1264,22 @@
             if (showEff) tree.forEach(root => effRoot.set(root.id, rootEffort(root, effNum)));
             const rootOf = n => { let r = n; while (r.parent) r = r.parent; return r; };
 
-            let html = '<div class="board-head">';
+            let html = '<div class="wbs-card"><div class="board-head">';
+            // Una sola colonna «Attività» ad albero; i nomi dei livelli (name_arg1..4) restano
+            // nell'intestazione, rinominabili con un clic.
+            html += '<div class="tree-head"><span class="tree-title">Attività</span>';
             for (let i = 1; i <= modelCols; i++) {
-                html += `<div class="col-head" data-col-index="${i}" title="Clicca per rinominare la colonna"><span class="col-head-text">${escapeHtml(colLabels[i - 1])}</span><i class="fas fa-pen col-head-pen"></i></div>`;
+                html += `${i > 1 ? '<i class="fas fa-angle-right tree-sep"></i>' : ''}<span class="col-head" data-col-index="${i}" title="Livello ${i}: clicca per rinominarlo"><span class="col-head-text">${escapeHtml(colLabels[i - 1])}</span><i class="fas fa-pen col-head-pen"></i></span>`;
             }
-            if (showEff) html += '<div class="eff-head"></div>';
+            html += '</div>';
+            if (showEff) html += '<div class="eff-head">Effort e avanzamento</div>';
+            // Colonna Effettivo / Marginalità / Sforamento: solo se almeno un'attività ha l'effettivo.
+            const consMap = new Map(nodes.map(n => [n, consuntivoNodo(n)]));
+            const showCons = [...consMap.values()].some(c => c.effettivo != null);
+            if (showCons) html += '<div class="cons-head" title="Effettivo, marginalità (+) e sforamento (−) rispetto alla stima">Effettivo / Margine</div>';
             html = projectSummaryHtml(effNum) + html;
+            // Attività in ritardo (Cruscotto PM): badge sull'argomento che le contiene.
+            const ritardo = new Set(((ganttPm && ganttPm.inRitardo) || []).map(r => String(r.id)));
             if (range) {
                 html += `<div class="timeline-head" style="width:${ganttW}px;">`;
                 // Riga superiore (mese o anno) e riga inferiore (giorno, settimana o mese)
@@ -1090,18 +1298,22 @@
                 if (level > modelCols) continue; // oltre il modello scelto: nascosto
                 // "Mostra gantt": le attività con "Mostra al cliente" disattivo restano fuori
                 if (ganttVisible && node.mostra_cliente === false) continue;
+                // Argomento chiuso con la freccia: le sue sotto attività non si mostrano.
+                let nascosto = false;
+                for (let p = node.parent; p; p = p.parent) if (collapsed.has(p.id)) { nascosto = true; break; }
+                if (nascosto) continue;
                 const color = displayColor(node);
-                html += `<div class="wbs-row" data-node-id="${escapeHtml(node.id)}">`;
-                for (let i = 1; i <= modelCols; i++) {
-                    if (i === level) {
-                        const critico = mostraCritico && ganttPm && ganttPm.critico.includes(node.id);
-                        html += `<div class="cell" data-col="${i}"><button type="button" class="node-btn${critico ? ' critico' : ''}" draggable="true" data-node-id="${escapeHtml(node.id)}" data-level="${level}"
-                            style="border-color:${color}; color:${color}; background:${tint(rootColor(node), 0.9)};">
-                            <span class="node-text">${node.milestone ? '<i class="fas fa-diamond ms-mark"></i>' : ''}${escapeHtml(node.name || '(senza nome)')}</span>
-                        </button></div>`;
-                    } else {
-                        html += `<div class="cell" data-col="${i}"></div>`;
-                    }
+                html += `<div class="wbs-row${level === 1 ? ' lvl1' : ''}" data-node-id="${escapeHtml(node.id)}"${level === 1 ? ` style="--stripe:${rootColor(node)}"` : ''}>`;
+                {
+                    // Colonna «Attività»: nome come testo, rientrato in base al livello.
+                    const critico = mostraCritico && ganttPm && ganttPm.critico.includes(node.id);
+                    const figli = node.children.some(c => nodeLevel(c) <= modelCols);
+                    const freccia = figli
+                        ? `<button type="button" class="tg-btn" data-toggle-id="${escapeHtml(node.id)}" title="${collapsed.has(node.id) ? 'Mostra' : 'Nascondi'} le sotto attività"><i class="fas fa-chevron-${collapsed.has(node.id) ? 'right' : 'down'}"></i></button>`
+                        : '<span class="tg-spacer"></span>';
+                    html += `<div class="cell tree-cell" style="padding-left:${8 + (level - 1) * 24}px"><span class="cell-in">${freccia}<button type="button" class="node-btn lv${level}${node.milestone ? ' ms' : ''}${critico ? ' critico' : ''}" draggable="true" data-node-id="${escapeHtml(node.id)}" data-level="${level}">
+                        <span class="node-text">${node.milestone ? '<i class="fas fa-diamond ms-mark"></i>' : ''}${escapeHtml(node.name || '(senza nome)')}</span>
+                    </button>${badgeNodo(node, ritardo, consMap.get(node))}</span></div>`;
                 }
                 if (showEff) {
                     const eRoot = effRoot.get(rootOf(node).id) || { tot: 0, fatto: 0 };
@@ -1141,6 +1353,19 @@
                     });
                     html += `<div class="eff-cell">${barre}</div>`;
                 }
+                if (showCons) {
+                    const c = consMap.get(node);
+                    let txt = '';
+                    if (c.effettivo != null) {
+                        const tip = `Effettivo ${fmtEff(c.effettivo)} · Marginalità ${fmtEff(c.marginalita || 0)} · Sforamento ${fmtEff(c.sforamento || 0)}`;
+                        const delta = [
+                            c.marginalita > 0 ? `<span class="pos">+${fmtEff(c.marginalita)}</span>` : '',
+                            c.sforamento > 0 ? `<span class="neg">−${fmtEff(c.sforamento)}</span>` : ''
+                        ].filter(Boolean).join(' · ');
+                        txt = `<span title="${escapeHtml(tip)}"><span class="cons-eff">${fmtEff(c.effettivo)}</span>${delta ? `<br>${delta}` : ''}</span>`;
+                    }
+                    html += `<div class="cons-cell">${txt}</div>`;
+                }
                 if (range) {
                     html += `<div class="gantt-cell" style="width:${ganttW}px;" data-gantt-cell="1">`;
                     // Linee guida: una a settimana nella vista giorno, una per casella
@@ -1174,7 +1399,7 @@
                 }
                 html += '</div>';
             }
-            html += '<svg id="depSvg"></svg>';
+            html += '</div><svg id="depSvg"></svg>';
             board.innerHTML = html;
 
             fitColumns();
@@ -1185,16 +1410,18 @@
         // Colonne degli argomenti larghe quanto il pulsante più lungo (più un piccolo spazio),
         // così Argomento 2 sta subito accanto ad Argomento 1. Mai più strette dell'intestazione.
         function fitColumns() {
-            for (let i = 1; i <= modelCols; i++) {
-                const head = board.querySelector(`.col-head[data-col-index="${i}"]`);
-                const headText = head ? head.querySelector('.col-head-text') : null;
-                let w = headText ? headText.scrollWidth + 34 : 80; // testo + matita + padding
-                board.querySelectorAll(`.cell[data-col="${i}"] .node-btn`).forEach(b => { w = Math.max(w, b.scrollWidth + 22); });
-                w = Math.min(Math.max(w, 80), 320) + 'px';
-                const set = el => { el.style.flex = `0 0 ${w}`; el.style.width = w; };
-                if (head) set(head);
-                board.querySelectorAll(`.cell[data-col="${i}"]`).forEach(set);
-            }
+            // Colonna «Attività» larga quanto la riga più lunga (rientro + freccia + nome + badge),
+            // mai più stretta dell'intestazione con i nomi dei livelli.
+            const head = board.querySelector('.tree-head');
+            let w = head ? head.scrollWidth + 16 : 240;
+            board.querySelectorAll('.tree-cell').forEach(c => {
+                const inner = c.querySelector('.cell-in');
+                if (inner) w = Math.max(w, inner.scrollWidth + (parseFloat(c.style.paddingLeft) || 8) + 20);
+            });
+            w = Math.min(Math.max(w, 240), 560) + 'px';
+            const set = el => { el.style.flex = `0 0 ${w}`; el.style.width = w; };
+            if (head) set(head);
+            board.querySelectorAll('.tree-cell').forEach(set);
         }
 
         // ===== Frecce di dipendenza (linee ortogonali viola) =====
@@ -1268,6 +1495,16 @@
                         if (ev.key === 'Enter') { ev.preventDefault(); span.blur(); }
                         if (ev.key === 'Escape') { span.textContent = colLabels[idx]; span.blur(); }
                     });
+                });
+            });
+
+            board.querySelectorAll('.tg-btn').forEach(t => {
+                t.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = t.dataset.toggleId;
+                    if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id);
+                    salvaChiusi();
+                    render();
                 });
             });
 
@@ -1373,6 +1610,10 @@
         const flyout = document.getElementById('flyout');
 
         function openFlyout(node) {
+            // Attività dentro un argomento chiuso (es. appena aggiunta): si riapre il ramo.
+            let riapri = false;
+            for (let p = node.parent; p; p = p.parent) if (collapsed.delete(p.id)) riapri = true;
+            if (riapri) { salvaChiusi(); render(); }
             selectedNode = node;
             fillFlyout(node);
             flyout.classList.add('open');
@@ -1391,6 +1632,8 @@
             document.getElementById('cfgName').value = node.name || '';
             const colorInput = document.getElementById('cfgColor');
             colorInput.disabled = readOnly || level !== 1;
+            // Sulle sotto attività il colore è ereditato e non modificabile: riga nascosta
+            document.getElementById('cfgColorRow').style.display = level === 1 ? '' : 'none';
             colorInput.value = level === 1 ? (node.colore || DEFAULT_COLOR) : rootColor(node);
             document.getElementById('cfgColorHint').textContent = level === 1
                 ? '' : `Ereditato da Argomento 1 (tonalità livello ${level})`;
@@ -1418,6 +1661,7 @@
             if (aggiornaDurata(node) && !readOnly) scheduleSave();
             if (!personeGantt) caricaPersone().then(() => { if (selectedNode === node) aggiornaNominativo(node); });
             document.getElementById('cfgTotaleRow').style.display = level === 1 ? '' : 'none';
+            aggiornaConsuntivoFlyout(node);
             document.getElementById('cfgMostraCliente').checked = node.mostra_cliente !== false;
             document.getElementById('cfgMilestoneRow').style.display = ganttPm && ganttPm.milestoneDisponibile ? '' : 'none';
             document.getElementById('cfgMilestone').checked = node.milestone === true;
@@ -1483,6 +1727,23 @@
             return cambiato;
         }
 
+        // Effettivo / Marginalità / Sforamento nel flyout: con sotto attività l'effettivo è la
+        // somma dei figli (sola lettura), marginalità e sforamento sono sempre calcolati.
+        function aggiornaConsuntivoFlyout(node) {
+            const c = consuntivoNodo(node);
+            const fmt = v => (v == null ? '' : v.toLocaleString('it-IT', { maximumFractionDigits: 2 }));
+            const effEl = document.getElementById('cfgEffettivo');
+            const somma = node.children.length > 0;
+            effEl.readOnly = readOnly || somma;
+            effEl.title = somma ? 'Somma delle sotto attività' : '';
+            effEl.value = c.effettivo == null ? '' : c.effettivo;
+            const margEl = document.getElementById('cfgMarginalita'), sforEl = document.getElementById('cfgSforamento');
+            margEl.value = fmt(c.marginalita);
+            sforEl.value = fmt(c.sforamento);
+            margEl.classList.toggle('pos', c.marginalita > 0);
+            sforEl.classList.toggle('neg', c.sforamento > 0);
+        }
+
         // Altre colonne della tabella (nr_mesi, nr_giorni, stato, avanzamento,
         // rischio, owner, nominativo, note_interne): input del flyout <-> nodo.
         const EXTRA_FIELD_INPUTS = [
@@ -1497,7 +1758,8 @@
             ['cfgAnalisi', 'analisi'],
             ['cfgConfigurazione', 'configurazione'],
             ['cfgFormazione', 'formazione'],
-            ['cfgTotale', 'totale']
+            ['cfgTotale', 'totale'],
+            ['cfgEffettivo', 'effettivo']
         ];
         EXTRA_FIELD_INPUTS.forEach(([inputId, col]) => {
             document.getElementById(inputId).addEventListener('change', () => {
@@ -1512,7 +1774,9 @@
                 } else {
                     value = String(value).trim() || null;
                 }
+                if (col === 'effettivo' && selectedNode.children.length) return; // somma dei figli
                 selectedNode[col] = value;
+                aggiornaConsuntivoFlyout(selectedNode);
                 scheduleSave();
                 if (GANTT_DECIMAL_COLS.has(col) || col === 'avanzamento') render(); // aggiorna barre e riepilogo
             });
@@ -1525,7 +1789,7 @@
         async function caricaPersone() {
             if (personeGantt) return personeGantt;
             try {
-                personeGantt = await api(`/projects/gantt-activity/persone?fieldId=${encodeURIComponent(fieldId)}`);
+                personeGantt = await api(`/projects/gantt-activity/persone?${ctxQs}`);
             } catch (e) {
                 personeGantt = { interno: [], cliente: [] };
             }
@@ -1590,28 +1854,28 @@
                 ganttPm = await fetch(`${location.origin}/api/pm/gantt?projectId=${encodeURIComponent(projectIdPm)}`, { headers: getAuthHeaders() })
                     .then((r) => (r.ok ? r.json() : null));
             } catch (e) { ganttPm = null; }
-            const info = document.getElementById('pmInfo');
-            if (!ganttPm) { info.textContent = ''; return; }
+            if (!ganttPm) return;
             document.getElementById('criticoBtn').style.display = ganttPm.conDate ? '' : 'none';
             document.getElementById('baselineBtn').style.display = ganttPm.baselineDisponibile && ganttPm.baselineFine ? '' : 'none';
-            const parti = [];
-            if (ganttPm.completamento != null) parti.push(`Completamento ${Math.round(ganttPm.completamento)}%`);
-            if (ganttPm.inRitardo && ganttPm.inRitardo.length) parti.push(`${ganttPm.inRitardo.length} in ritardo`);
-            if (ganttPm.scostamentoGiorni) parti.push(`${ganttPm.scostamentoGiorni > 0 ? '+' : ''}${ganttPm.scostamentoGiorni} gg sulla baseline`);
-            info.textContent = parti.join(' · ');
             if (selectedNode) fillFlyout(selectedNode);
-            if (mostraCritico || mostraBaseline) render();
+            // Completamento, ritardi e scostamento vanno nelle schede di riepilogo e nei badge:
+            // si ridisegna solo se sono cambiati, e mai mentre si sta scrivendo un nome nel Gantt.
+            const firma = JSON.stringify([ganttPm.completamento, ganttPm.scostamentoGiorni, (ganttPm.inRitardo || []).map(r => r.id)]);
+            const cambiata = firma !== caricaAnalisiPm.firma;
+            caricaAnalisiPm.firma = firma;
+            const scrivendo = document.activeElement && document.activeElement.isContentEditable;
+            if ((cambiata || mostraCritico || mostraBaseline) && !scrivendo) render();
         }
         document.getElementById('criticoBtn').addEventListener('click', (e) => {
             mostraCritico = !mostraCritico;
             e.currentTarget.classList.toggle('on', mostraCritico);
-            if (mostraCritico && !ganttVisible) document.getElementById('ganttToggleBtn').click();
+            if (mostraCritico && !ganttVisible) setGanttVisible(true);
             else render();
         });
         document.getElementById('baselineBtn').addEventListener('click', (e) => {
             mostraBaseline = !mostraBaseline;
             e.currentTarget.classList.toggle('on', mostraBaseline);
-            if (mostraBaseline && !ganttVisible) document.getElementById('ganttToggleBtn').click();
+            if (mostraBaseline && !ganttVisible) setGanttVisible(true);
             else render();
         });
 
@@ -1737,32 +2001,52 @@
             renumber();
             scheduleSave(); render();
             openFlyout(node);
+            // La nuova attività finisce in fondo: la si porta in vista con il nome già da
+            // scrivere (stessa modifica del doppio clic), così non sembra un pulsante.
+            const btn = board.querySelector(`.node-btn[data-node-id="${CSS.escape(node.id)}"]`);
+            if (btn) {
+                btn.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                btn.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+            }
         });
 
         document.getElementById('modelSel').addEventListener('change', () => {
             modelCols = Number(document.getElementById('modelSel').value) || 2;
-            try { localStorage.setItem('ganttModel:' + fieldId, String(modelCols)); } catch (e) { /* ignore */ }
+            try { localStorage.setItem('ganttModel:' + ganttKey, String(modelCols)); } catch (e) { /* ignore */ }
             render();
             if (selectedNode) fillFlyout(selectedNode);
         });
 
-        document.getElementById('ganttToggleBtn').addEventListener('click', () => {
-            ganttVisible = !ganttVisible;
-            const btn = document.getElementById('ganttToggleBtn');
-            btn.classList.toggle('active', ganttVisible);
-            btn.innerHTML = ganttVisible
-                ? '<i class="fas fa-chart-gantt"></i> Nascondi gantt'
-                : '<i class="fas fa-chart-gantt"></i> Mostra gantt';
-            // "Vista calendario" ha senso solo con il gantt a video
-            document.getElementById('calViewWrap').style.display = ganttVisible ? 'flex' : 'none';
+        // Vista Elenco / Timeline (pulsanti a scelta). «Timeline» = barre nel tempo (prima
+        // «Mostra gantt»); la scala Giorni/Settimane/Mesi compare solo con la timeline.
+        function setGanttVisible(v) {
+            ganttVisible = v;
+            document.getElementById('ganttToggleBtn').classList.toggle('on', v);
+            document.getElementById('viewListBtn').classList.toggle('on', !v);
+            document.getElementById('calViewWrap').style.display = v ? 'inline-flex' : 'none';
             render();
-        });
+        }
+        document.getElementById('ganttToggleBtn').addEventListener('click', () => { if (!ganttVisible) setGanttVisible(true); });
+        document.getElementById('viewListBtn').addEventListener('click', () => { if (ganttVisible) setGanttVisible(false); });
 
-        document.getElementById('calViewSel').addEventListener('change', () => {
-            calendarView = document.getElementById('calViewSel').value;
-            try { localStorage.setItem('ganttCalView:' + fieldId, calendarView); } catch (e) { /* ignore */ }
+        function aggiornaCalSeg() {
+            document.querySelectorAll('#calViewWrap [data-cal]').forEach(b => b.classList.toggle('on', b.dataset.cal === calendarView));
+        }
+        document.querySelectorAll('#calViewWrap [data-cal]').forEach(b => b.addEventListener('click', () => {
+            calendarView = b.dataset.cal;
+            try { localStorage.setItem('ganttCalView:' + ganttKey, calendarView); } catch (e) { /* ignore */ }
+            aggiornaCalSeg();
             render();
-        });
+        }));
+
+        // Menu «⋯»: si apre col pulsante e si chiude cliccando fuori o scegliendo un'azione.
+        const moreMenu = document.getElementById('moreMenu');
+        document.getElementById('moreBtn').addEventListener('click', (e) => { e.stopPropagation(); moreMenu.classList.toggle('open'); });
+        document.addEventListener('click', (e) => { if (!e.target.closest('#moreWrap')) moreMenu.classList.remove('open'); });
+        moreMenu.querySelectorAll('button.more-item').forEach(b => b.addEventListener('click', () => moreMenu.classList.remove('open')));
+
+        // Sottotitolo: cliente · progetto (dai parametri di apertura).
+        document.getElementById('projSub').textContent = [urlParams.get('clientName'), urlParams.get('projectName')].filter(Boolean).join(' · ');
 
         window.addEventListener('resize', drawDependencies);
 
@@ -1781,7 +2065,7 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparazione…';
             try {
                 if (!readOnly && autosave && hasPending()) { clearTimeout(saveTimer); await flush(); }
-                const res = await fetch(`${API_URL}/projects/gantt-activity/export?fieldId=${encodeURIComponent(fieldId)}`, {
+                const res = await fetch(`${API_URL}/projects/gantt-activity/export?${ctxQs}`, {
                     headers: getAuthHeaders()
                 });
                 if (res.status === 401) { location.href = 'login.html'; return; }
@@ -1817,7 +2101,7 @@
         let copySources = [];
         async function openCopyModal() {
             try {
-                copySources = await api(`/projects/gantt-activity/copy-sources?fieldId=${encodeURIComponent(fieldId)}`);
+                copySources = await api(`/projects/gantt-activity/copy-sources?${ctxQs}`);
             } catch (e) {
                 showToast('Errore: ' + e.message);
                 return;
@@ -1865,7 +2149,7 @@
             btn.disabled = true;
             try {
                 clearTimeout(saveTimer); // le modifiche non salvate non servono più
-                const r = await api('/projects/gantt-activity/svuota', { method: 'POST', body: JSON.stringify({ fieldId }) });
+                const r = await api('/projects/gantt-activity/svuota', { method: 'POST', body: JSON.stringify(ctxBody) });
                 chiudiSvuota();
                 showToast(`Eliminate ${r.eliminate} attività`);
                 await loadData();
@@ -1883,7 +2167,7 @@
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generazione…';
             try {
-                const r = await api('/projects/gantt-activity/genera', { method: 'POST', body: JSON.stringify({ fieldId }) });
+                const r = await api('/projects/gantt-activity/genera', { method: 'POST', body: JSON.stringify(ctxBody) });
                 showToast(`Create ${r.inserite} attività (${r.fasi} fasi) ${r.origine === 'checklist' ? 'dalla Check List' : 'dalla configurazione della Check List'}`);
                 await loadData();
             } catch (e) {
@@ -1912,7 +2196,7 @@
             try {
                 const result = await api('/projects/gantt-activity/copy', {
                     method: 'POST',
-                    body: JSON.stringify({ fieldId, sourceProjectId })
+                    body: JSON.stringify({ ...ctxBody, sourceProjectId })
                 });
                 document.getElementById('copyModal').classList.remove('open');
                 showToast(`Copiate ${result.copied} attività`);
@@ -1925,7 +2209,7 @@
         // ===== Caricamento iniziale =====
         async function loadData() {
             try {
-                const payload = await api(`/projects/gantt-activity?fieldId=${encodeURIComponent(fieldId)}`);
+                const payload = await api(`/projects/gantt-activity?${ctxQs}`);
                 if (payload.canWrite === false && !readOnly) {
                     readOnly = true;
                     document.body.classList.add('gantt-readonly');
@@ -1934,7 +2218,8 @@
                 effUnit = payload.unita === 'h' ? 'h' : 'g';
                 ganttEconomia = payload.economia || null;
                 // Etichette del pannello Configurazione con l'unità, es. «Analisi (h)».
-                [['cfgAnalisi', 'Analisi'], ['cfgConfigurazione', 'Configurazione'], ['cfgFormazione', 'Formazione'], ['cfgTotale', 'Totale']]
+                [['cfgAnalisi', 'Analisi'], ['cfgConfigurazione', 'Config.'], ['cfgFormazione', 'Formazione'], ['cfgTotale', 'Totale'],
+                 ['cfgEffettivo', 'Effettivo'], ['cfgMarginalita', 'Marginalità'], ['cfgSforamento', 'Sforamento']]
                     .forEach(([id, l]) => { const lab = document.querySelector(`label[for="${id}"]`); if (lab) lab.textContent = `${l} (${effUnit})`; });
                 buildTree(Array.isArray(payload.rows) ? payload.rows : []);
                 projectIdPm = (payload.context && payload.context.projectId) || urlParams.get('projectId') || '';
@@ -1942,12 +2227,12 @@
                 // Modello: preferenza salvata, altrimenti la profondità dei dati (min 2)
                 let deepest = 0;
                 forEachNode(n => { deepest = Math.max(deepest, nodeLevel(n)); });
-                const storedModel = Number(localStorage.getItem('ganttModel:' + fieldId));
+                const storedModel = Number(localStorage.getItem('ganttModel:' + ganttKey));
                 modelCols = Math.min(4, Math.max(2, storedModel || deepest || 2, deepest));
                 document.getElementById('modelSel').value = String(modelCols);
-                const storedView = localStorage.getItem('ganttCalView:' + fieldId);
+                const storedView = localStorage.getItem('ganttCalView:' + ganttKey);
                 if (storedView && CAL_UNIT_W[storedView]) calendarView = storedView;
-                document.getElementById('calViewSel').value = calendarView;
+                aggiornaCalSeg();
                 deletedIds.clear();
                 closeFlyout();
                 render();

@@ -752,6 +752,14 @@
         .proj-pm-ico { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-size: 1.35rem; color: #fff;
             background: linear-gradient(145deg, #6366F1, #4338CA); box-shadow: 0 3px 8px rgba(79,70,229,0.35); transition: transform 0.2s; }
         .proj-ck.proj-pm:hover .proj-pm-ico { transform: scale(1.06) rotate(-6deg); }
+        /* Pulsante Gantt (dopo Cruscotto PM): stessa card, toni azzurri */
+        .proj-ck.proj-gt { background: linear-gradient(145deg, #EFF6FF 0%, #DBEAFE 55%, #ECFEFF 100%); color: #1E3A8A;
+            box-shadow: 0 4px 14px rgba(37,99,235,0.16), inset 0 0 0 1px rgba(37,99,235,0.16); }
+        .proj-ck.proj-gt:hover { box-shadow: 0 10px 24px rgba(37,99,235,0.26), inset 0 0 0 1px rgba(37,99,235,0.24); }
+        .proj-ck.proj-gt:focus-visible { outline-color: #93C5FD; }
+        .proj-gt-ico { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-size: 1.3rem; color: #fff;
+            background: linear-gradient(145deg, #3B82F6, #1D4ED8); box-shadow: 0 3px 8px rgba(37,99,235,0.35); transition: transform 0.2s; }
+        .proj-ck.proj-gt:hover .proj-gt-ico { transform: scale(1.06); }
         /* Completamento a consuntivo accanto al campo Completamento della scheda progetto */
         .compl-cons { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
         .compl-cons-val { background: #EEF2FF; color: #3730A3; border-radius: 999px; padding: 0.1rem 0.55rem; }
@@ -13872,7 +13880,11 @@
                 // Cruscotto PM (sito/pm.html): salute, RAID, Change Request, stakeholder, chiusura, AI
                 '<button type="button" class="proj-ck proj-pm" id="projCruscottoBtn" title="Cruscotto PM: salute del progetto, rischi e decisioni, Change Request, stakeholder, chiusura, Status Report e domande all\'AI">' +
                 '<span class="proj-pm-ico"><i class="fas fa-gauge-high"></i></span>' +
-                '<span class="proj-ck-lbl">Cruscotto PM</span></button>';
+                '<span class="proj-ck-lbl">Cruscotto PM</span></button>' +
+                // Gantt del progetto (sito/gantt.html con projectId, senza campo griglia tipo 13)
+                '<button type="button" class="proj-ck proj-gt" id="projGanttBtn" title="Gantt del progetto: attività, date, effort, effettivo e dipendenze">' +
+                '<span class="proj-gt-ico"><i class="fas fa-chart-gantt"></i></span>' +
+                '<span class="proj-ck-lbl">Gantt</span></button>';
         }
         // Posizione del pulsante: nello spazio libero della riga di Descrizione (subito dopo il
         // campo); se la riga è piena o in riordino, nella testata del progetto.
@@ -14738,6 +14750,21 @@
             if (!e.target.closest('#projCruscottoBtn')) return;
             if (!currentDetailArgument) return;
             location.href = `pm.html?projectId=${encodeURIComponent(currentDetailArgument)}`;
+        });
+        // Gantt: pagina gantt.html del progetto aperto, identificato dal solo projectId (il server
+        // controlla proprietario / Manager in sola lettura). «Torna al Progetto» riapre questa scheda.
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#projGanttBtn')) return;
+            if (!currentDetailArgument) return;
+            const projList = [...detailNavStack].reverse().find(v => v && v.kind === 'projectList');
+            const params = new URLSearchParams({
+                projectId: currentDetailArgument,
+                clientId: projectClientId || '',
+                label: 'Gantt',
+                projectName: currentDetailLabel || '',
+                clientName: (projList && projList.label) || ''
+            });
+            location.href = `gantt.html?${params.toString()}`;
         });
         // Briefing pre-riunione dalla riga della riunione: serve il progetto collegato.
         document.addEventListener('click', (e) => {

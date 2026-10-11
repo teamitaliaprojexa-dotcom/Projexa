@@ -235,6 +235,10 @@ export async function righeGantt(user, projectId) {
   return r.rows.map((x) => {
     const livello = x.argomento4 ? 4 : x.argomento3 ? 3 : x.argomento2 ? 2 : 1;
     const chiave = [x.ordinamento1, x.ordinamento2, x.ordinamento3, x.ordinamento4].slice(0, livello).map((n) => n ?? 0).join('.');
+    // Stima dell'attività (come la pagina Gantt): analisi + configurazione + formazione,
+    // senza valori il totale. Effettivo scritto a mano (Supporto/CreaDB/proj_activity_effettivo.sql).
+    const parti = ['analisi', 'configurazione', 'formazione'].map((c) => numero(x[c])).filter((v) => v != null);
+    const stima = parti.length ? parti.reduce((a, b) => a + b, 0) : numero(x.totale);
     return {
       id: String(x.id),
       livello,
@@ -249,7 +253,9 @@ export async function righeGantt(user, projectId) {
       milestone: x.milestone === true,
       baselineInizio: dataIso(x.baseline_inizio),
       baselineFine: dataIso(x.baseline_fine),
-      baselineIl: x.baseline_il || null
+      baselineIl: x.baseline_il || null,
+      stima,
+      effettivo: numero(x.effettivo)
     };
   });
 }
@@ -261,7 +267,9 @@ export function analisiGantt(righe, oggi = oggiIso()) {
   const out = {
     attivita: righe.length, foglie: 0, conDate: 0, completamento: null,
     inRitardo: [], nonIniziate: [], milestone: [], critico: [],
-    inizio: null, fine: null, baselineFine: null, scostamentoGiorni: null, baselineIl: null
+    inizio: null, fine: null, baselineFine: null, scostamentoGiorni: null, baselineIl: null,
+    // Effettivo / Marginalità / Sforamento delle attività del Gantt (vedi sotto). null = nessun effettivo.
+    consuntivo: null
   };
   if (!righe.length) return out;
   const haFigli = new Set();
@@ -281,6 +289,29 @@ export function analisiGantt(righe, oggi = oggiIso()) {
     else if (f.inizio && f.inizio < oggi && f.avanzamento === 0) out.nonIniziate.push({ id: f.id, nome: f.nome, inizio: f.inizio, owner: f.owner });
   }
   if (peso) out.completamento = Math.round((fatto / peso) * 10) / 10;
+  // Effettivo contro stima, sulle sole foglie con l'Effettivo (i padri sono la loro somma: contarli
+  // raddoppierebbe). Per attività: marginalità = stima − effettivo se sotto, sforamento = effettivo
+  // − stima se sopra; i totali sommano i due valori separatamente, come la pagina Gantt.
+  const consuntivate = foglie.filter((f) => f.effettivo != null);
+  if (consuntivate.length) {
+    const r2 = (v) => Math.round(v * 100) / 100;
+    const c = { attivita: consuntivate.length, stima: 0, effettivo: 0, marginalita: 0, sforamento: 0, sforate: [] };
+    for (const f of consuntivate) {
+      const st = f.stima || 0;
+      c.stima += st;
+      c.effettivo += f.effettivo;
+      if (f.effettivo < st) c.marginalita += st - f.effettivo;
+      else if (f.effettivo > st) {
+        c.sforamento += f.effettivo - st;
+        c.sforate.push({ id: f.id, nome: f.nome, stima: r2(st), effettivo: r2(f.effettivo), sforamento: r2(f.effettivo - st), owner: f.owner });
+      }
+    }
+    ['stima', 'effettivo', 'marginalita', 'sforamento'].forEach((k) => { c[k] = r2(c[k]); });
+    c.netto = r2(c.marginalita - c.sforamento); // positivo = sotto la stima
+    c.perc = c.stima > 0 ? Math.round((c.effettivo / c.stima) * 1000) / 10 : null; // effettivo / stima %
+    c.sforate.sort((a, b) => b.sforamento - a.sforamento);
+    out.consuntivo = c;
+  }
   out.inRitardo.sort((a, b) => b.giorni - a.giorni);
   for (const m of righe.filter((r) => r.milestone)) {
     const data = m.fine || m.inizio;
@@ -524,6 +555,18 @@ export async function saluteProgetto(user, projectId, { prog = null, scheda = nu
         nota += `; stima a finire ${fmt(eac.percPrevista, 0)}% del budget, ancora poco affidabile (completamento sotto il 15%)`;
       }
     }
+    // Effettivo delle attività del Gantt contro la loro stima: sforamento netto (sforamento −
+    // marginalità) oltre il 10% della stima = giallo, oltre il 25% = rosso.
+    const gc = gantt.consuntivo;
+    if (gc && gc.stima > 0) {
+      const testo = `Gantt: effettivo ${fmt(gc.effettivo)} su stima ${fmt(gc.stima)} ${unita} in ${gc.attivita} attività`
+        + `${gc.marginalita ? `, marginalità ${fmt(gc.marginalita)}` : ''}${gc.sforamento ? `, sforamento ${fmt(gc.sforamento)}` : ''}`;
+      nota = stato === 'nd' ? testo : `${nota}; ${testo}`;
+      if (stato === 'nd') stato = 'verde';
+      const oltre = (-gc.netto / gc.stima) * 100;
+      if (oltre > 25) stato = peggiore(stato, 'rosso');
+      else if (oltre > 10) stato = peggiore(stato, 'giallo');
+    }
     ind.push({ chiave: 'budget', titolo: 'Budget', stato, nota });
   }
   // 2. Tempi
@@ -717,8 +760,12 @@ export async function contestoProgetto(user, projectId, { riunioni = 5, dal = nu
     const g = salute.gantt;
     L.push(`GANTT (${righe.length} attività, completamento calcolato ${g.completamento != null ? `${fmt(g.completamento, 0)}%` : '-'}${g.baselineFine ? `, baseline fine ${dataIt(g.baselineFine)}, scostamento ${g.scostamentoGiorni} gg` : ''})`);
     for (const r of righe.slice(0, 120)) {
-      L.push(`${'  '.repeat(r.livello - 1)}- ${r.nome}${r.milestone ? ' [MILESTONE]' : ''} | ${dataIt(r.inizio) || '?'} -> ${dataIt(r.fine) || '?'} | ${r.avanzamento}%${r.owner ? ` | ${r.owner}` : ''}${g.critico.includes(r.id) ? ' | CRITICA' : ''}`);
+      L.push(`${'  '.repeat(r.livello - 1)}- ${r.nome}${r.milestone ? ' [MILESTONE]' : ''} | ${dataIt(r.inizio) || '?'} -> ${dataIt(r.fine) || '?'} | ${r.avanzamento}%${r.owner ? ` | ${r.owner}` : ''}${g.critico.includes(r.id) ? ' | CRITICA' : ''}`
+        + `${r.stima != null ? ` | stima ${fmt(r.stima)} ${u}` : ''}${r.effettivo != null ? ` | effettivo ${fmt(r.effettivo)} ${u}` : ''}`);
     }
+    const gc = g.consuntivo;
+    if (gc) L.push(`Effettivo contro stima (${gc.attivita} attività con effettivo): stima ${fmt(gc.stima)} ${u}, effettivo ${fmt(gc.effettivo)} ${u}${gc.perc != null ? ` (${fmt(gc.perc, 0)}%)` : ''}, marginalità ${fmt(gc.marginalita)} ${u}, sforamento ${fmt(gc.sforamento)} ${u}`
+      + (gc.sforate.length ? `; attività sforate: ${gc.sforate.slice(0, 10).map((x) => `${x.nome} (+${fmt(x.sforamento)})`).join('; ')}` : ''));
     if (g.inRitardo.length) L.push(`In ritardo: ${g.inRitardo.map((x) => `${x.nome} (fine ${dataIt(x.fine)}, ${x.avanzamento}%)`).join('; ')}`);
     L.push('');
   }

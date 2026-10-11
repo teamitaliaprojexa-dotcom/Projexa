@@ -150,7 +150,8 @@ router.get('/portfolio', async (req, res) => {
         indicatori: s.indicatori, eac: s.eac || null, conteggi: s.conteggi || null,
         start: s.scheda ? s.scheda.start : null, end: s.scheda ? s.scheda.end : null,
         tipologia: s.scheda ? s.scheda.tipologia : '', stato: s.scheda ? s.scheda.stato : '',
-        gantt: s.gantt ? { inizio: s.gantt.inizio, fine: s.gantt.fine, baselineFine: s.gantt.baselineFine, completamento: s.gantt.completamento, milestone: s.gantt.milestone, inRitardo: s.gantt.inRitardo.length } : null
+        gantt: s.gantt ? { inizio: s.gantt.inizio, fine: s.gantt.fine, baselineFine: s.gantt.baselineFine, completamento: s.gantt.completamento, milestone: s.gantt.milestone, inRitardo: s.gantt.inRitardo.length,
+          consuntivo: s.gantt.consuntivo ? { ...s.gantt.consuntivo, sforate: undefined } : null } : null
       }))
     });
   } catch (e) { invia(res, e, 'PORTFOLIO'); }
