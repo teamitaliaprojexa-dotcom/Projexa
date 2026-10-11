@@ -4150,7 +4150,43 @@ app.get('/api/projects/gantt-activity', requireAuth, async (req, res) => {
       for (const c of GANTT_COLUMNS) out[c] = r[c];
       return out;
     });
-    res.json({ rows, canWrite, context: { clientId: ctx.clientId, projectId: ctx.projectId } });
+    // Unità dell'effort (analisi/configurazione/formazione/totale): ore se il progetto ha
+    // «Gestione a HH» = vero, altrimenti giorni (stessa regola dei KPI Gestione Progetto).
+    const hh = await db.query(
+      `SELECT COALESCE(bool_or(valore1), false) AS ore FROM projects
+        WHERE campo = 'Gestione a HH' AND argument = $1 AND tenant_id = $2 AND user_id = $3
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+      [String(ctx.projectId), ctx.tenantId, ctx.userId]
+    );
+    const unita = hh.rows[0] && hh.rows[0].ore ? 'h' : 'g';
+    // Riepilogo dai Costi Progetto (proj_worker, righe attive) nella stessa unità: offerta,
+    // consuntivo e consuntivo fatturato (ore dei voucher Qlik in stato «Chiuso»).
+    // Solo per i progetti con «a Consuntivo» = vero nella scheda.
+    let economia = null;
+    const aCons = (await db.query(
+      `SELECT COALESCE(bool_or(valore1), false) AS si FROM projects
+        WHERE lower(btrim(campo)) IN ('a consuntivo', '(*) a consuntivo') AND argument = $1
+          AND tenant_id = $2 AND user_id = $3 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+      [String(ctx.projectId), ctx.tenantId, ctx.userId]
+    )).rows[0].si;
+    const pwCols = aCons ? await getTableColumns('proj_worker') : new Set();
+    const u = unita === 'h' ? 'hh' : 'gg';
+    const col = (nomi) => nomi.find((c) => pwCols.has(c));
+    const cOff = col([`offerta_effort_${u}`, `effort_${u}`]);
+    const cCons = col([`time_spent_${u}`]);
+    const cFatt = col([`time_spent_fatt_${u}`]);
+    if (cOff || cCons || cFatt) {
+      const somma = (c) => (c ? `SUM("${assertValidIdentifier(c)}")::float8` : 'NULL::float8');
+      const e = (await db.query(
+        `SELECT ${somma(cOff)} AS offerta, ${somma(cCons)} AS consuntivo, ${somma(cFatt)} AS fatturato, count(*)::int AS righe
+           FROM proj_worker
+          WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3
+            AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+        [ctx.tenantId, ctx.userId, String(ctx.projectId)]
+      )).rows[0];
+      if (e && e.righe) economia = { offerta: e.offerta, consuntivo: e.consuntivo, fatturato: e.fatturato };
+    }
+    res.json({ rows, canWrite, unita, economia, context: { clientId: ctx.clientId, projectId: ctx.projectId } });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -4385,6 +4421,29 @@ app.post('/api/projects/gantt-activity/copy', requireAuth, async (req, res) => {
   }
 });
 
+// "Cancella": elimina TUTTE le attività del Gantt del progetto (la pagina chiede due conferme).
+// Serve il permesso di scrittura su ogni riga, come per l'eliminazione dal salvataggio.
+app.post('/api/projects/gantt-activity/svuota', requireAuth, async (req, res) => {
+  try {
+    const fieldId = String((req.body && req.body.fieldId) || '').trim();
+    const ctx = await resolveGanttContext(fieldId, req, true);
+    const ids = (await db.query(
+      `SELECT id FROM ${GANTT_TABLE} WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3 AND project_id = $4`,
+      [ctx.tenantId, ctx.userId, ctx.clientId, ctx.projectId]
+    )).rows.map((r) => String(r.id));
+    if (!ids.length) return res.json({ eliminate: 0 });
+    await assertRowsWritable(req, db, GANTT_TABLE, ids, await getTableColumns(GANTT_TABLE));
+    const r = await db.query(
+      `DELETE FROM ${GANTT_TABLE}
+        WHERE id = ANY($1::uuid[]) AND tenant_id = $2 AND user_id = $3 AND client_id = $4 AND project_id = $5`,
+      [ids, ctx.tenantId, ctx.userId, ctx.clientId, ctx.projectId]
+    );
+    res.json({ eliminate: r.rowCount });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 // "Genera": crea il Gantt di un progetto vuoto dalle fasi [Licenze] della Check List.
 //   - Check List del progetto presente (chek_list): le sue righe attive delle sezioni licenza
 //     (licenza valorizzata), nello stesso ordine della finestra Check List;
@@ -4392,6 +4451,9 @@ app.post('/api/projects/gantt-activity/copy', requireAuth, async (req, res) => {
 //     configurazione, condizioni e licenze del progetto), sempre solo le sezioni licenza.
 // Ogni fase (figlio 0) diventa un'attività di livello 1 (argomento1), le sue attività
 // (figlio > 0) le attività di livello 2 (argomento2). Date, colori e risorse restano vuoti.
+// Effort dalla griglia «Licenze da Attivare» (proj_licenze, stessa licenza): la fase riceve
+// totale; un'attività che nel nome contiene analisi / configurazione / formazione (maiuscole
+// e minuscole non contano) riceve solo quel valore.
 app.post('/api/projects/gantt-activity/genera', requireAuth, async (req, res) => {
   try {
     const fieldId = String((req.body && req.body.fieldId) || '').trim();
@@ -4423,6 +4485,24 @@ app.post('/api/projects/gantt-activity/genera', requireAuth, async (req, res) =>
         : 'Nessuna fase [Licenze] da generare: controlla la Tipologia, le «Licenze da attivare» del progetto e la configurazione della Check List' });
     }
 
+    // Effort per licenza dalla griglia «Licenze da Attivare» (proj_licenze), per nome licenza:
+    // l'argomento della licenza riceve il totale, le sue attività analisi/configurazione/formazione.
+    const normLic = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const effortLicenza = new Map();
+    if ((await db.query(`SELECT to_regclass('public.proj_licenze') IS NOT NULL AS c`)).rows[0].c) {
+      const eff = await db.query(
+        `SELECT cl.description AS nome, pl.totale, pl.analisi, pl.configurazione, pl.formazione
+           FROM proj_licenze pl JOIN conf_licenze_app cl ON cl.id = pl.licenza_id
+          WHERE pl.tenant_id = $1 AND pl.user_id = $2 AND pl.project_id::text = $3
+            AND (pl.scadenza IS NULL OR pl.scadenza >= CURRENT_DATE)
+          ORDER BY pl.id`,
+        [ctx.tenantId, ctx.userId, String(ctx.projectId)]
+      );
+      for (const e of eff.rows) if (!effortLicenza.has(normLic(e.nome))) effortLicenza.set(normLic(e.nome), e);
+    }
+    // Attività che parlano di analisi / configurazione / formazione: ricevono solo quel valore.
+    const EFFORT_ATTIVITA = [['analisi', /analis/i], ['configurazione', /configur/i], ['formazione', /formazion/i]];
+
     // Albero: una fase per sezione (padre + licenza), le attività sotto la loro fase.
     const fasi = [];
     const perSezione = new Map();
@@ -4430,7 +4510,7 @@ app.post('/api/projects/gantt-activity/genera', requireAuth, async (req, res) =>
       const k = `${r.padre}|${r.licenza}`;
       let fase = perSezione.get(k);
       if (!fase) {
-        fase = { titolo: '', attivita: [] };
+        fase = { titolo: '', attivita: [], effort: effortLicenza.get(normLic(r.licenza)) || null };
         perSezione.set(k, fase);
         fasi.push(fase);
       }
@@ -4456,10 +4536,18 @@ app.post('/api/projects/gantt-activity/genera', requireAuth, async (req, res) =>
         );
         inserite += 1;
       };
+      const conColonna = (data, col, v) => {
+        if (ganttColumns.has(col) && v != null && v !== '') data[col] = v;
+        return data;
+      };
       for (const [i, fase] of fasi.entries()) {
-        await inserisci({ argomento1: (fase.titolo || 'Fase').slice(0, 255), ordinamento1: i + 1 });
+        await inserisci(conColonna({ argomento1: (fase.titolo || 'Fase').slice(0, 255), ordinamento1: i + 1 },
+          'totale', fase.effort && fase.effort.totale));
         for (const [j, titolo] of fase.attivita.entries()) {
-          await inserisci({ argomento2: titolo.slice(0, 255), ordinamento1: i + 1, ordinamento2: j + 1 });
+          const att = { argomento2: titolo.slice(0, 255), ordinamento1: i + 1, ordinamento2: j + 1 };
+          const tipo = EFFORT_ATTIVITA.find(([, re]) => re.test(titolo));
+          if (tipo && fase.effort) conColonna(att, tipo[0], fase.effort[tipo[0]]);
+          await inserisci(att);
         }
       }
       await client.query('COMMIT');

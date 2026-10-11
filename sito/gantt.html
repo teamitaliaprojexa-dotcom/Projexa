@@ -20,7 +20,7 @@
             --radius: 8px;
             --dep-color: #8B5CF6; /* viola delle frecce di dipendenza */
             --col-w: 200px;       /* larghezza di ogni colonna argomento */
-            --row-h: 44px;        /* altezza di ogni riga */
+            --row-h: 38px;        /* altezza di ogni riga */
             --day-w: 26px;        /* larghezza di un giorno nel gantt */
         }
         * { box-sizing: border-box; }
@@ -54,6 +54,23 @@
             max-width: 320px;
         }
         .topbar .spacer { flex: 1; }
+        /* Riepilogo del progetto sopra gli argomenti: 100% (somma dei totali) e avanzamento */
+        .proj-sum-wrap { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; margin: 0.2rem 0 0.6rem; }
+        .ec-box { display: flex; flex-direction: column; gap: 3px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: white; font-size: 0.75rem; }
+        .ec-row { display: grid; grid-template-columns: 82px 78px 78px; align-items: center; gap: 8px; }
+        .ec-lbl { font-weight: 700; color: var(--text-muted); text-transform: uppercase; font-size: 0.66rem; letter-spacing: 0.02em; }
+        .ec-val { text-align: right; font-weight: 700; color: var(--dark); font-variant-numeric: tabular-nums; }
+        .ec-diff { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+        .ec-diff.ec-head { font-size: 0.62rem; font-weight: 600; color: var(--text-muted); }
+        .ec-diff.pos { color: #059669; }
+        .ec-diff.neg { color: #DC2626; }
+        .proj-sum { width: 897px; max-width: 100%; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+        .proj-sum-row { display: grid; grid-template-columns: 110px 1fr 120px; align-items: center; gap: 8px; font-size: 0.75rem; }
+        .proj-sum-row .lbl { font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; font-size: 0.68rem; }
+        .proj-sum-row .trk { height: 14px; background: #EEF2F7; border-radius: 7px; overflow: hidden; }
+        .proj-sum-row .fil { display: block; height: 100%; border-radius: 7px; }
+        .proj-sum-row .num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--dark); }
+        .proj-sum-row .num small { font-weight: 400; color: var(--text-muted); }
         button, select, input {
             font: inherit;
         }
@@ -89,7 +106,7 @@
         .cal-view-wrap { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; white-space: nowrap; }
 
         /* ===== Area principale ===== */
-        .main-scroll { overflow: auto; height: calc(100vh - 60px); }
+        .main-scroll { overflow: auto; height: calc(100vh - var(--topbar-h, 60px)); }
         .board { position: relative; min-width: max-content; padding: 0.8rem 1.2rem 3rem; }
 
         /* Intestazione colonne argomento + timeline */
@@ -130,13 +147,13 @@
             display: inline-flex;
             align-items: center;
             max-width: 100%;
-            min-width: 90px;
-            padding: 0.35rem 0.7rem;
-            border-radius: 8px;
-            border: 2px solid var(--primary);
+            min-width: 70px;
+            padding: 0.18rem 0.55rem;
+            border-radius: 6px;
+            border: 1.5px solid var(--primary);
             background: transparent;
             cursor: pointer;
-            font-size: 0.82rem;
+            font-size: 0.74rem;
             font-weight: 600;
             white-space: nowrap;
             overflow: hidden;
@@ -154,6 +171,21 @@
         .gantt-grid-line { position: absolute; top: 0; bottom: 0; width: 1px; background: #EEF1F5; }
         /* Funzioni da PM senior: milestone (rombo), baseline (barra grigia sotto), percorso critico */
         .gantt-bar.gantt-ms { position: absolute; top: 12px; width: 18px; height: 18px; min-width: 0; transform: translateX(-9px) rotate(45deg); border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.25); z-index: 1; }
+        /* Colonna Effort: barre di totale (argomenti) e analisi/configurazione/formazione */
+        .eff-head { flex: 0 0 414px; width: 414px; padding: 0 8px 8px; font-size: 0.7rem; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+        .eff-head .eff-leg { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+        .eff-head .eff-leg i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+        .wbs-row .eff-cell { flex: 0 0 414px; width: 414px; padding: 0 8px; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+        .eff-bar { display: flex; align-items: center; gap: 6px; height: 11px; }
+        .eff-track { flex: 1; height: 8px; background: #EEF2F7; border-radius: 4px; overflow: hidden; }
+        .eff-fill { display: block; height: 100%; border-radius: 4px; }
+        .eff-avz { flex: 0 0 52px; text-align: right; font-size: 0.66rem; font-weight: 700; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .eff-avz.done { color: #059669; }
+        .eff-val small { color: var(--text-muted); font-size: 0.62rem; }
+        .eff-val { flex: 0 0 84px; text-align: right; font-size: 0.68rem; color: var(--dark); font-variant-numeric: tabular-nums; }
+        .eff-bar.big { height: 16px; }
+        .eff-bar.big .eff-track { height: 14px; border-radius: 5px; }
+        .eff-bar.big .eff-val { font-weight: 700; font-size: 0.75rem; }
         .gantt-base { position: absolute; top: calc(var(--row-h) - 9px); height: 5px; border-radius: 3px; background: #6B7280; opacity: 0.55; }
         .gantt-bar.critico, .gantt-ms.critico { box-shadow: 0 0 0 2px #DC2626; }
         .node-btn.critico { outline: 2px solid #DC2626; outline-offset: 1px; }
@@ -210,10 +242,10 @@
         /* ===== Flyout Configurazione ===== */
         .flyout {
             position: fixed;
-            top: 60px; /* sotto la barra superiore: toggle e Salva restano cliccabili */
+            top: var(--topbar-h, 60px); /* sotto la barra superiore: toggle e Salva restano cliccabili */
             right: -380px;
             width: 360px;
-            height: calc(100vh - 60px);
+            height: calc(100vh - var(--topbar-h, 60px));
             background: white;
             border-left: 1px solid var(--border);
             box-shadow: -8px 0 24px rgba(0,0,0,0.08);
@@ -226,9 +258,11 @@
         .flyout-head { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.2rem; border-bottom: 1px solid var(--border); font-weight: 700; }
         .flyout-body { flex: 1; overflow: auto; padding: 1rem 1.2rem; display: flex; flex-direction: column; gap: 0.9rem; }
         .flyout-body label { font-size: 0.78rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px; }
-        .flyout-body input[type=text], .flyout-body input[type=date], .flyout-body input[type=number], .flyout-body textarea {
+        .flyout-body input[type=text], .flyout-body input[type=date], .flyout-body input[type=number], .flyout-body textarea,
+        .flyout-body select {
             width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 0.85rem;
         }
+        .flyout-body select { background: white; height: 38px; }
         .flyout-body textarea { resize: vertical; font-family: inherit; }
         .flyout-body .row2 { display: flex; gap: 10px; }
         .flyout-body .row2 > div { flex: 1; min-width: 0; }
@@ -256,7 +290,7 @@
         }
         .toast.show { opacity: 1; }
         /* Sola visualizzazione (mode=view): nascosti i comandi di modifica e salvataggio */
-        .gantt-readonly #addBtn, .gantt-readonly #copyBtn, .gantt-readonly #copyBtnEmpty, .gantt-readonly #generaBtnEmpty,
+        .gantt-readonly #addBtn, .gantt-readonly #copyBtn, .gantt-readonly #copyBtnEmpty, .gantt-readonly #generaBtnEmpty, .gantt-readonly #svuotaBtn,
         .gantt-readonly .autosave-wrap, .gantt-readonly #saveBtn,
         .gantt-readonly #cfgDepPick, .gantt-readonly #cfgDepClear, .gantt-readonly #cfgAddChild,
         .gantt-readonly .flyout-foot { display: none !important; }
@@ -287,6 +321,7 @@
             </select>
         </span>
         <button class="btn" id="copyBtn" style="display:none;"><i class="fas fa-copy"></i> Copia progetto da</button>
+        <button class="btn danger" id="svuotaBtn" style="display:none;" title="Elimina tutte le attività del Gantt"><i class="fas fa-trash"></i> Cancella</button>
         <!-- Export Excel: disponibile sia in visualizzazione sia in modifica -->
         <button class="btn" id="baselineBtn" style="display:none;" title="Mostra la baseline (piano congelato) sotto le barre"><i class="fas fa-snowflake"></i> Baseline</button>
         <button class="btn" id="criticoBtn" style="display:none;" title="Evidenzia in rosso le attività senza margine: se slittano, slitta la fine del progetto"><i class="fas fa-route"></i> Percorso critico</button>
@@ -368,7 +403,16 @@
             <div class="row2">
                 <div>
                     <label for="cfgStato">Stato</label>
-                    <input type="text" id="cfgStato">
+                    <!-- Stati del foglio «Setup» del modello Excel (backend/config/ganttXlsx.js, STATI) -->
+                    <select id="cfgStato">
+                        <option value="">—</option>
+                        <option>Da pianificare</option>
+                        <option>Da iniziare</option>
+                        <option>Programmata</option>
+                        <option>In corso</option>
+                        <option>In Revisione</option>
+                        <option>Completata</option>
+                    </select>
                 </div>
                 <div>
                     <label for="cfgAvanzamento">Avanzamento %</label>
@@ -426,6 +470,18 @@
     </div>
 
     <!-- Modale "Copia progetto da" -->
+    <!-- "Cancella": due conferme prima di eliminare tutte le attività -->
+    <div class="modal-mask" id="svuotaModal">
+        <div class="modal">
+            <h3 id="svuotaTitle">Cancellare il Gantt?</h3>
+            <p id="svuotaText" style="margin:0; color:var(--text-muted); font-size:0.9rem; line-height:1.45;"></p>
+            <div class="actions">
+                <button class="btn" id="svuotaCancel">Annulla</button>
+                <button class="btn danger" id="svuotaConfirm"><i class="fas fa-trash"></i> Continua</button>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-mask" id="copyModal">
         <div class="modal">
             <h3>Copia progetto da</h3>
@@ -908,21 +964,104 @@
 
         // ===== Render =====
         const board = document.getElementById('board');
-        const COL_W = 200, ROW_H = 44;
+        const COL_W = 200, ROW_H = 38;
+        // Barre dell'effort: colore del totale e delle tre parti.
+        const EFF_TOT_COLOR = '#1E40AF';
+        const EFF_AVZ_COLOR = '#10B981'; // avanzamento (come nel riepilogo del progetto)
+        const EFF_PARTI = [['analisi', 'Analisi', '#0EA5E9'], ['configurazione', 'Configurazione', '#10B981'], ['formazione', 'Formazione', '#F59E0B']];
+        // Unità dell'effort del progetto: 'h' (Gestione a HH) o 'g' (giorni), dal server.
+        let effUnit = 'g';
+        let ganttEconomia = null; // { offerta, consuntivo, fatturato } dai Costi Progetto
+        const fmtEff = v => `${Number(v).toLocaleString('it-IT', { maximumFractionDigits: 2 })} ${effUnit}`;
+
+        // Riepilogo del progetto (sopra ARGOMENTO 1):
+        //   100% = somma dei Totali degli argomenti (senza Totale: somma dei valori delle sue
+        //          sotto attività);
+        //   avanzamento = somma, punto per punto, di valore × Avanzamento % delle sotto attività
+        //          con analisi/configurazione/formazione; un argomento senza sotto attività
+        //          valorizzate conta con il suo Totale × il suo Avanzamento %.
+        // Effort di un argomento (livello 1): tot = 100% (Totale, o somma delle sotto attività);
+        // fatto = somma di valore × Avanzamento % delle sotto attività (senza sotto attività
+        // valorizzate: Totale × Avanzamento % dell'argomento).
+        function rootEffort(root, effNum) {
+            const avz = n => Math.max(0, Math.min(100, Number(n.avanzamento) || 0)) / 100;
+            let sommaParti = 0, fattoParti = 0;
+            forEachNode(n => {
+                if (n === root) return;
+                EFF_PARTI.forEach(([c]) => {
+                    const v = effNum(n[c]);
+                    if (v != null) { sommaParti += v; fattoParti += v * avz(n); }
+                });
+            }, [root]);
+            const tot = effNum(root.totale) != null ? effNum(root.totale) : sommaParti;
+            return { tot, fatto: sommaParti > 0 ? fattoParti : tot * avz(root) };
+        }
+
+        function projectSummaryHtml(effNum) {
+            let totale = 0, fatto = 0;
+            tree.forEach(root => {
+                const e = rootEffort(root, effNum);
+                totale += e.tot;
+                fatto += e.fatto;
+            });
+            const pct = totale > 0 ? Math.min(100, (fatto / totale) * 100) : 0;
+            const barre = !(totale > 0) ? '' : `<div class="proj-sum">
+                <div class="proj-sum-row" title="Somma dei Totali degli argomenti"><span class="lbl">Progetto</span><span class="trk"><span class="fil" style="width:100%; background:${EFF_TOT_COLOR};"></span></span><span class="num">${fmtEff(totale)} <small>(100%)</small></span></div>
+                <div class="proj-sum-row" title="Somma di valore × Avanzamento % delle singole attività"><span class="lbl">Avanzamento</span><span class="trk"><span class="fil" style="width:${pct.toFixed(1)}%; background:var(--secondary);"></span></span><span class="num">${fmtEff(Math.round(fatto * 100) / 100)} <small>(${Math.round(pct)}%)</small></span></div>
+            </div>`;
+            const econ = economiaHtml(totale);
+            return barre || econ ? `<div class="proj-sum-wrap">${barre}${econ}</div>` : '';
+        }
+
+        // Consuntivo e consuntivo fatturato dai Costi Progetto (proj_worker) e differenza rispetto
+        // al totale del progetto nel Gantt (barra «Progetto»): positiva = ancora disponibile,
+        // negativa = oltre il totale.
+        function economiaHtml(totale) {
+            const e = ganttEconomia;
+            if (!e) return '';
+            const n = v => (v == null || !Number.isFinite(Number(v)) ? null : Math.round(Number(v) * 100) / 100);
+            const tot = totale > 0 ? totale : null;
+            const diff = v => {
+                if (tot == null || v == null) return '<span class="ec-diff"></span>';
+                const d = Math.round((tot - v) * 100) / 100;
+                const cls = d < 0 ? 'neg' : 'pos';
+                const tit = `${fmtEff(tot)} − ${fmtEff(v)}: ${d < 0 ? 'oltre il totale del progetto' : 'ancora disponibile'}`;
+                return `<span class="ec-diff ${cls}" title="${tit}">${d > 0 ? '+' : ''}${fmtEff(d)}</span>`;
+            };
+            const riga = (lbl, v, tit) => `<div class="ec-row" title="${tit}"><span class="ec-lbl">${lbl}</span><span class="ec-val">${v == null ? '—' : fmtEff(v)}</span>${diff(v)}</div>`;
+            return `<div class="ec-box">
+                ${tot != null ? `<div class="ec-row"><span></span><span></span><span class="ec-diff ec-head">Δ su ${fmtEff(tot)}</span></div>` : ''}
+                ${riga('Consuntivo', n(e.consuntivo), 'Ore/giornate spese (Costi Progetto, import Qlik)')}
+                ${riga('Fatturato', n(e.fatturato), 'Consuntivo fatturato: voucher Qlik in stato «Chiuso»')}
+            </div>`;
+        }
 
         function render() {
             const nodes = flatNodes();
             document.getElementById('emptyState').style.display = nodes.length ? 'none' : 'block';
             document.getElementById('copyBtn').style.display = nodes.length ? 'none' : '';
+            document.getElementById('svuotaBtn').style.display = nodes.length ? '' : 'none';
             document.getElementById('copyBtnEmpty').style.display = '';
 
             const range = ganttVisible ? buildTimeline() : null;
             const ganttW = range ? range.width : 0;
 
+            // Colonna Effort: solo se almeno un'attività ha un valore. Il totale dell'argomento è
+            // il 100% (barra piena); analisi/configurazione/formazione delle sue sotto attività sono
+            // "di cui": barra = valore / totale del loro argomento. Senza totale, la base è la
+            // somma dei valori dell'argomento.
+            const effNum = v => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+            const showEff = nodes.some(n => effNum(n.totale) != null || EFF_PARTI.some(([c]) => effNum(n[c]) != null));
+            const effRoot = new Map(); // id argomento (livello 1) -> { tot (100%), fatto }
+            if (showEff) tree.forEach(root => effRoot.set(root.id, rootEffort(root, effNum)));
+            const rootOf = n => { let r = n; while (r.parent) r = r.parent; return r; };
+
             let html = '<div class="board-head">';
             for (let i = 1; i <= modelCols; i++) {
                 html += `<div class="col-head" data-col-index="${i}" title="Clicca per rinominare la colonna"><span class="col-head-text">${escapeHtml(colLabels[i - 1])}</span><i class="fas fa-pen col-head-pen"></i></div>`;
             }
+            if (showEff) html += '<div class="eff-head"></div>';
+            html = projectSummaryHtml(effNum) + html;
             if (range) {
                 html += `<div class="timeline-head" style="width:${ganttW}px;">`;
                 // Riga superiore (mese o anno) e riga inferiore (giorno, settimana o mese)
@@ -946,13 +1085,48 @@
                 for (let i = 1; i <= modelCols; i++) {
                     if (i === level) {
                         const critico = mostraCritico && ganttPm && ganttPm.critico.includes(node.id);
-                        html += `<div class="cell"><button type="button" class="node-btn${critico ? ' critico' : ''}" draggable="true" data-node-id="${escapeHtml(node.id)}" data-level="${level}"
+                        html += `<div class="cell" data-col="${i}"><button type="button" class="node-btn${critico ? ' critico' : ''}" draggable="true" data-node-id="${escapeHtml(node.id)}" data-level="${level}"
                             style="border-color:${color}; color:${color}; background:${tint(rootColor(node), 0.9)};">
                             <span class="node-text">${node.milestone ? '<i class="fas fa-diamond ms-mark"></i>' : ''}${escapeHtml(node.name || '(senza nome)')}</span>
                         </button></div>`;
                     } else {
-                        html += '<div class="cell"></div>';
+                        html += `<div class="cell" data-col="${i}"></div>`;
                     }
+                }
+                if (showEff) {
+                    const eRoot = effRoot.get(rootOf(node).id) || { tot: 0, fatto: 0 };
+                    const base = eRoot.tot || 0;
+                    // stato (solo sotto attività): { avz: 0..100, testo } -> la barra è sempre lunga
+                    // quanto il 100% dell'attività: colore pieno per la parte fatta, chiaro per quella
+                    // che manca, con la % accanto. La quota sul totale resta nel numero a destra.
+                    const bar = (val, color, label, big, stato = null) => {
+                        const quota = base > 0 ? (val / base) * 100 : 0;
+                        const pct = Math.min(100, Math.max(val > 0 ? 2 : 0, quota));
+                        const pctTxt = big || base <= 0 ? '' : ` <small>(${Math.round(quota)}%)</small>`;
+                        const fill = stato
+                            ? `linear-gradient(to right, ${color} ${stato.avz}%, ${color}40 ${stato.avz}%)`
+                            : color;
+                        const tip = `${label}: ${fmtEff(val)}${big ? '' : ` di ${fmtEff(base)}`}`
+                            + (stato ? ` · avanzamento ${stato.avz}%${stato.testo ? ` · ${stato.testo}` : ''}` : '');
+                        const avzHtml = stato
+                            ? `<span class="eff-avz${stato.avz >= 100 ? ' done' : ''}">${stato.avz >= 100 ? '<i class="fas fa-check"></i> ' : ''}${stato.avz}%</span>`
+                            : '';
+                        return `<div class="eff-bar${big ? ' big' : ''}" title="${escapeHtml(tip)}"><span class="eff-track"><span class="eff-fill" style="width:${big || stato ? 100 : pct}%; background:${fill};"></span></span>${avzHtml}<span class="eff-val">${fmtEff(val)}${pctTxt}</span></div>`;
+                    };
+                    let barre = '';
+                    if (level === 1 && effNum(node.totale) != null) {
+                        barre += bar(effNum(node.totale), EFF_TOT_COLOR, 'Totale', true);
+                        // Sotto il Totale: avanzamento dell'argomento (valore × Avanzamento % dei sotto elementi).
+                        barre += bar(Math.round(eRoot.fatto * 100) / 100, EFF_AVZ_COLOR, 'Avanzamento', false);
+                    }
+                    EFF_PARTI.forEach(([c, l, col]) => {
+                        if (effNum(node[c]) == null) return;
+                        const stato = level > 1
+                            ? { avz: Math.max(0, Math.min(100, Math.round(Number(node.avanzamento) || 0))), testo: String(node.stato || '').trim() }
+                            : null;
+                        barre += bar(effNum(node[c]), col, l, false, stato);
+                    });
+                    html += `<div class="eff-cell">${barre}</div>`;
                 }
                 if (range) {
                     html += `<div class="gantt-cell" style="width:${ganttW}px;" data-gantt-cell="1">`;
@@ -990,8 +1164,24 @@
             html += '<svg id="depSvg"></svg>';
             board.innerHTML = html;
 
+            fitColumns();
             wireBoardEvents();
             drawDependencies();
+        }
+
+        // Colonne degli argomenti larghe quanto il pulsante più lungo (più un piccolo spazio),
+        // così Argomento 2 sta subito accanto ad Argomento 1. Mai più strette dell'intestazione.
+        function fitColumns() {
+            for (let i = 1; i <= modelCols; i++) {
+                const head = board.querySelector(`.col-head[data-col-index="${i}"]`);
+                const headText = head ? head.querySelector('.col-head-text') : null;
+                let w = headText ? headText.scrollWidth + 34 : 80; // testo + matita + padding
+                board.querySelectorAll(`.cell[data-col="${i}"] .node-btn`).forEach(b => { w = Math.max(w, b.scrollWidth + 22); });
+                w = Math.min(Math.max(w, 80), 320) + 'px';
+                const set = el => { el.style.flex = `0 0 ${w}`; el.style.width = w; };
+                if (head) set(head);
+                board.querySelectorAll(`.cell[data-col="${i}"]`).forEach(set);
+            }
         }
 
         // ===== Frecce di dipendenza (linee ortogonali viola) =====
@@ -1193,6 +1383,13 @@
                 ? '' : `Ereditato da Argomento 1 (tonalità livello ${level})`;
             document.getElementById('cfgStart').value = node.data_inizio ? String(node.data_inizio).slice(0, 10) : '';
             document.getElementById('cfgEnd').value = node.data_fine ? String(node.data_fine).slice(0, 10) : '';
+            // Stato salvato con un valore fuori elenco (es. scritto a mano prima): resta selezionabile.
+            const statoSel = document.getElementById('cfgStato');
+            statoSel.querySelectorAll('option[data-extra]').forEach(o => o.remove());
+            const statoCur = node.stato == null ? '' : String(node.stato);
+            if (statoCur && ![...statoSel.options].some(o => o.value === statoCur)) {
+                statoSel.insertAdjacentHTML('beforeend', `<option data-extra="1" value="${escapeHtml(statoCur)}">${escapeHtml(statoCur)}</option>`);
+            }
             EXTRA_FIELD_INPUTS.forEach(([inputId, col]) => {
                 document.getElementById(inputId).value = node[col] == null ? '' : node[col];
             });
@@ -1257,6 +1454,7 @@
                 }
                 selectedNode[col] = value;
                 scheduleSave();
+                if (GANTT_DECIMAL_COLS.has(col) || col === 'avanzamento') render(); // aggiorna barre e riepilogo
             });
         });
 
@@ -1530,6 +1728,44 @@
         document.getElementById('copyBtnEmpty').addEventListener('click', openCopyModal);
         document.getElementById('copyCancel').addEventListener('click', () => document.getElementById('copyModal').classList.remove('open'));
 
+        // ===== "Cancella": elimina tutte le attività, dopo due conferme =====
+        let svuotaStep = 0;
+        function apriSvuota(step) {
+            svuotaStep = step;
+            const n = flatNodes().length;
+            document.getElementById('svuotaTitle').textContent = step === 1 ? 'Cancellare il Gantt?' : 'Conferma definitiva';
+            document.getElementById('svuotaText').textContent = step === 1
+                ? `Verranno eliminate tutte le ${n} attività del Gantt di questo progetto (argomenti, sotto attività, date, dipendenze e baseline).`
+                : 'Sei sicuro? L\'eliminazione è definitiva e non si può annullare.';
+            document.getElementById('svuotaConfirm').innerHTML = step === 1
+                ? '<i class="fas fa-trash"></i> Continua' : '<i class="fas fa-trash"></i> Elimina tutto';
+            document.getElementById('svuotaModal').classList.add('open');
+        }
+        const chiudiSvuota = () => { svuotaStep = 0; document.getElementById('svuotaModal').classList.remove('open'); };
+        document.getElementById('svuotaBtn').addEventListener('click', () => {
+            if (readOnly || !flatNodes().length) return;
+            apriSvuota(1);
+        });
+        document.getElementById('svuotaCancel').addEventListener('click', chiudiSvuota);
+        document.getElementById('svuotaConfirm').addEventListener('click', async () => {
+            if (svuotaStep === 1) { apriSvuota(2); return; }
+            if (svuotaStep !== 2) return;
+            if (flushing) { showToast('Salvataggio in corso: riprova tra un attimo'); return; }
+            const btn = document.getElementById('svuotaConfirm');
+            btn.disabled = true;
+            try {
+                clearTimeout(saveTimer); // le modifiche non salvate non servono più
+                const r = await api('/projects/gantt-activity/svuota', { method: 'POST', body: JSON.stringify({ fieldId }) });
+                chiudiSvuota();
+                showToast(`Eliminate ${r.eliminate} attività`);
+                await loadData();
+            } catch (e) {
+                showToast('Errore: ' + e.message);
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
         // ===== "Genera": attività dalle fasi [Licenze] della Check List (solo progetto vuoto) =====
         document.getElementById('generaBtnEmpty').addEventListener('click', async () => {
             const btn = document.getElementById('generaBtnEmpty');
@@ -1585,6 +1821,11 @@
                     document.body.classList.add('gantt-readonly');
                     showToast('Attività in sola lettura per il tuo ruolo');
                 }
+                effUnit = payload.unita === 'h' ? 'h' : 'g';
+                ganttEconomia = payload.economia || null;
+                // Etichette del pannello Configurazione con l'unità, es. «Analisi (h)».
+                [['cfgAnalisi', 'Analisi'], ['cfgConfigurazione', 'Configurazione'], ['cfgFormazione', 'Formazione'], ['cfgTotale', 'Totale']]
+                    .forEach(([id, l]) => { const lab = document.querySelector(`label[for="${id}"]`); if (lab) lab.textContent = `${l} (${effUnit})`; });
                 buildTree(Array.isArray(payload.rows) ? payload.rows : []);
                 projectIdPm = (payload.context && payload.context.projectId) || urlParams.get('projectId') || '';
                 caricaAnalisiPm();
@@ -1605,6 +1846,13 @@
                 board.innerHTML = `<div style="padding:2rem; color:var(--danger);">${escapeHtml(e.message)}</div>`;
             }
         }
+        // Barra dei comandi su più righe: area del Gantt e pannello Configurazione partono
+        // sotto la sua altezza reale (variabile CSS --topbar-h).
+        const topbarEl = document.querySelector('.topbar');
+        const syncTopbarH = () => document.documentElement.style.setProperty('--topbar-h', topbarEl.offsetHeight + 'px');
+        new ResizeObserver(syncTopbarH).observe(topbarEl);
+        syncTopbarH();
+
         loadData();
     </script>
 </body>

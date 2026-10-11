@@ -51,12 +51,18 @@ async function vociInEuro(user, projectId) {
   const eff = (u) => (c(`offerta_effort_${u}`) ? `a.offerta_effort_${u}` : c(`effort_${u}`) ? `a.effort_${u}` : 'NULL::numeric');
   const valOff = (u) => (c(`offerta_${u}`) ? `a.offerta_${u}` : `(${eff(u)} * a.tariffa_${u})`);
   const valSpe = (u) => (c(`cost_time_spent_${u}`) ? `a.cost_time_spent_${u}` : `(a.time_spent_${u} * a.tariffa_${u})`);
+  // Consuntivo fatturato (voucher Qlik «Chiuso»): effort e valore, se le colonne ci sono.
+  const conFatt = c('time_spent_fatt_hh') && c('time_spent_fatt_gg');
+  const valFatt = (u) => (c(`cost_time_spent_fatt_${u}`) ? `a.cost_time_spent_fatt_${u}`
+    : `(a.time_spent_fatt_${u} * COALESCE(a.tariffa_sc_time_spent_${u}, a.tariffa_${u}))`);
   const r = await db.query(
     `SELECT COALESCE(wc.desc_worker, 'Senza voce') AS voce, hh.gestione_hh AS hh,
             SUM(CASE WHEN hh.gestione_hh THEN COALESCE(${eff('hh')}, 0) ELSE COALESCE(${eff('gg')}, 0) END) AS offerta,
             SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END) AS speso,
             SUM(CASE WHEN hh.gestione_hh THEN COALESCE(${valOff('hh')}, ${valOff('gg')}, 0) ELSE COALESCE(${valOff('gg')}, ${valOff('hh')}, 0) END) AS valore_offerto,
             SUM(CASE WHEN hh.gestione_hh THEN COALESCE(${valSpe('hh')}, ${valSpe('gg')}, 0) ELSE COALESCE(${valSpe('gg')}, ${valSpe('hh')}, 0) END) AS valore_speso,
+            ${conFatt ? `SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_fatt_hh, 0) ELSE COALESCE(a.time_spent_fatt_gg, 0) END)` : 'NULL::numeric'} AS fatturato,
+            ${conFatt ? `SUM(CASE WHEN hh.gestione_hh THEN COALESCE(${valFatt('hh')}, 0) ELSE COALESCE(${valFatt('gg')}, 0) END)` : 'NULL::numeric'} AS valore_fatturato,
             MAX(CASE WHEN hh.gestione_hh THEN a.tariffa_hh ELSE a.tariffa_gg END) AS tariffa
        FROM proj_worker a
        LEFT JOIN proj_worker_cost wc ON wc.id = a.worker_cost_id AND wc.scadenza >= CURRENT_DATE
@@ -73,7 +79,8 @@ async function vociInEuro(user, projectId) {
   );
   return r.rows.map((x) => ({
     voce: x.voce, hh: !!x.hh, offerta: n(x.offerta), speso: n(x.speso),
-    valoreOfferto: n(x.valore_offerto), valoreSpeso: n(x.valore_speso), tariffa: x.tariffa == null ? null : Number(x.tariffa)
+    valoreOfferto: n(x.valore_offerto), valoreSpeso: n(x.valore_speso), tariffa: x.tariffa == null ? null : Number(x.tariffa),
+    fatturato: x.fatturato == null ? null : n(x.fatturato), valoreFatturato: x.valore_fatturato == null ? null : n(x.valore_fatturato)
   }));
 }
 
@@ -178,6 +185,18 @@ export async function economiaEuro(user, projectId, { prog = null, scheda = null
   const valoreSpeso = voci.reduce((s, v) => s + v.valoreSpeso, 0);
   const effortOfferto = voci.reduce((s, v) => s + v.offerta, 0);
   const effortSpeso = voci.reduce((s, v) => s + v.speso, 0);
+  // Consuntivo fatturato: solo nei progetti «a Consuntivo» (null anche se le colonne non ci sono).
+  const conFatt = !!scheda.aConsuntivo && voci.some((v) => v.fatturato != null);
+  if (!conFatt) voci.forEach((v) => { v.fatturato = null; v.valoreFatturato = null; });
+  const fatturato = conFatt ? {
+    effort: voci.reduce((s, v) => s + (v.fatturato || 0), 0),
+    valore: voci.reduce((s, v) => s + (v.valoreFatturato || 0), 0)
+  } : null;
+  if (fatturato) {
+    fatturato.daFatturareEffort = Math.max(0, effortSpeso - fatturato.effort);
+    fatturato.daFatturareValore = Math.max(0, valoreSpeso - fatturato.valore);
+    fatturato.perc = valoreSpeso > 0 ? (fatturato.valore / valoreSpeso) * 100 : null;
+  }
   // Budget: il valore delle voci (tariffe) + CR. Senza tariffe nei Costi Progetto si usa
   // l'Importo della scheda, così CPI e SPI si calcolano lo stesso (con meno precisione).
   let fonteBudget = 'tariffe';
@@ -283,6 +302,7 @@ export async function economiaEuro(user, projectId, { prog = null, scheda = null
     impostazioni: { ...imp, valute: VALUTE },
     voci: righeVoci,
     effort: { offerto: effortOfferto, speso: effortSpeso, crEffort },
+    fatturato,
     ev: {
       bac, fonteBudget, valoreOfferto, crImporto, ac, ev, pv, pvPerc, completamento, fonteCompletamento: fonteCompl,
       piano: piano ? { fonte: piano.fonte, inizio: piano.inizio, fine: piano.fine } : null,

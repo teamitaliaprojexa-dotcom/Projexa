@@ -88,6 +88,7 @@
                     <td><span class="mini-ind">${ind}</span>${peggiori ? `<div class="pm-nota" style="max-width:420px">${esc(peggiori)}</div>` : ''}</td>
                     <td class="n">${e.completamento != null ? `${fmt(e.completamento, 0)}%` : '–'}</td>
                     <td class="n">${e.bac ? `${fmt(e.ac)} / ${fmt(e.bac)} ${esc(e.unita === 'ore' ? 'h' : 'gg')}` : '–'}</td>
+                    <td class="n" title="${e.daFatturare > 0 ? `Da fatturare ${esc(fmt(e.daFatturare))} ${esc(e.unita === 'ore' ? 'h' : 'gg')}` : ''}">${e.fatturato != null && e.ac > 0 ? `${fmt(e.fatturato)} ${esc(e.unita === 'ore' ? 'h' : 'gg')}<div class="pm-nota">${fmt(e.percFatturato, 0)}% dello speso</div>` : '–'}</td>
                     <td class="n" style="color:${e.percPrevista > 100 ? '#DC2626' : 'inherit'}">${e.percPrevista != null ? `${fmt(e.percPrevista, 0)}%` : '–'}</td>
                     <td>${dataIt(x.end) || dataIt(x.gantt && x.gantt.fine) || '–'}</td>
                     <td class="n">${x.conteggi ? x.conteggi.rischiAperti : '–'}</td>
@@ -99,7 +100,7 @@
                 <div class="riepilogo">${card('rosso', 'Rossi', 'fa-circle-xmark')}${card('giallo', 'Gialli', 'fa-circle-exclamation')}${card('verde', 'Verdi', 'fa-circle-check')}${card('nd', 'Dati insufficienti', 'fa-circle-question')}</div>
                 <div class="pm-card">
                     <h2><i class="fas fa-heart-pulse"></i> Salute dei progetti ${filtro ? `<span class="pill">solo ${filtro}</span> <button class="pm-btn piccolo" id="togliFiltro">mostra tutti</button>` : ''}</h2>
-                    ${lista.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Stato</th><th>Progetto</th><th>Indicatori (budget, tempi, rischi, issue, commerciale)</th><th class="n">Compl.</th><th class="n">Speso / budget</th><th class="n">A finire</th><th>Fine</th><th class="n">Rischi</th><th class="n">Azioni (scadute)</th></tr></thead><tbody>${righe}</tbody></table></div>` : '<div class="pm-vuoto">Nessun progetto.</div>'}
+                    ${lista.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Stato</th><th>Progetto</th><th>Indicatori (budget, tempi, rischi, issue, commerciale)</th><th class="n">Compl.</th><th class="n">Speso / budget</th><th class="n" title="Consuntivo fatturato: voucher Qlik in stato «Chiuso»">Fatturato</th><th class="n">A finire</th><th>Fine</th><th class="n">Rischi</th><th class="n">Azioni (scadute)</th></tr></thead><tbody>${righe}</tbody></table></div>` : '<div class="pm-vuoto">Nessun progetto.</div>'}
                 </div>
                 <div class="pm-card">
                     <h2><i class="fas fa-chart-gantt"></i> Timeline del portfolio <span class="pm-nota">(barra = periodo del progetto, linea scura = baseline, ◆ milestone, linea rossa = oggi)</span></h2>

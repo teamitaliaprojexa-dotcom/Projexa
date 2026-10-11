@@ -159,8 +159,11 @@ export async function campiProgetto(user, projectId, { tutti = false } = {}) {
 export async function schedaProgetto(user, projectId) {
   const c = await campiProgetto(user, projectId);
   const stato = c.get('Stato Progetto');
+  // «a Consuntivo» (sì/no della scheda): solo questi progetti mostrano il consuntivo fatturato.
+  const rigaCons = c.riga('a Consuntivo');
   return {
     aOre: c.aOre,
+    aConsuntivo: !!rigaCons && vero(rigaCons.valore1),
     unita: c.aOre ? 'ore' : 'giorni',
     descrizione: c.get('Descrizione'),
     start: c.data('Start'),
@@ -184,10 +187,14 @@ export async function schedaProgetto(user, projectId) {
 // ECONOMIA: Costi Progetto (proj_worker), come l'indicatore Gestione Progetto
 // ----------------------------------------------------------------------------
 export async function economiaProgetto(user, projectId) {
+  // Consuntivo fatturato (time_spent_fatt_hh/gg: ore dei voucher Qlik «Chiuso», dal 2026-10-11).
+  const cols = await colonneTabella('proj_worker');
+  const conFatt = cols.has('time_spent_fatt_hh') && cols.has('time_spent_fatt_gg');
   const r = await db.query(
     `SELECT COALESCE(wc.desc_worker, 'Senza voce') AS voce, hh.gestione_hh AS hh,
             SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.offerta_effort_hh, 0) ELSE COALESCE(a.offerta_effort_gg, 0) END) AS offerta,
-            SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END) AS speso
+            SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END) AS speso,
+            ${conFatt ? 'SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_fatt_hh, 0) ELSE COALESCE(a.time_spent_fatt_gg, 0) END)' : 'NULL::numeric'} AS fatturato
        FROM proj_worker a
        LEFT JOIN proj_worker_cost wc ON wc.id = a.worker_cost_id AND wc.scadenza >= CURRENT_DATE
        LEFT JOIN LATERAL (
@@ -201,12 +208,15 @@ export async function economiaProgetto(user, projectId) {
       ORDER BY 1`,
     [user.tenant_id, user.user_id, projectId]
   );
-  const voci = r.rows.map((x) => ({ voce: x.voce, offerta: Number(x.offerta) || 0, speso: Number(x.speso) || 0 }));
+  const voci = r.rows.map((x) => ({ voce: x.voce, offerta: Number(x.offerta) || 0, speso: Number(x.speso) || 0,
+    fatturato: conFatt ? Number(x.fatturato) || 0 : null }));
   return {
     voci,
     aOre: r.rows.some((x) => x.hh),
     offerta: voci.reduce((s, v) => s + v.offerta, 0),
-    speso: voci.reduce((s, v) => s + v.speso, 0)
+    speso: voci.reduce((s, v) => s + v.speso, 0),
+    // null = colonne non ancora presenti nel database
+    fatturato: conFatt ? voci.reduce((s, v) => s + (v.fatturato || 0), 0) : null
   };
 }
 
@@ -449,6 +459,11 @@ export async function saluteProgetto(user, projectId, { prog = null, scheda = nu
   ]);
   const gantt = analisiGantt(righe, oggi);
   const unita = scheda.aOre ? 'ore' : 'giorni';
+  // Consuntivo fatturato: analizzato e mostrato solo nei progetti «a Consuntivo».
+  if (!scheda.aConsuntivo) {
+    eco.fatturato = null;
+    eco.voci.forEach((v) => { v.fatturato = null; });
+  }
   const crApprovate = cr.filter((x) => x.stato === 'approvata');
   const crDelta = crApprovate.reduce((s, x) => s + (Number(x.effort_delta) || 0), 0);
   const crImporto = crApprovate.reduce((s, x) => s + (Number(x.importo_delta) || 0), 0);
@@ -464,7 +479,11 @@ export async function saluteProgetto(user, projectId, { prog = null, scheda = nu
   const pc = completamento != null ? Math.max(0, Math.min(100, completamento)) / 100 : null;
   const eac = { unita, bac, bacOriginale: eco.offerta, crDelta, ac, completamento, fonteCompletamento: fonteCompl,
     ev: null, cpi: null, eac: null, etc: null, vac: null, percPrevista: null, valoreEuro: null,
-    ritmoGiorno: null, esaurimentoBudget: null, finePrevista: null };
+    ritmoGiorno: null, esaurimentoBudget: null, finePrevista: null,
+    // Consuntivo fatturato: quanto dello speso è già fatturato e quanto resta da fatturare.
+    fatturato: eco.fatturato,
+    daFatturare: eco.fatturato != null ? Math.max(0, ac - eco.fatturato) : null,
+    percFatturato: eco.fatturato != null && ac > 0 ? (eco.fatturato / ac) * 100 : null };
   if (bac > 0) {
     if (pc != null && pc > 0) {
       eac.ev = pc * bac;
@@ -573,6 +592,10 @@ export async function saluteProgetto(user, projectId, { prog = null, scheda = nu
     } else note.push('Tipologia «Previsione»: offerta e ordine non controllati');
     const crAttese = cr.filter((x) => x.stato === 'inviata' && x.data_richiesta && giorniTra(x.data_richiesta, oggi) > 15);
     if (crAttese.length) { stato = peggiore(stato, 'giallo'); note.push(`${crAttese.length} Change Request inviate da oltre 15 giorni senza risposta`); }
+    // Solo informativo: il fatturato non cambia il colore del semaforo.
+    if (eac.fatturato != null && ac > 0) {
+      note.push(`Fatturato ${fmt(eac.fatturato)} su ${fmt(ac)} ${unita} spese (${fmt(eac.percFatturato, 0)}%)${eac.daFatturare > 0 ? `, da fatturare ${fmt(eac.daFatturare)} ${unita}` : ''}`);
+    }
     ind.push({ chiave: 'commerciale', titolo: 'Commerciale', stato, nota: note.join('; ') });
   }
 
@@ -680,7 +703,8 @@ export async function contestoProgetto(user, projectId, { riunioni = 5, dal = nu
   const e = salute.eac;
   L.push(`Effort (${u}): budget ${fmt(e.bac)} (offerta ${fmt(e.bacOriginale)} + CR approvate ${fmt(e.crDelta)}), speso ${fmt(e.ac)}`
     + (e.eac != null ? `, stima a finire ${fmt(e.eac)} (${fmt(e.percPrevista, 0)}% del budget), mancano ${fmt(e.etc)}` : ', stima a finire non calcolabile (manca il completamento)')
-    + (e.cpi != null ? `, indice di efficienza CPI ${fmt(e.cpi, 2)}` : ''));
+    + (e.cpi != null ? `, indice di efficienza CPI ${fmt(e.cpi, 2)}` : '')
+    + (e.fatturato != null ? `, consuntivo fatturato ${fmt(e.fatturato)}${e.percFatturato != null ? ` (${fmt(e.percFatturato, 0)}% dello speso)` : ''}, da fatturare ${fmt(e.daFatturare)}` : ''));
   if (salute.economia.voci.length) L.push(`Voci di costo: ${salute.economia.voci.map((v) => `${v.voce} ${fmt(v.speso)}/${fmt(v.offerta)}`).join('; ')}`);
   // Economia in denaro (config/pmEconomia.js, import dinamico: i due moduli si usano a vicenda).
   try {
