@@ -5871,8 +5871,11 @@ app.post('/api/data/import/rollback', requireAuth, async (req, res) => {
 //     si usa la vecchia ele_commesse (una commessa per progetto, commessa_id vuoto);
 //  2) per ciascun gruppo risolto, aggiorna la riga di proj_componenti con la
 //     stessa email, lo stesso project_id e la stessa commessa_id:
-//       time_spent_hh = totale ore del gruppo (sovrascrive il valore precedente)
+//       time_spent_hh = totale ore del gruppo (sovrascrive il valore precedente),
+//                       escluse le righe con "Stato Voucher" = 'Sospeso'
 //       time_spent_gg = time_spent_hh / 8
+//       time_spent_fatt_hh = ore delle sole righe 'Chiuso' (se il file ha lo stato)
+//       time_spent_fatt_gg = time_spent_fatt_hh / 8
 //     Una riga della persona sul progetto ancora senza commessa viene assegnata alla
 //     commessa (niente doppioni); altrimenti si inserisce una riga nuova con commessa_id;
 //  3) ricalcola time_spent di proj_worker: per le righe con commessa_id la somma dei
@@ -5906,7 +5909,11 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
       const codiceArticolo = String((g && g.codiceArticolo) || '').trim();
       const ore = Number(g && g.oreTotali);
       if (!cod || !titolo || !email || !Number.isFinite(ore)) continue;
-      groups.push({ cod, titolo, email, nominativo, codiceArticolo, ore });
+      // Ore fatturate (righe "Stato Voucher" = 'Chiuso'): null se il file non ha la
+      // colonna dello stato (es. template Consuntivi), e allora non si toccano.
+      const oreFattRaw = g && g.oreFatturate;
+      const oreFatt = oreFattRaw === null || oreFattRaw === undefined || oreFattRaw === '' ? null : Number(oreFattRaw);
+      groups.push({ cod, titolo, email, nominativo, codiceArticolo, ore, oreFatt: Number.isFinite(oreFatt) ? oreFatt : null });
     }
     if (groups.length === 0) {
       return res.status(400).json({ error: 'Nessuna riga valida da importare (Codice Commessa / Titolo Commessa / Email / Ore mancanti)' });
@@ -5944,6 +5951,8 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'La tabella proj_componenti deve contenere tenant_id, user_id, client_id, project_id, email, nominativo, time_spent_hh e time_spent_gg' });
     }
     const hasUpdatedAt = componentiCols.has('updated_at');
+    // Ore fatturate: solo se il DB ha le colonne (Supporto/CreaDB/proj_worker_time_spent_fatt.sql).
+    const componentiHasFatt = componentiCols.has('time_spent_fatt_hh') && componentiCols.has('time_spent_fatt_gg');
 
     // 1) Risolve tutti i codici commessa coinvolti in un'unica query.
     const codes = [...new Set(groups.map((g) => g.cod))];
@@ -6148,6 +6157,10 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
               time_spent_hh: g.ore,
               time_spent_gg: g.ore / 8
             };
+            if (componentiHasFatt && g.oreFatt !== null) {
+              newComponentData.time_spent_fatt_hh = g.oreFatt;
+              newComponentData.time_spent_fatt_gg = g.oreFatt / 8;
+            }
             if (commessaId) newComponentData.commessa_id = commessaId;
             if (componentiCols.has('team_pro')) {
               const workerCostKey = String(project.clientId) + '\u0001' + g.codiceArticolo;
@@ -6186,6 +6199,14 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
             scadenzaRepairClause += `,
                  scadenza = DATE '2099-12-31'`;
             scadenzaChanged += " OR scadenza IS DISTINCT FROM DATE '2099-12-31'";
+          }
+          if (componentiHasFatt && g.oreFatt !== null) {
+            updateParams.push(g.oreFatt);
+            const p = `$${updateParams.length}::numeric`;
+            scadenzaRepairClause += `,
+                 time_spent_fatt_hh = ${p},
+                 time_spent_fatt_gg = (${p}) / 8.0`;
+            scadenzaChanged += ` OR time_spent_fatt_hh IS DISTINCT FROM ${p}`;
           }
           // Cast esplicito a numeric: se time_spent_hh/time_spent_gg non sono già di
           // tipo numerico (es. varchar, o una precisione che non accetta il valore
@@ -6228,18 +6249,24 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
           //  - riga di proj_worker CON commessa: somma dei componenti della stessa commessa;
           //  - riga SENZA commessa: somma di tutti i componenti del progetto (come prima).
           const perCommessa = componentiHasCommessa && projWorkerCols.has('commessa_id');
+          // Ore fatturate: stessa somma per voce, poi il DB ricalcola da solo
+          // cost_time_spent_fatt_hh/gg (colonne GENERATED di proj_worker).
+          const workerFatt = componentiHasFatt && projWorkerCols.has('time_spent_fatt_hh') && projWorkerCols.has('time_spent_fatt_gg');
+          const fattSum = workerFatt ? ', SUM(time_spent_fatt_hh) AS total_fatt_hh' : '';
           const aggResult = await client.query(
             `UPDATE proj_worker pw
              SET time_spent_hh = agg.total_hh,
-                 time_spent_gg = agg.total_hh / 8.0${workerUpdatedAtClause}
+                 time_spent_gg = agg.total_hh / 8.0${workerFatt ? `,
+                 time_spent_fatt_hh = agg.total_fatt_hh,
+                 time_spent_fatt_gg = agg.total_fatt_hh / 8.0` : ''}${workerUpdatedAtClause}
              FROM (
-               SELECT project_id, team_pro, ${perCommessa ? 'commessa_id' : 'NULL::uuid AS commessa_id'}, SUM(time_spent_hh) AS total_hh
+               SELECT project_id, team_pro, ${perCommessa ? 'commessa_id' : 'NULL::uuid AS commessa_id'}, SUM(time_spent_hh) AS total_hh${fattSum}
                FROM proj_componenti
                WHERE tenant_id = $1 AND project_id::text = ANY($2::text[])
                  AND team_pro IS NOT NULL${perCommessa ? ' AND commessa_id IS NOT NULL' : ''}
                GROUP BY project_id, team_pro${perCommessa ? `, commessa_id
                UNION ALL
-               SELECT project_id, team_pro, NULL::uuid, SUM(time_spent_hh)
+               SELECT project_id, team_pro, NULL::uuid, SUM(time_spent_hh)${workerFatt ? ', SUM(time_spent_fatt_hh)' : ''}
                FROM proj_componenti
                WHERE tenant_id = $1 AND project_id::text = ANY($2::text[])
                  AND team_pro IS NOT NULL
@@ -6251,7 +6278,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
                ${perCommessa
                  ? `AND pw.commessa_id IS NOT DISTINCT FROM agg.commessa_id`
                  : ''}
-               AND pw.time_spent_hh IS DISTINCT FROM agg.total_hh
+               AND (pw.time_spent_hh IS DISTINCT FROM agg.total_hh${workerFatt ? '\n                    OR pw.time_spent_fatt_hh IS DISTINCT FROM agg.total_fatt_hh' : ''})
              RETURNING pw.id`,
             [req.user.tenant_id, projectIds]
           );

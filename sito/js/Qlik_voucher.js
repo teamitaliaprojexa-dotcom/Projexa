@@ -42,8 +42,12 @@
 //      la stessa email, lo stesso project_id e la stessa commessa_id oppure, se
 //      non esiste, la crea usando anche "Nome Dipendente"; poi ricalcola le ore
 //      di proj_worker per commessa:
-//        proj_componenti.time_spent_hh = totale ore del gruppo
+//        proj_componenti.time_spent_hh = totale ore del gruppo, escluse le righe
+//                                        con "Stato Voucher" = 'Sospeso'
 //        proj_componenti.time_spent_gg = time_spent_hh / 8
+//        proj_componenti.time_spent_fatt_hh = ore delle sole righe 'Chiuso'
+//        proj_componenti.time_spent_fatt_gg = time_spent_fatt_hh / 8
+//      (le colonne fatt solo se il file ha "Stato Voucher" e il DB le possiede)
 //
 // NOTE / LIMITI NOTI
 //   - proj_commessa (o ele_commesse) e proj_componenti devono essere tabelle gestite (presenti e
@@ -486,9 +490,17 @@
             return;
         }
 
+        // "Stato Voucher" (facoltativa: il template Consuntivi non la ha):
+        //   'Sospeso' -> ore escluse dal consuntivo (time_spent_hh)
+        //   'Chiuso'  -> ore anche nel fatturato (time_spent_fatt_hh)
+        // Senza la colonna le ore fatturate non si inviano e il server non le tocca.
+        const colStato = findColumn(columns, 'Stato Voucher');
+        const statoOf = (row) => normalizeHeader(row[colStato]);
+
         // Raggruppa per (Email Dipendente, Codice Commessa, Titolo Commessa)
         // sommando le ore. Il nominativo viene mantenuto per creare l'eventuale
-        // componente che non esiste ancora nel progetto.
+        // componente che non esiste ancora nel progetto. Un gruppo con sole righe
+        // 'Sospeso' resta, con 0 ore, così il valore precedente viene azzerato.
         const groupsMap = new Map();
         for (const row of rows) {
             const cod = String(row[colCommessa] == null ? '' : row[colCommessa]).trim();
@@ -505,11 +517,14 @@
                 email,
                 nominativo,
                 codiceArticolo,
-                oreTotali: 0
+                oreTotali: 0,
+                oreFatturate: colStato ? 0 : null
             };
             if (!current.nominativo && nominativo) current.nominativo = nominativo;
             if (!current.codiceArticolo && codiceArticolo) current.codiceArticolo = codiceArticolo;
-            current.oreTotali += ore;
+            const stato = colStato ? statoOf(row) : '';
+            if (stato !== 'sospeso') current.oreTotali += ore;
+            if (stato === 'chiuso') current.oreFatturate += ore;
             groupsMap.set(key, current);
         }
         const groups = [...groupsMap.values()];
