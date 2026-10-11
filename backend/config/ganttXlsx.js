@@ -262,7 +262,7 @@ export async function buildGanttXlsx({ projectName, rows, logo = null }) {
         const hasDates = !!(n.data_inizio || n.data_fine);
         const values = {
           C: n.rischio || null,
-          D: n.owner || n.nominativo || null,
+          D: n.nominativo || n.owner || null, // owner = Interno/Cliente/Fornitore, il nome è nominativo
           E: (hasDates || !isHeader) ? statoExcel(n) : null,
           F: excelSerial(n.data_inizio),
           G: excelSerial(n.data_fine ?? n.data_inizio)

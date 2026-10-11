@@ -244,7 +244,7 @@ export async function righeGantt(user, projectId) {
       fine: dataIso(x.data_fine),
       avanzamento: Math.max(0, Math.min(100, Number(x.avanzamento) || 0)),
       stato: x.stato || '',
-      owner: x.owner || x.nominativo || '',
+      owner: x.nominativo || x.owner || '', // persona (nominativo); owner = Interno/Cliente/Fornitore
       dipendenza: x.dipendenza ? String(x.dipendenza) : null,
       milestone: x.milestone === true,
       baselineInizio: dataIso(x.baseline_inizio),

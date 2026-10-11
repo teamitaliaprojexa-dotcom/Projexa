@@ -3488,7 +3488,12 @@ app.put('/api/projects/checklist/:id', requireAuth, async (req, res) => {
     );
     if (!r.rows.length) return res.status(404).json({ error: 'Voce non trovata' });
     await ckpRicalcolaFasi(db, req, prog);
-    res.json({ ...r.rows[0], rows: await ckpRighe(req, prog) });
+    // Gantt collegato: attività a 100% (Completata) o a 0%. Un errore qui non annulla la spunta.
+    let ganttAggiornate = 0;
+    try {
+      ganttAggiornate = await ganttDaChecklist(db, req.user.tenant_id, req.user.user_id, prog.projectId, id, ok);
+    } catch (e) { console.error('[CHECKLIST -> GANTT]', e.message); }
+    res.json({ ...r.rows[0], ganttAggiornate, rows: await ckpRighe(req, prog) });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -4128,12 +4133,135 @@ function ganttCleanValues(values, tableColumns = null) {
   return data;
 }
 
+// ============================================================================
+// GANTT <-> CHECK LIST (Supporto/CreaDB/proj_activity_checklist.sql)
+// proj_activity.checklist_id = voce di chek_list da cui nasce l'attività (solo sezioni licenza).
+//   - Check List -> Gantt: voce spuntata = attività al 100% e Stato «Completata»; spunta tolta =
+//     attività a 0% (e Stato «Completata» tolto).
+//   - Gantt -> Check List: attività al 100% = voce spuntata con data = data fine dell'attività
+//     (oggi se manca); sotto il 100% = spunta tolta. La fase si ricalcola (ckpRicalcolaFasi).
+// Senza la colonna checklist_id (script non eseguito) non succede nulla.
+// ============================================================================
+async function ganttConChecklist() {
+  return (await getTableColumns(GANTT_TABLE)).has('checklist_id');
+}
+
+// Collega una sola volta (per nome) le attività dei Gantt generati prima del collegamento:
+// argomento = fase della licenza (figlio 0), sotto attività = voce della stessa fase e licenza.
+async function ganttCollegaChecklist(pool, tenantId, userId, projectId) {
+  if (!(await ganttConChecklist())) return;
+  const att = (await pool.query(
+    `SELECT id, argomento1, argomento2, argomento3, argomento4, checklist_id FROM ${GANTT_TABLE}
+      WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3
+      ORDER BY ordinamento1 NULLS LAST, ordinamento2 NULLS FIRST, ordinamento3 NULLS FIRST, ordinamento4 NULLS FIRST, created_at`,
+    [tenantId, userId, String(projectId)]
+  )).rows;
+  if (!att.some((r) => r.checklist_id == null)) return;
+  const cl = (await pool.query(
+    `SELECT id, padre, figlio, licenza, description, check_ok, client_id FROM "${CKP_TABELLA}"
+      WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3 AND licenza IS NOT NULL
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+      ORDER BY ordinamento NULLS LAST, padre, figlio, id`,
+    [tenantId, userId, String(projectId)]
+  )).rows;
+  if (!cl.length) return;
+  const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const perId = new Map(cl.map((c) => [String(c.id), c]));
+  const usati = new Set(att.filter((r) => r.checklist_id != null).map((r) => String(r.checklist_id)));
+  const livello = (r) => (r.argomento4 ? 4 : r.argomento3 ? 3 : r.argomento2 ? 2 : 1);
+  const nuoveAttivita = []; // { ganttId, voce } collegate adesso: si allinea lo stato
+  let fase = null;
+  for (const r of att) {
+    const lv = livello(r);
+    if (lv === 1) {
+      fase = r.checklist_id != null ? perId.get(String(r.checklist_id)) || null : null;
+      if (!fase) {
+        fase = cl.find((c) => Number(c.figlio || 0) === 0 && !usati.has(String(c.id)) && norm(c.description) === norm(r.argomento1)) || null;
+        if (fase && r.checklist_id == null) {
+          usati.add(String(fase.id));
+          await pool.query(`UPDATE ${GANTT_TABLE} SET checklist_id = $1 WHERE id = $2`, [fase.id, r.id]);
+        }
+      }
+    } else if (lv === 2 && fase && r.checklist_id == null) {
+      const voce = cl.find((c) => Number(c.figlio || 0) > 0 && !usati.has(String(c.id))
+        && String(c.padre) === String(fase.padre) && (c.licenza || '') === (fase.licenza || '')
+        && norm(c.description) === norm(r.argomento2));
+      if (voce) {
+        usati.add(String(voce.id));
+        await pool.query(`UPDATE ${GANTT_TABLE} SET checklist_id = $1 WHERE id = $2`, [voce.id, r.id]);
+        nuoveAttivita.push({ ganttId: r.id, voce });
+      }
+    }
+  }
+  // Primo allineamento: voce già spuntata -> attività al 100%; attività già al 100% -> voce spuntata.
+  for (const x of nuoveAttivita.filter((y) => y.voce.check_ok === true)) {
+    await ganttDaChecklist(pool, tenantId, userId, projectId, x.voce.id, true);
+  }
+  const daSpuntare = nuoveAttivita.filter((y) => y.voce.check_ok !== true).map((y) => String(y.ganttId));
+  if (daSpuntare.length && await checklistDaGantt(pool, tenantId, userId, projectId, daSpuntare)) {
+    const clientId = nuoveAttivita[0].voce.client_id;
+    await ckpRicalcolaFasi(pool, { user: { tenant_id: tenantId, user_id: userId } }, { clientId, projectId });
+  }
+}
+
+// Check List -> Gantt: le attività collegate alla voce vanno a 100% / 0%.
+async function ganttDaChecklist(pool, tenantId, userId, projectId, checklistId, fatto) {
+  if (!(await ganttConChecklist())) return 0;
+  await ganttCollegaChecklist(pool, tenantId, userId, projectId);
+  const righe = (await pool.query(
+    `SELECT id, stato, avanzamento FROM ${GANTT_TABLE}
+      WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3 AND checklist_id = $4`,
+    [tenantId, userId, String(projectId), checklistId]
+  )).rows;
+  let n = 0;
+  for (const r of righe) {
+    const stato = fatto ? 'Completata' : (String(r.stato || '').trim().toLowerCase() === 'completata' ? null : r.stato);
+    const avz = fatto ? 100 : 0;
+    if (Number(r.avanzamento) === avz && (r.stato || null) === (stato || null)) continue;
+    const data = await cryptoWrite(pool, 'main', GANTT_TABLE, { avanzamento: avz, stato }, r.id);
+    const cols = Object.keys(data);
+    await pool.query(
+      `UPDATE ${GANTT_TABLE} SET ${cols.map((c, i) => `"${assertValidIdentifier(c)}" = $${i + 1}`).join(', ')}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $${cols.length + 1}`,
+      [...cols.map((c) => data[c]), r.id]
+    );
+    n += 1;
+  }
+  return n;
+}
+
+// Gantt -> Check List: per le attività indicate (id), spunta/toglie la voce collegata in base
+// all'avanzamento (100% = fatto). Restituisce quante voci sono cambiate.
+async function checklistDaGantt(pool, tenantId, userId, projectId, ganttIds) {
+  if (!ganttIds.length || !(await ganttConChecklist())) return 0;
+  await ganttCollegaChecklist(pool, tenantId, userId, projectId);
+  const r = await pool.query(
+    `UPDATE "${CKP_TABELLA}" c
+        SET check_ok = (COALESCE(g.avanzamento, 0) >= 100),
+            data_check = CASE WHEN COALESCE(g.avanzamento, 0) >= 100 THEN COALESCE(g.data_fine, CURRENT_DATE) ELSE NULL END
+       FROM ${GANTT_TABLE} g
+      WHERE g.id = ANY($1::uuid[]) AND g.tenant_id = $2 AND g.user_id = $3 AND g.project_id::text = $4
+        AND g.checklist_id = c.id AND c.tenant_id = $2 AND c.user_id = $3
+        AND COALESCE(c.figlio, 0) > 0 AND (c.scadenza IS NULL OR c.scadenza >= CURRENT_DATE)
+        AND COALESCE(c.check_ok, false) IS DISTINCT FROM (COALESCE(g.avanzamento, 0) >= 100)
+      RETURNING c.id`,
+    [ganttIds, tenantId, userId, String(projectId)]
+  );
+  return r.rowCount;
+}
+
 // Lettura delle attività del progetto corrente, in ordine gerarchico
 // (ordinamento1..4: i NULLS FIRST fanno comparire il padre prima dei figli).
 app.get('/api/projects/gantt-activity', requireAuth, async (req, res) => {
   try {
     const fieldId = String(req.query.fieldId || '').trim();
     const ctx = await resolveGanttContext(fieldId, req, false);
+    // Collega alla Check List le attività dei Gantt generati prima (e allinea lo stato), solo
+    // se chi apre può modificare: in sola lettura non si scrive nulla.
+    if (!ctx.readOnly) {
+      try { await ganttCollegaChecklist(db, ctx.tenantId, ctx.userId, ctx.projectId); }
+      catch (e) { console.error('[GANTT <-> CHECKLIST collegamento]', e.message); }
+    }
     const result = await db.query(
       `SELECT *
        FROM ${GANTT_TABLE}
@@ -4352,7 +4480,23 @@ app.post('/api/projects/gantt-activity/batch', requireAuth, async (req, res) => 
     } finally {
       client.release();
     }
-    res.json({ ok: true, idMap });
+    // Check List collegata: le attività salvate con avanzamento o data fine aggiornano la spunta
+    // della loro voce (100% = fatto). Un errore qui non annulla il salvataggio del Gantt.
+    let checklistAggiornate = 0;
+    try {
+      const toccate = [...inserts.map((x) => ({ id: idMap[String(x?.tempId || '').trim()], values: x?.values })),
+        ...updates.map((x) => ({ id: UUID_RE.test(String(x?.id || '')) ? String(x.id) : idMap[String(x?.id || '')], values: x?.values }))]
+        .filter((x) => x.id && x.values && ('avanzamento' in x.values || 'data_fine' in x.values))
+        .map((x) => x.id);
+      if (toccate.length) {
+        checklistAggiornate = await checklistDaGantt(db, ctx.tenantId, ctx.userId, ctx.projectId, toccate);
+        if (checklistAggiornate) {
+          const reqProg = { ...req, user: { ...req.user, user_id: ctx.userId } };
+          await ckpRicalcolaFasi(db, reqProg, { clientId: ctx.clientId, projectId: ctx.projectId });
+        }
+      }
+    } catch (e) { console.error('[GANTT -> CHECKLIST]', e.message); }
+    res.json({ ok: true, idMap, checklistAggiornate });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -4416,6 +4560,40 @@ app.post('/api/projects/gantt-activity/copy', requireAuth, async (req, res) => {
         [roleWriteValue(req), result.rows.map((r) => r.id)]);
     }
     res.json({ copied: result.rows.length });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Persone per il campo Nominativo del pannello Configurazione, secondo l'Owner scelto:
+//   interno = persone del team del progetto (proj_componenti, come il Kick-off);
+//   cliente = contatti del cliente del progetto (tabella contacts);
+//   fornitore = nessun elenco (testo libero).
+app.get('/api/projects/gantt-activity/persone', requireAuth, async (req, res) => {
+  try {
+    const fieldId = String(req.query.fieldId || '').trim();
+    const ctx = await resolveGanttContext(fieldId, req, false);
+    const unici = (rows) => {
+      const visti = new Set();
+      return rows.map((x) => String(x.nominativo || '').trim())
+        .filter((n) => n && !visti.has(n.toLowerCase()) && visti.add(n.toLowerCase()))
+        .sort((a, b) => a.localeCompare(b, 'it'));
+    };
+    const interno = unici((await db.query(
+      `SELECT nominativo FROM proj_componenti
+        WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+      [ctx.tenantId, ctx.userId, String(ctx.projectId)])).rows);
+    let cliente = [];
+    const cc = await getTableColumns('contacts');
+    const colCliente = ['client_id', 'id_cliente'].find((c) => cc.has(c));
+    if (colCliente && cc.has('nominativo')) {
+      cliente = unici((await db.query(
+        `SELECT nominativo FROM contacts
+          WHERE tenant_id = $1 AND user_id = $2 AND "${colCliente}"::text = $3
+            ${cc.has('scadenza') ? 'AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)' : ''} LIMIT 2000`,
+        [ctx.tenantId, ctx.userId, String(ctx.clientId)])).rows);
+    }
+    res.json({ interno, cliente });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -4515,8 +4693,11 @@ app.post('/api/projects/gantt-activity/genera', requireAuth, async (req, res) =>
         fasi.push(fase);
       }
       const titolo = String(r.description || '').trim();
-      if (Number(r.figlio || 0) === 0) fase.titolo = titolo;
-      else if (titolo) fase.attivita.push(titolo);
+      // cid = voce della Check List (solo se il Gantt nasce dalla Check List salvata): collega
+      // l'attività alla voce; una voce già spuntata nasce al 100% (Stato «Completata»).
+      const cid = origine === 'checklist' && r.id != null ? r.id : null;
+      if (Number(r.figlio || 0) === 0) { fase.titolo = titolo; fase.cid = cid; }
+      else if (titolo) fase.attivita.push({ titolo, cid, fatto: origine === 'checklist' && r.check_ok === true });
     }
 
     const ganttColumns = await getTableColumns(GANTT_TABLE);
@@ -4541,10 +4722,12 @@ app.post('/api/projects/gantt-activity/genera', requireAuth, async (req, res) =>
         return data;
       };
       for (const [i, fase] of fasi.entries()) {
-        await inserisci(conColonna({ argomento1: (fase.titolo || 'Fase').slice(0, 255), ordinamento1: i + 1 },
-          'totale', fase.effort && fase.effort.totale));
-        for (const [j, titolo] of fase.attivita.entries()) {
+        await inserisci(conColonna(conColonna({ argomento1: (fase.titolo || 'Fase').slice(0, 255), ordinamento1: i + 1 },
+          'totale', fase.effort && fase.effort.totale), 'checklist_id', fase.cid));
+        for (const [j, { titolo, cid, fatto }] of fase.attivita.entries()) {
           const att = { argomento2: titolo.slice(0, 255), ordinamento1: i + 1, ordinamento2: j + 1 };
+          conColonna(att, 'checklist_id', cid);
+          if (fatto) { att.avanzamento = 100; att.stato = 'Completata'; }
           const tipo = EFFORT_ATTIVITA.find(([, re]) => re.test(titolo));
           if (tipo && fase.effort) conColonna(att, tipo[0], fase.effort[tipo[0]]);
           await inserisci(att);

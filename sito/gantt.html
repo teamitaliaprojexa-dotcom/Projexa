@@ -393,11 +393,11 @@
             <div class="row2">
                 <div>
                     <label for="cfgNrMesi">Nr. mesi</label>
-                    <input type="text" id="cfgNrMesi">
+                    <input type="text" id="cfgNrMesi" placeholder="dalle date">
                 </div>
                 <div>
                     <label for="cfgNrGiorni">Nr. giorni</label>
-                    <input type="text" id="cfgNrGiorni">
+                    <input type="text" id="cfgNrGiorni" placeholder="dalle date">
                 </div>
             </div>
             <div class="row2">
@@ -426,11 +426,18 @@
             <div class="row2">
                 <div>
                     <label for="cfgOwner">Owner</label>
-                    <input type="text" id="cfgOwner">
+                    <!-- Interno = team del progetto, Cliente = contatti del cliente, Fornitore = testo libero -->
+                    <select id="cfgOwner">
+                        <option value="">—</option>
+                        <option>Interno</option>
+                        <option>Cliente</option>
+                        <option>Fornitore</option>
+                    </select>
                 </div>
                 <div>
                     <label for="cfgNominativo">Nominativo</label>
                     <input type="text" id="cfgNominativo">
+                    <select id="cfgNominativoSel" style="display:none;"></select>
                 </div>
             </div>
             <div>
@@ -798,6 +805,9 @@
                     body: JSON.stringify({ fieldId, ...pending })
                 });
                 const idMap = result.idMap || {};
+                if (result.checklistAggiornate) {
+                    showToast(`Check List aggiornata: ${result.checklistAggiornate} ${result.checklistAggiornate === 1 ? 'voce' : 'voci'}`);
+                }
                 forEachNode(n => {
                     if (n.isNew && idMap[n.id]) { n.id = idMap[n.id]; n.isNew = false; }
                 });
@@ -1115,9 +1125,12 @@
                     };
                     let barre = '';
                     if (level === 1 && effNum(node.totale) != null) {
-                        barre += bar(effNum(node.totale), EFF_TOT_COLOR, 'Totale', true);
-                        // Sotto il Totale: avanzamento dell'argomento (valore × Avanzamento % dei sotto elementi).
-                        barre += bar(Math.round(eRoot.fatto * 100) / 100, EFF_AVZ_COLOR, 'Avanzamento', false);
+                        // Una sola barra, come le sotto attività: piena = Totale (100%), colore pieno =
+                        // avanzamento dell'argomento (valore × Avanzamento % dei sotto elementi).
+                        const tot = effNum(node.totale);
+                        const avzArg = tot > 0 ? Math.max(0, Math.min(100, Math.round((eRoot.fatto / tot) * 100))) : 0;
+                        barre += bar(tot, EFF_TOT_COLOR, 'Totale', false,
+                            { avz: avzArg, testo: `fatto ${fmtEff(Math.round(eRoot.fatto * 100) / 100)}` });
                     }
                     EFF_PARTI.forEach(([c, l, col]) => {
                         if (effNum(node[c]) == null) return;
@@ -1390,9 +1403,20 @@
             if (statoCur && ![...statoSel.options].some(o => o.value === statoCur)) {
                 statoSel.insertAdjacentHTML('beforeend', `<option data-extra="1" value="${escapeHtml(statoCur)}">${escapeHtml(statoCur)}</option>`);
             }
+            // Owner scritto a mano prima dell'elenco: resta selezionabile.
+            const ownerSel = document.getElementById('cfgOwner');
+            ownerSel.querySelectorAll('option[data-extra]').forEach(o => o.remove());
+            const ownerCur = node.owner == null ? '' : String(node.owner);
+            if (ownerCur && ![...ownerSel.options].some(o => o.value === ownerCur)) {
+                ownerSel.insertAdjacentHTML('beforeend', `<option data-extra="1" value="${escapeHtml(ownerCur)}">${escapeHtml(ownerCur)}</option>`);
+            }
             EXTRA_FIELD_INPUTS.forEach(([inputId, col]) => {
                 document.getElementById(inputId).value = node[col] == null ? '' : node[col];
             });
+            aggiornaNominativo(node);
+            // Attività con le date ma senza durata (o con una durata diversa): si ricalcola e si salva.
+            if (aggiornaDurata(node) && !readOnly) scheduleSave();
+            if (!personeGantt) caricaPersone().then(() => { if (selectedNode === node) aggiornaNominativo(node); });
             document.getElementById('cfgTotaleRow').style.display = level === 1 ? '' : 'none';
             document.getElementById('cfgMostraCliente').checked = node.mostra_cliente !== false;
             document.getElementById('cfgMilestoneRow').style.display = ganttPm && ganttPm.milestoneDisponibile ? '' : 'none';
@@ -1415,13 +1439,49 @@
         document.getElementById('cfgStart').addEventListener('change', () => {
             if (!selectedNode) return;
             selectedNode.data_inizio = document.getElementById('cfgStart').value || null;
+            aggiornaDurata(selectedNode);
             scheduleSave(); render();
         });
         document.getElementById('cfgEnd').addEventListener('change', () => {
             if (!selectedNode) return;
             selectedNode.data_fine = document.getElementById('cfgEnd').value || null;
+            aggiornaDurata(selectedNode);
             scheduleSave(); render();
         });
+
+        // Nr. giorni e Nr. mesi calcolati dalle date (Data inizio -> Data fine, estremi compresi):
+        //   giorni = giorni lavorativi (lunedì-venerdì);
+        //   mesi   = durata di calendario in mesi (giorni ÷ 30,44), con un decimale.
+        // Con entrambe le date i due campi sono in sola lettura; senza date si scrivono a mano.
+        function durataDaDate(inizio, fine) {
+            const a = inizio ? new Date(String(inizio).slice(0, 10) + 'T00:00:00Z') : null;
+            const b = fine ? new Date(String(fine).slice(0, 10) + 'T00:00:00Z') : null;
+            if (!a || !b || Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return null;
+            const giorniCal = Math.round((b - a) / 86400000) + 1;
+            let lav = 0;
+            for (let i = 0; i < giorniCal; i++) {
+                const g = new Date(a.getTime() + i * 86400000).getUTCDay();
+                if (g !== 0 && g !== 6) lav++;
+            }
+            const mesi = Math.round((giorniCal / 30.44) * 10) / 10;
+            return { giorni: String(lav), mesi: mesi.toLocaleString('it-IT', { maximumFractionDigits: 1 }) };
+        }
+        // Scrive i valori calcolati nel nodo e nei campi; true se sono cambiati.
+        function aggiornaDurata(node) {
+            const d = durataDaDate(node.data_inizio, node.data_fine);
+            const mesiEl = document.getElementById('cfgNrMesi'), giorniEl = document.getElementById('cfgNrGiorni');
+            [mesiEl, giorniEl].forEach(el => {
+                el.readOnly = !!d;
+                el.title = d ? 'Calcolato dalle date di inizio e fine' : '';
+            });
+            if (!d) return false;
+            const cambiato = String(node.nr_mesi ?? '') !== d.mesi || String(node.nr_giorni ?? '') !== d.giorni;
+            node.nr_mesi = d.mesi;
+            node.nr_giorni = d.giorni;
+            mesiEl.value = d.mesi;
+            giorniEl.value = d.giorni;
+            return cambiato;
+        }
 
         // Altre colonne della tabella (nr_mesi, nr_giorni, stato, avanzamento,
         // rischio, owner, nominativo, note_interne): input del flyout <-> nodo.
@@ -1456,6 +1516,56 @@
                 scheduleSave();
                 if (GANTT_DECIMAL_COLS.has(col) || col === 'avanzamento') render(); // aggiorna barre e riepilogo
             });
+        });
+
+        // ===== Owner e Nominativo =====
+        // Owner Interno -> Nominativo da elenco del team del progetto; Cliente -> elenco dei
+        // contatti del cliente; Fornitore (o vuoto) -> testo libero. Elenchi dal server, una volta.
+        let personeGantt = null; // { interno: [...], cliente: [...] }
+        async function caricaPersone() {
+            if (personeGantt) return personeGantt;
+            try {
+                personeGantt = await api(`/projects/gantt-activity/persone?fieldId=${encodeURIComponent(fieldId)}`);
+            } catch (e) {
+                personeGantt = { interno: [], cliente: [] };
+            }
+            return personeGantt;
+        }
+        function aggiornaNominativo(node) {
+            const owner = String(node.owner || '').trim().toLowerCase();
+            const inp = document.getElementById('cfgNominativo');
+            const sel = document.getElementById('cfgNominativoSel');
+            const elenco = !personeGantt ? null
+                : owner === 'interno' ? personeGantt.interno : owner === 'cliente' ? personeGantt.cliente : null;
+            if (owner !== 'interno' && owner !== 'cliente') {
+                inp.style.display = ''; sel.style.display = 'none';
+                inp.value = node.nominativo == null ? '' : node.nominativo;
+                inp.placeholder = owner === 'fornitore' ? 'Nome del fornitore' : '';
+                return;
+            }
+            const cur = node.nominativo == null ? '' : String(node.nominativo);
+            const lista = elenco || [];
+            const opts = ['<option value="">—</option>'].concat(lista.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`));
+            if (cur && !lista.includes(cur)) opts.push(`<option value="${escapeHtml(cur)}">${escapeHtml(cur)}</option>`);
+            if (elenco && !lista.length) {
+                opts.push(`<option value="" disabled>${owner === 'interno' ? 'Nessuna persona nel team del progetto' : 'Nessun contatto per questo cliente'}</option>`);
+            }
+            if (!elenco) opts.push('<option value="" disabled>Caricamento…</option>');
+            sel.innerHTML = opts.join('');
+            sel.value = cur;
+            inp.style.display = 'none'; sel.style.display = '';
+        }
+        // Cambio di Owner: il nominativo dell'altro elenco non vale più.
+        document.getElementById('cfgOwner').addEventListener('change', () => {
+            if (!selectedNode) return;
+            selectedNode.nominativo = null;
+            scheduleSave();
+            aggiornaNominativo(selectedNode);
+        });
+        document.getElementById('cfgNominativoSel').addEventListener('change', () => {
+            if (!selectedNode) return;
+            selectedNode.nominativo = document.getElementById('cfgNominativoSel').value || null;
+            scheduleSave();
         });
 
         // "Mostra al cliente": se disattivo l'attività sparisce dalla vista "Mostra gantt"
