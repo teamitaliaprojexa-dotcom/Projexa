@@ -29,10 +29,11 @@ function fonteDa(origine) {
 
 // Tabelle osservabili (i nomi finiscono nelle query: restano in whitelist).
 //   codice: colonna con il codice da mostrare; nome: come si chiama la riga nel testo;
-//   f: nome femminile (Nuova / aggiornata).
+//   f: nome femminile (Nuova / aggiornata);
+//   descrizione: colonna con la descrizione da aggiungere al messaggio (facoltativa).
 const TABELLE = {
-  task_app: { nome: 'Task Jira', codice: 'cod_task', f: false },
-  cl_quotazioni: { nome: 'Quotazione Jira', codice: 'codice', f: true },
+  task_app: { nome: 'Task Jira', codice: 'cod_task', descrizione: 'descrizione', f: false },
+  cl_quotazioni: { nome: 'Quotazione Jira', codice: 'codice', descrizione: 'descrizione', f: true },
   // Qlik (import voucher): proj_componenti = una riga per persona e progetto.
   //   INSERT = nuovo "Nome Dipendente" (nominativo) sul progetto;
   //   UPDATE delle ore: raggruppate per progetto (raggruppa), vedi notificaRaggruppata.
@@ -156,7 +157,7 @@ export async function notificheDaVariazioni(righe) {
       const conf = TABELLE[tabella];
       const ids = [...new Set(daFare.filter((x) => x.d.tabella === tabella).map((x) => String(x.d.chiave)))];
       const r = await db.query(
-        `SELECT id::text AS id, tenant_id, user_id, client_id, project_id${conf.codice ? `, "${conf.codice}" AS codice` : ''}
+        `SELECT id::text AS id, tenant_id, user_id, client_id, project_id${conf.codice ? `, "${conf.codice}" AS codice` : ''}${conf.descrizione ? `, "${conf.descrizione}" AS descrizione` : ''}
            FROM "${tabella}" WHERE id::text = ANY($1)`,
         [ids]
       );
@@ -173,7 +174,8 @@ export async function notificheDaVariazioni(righe) {
       const dopo = d.operazione === 'INSERT' ? decryptDeep(d.dopo || {}) : {};
       const riga = righeDb.get(`${d.tabella}|${d.chiave}`) || {
         tenant_id: d.tenant_id || dopo.tenant_id, user_id: dopo.user_id, client_id: dopo.client_id,
-        project_id: dopo.project_id, codice: conf.codice ? dopo[conf.codice] : null
+        project_id: dopo.project_id, codice: conf.codice ? dopo[conf.codice] : null,
+        descrizione: conf.descrizione ? dopo[conf.descrizione] : null
       };
       if (!riga.tenant_id || !riga.user_id) continue; // nessun destinatario
       const codice = riga.codice ? ` ${riga.codice}` : '';
@@ -195,8 +197,11 @@ export async function notificheDaVariazioni(righe) {
       const titolo = d.operazione === 'INSERT'
         ? `${conf.f ? 'Nuova' : 'Nuovo'} ${conf.nome}${codice}${cliente ? ` per ${cliente}` : ''}`
         : `${conf.nome}${codice} ${conf.f ? 'aggiornata' : 'aggiornato'}: ${cambi.map((c) => c.etichetta.toLowerCase()).join(', ')}`;
+      // Descrizione del task / della quotazione (testo lungo: accorciato).
+      const descr = riga.descrizione == null ? '' : String(riga.descrizione).replace(/\s+/g, ' ').trim();
       const messaggio = [
         ...cambi.map((c) => `${c.etichetta}: ${valoreTesto(c.prima)} → ${valoreTesto(c.dopo)}`),
+        descr ? `Descrizione: ${descr.length > 300 ? `${descr.slice(0, 297)}…` : descr}` : null,
         contesto
       ].filter(Boolean).join('\n');
       await inserisci({
