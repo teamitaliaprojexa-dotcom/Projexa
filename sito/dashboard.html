@@ -8788,8 +8788,9 @@
                 }
             }
             container.innerHTML = header + body;
-            // Tendine Cliente/Progetto sulle riunioni già gestite con Projexa
-            container.querySelectorAll('.meeting-card[data-managed="1"]').forEach((row) => renderMeetingAssign(row));
+            // Tendine Cliente/Progetto su tutte le riunioni: si possono scegliere anche prima di
+            // "Registra" (per prepararsi); la prima scelta crea la riga rec_meeting.
+            container.querySelectorAll('.meeting-card[data-event-id]:not([data-event-id=""])').forEach((row) => renderMeetingAssign(row));
             refreshMeetingStatuses(); // blocchi in coda (clessidra) e stato aggiornato
             updateImminentMeetings(); // riunione che sta per iniziare: animazione
         }
@@ -12557,7 +12558,16 @@
             const projectSel = assign.querySelector('.meeting-assign-project');
             const prevClient = assign.dataset.clientId || '';
             const prevProject = assign.dataset.projectId || '';
+            const row = assign.closest('.meeting-card');
+            const wasManaged = !row || row.dataset.managed === '1';
             try {
+                // Riunione non ancora gestita con Projexa: prima si crea la sua riga rec_meeting
+                // (come fa "Registra"). managed = '1' subito, così l'aggiornamento periodico
+                // degli stati non ridisegna le tendine mentre si salva.
+                if (!wasManaged) {
+                    row.dataset.managed = '1';
+                    await ensureManagedMeetingForRow(row);
+                }
                 if (sel === clientSel) {
                     await saveMeetingAssign(assign, clientSel.value, '');
                     await fillMeetingProjects(projectSel, clientSel.value, '');
@@ -12567,6 +12577,7 @@
             } catch (err) {
                 console.warn('⚠️ rec_meeting cliente/progetto:', err.message);
                 alert('Salvataggio non riuscito: ' + err.message);
+                if (!wasManaged && row) row.dataset.managed = '';
                 clientSel.value = prevClient;
                 await fillMeetingProjects(projectSel, prevClient, prevProject);
             }
