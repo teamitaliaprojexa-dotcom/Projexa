@@ -4173,6 +4173,26 @@
             box-shadow: 0 22px 60px rgba(15, 23, 42, 0.28), 0 2px 8px rgba(15, 23, 42, 0.1);
         }
         .settings-detail-flyout > .flyout-resizer { display: none; }
+        /* Scheda aperta (cliente, progetto, impostazione): copre TUTTO lo schermo sopra il dock,
+           senza margini, e la dashboard sotto non si vede né scorre più (niente seconda barra di
+           scorrimento a destra). Non vale per l'elenco progetti di un cliente (dock-side), che
+           resta un pannello accanto all'elenco clienti. Nel <main> non ci sono finestre modali:
+           nasconderlo non toglie nulla a quello che la scheda apre. */
+        .settings-detail-flyout:not(.dock-side),
+        .settings-detail-flyout.near-sidebar:not(.dock-side) {
+            left: 0;
+            right: 0;
+            top: 0;
+            bottom: var(--dock-h);
+        }
+        .settings-detail-flyout:not(.dock-side) .settings-detail-flyout-inner {
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
+        }
+        body:has(#settingsDetailFlyout.open:not(.dock-side)) main.main { visibility: hidden; }
+        html:has(#settingsDetailFlyout.open:not(.dock-side)),
+        body:has(#settingsDetailFlyout.open:not(.dock-side)) { overflow: hidden; }
         /* Elenco progetti di un cliente: a destra dell'elenco clienti, stessa altezza */
         .settings-detail-flyout.dock-side,
         .settings-detail-flyout.dock-side.open {
@@ -15425,7 +15445,8 @@
             // Admin: la disposizione (ordinamento, colonna e larghezza) può essere applicata
             // oltre il proprio contenitore. Una sola chiamata bulk, come nel flyout di
             // dettaglio: il salvataggio riga per riga toccherebbe solo la propria riga.
-            if (Number(decodeJwtPayload().id_roles) === 1) {
+            // Anche il non admin su un progetto sceglie l'ambito ("solo questo" / "tutti i miei progetti").
+            if (Number(decodeJwtPayload().id_roles) === 1 || nonAdminProjectScope(parentFormState.source)) {
                 window.__parentFormLayoutPending = {
                     source: parentFormState.source,
                     argument: parentFormState.argument,
@@ -20293,12 +20314,20 @@
                 }
                 return;
             }
+            // Non admin su un progetto con campi spostati: chiede se spostarli solo qui o in
+            // tutti i suoi progetti (i valori si salvano comunque solo su questo progetto).
+            if (!isAdmin && detailLayoutDirty && nonAdminProjectScope()) {
+                openClientScopeModal('save-layout');
+                return;
+            }
             performSaveDetailChanges(null);
         }
 
         // Salva i campi modificati (e l'eventuale disposizione dei campi). Se "scope" è valorizzato
         // ('this-tenant' | 'all-tenants', scelto dall'admin), viene incluso nelle richieste al backend.
-        async function performSaveDetailChanges(scope) {
+        // layoutScope ('this' | 'all'): ambito del solo spostamento campi scelto da un non admin
+        // nei Progetti (vedi saveDetailChanges); null = solo il progetto aperto.
+        async function performSaveDetailChanges(scope, layoutScope = null) {
             // Chiude eventuali popup di scelta ambito ancora aperti (tenant e/o
             // clienti/progetti): senza questo, dopo aver scelto "Tutti i progetti" /
             // "Solo questo progetto" il popup restava visibile sopra la pagina aggiornata.
@@ -20428,7 +20457,7 @@
                             const res = await fetch(`${API_URL}/${currentDetailSource}/reorder-fields`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                                body: JSON.stringify({ argument: currentDetailArgument, scope: 'this', tenantScope: 'this-tenant', items })
+                                body: JSON.stringify({ argument: currentDetailArgument, scope: layoutScope === 'all' ? 'all' : 'this', tenantScope: 'this-tenant', items })
                             });
                             if (res.ok) detailLayoutDirty = false;
                             else {
@@ -20960,7 +20989,10 @@
                         onSaved
                     };
                     close();
-                    if (Number(decodeJwtPayload().id_roles) !== 1) {
+                    if (nonAdminProjectScope(source)) {
+                        // Non admin su un progetto: "solo questo progetto" o "tutti i miei progetti".
+                        openClientScopeModal('parent-add-field');
+                    } else if (Number(decodeJwtPayload().id_roles) !== 1) {
                         // Nessuna scelta di ambito per i ruoli non admin: resta il proprio tenant.
                         await performParentFormAddField(source === 'settings' ? 'this-tenant' : 'this', 'this-tenant');
                     } else if (source === 'settings') {
@@ -21010,7 +21042,7 @@
                 // Admin: anche per l'AGGIUNTA di un campo chiede sempre l'ambito (questo
                 // tenant/cliente/progetto oppure tutti), riusando i popup già presenti,
                 // invece di salvare subito senza chiedere nulla.
-                if (mode === 'add' && Number(decodeJwtPayload().id_roles) === 1) {
+                if (mode === 'add' && (Number(decodeJwtPayload().id_roles) === 1 || nonAdminProjectScope(source))) {
                     window.__tvfAddPending = {
                         source,
                         campo,
@@ -21497,9 +21529,11 @@
                 window.__fieldTenantScope = 'this-tenant';
             }
 
-            // I ruoli diversi da 1 non vedono la scelta Tenant né quella globale
-            // Cliente/Progetto.
-            if (!isAdminScope) {
+            // I ruoli diversi da 1 non vedono mai la scelta Tenant. Nei Progetti scelgono tra
+            // "solo questo progetto" e "tutti i miei progetti" (il server limita "tutti" ai
+            // progetti dell'utente e ai soli campi custom "(*)"); nei Clienti resta "solo questo".
+            const ownProjectsScope = !isAdminScope && nonAdminProjectScope();
+            if (!isAdminScope && !ownProjectsScope) {
                 dispatchClientScope('this');
                 return;
             }
@@ -21509,7 +21543,7 @@
             const allBtn = document.getElementById('clientDeleteScopeAll');
             const thisBtn = document.getElementById('clientDeleteScopeThis');
             const isProjects = (currentDetailSource === 'projects');
-            const plural = isProjects ? 'tutti i progetti' : 'tutti i clienti';
+            const plural = ownProjectsScope ? 'tutti i tuoi progetti' : (isProjects ? 'tutti i progetti' : 'tutti i clienti');
             const singular = isProjects ? 'il progetto selezionato' : 'il cliente selezionato';
             let t, p;
             if (action === 'parent-reorder') {
@@ -21521,6 +21555,9 @@
             } else if (action === 'rename') {
                 t = 'Rinomina campi';
                 p = `La rinomina deve avvenire su ${plural} o solo su ${singular}?`;
+            } else if (action === 'save-layout') {
+                t = 'Sposta campo';
+                p = `Applicare lo spostamento dei campi a ${plural} o solo a ${singular}?`;
             } else if (action === 'edit' || action === 'save-values') {
                 t = 'Salva modifiche';
                 p = `Applicare le modifiche a ${plural} o solo a ${singular}?`;
@@ -21533,7 +21570,7 @@
             }
             if (title) title.textContent = t;
             if (text) text.textContent = p;
-            if (allBtn) allBtn.textContent = isProjects ? 'Tutti i progetti' : 'Tutti i clienti';
+            if (allBtn) allBtn.textContent = ownProjectsScope ? 'Tutti i miei progetti' : (isProjects ? 'Tutti i progetti' : 'Tutti i clienti');
             if (thisBtn) thisBtn.textContent = isProjects ? 'Solo questo progetto' : 'Solo questo cliente';
             if (modal) modal.style.display = 'flex';
         }
@@ -21551,7 +21588,17 @@
             else if (clientScopeAction === 'add') performAddField(scope);
             else if (clientScopeAction === 'edit') performEditField(scope);
             else if (clientScopeAction === 'save-values') performSaveDetailChanges(scope);
+            // Non admin nei Progetti: l'ambito vale solo per lo spostamento dei campi, i valori
+            // restano del progetto aperto.
+            else if (clientScopeAction === 'save-layout') performSaveDetailChanges(null, scope);
             else performDeleteFields(scope);
+        }
+
+        // Utente non admin su un progetto: per la struttura dei campi custom "(*)" (nuovo,
+        // sposta, rinomina, elimina, modifica) sceglie "solo questo progetto" o "tutti i miei
+        // progetti", con la stessa finestra dell'admin ma senza la scelta del tenant.
+        function nonAdminProjectScope(source) {
+            return Number(decodeJwtPayload().id_roles) !== 1 && (source || currentDetailSource) === 'projects';
         }
 
         // Crea il nuovo campo custom; scope = 'all' | 'this' (clienti/progetti) oppure

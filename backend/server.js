@@ -5909,7 +5909,9 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       const original = await pool.query(`SELECT id, argument, campo, tipo_valore, valore1, valore2, tenant_id, user_id, tabella, colonna, "VariabDB" FROM "${tableName}" WHERE ${where.join(' AND ')} LIMIT 1`, params);
       originalFieldRow = original.rows[0] || null;
       if (originalFieldRow && ['clients', 'projects'].includes(tableName) && originalFieldRow.argument) {
-        const container = await pool.query(`SELECT campo, valore2 FROM "${tableName}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [originalFieldRow.argument, originalFieldRow.tenant_id]);
+        // argument è l'id del contenitore (Nodo Padre) oppure un nome ('Cliente', 'Progetto' sulle
+        // righe anagrafiche): confronto come testo, così un nome non dà "invalid input syntax for type uuid".
+        const container = await pool.query(`SELECT campo, valore2 FROM "${tableName}" WHERE id::text = $1 AND tenant_id = $2 LIMIT 1`, [String(originalFieldRow.argument), originalFieldRow.tenant_id]);
         originalFieldRow.containerCampo = container.rows[0]?.campo || null;
         originalFieldRow.containerValue = container.rows[0]?.valore2 ?? null;
       }
