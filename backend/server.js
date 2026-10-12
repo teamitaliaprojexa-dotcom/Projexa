@@ -11276,6 +11276,26 @@ function tipo4AFineRisposta(req, res, rowId) {
 // Prima di scrivere il valore nella tabella di riferimento, verifica che non esista già
 // nella colonna <colonna> della tabella <tabella> indicate nella riga (per lo stesso contesto:
 // tenant/user, +client_id se "clients", +client_id/project_id se "projects", + eventuale VariabDB).
+// Griglia tipo 11/13 aperta o chiusa dall'utente: lo stato si memorizza subito in valore1
+// della riga del campo (true = chiusa), così alla prossima apertura la griglia si presenta
+// come l'ha lasciata. È una preferenza di visualizzazione: vale solo sulle righe dell'utente
+// del login (non su clienti condivisi o progetti del team) e non dipende da id_roles_write.
+app.put('/api/:source(settings|clients|projects)/:id/grid-collapsed', requireAuth, async (req, res) => {
+  try {
+    const source = req.params.source;
+    const collapsed = !!(req.body && (req.body.collapsed === true || req.body.collapsed === 'true'));
+    const r = await db.query(
+      `UPDATE "${source}" SET valore1 = $1
+        WHERE id::text = $2 AND tenant_id = $3 AND user_id = $4 AND tipo_valore::text IN ('11', '13')
+          AND valore1 IS DISTINCT FROM $1`,
+      [collapsed, String(req.params.id || ''), req.user.tenant_id, req.user.user_id]
+    );
+    res.json({ success: true, updated: r.rowCount });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 app.put('/api/:source(settings|clients|projects)/:id/reference-value', requireAuth, async (req, res) => {
   // Campo tipo 4 di un progetto modificato: il suo valore (e degli altri) va in valore2.
   if (req.params.source === 'projects') tipo4AFineRisposta(req, res, req.params.id);

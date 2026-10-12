@@ -15188,6 +15188,7 @@
                             icon.classList.toggle('fa-chevron-down', row.classList.contains('collapsed'));
                             icon.classList.toggle('fa-chevron-up', !row.classList.contains('collapsed'));
                         }
+                        if (event.isTrusted) saveType11Collapsed(row);
                     });
                 });
                 if (action === 'move') initParentFormDragDrop(content);
@@ -17111,7 +17112,7 @@
                 hydrateType11Grids(listEl);
                 // Barra tipo 11: click apre/chiude la griglia sottostante (freccia su/giù).
                 listEl.querySelectorAll('.type11-bar').forEach(bar => {
-                    bar.addEventListener('click', () => {
+                    bar.addEventListener('click', (event) => {
                         const row = bar.closest('.type11-grid-row');
                         if (!row) return;
                         row.classList.toggle('collapsed');
@@ -17120,6 +17121,7 @@
                             icon.classList.toggle('fa-chevron-down', row.classList.contains('collapsed'));
                             icon.classList.toggle('fa-chevron-up', !row.classList.contains('collapsed'));
                         }
+                        if (event.isTrusted) saveType11Collapsed(row);
                     });
                 });
                 // Ad ogni modifica: segna il campo come "da salvare" e mostra il pulsante Salva.
@@ -19686,6 +19688,21 @@
             const target = row && row.querySelector(`[data-setting-id="${CSS.escape(lens.dataset.lensTarget)}"]`);
             if (target) openFieldTextDialog(target, lens.dataset.lensTitle);
         });
+
+        // Griglia tipo 11/13 aperta o chiusa con un clic dell'utente: lo stato va subito in
+        // valore1 della riga del campo (true = chiusa), così resta anche per le prossime volte.
+        // Le aperture automatiche (es. per evidenziare una riga) non passano di qui.
+        function saveType11Collapsed(row) {
+            const widget = row && row.querySelector('.type11-grid-widget');
+            const source = widget && widget.dataset.gridSource;
+            const id = row && row.dataset.rowId;
+            if (!source || !id) return;
+            fetch(`${API_URL}/${encodeURIComponent(source)}/${encodeURIComponent(id)}/grid-collapsed`, {
+                method: 'PUT',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ collapsed: row.classList.contains('collapsed') })
+            }).catch((e) => console.warn('⚠️ Stato griglia non salvato:', e.message));
+        }
 
         function hydrateType11Grids(root) {
             if (!root) return;
