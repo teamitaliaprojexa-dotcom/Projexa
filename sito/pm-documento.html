@@ -118,7 +118,7 @@
                     <div class="riq interno"><small>Effort speso / budget (${esc(e.unita)})</small><b>${fmt(e.ac)} / ${fmt(e.bac)}</b></div>
                     <div class="riq interno"><small>Stima a finire</small><b>${e.eac != null ? `${fmt(e.eac)} (${fmt(e.percPrevista, 0)}%)` : '–'}</b></div>
                     <div class="riq interno"><small>Efficienza (CPI)</small><b>${e.cpi != null ? fmt(e.cpi, 2) : '–'}</b></div>
-                    <div class="riq interno"><small>Change Request approvate</small><b>${d.cr.filter((x) => x.stato === 'approvata').length}</b></div>
+                    <div class="riq interno"><small>Change Request approvate</small><b>${d.cr.filter((x) => x.stato === 'approvata' || x.stato === 'sviluppata').length}</b></div>
                 </div>
                 <div class="semaforo interno">${tab(['Indicatore', 'Stato', 'Dettaglio'], d.indicatori.map((i) => [esc(i.titolo), `<span class="sem ${i.stato}">${SEM[i.stato]}</span>`, esc(i.nota)]))}</div>`;
             if (d.ai.testo) html += `<div class="ai">${testoAiHtml(d.ai.testo)}</div>`;

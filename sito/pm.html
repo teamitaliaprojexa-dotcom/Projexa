@@ -433,30 +433,79 @@
 
         // ================= CHANGE REQUEST =================
         let crDati = null, crEstraiAperta = false;
-        const STATI_CR = { bozza: 'Bozza', inviata: 'Inviata al cliente', approvata: 'Approvata', rifiutata: 'Rifiutata' };
+        const STATI_CR = { bozza: 'Bozza', inviata: 'Inviata al cliente', approvata: 'Approvata', sviluppata: 'Sviluppata', rifiutata: 'Rifiutata' };
+        // Filtro sugli stati: di default fuori Sviluppata e Rifiutata. I KPI contano solo le CR filtrate.
+        const crFiltro = new Set(['bozza', 'inviata', 'approvata']);
+        // Approvate = anche quelle poi sviluppate (contano nel budget, come nel Cruscotto).
+        const crApprovata = (x) => x.stato === 'approvata' || x.stato === 'sviluppata';
+        function kpiCr(l, u) {
+            const app = l.filter(crApprovata);
+            const somma = (arr, k) => arr.reduce((s, x) => s + (Number(x[k]) || 0), 0);
+            const effort = somma(app, 'effort_delta'), importo = somma(app, 'importo_delta'), giorni = somma(app, 'giorni_delta');
+            return [
+                { label: 'Approvate', html: String(app.length), val: app.length },
+                { label: 'Effort approvato', html: `${effort > 0 ? '+' : ''}${fmt(effort)} ${esc(u)}`, val: effort, unita: u },
+                { label: 'Importo approvato', html: euro(importo), val: importo, unita: '€' },
+                { label: 'Slittamento approvato', html: `${giorni} gg`, val: giorni, unita: 'gg' },
+                { label: 'In attesa', html: String(l.filter((x) => x.stato === 'bozza' || x.stato === 'inviata').length), val: l.filter((x) => x.stato === 'bozza' || x.stato === 'inviata').length }
+            ];
+        }
+        const caricaSheetJs = () => (window.XLSX ? Promise.resolve() : new Promise((ok, ko) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+            s.onload = ok; s.onerror = () => ko(new Error('Libreria Excel non disponibile'));
+            document.head.appendChild(s);
+        }));
+        // Excel con i mini KPI in testa e le CR filtrate sotto.
+        async function esportaCr(l, u) {
+            await caricaSheetJs();
+            const num = (v) => (v == null || v === '' ? '' : Number(v));
+            const progetto = dati && dati.progetto ? dati.progetto.nome : '';
+            const righe = [
+                [`Change Request${progetto ? ` – ${progetto}` : ''}`],
+                [`Stati inclusi: ${[...crFiltro].map((s) => STATI_CR[s]).join(', ')}`],
+                [],
+                ...kpiCr(l, u).map((k) => [k.label, k.val, k.unita || '']),
+                [],
+                ['Codice', 'Rif. Jira', 'Titolo', 'Descrizione', 'Motivo', 'Stato', 'Data richiesta', 'Richiesta da', `Effort (${u})`, 'Importo (€)', 'Tempi (gg)', 'Data decisione', 'Note'],
+                ...l.map((x) => [x.codice || '', x.rif_jira || '', x.titolo || '', x.descrizione || '', x.motivo || '', STATI_CR[x.stato] || x.stato,
+                    dataIt(x.data_richiesta), x.richiesta_da || '', num(x.effort_delta), num(x.importo_delta), num(x.giorni_delta), dataIt(x.data_decisione), x.note || ''])
+            ];
+            const ws = XLSX.utils.aoa_to_sheet(righe);
+            ws['!cols'] = [12, 14, 40, 50, 40, 16, 13, 22, 12, 13, 11, 13, 40].map((w) => ({ wch: w }));
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Change Request');
+            const nomeFile = `ChangeRequest_${(progetto || 'progetto').replace(/[^\w-]+/g, '_')}_${(dati?.oggi || new Date().toISOString().slice(0, 10))}.xlsx`;
+            XLSX.writeFile(wb, nomeFile);
+        }
         async function caricaCr() {
             const p = pannello('cr');
             p.innerHTML = attesa('Carico le Change Request…');
             try { crDati = await api(`/cr?projectId=${encodeURIComponent(projectId)}`); renderCr(p); } catch (e) { p.innerHTML = errore(e); }
         }
         function renderCr(p) {
-            const l = crDati.cr, u = crDati.unita;
-            const app = l.filter((x) => x.stato === 'approvata');
-            const somma = (arr, k) => arr.reduce((s, x) => s + (Number(x[k]) || 0), 0);
+            const tutte = crDati.cr, u = crDati.unita;
+            const l = tutte.filter((x) => crFiltro.has(x.stato));
+            const filtri = Object.entries(STATI_CR).map(([k, v]) => `<label class="pm-filtro${crFiltro.has(k) ? ' attivo' : ''}"><input type="checkbox" data-filtro-cr="${k}" ${crFiltro.has(k) ? 'checked' : ''}> <span class="pill ${k}">${v}</span> <small>${tutte.filter((x) => x.stato === k).length}</small></label>`).join('');
             p.innerHTML = `${crDati.tabelle ? '' : sqlMancante()}
                 <div class="pm-card">
-                    <h2><i class="fas fa-code-pull-request"></i> Change Request <span class="azioni"><button class="pm-btn piccolo verde" id="btnEstraiCr" title="L'AI legge il recap di una riunione e propone le Change Request (in bozza)"><i class="fas fa-wand-magic-sparkles"></i> Estrai dalle riunioni</button><button class="pm-btn piccolo primario" id="nuovaCr"><i class="fas fa-plus"></i> Nuova Change Request</button></span></h2>
+                    <h2><i class="fas fa-code-pull-request"></i> Change Request <span class="azioni"><button class="pm-btn piccolo" id="btnEsportaCr" title="Scarica in Excel le Change Request filtrate, con i KPI in testa"><i class="fas fa-file-excel"></i> Esporta</button><button class="pm-btn piccolo verde" id="btnEstraiCr" title="L'AI legge il recap di una riunione e propone le Change Request (in bozza)"><i class="fas fa-wand-magic-sparkles"></i> Estrai dalle riunioni</button><button class="pm-btn piccolo primario" id="nuovaCr"><i class="fas fa-plus"></i> Nuova Change Request</button></span></h2>
+                    <div class="pm-filtri" title="Stati mostrati: i KPI contano solo le Change Request filtrate">${filtri}</div>
                     <div class="pm-kpi" style="margin-bottom:0.9rem">
-                        <div><small>Approvate</small><b>${app.length}</b></div>
-                        <div><small>Effort approvato</small><b>${somma(app, 'effort_delta') > 0 ? '+' : ''}${fmt(somma(app, 'effort_delta'))} ${esc(u)}</b></div>
-                        <div><small>Importo approvato</small><b>${euro(somma(app, 'importo_delta'))}</b></div>
-                        <div><small>Slittamento approvato</small><b>${somma(app, 'giorni_delta')} gg</b></div>
-                        <div><small>In attesa</small><b>${l.filter((x) => x.stato === 'bozza' || x.stato === 'inviata').length}</b></div>
+                        ${kpiCr(l, u).map((k) => `<div><small>${k.label}</small><b>${k.html}</b></div>`).join('')}
                     </div>
-                    ${l.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Codice</th><th>Titolo</th><th>Stato</th><th>Richiesta</th><th class="n">Effort (${esc(u)})</th><th class="n">Importo</th><th class="n">Tempi</th><th>Decisione</th></tr></thead><tbody>
-                        ${l.map((x) => `<tr class="click" data-id="${esc(x.id)}"><td><b>${esc(x.codice || '')}</b></td><td><b>${esc(x.titolo)}</b>${x.motivo ? `<div class="pm-nota">${esc(x.motivo)}</div>` : ''}</td><td><span class="pill ${x.stato}">${STATI_CR[x.stato]}</span></td><td>${dataIt(x.data_richiesta)}${x.richiesta_da ? `<div class="pm-nota">${esc(x.richiesta_da)}</div>` : ''}</td><td class="n">${x.effort_delta != null ? `${x.effort_delta > 0 ? '+' : ''}${fmt(x.effort_delta)}` : '–'}</td><td class="n">${euro(x.importo_delta)}</td><td class="n">${x.giorni_delta != null ? `${x.giorni_delta > 0 ? '+' : ''}${x.giorni_delta} gg` : '–'}</td><td>${dataIt(x.data_decisione)}</td></tr>`).join('')}
-                    </tbody></table></div>` : '<div class="pm-vuoto">Nessuna Change Request. Registra qui ogni richiesta del cliente che cambia lo scope: le CR approvate aumentano il budget usato per la salute e la previsione a finire.</div>'}
+                    ${l.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Codice</th><th>Rif. Jira</th><th>Titolo</th><th>Stato</th><th>Richiesta</th><th class="n">Effort (${esc(u)})</th><th class="n">Importo</th><th class="n">Tempi</th><th>Decisione</th></tr></thead><tbody>
+                        ${l.map((x) => `<tr class="click" data-id="${esc(x.id)}"><td><b>${esc(x.codice || '')}</b></td><td>${esc(x.rif_jira || '')}</td><td><b>${esc(x.titolo)}</b>${x.motivo ? `<div class="pm-nota">${esc(x.motivo)}</div>` : ''}</td><td><span class="pill ${x.stato}">${STATI_CR[x.stato]}</span></td><td>${dataIt(x.data_richiesta)}${x.richiesta_da ? `<div class="pm-nota">${esc(x.richiesta_da)}</div>` : ''}</td><td class="n">${x.effort_delta != null ? `${x.effort_delta > 0 ? '+' : ''}${fmt(x.effort_delta)}` : '–'}</td><td class="n">${euro(x.importo_delta)}</td><td class="n">${x.giorni_delta != null ? `${x.giorni_delta > 0 ? '+' : ''}${x.giorni_delta} gg` : '–'}</td><td>${dataIt(x.data_decisione)}</td></tr>`).join('')}
+                    </tbody></table></div>` : tutte.length ? '<div class="pm-vuoto">Nessuna Change Request negli stati selezionati: aggiungi uno stato dal filtro.</div>' : '<div class="pm-vuoto">Nessuna Change Request. Registra qui ogni richiesta del cliente che cambia lo scope: le CR approvate aumentano il budget usato per la salute e la previsione a finire.</div>'}
                 </div>`;
+            p.querySelectorAll('[data-filtro-cr]').forEach((c) => c.addEventListener('change', () => {
+                if (c.checked) crFiltro.add(c.dataset.filtroCr); else crFiltro.delete(c.dataset.filtroCr);
+                renderCr(p);
+            }));
+            p.querySelector('#btnEsportaCr').addEventListener('click', () => {
+                if (!l.length) { toast('Nessuna Change Request da esportare con questo filtro', 'errore'); return; }
+                esportaCr(l, u).catch((e) => toast(e.message, 'errore'));
+            });
             p.querySelector('#nuovaCr').addEventListener('click', () => formCr({}));
             p.querySelector('#btnEstraiCr').addEventListener('click', () => estraiDaRiunione(null, null, true));
             // Da «Risultati AI»: Change Request arrivate in modalità Batch, da rivedere e salvare.
@@ -471,6 +520,7 @@
                 titolo: `<i class="fas fa-code-pull-request"></i> ${nuovo ? 'Nuova Change Request' : esc(`${x.codice || ''} ${x.titolo}`)}`,
                 corpo: `${sola ? '<div class="pm-avviso">Sola lettura: il tuo ruolo non può modificare questa Change Request.</div>' : ''}<div class="pm-form">
                     <label class="largo">Titolo<input name="titolo" value="${esc(x.titolo || '')}"></label>
+                    <label>Rif. Jira (ticket della quotazione)<input name="rif_jira" value="${esc(x.rif_jira || '')}" maxlength="100" placeholder="es. PRJ-1234"></label>
                     <label class="largo">Descrizione della modifica<textarea name="descrizione">${esc(x.descrizione || '')}</textarea></label>
                     <label class="largo">Motivo<textarea name="motivo" style="min-height:50px">${esc(x.motivo || '')}</textarea></label>
                     <label>Richiesta da${campoPersona('name="richiesta_da"', x.richiesta_da, 'cliente')}</label>
@@ -481,7 +531,7 @@
                     <label>Stato<select name="stato">${Object.entries(STATI_CR).map(([k, v]) => `<option value="${k}" ${k === (x.stato || 'bozza') ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
                     <label>Data decisione del cliente<input type="date" name="data_decisione" value="${esc(x.data_decisione || '')}"></label>
                     <label class="largo">Note<textarea name="note" style="min-height:50px">${esc(x.note || '')}</textarea></label></div>
-                    <p class="pm-nota">Approvata o rifiutata senza data: Projexa mette la data di oggi. Le CR approvate sommano effort, importo e giorni al budget del progetto nel Cruscotto (la scheda e i Costi Progetto non vengono modificati).</p>`,
+                    <p class="pm-nota">Approvata o rifiutata senza data: Projexa mette la data di oggi. Le CR approvate (e quelle sviluppate) sommano effort, importo e giorni al budget del progetto nel Cruscotto (la scheda e i Costi Progetto non vengono modificati).</p>`,
                 pulsanti: [
                     ...(!nuovo && !sola ? [{ testo: '<i class="fas fa-trash"></i> Elimina', classe: 'pericolo', azione: async () => { if (!confirm('Eliminare questa Change Request?')) return false; await api(`/cr/${x.id}?projectId=${encodeURIComponent(projectId)}`, { metodo: 'DELETE' }); toast('Eliminata'); caricaCr(); caricaPanoramica(); } }] : []),
                     { testo: 'Annulla' },

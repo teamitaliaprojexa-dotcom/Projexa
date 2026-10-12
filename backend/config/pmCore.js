@@ -385,10 +385,16 @@ export async function raidProgetto(user, projectId, { tutte = false } = {}) {
   return r.rows.map((x) => ({ ...x, punteggio: x.probabilita && x.impatto ? x.probabilita * x.impatto : null }));
 }
 
+// CR che contano nel budget: approvate dal cliente (anche quelle poi sviluppate).
+export const CR_STATI_APPROVATI = ['approvata', 'sviluppata'];
+export const crApprovata = (x) => CR_STATI_APPROVATI.includes(x.stato);
+
 export async function crProgetto(user, projectId) {
   if (!(await tabellaPresente('pm_change_request'))) return [];
+  // rif_jira: colonna aggiunta da cr_rif_jira_sviluppata.sql (prima dello script resta vuota).
+  const rifJira = (await colonneTabella('pm_change_request')).has('rif_jira') ? 'rif_jira' : 'NULL::text AS rif_jira';
   const r = await db.query(
-    `SELECT id::text AS id, codice, titolo, descrizione, motivo, richiesta_da, data_richiesta::text AS data_richiesta,
+    `SELECT id::text AS id, codice, titolo, descrizione, motivo, richiesta_da, data_richiesta::text AS data_richiesta, ${rifJira},
             effort_delta::float8 AS effort_delta, importo_delta::float8 AS importo_delta, giorni_delta, stato,
             data_decisione::text AS data_decisione, note, id_roles_write, created_at
        FROM pm_change_request
@@ -495,7 +501,7 @@ export async function saluteProgetto(user, projectId, { prog = null, scheda = nu
     eco.fatturato = null;
     eco.voci.forEach((v) => { v.fatturato = null; });
   }
-  const crApprovate = cr.filter((x) => x.stato === 'approvata');
+  const crApprovate = cr.filter(crApprovata);
   const crDelta = crApprovate.reduce((s, x) => s + (Number(x.effort_delta) || 0), 0);
   const crImporto = crApprovate.reduce((s, x) => s + (Number(x.importo_delta) || 0), 0);
   const crGiorni = crApprovate.reduce((s, x) => s + (Number(x.giorni_delta) || 0), 0);

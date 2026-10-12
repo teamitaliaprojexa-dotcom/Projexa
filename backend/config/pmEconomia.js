@@ -28,7 +28,7 @@
 import db from './database.js';
 import {
   errore, oggiIso, dataIt, fmt, euro, tabellaPresente, colonneTabella, giorniTra,
-  progettoUtente, schedaProgetto, righeGantt, analisiGantt, crProgetto
+  progettoUtente, schedaProgetto, righeGantt, analisiGantt, crProgetto, crApprovata
 } from './pmCore.js';
 
 // Valute più usate nei contratti (codice ISO 4217).
@@ -176,7 +176,7 @@ export async function economiaEuro(user, projectId, { prog = null, scheda = null
   const gantt = analisiGantt(righe, oggi);
   const aOre = scheda.aOre;
   const unita = aOre ? 'ore' : 'giorni';
-  const crApprovate = cr.filter((x) => x.stato === 'approvata');
+  const crApprovate = cr.filter(crApprovata);
   const crImporto = crApprovate.reduce((s, x) => s + n(x.importo_delta), 0);
   const crEffort = crApprovate.reduce((s, x) => s + n(x.effort_delta), 0);
 

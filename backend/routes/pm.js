@@ -29,7 +29,7 @@ import { infoAi } from '../config/aiFunzioni.js';
 import {
   UUID_RE, errore, oggiIso, dataIt, dataIso, numero, fmt, euro, tabellaPresente, colonneTabella,
   progettoUtente, schedaProgetto, campiProgetto, economiaProgetto, saluteProgetto, saluteTuttiProgetti, righeGantt, analisiGantt,
-  raidProgetto, crProgetto, taskProgetto, issueProgetto, riunioniProgetto, contestoProgetto,
+  raidProgetto, crProgetto, crApprovata, taskProgetto, issueProgetto, riunioniProgetto, contestoProgetto,
   chiediAi, leggiJson
 } from '../config/pmCore.js';
 import { economiaEuro, normVoce, VALUTE, CATEGORIE_ESTERNE } from '../config/pmEconomia.js';
@@ -375,7 +375,11 @@ router.post('/raid/importa', async (req, res) => {
     // Change Request dalla riunione: SEMPRE in Bozza (scelta dell'utente), data di richiesta =
     // data della riunione, la riunione di origine nelle note. Importo e approvazione si
     // completano nella scheda Change Request.
-    const cr = crIn.map((x) => ({ ...datiCr({ titolo: x.titolo, descrizione: x.descrizione, motivo: x.motivo, richiesta_da: x.richiesta_da, effort_delta: x.effort_delta, giorni_delta: x.giorni_delta }), stato: 'bozza', data_decisione: null }));
+    // rif_jira escluso: l'AI non lo propone (e la colonna può non esserci ancora).
+    const cr = crIn.map((x) => {
+      const { rif_jira, ...d } = datiCr({ titolo: x.titolo, descrizione: x.descrizione, motivo: x.motivo, richiesta_da: x.richiesta_da, effort_delta: x.effort_delta, giorni_delta: x.giorni_delta });
+      return { ...d, stato: 'bozza', data_decisione: null };
+    });
     if (!elementi.length && !cr.length) throw errore(400, 'Nessun elemento da salvare');
     if (elementi.length) await richiedeTabella('pm_raid');
     if (cr.length) await richiedeTabella('pm_change_request');
@@ -428,12 +432,19 @@ function datiCr(b, parziale = false) {
   set('effort_delta', decimale(b.effort_delta));
   set('importo_delta', decimale(b.importo_delta));
   set('giorni_delta', intero(b.giorni_delta));
-  set('stato', scelta(b.stato, ['bozza', 'inviata', 'approvata', 'rifiutata'], 'bozza'));
+  set('stato', scelta(b.stato, ['bozza', 'inviata', 'approvata', 'sviluppata', 'rifiutata'], 'bozza'));
   set('data_decisione', dataOpz(b.data_decisione));
   set('note', testo(b.note));
+  set('rif_jira', testo(b.rif_jira, 100));
   if ((!parziale || 'titolo' in d) && !d.titolo) throw errore(400, 'Il titolo è obbligatorio');
   // Approvata o rifiutata senza data: oggi.
   if ((d.stato === 'approvata' || d.stato === 'rifiutata') && !d.data_decisione && (!parziale || !('data_decisione' in b))) d.data_decisione = oggiIso();
+  return d;
+}
+// Senza lo script cr_rif_jira_sviluppata.sql la colonna rif_jira non c'è: si ignora.
+async function datiCrDb(b, parziale = false) {
+  const d = datiCr(b, parziale);
+  if ('rif_jira' in d && !(await colonneTabella('pm_change_request')).has('rif_jira')) delete d.rif_jira;
   return d;
 }
 router.post('/cr', async (req, res) => {
@@ -441,7 +452,7 @@ router.post('/cr', async (req, res) => {
   try {
     await richiedeTabella('pm_change_request');
     const prog = await progettoUtente(req.user, pid(req));
-    const dati = datiCr(req.body || {});
+    const dati = await datiCrDb(req.body || {});
     client = await db.connect();
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pm_cr|${prog.projectId}`]);
@@ -460,7 +471,7 @@ router.put('/cr/:id', async (req, res) => {
   try {
     await richiedeTabella('pm_change_request');
     const prog = await progettoUtente(req.user, pid(req));
-    await aggiorna(req, 'pm_change_request', req.params.id, prog.projectId, datiCr(req.body || {}, true));
+    await aggiorna(req, 'pm_change_request', req.params.id, prog.projectId, await datiCrDb(req.body || {}, true));
     res.json({ ok: true });
   } catch (e) { invia(res, e, 'CR_UPD'); }
 });
@@ -1048,7 +1059,7 @@ router.post('/gantt/completamento', async (req, res) => {
 // stesse regole del Cruscotto. null se il budget è vuoto.
 async function consuntivo(user, projectId) {
   const [eco, cr] = await Promise.all([economiaProgetto(user, projectId), crProgetto(user, projectId)]);
-  const budget = eco.offerta + cr.filter((x) => x.stato === 'approvata').reduce((s, x) => s + (Number(x.effort_delta) || 0), 0);
+  const budget = eco.offerta + cr.filter(crApprovata).reduce((s, x) => s + (Number(x.effort_delta) || 0), 0);
   const perc = budget > 0 ? Math.round((eco.speso / budget) * 10000) / 100 : null;
   return { perc, speso: eco.speso, budget, unita: eco.aOre ? 'ore' : 'giorni' };
 }

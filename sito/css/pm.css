@@ -73,6 +73,12 @@ table.pm-t tr.click:hover td { background: #F9FAFB; }
 .pill.aperto, .pill.bozza { background: #EEF2FF; color: #3730A3; } .pill.in_corso, .pill.inviata { background: var(--pm-giallo-bg); color: var(--pm-giallo); }
 .pill.chiuso, .pill.approvata { background: var(--pm-verde-bg); color: var(--pm-verde); } .pill.rifiutata { background: var(--pm-rosso-bg); color: var(--pm-rosso); }
 .pill.riunione { background: #F5F3FF; color: #6D28D9; }
+.pill.sviluppata { background: #E0F2FE; color: #0369A1; }
+/* Filtro per stato (Change Request) */
+.pm-filtri { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.7rem; }
+.pm-filtro { display: inline-flex; align-items: center; gap: 0.3rem; border: 1px solid #E5E7EB; border-radius: 999px; padding: 0.15rem 0.55rem 0.15rem 0.35rem; cursor: pointer; opacity: 0.55; font-size: 0.8rem; }
+.pm-filtro.attivo { opacity: 1; border-color: #C7D2FE; background: #F8FAFF; }
+.pm-filtro small { color: var(--pm-tenue); }
 /* Scelta della persona: Cliente (contatti del cliente) / Interno (team del progetto) + nome */
 .pm-persona { display: flex; gap: 4px; min-width: 0; }
 .pm-persona select.pm-org, .pm-form .pm-persona select.pm-org { flex: 0 0 92px; width: 92px; padding-left: 0.35rem; padding-right: 0.2rem; font-size: 0.8rem; }
