@@ -345,6 +345,30 @@ export async function notificaRiunione({ tenantId, userId, idCalendar, tipo }) {
   }
 }
 
+// ----------------------------------------------------------------------------
+// «AI Automatizza (solo Batch)» (jobs/aiAutomatizza.js): riepilogo del lancio a fine
+// trascrizione (una riga per funzione: Batch, Immediato con il motivo, saltata) oppure esito
+// di una funzione ripiegata in Immediato. Si apre sulla riunione (tabella rec_meeting).
+// ----------------------------------------------------------------------------
+export async function notificaAutomazioneAi({ tenantId, userId, idCalendar, titolo, righe = [] }) {
+  try {
+    const r = (await db.query(
+      `SELECT id::text AS id, oggetto FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [tenantId, userId, idCalendar]
+    )).rows[0];
+    const oggetto = (r && r.oggetto) || '(riunione senza titolo)';
+    await inserisci({
+      tenantId, userId, fonte: 'ai',
+      titolo: `${titolo}: ${oggetto}`,
+      messaggio: righe.filter(Boolean).map((x) => String(x).slice(0, 300)).join('\n') || null,
+      tabella: 'rec_meeting', rigaId: r ? r.id : null
+    });
+  } catch (e) {
+    if (e.code === '42P01') { avvisaTabellaMancante(); return; }
+    console.error(`[NOTIFICHE] Notifica AI Automatizza della riunione ${idCalendar} non creata:`, e.message);
+  }
+}
+
 let tabellaMancanteSegnalata = false;
 function avvisaTabellaMancante() {
   if (!tabellaMancanteSegnalata) console.warn('[NOTIFICHE] Tabelle assenti su projexa_notif: eseguire Supporto/CreaDB/notifiche.sql');

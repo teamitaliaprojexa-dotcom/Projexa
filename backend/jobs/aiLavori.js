@@ -132,6 +132,19 @@ async function creaLavoro(req, operazione, scelte) {
   return lav.id;
 }
 
+// Lavoro creato dal server senza una richiesta HTTP («AI Automatizza (solo Batch)» a fine
+// trascrizione, jobs/aiAutomatizza.js): stessa strada di un lavoro Batch chiesto dalla pagina.
+//   user = { tenant_id, user_id, email }, path = rotta dell'operazione (solo descrittiva),
+//   body = corpo che l'handler si aspetta, ai = { nome, label } dell'AI da usare.
+export async function creaLavoroAutomatico(user, operazione, { path, body, ai, titolo = '' }) {
+  if (!OPERAZIONI[operazione] || !REGISTRO.has(operazione)) throw new Error(`Operazione AI non disponibile: ${operazione}`);
+  const req = {
+    user, method: 'POST', originalUrl: path, url: path, query: {}, body: body || {}, params: {},
+    aiScelta: { nome: ai.nome, label: ai.label, locale: false, esecuzione: 'batch', automatico: true }
+  };
+  return creaLavoro(req, operazione, { titolo, extra: null });
+}
+
 // ----------------------------------------------------------------------------
 // ESECUZIONE IN BACKGROUND
 // ----------------------------------------------------------------------------
@@ -166,8 +179,11 @@ async function attendiBatch(lavoro, providerName, prompt, opzioni = {}) {
     try {
       inv = await inviaBatchAi(lavoro.user_id, providerName, prompt, opzioni);
     } catch (e) {
-      if (!isBatchNonDisponibile(e)) throw e;
-      lavoro.ripiego = e.message;
+      // Lavori di «AI Automatizza (solo Batch)» (jobs/aiAutomatizza.js): qualsiasi errore del
+      // fornitore sulla richiesta Batch fa ripiegare sull'Immediato (non la chiave mancante).
+      const ripiegaAutomatico = lavoro.automatico && e.status !== 428;
+      if (!isBatchNonDisponibile(e) && !ripiegaAutomatico) throw e;
+      lavoro.ripiego = isBatchNonDisponibile(e) ? e.message : `Batch non riuscito (${e.message}): eseguito in modalità Immediata`;
       console.warn(`[AI BATCH] Lavoro ${lavoro.id}: ${e.message} (${e.dettaglio || ''})`);
       return subito();
     }
@@ -233,6 +249,7 @@ export async function eseguiLavoro(id) {
     )).rows[0];
     if (!l) return;
     const p = JSON.parse(l.parametri);
+    l.automatico = !!(p.ai && p.ai.automatico);
     const handler = REGISTRO.get(l.operazione);
     if (!handler) throw new Error(`Funzione «${l.operazione}» non disponibile su questo server`);
     const body = p.bodyFile ? await fs.readFile(fileInput(l)) : p.body;

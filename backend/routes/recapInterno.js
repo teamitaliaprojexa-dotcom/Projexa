@@ -179,6 +179,43 @@ async function genera(user, idCalendar, providerName) {
   await salvaInterno(user, idCalendar, p, r.text, r.label);
 }
 
+// «AI Automatizza (solo Batch)» a fine trascrizione (jobs/aiAutomatizza.js): recap interno in
+// Batch con l'AI indicata, senza guardare «Esecuzione Recap». Restituisce
+//   { modo: 'batch' }                                   richiesta inviata;
+//   { modo: 'immediato', motivo, avvia }                Batch impossibile o rifiutato dall'AI:
+//                                                       avvia() genera subito (in background);
+// oppure lancia l'errore (tabelle mancanti, riunione senza trascrizione, chiave scollegata).
+export async function avviaRecapInternoAutomatico(user, idCalendar, providerName) {
+  await richiedeTabelle();
+  const k = chiave(user, idCalendar);
+  if (inCorso.has(k)) throw errore(409, 'Recap interno già in preparazione');
+  const immediato = (motivo) => ({
+    modo: 'immediato', motivo,
+    avvia: async () => {
+      inCorso.add(k);
+      try {
+        await impostaStato(user, idCalendar, 'in_corso');
+        await genera(user, idCalendar, providerName);
+      } catch (e) {
+        await impostaStato(user, idCalendar, 'errore', String(e.message || e).slice(0, 1000)).catch(() => {});
+        throw e;
+      } finally {
+        inCorso.delete(k);
+      }
+    }
+  });
+  if (localRecapMode(providerName) === 'server') return immediato('Recap Projexa (lento) non ha la modalità Batch');
+  const p = await prepara(user, idCalendar);
+  try {
+    await inviaPromptBatch(user, idCalendar, providerName, p.build(p.transcript), { tipo: 'recap_interno' });
+  } catch (e) {
+    if (e.status === 428) throw e; // AI non collegata: inutile riprovare in Immediato
+    return immediato(e.message);
+  }
+  await impostaStato(user, idCalendar, 'batch');
+  return { modo: 'batch' };
+}
+
 // Recap interno in modalità Batch arrivato dall'AI (jobs/recapBatch.js).
 export async function completaRecapInternoBatch(user, idCalendar, testo, label) {
   await salvaInterno(user, idCalendar, await prepara(user, idCalendar), testo, label);

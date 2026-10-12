@@ -17269,7 +17269,7 @@
                     inp.addEventListener('input', onEdit);
                     inp.addEventListener('change', onEdit);
                 });
-                // Tipo 14 (e 22, con la data): mostra valore2 soltanto con valore1=true. Spegnendo
+                // Tipo 14 (e 22 con la data, 23/24 con l'elenco): mostra valore2 soltanto con valore1=true. Spegnendo
                 // il toggle, azzera subito il controllo e lo marca da salvare insieme al booleano.
                 // Tipo 22: accendendolo con la data vuota propone la data di oggi.
                 listEl.querySelectorAll('.type14-wrap').forEach(wrap => {
@@ -17283,6 +17283,10 @@
                     toggle.addEventListener('change', () => {
                         if (!toggle.checked) {
                             alpha.value = '';
+                            // Tipo 24 (scelta multipla): si tolgono anche le caselle e le etichette.
+                            alphaWrap.querySelectorAll('.multi9-check:checked').forEach(c => { c.checked = false; });
+                            const chips = alphaWrap.querySelector('.ms-dd-chips');
+                            if (chips) chips.innerHTML = msChipsHtml([]);
                             alpha.dataset.dirty = '1';
                             if (saveBar) saveBar.style.display = 'block';
                         } else if (alpha.dataset.type22 && !alpha.value) {
@@ -19998,6 +20002,41 @@
                 input = `<span class="type14-wrap" style="display:flex; align-items:center; gap:10px; flex:1 1 0; min-width:0;">
                     <span class="bool-cell"><label class="toggle-switch"><input type="checkbox" class="type14-toggle" data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>${BOOL_FLAG_HTML}</span>
                     <span class="type14-alpha-wrap" style="${alphaDisplay} flex:0 1 auto; min-width:0;"><input type="date" class="type14-alpha" data-type22="1" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(dateVal)}"></span>
+                </span>`;
+            } else if (tipo === 23 || tipo === 24) {
+                // Come il tipo 14, ma con il toggle acceso compare un ELENCO VALORI (opzioni da
+                // lookup_values con tipo_valore 23/24 e nome_campo = campo, row.lookup_options):
+                //   23 = scelta singola (menu a discesa come il tipo 10), valore in valore2;
+                //   24 = scelta multipla (tendina con caselle come il tipo 18), selezionati in
+                //        valore2 uniti da ";" (come il tipo 9).
+                // Spegnendo il toggle la scelta si svuota (gestito insieme al tipo 14).
+                const enabled = (row.valore1 === true || row.valore1 === 'true' || row.valore1 === 't');
+                const checked = enabled ? 'checked' : '';
+                const alphaDisplay = enabled ? '' : 'display:none;';
+                const opts = Array.isArray(row.lookup_options) ? row.lookup_options.map(String) : [];
+                let lista;
+                if (tipo === 23) {
+                    const current = row.valore2 == null ? '' : String(row.valore2);
+                    if (current && !opts.includes(current)) opts.unshift(current); // mantieni il valore attuale
+                    const optionsHtml = ['<option value=""></option>']
+                        .concat(opts.map(o => `<option value="${escapeHtml(o)}" ${o === current ? 'selected' : ''}>${escapeHtml(o)}</option>`))
+                        .join('');
+                    lista = `<select class="type14-alpha" data-setting-id="${id}" data-field="valore2" style="width:100%;">${optionsHtml}</select>`;
+                } else {
+                    const selected = String(row.valore2 == null ? '' : row.valore2).split(';').map(s => s.trim()).filter(s => s !== '');
+                    selected.forEach(s => { if (!opts.includes(s)) opts.push(s); }); // non perdere i selezionati fuori elenco
+                    if (mode === 'edit') {
+                        const boxes = opts.map(o => `<label class="multi9-opt"><input type="checkbox" class="multi9-check" value="${escapeHtml(o)}" ${selected.includes(o) ? 'checked' : ''}><span>${escapeHtml(o)}</span></label>`).join('');
+                        lista = `<span class="multi9 ms-dd" style="display:block; width:100%;"><input type="hidden" class="type14-alpha" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(selected.join(';'))}">` +
+                            `<button type="button" class="ms-dd-btn" aria-haspopup="listbox" aria-expanded="false"><span class="ms-dd-chips">${msChipsHtml(selected)}</span><i class="fas fa-chevron-down ms-dd-arrow"></i></button>` +
+                            `<span class="ms-dd-panel" role="listbox" aria-multiselectable="true">${opts.length ? '' : '<span class="ms-dd-empty">Nessuna voce disponibile</span>'}<span class="multi9-opts">${boxes}</span></span></span>`;
+                    } else {
+                        lista = `<span class="ms-chips-view">${selected.length ? msChipsHtml(selected) : ''}</span>`;
+                    }
+                }
+                input = `<span class="type14-wrap" style="display:flex; align-items:center; gap:10px; flex:1 1 0; min-width:0;">
+                    <span class="bool-cell"><label class="toggle-switch"><input type="checkbox" class="type14-toggle" data-setting-id="${id}" data-field="valore1" ${checked}><span class="toggle-slider"></span></label>${BOOL_FLAG_HTML}</span>
+                    <span class="type14-alpha-wrap" style="${alphaDisplay} flex:1 1 0; min-width:0;">${lista}</span>
                 </span>`;
             } else if (tipo === 2) {
                 // Alfanumerico -> valore2

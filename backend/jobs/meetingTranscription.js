@@ -826,6 +826,19 @@ async function processFinalize(job) {
         // Recap chiesto a mano con il pulsante (AI scelta lì): parte sempre, subito.
         await generateRecap(user, job.id_calendar, { origine: 'job:recap', ai: job.recap_ai });
       } else {
+        // «AI Automatizza (solo Batch)» (jobs/aiAutomatizza.js): le funzioni scelte partono in
+        // Batch, anche il recap se è tra quelle (allora il recap automatico qui sotto non serve).
+        // Solo al primo tentativo: i nuovi tentativi riguardano solo il recap normale.
+        let recapAutomatizzato = false;
+        if (!(Number(job.attempts) > 0)) {
+          try {
+            const { avviaAutomazioneAi } = await import('./aiAutomatizza.js');
+            recapAutomatizzato = await avviaAutomazioneAi(user, job.id_calendar);
+          } catch (e) {
+            console.error(`❌ [AI AUTOMATIZZA] ${job.id_calendar}: ${e.message}`);
+          }
+        }
+        if (recapAutomatizzato) return;
         // Recap automatico: «Chiedi sempre» (AI o esecuzione) = nessun recap, resta il pulsante.
         const ai = await recapAiImpostata(user);
         const esecuzione = await recapEsecuzione(user);

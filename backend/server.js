@@ -3140,7 +3140,7 @@ async function ofAlbero(req, prog) {
 // se quella è vuota, la prima non vuota.
 function ofValore(row) {
   const t = String(row.tipo_valore ?? '').trim();
-  const col = ['1', '14', '22'].includes(t) ? 'valore1' : (['3', '8'].includes(t) ? 'valore3' : 'valore2');
+  const col = ['1', '14', '22', '23', '24'].includes(t) ? 'valore1' : (['3', '8'].includes(t) ? 'valore3' : 'valore2');
   const pieno = (v) => v != null && String(v).trim() !== '';
   const v = pieno(row[col]) ? row[col] : [row.valore3, row.valore2, row.valore1].find(pieno);
   return v == null ? '' : String(v).trim();
@@ -5946,10 +5946,10 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       Object.entries(data).filter(([column]) => tableColumns.has(column))
     );
 
-    // tipo_valore=14: valore2 è valido soltanto quando il booleano valore1 è true.
+    // tipo_valore=14 (e 22, 23, 24): valore2 è valido soltanto quando il booleano valore1 è true.
     // La regola è applicata anche lato server per evitare valori residui nel database
     // in caso di chiamate API dirette o salvataggi parziali dal browser.
-    if (originalFieldRow && String(originalFieldRow.tipo_valore) === '14') {
+    if (originalFieldRow && ['14', '22', '23', '24'].includes(String(originalFieldRow.tipo_valore))) {
       const effectiveBoolean = Object.prototype.hasOwnProperty.call(data, 'valore1')
         ? data.valore1
         : originalFieldRow.valore1;
@@ -7676,7 +7676,7 @@ async function dosProgetti(req, owner, clientId, opz = {}) {
 function dosValore(row) {
   const t = String(row.tipo_valore ?? '').trim();
   const pieno = (v) => v != null && String(v).trim() !== '';
-  if (['1', '14', '22'].includes(t)) return pieno(row.valore1) ? String(row.valore1).trim() : '';
+  if (['1', '14', '22', '23', '24'].includes(t)) return pieno(row.valore1) ? String(row.valore1).trim() : '';
   const ordine = ['3', '8'].includes(t) ? [row.valore3, row.valore2] : [row.valore2, row.valore3];
   const v = ordine.find(pieno);
   return v == null ? '' : String(v).trim();
@@ -11151,10 +11151,11 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
         }
       }
 
-      // Tipi 9 (multi-selezione) e 10 (elenco): le opzioni arrivano da lookup_values, non da "colonna".
+      // Tipi 9 (multi-selezione) e 10 (elenco), e i loro gemelli con interruttore 24 e 23: le
+      // opzioni arrivano da lookup_values, non da "colonna".
       // Match per (tenant, user, tipo_valore, nome_campo=campo), filtrate per ruolo e date attive.
       const t = Number(row.tipo_valore);
-      if (t === 9 || t === 10) {
+      if (t === 9 || t === 10 || t === 23 || t === 24) {
         try {
           const rawCampo = String(row.campo || '');
           const stripped = rawCampo.replace(/^\(\*\)\s*/, '');

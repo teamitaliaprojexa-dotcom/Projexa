@@ -29,7 +29,7 @@ const TIPI_ESCLUSI_VERIFICA = ['17', '30', '0', '13', '20', '5', '12', '15', '16
 // tutto il resto (testo, email, date, elenchi) in valore2.
 function colonnaPerTipo(tipo) {
   const t = String(tipo ?? '').trim();
-  if (['1', '14', '22'].includes(t)) return 'valore1';
+  if (['1', '14', '22', '23', '24'].includes(t)) return 'valore1';
   if (['3', '8'].includes(t)) return 'valore3';
   return 'valore2';
 }

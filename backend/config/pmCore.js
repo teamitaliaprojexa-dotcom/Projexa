@@ -106,7 +106,7 @@ export async function progettoUtente(user, projectId, pool = db) {
 function valoreCampo(row) {
   const t = String(row.tipo_valore ?? '').trim();
   const pieno = (v) => v != null && String(v).trim() !== '';
-  if (['1', '14', '22'].includes(t)) return pieno(row.valore1) ? String(row.valore1).trim() : '';
+  if (['1', '14', '22', '23', '24'].includes(t)) return pieno(row.valore1) ? String(row.valore1).trim() : '';
   const ordine = ['3', '8'].includes(t) ? [row.valore3, row.valore2] : [row.valore2, row.valore3];
   const v = ordine.find(pieno);
   return v == null ? '' : String(v).trim();
