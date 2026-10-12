@@ -3603,6 +3603,16 @@
         }
         .meeting-inviata input { width: 1rem; height: 1rem; cursor: pointer; accent-color: #10B981; margin: 0; vertical-align: middle; }
         .meeting-inviata input:disabled { cursor: wait; }
+        /* Inviata = true: al posto della casella spuntata il flag della Check List (check-ok.png),
+           in piccolo e libero di uscire un po' dalla riga (margini negativi). La casella resta,
+           invisibile, e porta il salvataggio; il clic sul flag la toglie (label). */
+        .meeting-inviata-lbl { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 1.6rem; height: 1rem; cursor: pointer; vertical-align: middle; }
+        .meeting-inviata-ok { display: none; height: 24px; width: auto; margin: -6px 0 -4px; filter: drop-shadow(0 1px 2px rgba(5,150,105,0.35)); transform-origin: 30% 80%; transition: transform 0.15s; }
+        .meeting-inviata-lbl:hover .meeting-inviata-ok { transform: scale(1.1); }
+        .meeting-inviata-ok.pop { animation: ckpPop 0.45s cubic-bezier(.34,1.56,.64,1); }
+        .meeting-inviata-box:checked { position: absolute; opacity: 0; pointer-events: none; }
+        .meeting-inviata-box:checked + .meeting-inviata-ok { display: block; }
+        .meeting-inviata-box:disabled + .meeting-inviata-ok { cursor: wait; opacity: 0.6; }
 
         /* Intestazione dell'elenco: stesse colonne (e stesse larghezze) delle righe */
         .meeting-header {
@@ -4676,7 +4686,7 @@
                         <span class="meetings-date-wrap"><button id="meetingsDateBtn" type="button" class="meetings-date-btn" title="Scegli il giorno delle riunioni" aria-label="Scegli il giorno delle riunioni"><i class="fas fa-calendar-alt"></i></button><input id="meetingsDatePicker" type="date" class="meetings-date-input" tabindex="-1" aria-hidden="true"></span>
                         <span id="meetingsTitle">Riunioni</span>
                         <button id="meetingsTodayBtn" type="button" class="meetings-today-btn" style="display: none;" title="Torna alle riunioni di oggi">Oggi</button>
-                        <label id="meetingsShowAllWrap" class="meetings-show-all" title="Spuntato: tutte le riunioni di oggi, anche quelle già passate. Tolto: solo da adesso in poi."><input id="meetingsShowAll" type="checkbox"> Mostra tutti</label>
+                        <label id="meetingsShowAllWrap" class="meetings-show-all" title="Spuntato: tutte le riunioni di oggi, anche quelle già passate. Tolto: solo da adesso in poi."><input id="meetingsShowAll" type="checkbox" checked> Mostra tutti</label>
                     </div>
                     <div style="display: flex; gap: 1rem; align-items: center;">
                         <button id="audioDevicesBtn" type="button" class="audio-devices-btn" title="Dispositivi audio: microfono e altoparlanti" aria-label="Dispositivi audio"><i class="fas fa-cog"></i></button>
@@ -8832,8 +8842,8 @@
         // === GIORNO DELLE RIUNIONI (icona calendario accanto al titolo) ===
         // null = oggi (da adesso alle prossime 24 ore); 'YYYY-MM-DD' = giorno scelto.
         let meetingsDate = null;
-        // "Mostra tutti" (vista di oggi): anche le riunioni già passate. Tolto a ogni avvio.
-        let meetingsShowAll = false;
+        // "Mostra tutti" (vista di oggi): anche le riunioni già passate. Spuntato a ogni avvio.
+        let meetingsShowAll = true;
 
         function meetingsDayLabel() {
             if (!meetingsDate) return 'oggi';
@@ -9493,7 +9503,7 @@
         // Casella solo per le riunioni gestite con Projexa (con la riga rec_meeting).
         function meetingInviataBox(eventId, inviata) {
             const label = inviata ? 'Gestita (recap inviato): togli la spunta per riportarla da gestire' : 'Da gestire: spunta quando il recap è stato inviato';
-            return `<input type="checkbox" class="meeting-inviata-box" data-event-id="${escapeHtml(eventId || '')}"${inviata ? ' checked' : ''} title="${label}" aria-label="${label}">`;
+            return `<label class="meeting-inviata-lbl" title="${label}"><input type="checkbox" class="meeting-inviata-box" data-event-id="${escapeHtml(eventId || '')}"${inviata ? ' checked' : ''} aria-label="${label}"><img class="meeting-inviata-ok" src="check-ok.png" alt=""></label>`;
         }
 
         async function saveMeetingInviata(box) {
@@ -9509,7 +9519,19 @@
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
-                if (cell) { cell.innerHTML = meetingInviataBox(box.dataset.eventId, inviata); cell.dataset.state = cell.innerHTML; }
+                if (cell) {
+                    // Non si ridisegna la cella (interromperebbe il "pop" del flag): si aggiornano
+                    // solo il suggerimento e lo stato confrontato dall'aggiornamento periodico.
+                    const html = meetingInviataBox(box.dataset.eventId, inviata);
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = html;
+                    const nuovoLbl = tmp.querySelector('.meeting-inviata-lbl');
+                    const lbl = box.closest('.meeting-inviata-lbl');
+                    if (lbl && nuovoLbl) lbl.title = nuovoLbl.title;
+                    box.setAttribute('aria-label', nuovoLbl ? nuovoLbl.title : '');
+                    box.disabled = false;
+                    cell.dataset.state = html;
+                }
             } catch (e) {
                 box.checked = !inviata; // torna com'era
                 box.disabled = false;
@@ -9521,7 +9543,11 @@
 
         document.addEventListener('change', (e) => {
             const box = e.target.closest && e.target.closest('#meetingsContainer .meeting-inviata-box');
-            if (box) saveMeetingInviata(box);
+            if (!box) return;
+            // Spunta appena messa: il flag compare con lo stesso "pop" della Check List.
+            const ok = box.checked && box.parentElement && box.parentElement.querySelector('.meeting-inviata-ok');
+            if (ok) { ok.classList.remove('pop'); void ok.offsetWidth; ok.classList.add('pop'); }
+            saveMeetingInviata(box);
         });
 
         // === LENTE: testo di trascrizione / recap della riunione (rec_meeting) ===
@@ -10172,11 +10198,8 @@
                 interrotto: '<span style="color:#B45309"><i class="fas fa-circle-exclamation"></i> Generazione interrotta (riavvio del server): premi Genera di nuovo.</span>'
             };
             const generato = d.stato === 'pronto' || mi.righe.length || (d.sintesi || '').trim();
-            const opzioni = mi.persone.map((p) => `<option value="${escapeHtml(p.nominativo)}">${escapeHtml(p.email || '')}</option>`).join('');
-            // Owner = solo le persone del team del progetto (Kick-off): se mancano, si spiega dove aggiungerle.
-            const avvisoTeam = !(d.riunione && d.riunione.project_id)
-                ? '<div class="mi-avviso" style="margin-top:0.4rem"><i class="fas fa-circle-info"></i> La riunione non è collegata a un progetto: scegli il progetto nella riga della riunione per avere le persone del team come owner.</div>'
-                : (mi.persone.length ? '' : '<div class="mi-avviso" style="margin-top:0.4rem"><i class="fas fa-circle-info"></i> Il progetto non ha persone nel team: aggiungile dal pulsante Kick-off della scheda progetto (sezione Teams). Intanto puoi scrivere a mano il nome dell\'owner.</div>');
+            // Owner: elenco dinamico della rubrica (miOwnerRubrica), con in cima le persone del team
+            // del progetto (Kick-off). Nessun avviso se il team manca: la rubrica basta.
             const daTask = mi.righe.filter((r) => !r.task_id).length;
             pane.innerHTML = `
                 <div class="mi-bar">
@@ -10189,20 +10212,57 @@
                 <div><div class="mi-sez">Sintesi per il team</div>
                     <textarea class="mi-sintesi" id="miSintesi" placeholder="La sintesi interna compare qui dopo la generazione; puoi anche scriverla o correggerla a mano.">${escapeHtml(d.sintesi || '')}</textarea></div>
                 <div>
-                    <div class="mi-sez" style="display:flex; align-items:center; gap:0.5rem;">Attività del team <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--text-muted);">· scegli l'owner di ogni attività tra le persone del team del progetto (o scrivilo)</span></div>${avvisoTeam}
-                    <datalist id="miPersone">${opzioni}</datalist>
+                    <div class="mi-sez" style="display:flex; align-items:center; gap:0.5rem;">Attività del team <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--text-muted);">· scegli l'owner di ogni attività dalla rubrica (in cima le persone del team del progetto) o scrivilo</span></div>
                     ${mi.righe.length ? `<table class="mi-t"><thead><tr><th title="Selezionate per Crea task"><input type="checkbox" id="miTutte"></th><th style="width:16%">Argomento</th><th>Attività</th><th style="width:20%">Owner</th><th style="width:13%">Scadenza</th><th style="width:70px">Task</th><th></th></tr></thead><tbody>
                         ${mi.righe.map((r, i) => `<tr class="${r.task_id ? 'fatto' : ''}" data-i="${i}">
                             <td><input type="checkbox" data-mi="sel" ${r.sel && !r.task_id ? 'checked' : ''} ${r.task_id ? 'disabled' : ''}></td>
                             <td><input type="text" data-mi="argomento" value="${escapeHtml(r.argomento || '')}"></td>
                             <td><textarea data-mi="descrizione" rows="2">${escapeHtml(r.descrizione || '')}</textarea></td>
-                            <td><input type="text" data-mi="owner_nominativo" list="miPersone" autocomplete="off" placeholder="da assegnare" value="${escapeHtml(r.owner_nominativo || '')}" title="${escapeHtml(r.owner_email || '')}"></td>
+                            <td><input type="text" data-mi="owner_nominativo" autocomplete="off" placeholder="Cerca in rubrica…" value="${escapeHtml(r.owner_nominativo || '')}" title="${escapeHtml(r.owner_email || '')}"></td>
                             <td><input type="date" data-mi="scadenza" value="${escapeHtml(r.scadenza || '')}"></td>
                             <td>${r.task_id ? '<span class="mi-pill"><i class="fas fa-check"></i> creato</span>' : ''}</td>
                             <td>${r.task_id ? '' : '<button type="button" class="mi-btn" data-mi-del title="Togli questa attività" style="padding:0.3rem 0.5rem;"><i class="fas fa-trash"></i></button>'}</td></tr>`).join('')}
                     </tbody></table>` : '<div class="mi-vuoto">Nessuna attività.</div>'}
                     <button type="button" class="mi-btn" id="miAggiungi" style="margin-top:0.5rem;"><i class="fas fa-plus"></i> Aggiungi attività</button>
                 </div>`;
+            miOwnerRubrica(pane);
+        }
+
+        // Campo Owner: ricerca nella rubrica (stessa di «Assegnato a» delle To-Do), con in cima
+        // le persone del team del progetto. Scelto un contatto si salvano nome, email e
+        // rubrica_id; il nome resta comunque scrivibile a mano. Gli elenchi a comparsa del
+        // disegno precedente (sul body) si tolgono a ogni ridisegno della scheda.
+        async function miOwnerRubrica(pane) {
+            document.querySelectorAll('.rubrica-ac-list[data-mi-owner]').forEach((el) => el.remove());
+            const inputs = [...pane.querySelectorAll('input[data-mi="owner_nominativo"]')];
+            if (!inputs.length) return;
+            const loaded = await loadRubrica();
+            if (!inputs[0].isConnected) return; // la scheda è stata ridisegnata nel frattempo
+            const isUuid = (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v || ''));
+            const team = mi.persone.map((p) => ({
+                value: p.rubricaId || `team:${p.email || p.nominativo}`,
+                label: `${p.nominativo} · team`, name: p.nominativo, email: p.email || ''
+            }));
+            const nelTeam = new Set(team.map((o) => String(o.value)));
+            const data = { options: [...team, ...loaded.options.filter((o) => !nelTeam.has(String(o.value)))] };
+            inputs.forEach((input) => {
+                attachRubricaAutocomplete(input, data, {
+                    strict: false,
+                    freeText: true,
+                    onChoose: (option) => {
+                        const tr = input.closest('tr[data-i]');
+                        const r = tr && mi.righe[Number(tr.dataset.i)];
+                        if (!r || !option) return;
+                        r.owner_nominativo = option.name || option.label;
+                        r.owner_email = option.email || '';
+                        r.rubrica_id = isUuid(option.value) ? option.value : null;
+                        input.title = r.owner_email;
+                        miSegna();
+                    }
+                });
+                const list = document.body.lastElementChild;
+                if (list && list.classList.contains('rubrica-ac-list')) list.dataset.miOwner = '1';
+            });
         }
 
         // Modifiche nella scheda (delegate sul pannello, che si ridisegna).
@@ -10217,11 +10277,10 @@
             if (campo === 'sel') { r.sel = e.target.checked; return; }
             r[campo] = e.target.value;
             if (campo === 'owner_nominativo') {
-                // Owner scelto dall'elenco: email e contatto di rubrica; scritto a mano: solo il nome.
-                const p = mi.persone.find((x) => x.nominativo === e.target.value);
-                r.owner_email = p ? p.email : '';
-                r.rubrica_id = p ? p.rubricaId : null;
-                e.target.title = r.owner_email || '';
+                // Scritto a mano: solo il nome (email e contatto li compila la scelta dalla rubrica).
+                r.owner_email = '';
+                r.rubrica_id = null;
+                e.target.title = '';
             }
             miSegna();
         });
