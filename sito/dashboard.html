@@ -4192,7 +4192,14 @@
             transition: transform 0.38s cubic-bezier(0.2, 1.1, 0.36, 1), opacity 0.2s ease;
         }
         .meeting-panel.open { transform: none; opacity: 1; pointer-events: auto; }
-        .mp-head { display: flex; align-items: flex-start; gap: 0.4rem; padding: 0.9rem 1rem 0.7rem; border-bottom: 1px solid var(--border); }
+        .mp-head { display: flex; align-items: flex-start; gap: 0.4rem; padding: 0.9rem 1rem 0.7rem; border-bottom: 1px solid var(--border); cursor: move; user-select: none; }
+        .mp-head a, .mp-head button { cursor: pointer; }
+        /* Maniglie ai bordi sinistro e destro: trascinandole si allarga o si stringe il pannello */
+        .mp-resize { position: absolute; top: 16px; bottom: 16px; width: 8px; cursor: ew-resize; z-index: 2; }
+        .mp-resize-l { left: -4px; }
+        .mp-resize-r { right: -4px; }
+        .mp-resize:hover { background: rgba(99, 102, 241, 0.18); border-radius: 4px; }
+        .meeting-panel.mp-dragging { transition: none; user-select: none; }
         .mp-titoli { flex: 1; min-width: 0; display: flex; flex-direction: column; }
         .mp-eti { font-size: 0.7rem; font-weight: 700; color: #6366F1; text-transform: uppercase; letter-spacing: 0.04em; }
         .mp-titoli strong { font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -10829,9 +10836,79 @@
                 + sez('To-Do', 'fa-square-check', aperte, todo) + altre;
         }
 
+        // Pannello spostabile (trascinando la testata) e allargabile (maniglie ai bordi sinistro
+        // e destro). Posizione e dimensioni restano nel browser per le aperture successive.
+        // Coordinate del mouse divise per uiZoom(): pixel CSS del body zoomato (js/ui-scale.js).
+        const MP_GEOM_KEY = 'meetingPanelGeom';
+        function initMeetingPanelMoveResize(panel) {
+            const zoom = () => (window.uiZoom ? window.uiZoom() : 1) || 1;
+            const vw = () => window.innerWidth / zoom();
+            const vh = () => window.innerHeight / zoom();
+            const MIN_W = 320;
+            const apply = (g) => {
+                const w = Math.min(Math.max(g.width, MIN_W), vw() - 16);
+                const h = Math.min(Math.max(g.height, 240), vh() - 16);
+                const l = Math.min(Math.max(g.left, 8 - w + 120), vw() - 120); // almeno 120px visibili
+                const t = Math.min(Math.max(g.top, 8), vh() - 60);
+                Object.assign(panel.style, { left: l + 'px', top: t + 'px', width: w + 'px', height: h + 'px', bottom: 'auto' });
+            };
+            const current = () => {
+                const r = panel.getBoundingClientRect(), z = zoom();
+                return { left: r.left / z, top: r.top / z, width: r.width / z, height: r.height / z };
+            };
+            const save = () => { try { localStorage.setItem(MP_GEOM_KEY, JSON.stringify(current())); } catch (e) { /* solo per questa sessione */ } };
+            try {
+                const g = JSON.parse(localStorage.getItem(MP_GEOM_KEY) || 'null');
+                if (g && [g.left, g.top, g.width, g.height].every(Number.isFinite)) apply(g);
+            } catch (e) { /* posizione predefinita */ }
+
+            // mode: 'move' | 'l' | 'r'
+            const start = (e, mode) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                const z = zoom();
+                const g0 = current();
+                const x0 = e.clientX / z, y0 = e.clientY / z;
+                panel.classList.add('mp-dragging');
+                const onMove = (ev) => {
+                    const dx = ev.clientX / zoom() - x0, dy = ev.clientY / zoom() - y0;
+                    if (mode === 'move') apply({ ...g0, left: g0.left + dx, top: g0.top + dy });
+                    else if (mode === 'r') apply({ ...g0, width: g0.width + dx });
+                    else {
+                        const w = Math.min(Math.max(g0.width - dx, MIN_W), vw() - 16);
+                        apply({ ...g0, width: w, left: g0.left + g0.width - w });
+                    }
+                };
+                const onUp = () => {
+                    document.removeEventListener('pointermove', onMove);
+                    document.removeEventListener('pointerup', onUp);
+                    panel.classList.remove('mp-dragging');
+                    save();
+                };
+                document.addEventListener('pointermove', onMove);
+                document.addEventListener('pointerup', onUp);
+            };
+            panel.querySelector('.mp-head')?.addEventListener('pointerdown', (e) => {
+                if (e.target.closest('button, a')) return; // Aggiorna, Chiudi, Cruscotto PM
+                start(e, 'move');
+            });
+            panel.querySelector('.mp-resize-l')?.addEventListener('pointerdown', (e) => start(e, 'l'));
+            panel.querySelector('.mp-resize-r')?.addEventListener('pointerdown', (e) => start(e, 'r'));
+            // Doppio clic sulla testata: torna alla posizione e larghezza predefinite.
+            panel.querySelector('.mp-head')?.addEventListener('dblclick', (e) => {
+                if (e.target.closest('button, a')) return;
+                ['left', 'top', 'width', 'height', 'bottom'].forEach((p) => panel.style.removeProperty(p));
+                try { localStorage.removeItem(MP_GEOM_KEY); } catch (err) { /* niente */ }
+            });
+            // Finestra rimpicciolita: il pannello resta raggiungibile.
+            // (solo a pannello aperto: chiuso è traslato fuori schermo e la misura non vale)
+            window.addEventListener('resize', () => { if (panel.style.left && panel.classList.contains('open')) apply(current()); });
+        }
+
         function initMeetingPanel() {
             const panel = document.getElementById('meetingPanel');
             if (!panel) return;
+            initMeetingPanelMoveResize(panel);
             document.getElementById('meetingPanelClose')?.addEventListener('click', () => panel.classList.remove('open'));
             document.getElementById('meetingPanelRefresh')?.addEventListener('click', () => { if (meetingPanelId) openMeetingPanel(meetingPanelId); });
             document.getElementById('meetingRecorderPanel')?.addEventListener('click', () => {
@@ -21951,6 +22028,8 @@
             <button id="meetingPanelClose" type="button" title="Chiudi" aria-label="Chiudi"><i class="fas fa-times"></i></button>
         </div>
         <div id="meetingPanelBody" class="mp-body"></div>
+        <div class="mp-resize mp-resize-l" title="Trascina per allargare"></div>
+        <div class="mp-resize mp-resize-r" title="Trascina per allargare"></div>
     </aside>
     <div id="audioDevicesModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="audioDevicesTitle">
         <div class="task-modal-card" style="width: min(520px, calc(94vw * var(--ui-zoom-inv, 1)));">
