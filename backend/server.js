@@ -10428,6 +10428,16 @@ app.post('/api/:source(settings|clients)/execute-function', requireAuth, async (
           // UPDATE: imposta fun_colonna = ieri (data sistema -1) sul record SELEZIONATO
           // (match sull'id della riga) + filtri tenant/user.
           if (!tcols.has('id')) throw Object.assign(new Error("La tabella non ha colonna 'id': " + tab), { statusCode: 400 });
+          // La data di ieri si scrive solo su una colonna data (es. scadenza): una riga di
+          // function_db configurata per errore su un testo (es. projects.valore2, il nome del
+          // progetto) lo sovrascriverebbe con una data. In quel caso ci si ferma.
+          const tipoCol = (await client.query(
+            `SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2`,
+            [tab, col]
+          )).rows[0];
+          if (!tipoCol || !/^(date|timestamp)/i.test(tipoCol.data_type)) {
+            throw Object.assign(new Error(`Configurazione non valida in function_db («${r.funzione || ''}»): ${tab}.${col} non è una data, operazione annullata`), { statusCode: 400 });
+          }
           const parts = ['id = $1'];
           const p = [selectedId];
           if (tenCol) { assertValidIdentifier(tenCol); p.push(req.user.tenant_id); parts.push(`"${tenCol}" = $${p.length}`); }
