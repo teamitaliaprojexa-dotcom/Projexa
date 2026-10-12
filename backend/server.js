@@ -362,8 +362,17 @@ function isAdminUser(req) {
 //   - user_tenants/roles: da qui dipende chi è admin (id_roles = 1);
 //   - table_structures: quali tabelle sono modificabili dal form generico;
 //   - kpi_tab/function_db: contengono SQL e istruzioni eseguite dal server;
-//   - tipo_valore: quali tipi di campo può configurare ciascun ruolo.
-const ROLE_PROTECTED_TABLES = new Set(['user_tenants', 'roles', 'table_structures', 'kpi_tab', 'function_db', 'tipo_valore']);
+//   - tipo_valore: quali tipi di campo può configurare ciascun ruolo;
+//   - conf_worker_cost: voci di costo predefinite del tenant (vedi TENANT_ADMIN_TABLES).
+const ROLE_PROTECTED_TABLES = new Set(['user_tenants', 'roles', 'table_structures', 'kpi_tab', 'function_db', 'tipo_valore', 'conf_worker_cost']);
+// Configurazioni del tenant senza user_id: nelle griglie tipo 11 si filtrano solo per
+// tenant e sono visibili (non solo modificabili) esclusivamente all'Admin.
+const TENANT_ADMIN_TABLES = new Set(['conf_worker_cost']);
+function assertCanReadTenantAdminTable(req, tableName) {
+  if (TENANT_ADMIN_TABLES.has(String(tableName || '').toLowerCase()) && !isAdminUser(req)) {
+    throw Object.assign(new Error('Tabella riservata all\'amministratore'), { statusCode: 403 });
+  }
+}
 // Anagrafiche senza tenant_id (una riga per utente / per tenant): i non admin le scrivono
 // solo con reference-value, che tocca esclusivamente la riga del login (campi del Profilo).
 const IDENTITY_TABLES = new Set(['users', 'tenants']);
@@ -1424,6 +1433,8 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     }
 
     const tableName = assertValidIdentifier(String(config.tabella || '').trim());
+    assertCanReadTenantAdminTable(req, tableName);
+    const tenantLevel = TENANT_ADMIN_TABLES.has(tableName.toLowerCase());
     // Le colonne tra parentesi restano visibili ma non modificabili (vedi parseGridColumnsSpec).
     const columnsSpec = parseGridColumnsSpec(config.colonna);
     let selectedColumns = columnsSpec.columns;
@@ -1448,7 +1459,8 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     // Isolamento minimo obbligatorio: tenant e utente. client_id e project_id sono
     // facoltativi perché dipendono dal contesto: nei Progetti ci sono sempre, nelle
     // Impostazioni la griglia non è legata a un cliente e la tabella può non averli.
-    for (const required of ['tenant_id', 'user_id']) {
+    // Le configurazioni del tenant (TENANT_ADMIN_TABLES) non hanno user_id.
+    for (const required of tenantLevel ? ['tenant_id'] : ['tenant_id', 'user_id']) {
       if (!tableColumns.has(required)) {
         return res.status(400).json({ error: `La tabella ${tableName} non contiene ${required}` });
       }
@@ -1622,7 +1634,12 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     // filtrate anche per progetto, non solo tenant/utente/cliente. Nel contesto "projects"
     // l'id del progetto corrente è l'argument della riga di configurazione del widget
     // (la riga del campo tipo_valore=11 vive sotto il progetto stesso).
-    const queryParams = [req.user.tenant_id, effectiveUserId];
+    const queryParams = [req.user.tenant_id];
+    let userFilter = '';
+    if (tableColumns.has('user_id')) {
+      queryParams.push(effectiveUserId);
+      userFilter = ` AND src.user_id = $${queryParams.length}`;
+    }
     let clientFilter = '';
     if (filterByClient) {
       queryParams.push(clientId);
@@ -1645,7 +1662,7 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     const result = await db.query(
       `SELECT ${selectList}
        FROM "${tableName}" src${joinClause}
-       WHERE src.tenant_id = $1 AND src.user_id = $2${clientFilter}${projectFilter}${expiryFilter}${extraCondition}${orderBy}`,
+       WHERE src.tenant_id = $1${userFilter}${clientFilter}${projectFilter}${expiryFilter}${extraCondition}${orderBy}`,
       queryParams
     );
     // Formato oggetto uniforme per tutte le sorgenti: righe, colonne effettivamente
@@ -1734,6 +1751,7 @@ async function resolveGridWidgetContext(source, fieldId, req, needWrite) {
   if (!tableName) {
     throw Object.assign(new Error('Tabella non configurata'), { statusCode: 400 });
   }
+  assertCanReadTenantAdminTable(req, tableName);
   if (needWrite) assertCanWriteTable(req, tableName);
   tableColumnsCache.delete('main:' + tableName);
   const tableColumns = await getTableColumns(tableName);
@@ -5560,6 +5578,9 @@ app.get('/api/data/:table', requireAuth, async (req, res) => {
     if (!(await isManagedTable(tableName, pool))) {
       return res.status(404).json({ error: 'Table not found' });
     }
+    if (dbKey === 'main' && TENANT_ADMIN_TABLES.has(tableName.toLowerCase()) && !isAdminUser(req)) {
+      return res.status(403).json({ error: 'Tabella riservata all\'amministratore' });
+    }
 
     const columns = await getTableColumns(tableName, pool, dbKey);
     const admin = isAdminUser(req);
@@ -8274,6 +8295,37 @@ async function copyClientWorkerCosts(dbClient, req, srcClientId, newClientId) {
   return r.rowCount;
 }
 
+// Nuovo cliente: compila proj_worker_cost con le voci di costo predefinite del tenant
+// (conf_worker_cost, righe attive). Le colonne comuni alle due tabelle sono lette dal DB;
+// user_id = chi crea il cliente, client_id = nuovo cliente, id_roles_write = suo ruolo.
+// id_roles non si copia (in conf vale 1 = solo Admin): resta il default di proj_worker_cost.
+// Restituisce il numero di righe inserite, oppure null se la tabella conf non esiste o
+// non ha voci attive per il tenant (si ricade allora sulla copia dal cliente sorgente).
+async function fillClientWorkerCostsFromConf(dbClient, req, newClientId) {
+  const confCols = await getTableColumns('conf_worker_cost');
+  if (!confCols.size || !confCols.has('tenant_id')) return null;
+  const cols = await getTableColumns('proj_worker_cost');
+  if (!cols.size || !cols.has('client_id')) return null;
+  const generated = await getGeneratedColumns('proj_worker_cost');
+  const skip = new Set(['id', 'tenant_id', 'user_id', 'client_id', 'id_roles', 'id_roles_write', 'crypto', 'created_at', 'updated_at']);
+  const copyCols = [...cols].filter((c) => confCols.has(c) && !skip.has(c) && !generated.has(c)).map(assertValidIdentifier);
+  const insertCols = ['tenant_id', 'user_id', 'client_id', ...copyCols];
+  const selectCols = ['$1::uuid', '$2::uuid', '$3::uuid', ...copyCols.map((c) => `src."${c}"`)];
+  const activeFilter = confCols.has('scadenza') ? ' AND (src.scadenza IS NULL OR src.scadenza >= CURRENT_DATE)' : '';
+  const r = await dbClient.query(
+    `INSERT INTO proj_worker_cost (${insertCols.map((c) => `"${c}"`).join(', ')})
+     SELECT ${selectCols.join(', ')} FROM conf_worker_cost src WHERE src.tenant_id = $1::uuid${activeFilter}
+     RETURNING id`,
+    [req.user.tenant_id, req.user.user_id, newClientId]
+  );
+  if (!r.rowCount) return null;
+  if (cols.has('id_roles_write')) {
+    await dbClient.query('UPDATE proj_worker_cost SET id_roles_write = $1 WHERE id = ANY($2::uuid[])',
+      [roleWriteValue(req), r.rows.map((x) => x.id)]);
+  }
+  return r.rowCount;
+}
+
 // ===== Condivisione "viva" (ACL) dei clienti =====
 // Risale dalla riga (id) alla riga identità del cliente (argument='Cliente') e ne restituisce
 // { clientId, ownerUserId }, oppure null. idOrArgument = id di una qualsiasi riga dell'albero.
@@ -8525,8 +8577,12 @@ app.post('/api/clients', requireAuth, async (req, res) => {
     }
     if (srcId) {
       await deepCopyClientTree(client, req.user.tenant_id, req.user.user_id, srcId, newClient.id);
-      // Costi delle risorse (proj_worker_cost) del cliente copiato: stesse righe sul nuovo
-      // cliente, con tenant/utente di chi crea e id_roles_write = suo ruolo.
+    }
+    // Costi delle risorse (proj_worker_cost): prima le voci predefinite del tenant
+    // (conf_worker_cost, gestite dall'Admin); se il tenant non ne ha, le stesse righe del
+    // cliente copiato, sempre con tenant/utente di chi crea e id_roles_write = suo ruolo.
+    const fromConf = await fillClientWorkerCostsFromConf(client, req, newClient.id);
+    if (fromConf == null && srcId) {
       await copyClientWorkerCosts(client, req, srcId, newClient.id);
     }
     // Tutte le righe del nuovo cliente (master_id = id cliente, compilato dal trigger) e gli

@@ -1351,6 +1351,14 @@
                             : null;
                         barre += bar(effNum(node[c]), col, l, false, stato);
                     });
+                    // Sotto attività senza Analisi/Configurazione/Formazione (es. UAT, Go-live): la
+                    // barra mostra comunque l'Avanzamento %, in grigio e senza ore/giorni.
+                    if (!barre && level > 1) {
+                        const avz = Math.max(0, Math.min(100, Math.round(Number(node.avanzamento) || 0)));
+                        const testo = String(node.stato || '').trim();
+                        const grigio = '#94A3B8';
+                        barre = `<div class="eff-bar" title="${escapeHtml(`Avanzamento ${avz}%${testo ? ` · ${testo}` : ''} (nessun effort indicato)`)}"><span class="eff-track"><span class="eff-fill" style="width:100%; background:linear-gradient(to right, ${grigio} ${avz}%, ${grigio}40 ${avz}%);"></span></span><span class="eff-avz${avz >= 100 ? ' done' : ''}">${avz >= 100 ? '<i class="fas fa-check"></i> ' : ''}${avz}%</span><span class="eff-val"><small>—</small></span></div>`;
+                    }
                     html += `<div class="eff-cell">${barre}</div>`;
                 }
                 if (showCons) {
