@@ -82,6 +82,12 @@ export const PROMPT_FUNCTIONS = {
   BRIEFING_RIUNIONE: {
     titolo: 'Briefing pre-riunione',
     segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE']
+  },
+  // Finestra «Assistente PM» durante la registrazione (routes/assistentePm.js): istruzioni di
+  // sistema della sessione Gemini Live. Il punto «.» come risposta = nessun suggerimento.
+  ASSISTENTE_PM: {
+    titolo: 'Assistente PM durante la riunione (Gemini Live)',
+    segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE']
   }
 };
 

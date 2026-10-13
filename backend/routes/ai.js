@@ -1157,7 +1157,8 @@ export function whisperCppUrls() {
 }
 
 // Blocco WAV su whisper.cpp (endpoint /inference, risposta verbose_json con i segmenti).
-async function transcribeAudioCpp(base, audioBuffer, mime, prompt = '') {
+// Esportata per l'Assistente PM (ASSISTENTE_PM_WHISPER_CPP_URL, jobs/meetingTranscription.js).
+export async function transcribeAudioCpp(base, audioBuffer, mime, prompt = '') {
   for (let attempt = 1; ; attempt++) {
     try {
       const form = new FormData();

@@ -28,7 +28,7 @@ import { encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js
 import { SALTA_LOG_ON, SALTA_LOG_OFF, registraTestoRiunione } from '../config/audit.js';
 import { contestoAudit } from '../config/auditContext.js';
 import { notificaRiunione } from './notifiche.js';
-import { transcribeAudio, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate } from '../routes/ai.js';
+import { transcribeAudio, transcribeAudioCpp, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate } from '../routes/ai.js';
 
 export const NOME_PROGRAMMA = 'meetingTranscription';
 
@@ -301,6 +301,33 @@ async function transcribeJob(job, baseUrl) {
     }
   }
   return formatLines(lines, job.offset_sec, job.start_label);
+}
+
+// Blocco breve (~25 s) dell'«Assistente PM» (routes/assistentePm.js): trascritto SUBITO, fuori
+// dalla coda, e NON salvato nella trascrizione della riunione (quella resta dei blocchi da ~2
+// minuti). Stessi prompt, attribuzione di chi parla e correzioni automatiche dei blocchi normali.
+// Servizio: whisper.cpp se configurato (più veloce), altrimenti il primo servizio standard.
+// ASSISTENTE_PM_WHISPER_CPP_URL (solo sviluppo in locale): whisper.cpp della VM raggiunto con
+// il tunnel SSH (deploy/oracle/db-tunnel.ps1, porta 18101). Vale SOLO per l'assistente: la coda
+// della trascrizione normale continua a usare WHISPER_URL / WHISPER_CPP_URL.
+export async function trascriviBloccoBreve(user, idCalendar, { audioB64, energy, offset }) {
+  const dedicato = String(process.env.ASSISTENTE_PM_WHISPER_CPP_URL || '').trim().replace(/\/+$/, '');
+  const base = whisperCppUrls()[0] || whisperUrls()[0] || null;
+  const e = energy || {};
+  const me = e.mic ? await speakerName(user) : '';
+  const prompt = await buildWhisperPrompt(user, idCalendar, e.names || []);
+  const audio = Buffer.from(audioB64, 'base64');
+  const r = dedicato
+    ? await transcribeAudioCpp(dedicato, audio, 'audio/wav', prompt)
+    : await transcribeAudio(user.user_id, audio, 'audio/wav', base, prompt);
+  const lines = r.segments.map((seg) => {
+    let who = '';
+    if (e.mic && e.system) who = avgEnergy(e.mic, seg.start, seg.end) >= avgEnergy(e.system, seg.start, seg.end) ? me : OTHERS_LABEL;
+    else if (e.mic) who = me;
+    return { start: seg.start, end: seg.end, who, text: seg.text, cont: seg.cont };
+  });
+  const testo = formatLines(lines, offset, null);
+  return applyCorrections(testo, await loadCorrections(user, idCalendar)).text.trim();
 }
 
 // ----------------------------------------------------------------------------

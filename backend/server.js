@@ -19,6 +19,7 @@ import cryptoMigrationRoutes from './routes/crypto-migration.js';
 import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
+import assistentePmRoutes from './routes/assistentePm.js';
 import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
 import jobSchedulesRoutes from './routes/job-schedules.js';
 import auditLogRoutes from './routes/audit-log.js';
@@ -209,6 +210,8 @@ app.use('/api/notifiche', notificheRoutes);
 app.use('/api/audit', auditEventiRoutes);
 // Assistente "Projexa" della dashboard (Gemini + Manuale Utente): tutti gli utenti.
 app.use('/api/chatbot', chatbotRoutes);
+// Finestra «Assistente PM» durante la registrazione (Gemini Live): routes/assistentePm.js.
+app.use('/api/assistente-pm', assistentePmRoutes);
 // Cruscotto PM e Portfolio (funzioni da PM senior: salute, RAID, Change Request, stakeholder,
 // chiusura, documenti AI, Chiedi al progetto, briefing, baseline del Gantt): routes/pm.js.
 app.use('/api/pm', requireAuth, pmRoutes);

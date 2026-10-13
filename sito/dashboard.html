@@ -11517,6 +11517,13 @@
                 rec.bufferLen += (mic || sys).length;
                 recMonitorLevels(rec, rec.mic ? mic : null, rec.hasSystemAudio ? sys : null);
                 flushRecBuffer(rec, false);
+                // Assistente PM: stessi campioni in un buffer a parte, per i blocchi brevi.
+                if (rec.assistente) {
+                    if (rec.mic) rec.apMic.push(mic);
+                    if (rec.hasSystemAudio) rec.apSys.push(sys);
+                    rec.apLen += (mic || sys).length;
+                    flushAssistBuffer(rec, false);
+                }
             };
             merger.connect(rec.node);
             rec.node.connect(rec.ctx.destination); // l'uscita è silenziosa: serve solo a far girare il nodo
@@ -11540,6 +11547,83 @@
             recSetWarning(rec.hasSystemAudio ? '' : 'Audio della riunione non condiviso: verrà trascritto solo il tuo microfono. Ferma e riavvia la registrazione attivando "Condividi anche l\'audio di sistema".');
             updateRecStatus(rec);
             if (!rec.hasSystemAudio) showNotification('Audio di sistema non condiviso: verrà trascritto solo il tuo microfono', 'info');
+            // «Ai Assistente PM» acceso: finestra dell'assistente e blocchi brevi per lui.
+            rec.apMic = []; rec.apSys = []; rec.apLen = 0; rec.apFlushed = 0; rec.apScanFrom = 0; rec.apQuietRun = 0;
+            rec.assistente = false;
+            if (window.AssistentePm) {
+                window.AssistentePm.avvia({ eventId: rec.eventId, title: rec.title }).then((ok) => {
+                    if (!ok || !rec.running) return;
+                    // L'audio arrivato prima della risposta non serve all'assistente: si parte da qui.
+                    rec.apFlushed = rec.flushedSamples + rec.bufferLen;
+                    rec.assistente = true;
+                }).catch(() => {});
+            }
+        }
+
+        // === BLOCCHI BREVI PER L'«ASSISTENTE PM» (sito/js/assistente-pm.js) ===
+        // Oltre ai blocchi da ~2 minuti della trascrizione, con l'assistente attivo il browser
+        // manda ogni ~25 s un blocco breve che il server trascrive SUBITO (Whisper di Projexa)
+        // e passa in testo a Gemini; non entra nella trascrizione della riunione. Taglio alla
+        // prima pausa dopo AP_MIN_SECONDS, comunque entro AP_MAX_SECONDS.
+        const AP_MIN_SECONDS = 20;
+        const AP_MAX_SECONDS = 30;
+        function flushAssistBuffer(rec) {
+            const minLen = REC_SAMPLE_RATE * AP_MIN_SECONDS, maxLen = REC_SAMPLE_RATE * AP_MAX_SECONDS;
+            if (rec.apLen < minLen) return;
+            // Soglia di pausa dal livello della voce della registrazione (sola lettura).
+            const lvl = (track) => Math.max(REC_SILENCE_RMS, REC_PAUSE_RATIO * recVoiceLevel(rec, track, null));
+            const L = { mic: rec.mic ? lvl('mic') : 0, sys: rec.hasSystemAudio ? lvl('system') : 0 };
+            if (!rec.apScanFrom) { rec.apScanFrom = minLen; rec.apQuietRun = 0; }
+            let cut = null;
+            while (cut == null && rec.apScanFrom + REC_PAUSE_WINDOW <= Math.min(rec.apLen, maxLen)) {
+                const a = rec.apScanFrom, b = a + REC_PAUSE_WINDOW;
+                const score = Math.max(
+                    L.mic ? recRms(sliceRecParts(rec.apMic, a, b)) / L.mic : 0,
+                    L.sys ? recRms(sliceRecParts(rec.apSys, a, b)) / L.sys : 0
+                );
+                rec.apScanFrom = b;
+                rec.apQuietRun = score < 1 ? rec.apQuietRun + 1 : 0;
+                if (rec.apQuietRun >= 2) cut = a;
+            }
+            if (cut == null && rec.apLen >= maxLen) cut = maxLen;
+            if (cut == null) return;
+
+            const total = rec.apLen;
+            const micRaw = rec.mic ? sliceRecParts(rec.apMic, 0, cut) : null;
+            const sysRaw = rec.hasSystemAudio ? sliceRecParts(rec.apSys, 0, cut) : null;
+            const offsetSec = (rec.baseOffset || 0) + rec.apFlushed / REC_SAMPLE_RATE;
+            rec.apFlushed += cut;
+            rec.apMic = rec.mic && cut < total ? [sliceRecParts(rec.apMic, cut, total)] : [];
+            rec.apSys = rec.hasSystemAudio && cut < total ? [sliceRecParts(rec.apSys, cut, total)] : [];
+            rec.apLen = total - cut;
+            rec.apScanFrom = 0;
+            rec.apQuietRun = 0;
+            // Nessuno parla: niente da trascrivere.
+            const loudest = Math.max(0, ...(micRaw ? recEnergy(micRaw) : []), ...(sysRaw ? recEnergy(sysRaw) : []));
+            if (loudest < REC_SILENCE_RMS) return;
+            // Volume portato a livello udibile con il guadagno della registrazione (senza toccarne
+            // lo storico); all'inizio, senza storico, con il livello del blocco stesso.
+            const norm = (track, raw) => {
+                if (!raw) return null;
+                const level = recVoiceLevel(rec, track, null);
+                return level ? applyRecGain(raw, Math.min(REC_MAX_GAIN, Math.max(1, REC_TARGET_VOICE / level)), level).samples
+                    : normalizeRecTrack(raw).samples;
+            };
+            const micS = norm('mic', micRaw), sysS = norm('system', sysRaw);
+            const len = (micS || sysS).length;
+            const mix = new Int16Array(len);
+            for (let i = 0; i < len; i++) {
+                const v = (micS ? micS[i] : 0) + (sysS ? sysS[i] : 0);
+                mix[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
+            }
+            window.AssistentePm.inviaBlocco({
+                id_calendar: rec.eventId,
+                audio_mix: bytesToBase64(encodeWav(mix, REC_SAMPLE_RATE)),
+                energy_mic: micS ? recEnergy(micS) : null,
+                energy_system: sysS ? recEnergy(sysS) : null,
+                names: Array.isArray(rec.names) ? rec.names : [],
+                offset_sec: offsetSec
+            });
         }
 
         // --- Controllo dell'audio catturato durante la registrazione ---
@@ -11592,6 +11676,9 @@
             if (!rec || !rec.running) return;
             const recordedSec = rec.startedAt ? (Date.now() - rec.startedAt) / 1000 : 0;
             rec.stoppedReason = reason || '';
+            // Assistente PM: si chiude con la registrazione (l'ultimo pezzo non gli serve più).
+            rec.assistente = false;
+            if (window.AssistentePm) window.AssistentePm.ferma(rec.eventId);
             clearInterval(rec.timer);
             // Smetti di catturare nuovo audio, ma tieni "running" ancora attivo per un istante
             // così i messaggi già in coda dal worklet vengono raccolti nel buffer (onmessage
@@ -22457,6 +22544,7 @@
     <script src="js/jira.js"></script>
     <script src="js/integrazioni.js"></script>
     <script src="js/chatbot.js"></script>
+    <script src="js/assistente-pm.js"></script>
     <!-- Versione esplicita per evitare che il browser mantenga in cache una precedente
          risposta 404 del modulo: senza questo script la voce Qlik resta display:none. -->
     <script src="js/Qlik_voucher.js?v=20260922-5"></script>
