@@ -3307,6 +3307,20 @@
         .recap-toast-close { border: none; background: transparent; color: var(--text-muted); cursor: pointer; }
 
         /* Pannello registrazione/trascrizione riunione (in basso a destra) */
+        /* Pagina di Projexa aperta DENTRO la dashboard mentre una registrazione è in corso
+           (apriPaginaInterna): la dashboard resta viva, quindi registrazione, Assistente PM e
+           linea della riunione continuano a funzionare sopra la pagina. Il dock resta visibile. */
+        #paginaInterna { position: fixed; left: 0; right: 0; top: 0; bottom: var(--dock-h); z-index: 760; display: none;
+            flex-direction: column; background: #fff; box-shadow: 0 6px 24px rgba(15,23,42,0.18); }
+        #paginaInterna.open { display: flex; }
+        #paginaInterna .pi-bar { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.75rem; flex: none;
+            background: #EEF2FF; border-bottom: 1px solid #C7D2FE; font-size: 0.82rem; color: #312E81; }
+        #paginaInterna .pi-bar button { border: 1px solid #C7D2FE; background: #fff; color: #3730A3; border-radius: 6px;
+            padding: 0.2rem 0.6rem; cursor: pointer; font: inherit; font-weight: 600; }
+        #paginaInterna .pi-bar button:hover { background: #E0E7FF; }
+        #paginaInterna .pi-titolo { flex: 1; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #paginaInterna .pi-nota { color: #B91C1C; font-size: 0.78rem; white-space: nowrap; }
+        #paginaInterna iframe { flex: 1; width: 100%; border: 0; background: #fff; }
         .meeting-recorder {
             position: fixed;
             right: 1.25rem;
@@ -4243,6 +4257,8 @@
         .mp-sez > summary::-webkit-details-marker { display: none; }
         .mp-n { margin-left: auto; background: #EEF2FF; color: #4F46E5; border-radius: 999px; font-size: 0.72rem; padding: 0 0.5rem; }
         .mp-meta { margin: 0 0 0.4rem; color: var(--text-muted); font-size: 0.78rem; }
+        .mp-prec-scelta { display: flex; flex-direction: column; gap: 0.2rem; margin: 0 0 0.5rem; font-size: 0.78rem; color: var(--text-muted); }
+        .mp-prec-scelta select { width: 100%; padding: 0.3rem 0.4rem; border: 1px solid #CBD5E1; border-radius: 6px; font-size: 0.8rem; background: #fff; color: #1F2937; }
         .mp-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
         .mp-lista li { border: 1px solid #E5E7EB; border-radius: 10px; padding: 0.45rem 0.6rem; background: #FAFAFB; }
         .mp-lista label { display: flex; gap: 0.55rem; align-items: flex-start; cursor: pointer; }
@@ -8144,6 +8160,100 @@
             return token ? { 'Authorization': `Bearer ${token}` } : {};
         }
 
+        // Pagine di Projexa (dossier, documenti, Cruscotto PM…): sempre nella STESSA scheda, una
+        // sola pagina di Projexa aperta (richiesta utente 2026-10-13). Unica eccezione: con una
+        // registrazione o l'invio di un file audio in corso cambiare pagina li interromperebbe,
+        // quindi si chiede di aprirla in un'altra scheda.
+        function paginaOccupata() {
+            return !!((typeof meetingRec !== 'undefined' && meetingRec && (meetingRec.running || meetingRec.starting || meetingRec.pending > 0))
+                || (typeof audioFileJobs !== 'undefined' && audioFileJobs.size > 0));
+        }
+        function apriPagina(url) {
+            // Registrazione (o invio di un file audio) in corso: la pagina si apre DENTRO la
+            // dashboard, che resta viva (registrazione, Assistente PM, riquadro in basso).
+            if (paginaOccupata()) { apriPaginaInterna(url); return; }
+            location.href = url;
+        }
+
+        // --- Pagina interna (iframe sopra la dashboard) ---
+        let piCaricamenti = 0;
+        function apriPaginaInterna(url) {
+            const box = document.getElementById('paginaInterna');
+            const frame = document.getElementById('piFrame');
+            if (!box || !frame) { location.href = url; return; }
+            piCaricamenti = 0;
+            document.getElementById('piTitolo').textContent = '';
+            box.classList.add('open');
+            frame.src = url;
+        }
+        function chiudiPaginaInterna() {
+            const box = document.getElementById('paginaInterna');
+            if (!box || !box.classList.contains('open')) return;
+            box.classList.remove('open');
+            document.getElementById('piFrame').src = 'about:blank';
+        }
+        // «Indietro» delle pagine aperte qui (dossier, documenti PM): pagina precedente
+        // dell'area interna, oppure chiusura se è la prima.
+        function paginaInternaIndietro() {
+            const frame = document.getElementById('piFrame');
+            if (piCaricamenti > 1) { piCaricamenti -= 2; frame.contentWindow.history.back(); } else chiudiPaginaInterna();
+        }
+        window.chiudiPaginaInterna = chiudiPaginaInterna;
+        window.paginaInternaIndietro = paginaInternaIndietro;
+        function initPaginaInterna() {
+            const frame = document.getElementById('piFrame');
+            if (!frame) return;
+            document.getElementById('piDashboard').addEventListener('click', chiudiPaginaInterna);
+            document.getElementById('piIndietro').addEventListener('click', paginaInternaIndietro);
+            frame.addEventListener('load', () => {
+                if (!document.getElementById('paginaInterna').classList.contains('open')) return;
+                piCaricamenti++;
+                let loc;
+                try { loc = frame.contentWindow.location; } catch (e) { return; }
+                if (!loc || loc.href === 'about:blank') return;
+                // La pagina riporta alla dashboard (es. «Progetto» del Gantt, link a una To-Do):
+                // si chiude l'area e si apre il punto giusto nella dashboard che è già aperta.
+                if (/\/(dashboard\.html)?$/.test(loc.pathname)) {
+                    const q = loc.search;
+                    chiudiPaginaInterna();
+                    if (q) {
+                        history.replaceState(null, '', location.pathname + q);
+                        restoreProjectFromUrl();
+                        apriToDoDaUrl();
+                    }
+                    return;
+                }
+                // Sessione scaduta o uscita: pagina di accesso nella scheda principale.
+                if (/\/(login|index)\.html$/.test(loc.pathname)) { location.href = loc.pathname.slice(1) + loc.search; return; }
+                try { document.getElementById('piTitolo').textContent = frame.contentDocument.title || ''; } catch (e) { /* titolo non leggibile */ }
+                document.getElementById('piNota').style.display = paginaOccupata() ? '' : 'none';
+            });
+            // Con una registrazione in corso TUTTI i link alle pagine di Projexa (dock, notifiche,
+            // pannelli) si aprono nell'area interna invece di lasciare la dashboard.
+            document.addEventListener('click', (e) => {
+                const aperta = document.getElementById('paginaInterna').classList.contains('open');
+                const a = e.target.closest && e.target.closest('a[href]');
+                let pagina = null;
+                if (a && a.target !== '_blank' && !a.hasAttribute('download') && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                    try {
+                        const u = new URL(a.getAttribute('href'), location.href);
+                        if (u.origin === location.origin && /\.html$/.test(u.pathname) && !/\/(dashboard|login|index)\.html$/.test(u.pathname)) {
+                            pagina = u.pathname.slice(1) + u.search + u.hash;
+                        }
+                    } catch (err) { /* href non valido */ }
+                }
+                if (pagina && (paginaOccupata() || aperta)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    apriPaginaInterna(pagina);
+                    return;
+                }
+                // Area interna aperta e clic sul dock su una funzione della dashboard: si torna
+                // alla dashboard (la funzione si apre lì).
+                if (aperta && e.target.closest && e.target.closest('.sidebar-menu')) chiudiPaginaInterna();
+            }, true);
+        }
+
         // === AGGIORNAMENTO AUTOMATICO DOPO UN SALVATAGGIO ===
         // Ogni scrittura riuscita verso il server (POST/PUT/PATCH/DELETE da qualsiasi schermata:
         // scheda progetto, cliente, griglie, impostazioni, to-do...) ricarica i dati della
@@ -9316,13 +9426,13 @@
                         dett.innerHTML = `${testoBox(ris.briefing)}<div class="air-nota">${escapeHtml(ris.ai || '')}</div>`;
                         bottoni.push(copia(ris.briefing));
                     } else if (l.operazione === 'dossier') {
-                        bottoni.push(['<i class="fas fa-folder-open"></i> Apri dossier', 'primario', () => window.open(`dossier-cliente.html?lavoro=${encodeURIComponent(l.id)}`, '_blank')]);
+                        bottoni.push(['<i class="fas fa-folder-open"></i> Apri dossier', 'primario', () => apriPagina(`dossier-cliente.html?lavoro=${encodeURIComponent(l.id)}`)]);
                     } else if (l.operazione === 'pm_documento') {
-                        bottoni.push(['<i class="fas fa-file-lines"></i> Apri documento', 'primario', () => window.open(`pm-documento.html?${new URLSearchParams({ lavoro: l.id, tipo: (d.richiesta.query && d.richiesta.query.tipo) || 'status' })}`, '_blank')]);
+                        bottoni.push(['<i class="fas fa-file-lines"></i> Apri documento', 'primario', () => apriPagina(`pm-documento.html?${new URLSearchParams({ lavoro: l.id, tipo: (d.richiesta.query && d.richiesta.query.tipo) || 'status' })}`)]);
                     } else if (l.operazione === 'pm_raid' || l.operazione === 'pm_cr') {
                         const pid = (ris.progetto && ris.progetto.id) || '';
                         dett.innerHTML = `<div class="air-nota">${escapeHtml(String((ris.elementi || []).length))} proposte da rivedere e salvare nel Cruscotto PM.</div>`;
-                        bottoni.push(['<i class="fas fa-list-check"></i> Apri le proposte', 'primario', () => window.open(`pm.html?${new URLSearchParams({ projectId: pid, tab: l.operazione === 'pm_cr' ? 'cr' : 'raid', risultato: l.id })}`, '_blank')]);
+                        bottoni.push(['<i class="fas fa-list-check"></i> Apri le proposte', 'primario', () => apriPagina(`pm.html?${new URLSearchParams({ projectId: pid, tab: l.operazione === 'pm_cr' ? 'cr' : 'raid', risultato: l.id })}`)]);
                     }
                     if (notaPronto) dett.insertAdjacentHTML('beforeend', notaPronto);
                 } catch (e) { dett.innerHTML = `<div class="air-nota" style="color:#B91C1C">${escapeHtml(e.message)}</div>`; }
@@ -9995,7 +10105,7 @@
             // Rischi e decisioni: Cruscotto PM del progetto della riunione, scheda RAID, estrazione AI.
             document.getElementById('meetingTextRaid')?.addEventListener('click', () => {
                 const id = document.getElementById('meetingTextModal').dataset.eventId || '';
-                if (id) window.open(`pm.html?${new URLSearchParams({ da_riunione: id })}`, '_blank');
+                if (id) apriPagina(`pm.html?${new URLSearchParams({ da_riunione: id })}`);
             });
             document.getElementById('recapTasksClose')?.addEventListener('click', close);
             document.getElementById('recapTasksCancel')?.addEventListener('click', close);
@@ -10840,6 +10950,7 @@
         // /api/meeting-panel (server.js): attività della riunione precedente con la casella
         // «fatto», To-Do, task Jira, quotazioni e quesiti MySupport del cliente/progetto.
         let meetingPanelId = null;
+        const MP_PREC_KEY = 'meetingPanelPrecedente:';
         async function openMeetingPanel(idCalendar, { auto = false } = {}) {
             const panel = document.getElementById('meetingPanel');
             const body = document.getElementById('meetingPanelBody');
@@ -10850,8 +10961,11 @@
                 panel.classList.add('open');
             }
             let d;
+            // Riunione precedente scelta con la tendina (ricordata nel browser per questa riunione).
+            let precedente = '';
+            try { precedente = localStorage.getItem(MP_PREC_KEY + idCalendar) || ''; } catch (e) { /* predefinita */ }
             try {
-                const r = await fetch(`${API_URL}/meeting-panel?id_calendar=${encodeURIComponent(idCalendar)}`, { headers: getAuthHeaders() });
+                const r = await fetch(`${API_URL}/meeting-panel?id_calendar=${encodeURIComponent(idCalendar)}${precedente ? `&precedente=${encodeURIComponent(precedente)}` : ''}`, { headers: getAuthHeaders() });
                 d = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
             } catch (e) {
@@ -10876,7 +10990,7 @@
             const r = d.riunione;
             document.getElementById('meetingPanelTitle').textContent = r.oggetto || 'Riunione';
             document.getElementById('meetingPanelSub').innerHTML = `${escapeHtml(r.cliente || '')}${r.progetto ? ` · ${escapeHtml(r.progetto)}` : ''}`
-                + (r.projectId ? ` · <a href="pm.html?projectId=${encodeURIComponent(r.projectId)}" target="_blank" rel="noopener">Cruscotto PM <i class="fas fa-up-right-from-square"></i></a>` : '');
+                + (r.projectId ? ` · <a href="pm.html?projectId=${encodeURIComponent(r.projectId)}" data-apri-pagina>Cruscotto PM <i class="fas fa-arrow-right"></i></a>` : '');
             const dataIt = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '');
             const sez = (titolo, icona, n, html, aperta = true) =>
                 `<details class="mp-sez"${aperta ? ' open' : ''}><summary><i class="fas ${icona}"></i> ${titolo}${n != null ? ` <span class="mp-n">${n}</span>` : ''}</summary>${html}</details>`;
@@ -10892,7 +11006,11 @@
                         <small>${a.owner ? `<i class="fas fa-user"></i> ${escapeHtml(a.owner)}` : '<i class="fas fa-user-slash"></i> senza owner'}${a.scadenza ? ` · entro il ${dataIt(a.scadenza)}` : ''}${a.task_id ? ' · To-Do creata' : ''}</small></span></label></li>`).join('')}</ul>`
                     : '<div class="mp-vuoto">Nessuna attività del recap interno per quella riunione.</div>';
                 nPrec = p.attivita.length ? `${p.attivita.filter((a) => a.fatto).length}/${p.attivita.length}` : null;
-                prec = `<p class="mp-meta">${escapeHtml(p.oggetto)} del ${dataIt(p.data)}</p>${att}`
+                // Tendina delle riunioni precedenti (con recap o attività): si sceglie quale considerare.
+                const elenco = Array.isArray(d.precedenti) && d.precedenti.length ? d.precedenti : [p];
+                const scegli = `<label class="mp-prec-scelta"><span>Riunione da considerare</span>
+                    <select data-mp-precedente>${elenco.map((x) => `<option value="${escapeHtml(x.id_calendar)}" ${x.id_calendar === p.id_calendar ? 'selected' : ''}>${dataIt(x.data)}${x.orario ? ` ${escapeHtml(x.orario)}` : ''} · ${escapeHtml(x.oggetto)}</option>`).join('')}</select></label>`;
+                prec = `${scegli}${att}`
                     + (p.recap ? `<details class="mp-recap"><summary>Recap di quella riunione</summary><div>${escapeHtml(p.recap).replace(/\n/g, '<br>')}</div></details>` : '');
             }
 
@@ -10990,12 +11108,37 @@
             initMeetingPanelMoveResize(panel);
             document.getElementById('meetingPanelClose')?.addEventListener('click', () => panel.classList.remove('open'));
             document.getElementById('meetingPanelRefresh')?.addEventListener('click', () => { if (meetingPanelId) openMeetingPanel(meetingPanelId); });
+            // Riapre la finestra dell'Assistente PM (chiusa con la X), con i messaggi di prima.
+            document.getElementById('meetingRecorderAssistente')?.addEventListener('click', () => {
+                const rec = meetingRec;
+                if (!window.AssistentePm || !rec || !rec.eventId) return;
+                // Senza sessione e con la registrazione in corso l'assistente si avvia ora: da qui
+                // in poi riceve audio o blocchi brevi (come all'avvio della registrazione).
+                window.AssistentePm.riapri({ eventId: rec.eventId, title: rec.title, registrazioneInCorso: !!rec.running }).then((modo) => {
+                    if (!modo || !rec.running || rec.assistente) return;
+                    rec.apMic = []; rec.apSys = []; rec.apLen = 0; rec.apScanFrom = 0; rec.apQuietRun = 0;
+                    rec.apFlushed = rec.flushedSamples + rec.bufferLen;
+                    rec.assistente = modo;
+                }).catch(() => {});
+            });
             document.getElementById('meetingRecorderPanel')?.addEventListener('click', () => {
                 if (meetingRec && meetingRec.eventId) openMeetingPanel(meetingRec.eventId);
+            });
+            // Link alle pagine di Projexa nel pannello: stessa scheda (apriPagina).
+            panel.addEventListener('click', (e) => {
+                const a = e.target.closest('a[data-apri-pagina]');
+                if (a) { e.preventDefault(); apriPagina(a.getAttribute('href')); }
             });
             document.addEventListener('click', (e) => {
                 const b = e.target.closest('.meeting-linea-btn');
                 if (b) { e.preventDefault(); openMeetingPanel(b.dataset.eventId); }
+            });
+            // Tendina «Riunione da considerare»: si ricarica il pannello con quella scelta.
+            panel.addEventListener('change', (e) => {
+                const sel = e.target.closest('select[data-mp-precedente]');
+                if (!sel || !meetingPanelId) return;
+                try { localStorage.setItem(MP_PREC_KEY + meetingPanelId, sel.value); } catch (err) { /* solo per ora */ }
+                openMeetingPanel(meetingPanelId);
             });
             // Caselle «fatto»: attività della riunione precedente e To-Do.
             panel.addEventListener('change', async (e) => {
@@ -11706,7 +11849,7 @@
             rec.stoppedReason = reason || '';
             // Assistente PM: si chiude con la registrazione (l'ultimo pezzo non gli serve più).
             rec.assistente = false;
-            if (window.AssistentePm) window.AssistentePm.ferma(rec.eventId);
+            if (window.AssistentePm) window.AssistentePm.ferma(rec.eventId, { daRegistrazione: true });
             clearInterval(rec.timer);
             // Smetti di catturare nuovo audio, ma tieni "running" ancora attivo per un istante
             // così i messaggi già in coda dal worklet vengono raccolti nel buffer (onmessage
@@ -14051,7 +14194,7 @@
                 const qs = new URLSearchParams({ clientId, modo });
                 if (modo === 'tutti' && anni.value) qs.set('anno', anni.value);
                 m.classList.remove('open');
-                window.open(`dossier-cliente.html?${qs.toString()}`, '_blank');
+                apriPagina(`dossier-cliente.html?${qs.toString()}`);
             };
             m.classList.add('open');
         }
@@ -15031,7 +15174,7 @@
         document.addEventListener('click', (e) => {
             if (!e.target.closest('#projCruscottoBtn')) return;
             if (!currentDetailArgument) return;
-            location.href = `pm.html?projectId=${encodeURIComponent(currentDetailArgument)}`;
+            apriPagina(`pm.html?projectId=${encodeURIComponent(currentDetailArgument)}`);
         });
         // Gantt: pagina gantt.html del progetto aperto, identificato dal solo projectId (il server
         // controlla proprietario / Manager in sola lettura). «Torna al Progetto» riapre questa scheda.
@@ -15046,7 +15189,7 @@
                 projectName: currentDetailLabel || '',
                 clientName: (projList && projList.label) || ''
             });
-            location.href = `gantt.html?${params.toString()}`;
+            apriPagina(`gantt.html?${params.toString()}`);
         });
         // Briefing pre-riunione dalla riga della riunione: serve il progetto collegato.
         document.addEventListener('click', (e) => {
@@ -15055,7 +15198,7 @@
             const assign = b.closest('.meeting-assign');
             const projectId = assign && assign.dataset.projectId;
             if (!projectId) { showNotification('Briefing: scegli prima il progetto della riunione', 'info'); return; }
-            window.open(`pm.html?${new URLSearchParams({ projectId, briefing: assign.dataset.eventId || '1' })}`, '_blank');
+            apriPagina(`pm.html?${new URLSearchParams({ projectId, briefing: assign.dataset.eventId || '1' })}`);
         });
         document.addEventListener('click', async (e) => {
             const btn = e.target.closest('#projOffertaBtn');
@@ -18876,7 +19019,7 @@
                 clientName: (projList && projList.label) || ''
             });
             if (readOnly) params.set('mode', 'view');
-            window.location.href = `gantt.html?${params.toString()}`;
+            apriPagina(`gantt.html?${params.toString()}`);
         }
 
         // Dopo una scrittura in una griglia (nuova riga, modifica, eliminazione, chiusura)
@@ -22134,6 +22277,7 @@
             initFlyoutResizers();
             applyScreenScale(); // adatta lo zoom dell'interfaccia alla preferenza "schermo"
             window.addEventListener('resize', adjustFixedHeightsForZoom);
+            initPaginaInterna();
             restoreProjectFromUrl(); // rientro da gantt.html: riapre il progetto di partenza
 
             // Carica dati dalle API
@@ -22260,10 +22404,20 @@
         </div>
     </div>
 
+    <div id="paginaInterna" role="region" aria-label="Pagina di Projexa">
+        <div class="pi-bar">
+            <button type="button" id="piIndietro" title="Pagina precedente"><i class="fas fa-arrow-left"></i> Indietro</button>
+            <button type="button" id="piDashboard" title="Torna alla dashboard"><i class="fas fa-house"></i> Dashboard</button>
+            <span class="pi-titolo" id="piTitolo"></span>
+            <span class="pi-nota" id="piNota"><i class="fas fa-circle"></i> Registrazione in corso: continua mentre navighi</span>
+        </div>
+        <iframe id="piFrame" title="Pagina di Projexa"></iframe>
+    </div>
     <div id="meetingRecorder" class="meeting-recorder" role="region" aria-label="Registrazione riunione" style="display: none;">
         <div class="meeting-recorder-head">
             <span class="meeting-recorder-dot" id="meetingRecorderDot"></span>
             <strong id="meetingRecorderTitle">Riunione</strong>
+            <button id="meetingRecorderAssistente" type="button" aria-label="Assistente PM" title="Riapri la finestra dell'Assistente PM (suggerimenti e trascrizione live)"><i class="fas fa-user-tie"></i></button>
             <button id="meetingRecorderPanel" type="button" aria-label="Linea della riunione" title="Linea della riunione: attività, To-Do, Jira, quotazioni, MySupport"><i class="fas fa-route"></i></button>
             <button id="meetingRecorderClose" type="button" aria-label="Chiudi" title="Chiudi"><i class="fas fa-times"></i></button>
         </div>

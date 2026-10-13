@@ -7746,21 +7746,30 @@ app.get('/api/meeting-panel', requireAuth, async (req, res) => {
       riunione.progetto = p ? p.nome : '';
     }
 
-    // Riunione precedente dello stesso progetto (o dello stesso cliente se non c'è progetto),
-    // con recap o attività: la più recente prima di questa.
+    // Riunioni precedenti dello stesso progetto (o dello stesso cliente senza progetto) con
+    // recap o attività: elenco per la tendina del pannello (l'utente sceglie quale considerare,
+    // query «precedente» = id_calendar); predefinita la più recente.
     let precedente = null;
+    const colsAtt = await getTableColumns('rec_meeting_attivita');
+    const conAttivita = colsAtt.size > 0;
     const prev = (await db.query(
-      `SELECT r.id_calendar, r.oggetto, r.data_calendar::text AS data, r.recap
+      `SELECT r.id_calendar, r.oggetto, r.data_calendar::text AS data, r.orario_calendar::text AS orario, r.recap
+              ${conAttivita ? `, (SELECT count(*)::int FROM rec_meeting_attivita a
+                                   WHERE a.tenant_id = r.tenant_id AND a.user_id = r.user_id AND a.id_calendar = r.id_calendar) AS n_att`
+                            : ', 0 AS n_att'}
          FROM rec_meeting r
         WHERE r.tenant_id = $1 AND r.user_id = $2 AND r.id_calendar <> $3
           AND ${m.project_id ? 'r.project_id::text = $4' : 'r.client_id::text = $4 AND r.project_id IS NULL'}
           AND (r.data_calendar < $5::date OR (r.data_calendar = $5::date AND COALESCE(r.orario_calendar, '00:00') < COALESCE($6::time, '23:59')))
         ORDER BY r.data_calendar DESC NULLS LAST, r.orario_calendar DESC NULLS LAST
-        LIMIT 5`,
-      [req.user.tenant_id, req.user.user_id, idCal, m.project_id || m.client_id, m.data || '2999-12-31', m.orario || null])).rows;
-    const colsAtt = await getTableColumns('rec_meeting_attivita');
-    const conAttivita = colsAtt.size > 0;
-    for (const r of prev) {
+        LIMIT 40`,
+      [req.user.tenant_id, req.user.user_id, idCal, m.project_id || m.client_id, m.data || '2999-12-31', m.orario || null])).rows
+      .filter((r) => r.n_att > 0 || stripMarkdown(String(r.recap || '')).trim())
+      .slice(0, 20);
+    const precedenti = prev.map((r) => ({ id_calendar: r.id_calendar, oggetto: r.oggetto || 'Riunione', data: r.data, orario: r.orario ? String(r.orario).slice(0, 5) : '' }));
+    const scelta = String(req.query.precedente || '');
+    const selezionate = prev.filter((r) => r.id_calendar === scelta);
+    for (const r of (selezionate.length ? selezionate : prev)) {
       let attivita = [];
       if (conAttivita) {
         attivita = (await db.query(
@@ -7775,7 +7784,7 @@ app.get('/api/meeting-panel', requireAuth, async (req, res) => {
       }
       const recap = stripMarkdown(String(r.recap || '')).trim();
       if (!recap && !attivita.length) continue; // né recap né attività: si guarda la precedente
-      precedente = { id_calendar: r.id_calendar, oggetto: r.oggetto || 'Riunione', data: r.data, recap: recap.slice(0, 6000), attivita };
+      precedente = { id_calendar: r.id_calendar, oggetto: r.oggetto || 'Riunione', data: r.data, orario: r.orario ? String(r.orario).slice(0, 5) : '', recap: recap.slice(0, 6000), attivita };
       break;
     }
 
@@ -7821,7 +7830,7 @@ app.get('/api/meeting-panel', requireAuth, async (req, res) => {
         });
       } catch (e) { console.error(`PANNELLO_RIUNIONE ${key}:`, e.message); }
     }
-    res.json({ riunione, precedente, todo, sezioni, puoSegnareAttivita: colsAtt.has('completata') });
+    res.json({ riunione, precedente, precedenti, todo, sezioni, puoSegnareAttivita: colsAtt.has('completata') });
   } catch (error) {
     console.error('❌ PANNELLO_RIUNIONE:', error.message);
     res.status(error.statusCode || 500).json({ error: error.message });

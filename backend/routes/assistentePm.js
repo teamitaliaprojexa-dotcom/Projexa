@@ -33,6 +33,7 @@
 // che rispondono direttamente in testo.
 // ============================================================================
 import express from 'express';
+import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
 import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getIntegration } from '../config/integrations.js';
@@ -73,12 +74,19 @@ const TURNO_TIMEOUT_MS = 90000;           // risposta che non arriva: si passa a
 // Audio live: ogni quanti ms si chiude il «turno» e Gemini valuta l'audio ascoltato. Il
 // rilevamento automatico delle pause di Gemini non va bene per una riunione: si parla quasi di
 // continuo e ogni nuova voce interromperebbe la risposta (che così non arriva mai).
-const AUDIO_TURNO_MS = Math.max(5000, Number(process.env.ASSISTENTE_PM_TURNO_AUDIO_MS) || 15000);
+const AUDIO_TURNO_MS = Math.max(5000, Number(process.env.ASSISTENTE_PM_TURNO_AUDIO_MS) || 30000);
+// 30 s (era 15, scelta utente 2026-10-13): con tratti più lunghi Gemini capisce se un punto è
+// già stato chiarito e interviene meno e meglio.
 const INATTIVA_MS = 4 * 3600000;          // sessione dimenticata aperta: chiusa dopo 4 ore
+const CONSERVA_MS = 2 * 3600000;          // messaggi tenuti dopo «Ferma» per l'export in Word
 const vero = (v) => v === true || v === 'true' || v === 't' || v === 1 || v === '1';
 const errore = (status, msg) => Object.assign(new Error(msg), { status });
 // Risposta «niente da dire» (il prompt chiede un punto): non si mostra.
 const SILENZIO_RE = /^[\s.…\-–—]*(ok|nessun suggerimento)?[\s.…\-–—]*$/i;
+// Si mostrano solo i suggerimenti che iniziano con una parola chiave del prompt: il resto
+// (es. «Io vi sento. C'è altro che posso fare?», il modello che parla alla riunione) si scarta.
+// Le risposte alle domande scritte dall'utente si mostrano sempre.
+const SUGGERIMENTO_RE = /^\W*(DOMANDA|RISCHIO|CR|ATTENZIONE|AGENDA)\s*:/i;
 
 // "tenant|utente|id_calendar" -> sessione
 const sessioni = new Map();
@@ -283,7 +291,11 @@ function gestisciMessaggio(s, ws, msg) {
     const testo = s.risposta.replace(/\s+\n/g, '\n').trim();
     s.risposta = '';
     s.valutazioni++;
-    const silenzio = !testo || SILENZIO_RE.test(testo);
+    const libera = s.rispostaLibera;
+    s.rispostaLibera = false;
+    const scartata = !!testo && !SILENZIO_RE.test(testo) && !libera && !SUGGERIMENTO_RE.test(testo);
+    const silenzio = !testo || SILENZIO_RE.test(testo) || scartata;
+    if (scartata) console.log(`[ASSISTENTE PM] ${s.idCalendar}: risposta senza parola chiave scartata (${testo.length} caratteri)`);
     if (silenzio) s.silenzi++;
     else aggiungi(s, 'ai', testo);
     console.log(`[ASSISTENTE PM] ${s.idCalendar}: risposta ${s.valutazioni} (turni chiesti ${s.turniChiesti}) ${sc.interrupted ? 'interrotta' : 'completa'}, ${silenzio ? 'nessun suggerimento' : `suggerimento di ${testo.length} caratteri`}`);
@@ -358,30 +370,36 @@ function inviaAudio(s, pcmB64) {
 
 // Invia il prossimo testo in coda, uno alla volta: un nuovo messaggio a Gemini interrompe la
 // risposta in corso, quindi si aspetta la fine del turno (o TURNO_TIMEOUT_MS).
+// Elementi della coda: { testo, domanda } (domanda = scritta dall'utente: la risposta si mostra
+// anche senza parola chiave, vedi SUGGERIMENTO_RE).
 function prossimo(s) {
   if (s.chiusa || !s.pronta || s.inTurno || !s.coda.length || !s.ws) return;
-  const testo = s.coda.shift();
+  const voce = s.coda.shift();
   s.inTurno = true;
   s.risposta = '';
+  s.rispostaLibera = !!voce.domanda;
   s.timerTurno = setTimeout(() => { s.inTurno = false; prossimo(s); }, TURNO_TIMEOUT_MS);
   try {
-    s.ws.send(JSON.stringify({ clientContent: { turns: [{ role: 'user', parts: [{ text: testo }] }], turnComplete: true } }));
+    s.ws.send(JSON.stringify({ clientContent: { turns: [{ role: 'user', parts: [{ text: voce.testo }] }], turnComplete: true } }));
   } catch (e) {
-    s.coda.unshift(testo);
+    s.coda.unshift(voce);
     s.inTurno = false;
     clearTimeout(s.timerTurno);
   }
 }
 
-function accoda(s, testo) {
-  s.coda.push(testo);
+function accoda(s, testo, { domanda = false } = {}) {
+  s.coda.push({ testo, domanda });
   // Coda che cresce (Gemini lento): i blocchi di trascrizione in attesa si uniscono in uno.
-  if (s.coda.length > 3) s.coda.splice(0, s.coda.length, s.coda.join('\n\n'));
+  if (s.coda.length > 3) {
+    s.coda.splice(0, s.coda.length, { testo: s.coda.map((v) => v.testo).join('\n\n'), domanda: s.coda.some((v) => v.domanda) });
+  }
   prossimo(s);
 }
 
 function chiudi(s, rimuovi = true) {
   s.chiusa = true;
+  if (!s.chiusaIl) s.chiusaIl = Date.now();
   clearTimeout(s.timerTurno);
   clearInterval(s.timerAudio);
   clearTimeout(s.timerRisposta);
@@ -393,7 +411,9 @@ function chiudi(s, rimuovi = true) {
 // Sessioni dimenticate aperte (pagina chiusa senza fermare la registrazione).
 setInterval(() => {
   const limite = Date.now() - INATTIVA_MS;
-  for (const s of sessioni.values()) if (s.ultimoUso < limite) chiudi(s);
+  for (const s of sessioni.values()) {
+    if (s.chiusa ? (s.chiusaIl || 0) < Date.now() - CONSERVA_MS : s.ultimoUso < limite) chiudi(s);
+  }
 }, 15 * 60000).unref();
 
 function sessioneDi(req, idCalendar) {
@@ -450,9 +470,10 @@ router.post('/avvia', requireAuth, async (req, res) => {
     if (vecchia) chiudi(vecchia); // registrazione ripresa: sessione nuova
     const s = {
       chiave: k, idCalendar, apiKey, modalita, handle: null, ws: null, pronta: false, avviata: false, chiusa: false,
+      titolo: String(b.titolo || '').trim().slice(0, 200) || 'Riunione', creataIl: Date.now(), chiusaIl: 0,
       istruzioni: await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita),
       coda: [], inTurno: false, risposta: '', ascoltato: '', attesaAudio: [], timerTurno: null, riconnessioni: 0,
-      timerAudio: null, attivitaAperta: false, audioNuovo: false, valutazioni: 0, silenzi: 0,
+      timerAudio: null, attivitaAperta: false, audioNuovo: false, valutazioni: 0, silenzi: 0, rispostaLibera: false,
       attesaRisposta: false, timerRisposta: null, turniChiesti: 0, senzaRisposta: 0,
       modelloIdx: 0, contestoRipresa: '',
       messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve()
@@ -526,7 +547,7 @@ router.post('/chiedi', requireAuth, (req, res) => {
   if (!testo) return res.status(400).json({ error: 'Scrivi una domanda' });
   // mostra: testo breve per la finestra (pulsante «Suggerisci»), altrimenti la domanda stessa.
   aggiungi(s, 'utente', String(b.mostra || '').trim().slice(0, 200) || testo);
-  accoda(s, `DOMANDA SCRITTA DA CHI TI USA (rispondi in modo diretto e breve):\n${testo}`);
+  accoda(s, `DOMANDA SCRITTA DA CHI TI USA (rispondi in modo diretto e breve):\n${testo}`, { domanda: true });
   res.json({ ok: true });
 });
 
@@ -538,6 +559,8 @@ router.get('/messaggi', requireAuth, (req, res) => {
   s.ultimoUso = Date.now();
   res.json({
     attiva: !s.chiusa,
+    modalita: s.modalita,
+    titolo: s.titolo,
     collegata: s.pronta,
     inAttesa: s.inTurno || s.coda.length > 0,
     // Quante volte Gemini ha valutato la riunione e quante senza suggerimenti (per la finestra).
@@ -550,10 +573,52 @@ router.get('/messaggi', requireAuth, (req, res) => {
 });
 
 // Fine registrazione (o chiusura della finestra). Body: { id_calendar }.
+// La sessione si chiude con Gemini ma i messaggi restano CONSERVA_MS (export in Word dalla
+// finestra rimasta aperta dopo «Ferma»).
 router.post('/ferma', requireAuth, (req, res) => {
   const s = sessioneDi(req, idDa((req.body || {}).id_calendar));
-  if (s) chiudi(s);
+  if (s && !s.chiusa) chiudi(s, false);
   res.json({ ok: true });
+});
+
+// Export in Word: prima i suggerimenti (con le domande scritte e le risposte), poi la
+// trascrizione live. Query: id_calendar. Funziona durante la sessione e fino a CONSERVA_MS
+// dopo «Ferma».
+router.get('/export', requireAuth, async (req, res) => {
+  try {
+    const s = sessioneDi(req, idDa(req.query.id_calendar));
+    if (!s) return res.status(404).json({ error: 'Sessione dell\'assistente non più disponibile (i messaggi restano 2 ore dopo la fine della registrazione)' });
+    const ora = (iso) => new Date(iso).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Rome' });
+    const riga = (m, chi) => new Paragraph({
+      spacing: { after: 120 },
+      children: [new TextRun({ text: `${ora(m.ora)}${chi ? ` · ${chi}` : ''}  `, bold: true, color: '6B7280' }),
+        ...String(m.testo).split('\n').flatMap((t, i) => (i ? [new TextRun({ text: t, break: 1 })] : [new TextRun({ text: t })]))]
+    });
+    const suggerimenti = s.messaggi.filter((m) => m.tipo === 'ai' || m.tipo === 'utente');
+    const trascrizione = s.messaggi.filter((m) => m.tipo === 'trascrizione');
+    const vuoto = (t) => new Paragraph({ children: [new TextRun({ text: t, italics: true, color: '6B7280' })] });
+    const giorno = new Date(s.creataIl).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' });
+    const children = [
+      new Paragraph({ text: `Assistente PM – ${s.titolo}`, heading: HeadingLevel.TITLE }),
+      new Paragraph({ spacing: { after: 240 }, children: [new TextRun({
+        text: `Riunione del ${giorno} · ${s.modalita === 'audio' ? 'Audio live' : 'Testo'} · ${MODELLI[s.modelloIdx]}`, color: '6B7280' })] }),
+      new Paragraph({ text: 'Suggerimenti dell\'assistente', heading: HeadingLevel.HEADING_1 }),
+      ...(suggerimenti.length ? suggerimenti.map((m) => riga(m, m.tipo === 'utente' ? 'Tu' : 'Assistente')) : [vuoto('Nessun suggerimento.')]),
+      new Paragraph({ text: 'Trascrizione live', heading: HeadingLevel.HEADING_1, spacing: { before: 360 } }),
+      new Paragraph({ spacing: { after: 160 }, children: [new TextRun({ italics: true, color: '6B7280', text: s.modalita === 'audio'
+        ? 'Testo di ciò che Gemini ha sentito (non è la trascrizione ufficiale della riunione).'
+        : 'Pezzi di riunione trascritti da Projexa per l\'assistente (non è la trascrizione ufficiale della riunione).' })] }),
+      ...(trascrizione.length ? trascrizione.map((m) => riga(m, '')) : [vuoto('Nessun testo.')])
+    ];
+    const buf = await Packer.toBuffer(new Document({ creator: 'Projexa', title: `Assistente PM – ${s.titolo}`, sections: [{ children }] }));
+    const nome = `Assistente PM - ${s.titolo} - ${giorno.replace(/\//g, '-')}.docx`.replace(/[\\/:*?"<>|]+/g, ' ');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="assistente-pm.docx"; filename*=UTF-8''${encodeURIComponent(nome)}`);
+    res.send(buf);
+  } catch (e) {
+    console.error('❌ [ASSISTENTE PM] export:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;

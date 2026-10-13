@@ -102,6 +102,7 @@
             <div class="apm-head" title="Trascina per spostare · doppio clic: posizione iniziale">
                 <span class="apm-dot"></span>
                 <span class="apm-title">Assistente PM<span class="apm-sub"></span></span>
+                <button type="button" class="apm-word" title="Esporta in Word: suggerimenti e trascrizione live"><i class="fas fa-file-word"></i></button>
                 <button type="button" class="apm-close" title="Chiudi l'assistente (la registrazione continua)"><i class="fas fa-xmark"></i></button>
             </div>
             <div class="apm-tabs">
@@ -127,7 +128,16 @@
         inputEl = win.querySelector('textarea');
         sendEl = win.querySelector('.apm-send');
 
-        win.querySelector('.apm-close').addEventListener('click', () => { if (stato) ferma(stato.eventId); });
+        // X: con la sessione avviata (o terminata) la finestra si NASCONDE soltanto: l'assistente
+        // continua ad ascoltare fino a «Ferma» e la finestra si riapre con i messaggi dal pulsante
+        // «Assistente PM» del riquadro della registrazione (riapri). Durante la scelta della
+        // modalità, o se l'avvio non è riuscito, la X annulla.
+        win.querySelector('.apm-close').addEventListener('click', () => {
+            if (!stato) return;
+            if (stato.modalita) win.classList.remove('open');
+            else ferma(stato.eventId);
+        });
+        win.querySelector('.apm-word').addEventListener('click', esporta);
         win.querySelectorAll('.apm-tabs button').forEach((b) => b.addEventListener('click', () => {
             if (!stato) return;
             stato.tab = b.dataset.tab;
@@ -261,7 +271,7 @@
                 }
                 aggiornaStato(d.collegata);
                 disegna(false);
-                if (!s.attiva) { clearInterval(s.timer); s.timer = null; }
+                if (!s.attiva) { clearInterval(s.timer); s.timer = null; s.terminata = true; }
             }
         } catch (e) { /* rete momentaneamente assente: si riprova al prossimo giro */ }
     }
@@ -376,20 +386,76 @@
         disegna(true);
     }
 
-    // Fine registrazione (o X della finestra): chiude la sessione e la finestra.
-    function ferma(eventId) {
-        if (!stato || (eventId && stato.eventId !== eventId)) return;
-        const id = stato.eventId;
-        if (stato.timer) clearInterval(stato.timer);
-        if (stato.scelta) stato.scelta(null);
-        stato = null;
-        if (win) { win.classList.remove('open'); win.classList.remove('apm-scegli'); }
-        fetch(`${API_URL}/assistente-pm/ferma`, {
+    const conMessaggi = (s) => !!(s && s.modalita && s.messaggi.some((m) => ['ai', 'utente', 'trascrizione'].includes(m.tipo)));
+
+    // Fine registrazione (daRegistrazione) o X della finestra: chiude la sessione con Gemini.
+    // A fine registrazione, se ci sono suggerimenti o trascrizione, la finestra RESTA APERTA
+    // per l'export in Word (il server conserva i messaggi 2 ore); la si chiude con la X.
+    async function ferma(eventId, { daRegistrazione = false } = {}) {
+        const s = stato;
+        if (!s || (eventId && s.eventId !== eventId)) return;
+        if (s.terminata) { chiudiFinestra(); return; } // X dopo la fine: solo la finestra
+        if (s.timer) clearInterval(s.timer);
+        s.timer = null;
+        if (s.scelta) s.scelta(null);
+        const tieni = daRegistrazione && conMessaggi(s);
+        const chiusa = fetch(`${API_URL}/assistente-pm/ferma`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...auth() },
-            body: JSON.stringify({ id_calendar: id }),
+            body: JSON.stringify({ id_calendar: s.eventId }),
             keepalive: true
         }).catch(() => {});
+        if (!tieni) { chiudiFinestra(); return; }
+        s.attiva = false;
+        s.terminata = true;
+        await chiusa;
+        await leggi(); // ultimi messaggi arrivati prima della chiusura
+        if (s !== stato) return;
+        s.messaggi.push({ n: 0, tipo: 'info', ora: new Date().toISOString(),
+            testo: 'Registrazione fermata: l\'assistente è chiuso. Usa il pulsante Word in alto per conservare suggerimenti e trascrizione (disponibili per 2 ore), poi chiudi la finestra con la X.' });
+        aggiornaStato(false);
+        disegna(true);
+    }
+
+    function chiudiFinestra() {
+        if (stato && stato.timer) clearInterval(stato.timer);
+        if (stato && stato.scelta) stato.scelta(null);
+        stato = null;
+        if (win) { win.classList.remove('open'); win.classList.remove('apm-scegli'); }
+    }
+
+    // Export in Word (GET /assistente-pm/export): suggerimenti e poi trascrizione live.
+    async function esporta() {
+        const s = stato;
+        if (!s || !s.modalita) return;
+        const btn = win.querySelector('.apm-word');
+        btn.disabled = true;
+        try {
+            const r = await fetch(`${API_URL}/assistente-pm/export?id_calendar=${encodeURIComponent(s.eventId)}`, { headers: auth() });
+            if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                throw new Error(d.error || `Errore ${r.status}`);
+            }
+            const blob = await r.blob();
+            const cd = r.headers.get('Content-Disposition') || '';
+            const m = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+            const nome = m ? decodeURIComponent(m[1]) : 'Assistente PM.docx';
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = nome;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+        } catch (e) {
+            if (s === stato) {
+                s.messaggi.push({ n: 0, tipo: 'errore', testo: `Export non riuscito: ${e.message}`, ora: new Date().toISOString() });
+                disegna(true);
+            }
+        } finally {
+            btn.disabled = false;
+        }
     }
 
     const attivo = (eventId) => !!(stato && stato.attiva && stato.eventId === eventId);
@@ -454,5 +520,46 @@
         }
     }
 
-    window.AssistentePm = { avvia, ferma, attivo, inviaBlocco, inviaAudio };
+    // Riapre la finestra (chiusa con la X, o dopo un ricaricamento della pagina) con i messaggi
+    // della sessione, attiva o terminata da meno di 2 ore. Se per la riunione non c'è nessuna
+    // sessione e la registrazione è in corso, la avvia come all'inizio: restituisce allora la
+    // modalità scelta ('testo' | 'audio'), come avvia; altrimenti null.
+    async function riapri({ eventId, title, registrazioneInCorso = false }) {
+        if (!eventId) return null;
+        crea();
+        if (stato && stato.eventId === eventId && stato.modalita) {
+            win.classList.add('open');
+            win._applyGeom();
+            disegna(true);
+            if (!stato.terminata) leggi();
+            return null;
+        }
+        let d = {};
+        try {
+            const r = await fetch(`${API_URL}/assistente-pm/messaggi?id_calendar=${encodeURIComponent(eventId)}&dopo=0`, { headers: auth() });
+            d = await r.json().catch(() => ({}));
+        } catch (e) { /* server non raggiungibile */ }
+        const messaggi = Array.isArray(d.messaggi) ? d.messaggi : [];
+        if (!d.modalita) {
+            // Nessuna sessione: con la registrazione in corso si avvia (scelta della modalità).
+            if (registrazioneInCorso) return avvia({ eventId, title });
+            apri(eventId, title);
+            mostraErrore('Nessuna sessione dell\'assistente per questa riunione (i messaggi restano 2 ore dopo la fine della registrazione).');
+            return null;
+        }
+        apri(eventId, d.titolo || title, 'Gemini');
+        const s = stato;
+        s.modalita = d.modalita;
+        s.messaggi = messaggi;
+        s.ultimo = messaggi.length ? messaggi[messaggi.length - 1].n : 0;
+        s.attiva = !!d.attiva;
+        s.terminata = !d.attiva;
+        subEl.textContent = `· Gemini · ${d.modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.title}`;
+        if (s.attiva) { s.timer = setInterval(leggi, POLL_MS); leggi(); }
+        aggiornaStato(!!d.collegata);
+        disegna(true);
+        return null;
+    }
+
+    window.AssistentePm = { avvia, ferma, attivo, inviaBlocco, inviaAudio, riapri };
 })();
