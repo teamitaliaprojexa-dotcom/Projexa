@@ -4820,6 +4820,7 @@
                                 <label class="todo-multiselect-option"><input type="checkbox" value="week"> Questa settimana</label>
                                 <label class="todo-multiselect-option"><input type="checkbox" value="month"> Questo mese</label>
                                 <label class="todo-multiselect-option"><input type="checkbox" value="overdue"> In ritardo</label>
+                                <label class="todo-multiselect-option"><input type="checkbox" value="none"> Senza scadenza</label>
                                 <div class="todo-multiselect-divider"></div>
                                 <button type="button" class="todo-multiselect-clear" data-clear="date">Deseleziona tutto</button>
                             </div>
@@ -7090,7 +7091,8 @@
                 };
 
                 filtered = filtered.filter(todo => {
-                    if (!todo.due_date) return false;
+                    // «Senza scadenza»: task senza due_date (le altre scelte le escludono).
+                    if (!todo.due_date) return currentDateFilter.includes('none');
                     const dueDate = parseTodoDate(todo.due_date);
                     dueDate.setHours(0, 0, 0, 0);
                     return currentDateFilter.some(option => matchesDateOption(dueDate, option));
