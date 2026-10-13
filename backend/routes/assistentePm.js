@@ -6,13 +6,18 @@
 // Registra della riga o «Registra» della barra laterale) la dashboard apre la finestra
 // «Assistente PM» (sito/js/assistente-pm.js). Fermando la registrazione la sessione si chiude.
 //
-// La TRASCRIZIONE LA FA SEMPRE PROJEXA (Whisper sulla VM), mai Gemini: oltre ai blocchi
-// normali da ~2 minuti (trascrizione della riunione, coda di jobs/meetingTranscription.js) il
-// browser invia blocchi BREVI (~25 s) solo per l'assistente: il server li trascrive subito
-// (trascriviBloccoBreve, non salvati nella riunione) e ne manda il TESTO a una sessione
-// Gemini Live aperta dal server con la chiave dell'utente (che non va mai al browser). Gemini
-// fa da project manager senior e risponde in testo; la finestra legge risposte e trascrizione
-// con GET /messaggi ogni pochi secondi. L'utente può anche scrivere una domanda (/chiedi).
+// All'apertura la finestra chiede la MODALITÀ (scelta dell'utente a ogni registrazione):
+//  - TESTO: la trascrizione la fa Projexa (Whisper sulla VM), non Gemini. Oltre ai blocchi
+//    normali da ~2 minuti (trascrizione della riunione, coda di jobs/meetingTranscription.js) il
+//    browser invia blocchi BREVI (~10 s) solo per l'assistente: il server li trascrive subito
+//    (trascriviBloccoBreve, non salvati nella riunione) e ne manda il TESTO a Gemini;
+//  - AUDIO LIVE: il browser manda l'audio della riunione in tempo reale (pezzi da ~0,5 s,
+//    POST /audio) e il server lo inoltra a Gemini, che lo ascolta e risponde in testo. Il
+//    testo di ciò che Gemini ha sentito compare solo nella finestra (non è salvato): la
+//    trascrizione della riunione resta sempre quella di Projexa.
+// La sessione Gemini Live la apre il server con la chiave dell'utente (che non va mai al
+// browser). Gemini fa da project manager senior e risponde in testo; la finestra legge risposte
+// e trascrizione con GET /messaggi ogni pochi secondi. L'utente può anche scrivere una domanda.
 //
 // Sessioni in memoria (un solo processo Node, PM2 fork): un riavvio del server le chiude e la
 // finestra lo segnala. Gemini chiude la connessione ogni ~10 minuti con «goAway»: si riapre con
@@ -42,6 +47,11 @@ const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativel
 // AI gestite per ora dall'Assistente PM (voci dell'elenco del campo).
 const AI_SUPPORTATE = { gemini: { provider: 'Gemini', prefix: 'gemini' } };
 const MAX_DATI = 40000;
+// Compressione del contesto (token): oltre COMPRESSIONE_DA si torna a COMPRESSIONE_A.
+const COMPRESSIONE_DA = Number(process.env.GEMINI_LIVE_TRIGGER_TOKENS) || 48000;
+const COMPRESSIONE_A = Number(process.env.GEMINI_LIVE_TARGET_TOKENS) || 24000;
+const MAX_AUDIO_LIVE_BYTES = 256 * 1024; // pezzo di audio live: ~0,5 s = 16 KB
+const MAX_ATTESA_AUDIO = 20;              // pezzi tenuti mentre Gemini si ricollega (~10 s)
 const MAX_AUDIO_BYTES = 3 * 1024 * 1024;  // blocco breve: ~30 s di WAV 16 kHz = ~1 MB
 const MAX_MESSAGGI = 400;                 // messaggi tenuti per la finestra
 const MAX_RICONNESSIONI = 5;              // di fila, senza una risposta riuscita in mezzo
@@ -95,13 +105,20 @@ async function datiRiunione(user, idCalendar, titolo) {
   return { riunione, dati };
 }
 
-async function istruzioni(user, idCalendar, titolo) {
+// {{INGRESSO}} del prompt: cosa riceve Gemini, secondo la modalità scelta nella finestra.
+const INGRESSO = {
+  testo: 'Ricevi la trascrizione della riunione a pezzi brevi di circa 10 secondi, man mano che viene detta (una frase può continuare nel pezzo successivo; righe «[ora] Nome: testo», dove «Partecipanti» sono le altre persone collegate).',
+  audio: 'Ascolti in tempo reale l\'audio della riunione: la voce di chi ti usa (dal suo microfono) e quella degli altri partecipanti.'
+};
+
+async function istruzioni(user, idCalendar, titolo, modalita) {
   const { riunione, dati } = await datiRiunione(user, idCalendar, titolo);
   const utente = String(await speakerName(user) || '').trim() || user.email || '';
-  const vars = { UTENTE: utente, RIUNIONE: riunione, DATA: dataIt(oggiIso()), DATI: dati };
+  const vars = { UTENTE: utente, RIUNIONE: riunione, DATA: dataIt(oggiIso()), DATI: dati, INGRESSO: INGRESSO[modalita] };
   let tpl = (await getPromptFor('ASSISTENTE_PM', user)).testo;
+  if (!tpl.includes('{{INGRESSO}}')) tpl = `{{INGRESSO}}\n${tpl}`;
   if (!tpl.includes('{{DATI}}')) tpl += '\n\nDATI\n{{DATI}}';
-  return tpl.replace(/\{\{(UTENTE|RIUNIONE|DATA|DATI)\}\}/g, (x, k) => vars[k]);
+  return tpl.replace(/\{\{(UTENTE|RIUNIONE|DATA|DATI|INGRESSO)\}\}/g, (x, k) => vars[k]);
 }
 
 // ----------------------------------------------------------------------------
@@ -125,11 +142,17 @@ function connetti(s) {
       model: `models/${MODELLO}`,
       generationConfig: { responseModalities: [MODALITA] },
       systemInstruction: { parts: [{ text: s.istruzioni }] },
-      // Riunioni lunghe: il contesto più vecchio si comprime invece di chiudere la sessione.
-      contextWindowCompression: { slidingWindow: {} },
+      // Riunioni lunghe: il contesto più vecchio si scarta invece di chiudere la sessione.
+      // Soglia bassa anche per il COSTO: Gemini Live fattura a ogni risposta tutto il contesto
+      // della sessione (con l'audio cresce di ~25 token al secondo). Le istruzioni restano.
+      contextWindowCompression: { triggerTokens: COMPRESSIONE_DA, slidingWindow: { targetTokens: COMPRESSIONE_A } },
       sessionResumption: s.handle ? { handle: s.handle } : {}
     };
     if (MODALITA === 'AUDIO') setup.outputAudioTranscription = {};
+    // Audio live: Gemini rileva da solo le pause (risponde a fine frase) e restituisce il testo
+    // di ciò che ha sentito, mostrato SOLO nella finestra (scheda «Trascrizione live», non
+    // salvato: la trascrizione della riunione resta quella di Projexa).
+    if (s.modalita === 'audio') setup.inputAudioTranscription = {};
     ws.send(JSON.stringify({ setup }));
   });
   ws.addEventListener('message', (ev) => {
@@ -170,7 +193,14 @@ function connetti(s) {
 function gestisciMessaggio(s, ws, msg) {
   if (msg.setupComplete) {
     s.pronta = true;
-    if (!s.avviata) { s.avviata = true; aggiungi(s, 'info', 'Assistente collegato: ti suggerirà domande e punti da chiarire man mano che la riunione viene trascritta.'); }
+    if (!s.avviata) {
+      s.avviata = true;
+      aggiungi(s, 'info', s.modalita === 'audio'
+        ? 'Assistente collegato in AUDIO LIVE: ascolta la riunione e ti suggerirà domande e punti da chiarire.'
+        : 'Assistente collegato in modalità TESTO: ti suggerirà domande e punti da chiarire man mano che Projexa trascrive la riunione.');
+    }
+    // Audio arrivato mentre Gemini si collegava (o si ricollegava dopo «goAway»).
+    for (const pcm of s.attesaAudio.splice(0)) inviaAudio(s, pcm);
     prossimo(s);
     return;
   }
@@ -190,7 +220,13 @@ function gestisciMessaggio(s, ws, msg) {
     for (const p of sc.modelTurn.parts) if (p && p.text && !p.thought) s.risposta += p.text;
   }
   if (sc.outputTranscription && sc.outputTranscription.text) s.risposta += sc.outputTranscription.text;
+  // Audio live: testo di ciò che Gemini ha sentito, a frammenti; si mostra a frasi.
+  if (sc.inputTranscription && sc.inputTranscription.text) {
+    s.ascoltato += sc.inputTranscription.text;
+    if (s.ascoltato.length > 400 && /[.?!]\s*$/.test(s.ascoltato)) scriviAscoltato(s);
+  }
   if (sc.turnComplete || sc.interrupted) {
+    scriviAscoltato(s);
     const testo = s.risposta.replace(/\s+\n/g, '\n').trim();
     s.risposta = '';
     if (testo && !SILENZIO_RE.test(testo)) aggiungi(s, 'ai', testo);
@@ -199,6 +235,26 @@ function gestisciMessaggio(s, ws, msg) {
     clearTimeout(s.timerTurno);
     prossimo(s);
   }
+}
+
+function scriviAscoltato(s) {
+  const t = s.ascoltato.replace(/\s+/g, ' ').trim();
+  s.ascoltato = '';
+  if (t) aggiungi(s, 'trascrizione', t);
+}
+
+// Audio live verso Gemini: PCM 16 bit mono 16 kHz in base64. Se la connessione non è pronta
+// (avvio o riconnessione) si tengono gli ultimi pezzi e si inviano appena pronta.
+function inviaAudio(s, pcmB64) {
+  if (s.chiusa) return;
+  if (!s.pronta || !s.ws) {
+    s.attesaAudio.push(pcmB64);
+    if (s.attesaAudio.length > MAX_ATTESA_AUDIO) s.attesaAudio.shift();
+    return;
+  }
+  try {
+    s.ws.send(JSON.stringify({ realtimeInput: { audio: { data: pcmB64, mimeType: 'audio/pcm;rate=16000' } } }));
+  } catch { /* connessione in chiusura: il pezzo si perde */ }
 }
 
 // Invia il prossimo testo in coda, uno alla volta: un nuovo messaggio a Gemini interrompe la
@@ -249,47 +305,72 @@ const idDa = (v) => String(v || '').trim().slice(0, 300);
 // ROTTE
 // ----------------------------------------------------------------------------
 
-// Avvio della finestra all'inizio della registrazione. Body: { id_calendar, titolo }.
-// Risposta: { attiva:false } (interruttore spento) oppure { attiva, ai, modello }.
-router.post('/avvia', requireAuth, async (req, res) => {
-  try {
-    const b = req.body || {};
-    const idCalendar = idDa(b.id_calendar);
-    if (!idCalendar) throw errore(400, 'id_calendar richiesto');
-    const conf = await leggiImpostazione(req.user);
-    if (!conf.attiva) return res.json({ attiva: false });
-    const ai = AI_SUPPORTATE[conf.ai.toLowerCase()];
-    if (!ai) throw errore(400, `Assistente PM: «${conf.ai}» non è ancora supportata (per ora solo Gemini)`);
-    const el = await getIntegration(req.user.user_id, ai.provider);
-    const apiKey = el[`${ai.prefix}_api_key`];
-    if (!apiKey) throw errore(428, 'Assistente PM: collega la chiave API di Gemini in Impostazioni › AI');
+// AI e chiave dell'utente; errore comprensibile se manca qualcosa.
+async function aiUtente(user) {
+  const conf = await leggiImpostazione(user);
+  if (!conf.attiva) return null;
+  const ai = AI_SUPPORTATE[conf.ai.toLowerCase()];
+  if (!ai) throw errore(400, `Assistente PM: «${conf.ai}» non è ancora supportata (per ora solo Gemini)`);
+  const el = await getIntegration(user.user_id, ai.provider);
+  const apiKey = el[`${ai.prefix}_api_key`];
+  if (!apiKey) throw errore(428, 'Assistente PM: collega la chiave API di Gemini in Impostazioni › AI');
+  return { ai, apiKey };
+}
 
-    const k = chiave(req.user, idCalendar);
-    const vecchia = sessioni.get(k);
-    if (vecchia) chiudi(vecchia); // registrazione ripresa: sessione nuova
-    const s = {
-      chiave: k, idCalendar, apiKey, handle: null, ws: null, pronta: false, avviata: false, chiusa: false,
-      istruzioni: await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200)),
-      coda: [], inTurno: false, risposta: '', timerTurno: null, riconnessioni: 0,
-      messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve()
-    };
-    sessioni.set(k, s);
-    aggiungi(s, 'info', 'Collegamento a Gemini Live…');
-    connetti(s);
-    res.json({ attiva: true, ai: ai.provider, modello: MODELLO });
+// All'avvio della registrazione: assistente acceso? Se sì la finestra chiede la modalità.
+// Risposta: { attiva:false } oppure { attiva, ai }.
+router.get('/config', requireAuth, async (req, res) => {
+  try {
+    const x = await aiUtente(req.user);
+    res.json(x ? { attiva: true, ai: x.ai.provider } : { attiva: false });
   } catch (e) {
     if (!e.status) console.error('❌ [ASSISTENTE PM]', e.message);
     res.status(e.status || 500).json({ error: e.message });
   }
 });
 
-// Blocco audio breve (~25 s) solo per l'assistente: trascritto da Projexa, il testo va a
+// Avvio della sessione con la modalità scelta nella finestra.
+// Body: { id_calendar, titolo, modalita: 'testo' | 'audio' }.
+//   testo -> blocchi brevi trascritti da Projexa (POST /blocco), il testo va a Gemini;
+//   audio -> audio live a Gemini (POST /audio), Gemini risponde in testo.
+// Risposta: { attiva:false } (interruttore spento) oppure { attiva, ai, modello, modalita }.
+router.post('/avvia', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const idCalendar = idDa(b.id_calendar);
+    if (!idCalendar) throw errore(400, 'id_calendar richiesto');
+    const modalita = b.modalita === 'audio' ? 'audio' : 'testo';
+    const x = await aiUtente(req.user);
+    if (!x) return res.json({ attiva: false });
+    const { ai, apiKey } = x;
+
+    const k = chiave(req.user, idCalendar);
+    const vecchia = sessioni.get(k);
+    if (vecchia) chiudi(vecchia); // registrazione ripresa: sessione nuova
+    const s = {
+      chiave: k, idCalendar, apiKey, modalita, handle: null, ws: null, pronta: false, avviata: false, chiusa: false,
+      istruzioni: await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita),
+      coda: [], inTurno: false, risposta: '', ascoltato: '', attesaAudio: [], timerTurno: null, riconnessioni: 0,
+      messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve()
+    };
+    sessioni.set(k, s);
+    aggiungi(s, 'info', 'Collegamento a Gemini Live…');
+    connetti(s);
+    res.json({ attiva: true, ai: ai.provider, modello: MODELLO, modalita });
+  } catch (e) {
+    if (!e.status) console.error('❌ [ASSISTENTE PM]', e.message);
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// Blocco audio breve (8-15 s) solo per l'assistente: trascritto da Projexa, il testo va a
 // Gemini. Body: { id_calendar, audio_mix (WAV base64), energy_mic, energy_system, names, offset_sec }.
 // Risponde subito (202): la trascrizione prosegue in background, in ordine di arrivo.
 router.post('/blocco', requireAuth, (req, res) => {
   const b = req.body || {};
   const s = sessioneDi(req, idDa(b.id_calendar));
   if (!s || s.chiusa) return res.status(404).json({ error: 'Assistente PM non attivo per questa riunione' });
+  if (s.modalita !== 'testo') return res.status(409).json({ error: 'L\'assistente è in modalità audio live' });
   const audio = String(b.audio_mix || '');
   if (!audio) return res.status(400).json({ error: 'Audio mancante' });
   if (Math.floor(audio.length * 3 / 4) > MAX_AUDIO_BYTES) return res.status(413).json({ error: 'Blocco audio troppo grande' });
@@ -315,6 +396,21 @@ router.post('/blocco', requireAuth, (req, res) => {
     }
   });
   res.status(202).json({ ok: true });
+});
+
+// Audio live (modalità «audio»): un pezzo da ~0,5 s di PCM 16 bit mono 16 kHz.
+// Body: { id_calendar, pcm (base64) }. Va subito a Gemini, nulla viene salvato.
+router.post('/audio', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const s = sessioneDi(req, idDa(b.id_calendar));
+  if (!s || s.chiusa) return res.status(404).json({ error: 'Assistente PM non attivo per questa riunione' });
+  if (s.modalita !== 'audio') return res.status(409).json({ error: 'L\'assistente è in modalità testo' });
+  const pcm = String(b.pcm || '');
+  if (!pcm || !/^[A-Za-z0-9+/=]+$/.test(pcm)) return res.status(400).json({ error: 'Audio mancante' });
+  if (Math.floor(pcm.length * 3 / 4) > MAX_AUDIO_LIVE_BYTES) return res.status(413).json({ error: 'Pezzo audio troppo grande' });
+  s.ultimoUso = Date.now();
+  inviaAudio(s, pcm);
+  res.status(204).end();
 });
 
 // Domanda scritta dall'utente nella finestra. Body: { id_calendar, testo, mostra }.

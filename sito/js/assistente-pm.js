@@ -1,9 +1,12 @@
 // === Finestra «Assistente PM» durante la registrazione di una riunione ===
 //
 // Con Impostazioni › «Ai Assistente PM» acceso, all'avvio della registrazione (dashboard,
-// startMeetingRecording) si apre questa finestra: il server Projexa trascrive con Whisper dei
-// blocchi brevi (~25 s) inviati solo per l'assistente e ne manda il testo a Gemini Live, che
-// risponde con suggerimenti da project manager senior (backend/routes/assistentePm.js).
+// startMeetingRecording) si apre questa finestra, che chiede subito la modalità:
+//  - Testo: il server Projexa trascrive con Whisper dei blocchi brevi (~10 s) inviati solo per
+//    l'assistente e ne manda il testo a Gemini Live;
+//  - Audio live: l'audio della riunione va a Gemini in tempo reale (pezzi da ~0,5 s).
+// In entrambi i casi Gemini risponde in testo con suggerimenti da project manager senior
+// (backend/routes/assistentePm.js).
 // La finestra legge risposte e trascrizione ogni pochi secondi; si sposta trascinando la
 // testata e si allarga/allunga dai bordi e dall'angolo (posizione e dimensioni restano nel
 // browser). Fermando la registrazione la sessione si chiude.
@@ -12,6 +15,7 @@
 
     const API_URL = location.origin + '/api';
     const GEOM_KEY = 'assistentePmGeom';
+    const MODO_KEY = 'assistentePmModo'; // ultima modalità scelta (solo evidenziata)
     const POLL_MS = 3000;
     const MIN_W = 300, MIN_H = 220;
 
@@ -68,6 +72,18 @@
     .apm-rs-t { left: 0; top: 0; width: 100%; height: 4px; cursor: ns-resize; }
     .apm-rs-br { right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize; z-index: 2;
         background: linear-gradient(135deg, transparent 50%, #A5B4FC 50%); border-bottom-right-radius: 12px; }
+    .apm-win.apm-scegli .apm-tabs, .apm-win.apm-scegli .apm-foot { display: none; }
+    .apm-chiedi { margin: 4px 0 10px; font-weight: 600; color: #312E81; }
+    .apm-modo {
+        display: flex; gap: 12px; align-items: flex-start; width: 100%; text-align: left; cursor: pointer;
+        margin: 0 0 10px; padding: 12px; border: 1px solid #C7D2FE; border-radius: 10px; background: #fff; font: inherit; color: inherit;
+    }
+    .apm-modo:hover { background: #EEF2FF; border-color: #6366F1; }
+    .apm-modo.preferita { border-width: 2px; border-color: #6366F1; }
+    .apm-modo i { font-size: 22px; color: #4F46E5; margin-top: 2px; width: 26px; text-align: center; }
+    .apm-modo b { display: block; margin-bottom: 2px; }
+    .apm-modo em { display: block; font-style: normal; font-size: 12.5px; color: #475569; }
+    .apm-nota { font-size: 12px; color: #64748B; margin: 4px 0 0; }
     .apm-rs-bl { left: 0; bottom: 0; width: 14px; height: 14px; cursor: nesw-resize; z-index: 2; }
     `;
 
@@ -200,7 +216,9 @@
         }).join('');
         if (!voci.length) {
             html = stato.tab === 'trascrizione'
-                ? '<div class="apm-msg info">La trascrizione per l\'assistente compare qui ogni mezzo minuto circa.</div>'
+                ? (stato.modalita === 'audio'
+                    ? '<div class="apm-msg info">Qui compare il testo di ciò che Gemini sente (solo in questa finestra, non viene salvato).</div>'
+                    : '<div class="apm-msg info">La trascrizione per l\'assistente compare qui ogni 10 secondi circa.</div>')
                 : '<div class="apm-msg info">Collegamento in corso…</div>';
         }
         if (stato.tab === 'ai' && stato.inAttesa && stato.attiva) html += '<div class="apm-attesa"><i class="fas fa-ellipsis fa-fade"></i> l\'assistente sta leggendo…</div>';
@@ -261,43 +279,87 @@
         }
     }
 
-    // Avvio con la registrazione. Restituisce true se l'assistente è attivo (la dashboard
-    // inizia allora a mandare i blocchi brevi).
+    function mostraErrore(testo) {
+        stato.attiva = false;
+        stato.messaggi.push({ n: 0, tipo: 'errore', testo, ora: new Date().toISOString() });
+        win.classList.remove('apm-scegli');
+        aggiornaStato(false);
+        disegna(true);
+    }
+
+    // Avvio con la registrazione. Se l'assistente è acceso apre la finestra con la scelta della
+    // modalità e restituisce, a scelta fatta, 'testo' o 'audio' (la dashboard inizia allora a
+    // mandare i blocchi brevi o l'audio live); null se l'assistente è spento o non parte.
     async function avvia({ eventId, title }) {
-        if (!eventId) return false;
+        if (!eventId) return null;
         let d;
         try {
-            const r = await fetch(`${API_URL}/assistente-pm/avvia`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...auth() },
-                body: JSON.stringify({ id_calendar: eventId, titolo: title || '' })
-            });
+            const r = await fetch(`${API_URL}/assistente-pm/config`, { headers: auth() });
             d = await r.json().catch(() => ({}));
             if (!r.ok) {
                 // Interruttore acceso ma qualcosa manca (chiave Gemini, AI non supportata): si mostra.
                 crea();
                 apri(eventId, title);
-                stato.attiva = false;
-                stato.messaggi.push({ n: 0, tipo: 'errore', testo: d.error || `Errore ${r.status}`, ora: new Date().toISOString() });
-                aggiornaStato(false);
-                disegna(true);
-                return false;
+                mostraErrore(d.error || `Errore ${r.status}`);
+                return null;
             }
         } catch (e) {
-            return false; // server non raggiungibile: la registrazione prosegue senza assistente
+            return null; // server non raggiungibile: la registrazione prosegue senza assistente
         }
-        if (!d.attiva) return false; // interruttore spento
+        if (!d.attiva) return null; // interruttore spento
         crea();
         apri(eventId, title, d.ai);
-        stato.timer = setInterval(leggi, POLL_MS);
+        const s = stato;
+        const modalita = await new Promise((resolve) => { s.scelta = resolve; disegnaScelta(); });
+        if (!modalita || s !== stato) return null; // finestra chiusa o registrazione fermata
+        try {
+            const r = await fetch(`${API_URL}/assistente-pm/avvia`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...auth() },
+                body: JSON.stringify({ id_calendar: eventId, titolo: title || '', modalita })
+            });
+            const x = await r.json().catch(() => ({}));
+            if (s !== stato) return null;
+            if (!r.ok || !x.attiva) { mostraErrore(x.error || `Errore ${r.status}`); return null; }
+        } catch (e) {
+            if (s === stato) mostraErrore('Server non raggiungibile: assistente non avviato.');
+            return null;
+        }
+        s.modalita = modalita;
+        s.attiva = true;
+        win.classList.remove('apm-scegli');
+        subEl.textContent = `· ${d.ai} · ${modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.title}`;
+        s.timer = setInterval(leggi, POLL_MS);
         leggi();
-        return true;
+        return modalita;
+    }
+
+    // Scelta della modalità, appena si apre la finestra. L'ultima scelta resta evidenziata.
+    function disegnaScelta() {
+        let ultima = 'testo';
+        try { ultima = localStorage.getItem(MODO_KEY) === 'audio' ? 'audio' : 'testo'; } catch (e) { /* predefinita */ }
+        const voce = (m, icona, titolo, testo) => `<button type="button" class="apm-modo${m === ultima ? ' preferita' : ''}" data-modo="${m}">
+                <i class="fas ${icona}"></i><span><b>${titolo}</b><em>${testo}</em></span></button>`;
+        win.classList.add('apm-scegli');
+        bodyEl.innerHTML = `<p class="apm-chiedi">Come vuoi che l'assistente segua questa riunione?</p>`
+            + voce('testo', 'fa-file-lines', 'Testo', 'Projexa trascrive la riunione ogni ~10 secondi e manda il testo a Gemini. Consuma meno e la riunione non esce dal server di Projexa come audio.')
+            + voce('audio', 'fa-microphone-lines', 'Audio live', 'L\'audio della riunione va a Gemini in tempo reale: suggerimenti più rapidi, ma costa di più (Gemini fattura l\'audio ascoltato).')
+            + '<p class="apm-nota">In entrambi i casi Gemini risponde in testo qui e la trascrizione della riunione resta quella di Projexa.</p>';
+        bodyEl.querySelectorAll('.apm-modo').forEach((b) => b.addEventListener('click', () => {
+            const m = b.dataset.modo;
+            try { localStorage.setItem(MODO_KEY, m); } catch (e) { /* solo preferenza */ }
+            bodyEl.innerHTML = '<div class="apm-msg info">Collegamento a Gemini Live…</div>';
+            const r = stato && stato.scelta;
+            if (stato) stato.scelta = null;
+            if (r) r(m);
+        }));
     }
 
     function apri(eventId, title, ai) {
         if (stato && stato.timer) clearInterval(stato.timer);
-        stato = { eventId, ultimo: 0, timer: null, messaggi: [], tab: 'ai', attiva: true, inAttesa: false };
-        subEl.textContent = `${ai ? `· ${ai} ` : ''}· ${title || 'Riunione'}`;
+        if (stato && stato.scelta) stato.scelta(null);
+        stato = { eventId, title: title || 'Riunione', ultimo: 0, timer: null, messaggi: [], tab: 'ai', attiva: false, inAttesa: false, scelta: null, audio: null };
+        subEl.textContent = `${ai ? `· ${ai} ` : ''}· ${stato.title}`;
         win.querySelectorAll('.apm-tabs button').forEach((x) => x.classList.toggle('active', x.dataset.tab === 'ai'));
         win.classList.add('open');
         win._applyGeom();
@@ -310,8 +372,9 @@
         if (!stato || (eventId && stato.eventId !== eventId)) return;
         const id = stato.eventId;
         if (stato.timer) clearInterval(stato.timer);
+        if (stato.scelta) stato.scelta(null);
         stato = null;
-        if (win) win.classList.remove('open');
+        if (win) { win.classList.remove('open'); win.classList.remove('apm-scegli'); }
         fetch(`${API_URL}/assistente-pm/ferma`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...auth() },
@@ -332,5 +395,55 @@
         }).then((r) => { if (r.status === 404) leggi(); }).catch(() => {});
     }
 
-    window.AssistentePm = { avvia, ferma, attivo, inviaBlocco };
+    // Audio live: campioni PCM 16 bit mono 16 kHz (già mixati dalla dashboard), raccolti in
+    // pezzi da ~0,5 s e inviati in ordine. Se la rete rallenta e i pezzi in attesa si
+    // accumulano, si scartano i più vecchi: per un assistente dal vivo conta il presente.
+    const AUDIO_PEZZO = 8000;      // campioni = 0,5 s
+    const AUDIO_MAX_ATTESA = 6;    // pezzi in coda (~3 s)
+    function inviaAudio(eventId, samples) {
+        const s = stato;
+        if (!s || !s.attiva || s.modalita !== 'audio' || s.eventId !== eventId || !samples || !samples.length) return;
+        if (!s.audio) s.audio = { parti: [], len: 0, coda: [], inVolo: false };
+        const a = s.audio;
+        a.parti.push(samples);
+        a.len += samples.length;
+        if (a.len < AUDIO_PEZZO) return;
+        const pcm = new Int16Array(a.len);
+        let pos = 0;
+        for (const p of a.parti) { pcm.set(p, pos); pos += p.length; }
+        a.parti = []; a.len = 0;
+        a.coda.push(pcmBase64(pcm));
+        if (a.coda.length > AUDIO_MAX_ATTESA) a.coda.splice(0, a.coda.length - AUDIO_MAX_ATTESA);
+        spedisciAudio(s);
+    }
+
+    function pcmBase64(pcm) {
+        const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength); // little-endian come il browser
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        return btoa(bin);
+    }
+
+    async function spedisciAudio(s) {
+        const a = s.audio;
+        if (a.inVolo) return;
+        a.inVolo = true;
+        try {
+            while (a.coda.length && s === stato && s.attiva) {
+                const pcm = a.coda.shift();
+                try {
+                    const r = await fetch(`${API_URL}/assistente-pm/audio`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...auth() },
+                        body: JSON.stringify({ id_calendar: s.eventId, pcm })
+                    });
+                    if (r.status === 404) { leggi(); break; }
+                } catch (e) { /* rete assente: il pezzo si perde, si continua col successivo */ }
+            }
+        } finally {
+            a.inVolo = false;
+        }
+    }
+
+    window.AssistentePm = { avvia, ferma, attivo, inviaBlocco, inviaAudio };
 })();

@@ -87,7 +87,8 @@ export const PROMPT_FUNCTIONS = {
   // sistema della sessione Gemini Live. Il punto «.» come risposta = nessun suggerimento.
   ASSISTENTE_PM: {
     titolo: 'Assistente PM durante la riunione (Gemini Live)',
-    segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE']
+    // INGRESSO = frase su cosa riceve Gemini (trascrizione a pezzi o audio live), dalla modalità.
+    segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE', 'INGRESSO']
   }
 };
 

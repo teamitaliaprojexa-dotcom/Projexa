@@ -303,7 +303,7 @@ async function transcribeJob(job, baseUrl) {
   return formatLines(lines, job.offset_sec, job.start_label);
 }
 
-// Blocco breve (~25 s) dell'«Assistente PM» (routes/assistentePm.js): trascritto SUBITO, fuori
+// Blocco breve (8-15 s) dell'«Assistente PM» (routes/assistentePm.js): trascritto SUBITO, fuori
 // dalla coda, e NON salvato nella trascrizione della riunione (quella resta dei blocchi da ~2
 // minuti). Stessi prompt, attribuzione di chi parla e correzioni automatiche dei blocchi normali.
 // Servizio: whisper.cpp se configurato (più veloce), altrimenti il primo servizio standard.

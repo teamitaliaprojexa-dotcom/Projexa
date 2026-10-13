@@ -11517,12 +11517,15 @@
                 rec.bufferLen += (mic || sys).length;
                 recMonitorLevels(rec, rec.mic ? mic : null, rec.hasSystemAudio ? sys : null);
                 flushRecBuffer(rec, false);
-                // Assistente PM: stessi campioni in un buffer a parte, per i blocchi brevi.
-                if (rec.assistente) {
+                // Assistente PM: in modalità Testo stessi campioni in un buffer a parte, per i
+                // blocchi brevi; in modalità Audio live mixati e inviati subito a Gemini.
+                if (rec.assistente === 'testo') {
                     if (rec.mic) rec.apMic.push(mic);
                     if (rec.hasSystemAudio) rec.apSys.push(sys);
                     rec.apLen += (mic || sys).length;
-                    flushAssistBuffer(rec, false);
+                    flushAssistBuffer(rec);
+                } else if (rec.assistente === 'audio') {
+                    sendAssistAudio(rec, rec.mic ? mic : null, rec.hasSystemAudio ? sys : null);
                 }
             };
             merger.connect(rec.node);
@@ -11551,22 +11554,47 @@
             rec.apMic = []; rec.apSys = []; rec.apLen = 0; rec.apFlushed = 0; rec.apScanFrom = 0; rec.apQuietRun = 0;
             rec.assistente = false;
             if (window.AssistentePm) {
-                window.AssistentePm.avvia({ eventId: rec.eventId, title: rec.title }).then((ok) => {
-                    if (!ok || !rec.running) return;
-                    // L'audio arrivato prima della risposta non serve all'assistente: si parte da qui.
+                // La finestra chiede la modalità: 'testo' (blocchi brevi trascritti da Projexa)
+                // o 'audio' (audio live a Gemini); null = assistente spento o non avviato.
+                window.AssistentePm.avvia({ eventId: rec.eventId, title: rec.title }).then((modo) => {
+                    if (!modo || !rec.running) return;
+                    // L'audio arrivato prima della scelta non serve all'assistente: si parte da qui.
                     rec.apFlushed = rec.flushedSamples + rec.bufferLen;
-                    rec.assistente = true;
+                    rec.assistente = modo;
                 }).catch(() => {});
             }
         }
 
         // === BLOCCHI BREVI PER L'«ASSISTENTE PM» (sito/js/assistente-pm.js) ===
         // Oltre ai blocchi da ~2 minuti della trascrizione, con l'assistente attivo il browser
-        // manda ogni ~25 s un blocco breve che il server trascrive SUBITO (Whisper di Projexa)
+        // manda ogni ~10 s un blocco breve che il server trascrive SUBITO (Whisper di Projexa)
         // e passa in testo a Gemini; non entra nella trascrizione della riunione. Taglio alla
         // prima pausa dopo AP_MIN_SECONDS, comunque entro AP_MAX_SECONDS.
-        const AP_MIN_SECONDS = 20;
-        const AP_MAX_SECONDS = 30;
+        const AP_MIN_SECONDS = 7;
+        const AP_MAX_SECONDS = 10;
+
+        // Modalità Audio live: microfono + audio di sistema mixati come per la trascrizione
+        // (stesso guadagno della registrazione, ricalcolato ogni 2 s) e passati alla finestra,
+        // che li invia a Gemini a pezzi da ~0,5 s.
+        function sendAssistAudio(rec, mic, sys) {
+            const now = Date.now();
+            if (!rec.apGain || now - rec.apGain.at > 2000) {
+                const gain = (track) => {
+                    const level = recVoiceLevel(rec, track, null);
+                    return level ? Math.min(REC_MAX_GAIN, Math.max(1, REC_TARGET_VOICE / level)) : 1;
+                };
+                rec.apGain = { at: now, mic: mic ? gain('mic') : 1, sys: sys ? gain('system') : 1 };
+            }
+            const g = rec.apGain;
+            const len = (mic || sys).length;
+            const out = new Int16Array(len);
+            for (let i = 0; i < len; i++) {
+                // limitatore morbido come applyRecGain
+                const x = (mic ? mic[i] / 32768 * g.mic : 0) + (sys ? sys[i] / 32768 * g.sys : 0);
+                out[i] = Math.round(Math.tanh(x) * 32767);
+            }
+            window.AssistentePm.inviaAudio(rec.eventId, out);
+        }
         function flushAssistBuffer(rec) {
             const minLen = REC_SAMPLE_RATE * AP_MIN_SECONDS, maxLen = REC_SAMPLE_RATE * AP_MAX_SECONDS;
             if (rec.apLen < minLen) return;
