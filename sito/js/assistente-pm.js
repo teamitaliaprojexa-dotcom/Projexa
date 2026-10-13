@@ -223,8 +223,9 @@
         }
         if (stato.tab === 'ai' && stato.inAttesa && stato.attiva) html += '<div class="apm-attesa"><i class="fas fa-ellipsis fa-fade"></i> l\'assistente sta leggendo…</div>';
         // Contatore: si vede che Gemini lavora anche quando non ha nulla da suggerire.
-        if (stato.tab === 'ai' && stato.attiva && stato.valutazioni) {
-            html += `<div class="apm-msg info"><i class="fas fa-chart-simple"></i> Gemini ha valutato la riunione ${stato.valutazioni} volt${stato.valutazioni === 1 ? 'a' : 'e'}${stato.silenzi ? `, ${stato.silenzi} senza suggerimenti` : ''}.</div>`;
+        if (stato.tab === 'ai' && stato.attiva && (stato.valutazioni || stato.turniChiesti)) {
+            html += `<div class="apm-msg info"><i class="fas fa-chart-simple"></i> Gemini ha valutato la riunione ${stato.valutazioni} volt${stato.valutazioni === 1 ? 'a' : 'e'}${stato.silenzi ? `, ${stato.silenzi} senza suggerimenti` : ''}`
+                + (stato.modalita === 'audio' ? ` · turni chiesti ${stato.turniChiesti}${stato.senzaRisposta ? `, ${stato.senzaRisposta} senza risposta` : ''}` : '') + '.</div>';
         }
         bodyEl.innerHTML = html;
         if (forzaScroll || vicinoAlFondo) bodyEl.scrollTop = bodyEl.scrollHeight;
@@ -253,6 +254,8 @@
                 s.inAttesa = !!d.inAttesa;
                 s.valutazioni = Number(d.valutazioni) || 0;
                 s.silenzi = Number(d.silenzi) || 0;
+                s.turniChiesti = Number(d.turniChiesti) || 0;
+                s.senzaRisposta = Number(d.senzaRisposta) || 0;
                 if (eraAttiva && !s.attiva && !nuovi.some((m) => m.tipo === 'errore')) {
                     s.messaggi.push({ n: 0, tipo: 'errore', testo: 'Sessione dell\'assistente chiusa (server riavviato o errore): riavvia la registrazione per riaprirla.', ora: new Date().toISOString() });
                 }

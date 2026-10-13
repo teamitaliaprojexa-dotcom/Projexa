@@ -10882,7 +10882,7 @@
                 `<details class="mp-sez"${aperta ? ' open' : ''}><summary><i class="fas ${icona}"></i> ${titolo}${n != null ? ` <span class="mp-n">${n}</span>` : ''}</summary>${html}</details>`;
 
             // 1. Dalla riunione precedente
-            let prec = '<div class="mp-vuoto">Nessuna riunione precedente con recap per questo ' + (r.projectId ? 'progetto' : 'cliente') + '.</div>';
+            let prec = '<div class="mp-vuoto">Nessuna riunione precedente con recap per questo ' + (r.projectId ? 'progetto' : 'cliente (riunioni senza progetto)') + '.</div>';
             let nPrec = null;
             if (d.precedente) {
                 const p = d.precedente;
@@ -10902,14 +10902,14 @@
                     <label><input type="checkbox" data-mp-task="${escapeHtml(t.id)}" ${t.fatto ? 'checked' : ''}>
                     <span><b>${escapeHtml(t.titolo || '')}</b>${t.descrizione ? `<em>${escapeHtml(String(t.descrizione).slice(0, 220))}</em>` : ''}
                     <small>${t.assegnato ? `<i class="fas fa-user"></i> ${escapeHtml(t.assegnato)}` : 'non assegnata'}${t.scadenza ? ` · <span class="${t.scaduta ? 'mp-scaduta' : ''}">scadenza ${dataIt(t.scadenza)}${t.scaduta ? ' (scaduta)' : ''}</span>` : ''}</small></span></label></li>`).join('')}</ul>`
-                : '<div class="mp-vuoto">Nessuna To-Do aperta.</div>';
+                : '<div class="mp-vuoto">Nessuna To-Do aperta' + (r.projectId ? ' per questo progetto' : ' del cliente senza progetto') + '.</div>';
 
             // 3. Task Jira, quotazioni, MySupport
             const ICONE = { task: 'fa-list-check', quotazioni: 'fa-file-invoice-dollar', mysupport: 'fa-headset' };
             const altre = d.sezioni.map((s) => sez(escapeHtml(s.titolo), ICONE[s.key] || 'fa-table', s.righe.length,
                 s.righe.length ? `<div class="mp-tab"><table><thead><tr>${s.colonne.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>
                     <tbody>${s.righe.map((v) => `<tr>${v.map((x) => `<td>${escapeHtml(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
-                    : '<div class="mp-vuoto">Niente di aperto.</div>', s.righe.length > 0)).join('');
+                    : `<div class="mp-vuoto">Niente di aperto${s.ambito === 'progetto' ? ' collegato a questo progetto' : s.ambito === 'cliente' ? ' del cliente senza progetto' : ''}.</div>`, s.righe.length > 0)).join('');
 
             body.innerHTML = sez('Dalla riunione precedente', 'fa-clock-rotate-left', nPrec, prec)
                 + sez('To-Do', 'fa-square-check', aperte, todo) + altre;

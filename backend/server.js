@@ -7753,7 +7753,7 @@ app.get('/api/meeting-panel', requireAuth, async (req, res) => {
       `SELECT r.id_calendar, r.oggetto, r.data_calendar::text AS data, r.recap
          FROM rec_meeting r
         WHERE r.tenant_id = $1 AND r.user_id = $2 AND r.id_calendar <> $3
-          AND ${m.project_id ? 'r.project_id::text = $4' : 'r.client_id::text = $4'}
+          AND ${m.project_id ? 'r.project_id::text = $4' : 'r.client_id::text = $4 AND r.project_id IS NULL'}
           AND (r.data_calendar < $5::date OR (r.data_calendar = $5::date AND COALESCE(r.orario_calendar, '00:00') < COALESCE($6::time, '23:59')))
         ORDER BY r.data_calendar DESC NULLS LAST, r.orario_calendar DESC NULLS LAST
         LIMIT 5`,
@@ -7786,7 +7786,7 @@ app.get('/api/meeting-panel', requireAuth, async (req, res) => {
               COALESCE(rb.nominativo, t.assigned_to_text) AS assegnato
          FROM tasks t
          LEFT JOIN rubrica rb ON rb.id = t.assigned_to AND rb.tenant_id = t.tenant_id
-        WHERE t.tenant_id = $1 AND t.user_id = $2 AND ${m.project_id ? 't.project_id::text = $3' : 't.client_id::text = $3'}
+        WHERE t.tenant_id = $1 AND t.user_id = $2 AND ${m.project_id ? 't.project_id::text = $3' : 't.client_id::text = $3 AND t.project_id IS NULL'}
           AND (t.scadenza IS NULL OR t.scadenza >= CURRENT_DATE)
           AND (COALESCE(t.status, 'todo') <> 'completed' OR t.updated_at >= now() - interval '7 days')
         ORDER BY (t.status = 'completed'), t.due_date NULLS LAST
@@ -7794,7 +7794,10 @@ app.get('/api/meeting-panel', requireAuth, async (req, res) => {
       [req.user.tenant_id, req.user.user_id, m.project_id || m.client_id])).rows
       .map((t) => ({ ...t, fatto: t.stato === 'completed', scaduta: t.stato !== 'completed' && !!t.scadenza && t.scadenza < new Date().toISOString().slice(0, 10) }));
 
-    // Task Jira, quotazioni e MySupport del cliente (solo quelli non chiusi).
+    // Task Jira, quotazioni e MySupport del cliente (solo quelli non chiusi). Regola dell'utente
+    // (2026-10-13), uguale per To-Do e riunione precedente: riunione con cliente e progetto ->
+    // solo i dati di QUEL progetto; riunione con il solo cliente -> solo i dati del cliente SENZA
+    // progetto. MySupport, che non ha progetto, resta sempre del cliente.
     const sezioni = [];
     for (const key of PANNELLO_SEZIONI) {
       const sez = DOS_SEZIONI.find((s) => s.key === key);
@@ -7808,9 +7811,10 @@ app.get('/api/meeting-panel', requireAuth, async (req, res) => {
         const iStato = usate.findIndex((c) => /^stato/i.test(c));
         sezioni.push({
           key, titolo: key === 'task' ? 'Task Jira' : sez.titolo,
+          ambito: sez.perProgetto ? (m.project_id ? 'progetto' : 'cliente') : null,
           colonne: usate.map((c) => d.label(c)),
           righe: righe
-            .filter((x) => !sez.perProgetto || !m.project_id || !x.progetto || x.progetto === m.project_id)
+            .filter((x) => !sez.perProgetto || (m.project_id ? x.progetto === m.project_id : !x.progetto))
             .filter((x) => iStato < 0 || !PANNELLO_CHIUSO.test(String(x.valori[iStato] || '').trim()))
             .slice(0, 80)
             .map((x) => x.valori)

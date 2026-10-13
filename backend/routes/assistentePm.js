@@ -64,7 +64,8 @@ const MAX_DATI = 16000;
 const COMPRESSIONE_DA = Number(process.env.GEMINI_LIVE_TRIGGER_TOKENS) || 24000;
 const COMPRESSIONE_A = Number(process.env.GEMINI_LIVE_TARGET_TOKENS) || 12000;
 const MAX_AUDIO_LIVE_BYTES = 256 * 1024; // pezzo di audio live: ~0,5 s = 16 KB
-const MAX_ATTESA_AUDIO = 20;              // pezzi tenuti mentre Gemini si ricollega (~10 s)
+const MAX_ATTESA_AUDIO = 80;              // pezzi tenuti mentre Gemini si ricollega o risponde (~40 s)
+const ATTESA_RISPOSTA_MS = 25000;         // audio live: attesa massima della risposta a un turno
 const MAX_AUDIO_BYTES = 3 * 1024 * 1024;  // blocco breve: ~30 s di WAV 16 kHz = ~1 MB
 const MAX_MESSAGGI = 400;                 // messaggi tenuti per la finestra
 const MAX_RICONNESSIONI = 5;              // di fila, senza una risposta riuscita in mezzo
@@ -192,6 +193,9 @@ function connetti(s) {
     s.pronta = false;
     s.ws = null;
     s.attivitaAperta = false;
+    // Risposta persa con la connessione: l'audio messo da parte resta in attesaAudio e parte
+    // con la nuova connessione (setupComplete).
+    if (s.attesaRisposta) { s.attesaRisposta = false; clearTimeout(s.timerRisposta); }
     if (s.chiusa) return;
     // Risposta interrotta: il testo in attesa resta in coda e riparte con la nuova connessione.
     if (s.inTurno) { s.inTurno = false; clearTimeout(s.timerTurno); }
@@ -282,10 +286,11 @@ function gestisciMessaggio(s, ws, msg) {
     const silenzio = !testo || SILENZIO_RE.test(testo);
     if (silenzio) s.silenzi++;
     else aggiungi(s, 'ai', testo);
-    console.log(`[ASSISTENTE PM] ${s.idCalendar}: turno ${s.valutazioni} ${sc.interrupted ? 'interrotto' : 'completo'}, ${silenzio ? 'nessun suggerimento' : `suggerimento di ${testo.length} caratteri`}`);
+    console.log(`[ASSISTENTE PM] ${s.idCalendar}: risposta ${s.valutazioni} (turni chiesti ${s.turniChiesti}) ${sc.interrupted ? 'interrotta' : 'completa'}, ${silenzio ? 'nessun suggerimento' : `suggerimento di ${testo.length} caratteri`}`);
     s.riconnessioni = 0;
     s.inTurno = false;
     clearTimeout(s.timerTurno);
+    if (s.attesaRisposta) fineAttesaRisposta(s);
     prossimo(s);
   }
 }
@@ -304,21 +309,39 @@ function scriviAscoltato(s, soloFrasiFinite = false) {
 }
 
 // Fine del turno audio: Gemini valuta quanto ascoltato dall'ultimo turno (se c'è audio nuovo).
-// Il turno successivo si apre col prossimo pezzo di audio (inviaAudio).
+// Fino alla sua risposta (o ATTESA_RISPOSTA_MS) NON si apre un turno nuovo: aprirlo subito
+// (il pezzo di audio successivo arriva dopo mezzo secondo) annullava quasi sempre la risposta
+// in preparazione (prima prova reale 2026-10-13: 4 valutazioni in 35 minuti). L'audio che
+// arriva intanto si tiene da parte e parte appena arriva la risposta: non si perde nulla.
 function chiudiTurnoAudio(s) {
-  if (s.chiusa || !s.pronta || !s.ws || !s.attivitaAperta || !s.audioNuovo) return;
+  if (s.chiusa || !s.pronta || !s.ws || !s.attivitaAperta || !s.audioNuovo || s.attesaRisposta) return;
   try {
     s.ws.send(JSON.stringify({ realtimeInput: { activityEnd: {} } }));
     s.attivitaAperta = false;
     s.audioNuovo = false;
+    s.attesaRisposta = true;
+    s.turniChiesti++;
+    s.timerRisposta = setTimeout(() => {
+      if (!s.attesaRisposta) return;
+      s.senzaRisposta++;
+      console.warn(`[ASSISTENTE PM] ${s.idCalendar}: turno ${s.turniChiesti} senza risposta da Gemini dopo ${ATTESA_RISPOSTA_MS / 1000} s`);
+      fineAttesaRisposta(s);
+    }, ATTESA_RISPOSTA_MS);
   } catch { /* connessione in chiusura */ }
 }
 
+function fineAttesaRisposta(s) {
+  s.attesaRisposta = false;
+  clearTimeout(s.timerRisposta);
+  for (const pcm of s.attesaAudio.splice(0)) inviaAudio(s, pcm);
+}
+
 // Audio live verso Gemini: PCM 16 bit mono 16 kHz in base64. Se la connessione non è pronta
-// (avvio o riconnessione) si tengono gli ultimi pezzi e si inviano appena pronta.
+// (avvio o riconnessione) o si aspetta la risposta al turno appena chiuso, si tengono gli
+// ultimi pezzi e si inviano appena possibile.
 function inviaAudio(s, pcmB64) {
   if (s.chiusa) return;
-  if (!s.pronta || !s.ws) {
+  if (!s.pronta || !s.ws || s.attesaRisposta) {
     s.attesaAudio.push(pcmB64);
     if (s.attesaAudio.length > MAX_ATTESA_AUDIO) s.attesaAudio.shift();
     return;
@@ -361,6 +384,7 @@ function chiudi(s, rimuovi = true) {
   s.chiusa = true;
   clearTimeout(s.timerTurno);
   clearInterval(s.timerAudio);
+  clearTimeout(s.timerRisposta);
   try { if (s.ws) s.ws.close(1000, 'fine riunione'); } catch { /* già chiusa */ }
   s.ws = null;
   if (rimuovi) sessioni.delete(s.chiave);
@@ -429,6 +453,7 @@ router.post('/avvia', requireAuth, async (req, res) => {
       istruzioni: await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita),
       coda: [], inTurno: false, risposta: '', ascoltato: '', attesaAudio: [], timerTurno: null, riconnessioni: 0,
       timerAudio: null, attivitaAperta: false, audioNuovo: false, valutazioni: 0, silenzi: 0,
+      attesaRisposta: false, timerRisposta: null, turniChiesti: 0, senzaRisposta: 0,
       modelloIdx: 0, contestoRipresa: '',
       messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve()
     };
@@ -518,6 +543,8 @@ router.get('/messaggi', requireAuth, (req, res) => {
     // Quante volte Gemini ha valutato la riunione e quante senza suggerimenti (per la finestra).
     valutazioni: s.valutazioni,
     silenzi: s.silenzi,
+    turniChiesti: s.turniChiesti,
+    senzaRisposta: s.senzaRisposta,
     messaggi: s.messaggi.filter((m) => m.n > dopo)
   });
 });
