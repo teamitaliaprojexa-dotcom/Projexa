@@ -1159,9 +1159,11 @@ export function whisperCppUrls() {
 // Trascrizione di un blocco WAV con Gemini («modalità Trascrizione» = Gemini, chiave API
 // dell'utente). Gemini restituisce le frasi con inizio/fine in secondi (JSON con schema), nello
 // stesso formato dei segmenti di Whisper: { segments: [{ start, end, text }], provider }.
-// Modello: GEMINI_TRANSCRIBE_MODEL (predefinito gemini-flash-latest).
+// Modello: GEMINI_TRANSCRIBE_MODEL (predefinito gemini-flash-lite-latest).
 export async function transcribeAudioGemini(apiKey, audioBuffer, mime, contesto = '') {
-  const model = process.env.GEMINI_TRANSCRIBE_MODEL || 'gemini-flash-latest';
+  // Flash Lite: nel piano gratuito 500 richieste al giorno (Flash solo 20, finite in ~40 minuti di
+  // riunione con un blocco ogni 2 minuti).
+  const model = process.env.GEMINI_TRANSCRIBE_MODEL || 'gemini-flash-lite-latest';
   const istruzioni = [
     'Trascrivi fedelmente, parola per parola, il parlato di questo audio di una riunione di lavoro in italiano.',
     'Restituisci le frasi in ordine, ognuna con inizio e fine in secondi dall\'inizio dell\'audio (start, end, con i decimali) e il testo.',
