@@ -9,7 +9,8 @@
 // rec_meeting_chunks (audio cifrato) e il server lo elabora in background:
 //   1. trascrizione con Whisper: più servizi (WHISPER_URLS) lavorano IN PARALLELO, un
 //      blocco ciascuno; chi ha "modalità Trascrizione" = Background-Veloce usa whisper.cpp
-//      (WHISPER_CPP_URL);
+//      (WHISPER_CPP_URL), chi ha "Gemini" usa Gemini con la sua chiave (corsia a parte,
+//      Whisper di riserva);
 //   2. il testo del blocco (già formattato, cifrato) resta in coda finché i blocchi
 //      precedenti della stessa riunione non sono pronti: viene aggiunto a
 //      rec_meeting.trascrizione sempre nell'ordine giusto;
@@ -28,7 +29,8 @@ import { encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js
 import { SALTA_LOG_ON, SALTA_LOG_OFF, registraTestoRiunione } from '../config/audit.js';
 import { contestoAudit } from '../config/auditContext.js';
 import { notificaRiunione } from './notifiche.js';
-import { transcribeAudio, transcribeAudioCpp, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate } from '../routes/ai.js';
+import { getIntegration } from '../config/integrations.js';
+import { transcribeAudio, transcribeAudioCpp, transcribeAudioGemini, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate } from '../routes/ai.js';
 
 export const NOME_PROGRAMMA = 'meetingTranscription';
 
@@ -265,7 +267,40 @@ function formatLines(lines, offset, startLabel) {
   return add;
 }
 
-// Trascrive un blocco sul servizio Whisper indicato e restituisce il testo formattato.
+// ----------------------------------------------------------------------------
+// «MODALITÀ TRASCRIZIONE» = GEMINI (2026-10-13)
+// ----------------------------------------------------------------------------
+// I blocchi di chi ha scelto «Gemini» vanno a Gemini (chiave API dell'utente, chiamata
+// immediata: niente Batch, che il piano gratuito non ha) invece che a Whisper. Se Gemini non
+// risponde (chiave non collegata, limite del piano gratuito, errore) il blocco si trascrive
+// SUBITO con Whisper (whisper.cpp se c'è): nessun blocco resta indietro.
+const CORSIA_GEMINI = 'gemini';
+const GEMINI_PARALLELO = Math.max(1, Number(process.env.GEMINI_TRANSCRIBE_PARALLEL) || 2);
+let geminiOccupati = 0;
+// Avviso nel log una volta ogni 10 minuti per utente (es. piano gratuito esaurito).
+const avvisiGemini = new Map();
+
+async function trascriviAudio(user, audio, mime, baseUrl, prompt = '') {
+  if (baseUrl !== CORSIA_GEMINI) return transcribeAudio(user.user_id, audio, mime, baseUrl, prompt);
+  try {
+    const el = await getIntegration(user.user_id, 'Gemini');
+    if (!el.gemini_api_key) throw Object.assign(new Error('chiave API di Gemini non collegata'), { status: 428 });
+    // Il prompt di Whisper (titolo, partecipanti, cliente, termini) fa da contesto, senza la
+    // frase di stile che serve solo a Whisper.
+    return await transcribeAudioGemini(el.gemini_api_key, audio, mime, String(prompt || '').replace(PROMPT_STYLE, '').trim());
+  } catch (e) {
+    const k = `${user.tenant_id}|${user.user_id}`;
+    if (!avvisiGemini.has(k) || avvisiGemini.get(k) < Date.now()) {
+      console.warn(`[TRASCRIZIONE] Gemini non disponibile per ${user.email || user.user_id} (${e.message}): uso Whisper`);
+      avvisiGemini.set(k, Date.now() + 10 * 60000);
+    }
+    const riserva = whisperCppUrls()[0] || whisperUrls()[0] || null;
+    return transcribeAudio(user.user_id, audio, mime, riserva, prompt);
+  }
+}
+
+// Trascrive un blocco sul servizio Whisper indicato (o su Gemini, baseUrl = CORSIA_GEMINI) e
+// restituisce il testo formattato.
 //  - traccia unica (audio_mix): UNA trascrizione; per ogni frase si confronta il volume del
 //    microfono con quello dell'audio di sistema nello stesso intervallo: se prevale il
 //    microfono la frase è dell'utente, altrimenti degli altri partecipanti;
@@ -278,7 +313,7 @@ async function transcribeJob(job, baseUrl) {
     const energy = parseEnergy(job.energy);
     const me = energy.mic ? await speakerName(user) : '';
     const prompt = await buildWhisperPrompt(user, job.id_calendar, energy.names);
-    const r = await transcribeAudio(user.user_id, Buffer.from(job.audio_mix, 'base64'), mime, baseUrl, prompt);
+    const r = await trascriviAudio(user, Buffer.from(job.audio_mix, 'base64'), mime, baseUrl, prompt);
     for (const seg of r.segments) {
       let who = '';
       if (energy.mic && energy.system) {
@@ -291,11 +326,11 @@ async function transcribeJob(job, baseUrl) {
   } else {
     if (job.audio_mic) {
       const me = await speakerName(user);
-      const r = await transcribeAudio(user.user_id, Buffer.from(job.audio_mic, 'base64'), mime, baseUrl);
+      const r = await trascriviAudio(user, Buffer.from(job.audio_mic, 'base64'), mime, baseUrl);
       r.segments.forEach((x) => lines.push({ start: x.start, end: x.end, who: me, text: x.text, cont: x.cont }));
     }
     if (job.audio_system) {
-      const r = await transcribeAudio(user.user_id, Buffer.from(job.audio_system, 'base64'), mime, baseUrl);
+      const r = await trascriviAudio(user, Buffer.from(job.audio_system, 'base64'), mime, baseUrl);
       const who = job.audio_mic ? OTHERS_LABEL : '';
       r.segments.forEach((x) => lines.push({ start: x.start, end: x.end, who, text: x.text, cont: x.cont }));
     }
@@ -744,7 +779,7 @@ async function processAudioJob(job, baseUrl) {
     console.log(`[TRASCRIZIONE] ✓ ${job.id_calendar} blocco da ${hhmmss(job.offset_sec)} (${baseUrl})`);
   } catch (error) {
     // Servizio irraggiungibile: per un po' non gli si assegnano altri blocchi.
-    if (baseUrl && (error.status === 502 || error.status === 503) && !error.upstreamStatus) markUrl(baseUrl, false);
+    if (baseUrl && baseUrl !== CORSIA_GEMINI && (error.status === 502 || error.status === 503) && !error.upstreamStatus) markUrl(baseUrl, false);
     const attempts = (Number(job.attempts) || 0) + 1;
     if (isTemporary(error) && attempts < MAX_ATTEMPTS) {
       const waitSec = Math.min(60 * attempts, 15 * 60); // 1, 2, 3 ... fino a 15 minuti
@@ -978,10 +1013,11 @@ async function claimAudioJobs(n, owners = null) {
   return r.rows.sort((a, b) => Number(a.seq) - Number(b.seq));
 }
 
-// Utenti con blocchi in attesa che hanno scelto "modalità Trascrizione" = Background-Veloce
-// (whisper.cpp). Il confronto si fa qui e non in SQL perché valore2 può essere cifrato
-// (la decifratura avviene in lettura). Restituisce le chiavi 'tenant|utente'.
-async function fastOwnerKeys() {
+// Utenti con blocchi in attesa che hanno scelto una "modalità Trascrizione" (es.
+// 'background-veloce' = whisper.cpp, 'gemini' = Gemini). Il confronto si fa qui e non in SQL
+// perché valore2 può essere cifrato (la decifratura avviene in lettura). Restituisce le chiavi
+// 'tenant|utente'.
+async function modeOwnerKeys(modalita) {
   const r = await db.query(
     `SELECT DISTINCT c.tenant_id::text AS t, c.user_id::text AS u, s.valore2
        FROM rec_meeting_chunks c
@@ -990,7 +1026,7 @@ async function fastOwnerKeys() {
       WHERE c.kind = 'audio' AND c.state = 'pending'`
   );
   return [...new Set(r.rows
-    .filter((x) => String(x.valore2 || '').trim().toLowerCase() === 'background-veloce')
+    .filter((x) => String(x.valore2 || '').trim().toLowerCase() === modalita)
     .map((x) => `${x.t}|${x.u}`))];
 }
 
@@ -1103,6 +1139,16 @@ async function runWorker() {
 
       const urls = whisperUrls();
       const cppUrls = whisperCppUrls();
+      // «Modalità Trascrizione» = Gemini: corsia a parte (non usa i servizi Whisper), fino a
+      // GEMINI_PARALLELO blocchi insieme. Se Gemini non risponde il blocco va subito a Whisper.
+      const geminiKeys = await modeOwnerKeys('gemini');
+      if (geminiKeys.length && geminiOccupati < GEMINI_PARALLELO) {
+        for (const job of await claimAudioJobs(GEMINI_PARALLELO - geminiOccupati, { keys: geminiKeys, include: true })) {
+          geminiOccupati++;
+          const p = processAudioJob(job, CORSIA_GEMINI).finally(() => { geminiOccupati--; inflight.delete(job.id); });
+          inflight.set(job.id, p);
+        }
+      }
       if (urls.length || cppUrls.length) {
         const start = (jobs, free) => jobs.forEach((job, i) => {
           const url = free[i];
@@ -1113,17 +1159,19 @@ async function runWorker() {
         // Background-Veloce: i blocchi di chi l'ha scelto vanno a whisper.cpp. Se whisper.cpp
         // non è configurato o non risponde, vanno ai servizi standard (nessun blocco resta fermo).
         const cppOn = cppUrls.some((u) => busyUrls.has(u) || urlReady(u));
-        const fastKeys = cppOn ? await fastOwnerKeys() : [];
+        const fastKeys = cppOn ? await modeOwnerKeys('background-veloce') : [];
         if (fastKeys.length) {
           const freeCpp = cppUrls.filter((u) => !busyUrls.has(u) && urlReady(u));
           start(await claimAudioJobs(freeCpp.length, { keys: fastKeys, include: true }), freeCpp);
         }
         // Un blocco per ogni servizio Whisper libero e raggiungibile: lavorano in parallelo.
+        // (esclusi i blocchi Background-Veloce e quelli della corsia Gemini)
         const free = urls.filter((u) => !busyUrls.has(u) && urlReady(u));
-        start(await claimAudioJobs(free.length, { keys: fastKeys, include: false }), free);
+        start(await claimAudioJobs(free.length, { keys: [...fastKeys, ...geminiKeys], include: false }), free);
       } else {
         // Nessun servizio configurato: i blocchi vengono chiusi con una nota (non restano in coda).
-        const orphan = await claimAudioJobs(50);
+        // Quelli della corsia Gemini no: li trascrive Gemini.
+        const orphan = await claimAudioJobs(50, { keys: geminiKeys, include: false });
         for (const job of orphan) await processAudioJob(job, null);
       }
 

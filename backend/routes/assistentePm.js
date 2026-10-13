@@ -25,7 +25,9 @@
 //
 // Istruzioni: prompt ASSISTENTE_PM (app_prompts, file backend/prompts/assistente_pm.txt) con
 // i dati del progetto della riunione (gli stessi del Briefing pre-riunione) se ce n'è uno.
-// Modello: GEMINI_LIVE_MODEL nel .env (predefinito gemini-3.8-live). Risposta: i modelli
+// Modello: GEMINI_LIVE_MODEL nel .env (predefinito gemini-3.8-live); se Gemini chiude per quota
+// esaurita, sovraccarico o modello non disponibile si passa ai modelli di GEMINI_LIVE_FALLBACK_MODEL
+// (predefinito gemini-3.1-flash-live-preview), con avviso nella finestra. Risposta: i modelli
 // Live «native audio» rispondono solo in AUDIO: si chiede AUDIO + trascrizione della risposta
 // (outputAudioTranscription) e si usa solo il testo. GEMINI_LIVE_MODALITY=TEXT per i modelli
 // che rispondono direttamente in testo.
@@ -41,15 +43,26 @@ import { contestoProgetto, dataIt, oggiIso } from '../config/pmCore.js';
 const router = express.Router();
 
 const CAMPO = 'ai assistente pm';
-const MODELLO = process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live';
+// Modello principale e, in ordine, quelli di riserva usati se Gemini chiude la sessione per
+// quota esaurita, sovraccarico o modello non disponibile (GEMINI_LIVE_FALLBACK_MODEL, separati
+// da virgola; vuota = nessuna riserva).
+const MODELLI = [...new Set([
+  process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live',
+  ...String(process.env.GEMINI_LIVE_FALLBACK_MODEL ?? 'gemini-3.1-flash-live-preview').split(',')
+].map((m) => m.trim().replace(/^models\//, '')).filter(Boolean))];
+const RISERVA_RE = /quota|resource[_ ]?exhausted|rate.?limit|too many|exceeded|overload|unavailable|not found|not supported|busy|capacity/i;
+const CHIAVE_RE = /api key/i;
+const CONTESTO_PEZZI = 8; // pezzi di riunione rimandati al modello di riserva
 const MODALITA = String(process.env.GEMINI_LIVE_MODALITY || 'AUDIO').toUpperCase() === 'TEXT' ? 'TEXT' : 'AUDIO';
 const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 // AI gestite per ora dall'Assistente PM (voci dell'elenco del campo).
 const AI_SUPPORTATE = { gemini: { provider: 'Gemini', prefix: 'gemini' } };
-const MAX_DATI = 40000;
+// Dati del progetto nelle istruzioni: restano nel contesto e si pagano a OGNI turno (Gemini Live
+// non ha la cache del contesto), quindi ~4-5.000 token al massimo, sotto la soglia di compressione.
+const MAX_DATI = 16000;
 // Compressione del contesto (token): oltre COMPRESSIONE_DA si torna a COMPRESSIONE_A.
-const COMPRESSIONE_DA = Number(process.env.GEMINI_LIVE_TRIGGER_TOKENS) || 48000;
-const COMPRESSIONE_A = Number(process.env.GEMINI_LIVE_TARGET_TOKENS) || 24000;
+const COMPRESSIONE_DA = Number(process.env.GEMINI_LIVE_TRIGGER_TOKENS) || 24000;
+const COMPRESSIONE_A = Number(process.env.GEMINI_LIVE_TARGET_TOKENS) || 12000;
 const MAX_AUDIO_LIVE_BYTES = 256 * 1024; // pezzo di audio live: ~0,5 s = 16 KB
 const MAX_ATTESA_AUDIO = 20;              // pezzi tenuti mentre Gemini si ricollega (~10 s)
 const MAX_AUDIO_BYTES = 3 * 1024 * 1024;  // blocco breve: ~30 s di WAV 16 kHz = ~1 MB
@@ -143,7 +156,7 @@ function connetti(s) {
   s.ws = ws;
   ws.addEventListener('open', () => {
     const setup = {
-      model: `models/${MODELLO}`,
+      model: `models/${MODELLI[s.modelloIdx]}`,
       generationConfig: { responseModalities: [MODALITA] },
       systemInstruction: { parts: [{ text: s.istruzioni }] },
       // Riunioni lunghe: il contesto più vecchio si scarta invece di chiudere la sessione.
@@ -182,16 +195,19 @@ function connetti(s) {
     if (s.chiusa) return;
     // Risposta interrotta: il testo in attesa resta in coda e riparte con la nuova connessione.
     if (s.inTurno) { s.inTurno = false; clearTimeout(s.timerTurno); }
-    s.riconnessioni++;
-    if (s.riconnessioni > MAX_RICONNESSIONI) {
-      aggiungi(s, 'errore', `Gemini ha chiuso la sessione${ev.reason ? `: ${ev.reason}` : ` (codice ${ev.code})`}. Assistente fermato.`);
+    const motivo = ev.reason || `codice ${ev.code}`;
+    console.warn(`[ASSISTENTE PM] ${s.idCalendar}: Gemini ${MODELLI[s.modelloIdx]} ha chiuso la connessione (${motivo})`);
+    // Chiave non valida: nessun modello può funzionare.
+    if (CHIAVE_RE.test(ev.reason || '')) {
+      aggiungi(s, 'errore', `Gemini ha rifiutato la sessione: ${motivo}`);
       chiudi(s, false);
       return;
     }
-    // Errori di configurazione (modello, chiave, quota): inutile riprovare all'infinito,
-    // ma il motivo va mostrato subito.
-    if (ev.code === 1007 || ev.code === 1008) {
-      aggiungi(s, 'errore', `Gemini ha rifiutato la sessione: ${ev.reason || `codice ${ev.code}`}`);
+    // Quota esaurita, sovraccarico o modello non disponibile: si passa al modello di riserva.
+    s.riconnessioni++;
+    if (RISERVA_RE.test(ev.reason || '') || ev.code === 1007 || ev.code === 1008 || s.riconnessioni > MAX_RICONNESSIONI) {
+      if (passaAlModelloSuccessivo(s, motivo)) return;
+      aggiungi(s, 'errore', `Gemini ha chiuso la sessione: ${motivo}. Nessun altro modello Live di riserva: assistente fermato.`);
       chiudi(s, false);
       return;
     }
@@ -199,9 +215,32 @@ function connetti(s) {
   });
 }
 
+// Modello di riserva (GEMINI_LIVE_FALLBACK_MODEL): sessione nuova con le stesse istruzioni. Il
+// contesto della conversazione non passa da un modello all'altro: si rimandano come contesto gli
+// ultimi pezzi di riunione (senza chiedere una risposta). false = non ci sono altri modelli.
+function passaAlModelloSuccessivo(s, motivo) {
+  if (s.modelloIdx + 1 >= MODELLI.length) return false;
+  const prima = MODELLI[s.modelloIdx];
+  s.modelloIdx++;
+  s.handle = null; // l'handle di ripresa vale solo per il modello che l'ha dato
+  s.riconnessioni = 0;
+  s.risposta = '';
+  const ultimi = s.messaggi.filter((m) => m.tipo === 'trascrizione').slice(-CONTESTO_PEZZI).map((m) => m.testo);
+  s.contestoRipresa = ultimi.length
+    ? `Riprendi l'assistenza: la sessione precedente si è interrotta. Ecco gli ultimi pezzi della riunione, solo come contesto (non rispondere a questo messaggio):\n${ultimi.join('\n')}`
+    : '';
+  aggiungi(s, 'avviso', `${prima} non disponibile (${String(motivo).slice(0, 200)}): continuo con ${MODELLI[s.modelloIdx]}.`);
+  setTimeout(() => connetti(s), 500);
+  return true;
+}
+
 function gestisciMessaggio(s, ws, msg) {
   if (msg.setupComplete) {
     s.pronta = true;
+    if (s.contestoRipresa) {
+      try { ws.send(JSON.stringify({ clientContent: { turns: [{ role: 'user', parts: [{ text: s.contestoRipresa }] }], turnComplete: false } })); } catch { /* si riparte senza */ }
+      s.contestoRipresa = '';
+    }
     if (!s.avviata) {
       s.avviata = true;
       aggiungi(s, 'info', s.modalita === 'audio'
@@ -390,12 +429,13 @@ router.post('/avvia', requireAuth, async (req, res) => {
       istruzioni: await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita),
       coda: [], inTurno: false, risposta: '', ascoltato: '', attesaAudio: [], timerTurno: null, riconnessioni: 0,
       timerAudio: null, attivitaAperta: false, audioNuovo: false, valutazioni: 0, silenzi: 0,
+      modelloIdx: 0, contestoRipresa: '',
       messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve()
     };
     sessioni.set(k, s);
     aggiungi(s, 'info', 'Collegamento a Gemini Live…');
     connetti(s);
-    res.json({ attiva: true, ai: ai.provider, modello: MODELLO, modalita });
+    res.json({ attiva: true, ai: ai.provider, modello: MODELLI[0], modalita });
   } catch (e) {
     if (!e.status) console.error('❌ [ASSISTENTE PM]', e.message);
     res.status(e.status || 500).json({ error: e.message });

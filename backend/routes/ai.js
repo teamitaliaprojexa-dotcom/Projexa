@@ -1156,6 +1156,61 @@ export function whisperCppUrls() {
   return [...new Set(list)];
 }
 
+// Trascrizione di un blocco WAV con Gemini («modalità Trascrizione» = Gemini, chiave API
+// dell'utente). Gemini restituisce le frasi con inizio/fine in secondi (JSON con schema), nello
+// stesso formato dei segmenti di Whisper: { segments: [{ start, end, text }], provider }.
+// Modello: GEMINI_TRANSCRIBE_MODEL (predefinito gemini-flash-latest).
+export async function transcribeAudioGemini(apiKey, audioBuffer, mime, contesto = '') {
+  const model = process.env.GEMINI_TRANSCRIBE_MODEL || 'gemini-flash-latest';
+  const istruzioni = [
+    'Trascrivi fedelmente, parola per parola, il parlato di questo audio di una riunione di lavoro in italiano.',
+    'Restituisci le frasi in ordine, ognuna con inizio e fine in secondi dall\'inizio dell\'audio (start, end, con i decimali) e il testo.',
+    'Non tradurre, non riassumere, non correggere il contenuto e non aggiungere nulla che non sia stato detto; usa la punteggiatura normale.',
+    'Se una parola non si capisce scrivi la trascrizione più probabile. Se nell\'audio non c\'è parlato restituisci un elenco vuoto.',
+    contesto ? `Contesto utile per riconoscere nomi e termini (NON trascriverlo): ${contesto}` : ''
+  ].filter(Boolean).join('\n');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const data = await readJson(await callApi(url, {
+    method: 'POST',
+    headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [
+        { inline_data: { mime_type: mime || 'audio/wav', data: audioBuffer.toString('base64') } },
+        { text: istruzioni }
+      ] }],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'ARRAY',
+          items: {
+            type: 'OBJECT',
+            properties: { start: { type: 'NUMBER' }, end: { type: 'NUMBER' }, text: { type: 'STRING' } },
+            required: ['start', 'end', 'text']
+          }
+        }
+      }
+    }),
+    timeoutMs: 300000
+  }, 'Gemini'), 'Gemini');
+  const cand = (data.candidates || [])[0] || {};
+  const testo = ((cand.content && cand.content.parts) || []).map((p) => (p.thought ? '' : p.text || '')).join('').trim();
+  if (!testo && data.promptFeedback && data.promptFeedback.blockReason) {
+    throw httpError(422, `Gemini ha bloccato la trascrizione (${data.promptFeedback.blockReason})`);
+  }
+  let lista;
+  try { lista = JSON.parse(testo || '[]'); } catch {
+    const err = httpError(502, 'Gemini: risposta della trascrizione non leggibile');
+    err.upstreamStatus = 500;
+    throw err;
+  }
+  const segments = (Array.isArray(lista) ? lista : [])
+    .map((x) => ({ start: Math.max(0, Number(x && x.start) || 0), end: Number(x && x.end) || 0, text: String((x && x.text) || '').trim() }))
+    .filter((x) => x.text)
+    .map((x) => ({ ...x, end: Math.max(x.start, x.end) }));
+  return { segments, provider: `Gemini ${model}` };
+}
+
 // Blocco WAV su whisper.cpp (endpoint /inference, risposta verbose_json con i segmenti).
 // Esportata per l'Assistente PM (ASSISTENTE_PM_WHISPER_CPP_URL, jobs/meetingTranscription.js).
 export async function transcribeAudioCpp(base, audioBuffer, mime, prompt = '') {
