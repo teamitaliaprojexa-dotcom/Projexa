@@ -44,6 +44,8 @@ import { contestoProgetto, dataIt, oggiIso } from '../config/pmCore.js';
 const router = express.Router();
 
 const CAMPO = 'ai assistente pm';
+// Campo booleano (creato dall'utente 2026-10-13): export Word automatico a «Ferma».
+const CAMPO_DOWNLOAD = 'download automatico file ass pm ai';
 // Modello principale e, in ordine, quelli di riserva usati se Gemini chiude la sessione per
 // quota esaurita, sovraccarico o modello non disponibile (GEMINI_LIVE_FALLBACK_MODEL, separati
 // da virgola; vuota = nessuna riserva).
@@ -575,10 +577,24 @@ router.get('/messaggi', requireAuth, (req, res) => {
 // Fine registrazione (o chiusura della finestra). Body: { id_calendar }.
 // La sessione si chiude con Gemini ma i messaggi restano CONSERVA_MS (export in Word dalla
 // finestra rimasta aperta dopo «Ferma»).
-router.post('/ferma', requireAuth, (req, res) => {
+// Risposta: { ok, scaricaWord } — scaricaWord = campo booleano «Download automatico file Ass PM
+// AI» acceso (valore1): la finestra avvia da sola l'export in Word a fine registrazione.
+router.post('/ferma', requireAuth, async (req, res) => {
   const s = sessioneDi(req, idDa((req.body || {}).id_calendar));
   if (s && !s.chiusa) chiudi(s, false);
-  res.json({ ok: true });
+  let scaricaWord = false;
+  try {
+    const r = (await db.query(
+      `SELECT valore1 FROM settings
+        WHERE tenant_id = $1 AND user_id = $2
+          AND lower(btrim(campo)) IN ($3, '(*) ' || $3)
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+        ORDER BY id LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, CAMPO_DOWNLOAD]
+    )).rows[0];
+    scaricaWord = !!(r && vero(r.valore1));
+  } catch (e) { console.warn('[ASSISTENTE PM] impostazione download automatico non letta:', e.message); }
+  res.json({ ok: true, scaricaWord });
 });
 
 // Export in Word: prima i suggerimenti (con le domande scritte e le risposte), poi la

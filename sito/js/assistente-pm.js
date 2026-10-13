@@ -399,22 +399,27 @@
         s.timer = null;
         if (s.scelta) s.scelta(null);
         const tieni = daRegistrazione && conMessaggi(s);
+        // Risposta: scaricaWord = «Download automatico file Ass PM AI» acceso.
         const chiusa = fetch(`${API_URL}/assistente-pm/ferma`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...auth() },
             body: JSON.stringify({ id_calendar: s.eventId }),
             keepalive: true
-        }).catch(() => {});
+        }).then((r) => r.json()).catch(() => ({}));
         if (!tieni) { chiudiFinestra(); return; }
         s.attiva = false;
         s.terminata = true;
-        await chiusa;
+        const esito = (await chiusa) || {};
         await leggi(); // ultimi messaggi arrivati prima della chiusura
         if (s !== stato) return;
         s.messaggi.push({ n: 0, tipo: 'info', ora: new Date().toISOString(),
-            testo: 'Registrazione fermata: l\'assistente è chiuso. Usa il pulsante Word in alto per conservare suggerimenti e trascrizione (disponibili per 2 ore), poi chiudi la finestra con la X.' });
+            testo: esito.scaricaWord
+                ? 'Registrazione fermata: l\'assistente è chiuso. Il file Word con suggerimenti e trascrizione si sta scaricando (download automatico attivo); puoi riscaricarlo con il pulsante Word per 2 ore, poi chiudi la finestra con la X.'
+                : 'Registrazione fermata: l\'assistente è chiuso. Usa il pulsante Word in alto per conservare suggerimenti e trascrizione (disponibili per 2 ore), poi chiudi la finestra con la X.' });
         aggiornaStato(false);
         disegna(true);
+        // Impostazioni › «Download automatico file Ass PM AI»: export in Word senza clic.
+        if (esito.scaricaWord) esporta();
     }
 
     function chiudiFinestra() {
