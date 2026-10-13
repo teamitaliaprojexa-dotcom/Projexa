@@ -56,6 +56,10 @@ const MAX_AUDIO_BYTES = 3 * 1024 * 1024;  // blocco breve: ~30 s di WAV 16 kHz =
 const MAX_MESSAGGI = 400;                 // messaggi tenuti per la finestra
 const MAX_RICONNESSIONI = 5;              // di fila, senza una risposta riuscita in mezzo
 const TURNO_TIMEOUT_MS = 90000;           // risposta che non arriva: si passa al testo successivo
+// Audio live: ogni quanti ms si chiude il «turno» e Gemini valuta l'audio ascoltato. Il
+// rilevamento automatico delle pause di Gemini non va bene per una riunione: si parla quasi di
+// continuo e ogni nuova voce interromperebbe la risposta (che così non arriva mai).
+const AUDIO_TURNO_MS = Math.max(5000, Number(process.env.ASSISTENTE_PM_TURNO_AUDIO_MS) || 15000);
 const INATTIVA_MS = 4 * 3600000;          // sessione dimenticata aperta: chiusa dopo 4 ore
 const vero = (v) => v === true || v === 'true' || v === 't' || v === 1 || v === '1';
 const errore = (status, msg) => Object.assign(new Error(msg), { status });
@@ -149,10 +153,14 @@ function connetti(s) {
       sessionResumption: s.handle ? { handle: s.handle } : {}
     };
     if (MODALITA === 'AUDIO') setup.outputAudioTranscription = {};
-    // Audio live: Gemini rileva da solo le pause (risponde a fine frase) e restituisce il testo
-    // di ciò che ha sentito, mostrato SOLO nella finestra (scheda «Trascrizione live», non
-    // salvato: la trascrizione della riunione resta quella di Projexa).
-    if (s.modalita === 'audio') setup.inputAudioTranscription = {};
+    // Audio live: i turni li decide il server (activityStart/activityEnd ogni AUDIO_TURNO_MS),
+    // chi parla non interrompe la risposta di Gemini. Gemini restituisce anche il testo di ciò
+    // che ha sentito, mostrato SOLO nella finestra (scheda «Trascrizione live», non salvato:
+    // la trascrizione della riunione resta quella di Projexa).
+    if (s.modalita === 'audio') {
+      setup.inputAudioTranscription = {};
+      setup.realtimeInputConfig = { automaticActivityDetection: { disabled: true }, activityHandling: 'NO_INTERRUPTION' };
+    }
     ws.send(JSON.stringify({ setup }));
   });
   ws.addEventListener('message', (ev) => {
@@ -170,6 +178,7 @@ function connetti(s) {
     if (s.ws !== ws) return; // connessione già sostituita
     s.pronta = false;
     s.ws = null;
+    s.attivitaAperta = false;
     if (s.chiusa) return;
     // Risposta interrotta: il testo in attesa resta in coda e riparte con la nuova connessione.
     if (s.inTurno) { s.inTurno = false; clearTimeout(s.timerTurno); }
@@ -201,6 +210,7 @@ function gestisciMessaggio(s, ws, msg) {
     }
     // Audio arrivato mentre Gemini si collegava (o si ricollegava dopo «goAway»).
     for (const pcm of s.attesaAudio.splice(0)) inviaAudio(s, pcm);
+    if (s.modalita === 'audio' && !s.timerAudio) s.timerAudio = setInterval(() => chiudiTurnoAudio(s), AUDIO_TURNO_MS);
     prossimo(s);
     return;
   }
@@ -223,13 +233,17 @@ function gestisciMessaggio(s, ws, msg) {
   // Audio live: testo di ciò che Gemini ha sentito, a frammenti; si mostra a frasi.
   if (sc.inputTranscription && sc.inputTranscription.text) {
     s.ascoltato += sc.inputTranscription.text;
-    if (s.ascoltato.length > 400 && /[.?!]\s*$/.test(s.ascoltato)) scriviAscoltato(s);
+    if (s.ascoltato.length > 300) scriviAscoltato(s, true);
   }
   if (sc.turnComplete || sc.interrupted) {
     scriviAscoltato(s);
     const testo = s.risposta.replace(/\s+\n/g, '\n').trim();
     s.risposta = '';
-    if (testo && !SILENZIO_RE.test(testo)) aggiungi(s, 'ai', testo);
+    s.valutazioni++;
+    const silenzio = !testo || SILENZIO_RE.test(testo);
+    if (silenzio) s.silenzi++;
+    else aggiungi(s, 'ai', testo);
+    console.log(`[ASSISTENTE PM] ${s.idCalendar}: turno ${s.valutazioni} ${sc.interrupted ? 'interrotto' : 'completo'}, ${silenzio ? 'nessun suggerimento' : `suggerimento di ${testo.length} caratteri`}`);
     s.riconnessioni = 0;
     s.inTurno = false;
     clearTimeout(s.timerTurno);
@@ -237,10 +251,28 @@ function gestisciMessaggio(s, ws, msg) {
   }
 }
 
-function scriviAscoltato(s) {
-  const t = s.ascoltato.replace(/\s+/g, ' ').trim();
-  s.ascoltato = '';
+// soloFrasiFinite: si scrive fino all'ultima frase conclusa, il resto aspetta i frammenti dopo.
+function scriviAscoltato(s, soloFrasiFinite = false) {
+  let t = s.ascoltato;
+  if (soloFrasiFinite) {
+    const m = t.match(/^[\s\S]*[.?!…](?=\s|$)/);
+    if (!m) return;
+    t = m[0];
+  }
+  s.ascoltato = s.ascoltato.slice(t.length);
+  t = t.replace(/\s+/g, ' ').trim();
   if (t) aggiungi(s, 'trascrizione', t);
+}
+
+// Fine del turno audio: Gemini valuta quanto ascoltato dall'ultimo turno (se c'è audio nuovo).
+// Il turno successivo si apre col prossimo pezzo di audio (inviaAudio).
+function chiudiTurnoAudio(s) {
+  if (s.chiusa || !s.pronta || !s.ws || !s.attivitaAperta || !s.audioNuovo) return;
+  try {
+    s.ws.send(JSON.stringify({ realtimeInput: { activityEnd: {} } }));
+    s.attivitaAperta = false;
+    s.audioNuovo = false;
+  } catch { /* connessione in chiusura */ }
 }
 
 // Audio live verso Gemini: PCM 16 bit mono 16 kHz in base64. Se la connessione non è pronta
@@ -253,7 +285,12 @@ function inviaAudio(s, pcmB64) {
     return;
   }
   try {
+    if (!s.attivitaAperta) {
+      s.ws.send(JSON.stringify({ realtimeInput: { activityStart: {} } }));
+      s.attivitaAperta = true;
+    }
     s.ws.send(JSON.stringify({ realtimeInput: { audio: { data: pcmB64, mimeType: 'audio/pcm;rate=16000' } } }));
+    s.audioNuovo = true;
   } catch { /* connessione in chiusura: il pezzo si perde */ }
 }
 
@@ -284,6 +321,7 @@ function accoda(s, testo) {
 function chiudi(s, rimuovi = true) {
   s.chiusa = true;
   clearTimeout(s.timerTurno);
+  clearInterval(s.timerAudio);
   try { if (s.ws) s.ws.close(1000, 'fine riunione'); } catch { /* già chiusa */ }
   s.ws = null;
   if (rimuovi) sessioni.delete(s.chiave);
@@ -351,6 +389,7 @@ router.post('/avvia', requireAuth, async (req, res) => {
       chiave: k, idCalendar, apiKey, modalita, handle: null, ws: null, pronta: false, avviata: false, chiusa: false,
       istruzioni: await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita),
       coda: [], inTurno: false, risposta: '', ascoltato: '', attesaAudio: [], timerTurno: null, riconnessioni: 0,
+      timerAudio: null, attivitaAperta: false, audioNuovo: false, valutazioni: 0, silenzi: 0,
       messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve()
     };
     sessioni.set(k, s);
@@ -436,6 +475,9 @@ router.get('/messaggi', requireAuth, (req, res) => {
     attiva: !s.chiusa,
     collegata: s.pronta,
     inAttesa: s.inTurno || s.coda.length > 0,
+    // Quante volte Gemini ha valutato la riunione e quante senza suggerimenti (per la finestra).
+    valutazioni: s.valutazioni,
+    silenzi: s.silenzi,
     messaggi: s.messaggi.filter((m) => m.n > dopo)
   });
 });
