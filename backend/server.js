@@ -98,7 +98,9 @@ const CONTENT_SECURITY_POLICY = [
   "font-src 'self' data: https://cdnjs.cloudflare.com",
   "img-src 'self' data: blob: https:",
   "connect-src 'self' https://accounts.google.com",
-  "frame-src https://accounts.google.com",
+  // 'self': pagine di Projexa aperte DENTRO la dashboard durante una registrazione
+  // (#paginaInterna in dashboard.html), così registrazione e Assistente PM non si interrompono.
+  "frame-src 'self' https://accounts.google.com",
   "worker-src 'self'",
   "object-src 'none'",
   "base-uri 'self'",

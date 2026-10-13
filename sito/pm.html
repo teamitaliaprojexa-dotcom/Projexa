@@ -207,7 +207,16 @@
         }
 
         // ================= RAID =================
-        let raidDati = null, raidTutte = false;
+        // raidEstraiAperta: l'estrazione chiesta dall'URL (estrai= / risultato=) si apre UNA volta.
+        // Prima il segno stava in raidDati, che si ricarica dopo «Salva selezionati»: la finestra
+        // si riapriva da sola e rifaceva l'analisi.
+        let raidDati = null, raidTutte = false, raidEstraiAperta = false;
+        // Toglie dall'URL i parametri già usati: un ricaricamento della pagina non riapre l'estrazione.
+        function togliParametri(...nomi) {
+            const u = new URL(location.href);
+            nomi.forEach((n) => u.searchParams.delete(n));
+            history.replaceState(null, '', u.pathname + (u.searchParams.toString() ? `?${u.searchParams}` : '') + u.hash);
+        }
         const TIPI = {
             rischio: { label: 'Rischio', plurale: 'Rischi', ico: 'fa-triangle-exclamation' },
             decisione: { label: 'Decisione', plurale: 'Decisioni', ico: 'fa-gavel' },
@@ -274,9 +283,9 @@
             p.querySelectorAll('[data-nuovo]').forEach((b) => b.addEventListener('click', () => formRaid({ tipo: b.dataset.nuovo })));
             p.querySelectorAll('tr.click[data-id]').forEach((tr) => tr.addEventListener('click', () => formRaid(r.find((x) => x.id === tr.dataset.id))));
             p.querySelector('#btnEstrai').addEventListener('click', () => estraiDaRiunione());
-            if (qs.get('estrai') && !raidDati._estraiAperta) { raidDati._estraiAperta = true; estraiDaRiunione(qs.get('estrai')); }
+            if (qs.get('estrai') && !raidEstraiAperta) { raidEstraiAperta = true; estraiDaRiunione(qs.get('estrai')); togliParametri('estrai'); }
             // Da «Risultati AI»: proposte arrivate in modalità Batch, da rivedere e salvare.
-            if (qs.get('risultato') && qs.get('tab') !== 'cr' && !raidDati._estraiAperta) { raidDati._estraiAperta = true; estraiDaRiunione(null, qs.get('risultato')); }
+            if (qs.get('risultato') && qs.get('tab') !== 'cr' && !raidEstraiAperta) { raidEstraiAperta = true; estraiDaRiunione(null, qs.get('risultato')); togliParametri('risultato'); }
         }
         // Scelta della persona (owner, decisa da, richiesta da): «Cliente» = Contatti del cliente del
         // progetto, «Interno» = persone del team del progetto (Kick-off, proj_componenti). Gli elenchi
@@ -509,7 +518,7 @@
             p.querySelector('#nuovaCr').addEventListener('click', () => formCr({}));
             p.querySelector('#btnEstraiCr').addEventListener('click', () => estraiDaRiunione(null, null, true));
             // Da «Risultati AI»: Change Request arrivate in modalità Batch, da rivedere e salvare.
-            if (qs.get('tab') === 'cr' && qs.get('risultato') && !crEstraiAperta) { crEstraiAperta = true; estraiDaRiunione(null, qs.get('risultato'), true); }
+            if (qs.get('tab') === 'cr' && qs.get('risultato') && !crEstraiAperta) { crEstraiAperta = true; estraiDaRiunione(null, qs.get('risultato'), true); togliParametri('risultato'); }
             p.querySelectorAll('tr.click').forEach((tr) => tr.addEventListener('click', () => formCr(l.find((x) => x.id === tr.dataset.id))));
         }
         async function formCr(x) {
