@@ -3881,8 +3881,8 @@
              cliente (.dock-side) a destra dell'elenco clienti.
            ================================================================== */
         :root {
-            --dock-size: 46px;     /* lato delle icone a riposo */
-            --dock-h: 78px;        /* ingombro del dock dal fondo dello schermo */
+            --dock-size: 60px;     /* lato delle icone a riposo */
+            --dock-h: 92px;        /* ingombro del dock dal fondo dello schermo */
         }
 
         .main, .main.minimized {
@@ -4276,13 +4276,20 @@
         .mp-tab table { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
         .mp-tab th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 0.25rem 0.35rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
         .mp-tab td { padding: 0.3rem 0.35rem; border-bottom: 1px solid #F3F4F6; vertical-align: top; }
+        /* Lente davanti alle righe di Jira, quotazioni e MySupport: apre il dettaglio della riga */
+        .mp-tab .mp-lente-col { width: 1%; padding-left: 0; padding-right: 0.15rem; }
+        .mp-lente { border: none; background: transparent; color: #6366F1; cursor: pointer; padding: 0.05rem 0.25rem; border-radius: 5px; font-size: 0.72rem; line-height: 1; }
+        .mp-lente:hover { background: #EEF2FF; color: #4338CA; }
+        .mp-dett { display: grid; grid-template-columns: max-content 1fr; gap: 0.45rem 1rem; margin: 0; font-size: 0.86rem; }
+        .mp-dett dt { color: var(--text-muted); font-weight: 600; }
+        .mp-dett dd { margin: 0; color: #1F2937; word-break: break-word; }
         .mp-vuoto { color: #9CA3AF; font-style: italic; padding: 0.3rem 0; }
         .mp-errore { color: #B91C1C; font-style: normal; }
         .meeting-linea-btn { border: none; background: #EEF2FF; color: #4F46E5; border-radius: 6px; padding: 0.2rem 0.4rem; margin-left: 0.3rem; cursor: pointer; }
         .meeting-linea-btn:hover { background: #4F46E5; color: #fff; }
 
         @media (max-width: 768px) {
-            :root { --dock-size: 38px; --dock-h: 66px; }
+            :root { --dock-size: 49px; --dock-h: 78px; }
             .sidebar .sidebar-menu { overflow-x: auto; overflow-y: visible; gap: 4px; }
         }
         @media (prefers-reduced-motion: reduce) {
@@ -7925,8 +7932,8 @@
             const dock = document.querySelector('.sidebar');
             const menu = dock && dock.querySelector('.sidebar-menu');
             if (!menu) return;
-            const MAX = 0.6;      // ingrandimento massimo (+60%) sotto il mouse
-            const RAGGIO = 140;   // distanza (px schermo) entro cui le icone vicine crescono
+            const MAX = 0.75;     // ingrandimento massimo (+75%) sotto il mouse
+            const RAGGIO = 180;   // distanza (px schermo) entro cui le icone vicine crescono (icone da 60px)
             const riduci = window.matchMedia('(prefers-reduced-motion: reduce)');
             const tiles = () => [...menu.querySelectorAll(':scope > li > a')].filter(a => a.offsetParent !== null);
             const azzera = () => tiles().forEach(a => a.style.removeProperty('--s'));
@@ -10936,6 +10943,12 @@
             return recording ? '<i class="fas fa-stop"></i> Ferma' : '<i class="fas fa-circle"></i> Registra';
         }
 
+        // Pulsante «Assistente PM» sulla riga della riunione in registrazione: riapre la finestra
+        // dell'assistente chiusa con la X (stesso comando del riquadro della registrazione).
+        function assistenteRigaButton() {
+            return '<button type="button" class="meeting-linea-btn meeting-ap-btn" title="Assistente PM: riapri la finestra (suggerimenti e trascrizione live)" aria-label="Assistente PM"><i class="fas fa-user-tie"></i></button>';
+        }
+
         // Allinea tutti i pulsanti Registra/Ferma allo stato della registrazione in corso.
         function refreshRecButtons() {
             document.querySelectorAll('.meeting-rec-btn').forEach((b) => {
@@ -10943,6 +10956,10 @@
                 b.classList.toggle('recording', recording);
                 b.innerHTML = recButtonLabel(recording);
                 b.disabled = false;
+                const box = b.parentElement;
+                const ap = box && box.querySelector('.meeting-ap-btn');
+                if (recording && !ap) box.insertAdjacentHTML('beforeend', assistenteRigaButton());
+                else if (!recording && ap) ap.remove();
             });
         }
 
@@ -10952,6 +10969,7 @@
         // /api/meeting-panel (server.js): attività della riunione precedente con la casella
         // «fatto», To-Do, task Jira, quotazioni e quesiti MySupport del cliente/progetto.
         let meetingPanelId = null;
+        let mpSezioni = []; // sezioni Jira/quotazioni/MySupport mostrate (per la finestra di dettaglio)
         const MP_PREC_KEY = 'meetingPanelPrecedente:';
         async function openMeetingPanel(idCalendar, { auto = false } = {}) {
             const panel = document.getElementById('meetingPanel');
@@ -11025,10 +11043,12 @@
                 : '<div class="mp-vuoto">Nessuna To-Do aperta' + (r.projectId ? ' per questo progetto' : ' del cliente senza progetto') + '.</div>';
 
             // 3. Task Jira, quotazioni, MySupport
+            // Lente davanti a ogni riga: finestra con tutti i campi della riga (s.campi / s.dettagli).
             const ICONE = { task: 'fa-list-check', quotazioni: 'fa-file-invoice-dollar', mysupport: 'fa-headset' };
-            const altre = d.sezioni.map((s) => sez(escapeHtml(s.titolo), ICONE[s.key] || 'fa-table', s.righe.length,
-                s.righe.length ? `<div class="mp-tab"><table><thead><tr>${s.colonne.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>
-                    <tbody>${s.righe.map((v) => `<tr>${v.map((x) => `<td>${escapeHtml(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+            mpSezioni = d.sezioni;
+            const altre = d.sezioni.map((s, si) => sez(escapeHtml(s.titolo), ICONE[s.key] || 'fa-table', s.righe.length,
+                s.righe.length ? `<div class="mp-tab"><table><thead><tr><th class="mp-lente-col"></th>${s.colonne.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>
+                    <tbody>${s.righe.map((v, ri) => `<tr><td class="mp-lente-col">${Array.isArray(s.dettagli) ? `<button type="button" class="mp-lente" data-mp-sez="${si}" data-mp-riga="${ri}" title="Dettagli della riga" aria-label="Dettagli della riga"><i class="fas fa-magnifying-glass"></i></button>` : ''}</td>${v.map((x) => `<td>${escapeHtml(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
                     : `<div class="mp-vuoto">Niente di aperto${s.ambito === 'progetto' ? ' collegato a questo progetto' : s.ambito === 'cliente' ? ' del cliente senza progetto' : ''}.</div>`, s.righe.length > 0)).join('');
 
             body.innerHTML = sez('Dalla riunione precedente', 'fa-clock-rotate-left', nPrec, prec)
@@ -11129,9 +11149,17 @@
             // Link alle pagine di Projexa nel pannello: stessa scheda (apriPagina).
             panel.addEventListener('click', (e) => {
                 const a = e.target.closest('a[data-apri-pagina]');
-                if (a) { e.preventDefault(); apriPagina(a.getAttribute('href')); }
+                if (a) { e.preventDefault(); apriPagina(a.getAttribute('href')); return; }
+                const lente = e.target.closest('.mp-lente');
+                if (lente) apriDettaglioRigaPannello(Number(lente.dataset.mpSez), Number(lente.dataset.mpRiga));
             });
+            const dett = document.getElementById('mpDettaglioModal');
+            const chiudiDett = () => dett?.classList.remove('open');
+            document.getElementById('mpDettaglioClose')?.addEventListener('click', chiudiDett);
+            dett?.addEventListener('click', (e) => { if (e.target === dett) chiudiDett(); });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && dett?.classList.contains('open')) chiudiDett(); });
             document.addEventListener('click', (e) => {
+                if (e.target.closest('.meeting-ap-btn')) { e.preventDefault(); document.getElementById('meetingRecorderAssistente')?.click(); return; }
                 const b = e.target.closest('.meeting-linea-btn');
                 if (b) { e.preventDefault(); openMeetingPanel(b.dataset.eventId); }
             });
@@ -11161,6 +11189,23 @@
                     showNotification('Errore: ' + err.message, 'info');
                 } finally { box.disabled = false; }
             });
+        }
+
+        // Finestra di dettaglio di una riga (task Jira, quotazione, quesito MySupport) del pannello:
+        // tutti i campi della riga, anche quelli non mostrati nella griglia; i vuoti si saltano.
+        function apriDettaglioRigaPannello(si, ri) {
+            const s = mpSezioni[si];
+            const valori = s && Array.isArray(s.dettagli) ? s.dettagli[ri] : null;
+            if (!valori) return;
+            const ICONE = { task: 'fa-list-check', quotazioni: 'fa-file-invoice-dollar', mysupport: 'fa-headset' };
+            const codice = (s.righe[ri] && s.righe[ri][0]) || '';
+            document.getElementById('mpDettaglioTitle').innerHTML =
+                `<i class="fas ${ICONE[s.key] || 'fa-table'}" style="color: #6366F1;"></i> ${escapeHtml(s.titolo)}${codice ? ` · ${escapeHtml(codice)}` : ''}`;
+            const campi = s.campi.map((c, i) => [c, valori[i]]).filter(([, v]) => v != null && String(v).trim() !== '');
+            document.getElementById('mpDettaglioBody').innerHTML = campi.length
+                ? `<dl class="mp-dett">${campi.map(([c, v]) => `<dt>${escapeHtml(c)}</dt><dd>${escapeHtml(v).replace(/\n/g, '<br>')}</dd>`).join('')}</dl>`
+                : '<div class="mp-vuoto">Nessun dato per questa riga.</div>';
+            document.getElementById('mpDettaglioModal').classList.add('open');
         }
 
         function showMeetingRecorder(title) {
@@ -13092,7 +13137,7 @@
                     <div class="meeting-duration">${escapeHtml(durationStr)}</div>
                     <div class="meeting-time"><i class="fas fa-clock"></i> ${escapeHtml(timeStr)}</div>
                     ${providerBadge}
-                    <div class="meeting-manage">${(meetingLink || event.manual || isRecordingMeeting(event.id)) ? `<button type="button" class="meeting-rec-btn${isRecordingMeeting(event.id) ? ' recording' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">${recButtonLabel(isRecordingMeeting(event.id))}</button>` : ''}${event.managed && event.client_id ? `<button type="button" class="meeting-linea-btn" data-event-id="${escapeHtml(event.id || '')}" title="Linea della riunione: attività della volta scorsa, To-Do, Jira, quotazioni, MySupport" aria-label="Linea della riunione"><i class="fas fa-route"></i></button>` : ''}</div>
+                    <div class="meeting-manage">${(meetingLink || event.manual || isRecordingMeeting(event.id)) ? `<button type="button" class="meeting-rec-btn${isRecordingMeeting(event.id) ? ' recording' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">${recButtonLabel(isRecordingMeeting(event.id))}</button>` : ''}${event.managed && event.client_id ? `<button type="button" class="meeting-linea-btn" data-event-id="${escapeHtml(event.id || '')}" title="Linea della riunione: attività della volta scorsa, To-Do, Jira, quotazioni, MySupport" aria-label="Linea della riunione"><i class="fas fa-route"></i></button>` : ''}${isRecordingMeeting(event.id) ? assistenteRigaButton() : ''}</div>
                     <div class="meeting-title"${event.manual ? ' data-renamable="1"' : ''} title="${escapeHtml(event.manual ? tooltip + '\n(doppio clic per rinominare)' : tooltip)}">${escapeHtml(title)}</div>
                     <div class="meeting-status meeting-status-genrecap">${event.has_trascrizione && !event.has_recap ? manualRecapButton(event.id) : ''}</div>
                     <div class="meeting-status meeting-status-trascrizione">${event.has_trascrizione ? meetingTextButton(event, 'trascrizione', title) : (isRecordingMeeting(event.id) ? '' : meetingUploadButton('trascrizione'))}</div>
@@ -22447,6 +22492,16 @@
         <div class="mp-resize mp-resize-l" title="Trascina per allargare"></div>
         <div class="mp-resize mp-resize-r" title="Trascina per allargare"></div>
     </aside>
+    <!-- Dettaglio di una riga del pannello (lente: apriDettaglioRigaPannello) -->
+    <div id="mpDettaglioModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="mpDettaglioTitle">
+        <div class="task-modal-card" style="width: min(560px, calc(94vw * var(--ui-zoom-inv, 1)));">
+            <div class="task-modal-header">
+                <h3 id="mpDettaglioTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"></h3>
+                <button id="mpDettaglioClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="mpDettaglioBody" style="padding: 1rem 1.25rem; overflow: auto; max-height: calc(70vh * var(--ui-zoom-inv, 1));"></div>
+        </div>
+    </div>
     <div id="audioDevicesModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="audioDevicesTitle">
         <div class="task-modal-card" style="width: min(520px, calc(94vw * var(--ui-zoom-inv, 1)));">
             <div class="task-modal-header">

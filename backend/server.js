@@ -7817,18 +7817,25 @@ app.get('/api/meeting-panel', requireAuth, async (req, res) => {
         if (!d.cols.length) continue;
         const colonne = sez.default.filter((c) => d.cols.includes(c));
         if (!colonne.length) continue;
-        const righe = await dosRighe(req, owner, m.client_id, sez, colonne, d, {});
-        const usate = (righe[0] && righe[0]._cols) || colonne;
+        // Si leggono TUTTE le colonne: le predefinite (prima, nella griglia del pannello) e le
+        // altre, mostrate solo nella finestra di dettaglio della riga (lente, 2026-10-14).
+        const tutte = [...colonne, ...d.cols.filter((c) => !colonne.includes(c))];
+        const righe = await dosRighe(req, owner, m.client_id, sez, tutte, d, {});
+        const usate = (righe[0] && righe[0]._cols) || tutte;
+        const nVisibili = usate.filter((c) => colonne.includes(c)).length;
         const iStato = usate.findIndex((c) => /^stato/i.test(c));
+        const filtrate = righe
+          .filter((x) => !sez.perProgetto || (m.project_id ? x.progetto === m.project_id : !x.progetto))
+          .filter((x) => iStato < 0 || !PANNELLO_CHIUSO.test(String(x.valori[iStato] || '').trim()))
+          .slice(0, 80);
         sezioni.push({
           key, titolo: key === 'task' ? 'Task Jira' : sez.titolo,
           ambito: sez.perProgetto ? (m.project_id ? 'progetto' : 'cliente') : null,
-          colonne: usate.map((c) => d.label(c)),
-          righe: righe
-            .filter((x) => !sez.perProgetto || (m.project_id ? x.progetto === m.project_id : !x.progetto))
-            .filter((x) => iStato < 0 || !PANNELLO_CHIUSO.test(String(x.valori[iStato] || '').trim()))
-            .slice(0, 80)
-            .map((x) => x.valori)
+          colonne: usate.slice(0, nVisibili).map((c) => d.label(c)),
+          righe: filtrate.map((x) => x.valori.slice(0, nVisibili)),
+          // Finestra di dettaglio: etichette e valori di tutte le colonne della riga.
+          campi: usate.map((c) => d.label(c)),
+          dettagli: filtrate.map((x) => x.valori)
         });
       } catch (e) { console.error(`PANNELLO_RIUNIONE ${key}:`, e.message); }
     }
