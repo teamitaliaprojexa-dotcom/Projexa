@@ -46,6 +46,8 @@ const router = express.Router();
 const CAMPO = 'ai assistente pm';
 // Campo booleano (creato dall'utente 2026-10-13): export Word automatico a «Ferma».
 const CAMPO_DOWNLOAD = 'download automatico file ass pm ai';
+// Campo a tendina (creato dall'utente 2026-10-14): modalità scelta in automatico (modalitaImpostata).
+const CAMPO_ESECUZIONE = 'esecuzione assistente pm';
 // Modello principale e, in ordine, quelli di riserva usati se Gemini chiude la sessione per
 // quota esaurita, sovraccarico o modello non disponibile (GEMINI_LIVE_FALLBACK_MODEL, separati
 // da virgola; vuota = nessuna riserva).
@@ -440,12 +442,31 @@ async function aiUtente(user) {
   return { ai, apiKey };
 }
 
-// All'avvio della registrazione: assistente acceso? Se sì la finestra chiede la modalità.
-// Risposta: { attiva:false } oppure { attiva, ai }.
+// Campo settings «Esecuzione Assistente PM» (2026-10-14, creato dall'utente): "Chiedi Sempre"
+// (o vuoto) = la finestra chiede la modalità; "Testo to Testo" = parte subito in Testo;
+// "Audio to Testo" = parte subito in Audio live. Restituisce 'testo' | 'audio' | null.
+async function modalitaImpostata(user) {
+  const r = (await db.query(
+    `SELECT valore2 FROM settings
+      WHERE tenant_id = $1 AND user_id = $2
+        AND lower(btrim(campo)) IN ($3, '(*) ' || $3)
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+      ORDER BY id LIMIT 1`,
+    [user.tenant_id, user.user_id, CAMPO_ESECUZIONE]
+  )).rows[0];
+  const v = String((r && r.valore2) || '').trim().toLowerCase();
+  if (v.startsWith('testo')) return 'testo';
+  if (v.startsWith('audio')) return 'audio';
+  return null;
+}
+
+// All'avvio della registrazione: assistente acceso? Se sì la finestra chiede la modalità,
+// oppure parte subito con quella di «Esecuzione Assistente PM».
+// Risposta: { attiva:false } oppure { attiva, ai, modalita: 'testo' | 'audio' | null }.
 router.get('/config', requireAuth, async (req, res) => {
   try {
     const x = await aiUtente(req.user);
-    res.json(x ? { attiva: true, ai: x.ai.provider } : { attiva: false });
+    res.json(x ? { attiva: true, ai: x.ai.provider, modalita: await modalitaImpostata(req.user) } : { attiva: false });
   } catch (e) {
     if (!e.status) console.error('❌ [ASSISTENTE PM]', e.message);
     res.status(e.status || 500).json({ error: e.message });

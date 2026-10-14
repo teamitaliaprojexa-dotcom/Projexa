@@ -329,7 +329,11 @@
         crea();
         apri(eventId, title, d.ai);
         const s = stato;
-        const modalita = await new Promise((resolve) => { s.scelta = resolve; disegnaScelta(); });
+        // Impostazioni › «Esecuzione Assistente PM»: Testo/Audio = parte subito con quella
+        // modalità; "Chiedi Sempre" (o vuoto) = scelta nella finestra.
+        let modalita = d.modalita === 'testo' || d.modalita === 'audio' ? d.modalita : null;
+        if (modalita) bodyEl.innerHTML = '<div class="apm-msg info">Collegamento a Gemini Live…</div>';
+        else modalita = await new Promise((resolve) => { s.scelta = resolve; disegnaScelta(); });
         if (!modalita || s !== stato) return null; // finestra chiusa o registrazione fermata
         try {
             const r = await fetch(`${API_URL}/assistente-pm/avvia`, {

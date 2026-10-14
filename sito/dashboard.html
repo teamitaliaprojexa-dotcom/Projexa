@@ -4287,6 +4287,7 @@
         .mp-errore { color: #B91C1C; font-style: normal; }
         .meeting-linea-btn { border: none; background: #EEF2FF; color: #4F46E5; border-radius: 6px; padding: 0.2rem 0.4rem; margin-left: 0.3rem; cursor: pointer; }
         .meeting-linea-btn:hover { background: #4F46E5; color: #fff; }
+        .meeting-ap-btn.attivo { background: #4F46E5; color: #fff; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25); }
 
         @media (max-width: 768px) {
             :root { --dock-size: 49px; --dock-h: 78px; }
@@ -10943,10 +10944,16 @@
             return recording ? '<i class="fas fa-stop"></i> Ferma' : '<i class="fas fa-circle"></i> Registra';
         }
 
-        // Pulsante «Assistente PM» sulla riga della riunione in registrazione: riapre la finestra
-        // dell'assistente chiusa con la X (stesso comando del riquadro della registrazione).
-        function assistenteRigaButton() {
-            return '<button type="button" class="meeting-linea-btn meeting-ap-btn" title="Assistente PM: riapri la finestra (suggerimenti e trascrizione live)" aria-label="Assistente PM"><i class="fas fa-user-tie"></i></button>';
+        // Pulsante «Assistente PM» sulla riga (accanto alla Linea della riunione):
+        //  - riunione in registrazione (o con il solo assistente in ascolto): riapre la finestra
+        //    dell'assistente chiusa con la X (stesso comando del riquadro della registrazione);
+        //  - altrimenti avvia l'assistente SENZA registrare (es. riunione Teams di cui si caricherà
+        //    la trascrizione di Teams): startMeetingRecording con soloAssistente.
+        // Con «Registra» l'assistente parte comunque da solo, come prima.
+        const AP_TITOLO_AVVIA = 'Assistente PM senza registrare: ascolta la riunione e ti dà suggerimenti, ma la riunione non viene trascritta da Projexa (per registrarla usa Registra)';
+        const AP_TITOLO_RIAPRI = 'Assistente PM: riapri la finestra (suggerimenti e trascrizione live)';
+        function assistenteRigaButton(recording) {
+            return `<button type="button" class="meeting-linea-btn meeting-ap-btn${recording ? ' attivo' : ''}" title="${recording ? AP_TITOLO_RIAPRI : AP_TITOLO_AVVIA}" aria-label="Assistente PM"><i class="fas fa-user-tie"></i></button>`;
         }
 
         // Allinea tutti i pulsanti Registra/Ferma allo stato della registrazione in corso.
@@ -10956,10 +10963,11 @@
                 b.classList.toggle('recording', recording);
                 b.innerHTML = recButtonLabel(recording);
                 b.disabled = false;
-                const box = b.parentElement;
-                const ap = box && box.querySelector('.meeting-ap-btn');
-                if (recording && !ap) box.insertAdjacentHTML('beforeend', assistenteRigaButton());
-                else if (!recording && ap) ap.remove();
+                const ap = b.parentElement && b.parentElement.querySelector('.meeting-ap-btn');
+                if (ap) {
+                    ap.classList.toggle('attivo', recording);
+                    ap.title = recording ? AP_TITOLO_RIAPRI : AP_TITOLO_AVVIA;
+                }
             });
         }
 
@@ -11159,7 +11167,14 @@
             dett?.addEventListener('click', (e) => { if (e.target === dett) chiudiDett(); });
             document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && dett?.classList.contains('open')) chiudiDett(); });
             document.addEventListener('click', (e) => {
-                if (e.target.closest('.meeting-ap-btn')) { e.preventDefault(); document.getElementById('meetingRecorderAssistente')?.click(); return; }
+                const ap = e.target.closest('.meeting-ap-btn');
+                if (ap) {
+                    e.preventDefault();
+                    const recBtn = ap.parentElement && ap.parentElement.querySelector('.meeting-rec-btn');
+                    if (!recBtn || isRecordingMeeting(recBtn.dataset.eventId)) document.getElementById('meetingRecorderAssistente')?.click();
+                    else startMeetingRecording(recBtn, { soloAssistente: true });
+                    return;
+                }
                 const b = e.target.closest('.meeting-linea-btn');
                 if (b) { e.preventDefault(); openMeetingPanel(b.dataset.eventId); }
             });
@@ -11508,6 +11523,15 @@
             return all.length ? all[Math.min(all.length - 1, Math.floor(all.length * 0.9))] : 0;
         }
 
+        // Solo assistente (nessun blocco di trascrizione): storico dei livelli aggiornato a mano.
+        function recStoricoLivelli(rec, track, samples) {
+            if (!samples) return;
+            if (!rec.levelHist) rec.levelHist = { mic: [], system: [] };
+            const hist = rec.levelHist[track];
+            for (const v of recEnergy(samples)) if (v >= REC_SILENCE_RMS) hist.push(v);
+            if (hist.length > REC_LEVEL_HISTORY) hist.splice(0, hist.length - REC_LEVEL_HISTORY);
+        }
+
         function normalizeRecTrackSession(rec, track, samples, windows) {
             if (!rec.levelHist) rec.levelHist = { mic: [], system: [] };
             const hist = rec.levelHist[track];
@@ -11531,7 +11555,11 @@
         function updateRecStatus(rec) {
             if (rec !== meetingRec) return;
             const elapsed = rec.startedAt ? (Date.now() - rec.startedAt) / 1000 : 0;
-            if (rec.running) {
+            if (rec.running && rec.soloAssistente) {
+                setRecStatus(`● Assistente PM in ascolto ${formatRecTime(elapsed)} · la riunione NON viene registrata né trascritta${rec.hasSystemAudio ? '' : ' · solo microfono'}`);
+            } else if (rec.soloAssistente) {
+                setRecStatus(rec.stoppedReason || 'Assistente PM fermato: la riunione non è stata registrata.');
+            } else if (rec.running) {
                 let t = `● Registrazione in corso ${formatRecTime(elapsed)} · blocchi inviati al server: ${rec.sent}`;
                 if (rec.skipped) t += ` · silenzi saltati: ${rec.skipped}`;
                 if (!rec.hasSystemAudio) t += ' · solo microfono';
@@ -11547,11 +11575,27 @@
             }
         }
 
-        async function startMeetingRecording(btn) {
+        // soloAssistente: cattura l'audio solo per l'«Assistente PM» (pulsante della riga), senza
+        // trascrivere né salvare la riunione: niente blocchi al server, niente recap. Si ferma con
+        // «Ferma» (riga o riquadro) oppure da solo se l'assistente non parte.
+        async function startMeetingRecording(btn, { soloAssistente = false } = {}) {
             const ui = recUi();
             if (meetingRec && (meetingRec.running || meetingRec.starting)) {
-                showNotification('È già in corso la registrazione di un\'altra riunione', 'info');
+                showNotification(meetingRec.soloAssistente
+                    ? 'L\'Assistente PM sta già ascoltando una riunione senza registrarla: fermalo con «Ferma» e poi premi Registra'
+                    : 'È già in corso la registrazione di un\'altra riunione', 'info');
                 return;
+            }
+            if (soloAssistente) {
+                // Interruttore «Ai Assistente PM» spento: inutile chiedere la condivisione dell'audio.
+                try {
+                    const r = await fetch(`${API_URL}/assistente-pm/config`, { headers: getAuthHeaders() });
+                    const d = await r.json().catch(() => ({}));
+                    if (r.ok && !d.attiva) {
+                        showNotification('Assistente PM spento: attivalo in Impostazioni › «Ai Assistente PM»', 'info');
+                        return;
+                    }
+                } catch (e) { /* si prova comunque: l'errore lo mostrerà la finestra */ }
             }
             if (audioFileJobs.has(btn.dataset.eventId)) {
                 showNotification('È in corso l\'invio di un file audio per questa riunione: attendi che finisca', 'info');
@@ -11562,7 +11606,7 @@
                 return;
             }
             const rec = meetingRec = { eventId: btn.dataset.eventId, title: btn.dataset.title, running: false, starting: true,
-                names: meetingNames.get(String(btn.dataset.eventId)) || [] };
+                names: meetingNames.get(String(btn.dataset.eventId)) || [], soloAssistente };
             btn.disabled = true;
             showMeetingRecorder(rec.title);
             ui.stop.style.display = 'none';
@@ -11623,7 +11667,7 @@
             // data, orario e titolo): niente audio, la sua trascrizione verrà copiata qui e il
             // recap partirà con le impostazioni di questo utente. Se il controllo non risponde
             // si registra comunque.
-            try {
+            if (!soloAssistente) try {
                 const r = await fetch(`${API_URL}/calendar/meetings/managed/claim-recording`, {
                     method: 'POST',
                     headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
@@ -11646,7 +11690,7 @@
             } catch (e) { /* controllo non disponibile: si registra */ }
             // Riunione già trascritta in precedenza: gli orari riprendono da dove erano arrivati.
             rec.baseOffset = 0;
-            try {
+            if (!soloAssistente) try {
                 const r = await fetch(`${API_URL}/calendar/meetings/managed/offset?id_calendar=${encodeURIComponent(rec.eventId)}`, { headers: calendarAuthHeaders() });
                 const d = await r.json().catch(() => ({}));
                 if (r.ok) rec.baseOffset = Math.max(0, Number(d.offset) || 0);
@@ -11702,11 +11746,18 @@
             rec.node.port.onmessage = (ev) => {
                 if (!rec.running) return;
                 const { mic, sys } = ev.data;
-                if (rec.mic) rec.bufMic.push(mic);
-                if (rec.hasSystemAudio) rec.bufSys.push(sys);
-                rec.bufferLen += (mic || sys).length;
                 recMonitorLevels(rec, rec.mic ? mic : null, rec.hasSystemAudio ? sys : null);
-                flushRecBuffer(rec, false);
+                if (rec.soloAssistente) {
+                    // Solo assistente: nessun blocco per la trascrizione; si tiene solo lo storico
+                    // dei livelli della voce (serve al volume dei blocchi brevi e dell'audio live).
+                    recStoricoLivelli(rec, 'mic', rec.mic ? mic : null);
+                    recStoricoLivelli(rec, 'system', rec.hasSystemAudio ? sys : null);
+                } else {
+                    if (rec.mic) rec.bufMic.push(mic);
+                    if (rec.hasSystemAudio) rec.bufSys.push(sys);
+                    rec.bufferLen += (mic || sys).length;
+                    flushRecBuffer(rec, false);
+                }
                 // Assistente PM: in modalità Testo stessi campioni in un buffer a parte, per i
                 // blocchi brevi; in modalità Audio live mixati e inviati subito a Gemini.
                 if (rec.assistente === 'testo') {
@@ -11737,16 +11788,20 @@
             rec.sysLastHeard = Date.now();
             rec.sysWarned = false;
             recShowLevels(true);
-            recSetWarning(rec.hasSystemAudio ? '' : 'Audio della riunione non condiviso: verrà trascritto solo il tuo microfono. Ferma e riavvia la registrazione attivando "Condividi anche l\'audio di sistema".');
+            recSetWarning(rec.hasSystemAudio ? '' : (soloAssistente
+                ? 'Audio della riunione non condiviso: l\'assistente sente solo il tuo microfono. Ferma e riavvia attivando "Condividi anche l\'audio di sistema".'
+                : 'Audio della riunione non condiviso: verrà trascritto solo il tuo microfono. Ferma e riavvia la registrazione attivando "Condividi anche l\'audio di sistema".'));
             updateRecStatus(rec);
-            if (!rec.hasSystemAudio) showNotification('Audio di sistema non condiviso: verrà trascritto solo il tuo microfono', 'info');
+            if (!rec.hasSystemAudio) showNotification(soloAssistente ? 'Audio di sistema non condiviso: l\'assistente sente solo il tuo microfono' : 'Audio di sistema non condiviso: verrà trascritto solo il tuo microfono', 'info');
             // «Ai Assistente PM» acceso: finestra dell'assistente e blocchi brevi per lui.
             rec.apMic = []; rec.apSys = []; rec.apLen = 0; rec.apFlushed = 0; rec.apScanFrom = 0; rec.apQuietRun = 0;
             rec.assistente = false;
             if (window.AssistentePm) {
                 // La finestra chiede la modalità: 'testo' (blocchi brevi trascritti da Projexa)
                 // o 'audio' (audio live a Gemini); null = assistente spento o non avviato.
+                // Solo assistente: se l'assistente non parte la cattura non serve e si ferma.
                 window.AssistentePm.avvia({ eventId: rec.eventId, title: rec.title }).then((modo) => {
+                    if (!modo && rec.soloAssistente && rec.running) { stopMeetingRecording('Assistente PM non avviato: ascolto fermato.'); return; }
                     if (!modo || !rec.running) return;
                     // L'audio arrivato prima della scelta non serve all'assistente: si parte da qui.
                     rec.apFlushed = rec.flushedSamples + rec.bufferLen;
@@ -13137,7 +13192,7 @@
                     <div class="meeting-duration">${escapeHtml(durationStr)}</div>
                     <div class="meeting-time"><i class="fas fa-clock"></i> ${escapeHtml(timeStr)}</div>
                     ${providerBadge}
-                    <div class="meeting-manage">${(meetingLink || event.manual || isRecordingMeeting(event.id)) ? `<button type="button" class="meeting-rec-btn${isRecordingMeeting(event.id) ? ' recording' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">${recButtonLabel(isRecordingMeeting(event.id))}</button>` : ''}${event.managed && event.client_id ? `<button type="button" class="meeting-linea-btn" data-event-id="${escapeHtml(event.id || '')}" title="Linea della riunione: attività della volta scorsa, To-Do, Jira, quotazioni, MySupport" aria-label="Linea della riunione"><i class="fas fa-route"></i></button>` : ''}${isRecordingMeeting(event.id) ? assistenteRigaButton() : ''}</div>
+                    <div class="meeting-manage">${(meetingLink || event.manual || isRecordingMeeting(event.id)) ? `<button type="button" class="meeting-rec-btn${isRecordingMeeting(event.id) ? ' recording' : ''}" data-event-id="${escapeHtml(event.id || '')}" data-title="${escapeHtml(title)}" data-provider="${escapeHtml(provider ? provider.name : '')}" data-date="${escapeHtml(localDate)}" data-time="${escapeHtml(localTime)}">${recButtonLabel(isRecordingMeeting(event.id))}</button>` : ''}${event.managed && event.client_id ? `<button type="button" class="meeting-linea-btn" data-event-id="${escapeHtml(event.id || '')}" title="Linea della riunione: attività della volta scorsa, To-Do, Jira, quotazioni, MySupport" aria-label="Linea della riunione"><i class="fas fa-route"></i></button>` : ''}${(meetingLink || event.manual || isRecordingMeeting(event.id)) ? assistenteRigaButton(isRecordingMeeting(event.id)) : ''}</div>
                     <div class="meeting-title"${event.manual ? ' data-renamable="1"' : ''} title="${escapeHtml(event.manual ? tooltip + '\n(doppio clic per rinominare)' : tooltip)}">${escapeHtml(title)}</div>
                     <div class="meeting-status meeting-status-genrecap">${event.has_trascrizione && !event.has_recap ? manualRecapButton(event.id) : ''}</div>
                     <div class="meeting-status meeting-status-trascrizione">${event.has_trascrizione ? meetingTextButton(event, 'trascrizione', title) : (isRecordingMeeting(event.id) ? '' : meetingUploadButton('trascrizione'))}</div>
