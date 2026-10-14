@@ -4283,6 +4283,9 @@
         .mp-dett { display: grid; grid-template-columns: max-content 1fr; gap: 0.45rem 1rem; margin: 0; font-size: 0.86rem; }
         .mp-dett dt { color: var(--text-muted); font-weight: 600; }
         .mp-dett dd { margin: 0; color: #1F2937; word-break: break-word; }
+        .mp-dett dd a { color: #4F46E5; text-decoration: none; }
+        .mp-dett dd a:hover { text-decoration: underline; }
+        .mp-dett dd a i { font-size: 0.7rem; margin-left: 0.15rem; }
         .mp-vuoto { color: #9CA3AF; font-style: italic; padding: 0.3rem 0; }
         .mp-errore { color: #B91C1C; font-style: normal; }
         .meeting-linea-btn { border: none; background: #EEF2FF; color: #4F46E5; border-radius: 6px; padding: 0.2rem 0.4rem; margin-left: 0.3rem; cursor: pointer; }
@@ -11198,7 +11201,7 @@
                     if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
                     box.closest('li')?.classList.toggle('fatto', box.checked);
                     // La To-Do della dashboard resta allineata.
-                    if (!att && typeof loadTodoData === 'function') loadDashboardTasks();
+                    if (!att && typeof loadTodoData === 'function') loadTodoData().catch(() => {});
                 } catch (err) {
                     box.checked = !box.checked;
                     showNotification('Errore: ' + err.message, 'info');
@@ -11218,7 +11221,15 @@
                 `<i class="fas ${ICONE[s.key] || 'fa-table'}" style="color: #6366F1;"></i> ${escapeHtml(s.titolo)}${codice ? ` · ${escapeHtml(codice)}` : ''}`;
             const campi = s.campi.map((c, i) => [c, valori[i]]).filter(([, v]) => v != null && String(v).trim() !== '');
             document.getElementById('mpDettaglioBody').innerHTML = campi.length
-                ? `<dl class="mp-dett">${campi.map(([c, v]) => `<dt>${escapeHtml(c)}</dt><dd>${escapeHtml(v).replace(/\n/g, '<br>')}</dd>`).join('')}</dl>`
+                // Valori che sono un indirizzo web (Url delle quotazioni, Link task di Jira):
+                // cliccabili, si aprono in un'altra scheda del browser (pagine esterne a Projexa).
+                ? `<dl class="mp-dett">${campi.map(([c, v]) => {
+                    const t = String(v).trim();
+                    const dd = /^https?:\/\/\S+$/i.test(t)
+                        ? `<a href="${escapeHtml(t)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t)} <i class="fas fa-arrow-up-right-from-square"></i></a>`
+                        : escapeHtml(v).replace(/\n/g, '<br>');
+                    return `<dt>${escapeHtml(c)}</dt><dd>${dd}</dd>`;
+                }).join('')}</dl>`
                 : '<div class="mp-vuoto">Nessun dato per questa riga.</div>';
             document.getElementById('mpDettaglioModal').classList.add('open');
         }
