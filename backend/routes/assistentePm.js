@@ -195,6 +195,7 @@ function connetti(s) {
       const raw = typeof ev.data === 'string' ? ev.data : Buffer.from(ev.data).toString('utf8');
       msg = JSON.parse(raw);
     } catch { return; }
+    if (s.ws !== ws) return; // connessione abbandonata (sbloccaGemini): risposte in ritardo ignorate
     gestisciMessaggio(s, ws, msg);
   });
   ws.addEventListener('error', (ev) => {
@@ -241,13 +242,54 @@ function passaAlModelloSuccessivo(s, motivo) {
   s.handle = null; // l'handle di ripresa vale solo per il modello che l'ha dato
   s.riconnessioni = 0;
   s.risposta = '';
-  const ultimi = s.messaggi.filter((m) => m.tipo === 'trascrizione').slice(-CONTESTO_PEZZI).map((m) => m.testo);
-  s.contestoRipresa = ultimi.length
-    ? `Riprendi l'assistenza: la sessione precedente si è interrotta. Ecco gli ultimi pezzi della riunione, solo come contesto (non rispondere a questo messaggio):\n${ultimi.join('\n')}`
-    : '';
+  s.contestoRipresa = contestoUltimiPezzi(s);
   aggiungi(s, 'avviso', `${prima} non disponibile (${String(motivo).slice(0, 200)}): continuo con ${MODELLI[s.modelloIdx]}.`);
   setTimeout(() => connetti(s), 500);
   return true;
+}
+
+// Ultimi pezzi di riunione da rimandare come contesto a una sessione Gemini nuova.
+function contestoUltimiPezzi(s) {
+  const ultimi = s.messaggi.filter((m) => m.tipo === 'trascrizione').slice(-CONTESTO_PEZZI).map((m) => m.testo);
+  return ultimi.length
+    ? `Riprendi l'assistenza: la sessione precedente si è interrotta. Ecco gli ultimi pezzi della riunione, solo come contesto (non rispondere a questo messaggio):\n${ultimi.join('\n')}`
+    : '';
+}
+
+// Gemini «appeso»: la connessione resta aperta ma non risponde più a nessun turno (né manda la
+// trascrizione di ciò che sente). Caso reale 2026-10-14: dopo 3 risposte, 54 turni di fila senza
+// risposta per tutta la riunione, senza che la connessione si chiudesse. Dopo SBLOCCO_TURNI turni
+// di fila senza risposta si riapre la connessione: la prima volta riprendendo la stessa sessione
+// (handle, contesto intatto), poi con una sessione nuova (ultimi pezzi come contesto); se non
+// basta ancora si prova il modello di riserva.
+const SBLOCCO_TURNI = 2;
+function sbloccaGemini(s) {
+  if (s.chiusa) return;
+  s.senzaRispostaDiFila = 0;
+  s.sblocchi++;
+  if (s.sblocchi > 3 && passaAlModelloSuccessivo(s, 'nessuna risposta da diversi minuti')) {
+    staccaConnessione(s);
+    return;
+  }
+  const nuova = s.sblocchi > 1;
+  console.warn(`[ASSISTENTE PM] ${s.idCalendar}: Gemini non risponde da ${SBLOCCO_TURNI} turni, riconnessione ${nuova ? 'con sessione nuova' : 'con ripresa della sessione'} (tentativo ${s.sblocchi})`);
+  staccaConnessione(s);
+  if (nuova) { s.handle = null; s.contestoRipresa = contestoUltimiPezzi(s); }
+  aggiungi(s, 'avviso', 'Gemini non rispondeva più: mi ricollego (l\'ascolto continua).');
+  setTimeout(() => connetti(s), 300);
+}
+
+// Abbandona la connessione attuale senza passare dal suo «close» (che aspetterebbe la risposta
+// di una connessione appesa): lo stato del turno si azzera, l'audio in attesa resta da inviare.
+function staccaConnessione(s) {
+  const vecchia = s.ws;
+  s.ws = null;
+  s.pronta = false;
+  s.attivitaAperta = false;
+  s.risposta = '';
+  if (s.attesaRisposta) { s.attesaRisposta = false; clearTimeout(s.timerRisposta); }
+  if (s.inTurno) { s.inTurno = false; clearTimeout(s.timerTurno); }
+  try { if (vecchia) vecchia.close(1000, 'riconnessione'); } catch { /* già chiusa */ }
 }
 
 function gestisciMessaggio(s, ws, msg) {
@@ -304,6 +346,8 @@ function gestisciMessaggio(s, ws, msg) {
     else aggiungi(s, 'ai', testo);
     console.log(`[ASSISTENTE PM] ${s.idCalendar}: risposta ${s.valutazioni} (turni chiesti ${s.turniChiesti}) ${sc.interrupted ? 'interrotta' : 'completa'}, ${silenzio ? 'nessun suggerimento' : `suggerimento di ${testo.length} caratteri`}`);
     s.riconnessioni = 0;
+    s.senzaRispostaDiFila = 0;
+    s.sblocchi = 0;
     s.inTurno = false;
     clearTimeout(s.timerTurno);
     if (s.attesaRisposta) fineAttesaRisposta(s);
@@ -340,7 +384,9 @@ function chiudiTurnoAudio(s) {
     s.timerRisposta = setTimeout(() => {
       if (!s.attesaRisposta) return;
       s.senzaRisposta++;
+      s.senzaRispostaDiFila++;
       console.warn(`[ASSISTENTE PM] ${s.idCalendar}: turno ${s.turniChiesti} senza risposta da Gemini dopo ${ATTESA_RISPOSTA_MS / 1000} s`);
+      if (s.senzaRispostaDiFila >= SBLOCCO_TURNI) { sbloccaGemini(s); return; }
       fineAttesaRisposta(s);
     }, ATTESA_RISPOSTA_MS);
   } catch { /* connessione in chiusura */ }
@@ -382,7 +428,12 @@ function prossimo(s) {
   s.inTurno = true;
   s.risposta = '';
   s.rispostaLibera = !!voce.domanda;
-  s.timerTurno = setTimeout(() => { s.inTurno = false; prossimo(s); }, TURNO_TIMEOUT_MS);
+  s.timerTurno = setTimeout(() => {
+    s.inTurno = false;
+    // Modalità Testo: stesso controllo di Gemini «appeso» dell'audio live.
+    if (++s.senzaRispostaDiFila >= SBLOCCO_TURNI) { sbloccaGemini(s); return; }
+    prossimo(s);
+  }, TURNO_TIMEOUT_MS);
   try {
     s.ws.send(JSON.stringify({ clientContent: { turns: [{ role: 'user', parts: [{ text: voce.testo }] }], turnComplete: true } }));
   } catch (e) {
@@ -497,7 +548,7 @@ router.post('/avvia', requireAuth, async (req, res) => {
       istruzioni: await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita),
       coda: [], inTurno: false, risposta: '', ascoltato: '', attesaAudio: [], timerTurno: null, riconnessioni: 0,
       timerAudio: null, attivitaAperta: false, audioNuovo: false, valutazioni: 0, silenzi: 0, rispostaLibera: false,
-      attesaRisposta: false, timerRisposta: null, turniChiesti: 0, senzaRisposta: 0,
+      attesaRisposta: false, timerRisposta: null, turniChiesti: 0, senzaRisposta: 0, senzaRispostaDiFila: 0, sblocchi: 0,
       modelloIdx: 0, contestoRipresa: '',
       messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve()
     };
