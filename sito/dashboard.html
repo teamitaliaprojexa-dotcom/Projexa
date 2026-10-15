@@ -8652,6 +8652,45 @@
             }
         });
 
+        // Interruttore «DataBricks»: acceso -> scelta della cartella (deve contenere MySupport.xlsx)
+        // e schedulazione dell'import; spento (con conferma) -> schedulazione sospesa.
+        // Accanto all'interruttore: nome della cartella e «Cambia cartella» (vuoto se spento).
+        function dbxDopo(toggle, cartella) {
+            clearCalendarToggleDirty(toggle);
+            // Il segnaposto .calendar-conn segue la .bool-cell dell'interruttore (renderSettingRow).
+            const cella = toggle.closest('.bool-cell') || toggle.closest('.toggle-switch');
+            const conn = cella && cella.nextElementSibling && cella.nextElementSibling.classList.contains('calendar-conn') ? cella.nextElementSibling : null;
+            if (!conn) return;
+            conn.innerHTML = cartella
+                ? `<span class="calendar-conn-account" title="Cartella da cui si importa MySupport.xlsx (alle ore della pagina Schedulazioni, con Projexa aperta)"><i class="fas fa-folder-open" style="color:#F59E0B;"></i> ${escapeHtml(cartella)}</span>`
+                  + `<button type="button" class="calendar-conn-btn calendar-conn-on" data-dbx-cambia="${escapeHtml(toggle.dataset.settingId)}"><i class="fas fa-folder-tree"></i> Cambia cartella</button>`
+                : '';
+        }
+        document.addEventListener('change', async (e) => {
+            const toggle = e.target;
+            if (!toggle || !toggle.classList || !toggle.classList.contains('dbx-toggle')) return;
+            if (!window.MySupportCartella) { revertCalendarToggle(toggle, !toggle.checked); return; }
+            const id = toggle.dataset.settingId;
+            if (toggle.checked) {
+                const cartella = await window.MySupportCartella.attiva(id);
+                if (!cartella) { revertCalendarToggle(toggle, false); return; }
+                dbxDopo(toggle, cartella);
+            } else {
+                const yes = await confirmCalendarDisconnect('DataBricks', 'Disattiva l\'import automatico di MySupport.xlsx');
+                if (!yes || !(await window.MySupportCartella.disattiva(id))) { revertCalendarToggle(toggle, true); return; }
+                dbxDopo(toggle, '');
+            }
+        });
+        document.addEventListener('click', async (e) => {
+            const b = e.target.closest && e.target.closest('[data-dbx-cambia]');
+            if (!b || !window.MySupportCartella) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const cartella = await window.MySupportCartella.attiva(b.dataset.dbxCambia);
+            const toggle = document.querySelector(`.dbx-toggle[data-setting-id="${b.dataset.dbxCambia}"]`);
+            if (cartella && toggle) { toggle.checked = true; dbxDopo(toggle, cartella); }
+        });
+
         // Outlook: scelta del metodo di collegamento. Risolve 'oauth' | 'ics' | null (annulla).
         function chooseOutlookConnectMethod() {
             return new Promise((resolve) => {
@@ -20363,7 +20402,12 @@
                 // ricaricano la pagina (mostrano/nascondono chatbot e sezioni della dashboard)
                 const isDashFlag = !calKey && !aiKey && currentDetailSource === 'settings'
                     && DASHBOARD_FLAG_CAMPI.includes(String(row.campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase());
-                const calAttrs = calKey ? ` class="calendar-toggle" data-cal-provider="${calKey}"`
+                // Impostazioni › «DataBricks»: acceso = scelta della cartella di MySupport.xlsx e
+                // import schedulato (js/mysupport-cartella.js); il nome della cartella è in valore2.
+                const isDbx = !calKey && !aiKey && currentDetailSource === 'settings' && !detailReorderMode
+                    && String(row.campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase() === 'databricks';
+                const calAttrs = isDbx ? ' class="dbx-toggle"'
+                    : calKey ? ` class="calendar-toggle" data-cal-provider="${calKey}"`
                     : (aiKey === 'copilot' ? ' disabled title="Copilot non disponibile: non ha un\'API pubblica"'
                     : (aiKey ? ` class="ai-toggle" data-ai-provider="${aiKey}"`
                     : (isDashFlag ? ' data-reload-on-save="1"' : '')));
@@ -20372,7 +20416,11 @@
                 // le AI (accanto resta "chiave API collegata"); non per Calendar, i cui interruttori
                 // collegano gli account e restano tali.
                 if (!calKey) input =`<span class="bool-cell">${input}${BOOL_FLAG_HTML}</span>`;
-                if (calKey) {
+                if (isDbx) {
+                    const acceso = checked && row.valore2;
+                    input += `<span class="calendar-conn">${acceso ? `<span class="calendar-conn-account" title="Cartella da cui si importa MySupport.xlsx (alle ore della pagina Schedulazioni, con Projexa aperta)"><i class="fas fa-folder-open" style="color:#F59E0B;"></i> ${escapeHtml(row.valore2)}</span>`
+                        + `<button type="button" class="calendar-conn-btn calendar-conn-on" data-dbx-cambia="${id}"><i class="fas fa-folder-tree"></i> Cambia cartella</button>` : ''}</span>`;
+                } else if (calKey) {
                     input += `<span class="calendar-conn" data-cal-provider="${calKey}"></span>`;
                     queueCalendarSettingsButtons();
                 } else if (aiKey === 'copilot') {
@@ -22869,7 +22917,8 @@
     <script src="js/assistente-pm.js"></script>
     <!-- Versione esplicita per evitare che il browser mantenga in cache una precedente
          risposta 404 del modulo: senza questo script la voce Qlik resta display:none. -->
-    <script src="js/Qlik_voucher.js?v=20260922-5"></script>
+    <script src="js/Qlik_voucher.js?v=20261015-1"></script>
+    <script src="js/mysupport-cartella.js?v=20261015-1"></script>
 <script>
 (function () {
     const colorClasses = [

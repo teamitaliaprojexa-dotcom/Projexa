@@ -234,9 +234,11 @@
                     <button id="qlikTypeVoucher" type="button" style="padding:0.75rem 1rem; text-align:left; background:#3B82F6; color:white; border:none; border-radius:7px; font-weight:600; cursor:pointer;">
                         Voucher <span style="display:block; font-size:0.78rem; font-weight:400; opacity:0.9; margin-top:0.2rem;">Ore attività sulle commesse dei progetti</span>
                     </button>
-                    <button id="qlikTypeMySupport" type="button" style="padding:0.75rem 1rem; text-align:left; background:#F3F4F6; color:#1F2937; border:1px solid #D1D5DB; border-radius:7px; font-weight:600; cursor:pointer;">
-                        MySupport <span style="display:block; font-size:0.78rem; font-weight:400; color:#6B7280; margin-top:0.2rem;">Quesiti di assistenza dei clienti (campo My Support della scheda cliente)</span>
-                    </button>
+                    <!-- MySupport: import manuale disattivato (2026-10-15). Il file arriva da solo dalla
+                         cartella scelta con «DataBricks» in Impostazioni (js/mysupport-cartella.js). -->
+                    <div style="padding:0.75rem 1rem; background:#F9FAFB; color:#9CA3AF; border:1px dashed #D1D5DB; border-radius:7px; font-weight:600; cursor:not-allowed;" title="Import manuale disattivato">
+                        MySupport <span style="display:block; font-size:0.78rem; font-weight:400; margin-top:0.2rem;">Import automatico dal file MySupport.xlsx della cartella scelta in Impostazioni › DataBricks (orari nella pagina Schedulazioni)</span>
+                    </div>
                 </div>
                 <div style="display:flex; justify-content:flex-end; margin-top:1rem;">
                     <button id="qlikTypeCancel" type="button" style="padding:0.5rem 0.9rem; background:white; color:#4B5563; border:1px solid #D1D5DB; border-radius:6px; cursor:pointer;">Annulla</button>
@@ -245,7 +247,6 @@
         modal.style.display = 'flex';
         const close = () => { modal.style.display = 'none'; };
         document.getElementById('qlikTypeVoucher').onclick = () => { close(); QlikVoucher.mode = 'qlik'; showQlikScopeModal(); };
-        document.getElementById('qlikTypeMySupport').onclick = () => { close(); QlikVoucher.mode = 'mysupport'; openQlikFilePicker('active'); };
         document.getElementById('qlikTypeCancel').onclick = close;
         modal.onclick = (e) => { if (e.target === modal) close(); };
     }
@@ -285,12 +286,10 @@
         return null;
     }
 
-    async function handleMySupportFile(columns, rows, fileName) {
+    // Righe del file -> righe per POST /api/mysupport/import. { righe } oppure { errore }.
+    function righeMySupport(columns, rows) {
         const mancanti = MYSUPPORT_MAPPA.filter(([nome]) => !findColumn(columns, nome)).map(([nome]) => nome);
-        if (mancanti.length) {
-            notify(`Il file MySupport non contiene le colonne: ${mancanti.join(', ')}`, 'info');
-            return;
-        }
+        if (mancanti.length) return { errore: `Il file MySupport non contiene le colonne: ${mancanti.join(', ')}` };
         const colonna = Object.fromEntries(MYSUPPORT_MAPPA.map(([nome, db]) => [db, findColumn(columns, nome)]));
         const righe = rows.map((row) => {
             const out = {};
@@ -301,9 +300,12 @@
             });
             return out;
         }).filter((r) => r.codice_quesito);
-        if (!righe.length) { notify('Nessuna riga con "Codice Quesito" nel file', 'info'); return; }
+        if (!righe.length) return { errore: 'Nessuna riga con "Codice Quesito" nel file' };
+        return { righe };
+    }
 
-        notify(`File letto: ${righe.length} quesiti da importare…`, 'info');
+    // Invio a blocchi di 2000 righe; restituisce i totali, oppure lancia un errore.
+    async function inviaMySupport(righe) {
         const CHUNK = 2000;
         const tot = { totale: 0, inserted: 0, updated: 0, unchanged: 0, invalid: 0, nonTrovati: new Map(), ambigui: new Set() };
         for (let i = 0; i < righe.length; i += CHUNK) {
@@ -314,17 +316,47 @@
                     body: JSON.stringify({ rows: righe.slice(i, i + CHUNK) })
                 });
                 const data = await res.json().catch(() => ({}));
-                if (!res.ok) { notify('Errore durante l\'importazione MySupport: ' + (data.error || res.status), 'info'); return; }
+                if (!res.ok) throw new Error('Errore durante l\'importazione MySupport: ' + (data.error || res.status));
                 ['totale', 'inserted', 'updated', 'unchanged', 'invalid'].forEach((k) => { tot[k] += Number(data[k]) || 0; });
                 (data.nonTrovati || []).forEach((x) => tot.nonTrovati.set(x.nome, (tot.nonTrovati.get(x.nome) || 0) + x.righe));
                 (data.ambigui || []).forEach((x) => tot.ambigui.add(x));
             } catch (e) {
-                notify('Errore di connessione durante l\'importazione MySupport', 'info');
-                return;
+                throw new Error(e && /importazione MySupport/.test(e.message) ? e.message : 'Errore di connessione durante l\'importazione MySupport');
             }
         }
+        return tot;
+    }
+
+    async function handleMySupportFile(columns, rows, fileName) {
+        const x = righeMySupport(columns, rows);
+        if (x.errore) { notify(x.errore, 'info'); return; }
+        notify(`File letto: ${x.righe.length} quesiti da importare…`, 'info');
+        let tot;
+        try { tot = await inviaMySupport(x.righe); } catch (e) { notify(e.message, 'info'); return; }
         showMySupportResultModal(tot, fileName);
     }
+
+    // Import MySupport senza finestre (schedulazione «DataBricks», js/mysupport-cartella.js):
+    // legge il file (primo foglio, intestazioni in prima riga) e lo importa. Restituisce i
+    // totali { totale, inserted, updated, unchanged, invalid, nonTrovati: n, ambigui: n }.
+    QlikVoucher.importaMySupportFile = async function (file) {
+        if (!window.XLSX) throw new Error('Libreria Excel non ancora caricata');
+        const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        if (!sheet) throw new Error('Il file non contiene fogli leggibili');
+        const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+        if (!Array.isArray(grid) || grid.length < 2) throw new Error('Il file non contiene righe di dati');
+        const columns = grid[0].map((h) => String(h == null ? '' : h).trim());
+        const rows = grid.slice(1).map((cells) => {
+            const obj = {};
+            columns.forEach((col, idx) => { obj[col] = cells[idx] === undefined ? null : cells[idx]; });
+            return obj;
+        });
+        const x = righeMySupport(columns, rows);
+        if (x.errore) throw new Error(x.errore);
+        const tot = await inviaMySupport(x.righe);
+        return { ...tot, nonTrovati: tot.nonTrovati.size, ambigui: tot.ambigui.size };
+    };
 
     function showMySupportResultModal(r, fileName) {
         let modal = document.getElementById('qlikResultModal');

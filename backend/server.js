@@ -20,6 +20,7 @@ import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
 import assistentePmRoutes from './routes/assistentePm.js';
+import mysupportCartellaRoutes from './routes/mysupportCartella.js';
 import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
 import jobSchedulesRoutes from './routes/job-schedules.js';
 import auditLogRoutes from './routes/audit-log.js';
@@ -214,6 +215,8 @@ app.use('/api/audit', auditEventiRoutes);
 app.use('/api/chatbot', chatbotRoutes);
 // Finestra «Assistente PM» durante la registrazione (Gemini Live): routes/assistentePm.js.
 app.use('/api/assistente-pm', assistentePmRoutes);
+// Import MySupport dalla cartella del PC (interruttore «DataBricks»): routes/mysupportCartella.js.
+app.use('/api/mysupport/cartella', mysupportCartellaRoutes);
 // Cruscotto PM e Portfolio (funzioni da PM senior: salute, RAID, Change Request, stakeholder,
 // chiusura, documenti AI, Chiedi al progetto, briefing, baseline del Gantt): routes/pm.js.
 app.use('/api/pm', requireAuth, pmRoutes);

@@ -55,8 +55,15 @@ const JOBS = {
   lavori_ai: () => eseguiGiroLavoriAi()
 };
 
+// Job eseguiti dal BROWSER dell'utente (utente_config) mentre Projexa è aperta, non dal
+// server: lo schedulatore ne calcola solo la prossima esecuzione e non li prenota mai.
+//   import_mysupport_cartella = file «MySupport.xlsx» della cartella scelta con l'interruttore
+//   «DataBricks» (Impostazioni), importato come Qlik › MySupport (routes/mysupportCartella.js,
+//   sito/js/mysupport-cartella.js). Il server non vede il PC dell'utente.
+export const JOBS_BROWSER = ['import_mysupport_cartella'];
+
 // Nomi dei job schedulabili (usati dalla pagina di gestione per l'elenco a discesa).
-export const NOMI_JOB = Object.keys(JOBS);
+export const NOMI_JOB = [...Object.keys(JOBS), ...JOBS_BROWSER];
 
 // Descrizione dei job per la pagina; jira = utente_config è la configurazione Jira da usare.
 export const INFO_JOB = {
@@ -68,7 +75,8 @@ export const INFO_JOB = {
   pm_notifiche_progetti: { etichetta: 'Salute progetti: notifiche e fotografia giornaliera', jira: false },
   pm_digest_settimanale: { etichetta: 'Digest settimanale via email ai PM', jira: false },
   recap_batch: { etichetta: 'Recap in modalità Batch: raccoglie quelli pronti', jira: false },
-  lavori_ai: { etichetta: 'Lavori AI in Batch: ripresa e pulizia', jira: false }
+  lavori_ai: { etichetta: 'Lavori AI in Batch: ripresa e pulizia', jira: false },
+  import_mysupport_cartella: { etichetta: 'Import MySupport dalla cartella del PC (browser con Projexa aperta)', jira: false }
 };
 
 export function schedulerAttivo() {
@@ -166,11 +174,13 @@ async function prenotaProssima() {
       WHERE id = (
         SELECT id FROM job_schedules
          WHERE attivo AND prossima_esecuzione <= now()
+           AND job <> ALL($1::text[])
            AND (in_esecuzione_dal IS NULL OR in_esecuzione_dal < now() - interval '${BLOCCO_SCADUTO}')
          ORDER BY prossima_esecuzione
          LIMIT 1
          FOR UPDATE SKIP LOCKED)
-      RETURNING *`
+      RETURNING *`,
+    [JOBS_BROWSER]
   );
   return rows[0] || null;
 }
