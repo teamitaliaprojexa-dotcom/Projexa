@@ -3590,6 +3590,23 @@
         }
         .meeting-genrecap-btn:hover { background: #BAE6FD; }
         .meeting-genrecap-btn:disabled { opacity: 0.7; cursor: wait; }
+        /* Recap preso in carico da «AI Automatizza»: arancione e non cliccabile (span, non
+           button, così il suggerimento al passaggio del mouse compare sempre) */
+        .meeting-genrecap-auto {
+            display: inline-block;
+            width: 4.8rem;
+            padding: 0.25rem 0.4rem;
+            border: 1px solid #FDBA74;
+            border-radius: 6px;
+            background: #FFEDD5; /* arancione */
+            color: #9A3412;
+            font-weight: 600;
+            font-size: 0.78rem;
+            text-align: center;
+            cursor: not-allowed;
+            white-space: nowrap;
+            user-select: none;
+        }
         .meeting-header .meeting-status { color: var(--text-muted); font-size: 0.7rem; }
 
         /* Cliente e Progetto (solo per le riunioni gestite con Projexa), dopo il titolo */
@@ -9303,6 +9320,8 @@
 
         const serverRecapIcon = '<i class="fas fa-hourglass-half meeting-queued" title="Recap Projexa in preparazione sul server: può richiedere diversi minuti, anche a pagina chiusa"></i>';
         const batchRecapIcon = '<i class="fas fa-hourglass-half meeting-queued" title="Recap in modalità Batch: arriva entro 24 ore (di solito pochi minuti), anche a pagina chiusa"></i>';
+        // «AI Automatizza (solo Batch)» ha preso in carico il recap: pulsante arancione, non cliccabile.
+        const autoRecapButton = '<span class="meeting-genrecap-auto" role="button" aria-disabled="true" title="È in carico l\'automatismo con AI per la generazione del recap (AI Automatizza)"><i class="fas fa-robot"></i> Recap</span>';
 
         // «Chiedi sempre» in Impostazioni › AI (AI generazione e-mail recap / Esecuzione Recap):
         // prima di partire si chiede AI e/o esecuzione. Risolve { ai, esecuzione }, oppure null
@@ -9634,7 +9653,8 @@
                     // durante una generazione in corso il pulsante "Recap…" non va sovrascritto
                     if (!manualRecapRunning.has(ev.id)) {
                         const canRecap = m && m.has_trascrizione && !m.has_recap && !m.pending && !recording;
-                        setStatusCell(row, 'meeting-status-genrecap', m && m.recap_running && !m.has_recap ? (m.recap_batch ? batchRecapIcon : serverRecapIcon) : (canRecap ? manualRecapButton(ev.id) : ''));
+                        setStatusCell(row, 'meeting-status-genrecap', m && m.recap_auto && !m.has_recap ? autoRecapButton
+                            : (m && m.recap_running && !m.has_recap ? (m.recap_batch ? batchRecapIcon : serverRecapIcon) : (canRecap ? manualRecapButton(ev.id) : '')));
                     }
                     const queued = m && m.pending > 0
                         ? `<i class="fas fa-hourglass-half meeting-queued" title="Trascrizione in corso sul server: ${m.pending} blocc${m.pending === 1 ? 'o' : 'hi'} in coda"></i>`
@@ -9860,6 +9880,11 @@
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+            return data; // data.automazione: recap preso in carico da «AI Automatizza»
+        }
+        function meetingTextSavedMsg(field, fileName, data) {
+            const base = `${field === 'recap' ? 'Recap' : 'Trascrizione'} caricat${field === 'recap' ? 'o' : 'a'} da ${fileName}`;
+            return data && data.automazione ? `${base}: il recap è in carico ad AI Automatizza` : base;
         }
 
         // === ICONA DI CARICAMENTO NELLA GRIGLIA (trascrizione / recap ancora vuoti) ===
@@ -9898,8 +9923,8 @@
                 }
                 const text = await readMeetingTextFile(file);
                 await ensureManagedMeetingForRow(row);
-                await saveMeetingText(eventId, field, text);
-                showNotification(`${field === 'recap' ? 'Recap' : 'Trascrizione'} caricat${field === 'recap' ? 'o' : 'a'} da ${file.name}`, 'success');
+                const saved = await saveMeetingText(eventId, field, text);
+                showNotification(meetingTextSavedMsg(field, file.name, saved), 'success');
                 refreshMeetingStatuses();
             } catch (e) {
                 showNotification('Caricamento non riuscito: ' + e.message, 'info');
@@ -10027,8 +10052,8 @@
             if (current.trim() && !window.confirm(`Il contenuto del file sostituirà ${label} attuale di questa riunione. Continuare?`)) return;
             try {
                 const text = await readMeetingTextFile(file);
-                await saveMeetingText(modal.dataset.eventId, field, text);
-                showNotification(`${field === 'recap' ? 'Recap' : 'Trascrizione'} caricat${field === 'recap' ? 'o' : 'a'} da ${file.name}`, 'success');
+                const saved = await saveMeetingText(modal.dataset.eventId, field, text);
+                showNotification(meetingTextSavedMsg(field, file.name, saved), 'success');
                 // Riapre la finestra con il testo appena salvato e aggiorna le lenti della griglia
                 openMeetingText({ dataset: { eventId: modal.dataset.eventId, field, title: modal.dataset.title } });
                 refreshMeetingStatuses();
@@ -20157,7 +20182,7 @@
                                     });
                                     const data = await res.json().catch(() => ({}));
                                     if (!res.ok) {
-                                        showNotification(`${saved ? `Salvate ${saved} righe. ` : ''}Errore sulla riga successiva: ${data.error || res.status}`, 'info');
+                                        showNotification(saved ? `Salvate ${saved} righe. Errore sulla riga successiva: ${data.error || res.status}` : `Errore: ${data.error || res.status}`, 'info');
                                         if (saved) type11DataChanged(widget);
                                         return;
                                     }

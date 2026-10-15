@@ -3669,6 +3669,17 @@ app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth,
         data[k] = v === '' ? null : v;
       }
     }
+    // MySupport (2026-10-15, richiesta dell'utente): una riga con il solo Codice Quesito non
+    // compare nella griglia, quindi non si può inserire: serve almeno un altro dato.
+    if (tableName === 'mysupport') {
+      const pieno = (v) => v !== null && v !== undefined && v !== false && String(v).trim() !== '';
+      if (!pieno(data.codice_quesito)) {
+        return res.status(400).json({ error: 'Inserisci il Codice Quesito' });
+      }
+      if (!Object.entries(data).some(([k, v]) => k !== 'codice_quesito' && pieno(v))) {
+        return res.status(400).json({ error: 'Non puoi inserire solo il Codice Quesito: compila almeno un altro campo (es. stato, procedura, data apertura)' });
+      }
+    }
     if (tableColumns.has('tenant_id')) data.tenant_id = req.user.tenant_id;
     if (tableColumns.has('user_id')) data.user_id = effectiveUserId;
     if (tableColumns.has('client_id') && clientId) data.client_id = clientId;

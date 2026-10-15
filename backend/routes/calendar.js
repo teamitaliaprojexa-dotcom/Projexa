@@ -19,7 +19,7 @@ import jwt from 'jsonwebtoken';
 import db from '../config/database.js';
 import {
   encRec, enqueueChunk, enqueueLostNotes, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices,
-  recapInProgress, recapBatchInCorso, loadCorrections, applyCorrections, applyCorrectionsHtml, stripMarkdown, speakerName,
+  recapInProgress, recapBatchInCorso, recapAutomaticoInCorso, loadCorrections, applyCorrections, applyCorrectionsHtml, stripMarkdown, speakerName,
   copiaTrascrizioneCondivisa, recapAiImpostata, recapEsecuzione, isChiediSempre
 } from '../jobs/meetingTranscription.js';
 import { inviaRecapBatch, controllaRecapBatchUtente } from '../jobs/recapBatch.js';
@@ -781,7 +781,19 @@ router.put('/meetings/managed/text', requireAuth, async (req, res) => {
       [encRec(fixed), req.user.tenant_id, req.user.user_id, idCalendar]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
-    res.json({ success: true, length: text.length });
+    // Trascrizione caricata a mano: «AI Automatizza (solo Batch)» come a fine trascrizione
+    // (jobs/aiAutomatizza.js). Si attende l'invio (pochi secondi) così la griglia, aggiornata
+    // subito dopo, mostra già il pulsante Recap arancione; gli errori non annullano il caricamento.
+    let automazione = false;
+    if (col === 'trascrizione') {
+      try {
+        const { avviaAutomazioneAi } = await import('../jobs/aiAutomatizza.js');
+        automazione = await avviaAutomazioneAi(req.user, idCalendar);
+      } catch (e) {
+        console.error(`❌ [AI AUTOMATIZZA] ${idCalendar}: ${e.message}`);
+      }
+    }
+    res.json({ success: true, length: text.length, automazione });
   } catch (error) {
     console.error('❌ REC_MEETING_UPLOAD:', error.message);
     res.status(500).json({ error: error.message });
@@ -1073,12 +1085,14 @@ router.post('/meetings/managed/status', requireAuth, async (req, res) => {
     const pending = await pendingChunks(req.user, ids);
     const recapRunning = await recapInProgress(req.user, ids);
     const recapBatch = await recapBatchInCorso(req.user, ids);
+    // Recap preso in carico da «AI Automatizza»: pulsante Recap arancione e non cliccabile.
+    const recapAuto = await recapAutomaticoInCorso(req.user, ids);
     // Recap Batch in attesa: si controllano subito presso l'AI (in background); il recap
     // pronto compare al prossimo aggiornamento della lista.
     if (recapBatch.size) controllaRecapBatchUtente(req.user);
     const out = {};
     for (const [id, row] of map) {
-      out[id] = { ...row, pending: pending.get(id) || 0, recap_running: recapRunning.has(id), recap_batch: recapBatch.has(id) };
+      out[id] = { ...row, pending: pending.get(id) || 0, recap_running: recapRunning.has(id), recap_batch: recapBatch.has(id), recap_auto: recapAuto.has(id) };
     }
     res.json({ meetings: out });
   } catch (error) {

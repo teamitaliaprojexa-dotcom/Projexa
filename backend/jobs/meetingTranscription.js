@@ -621,6 +621,31 @@ export async function recapBatchInCorso(user, ids) {
   }
 }
 
+// Recap per il cliente preso in carico da «AI Automatizza (solo Batch)» (jobs/aiAutomatizza.js)
+// e non ancora pronto: Batch in attesa con origine 'job:ai_automatizza' oppure ripiego in
+// Immediato prenotato/in corso (recapAutomatico). La griglia mostra il pulsante Recap arancione
+// e non cliccabile.
+export const ORIGINE_AUTOMATIZZA = 'job:ai_automatizza';
+const recapAutomatico = new Set(); // "tenant|utente|id_calendar"
+export function segnaRecapAutomatico(user, idCalendar, attivo) {
+  if (attivo) recapAutomatico.add(recapKey(user, idCalendar));
+  else recapAutomatico.delete(recapKey(user, idCalendar));
+}
+export async function recapAutomaticoInCorso(user, ids) {
+  const out = new Set(ids.filter((id) => recapAutomatico.has(recapKey(user, id))));
+  if (!ids.length) return out;
+  try {
+    const r = await db.query(
+      `SELECT DISTINCT id_calendar FROM rec_meeting_batch b
+        WHERE tenant_id = $1 AND user_id = $2 AND stato = 'in_corso' AND id_calendar = ANY($3::text[])
+          AND origine = $4 AND COALESCE(to_jsonb(b) ->> 'tipo', 'recap') = 'recap'`,
+      [user.tenant_id, user.user_id, ids, ORIGINE_AUTOMATIZZA]
+    );
+    for (const x of r.rows) out.add(x.id_calendar);
+  } catch (e) { /* tabella non ancora creata */ }
+  return out;
+}
+
 // user: { tenant_id, user_id, email }. Restituisce { provider, model, length }.
 // origine: per il log (default: la richiesta in corso, altrimenti 'job:recap').
 // ai: AI scelta con il pulsante Recap ("Chiedi sempre"); senza, quella delle impostazioni.

@@ -61,17 +61,18 @@ router.post('/attiva', requireAuth, async (req, res) => {
     await db.query('UPDATE settings SET valore1 = true, valore2 = $2 WHERE id = $1', [st.id, cartella]);
     const r = await rigaUtente(req.user);
     const parametri = { ...((r && r.parametri) || {}), cartella, file: FILE, tentativi: 0 };
+    // La descrizione (pagina Schedulazioni) segue sempre la cartella scelta.
+    const descrizione = `Import MySupport dalla cartella «${cartella}» (${req.user.email || 'utente'})`.slice(0, 255);
     if (r) {
       await db.query(
-        `UPDATE job_schedules SET attivo = true, parametri = $2, prossima_esecuzione = NULL, in_esecuzione_dal = NULL, updated_at = now() WHERE id = $1`,
-        [r.id, JSON.stringify(parametri)]);
+        `UPDATE job_schedules SET attivo = true, descrizione = $3, parametri = $2, prossima_esecuzione = NULL, in_esecuzione_dal = NULL, updated_at = now() WHERE id = $1`,
+        [r.id, JSON.stringify(parametri), descrizione]);
     } else {
       await db.query(
         `INSERT INTO job_schedules (tenant_id, job, descrizione, parametri, attivo, giorni_settimana, ora_inizio, ora_fine,
                                     intervallo_minuti, fuso_orario, utente_config)
          VALUES ($1, $2, $3, $4, true, '{1,2,3,4,5}', '10:15', '16:00', 345, 'Europe/Rome', $5)`,
-        [req.user.tenant_id, JOB, `Import MySupport dalla cartella «${cartella}» (${req.user.email || 'utente'})`,
-          JSON.stringify(parametri), req.user.user_id]);
+        [req.user.tenant_id, JOB, descrizione, JSON.stringify(parametri), req.user.user_id]);
     }
     res.json({ ok: true });
   } catch (e) {

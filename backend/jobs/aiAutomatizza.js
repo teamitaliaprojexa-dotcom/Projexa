@@ -4,7 +4,9 @@
 // Campo di settings «AI Automatizza (solo Batch)»: interruttore (valore1) + elenco a scelta
 // multipla (valore2: «Recap», «Recap Interno», «RAID», «Change Request», separati da ";" o ",").
 // Con l'interruttore acceso, A FINE TRASCRIZIONE di una riunione (jobs/meetingTranscription.js,
-// processFinalize) le funzioni scelte partono da sole in modalità Batch (costo dimezzato) con
+// processFinalize) e DOPO IL CARICAMENTO MANUALE di una trascrizione da file .txt/.vtt
+// (routes/calendar.js, PUT /meetings/managed/text; il file audio passa da processFinalize)
+// le funzioni scelte partono da sole in modalità Batch (costo dimezzato) con
 // l'AI di «AI generazione e-mail recap». Vale SOLO per questo lancio automatico: i campi
 // «Esecuzione ...» («Chiedi sempre», «Immediato») restano validi quando la funzione si esegue a
 // mano dal suo pulsante.
@@ -23,7 +25,7 @@
 // ============================================================================
 import db from '../config/database.js';
 import { localRecapMode, aiCollegate, PROVIDERS } from '../routes/ai.js';
-import { recapAiImpostata, isChiediSempre, generateRecap } from './meetingTranscription.js';
+import { recapAiImpostata, isChiediSempre, generateRecap, segnaRecapAutomatico, ORIGINE_AUTOMATIZZA } from './meetingTranscription.js';
 import { notificaAutomazioneAi } from './notifiche.js';
 
 const CAMPO = 'ai automatizza (solo batch)';
@@ -98,13 +100,19 @@ export async function avviaAutomazioneAi(user, idCalendar) {
   if (f.has('recap')) {
     const immediato = (motivo) => {
       righe.push(`Recap: Immediato (${motivo})`);
-      daEseguireSubito.push({ nome: 'Recap', avvia: () => generateRecap(user, idCalendar, { origine: 'job:ai_automatizza', ai }) });
+      // Pulsante Recap arancione dalla prenotazione fino alla fine (pronto o errore).
+      segnaRecapAutomatico(user, idCalendar, true);
+      daEseguireSubito.push({
+        nome: 'Recap',
+        avvia: () => generateRecap(user, idCalendar, { origine: ORIGINE_AUTOMATIZZA, ai }),
+        fine: () => segnaRecapAutomatico(user, idCalendar, false)
+      });
     };
     if (locale) immediato('Recap Projexa non ha la modalità Batch');
     else {
       try {
         const { inviaRecapBatch } = await import('./recapBatch.js');
-        await inviaRecapBatch(user, idCalendar, ai, { origine: 'job:ai_automatizza' });
+        await inviaRecapBatch(user, idCalendar, ai, { origine: ORIGINE_AUTOMATIZZA });
         righe.push(`Recap: Batch con ${labelAi}`);
       } catch (e) {
         // La trascrizione c'è (processFinalize lo verifica prima): ogni errore qui viene dal
@@ -181,7 +189,9 @@ export async function avviaAutomazioneAi(user, idCalendar) {
           await notificaAutomazioneAi({
             tenantId: user.tenant_id, userId: user.user_id, idCalendar, titolo: `AI Automatizza: ${x.nome} non generato`,
             righe: [String(e.message || e)]
-          });
+          }).catch(() => {});
+        } finally {
+          if (x.fine) x.fine();
         }
       }
     })();
