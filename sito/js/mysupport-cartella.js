@@ -98,12 +98,17 @@
             document.body.appendChild(el);
         }
         el.innerHTML = '<b>Import MySupport</b><br>Il browser chiede di riconfermare l\'accesso alla cartella del file MySupport.xlsx.'
+            + '<div style="margin-top:4px; font-size:12px;">Nella richiesta di Chrome/Edge scegli <b>«Consenti a ogni visita»</b>, se c\'è: così non te lo richiede più.</div>'
             + '<div style="margin-top:8px; display:flex; gap:6px;"><button type="button" data-ms-ok style="border:none; background:#D97706; color:#fff; border-radius:6px; padding:5px 10px; font-weight:600; cursor:pointer;">Consenti accesso</button>'
             + '<button type="button" data-ms-no style="border:none; background:transparent; color:#92400E; cursor:pointer;">Più tardi</button></div>';
         el.querySelector('[data-ms-no]').onclick = nascondiPermesso;
         el.querySelector('[data-ms-ok]').onclick = async () => {
             try {
-                if (await h.requestPermission({ mode: 'read' }) === 'granted') { nascondiPermesso(); avvisa('Accesso alla cartella concesso: l\'import MySupport riparte entro 5 minuti', 'success'); }
+                if (await h.requestPermission({ mode: 'read' }) === 'granted') {
+                    nascondiPermesso();
+                    avvisa('Accesso alla cartella concesso', 'success');
+                    controlla(true); // se l'ultimo giro era fermo per il permesso, riparte subito
+                }
             } catch (e) { avvisa('Accesso non concesso: ' + e.message); }
         };
     }
@@ -111,8 +116,16 @@
 
     // --- Esecuzione ---
     let inCorso = false;
+    // Qualunque errore imprevisto (accesso alla cartella, lettura del file…) finisce nell'esito della
+    // schedulazione: senza, l'esecuzione resterebbe «prenotata» senza spiegazione.
     async function esegui(stato) {
         const avvio = Date.now();
+        try { await eseguiInterno(stato, avvio); } catch (e) {
+            console.warn('[MySupport cartella] esecuzione non riuscita:', e);
+            await post('esito', { id: stato.id, durataMs: Date.now() - avvio, esito: 'fallito', errore: `Errore nel browser: ${e && e.message ? e.message : e}` }).catch(() => {});
+        }
+    }
+    async function eseguiInterno(stato, avvio) {
         const esito = (e) => post('esito', { id: stato.id, durataMs: Date.now() - avvio, ...e }).catch(() => {});
         const h = await leggiHandle();
         if (!h) {
@@ -153,21 +166,37 @@
     }
 
     // Ogni minuto: è ora? (con prenota=1 il server assegna l'esecuzione a una sola scheda)
-    async function controlla() {
+    // subito = dopo «Consenti accesso»: il server assegna l'esecuzione anche prima dell'ora se l'ultimo
+    // giro si era fermato per il permesso.
+    async function controlla(subito = false) {
         if (inCorso) return;
         inCorso = true;
         try {
-            const r = await fetch(`${API}/stato?prenota=1`, { headers: auth() });
-            if (!r.ok) return;
+            const r = await fetch(`${API}/stato?prenota=1${subito ? '&subito=1' : ''}`, { headers: auth(), cache: 'no-store' });
+            if (!r.ok) { console.warn('[MySupport cartella] controllo non riuscito: HTTP', r.status); return; }
             const stato = await r.json();
             if (stato.attiva && stato.eseguire) await esegui(stato);
-        } catch (e) { /* rete assente: si riprova al giro successivo */ }
+        } catch (e) { console.warn('[MySupport cartella] controllo non riuscito:', e); }
         finally { inCorso = false; }
+    }
+
+    // All'apertura della dashboard: con l'import attivo, se Chrome/Edge hanno «dimenticato» l'accesso
+    // alla cartella (succede a ogni apertura della pagina se non si è scelto «Consenti a ogni visita»)
+    // l'avviso compare subito, così il clic si fa una volta e l'import delle ore previste parte da solo.
+    async function verificaPermesso() {
+        try {
+            const r = await fetch(`${API}/stato`, { headers: auth(), cache: 'no-store' });
+            if (!r.ok) return;
+            const stato = await r.json();
+            if (!stato.attiva) return;
+            const h = await leggiHandle();
+            if (h && await h.queryPermission({ mode: 'read' }) !== 'granted') mostraPermesso(h);
+        } catch (e) { /* si vedrà al momento dell'import */ }
     }
 
     // Solo nella dashboard: aprendo altre pagine di Projexa (es. Schedulazioni) il controllo si ferma
     // e riparte al ritorno, con l'esecuzione rimasta in attesa.
-    setTimeout(() => { controlla(); setInterval(controlla, 60000); }, 5000);
+    setTimeout(async () => { await verificaPermesso(); controlla(); setInterval(controlla, 60000); }, 5000);
 
     window.MySupportCartella = { attiva, disattiva, supportato, esegui: controlla };
 })();

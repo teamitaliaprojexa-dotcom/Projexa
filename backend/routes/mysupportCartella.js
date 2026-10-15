@@ -102,20 +102,30 @@ router.get('/stato', requireAuth, async (req, res) => {
     const st = await settingUtente(req.user, null);
     let r = await rigaUtente(req.user);
     const attiva = !!st && (st.valore1 === true || st.valore1 === 'true') && !!r && r.attivo;
-    if (!attiva) return res.json({ attiva: false, cartella: st ? st.valore2 || '' : '' });
+    if (!attiva) {
+      if (req.query.prenota === '1' && r && r.attivo) console.log(`[MYSUPPORT CARTELLA] ${req.user.email || req.user.user_id}: schedulazione attiva ma interruttore «DataBricks» ${st ? 'spento' : 'non trovato'}`);
+      return res.json({ attiva: false, cartella: st ? st.valore2 || '' : '' });
+    }
     if (!r.prossima_esecuzione) {
       // Riga nuova o calendario cambiato dalla pagina Schedulazioni.
       const prossima = calcolaProssima(r);
       r = (await db.query('UPDATE job_schedules SET prossima_esecuzione = $2, updated_at = now() WHERE id = $1 RETURNING *', [r.id, prossima])).rows[0];
     }
     let eseguire = false;
-    if (req.query.prenota === '1' && r.prossima_esecuzione && new Date(r.prossima_esecuzione) <= new Date()) {
+    // subito=1 (clic su «Consenti accesso»): se l'ultimo giro si era fermato per il permesso della
+    // cartella, si riparte adesso invece di aspettare il tentativo successivo (5 minuti).
+    const subito = req.query.subito === '1' && r.ultimo_esito === 'permesso';
+    if (req.query.prenota === '1' && r.prossima_esecuzione && (subito || new Date(r.prossima_esecuzione) <= new Date())) {
       const p = await db.query(
         `UPDATE job_schedules SET in_esecuzione_dal = now(), updated_at = now()
-          WHERE id = $1 AND prossima_esecuzione <= now()
+          WHERE id = $1 AND (prossima_esecuzione <= now() OR $2::boolean)
             AND (in_esecuzione_dal IS NULL OR in_esecuzione_dal < now() - interval '${BLOCCO_MIN} minutes')
-          RETURNING id`, [r.id]);
+          RETURNING id`, [r.id, subito]);
       eseguire = p.rowCount > 0;
+    }
+    if (req.query.prenota === '1') {
+      const dovuta = subito || (!!r.prossima_esecuzione && new Date(r.prossima_esecuzione) <= new Date());
+      if (dovuta || eseguire) console.log(`[MYSUPPORT CARTELLA] ${req.user.email || req.user.user_id}: esecuzione dovuta (${new Date(r.prossima_esecuzione).toISOString()}), ${eseguire ? 'assegnata a questo browser' : `non assegnata (in esecuzione dal ${r.in_esecuzione_dal ? new Date(r.in_esecuzione_dal).toISOString() : '-'})`}`);
     }
     const par = r.parametri || {};
     res.json({
@@ -160,6 +170,7 @@ router.post('/esito', requireAuth, async (req, res) => {
               ultimo_report = $6, prossima_esecuzione = $7, parametri = $8, in_esecuzione_dal = NULL, updated_at = now()
         WHERE id = $1`,
       [r.id, ora, esito.slice(0, 20), errore, Number(b.durataMs) || null, b.report ? JSON.stringify(b.report) : null, prossima, JSON.stringify(par)]);
+    console.log(`[MYSUPPORT CARTELLA] ${req.user.email || req.user.user_id}: esito ${esito}${errore ? ` - ${errore}` : ''}; prossima ${prossima ? prossima.toISOString() : 'nessuna'}`);
     res.json({ ok: true, prossima });
   } catch (e) {
     console.error('[MYSUPPORT CARTELLA] esito:', e.message);
