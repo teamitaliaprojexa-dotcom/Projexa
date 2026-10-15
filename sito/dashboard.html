@@ -760,6 +760,11 @@
         .proj-gt-ico { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-size: 1.3rem; color: #fff;
             background: linear-gradient(145deg, #3B82F6, #1D4ED8); box-shadow: 0 3px 8px rgba(37,99,235,0.35); transition: transform 0.2s; }
         .proj-ck.proj-gt:hover .proj-gt-ico { transform: scale(1.06); }
+        .proj-ck.proj-dos { background: linear-gradient(145deg, #EEF2FF 0%, #E0E7FF 55%, #F5F3FF 100%); color: #3730A3; }
+        .proj-ck.proj-dos:hover { box-shadow: 0 10px 24px rgba(79,70,229,0.26), inset 0 0 0 1px rgba(79,70,229,0.24); }
+        .proj-dos-ico { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-size: 1.25rem; color: #fff;
+            background: linear-gradient(135deg, #6366F1, #4338CA); box-shadow: 0 3px 8px rgba(79,70,229,0.35); transition: transform 0.2s; }
+        .proj-ck.proj-dos:hover .proj-dos-ico { transform: scale(1.06); }
         /* Completamento a consuntivo accanto al campo Completamento della scheda progetto */
         .compl-cons { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
         .compl-cons-val { background: #EEF2FF; color: #3730A3; border-radius: 999px; padding: 0.1rem 0.55rem; }
@@ -14422,7 +14427,11 @@
                 // Gantt del progetto (sito/gantt.html con projectId, senza campo griglia tipo 13)
                 '<button type="button" class="proj-ck proj-gt" id="projGanttBtn" title="Gantt del progetto: attività, date, effort, effettivo e dipendenze">' +
                 '<span class="proj-gt-ico"><i class="fas fa-chart-gantt"></i></span>' +
-                '<span class="proj-ck-lbl">Gantt</span></button>';
+                '<span class="proj-ck-lbl">Gantt</span></button>' +
+                // Dossier Progetto: il Dossier Cliente limitato a questo progetto (stesse impostazioni AI)
+                '<button type="button" class="proj-ck proj-dos" id="projDossierBtn" title="Dossier Progetto: anteprima da stampare o salvare in PDF con i soli dati di questo progetto">' +
+                '<span class="proj-dos-ico"><i class="fas fa-file-pdf"></i></span>' +
+                '<span class="proj-ck-lbl">Dossier Progetto</span></button>';
         }
         // Posizione del pulsante: nello spazio libero della riga di Descrizione (subito dopo il
         // campo); se la riga è piena o in riordino, nella testata del progetto.
@@ -15303,6 +15312,14 @@
                 clientName: (projList && projList.label) || ''
             });
             apriPagina(`gantt.html?${params.toString()}`);
+        });
+        // Dossier Progetto: dossier-cliente.html con clientId + projectId (solo quel progetto,
+        // «AI Dossier Cliente» ed «Esecuzione Dossier» come il Dossier Cliente).
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#projDossierBtn')) return;
+            if (!currentDetailArgument || !projectClientId) return;
+            const qs = new URLSearchParams({ clientId: projectClientId, projectId: currentDetailArgument });
+            apriPagina(`dossier-cliente.html?${qs.toString()}`);
         });
         // Briefing pre-riunione dalla riga della riunione: serve il progetto collegato.
         document.addEventListener('click', (e) => {

@@ -7493,7 +7493,9 @@ async function dosRighe(req, owner, clientId, sez, colonne, d, opz = {}) {
       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public' AND tc.table_name = $1`,
     [tabella]
   )).rows.map((x) => [x.column_name, x]));
-  const select = [cols.has('project_id') ? 's.project_id::text AS "__progetto"' : 'NULL AS "__progetto"'];
+  const select = [cols.has('project_id') ? 's.project_id::text AS "__progetto"' : 'NULL AS "__progetto"',
+    // Riga chiusa (scadenza passata): nel dettaglio dei progetti si mostra come «Completato».
+    cols.has('scadenza') ? '(s.scadenza < CURRENT_DATE) AS "__scaduta"' : 'false AS "__scaduta"'];
   const joins = [];
   let j = 0;
   for (const c of usate) {
@@ -7574,7 +7576,7 @@ async function dosRighe(req, owner, clientId, sez, colonne, d, opz = {}) {
   };
   return r.rows.map((x) => {
     const riga = etichetteValori(tabella, { ...x });
-    return { progetto: x.__progetto || null, valori: usate.map((c) => fmt(c, riga[c])) };
+    return { progetto: x.__progetto || null, completato: !!x.__scaduta, valori: usate.map((c) => fmt(c, riga[c])) };
   }).map((x, i) => ({ ...x, _cols: i === 0 ? usate : undefined }));
 }
 
@@ -7675,6 +7677,289 @@ async function dosProgetti(req, owner, clientId, opz = {}) {
     } catch (e) { out.forEach((v) => { v.commesse = []; }); }
   }
   return out;
+}
+
+// ==========================================
+// DOSSIER CLIENTE: DETTAGLIO DI OGNI PROGETTO IN CORSO (2026-10-15)
+// ==========================================
+// In fondo al dossier, per ogni progetto non chiuso: offerta/ordine con data, ordine interno e
+// ODA, commesse, Team Work, gestione a ore o giorni, a consuntivo, Licenze da Attivare,
+// riunioni (data, orario, recap), dal Cruscotto PM salute, effort per voce di costo, costi
+// esterni, rischi, decisioni, dipendenze e assunzioni, issue, Change Request e il riepilogo del
+// Gantt come nella pagina Gantt (schede in alto + attività con effort e avanzamento). Task e
+// quotazioni del progetto arrivano già dalle sezioni del dossier. Dati del PROPRIETARIO del
+// cliente (owner): un Manager vede quelli del suo diretto. Niente di questo va all'AI.
+async function dosDettaglioProgetto(req, owner, p) {
+  const pm = await import('./config/pmCore.js');
+  const user = { tenant_id: req.user.tenant_id, user_id: owner, email: req.user.email };
+  const c = await pm.campiProgetto(user, p.id);
+  const siData = (nome) => {
+    const r = c.riga(nome);
+    if (!r) return null;
+    return { si: dosVero(r.valore1), data: c.data(nome) };
+  };
+  const [salute, team, licenze, riunioni, esterni, raid, issue, cr, gantt, commesse, voci] = await Promise.all([
+    pm.saluteProgetto(user, p.id).catch((e) => ({ errore: e.message })),
+    dosTeamProgetto(user, p.id),
+    dosLicenzeProgetto(user, p.id),
+    db.query(
+      `SELECT data_calendar::text AS data, orario_calendar::text AS orario,
+              (recap IS NOT NULL AND BTRIM(recap) <> '') AS recap
+         FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3
+        ORDER BY data_calendar DESC NULLS LAST, orario_calendar DESC NULLS LAST LIMIT 200`,
+      [user.tenant_id, owner, p.id]).then((r) => r.rows.map((x) => ({ data: x.data, orario: x.orario ? String(x.orario).slice(0, 5) : '', recap: !!x.recap }))),
+    dosCostiEsterni(user, p.id),
+    pm.raidProgetto(user, p.id, { tutte: true }),
+    pm.issueProgetto(user, p.id),
+    dosCrProgetto(user, p.id),
+    dosGanttProgetto(user, p.id, p.aOre, p.aConsuntivo, pm),
+    db.query(
+      `SELECT cod_commessa AS cod, commessa AS nome, (scadenza < CURRENT_DATE) AS completato FROM proj_commessa
+        WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3 ORDER BY (scadenza < CURRENT_DATE), cod_commessa`,
+      [user.tenant_id, owner, p.id]).then((r) => r.rows.map((x) => ({ cod: x.cod, nome: x.nome || '', completato: !!x.completato }))).catch(() => p.commesse || []),
+    dosVociCommessa(user, p.id, p.aOre)
+  ]);
+  const riga = (x, campi) => Object.fromEntries(campi.map((k) => [k, x[k] ?? null]));
+  return {
+    offerta: siData('Offerta inviata al Cliente'),
+    ordine: siData('Ordine Ricevuto'),
+    ordineInterno: c.get('Ordine interno'),
+    oda: p.paOda,
+    commesse,
+    aOre: !!p.aOre,
+    aConsuntivo: p.aConsuntivo,
+    team,
+    licenze,
+    riunioni,
+    salute: salute && !salute.errore
+      ? {
+        semaforo: salute.semaforo,
+        indicatori: salute.indicatori.map((x) => riga(x, ['titolo', 'stato', 'nota']))
+      }
+      : { errore: (salute && salute.errore) || 'non disponibile' },
+    voci,
+    esterni,
+    raid: raid.map((x) => ({ ...riga(x, ['tipo', 'titolo', 'descrizione', 'probabilita', 'impatto', 'punteggio', 'owner', 'mitigazione', 'data_revisione', 'decisa_da', 'stato']), completato: !!x.riga_chiusa })),
+    issue: issue.map((x) => riga(x, ['data_segnalazione', 'descrizione', 'categoria', 'priorita', 'owner', 'stato', 'scadenza'])),
+    cr,
+    gantt
+  };
+}
+
+// Team Work del progetto (proj_componenti) per commessa, con il ruolo dalla rubrica (stessa email):
+// una riga per persona e commessa; le righe chiuse (scadenza passata) come «Completato».
+async function dosTeamProgetto(user, projectId) {
+  const r = await db.query(
+    `SELECT c.nominativo, c.email, pc.cod_commessa AS commessa_cod, pc.commessa AS commessa_nome,
+            (c.scadenza < CURRENT_DATE) AS completato
+       FROM proj_componenti c
+       LEFT JOIN proj_commessa pc ON pc.id = c.commessa_id AND pc.tenant_id = c.tenant_id
+      WHERE c.tenant_id = $1 AND c.user_id = $2 AND c.project_id::text = $3
+      ORDER BY pc.cod_commessa NULLS LAST, (c.scadenza < CURRENT_DATE), c.nominativo`,
+    [user.tenant_id, user.user_id, projectId]).catch(() => ({ rows: [] }));
+  if (!r.rows.length) return [];
+  const col = await koColRuolo('rubrica');
+  const ruoli = new Map();
+  if (col) {
+    const rb = await db.query(`SELECT email, "${col}" AS ruolo FROM rubrica WHERE tenant_id = $1 AND user_id = $2`,
+      [user.tenant_id, user.user_id]).catch(() => ({ rows: [] }));
+    rb.rows.forEach((x) => { if (x.ruolo) ruoli.set(koNorm(x.email), String(x.ruolo).trim()); });
+  }
+  return r.rows.map((x) => ({
+    nominativo: x.nominativo || '', email: x.email || '', ruolo: ruoli.get(koNorm(x.email)) || '',
+    commessa: x.commessa_cod ? `${x.commessa_cod}${x.commessa_nome ? ` – ${x.commessa_nome}` : ''}` : '', completato: !!x.completato
+  }));
+}
+
+// Effort per voce di costo e commessa (Costi Progetto, proj_worker): offerta, consuntivo e
+// consuntivo fatturato nell'unità del progetto. Righe chiuse (scadenza passata) a parte, «Completato».
+async function dosVociCommessa(user, projectId, aOre) {
+  const cols = await getTableColumns('proj_worker');
+  const u = aOre ? 'hh' : 'gg';
+  const somma = (c) => (cols.has(c) ? `SUM(COALESCE(w."${c}", 0))::float8` : 'NULL::float8');
+  const r = await db.query(
+    `SELECT pc.cod_commessa AS commessa_cod, pc.commessa AS commessa_nome, COALESCE(wc.desc_worker, 'Senza voce') AS voce,
+            (w.scadenza < CURRENT_DATE) AS completato,
+            ${somma(`offerta_effort_${u}`)} AS offerta, ${somma(`time_spent_${u}`)} AS consuntivo, ${somma(`time_spent_fatt_${u}`)} AS fatturato
+       FROM proj_worker w
+       LEFT JOIN proj_worker_cost wc ON wc.id = w.worker_cost_id
+       LEFT JOIN proj_commessa pc ON pc.id = w.commessa_id AND pc.tenant_id = w.tenant_id
+      WHERE w.tenant_id = $1 AND w.user_id = $2 AND w.project_id::text = $3
+      GROUP BY 1, 2, 3, 4
+      ORDER BY pc.cod_commessa NULLS LAST, 4, 3`,
+    [user.tenant_id, user.user_id, projectId]).catch(() => ({ rows: [] }));
+  return r.rows.map((x) => ({
+    commessa: x.commessa_cod ? `${x.commessa_cod}${x.commessa_nome ? ` – ${x.commessa_nome}` : ''}` : '',
+    voce: x.voce, completato: !!x.completato,
+    offerta: x.offerta, consuntivo: x.consuntivo, fatturato: x.fatturato
+  }));
+}
+
+// Costi esterni del progetto (pm_costo_esterno), anche le righe chiuse («Completato»).
+async function dosCostiEsterni(user, projectId) {
+  if (!(await db.query(`SELECT to_regclass('public.pm_costo_esterno') IS NOT NULL AS c`)).rows[0].c) return [];
+  const r = await db.query(
+    `SELECT categoria, descrizione, fornitore, data::text AS data, previsto::float8 AS previsto, effettivo::float8 AS effettivo, note,
+            (scadenza < CURRENT_DATE) AS completato
+       FROM pm_costo_esterno WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3
+      ORDER BY (scadenza < CURRENT_DATE), data NULLS LAST, created_at`,
+    [user.tenant_id, user.user_id, projectId]).catch(() => ({ rows: [] }));
+  return r.rows.map((x) => ({ ...x, completato: !!x.completato }));
+}
+
+// Change Request del progetto, anche le righe chiuse («Completato»).
+async function dosCrProgetto(user, projectId) {
+  if (!(await db.query(`SELECT to_regclass('public.pm_change_request') IS NOT NULL AS c`)).rows[0].c) return [];
+  const r = await db.query(
+    `SELECT codice, titolo, stato, data_richiesta::text AS data_richiesta, richiesta_da, effort_delta::float8 AS effort_delta,
+            importo_delta::float8 AS importo_delta, giorni_delta, data_decisione::text AS data_decisione,
+            (scadenza < CURRENT_DATE) AS completato
+       FROM pm_change_request WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3
+      ORDER BY (scadenza < CURRENT_DATE), codice NULLS LAST, created_at`,
+    [user.tenant_id, user.user_id, projectId]).catch(() => ({ rows: [] }));
+  return r.rows.map((x) => ({ ...x, completato: !!x.completato }));
+}
+
+// Licenze da Attivare del progetto (griglia proj_licenze, righe attive): nome, referente, effort.
+async function dosLicenzeProgetto(user, projectId) {
+  if (!(await db.query(`SELECT to_regclass('public.proj_licenze') IS NOT NULL AS c`)).rows[0].c) return [];
+  const r = await db.query(
+    `SELECT cl.description AS licenza, COALESCE(rb.nominativo, pl.referente::text) AS referente,
+            pl.analisi::float8 AS analisi, pl.configurazione::float8 AS configurazione,
+            pl.formazione::float8 AS formazione, pl.totale::float8 AS totale, (pl.scadenza < CURRENT_DATE) AS completato
+       FROM proj_licenze pl
+       LEFT JOIN conf_licenze_app cl ON cl.id = pl.licenza_id
+       LEFT JOIN rubrica rb ON rb.id::text = pl.referente::text AND rb.tenant_id = pl.tenant_id
+      WHERE pl.tenant_id = $1 AND pl.user_id = $2 AND pl.project_id::text = $3
+      ORDER BY (pl.scadenza < CURRENT_DATE), pl.id`,
+    [user.tenant_id, user.user_id, projectId]).catch(() => ({ rows: [] }));
+  return r.rows;
+}
+
+// Riepilogo del Gantt come la pagina Gantt (sito/gantt.html, projectSummaryHtml e render):
+// schede Stima progetto / Completamento / Consuntivo / Fatturato / Effettivo / Marginalità /
+// Sforamento e righe delle attività con effort (analisi, configurazione, formazione, totale)
+// e avanzamento. Stessi calcoli della pagina (rootEffort, consuntivoNodo, badge).
+async function dosGanttProgetto(user, projectId, aOre, aConsuntivo, pm) {
+  const r = await db.query(
+    `SELECT * FROM proj_activity WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3
+      ORDER BY ordinamento1 NULLS LAST, ordinamento2 NULLS FIRST, ordinamento3 NULLS FIRST, ordinamento4 NULLS FIRST, created_at`,
+    [user.tenant_id, user.user_id, projectId]).catch(() => ({ rows: [] }));
+  if (!r.rows.length) return null;
+  const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  const r2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
+  const PARTI = ['analisi', 'configurazione', 'formazione'];
+  // Albero dalle chiavi di ordinamento (come righeGantt del Cruscotto).
+  const nodi = r.rows.map((x) => {
+    const livello = x.argomento4 ? 4 : x.argomento3 ? 3 : x.argomento2 ? 2 : 1;
+    const chiave = [x.ordinamento1, x.ordinamento2, x.ordinamento3, x.ordinamento4].slice(0, livello).map((n) => n ?? 0).join('.');
+    return {
+      id: String(x.id), livello, chiave, figli: [],
+      nome: String(x[`argomento${livello}`] || '').trim() || '(senza nome)',
+      milestone: x.milestone === true,
+      avanzamento: Math.max(0, Math.min(100, Number(x.avanzamento) || 0)),
+      totale: num(x.totale), analisi: num(x.analisi), configurazione: num(x.configurazione), formazione: num(x.formazione),
+      effettivo: num(x.effettivo)
+    };
+  });
+  const perChiave = new Map(nodi.map((n) => [n.chiave, n]));
+  const radici = [];
+  for (const n of nodi) {
+    const padre = n.livello > 1 ? perChiave.get(n.chiave.split('.').slice(0, -1).join('.')) : null;
+    if (padre) { padre.figli.push(n); n.padre = padre; } else radici.push(n);
+  }
+  const discendenti = (n) => n.figli.flatMap((f) => [f, ...discendenti(f)]);
+  const avz = (n) => n.avanzamento / 100;
+  const effortRadice = (radice) => {
+    let somma = 0, fatto = 0;
+    for (const n of discendenti(radice)) for (const k of PARTI) if (n[k] != null) { somma += n[k]; fatto += n[k] * avz(n); }
+    const tot = radice.totale != null ? radice.totale : somma;
+    return { tot, fatto: somma > 0 ? fatto : tot * avz(radice) };
+  };
+  const consuntivo = (n) => {
+    if (n.figli.length) {
+      let eff = null, marg = null, sfor = null;
+      n.figli.forEach((f) => {
+        const x = consuntivo(f);
+        if (x.effettivo != null) eff = (eff || 0) + x.effettivo;
+        if (x.marginalita != null) marg = (marg || 0) + x.marginalita;
+        if (x.sforamento != null) sfor = (sfor || 0) + x.sforamento;
+      });
+      return { effettivo: r2(eff), marginalita: r2(marg), sforamento: r2(sfor) };
+    }
+    if (n.effettivo == null) return { effettivo: null, marginalita: null, sforamento: null };
+    const parti = PARTI.map((k) => n[k]).filter((v) => v != null);
+    const stima = parti.length ? parti.reduce((a, b) => a + b, 0) : (n.totale || 0);
+    return { effettivo: r2(n.effettivo), marginalita: r2(Math.max(0, stima - n.effettivo)), sforamento: r2(Math.max(0, n.effettivo - stima)) };
+  };
+  // Completamento e ritardi: analisi del Cruscotto PM (come la scheda della pagina Gantt).
+  let analisi = null;
+  try { analisi = pm.analisiGantt(await pm.righeGantt(user, projectId)); } catch (e) { /* senza analisi */ }
+  const ritardo = new Set(((analisi && analisi.inRitardo) || []).map((x) => String(x.id)));
+
+  const effRadice = new Map(radici.map((n) => [n.id, effortRadice(n)]));
+  let stima = 0, fatto = 0;
+  effRadice.forEach((e) => { stima += e.tot; fatto += e.fatto; });
+  let effettivo = null, marg = 0, sfor = 0;
+  radici.forEach((n) => { const x = consuntivo(n); if (x.effettivo != null) { effettivo = (effettivo || 0) + x.effettivo; marg += x.marginalita || 0; sfor += x.sforamento || 0; } });
+
+  // Consuntivo e fatturato dai Costi Progetto: solo per i progetti «a Consuntivo».
+  let economia = null;
+  if (aConsuntivo) {
+    const cols = await getTableColumns('proj_worker');
+    const u = aOre ? 'hh' : 'gg';
+    const somma = (c) => (cols.has(c) ? `SUM("${c}")::float8` : 'NULL::float8');
+    const e = (await db.query(
+      `SELECT ${somma(`time_spent_${u}`)} AS consuntivo, ${somma(`time_spent_fatt_${u}`)} AS fatturato, count(*)::int AS righe
+         FROM proj_worker WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+      [user.tenant_id, user.user_id, projectId]).catch(() => ({ rows: [] }))).rows[0];
+    if (e && e.righe) economia = { consuntivo: r2(num(e.consuntivo)), fatturato: r2(num(e.fatturato)) };
+  }
+
+  const righe = [];
+  const visita = (n) => {
+    const radice = (() => { let x = n; while (x.padre) x = x.padre; return x; })();
+    const base = (effRadice.get(radice.id) || { tot: 0 }).tot || 0;
+    const barre = [];
+    if (n.livello === 1 && n.totale != null) {
+      const e = effRadice.get(n.id);
+      barre.push({ parte: 'totale', valore: n.totale, avanzamento: n.totale > 0 ? Math.max(0, Math.min(100, Math.round((e.fatto / n.totale) * 100))) : 0, quota: base > 0 ? Math.round((n.totale / base) * 100) : null });
+    }
+    for (const k of PARTI) {
+      if (n[k] == null) continue;
+      barre.push({ parte: k, valore: n[k], avanzamento: n.livello > 1 ? Math.round(n.avanzamento) : null, quota: base > 0 ? Math.round((n[k] / base) * 100) : null });
+    }
+    if (!barre.length && n.livello > 1) barre.push({ parte: 'nessuna', valore: null, avanzamento: Math.round(n.avanzamento), quota: null });
+    let badge = '';
+    if (n.figli.length && n.livello === 1) {
+      const foglie = discendenti(n).filter((x) => !x.figli.length);
+      const nRit = discendenti(n).filter((x) => ritardo.has(x.id)).length;
+      if (nRit) badge = `${nRit} in ritardo`;
+      else if (foglie.length && foglie.every((f) => f.avanzamento >= 100)) badge = 'Completato';
+      else if (foglie.some((f) => f.avanzamento > 0)) badge = 'In corso';
+      else badge = 'Da iniziare';
+    }
+    const cons = n.figli.length ? null : consuntivo(n);
+    righe.push({
+      livello: n.livello, nome: n.nome, milestone: n.milestone, badge,
+      completata: !n.figli.length && n.avanzamento >= 100,
+      inRitardo: !n.figli.length && ritardo.has(n.id),
+      sforamento: cons && cons.sforamento > 0 ? cons.sforamento : null,
+      barre
+    });
+    n.figli.forEach(visita);
+  };
+  radici.forEach(visita);
+  return {
+    unita: aOre ? 'h' : 'g',
+    stima: r2(stima), fatto: r2(fatto), perc: stima > 0 ? Math.min(100, (fatto / stima) * 100) : 0,
+    completamento: analisi ? analisi.completamento : null,
+    inRitardo: analisi ? analisi.inRitardo.length : 0,
+    scostamentoGiorni: analisi ? analisi.scostamentoGiorni : null,
+    economia,
+    effettivo: r2(effettivo), marginalita: r2(marg), sforamento: r2(sfor),
+    righe
+  };
 }
 
 // Valore di un campo della scheda per il Dossier: sì/no (tipi 1, 14, 22) da valore1, numeri
@@ -7911,6 +8196,11 @@ app.get('/api/clients/dossier', requireAuth, ...rottaAi('dossier', async (req, r
     const tutti = req.query.modo === 'tutti';
     const annoN = parseInt(req.query.anno, 10);
     const opz = { tutti, anno: tutti && annoN > 1900 && annoN < 3000 ? annoN : null };
+    // «Dossier Progetto» (pulsante della scheda progetto, 2026-10-15): stesso documento e stesse
+    // impostazioni AI («AI Dossier Cliente» / «Esecuzione Dossier»), ma solo il progetto indicato
+    // (aperto o chiuso) con i suoi task, quotazioni e dettaglio; niente dati del cliente intero
+    // (licenze, MySupport, Issue, righe senza progetto, fatturato del cliente per anno).
+    const soloProgetto = DOS_UUID.test(String(req.query.projectId || '')) ? String(req.query.projectId) : null;
     const nomeCliente = (await resolveClientDescriptions([clientId], req.user.tenant_id)).get(clientId) || 'Cliente';
 
     // Anagrafica (solo nel documento, mai all'AI) e Pubblica Amministrazione del cliente.
@@ -7932,7 +8222,11 @@ app.get('/api/clients/dossier', requireAuth, ...rottaAi('dossier', async (req, r
     const pa = perCampoCliente.get(chiave('Pubblica Amministrazione'));
     const cliente = { nome: nomeCliente, ...anag, pubblicaAmministrazione: pa ? dosVero(pa.valore1) : null };
 
-    const progetti = await dosProgetti(req, owner, clientId, opz);
+    let progetti = await dosProgetti(req, owner, clientId, soloProgetto ? { tutti: true, anno: null } : opz);
+    if (soloProgetto) {
+      progetti = progetti.filter((x) => x.id === soloProgetto);
+      if (!progetti.length) throw Object.assign(new Error('Progetto non trovato per questo cliente'), { statusCode: 404 });
+    }
     const totali = { importo: 0, fatturato: 0, fatturatoFuturo: 0, daFatturare: 0 };
     progetti.forEach((p) => Object.keys(totali).forEach((k) => { totali[k] += dosNum(p[k]) || 0; }));
 
@@ -7940,7 +8234,7 @@ app.get('/api/clients/dossier', requireAuth, ...rottaAi('dossier', async (req, r
     // gli anni: servono all'AI per l'andamento economico (spesa per anno, tendenza); nel documento,
     // con «Anche chiusi» e un anno scelto, la tabella mostra solo quell'anno (fatturatoAnni).
     let fatturatoTuttiAnni = [];
-    try {
+    if (!soloProgetto) try {
       fatturatoTuttiAnni = (await db.query(
         `SELECT anno, SUM(totale) AS totale, SUM(forecast) AS forecast, SUM(da_fatturare) AS da_fatturare
            FROM kpi_fatturazione WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
@@ -7999,16 +8293,21 @@ app.get('/api/clients/dossier', requireAuth, ...rottaAi('dossier', async (req, r
     for (const sez of DOS_SEZIONI) {
       const d = disponibili[sez.key];
       if (!d.cols.length) continue;
+      if (soloProgetto && !sez.perProgetto) continue; // Dossier Progetto: solo task e quotazioni
       const colonne = (scelte[sez.key] || sez.default).filter((c) => d.cols.includes(c));
       if (!colonne.length) continue;
-      const righe = await dosRighe(req, owner, clientId, sez, colonne, d, opz);
+      // Task e quotazioni: anche le righe chiuse (scadenza passata), mostrate come «Completato» nel
+      // dettaglio del progetto; senza progetto e per l'AI restano solo quelle valide (come prima).
+      const righe = await dosRighe(req, owner, clientId, sez, colonne, d, sez.perProgetto ? { ...opz, tutti: true } : opz);
       const usate = (righe[0] && righe[0]._cols) || colonne;
       sezioni.push({
         key: sez.key, titolo: sez.titolo, perProgetto: sez.perProgetto,
         colonne: usate.map((c) => d.label(c)),
         // Per progetto: solo i progetti attivi e le righe senza progetto (le altre no).
         righe: righe.filter((x) => !sez.perProgetto || !x.progetto || idsAttivi.has(x.progetto))
-          .map((x) => ({ progetto: x.progetto && idsAttivi.has(x.progetto) ? x.progetto : null, valori: x.valori }))
+          .map((x) => ({ progetto: x.progetto && idsAttivi.has(x.progetto) ? x.progetto : null, completato: x.completato, valori: x.valori }))
+          .filter((x) => opz.tutti || !x.completato || x.progetto)
+          .filter((x) => !soloProgetto || x.progetto)
       });
     }
 
@@ -8048,7 +8347,7 @@ app.get('/api/clients/dossier', requireAuth, ...rottaAi('dossier', async (req, r
     const nomeProg = new Map(progetti.map((p) => [p.id, p.nome]));
     for (const s of sezioni) {
       righeAi.push(`\n${s.titolo.toUpperCase()} (${s.righe.length}) - colonne: ${s.colonne.join(' | ')}`);
-      s.righe.slice(0, 300).forEach((r) => righeAi.push(`${s.perProgetto ? `[${r.progetto ? nascondi(nomeProg.get(r.progetto)) : 'senza progetto'}] ` : ''}${nascondi(r.valori.join(' | '))}`));
+      s.righe.filter((r) => opz.tutti || !r.completato).slice(0, 300).forEach((r) => righeAi.push(`${s.perProgetto ? `[${r.progetto ? nascondi(nomeProg.get(r.progetto)) : 'senza progetto'}] ` : ''}${nascondi(r.valori.join(' | '))}`));
       if (s.righe.length > 300) righeAi.push(`… altre ${s.righe.length - 300} righe`);
     }
     const datiAi = righeAi.join('\n');
@@ -8075,7 +8374,16 @@ app.get('/api/clients/dossier', requireAuth, ...rottaAi('dossier', async (req, r
       }
     }
 
-    res.json({ cliente, data: oggi, utente, filtro: opz, progetti, totali, fatturatoAnni, sezioni, ai, colonneIgnorate: ignorate });
+    // Dettaglio di ogni progetto in corso (in fondo al documento; non va all'AI).
+    const dettagli = {};
+    for (const p of progetti.filter((x) => soloProgetto || !x.chiuso)) {
+      try { dettagli[p.id] = await dosDettaglioProgetto(req, owner, p); } catch (e) {
+        console.error(`[DOSSIER CLIENTE] dettaglio progetto ${p.id}:`, e.message);
+        dettagli[p.id] = { errore: e.message };
+      }
+    }
+
+    res.json({ cliente, data: oggi, utente, filtro: opz, soloProgetto, progetti, totali, fatturatoAnni, sezioni, dettagli, ai, colonneIgnorate: ignorate });
   } catch (error) {
     console.error('[DOSSIER CLIENTE]', error.message);
     res.status(error.statusCode || error.status || 500).json({ error: error.message });

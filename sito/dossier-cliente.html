@@ -63,6 +63,48 @@
         .no { color: #9CA3AF; }
         .vuoto { color: #9CA3AF; font-style: italic; font-size: 10.5px; margin: 1mm 0 2mm; }
         .progetto { break-inside: avoid-page; }
+        /* Dettaglio di ogni progetto (in fondo): ogni progetto parte da una pagina nuova */
+        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .dett-prog { break-before: page; }
+        .dett-prog > h2 { font-size: 15px; }
+        .dett-anag { font-size: 12px; }
+        .dett-anag b { font-size: 12px; }
+        h3.sotto { margin-top: 6mm; font-size: 12.5px; color: #312E81; border-bottom: 1px dashed #C7D2FE; padding-bottom: 1mm; }
+        tr.gruppo td { background: #F8FAFC; font-weight: 700; color: #312E81; border-top: 1px solid #C7D2FE; }
+        tr.compl td { color: #6B7280; }
+        .sem { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; background: #9CA3AF; }
+        .sem-verde { background: #10B981; } .sem-giallo { background: #F59E0B; } .sem-rosso { background: #DC2626; }
+        /* Gantt: come la pagina Gantt (schede di riepilogo + attività con barre) */
+        .gk-row { display: flex; flex-wrap: wrap; gap: 2.5mm; margin: 1mm 0 3mm; }
+        .gk { flex: 0 0 34mm; border: 1px solid #E5E7EB; border-radius: 3mm; padding: 2mm 3mm; break-inside: avoid; }
+        .gk.wide { flex: 1 1 100%; }
+        .gk small { display: block; font-size: 9.5px; color: #6B7280; font-weight: 600; }
+        .gk b { font-size: 15px; color: #111827; font-variant-numeric: tabular-nums; }
+        .gk.wide b { font-size: 18px; }
+        .gk .gk-note { font-size: 9.5px; color: #6B7280; margin-top: 1px; }
+        .gk .pos { color: #059669; } .gk .neg { color: #DC2626; } .gk .warn { color: #B45309; }
+        .gk-bar { display: grid; grid-template-columns: 1fr 14mm; align-items: center; gap: 2mm; margin-top: 1.5mm; }
+        .gk-bar .trk, .gb .trk { display: block; background: #EEF2F7; border-radius: 3mm; overflow: hidden; }
+        .gk-bar .trk { height: 4mm; }
+        .gk-bar .fil, .gb .fil { display: block; height: 100%; width: 100%; border-radius: 3mm; }
+        .gk-bar .avz, .gb .avz { text-align: right; font-size: 9.5px; font-weight: 700; color: #6B7280; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .avz.done { color: #059669; }
+        table.gt td { vertical-align: middle; padding: 1.8mm 1.8mm; }
+        table.gt tr.g1 td { border-top: 1px solid #E5E7EB; }
+        table.gt tr.g1 td.gn { border-left: 3px solid #3B82F6; }
+        td.gn { width: 45%; font-size: 11px; }
+        td.gn .gnb { font-weight: 700; font-size: 12px; }
+        td.gn .rombo { color: #4F46E5; margin-right: 1.5mm; }
+        td.gn .ck { color: #059669; margin-left: 1.5mm; }
+        td.gn .pill { margin-left: 1.5mm; }
+        .pill { font-size: 8.5px; font-weight: 700; padding: 0.3mm 2mm; border-radius: 999px; white-space: nowrap; }
+        .pill.warn { background: #FEF3C7; color: #92400E; } .pill.ok { background: #D1FAE5; color: #065F46; }
+        .pill.neg { background: #FEE2E2; color: #991B1B; } .pill.mut { background: #EEF2F7; color: #475569; }
+        .pill.acc { background: #DBEAFE; color: #1E40AF; }
+        .gb { display: grid; grid-template-columns: 1fr 14mm 26mm; align-items: center; gap: 2mm; margin: 0.6mm 0; }
+        .gb .trk { height: 2.6mm; }
+        .gb .val { text-align: right; font-size: 10px; font-variant-numeric: tabular-nums; }
+        .gb .val small { color: #6B7280; font-size: 8.5px; }
         .piede { margin-top: 8mm; padding-top: 2mm; border-top: 1px solid #E5E7EB; font-size: 9px; color: #9CA3AF; display: flex; justify-content: space-between; }
         @media print {
             body { background: #fff; }
@@ -139,8 +181,13 @@
 
         function sezioneHtml(s, righe, titolo, livello = 'h2') {
             const testa = `<${livello}>${esc(titolo)} (${righe.length})</${livello}>`;
-            return testa + (righe.length ? tabella(s.colonne, righe.map((r) => r.valori)) : '<div class="vuoto">Nessuna riga.</div>');
+            if (!righe.length) return testa + '<div class="vuoto">Nessuna riga.</div>';
+            // Righe chiuse (scadenza passata): in fondo, con la dicitura «Completato».
+            const ord = [...righe].sort((a, b) => (a.completato ? 1 : 0) - (b.completato ? 1 : 0));
+            return testa + `<table${s.colonne.length <= 3 ? ' class="stretta"' : ''}><thead><tr>${s.colonne.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+                <tbody>${ord.map((r) => `<tr${r.completato ? ' class="compl"' : ''}>${r.valori.map((v, i) => `<td>${esc(v)}${i === 0 && r.completato ? COMPLETATO : ''}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
         }
+        const COMPLETATO = ' <span class="pill ok">Completato</span>';
 
         let titoloProgetti = 'Progetti attivi';
         function progettiHtml(d) {
@@ -174,12 +221,152 @@
                 <tr class="tot"><td>Totale</td><td class="n">${esc(euro(tot.f))}</td><td class="n">${esc(euro(tot.u))}</td><td class="n">${esc(euro(tot.d))}</td></tr></tbody></table>`;
         }
 
+        // ===== Dettaglio di ogni progetto (in fondo al dossier) =====
+        const dataIt = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '');
+        const nfmt = (v) => (v == null || v === '' ? '' : Number(v).toLocaleString('it-IT', { maximumFractionDigits: 2 }));
+        const STATI_RAID = { aperto: 'Aperto', in_corso: 'In corso', chiuso: 'Chiuso' };
+        const STATI_CR = { bozza: 'Bozza', inviata: 'Inviata al cliente', approvata: 'Approvata', sviluppata: 'Sviluppata', rifiutata: 'Rifiutata' };
+        const SEMAFORO = { verde: 'Verde', giallo: 'Giallo', rosso: 'Rosso', nd: 'Non valutabile' };
+
+        // Tabella generica: colonne [{ t: titolo, n: numerica }], righe di valori già formattati (testo).
+        // Una riga: array di celle, oppure { celle, completato } (riga chiusa: dicitura «Completato»
+        // nella prima cella), oppure { gruppo: 'titolo' } (riga di intestazione, es. la commessa).
+        function tab(titolo, colonne, righe) {
+            const n = righe.filter((r) => !r.gruppo).length;
+            const testa = `<h3>${esc(titolo)} (${n})</h3>`;
+            if (!n) return testa + '<div class="vuoto">Nessuna riga.</div>';
+            const cella = (v, i, compl) => `<td${colonne[i] && colonne[i].n ? ' class="n"' : ''}>${v && v.html != null ? v.html : esc(v)}${i === 0 && compl ? COMPLETATO : ''}</td>`;
+            return testa + `<table${colonne.length <= 3 ? ' class="stretta"' : ''}><thead><tr>${colonne.map((c) => `<th${c.n ? ' class="n"' : ''}>${esc(c.t)}</th>`).join('')}</tr></thead>
+                <tbody>${righe.map((r) => {
+                    if (r.gruppo) return `<tr class="gruppo"><td colspan="${colonne.length}">${esc(r.gruppo)}</td></tr>`;
+                    const celle = Array.isArray(r) ? r : r.celle;
+                    return `<tr${r.completato ? ' class="compl"' : ''}>${celle.map((v, i) => cella(v, i, r.completato)).join('')}</tr>`;
+                }).join('')}</tbody></table>`;
+        }
+        // Righe raggruppate per commessa (una riga di intestazione per commessa).
+        function perCommessa(lista, celle) {
+            const out = [];
+            let corrente = null;
+            for (const x of lista) {
+                const g = x.commessa || 'Senza commessa';
+                if (g !== corrente) { out.push({ gruppo: `Commessa: ${g}` }); corrente = g; }
+                out.push({ celle: celle(x), completato: x.completato });
+            }
+            return out;
+        }
+        const pallino = (stato) => ({ html: `<span class="sem sem-${esc(stato || 'nd')}"></span>${esc(SEMAFORO[stato] || stato || '')}` });
+        const siDataTxt = (x) => (!x ? '—' : x.si || x.data ? `Sì${x.data ? ` il ${dataIt(x.data)}` : ''}` : 'No');
+
+        function dettaglioProgettoHtml(p, dt, sez) {
+            const testa = `<h2>Progetto: ${esc(p.nome)}${p.chiuso ? ' <span class="chiuso">chiuso</span>' : ''}</h2>`;
+            const blocchiTq = ['task', 'quotazioni'].filter((k) => sez[k]).map((k) => {
+                const righe = sez[k].righe.filter((r) => r.progetto === p.id);
+                return (righe.length || dt) ? sezioneHtml(sez[k], righe, sez[k].titolo, 'h3') : '';
+            }).join('');
+            // Progetto chiuso (o dettaglio non arrivato): solo task e quotazioni, se ci sono.
+            if (!dt) return blocchiTq ? `<div class="dett-prog">${testa}${blocchiTq}</div>` : '';
+            if (dt.errore) return `<div class="dett-prog">${testa}<div class="vuoto">Dettaglio non disponibile: ${esc(dt.errore)}</div>${blocchiTq}</div>`;
+            const u = dt.aOre ? 'h' : 'gg';
+            const oda = dt.oda ? `${dt.oda.si ? 'Sì' : 'No'}${dt.oda.valore ? ` – ${dt.oda.valore}` : ''}` : '—';
+            let h = `<div class="dett-prog">${testa}<div class="anag dett-anag">
+                <span>Offerta inviata al cliente:</span><b>${esc(siDataTxt(dt.offerta))}</b>
+                <span>Ordine ricevuto:</span><b>${esc(siDataTxt(dt.ordine))}</b>
+                <span>Ordine interno:</span><b>${esc(dt.ordineInterno || '—')}</b>
+                <span>Ordine cliente (ODA):</span><b>${esc(oda)}</b>
+                <span>Commesse:</span><b>${dt.commesse.length ? dt.commesse.map((c) => `${esc(c.cod)}${c.nome ? ` – ${esc(c.nome)}` : ''}${c.completato ? COMPLETATO : ''}`).join('<br>') : '—'}</b>
+                <span>Gestione:</span><b>${dt.aOre ? 'a ore (HH)' : 'a giorni'}</b>
+                <span>A consuntivo:</span><b>${dt.aConsuntivo ? 'Sì' : 'No'}</b>
+            </div>`;
+            h += tab('Team Work', [{ t: 'Nominativo' }, { t: 'Ruolo' }, { t: 'Email' }], perCommessa(dt.team, (x) => [x.nominativo, x.ruolo, x.email]));
+            h += tab('Licenze da Attivare', [{ t: 'Licenza' }, { t: 'Referente' }, { t: `Analisi (${u})`, n: 1 }, { t: `Configurazione (${u})`, n: 1 }, { t: `Formazione (${u})`, n: 1 }, { t: `Totale (${u})`, n: 1 }],
+                dt.licenze.map((x) => ({ celle: [x.licenza || '', x.referente || '', nfmt(x.analisi), nfmt(x.configurazione), nfmt(x.formazione), nfmt(x.totale)], completato: x.completato })));
+            h += blocchiTq;
+            h += tab('Meeting e recap', [{ t: 'Data' }, { t: 'Orario' }], dt.riunioni.map((x) => [dataIt(x.data), x.orario]));
+
+            // Dal Cruscotto PM
+            h += '<h3 class="sotto">Dal Cruscotto PM</h3>';
+            if (dt.salute && !dt.salute.errore) {
+                h += `<h3>Salute del progetto: ${pallino(dt.salute.semaforo).html}</h3>`;
+                h += dt.salute.indicatori.length
+                    ? `<table><thead><tr><th>Indicatore</th><th>Stato</th><th>Nota</th></tr></thead><tbody>${dt.salute.indicatori.map((x) => `<tr><td>${esc(x.titolo)}</td><td>${pallino(x.stato).html}</td><td>${esc(x.nota)}</td></tr>`).join('')}</tbody></table>`
+                    : '<div class="vuoto">Nessun indicatore.</div>';
+            } else h += `<h3>Salute del progetto</h3><div class="vuoto">Non disponibile${dt.salute && dt.salute.errore ? `: ${esc(dt.salute.errore)}` : ''}.</div>`;
+            const colV = [{ t: 'Voce di costo' }, { t: `Offerta (${u})`, n: 1 }, { t: `Consuntivo (${u})`, n: 1 }, ...(dt.aConsuntivo ? [{ t: `Fatturato (${u})`, n: 1 }] : []), { t: `Residuo (${u})`, n: 1 }];
+            h += tab('Effort per voce di costo', colV, perCommessa(dt.voci || [], (v) => [v.voce, nfmt(v.offerta || 0), nfmt(v.consuntivo || 0), ...(dt.aConsuntivo ? [nfmt(v.fatturato || 0)] : []), nfmt(Math.round(((v.offerta || 0) - (v.consuntivo || 0)) * 100) / 100)]));
+            h += tab('Costi esterni', [{ t: 'Data' }, { t: 'Categoria' }, { t: 'Descrizione' }, { t: 'Fornitore' }, { t: 'Previsto', n: 1 }, { t: 'Effettivo', n: 1 }, { t: 'Note' }],
+                dt.esterni.map((x) => ({ celle: [dataIt(x.data), x.categoria || '', x.descrizione || '', x.fornitore || '', euro(x.previsto), euro(x.effettivo), x.note || ''], completato: x.completato })));
+            const raid = (t) => dt.raid.filter((x) => t.includes(x.tipo)).sort((a, b) => (a.completato ? 1 : 0) - (b.completato ? 1 : 0));
+            h += tab('Rischi', [{ t: 'Rischio' }, { t: 'Probabilità', n: 1 }, { t: 'Impatto', n: 1 }, { t: 'Punteggio', n: 1 }, { t: 'Owner' }, { t: 'Risposta al rischio' }, { t: 'Revisione' }, { t: 'Stato' }],
+                raid(['rischio']).map((x) => ({ celle: [x.titolo, x.probabilita ?? '', x.impatto ?? '', x.punteggio ?? '', x.owner || '', x.mitigazione || '', dataIt(x.data_revisione), STATI_RAID[x.stato] || x.stato || ''], completato: x.completato })));
+            h += tab('Decisioni', [{ t: 'Data' }, { t: 'Decisione' }, { t: 'Decisa da' }, { t: 'Motivazione' }],
+                raid(['decisione']).map((x) => ({ celle: [dataIt(x.data_revisione), x.titolo, x.decisa_da || '', x.mitigazione || x.descrizione || ''], completato: x.completato })));
+            h += tab('Dipendenze e assunzioni', [{ t: 'Tipo' }, { t: 'Titolo' }, { t: 'Owner' }, { t: 'Revisione' }, { t: 'Stato' }, { t: 'Descrizione' }],
+                raid(['dipendenza', 'assunzione']).map((x) => ({ celle: [x.tipo === 'dipendenza' ? 'Dipendenza' : 'Assunzione', x.titolo, x.owner || '', dataIt(x.data_revisione), STATI_RAID[x.stato] || x.stato || '', x.descrizione || ''], completato: x.completato })));
+            h += tab('Issue', [{ t: 'Data' }, { t: 'Descrizione' }, { t: 'Categoria' }, { t: 'Priorità' }, { t: 'Owner' }, { t: 'Stato' }, { t: 'Scadenza' }],
+                dt.issue.map((x) => [dataIt(x.data_segnalazione), x.descrizione || '', x.categoria || '', x.priorita || '', x.owner || '', x.stato || '', dataIt(x.scadenza)]));
+            h += tab('Change Request', [{ t: 'Codice' }, { t: 'Titolo' }, { t: 'Stato' }, { t: 'Richiesta il' }, { t: 'Richiesta da' }, { t: `Effort (${u})`, n: 1 }, { t: 'Importo', n: 1 }, { t: 'Tempi (gg)', n: 1 }, { t: 'Decisa il' }],
+                dt.cr.map((x) => ({ celle: [x.codice || '', x.titolo || '', STATI_CR[x.stato] || x.stato || '', dataIt(x.data_richiesta), x.richiesta_da || '', nfmt(x.effort_delta), euro(x.importo_delta), x.giorni_delta ?? '', dataIt(x.data_decisione)], completato: x.completato })));
+            h += ganttHtml(dt.gantt);
+            return h + '</div>';
+        }
+
+        // Gantt come nella pagina Gantt: schede di riepilogo e attività con effort e avanzamento.
+        const COLORI_PARTE = { totale: '#1E40AF', analisi: '#0EA5E9', configurazione: '#10B981', formazione: '#F59E0B', nessuna: '#94A3B8' };
+        function ganttHtml(g) {
+            if (!g) return '<h3>Gantt</h3><div class="vuoto">Nessuna attività nel Gantt.</div>';
+            const f = (v) => `${Number(v).toLocaleString('it-IT', { maximumFractionDigits: 2 })} ${g.unita}`;
+            const schede = [];
+            if (g.stima > 0) {
+                const pct = g.perc, t = Math.round(pct);
+                schede.push(`<div class="gk wide"><small>Stima progetto</small><b>${f(g.stima)}</b>
+                    <div class="gk-bar"><span class="trk"><span class="fil" style="background:linear-gradient(to right, #1E40AF ${pct.toFixed(1)}%, #1E40AF40 ${pct.toFixed(1)}%);"></span></span><span class="avz${t >= 100 ? ' done' : ''}">${t >= 100 ? '✓ ' : ''}${t}%</span></div>
+                    <div class="gk-note">fatto ${f(g.fatto)}</div></div>`);
+            }
+            if (g.completamento != null || g.inRitardo) {
+                const note = [g.inRitardo ? `<span class="warn">${g.inRitardo} in ritardo</span>` : 'nessun ritardo'];
+                if (g.scostamentoGiorni) note.push(`<span class="${g.scostamentoGiorni > 0 ? 'neg' : 'pos'}">${g.scostamentoGiorni > 0 ? '+' : ''}${g.scostamentoGiorni} gg sulla baseline</span>`);
+                schede.push(`<div class="gk"><small>Completamento</small><b>${g.completamento != null ? Math.round(g.completamento) + '%' : '–'}</b><div class="gk-note">${note.join(' · ')}</div></div>`);
+            }
+            if (g.economia) {
+                const cons = g.economia.consuntivo, fatt = g.economia.fatturato;
+                const disp = g.stima > 0 && cons != null ? Math.round((g.stima - cons) * 100) / 100 : null;
+                schede.push(`<div class="gk"><small>Consuntivo</small><b>${cons == null ? '—' : f(cons)}</b>${disp != null ? `<div class="gk-note ${disp < 0 ? 'neg' : 'pos'}">${disp < 0 ? `${f(-disp)} oltre la stima` : `${f(disp)} disponibili`}</div>` : ''}</div>`);
+                schede.push(`<div class="gk"><small>Fatturato</small><b>${fatt == null ? '—' : f(fatt)}</b>${fatt != null && cons ? `<div class="gk-note">${Math.round((fatt / cons) * 100)}% del consuntivo</div>` : ''}</div>`);
+            }
+            const vuoto = g.effettivo == null;
+            schede.push(`<div class="gk"><small>Effettivo</small><b>${vuoto ? '—' : f(g.effettivo)}</b><div class="gk-note">${vuoto ? 'non compilato' : 'ore/giorni usati'}</div></div>`);
+            schede.push(`<div class="gk"><small>Marginalità</small><b class="${!vuoto && g.marginalita > 0 ? 'pos' : ''}">${vuoto ? '—' : f(g.marginalita)}</b><div class="gk-note">sotto la stima</div></div>`);
+            schede.push(`<div class="gk"><small>Sforamento</small><b class="${!vuoto && g.sforamento > 0 ? 'neg' : ''}">${vuoto ? '—' : f(g.sforamento)}</b><div class="gk-note">oltre la stima</div></div>`);
+
+            const pill = (b) => {
+                if (!b) return '';
+                const cls = /ritardo/.test(b) ? 'warn' : b === 'Completato' ? 'ok' : b === 'In corso' ? 'acc' : 'mut';
+                return `<span class="pill ${cls}">${b === 'Completato' ? '✓ ' : ''}${esc(b)}</span>`;
+            };
+            const barra = (b) => {
+                const col = COLORI_PARTE[b.parte] || '#94A3B8';
+                const avz = b.avanzamento;
+                const fill = avz != null ? `linear-gradient(to right, ${col} ${avz}%, ${col}40 ${avz}%)` : col;
+                return `<div class="gb"><span class="trk"><span class="fil" style="background:${fill};"></span></span>`
+                    + `<span class="avz${avz >= 100 ? ' done' : ''}">${avz != null ? `${avz >= 100 ? '✓ ' : ''}${avz}%` : ''}</span>`
+                    + `<span class="val">${b.valore != null ? `${f(b.valore)}${b.quota != null ? ` <small>(${b.quota}%)</small>` : ''}` : '<small>—</small>'}</span></div>`;
+            };
+            const righe = g.righe.map((r) => `<tr class="${r.livello === 1 ? 'g1' : ''}">
+                <td class="gn" style="padding-left:${2 + (r.livello - 1) * 6}mm">${r.livello === 1 || r.milestone ? '<span class="rombo">◆</span>' : ''}<span class="${r.livello === 1 ? 'gnb' : ''}">${esc(r.nome)}</span>
+                    ${pill(r.badge)}${r.completata ? '<span class="ck">✔</span>' : ''}${r.inRitardo ? '<span class="pill warn">in ritardo</span>' : ''}${r.sforamento ? `<span class="pill neg">+${esc(f(r.sforamento))}</span>` : ''}</td>
+                <td class="ge">${r.barre.map(barra).join('')}</td></tr>`).join('');
+            return `<h3>Gantt</h3><div class="gk-row">${schede.join('')}</div>
+                <table class="gt"><thead><tr><th style="text-align:left">Attività</th><th style="text-align:left">Effort e avanzamento</th></tr></thead><tbody>${righe}</tbody></table>`;
+        }
+
         async function carica() {
             const qs = new URLSearchParams(location.search);
             const clientId = qs.get('clientId') || '';
             // Scelta fatta all'apertura: modo=attivi (default) o tutti (anche chiusi) + anno del progetto.
             const filtroQs = new URLSearchParams({ clientId, modo: qs.get('modo') === 'tutti' ? 'tutti' : 'attivi' });
             if (qs.get('anno')) filtroQs.set('anno', qs.get('anno'));
+            // Dossier Progetto (pulsante della scheda progetto): solo quel progetto.
+            if (qs.get('projectId')) filtroQs.set('projectId', qs.get('projectId'));
             if (!localStorage.getItem('authToken')) { location.href = 'index.html'; return; }
             try {
                 let d, logoTenant, logoCliente;
@@ -213,7 +400,9 @@
                     }
                     logoTenant = lt; logoCliente = lc;
                 }
-                document.title = `Dossier Cliente - ${d.cliente.nome}`;
+                const soloProg = d.soloProgetto ? (d.progetti[0] || null) : null;
+                document.title = soloProg ? `Dossier Progetto - ${soloProg.nome}` : `Dossier Cliente - ${d.cliente.nome}`;
+                if (soloProg) document.querySelector('.toolbar .t').innerHTML = '<i class="fas fa-file-pdf"></i> Dossier Progetto';
 
                 const avvisi = [];
                 if (d.ai && d.ai.errore) avvisi.push(d.ai.errore);
@@ -222,11 +411,11 @@
 
                 const c = d.cliente;
                 const f = d.filtro || {};
-                const descrFiltro = f.tutti ? `Progetti aperti e chiusi${f.anno ? ` · anno ${f.anno}` : ' · tutti gli anni'}` : 'Solo progetti attivi';
-                titoloProgetti = f.tutti ? `Progetti aperti e chiusi${f.anno ? ` (anno ${f.anno})` : ''}` : 'Progetti attivi';
+                const descrFiltro = soloProg ? `Progetto ${soloProg.nome}` : f.tutti ? `Progetti aperti e chiusi${f.anno ? ` · anno ${f.anno}` : ' · tutti gli anni'}` : 'Solo progetti attivi';
+                titoloProgetti = soloProg ? 'Progetto' : f.tutti ? `Progetti aperti e chiusi${f.anno ? ` (anno ${f.anno})` : ''}` : 'Progetti attivi';
                 let html = `<div class="testata">
                     <div class="logo">${logoTenant ? `<img src="${logoTenant}" alt="Logo">` : ''}</div>
-                    <div class="titolo"><h1>DOSSIER CLIENTE</h1><div class="cli">${esc(c.nome)}</div><div class="sub">Aggiornato al ${esc(d.data)} · ${esc(descrFiltro)}</div></div>
+                    <div class="titolo"><h1>${soloProg ? 'DOSSIER PROGETTO' : 'DOSSIER CLIENTE'}</h1><div class="cli">${soloProg ? `${esc(soloProg.nome)}<br><span style="font-weight:600;font-size:13px;">${esc(c.nome)}</span>` : esc(c.nome)}</div><div class="sub">Aggiornato al ${esc(d.data)} · ${esc(descrFiltro)}</div></div>
                     <div class="logo dx">${logoCliente ? `<img src="${logoCliente}" alt="Logo cliente">` : ''}</div>
                 </div>
                 <div class="anag">
@@ -242,19 +431,18 @@
                 if (sez.licenze) html += sezioneHtml(sez.licenze, sez.licenze.righe, 'Licenze attive');
                 html += progettiHtml(d) + fatturatoAnniHtml(d);
 
-                // Per ogni progetto attivo: i suoi task e le sue quotazioni.
-                for (const p of d.progetti) {
-                    const blocchi = ['task', 'quotazioni'].filter((k) => sez[k]).map((k) => {
-                        const righe = sez[k].righe.filter((r) => r.progetto === p.id);
-                        return righe.length ? sezioneHtml(sez[k], righe, `${sez[k].titolo}`, 'h3') : '';
-                    }).join('');
-                    if (blocchi) html += `<div class="progetto"><h2>Progetto: ${esc(p.nome)}${p.chiuso ? ' <span class="chiuso">chiuso</span>' : ''}</h2>${blocchi}</div>`;
+                // Parti del cliente intero: non nel Dossier Progetto.
+                if (!soloProg) {
+                    if (sez.task) html += sezioneHtml(sez.task, sez.task.righe.filter((r) => !r.progetto), 'Task senza progetto');
+                    if (sez.quotazioni) html += sezioneHtml(sez.quotazioni, sez.quotazioni.righe.filter((r) => !r.progetto), 'Quotazioni senza progetto');
+                    if (sez.mysupport) html += sezioneHtml(sez.mysupport, sez.mysupport.righe, 'Ticket MySupport non chiusi');
+                    if (sez.issue) html += sezioneHtml(sez.issue, sez.issue.righe, 'Issue');
                 }
-                if (sez.task) html += sezioneHtml(sez.task, sez.task.righe.filter((r) => !r.progetto), 'Task senza progetto');
-                if (sez.quotazioni) html += sezioneHtml(sez.quotazioni, sez.quotazioni.righe.filter((r) => !r.progetto), 'Quotazioni senza progetto');
-                if (sez.mysupport) html += sezioneHtml(sez.mysupport, sez.mysupport.righe, 'Ticket MySupport non chiusi');
-                if (sez.issue) html += sezioneHtml(sez.issue, sez.issue.righe, 'Issue');
-                html += `<div class="piede"><span>Projexa · Dossier Cliente · ${esc(c.nome)}</span><span>${esc(d.data)}</span></div>`;
+
+                // In fondo: il dettaglio di ogni progetto (in corso: con dati del Cruscotto e del
+                // Gantt; chiuso, con «Anche chiusi»: solo task e quotazioni come prima).
+                for (const p of d.progetti) html += dettaglioProgettoHtml(p, (d.dettagli || {})[p.id], sez);
+                html += `<div class="piede"><span>Projexa · ${soloProg ? `Dossier Progetto · ${esc(soloProg.nome)} · ` : 'Dossier Cliente · '}${esc(c.nome)}</span><span>${esc(d.data)}</span></div>`;
 
                 $('pagina').innerHTML = html;
                 $('stato').textContent = d.ai && d.ai.testo ? 'Pronto: controlla e stampa (orientamento orizzontale).' : 'Pronto, senza sintesi dell\'AI: controlla e stampa.';

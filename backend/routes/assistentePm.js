@@ -161,12 +161,37 @@ function aggiungi(s, tipo, testo) {
   s.ultimoUso = Date.now();
 }
 
+// --- Diagnostica dei blocchi di Gemini (2026-10-15) ---
+// Gemini a volte smette di rispondere senza chiudere la connessione e senza errori. Per capire
+// quando succede si annota cosa arriva da Gemini (tipi di messaggio, token del contesto, ora
+// dell'ultimo messaggio) e lo si scrive nel log a ogni turno senza risposta e a ogni risposta.
+function notaDiagnostica(s, msg) {
+  const d = s.diag;
+  d.ultimoMsg = Date.now();
+  const tipi = Object.keys(msg);
+  if (msg.serverContent) tipi.push(...Object.keys(msg.serverContent).map((k) => `serverContent.${k}`));
+  for (const t of tipi) d.tipi[t] = (d.tipi[t] || 0) + 1;
+  const u = msg.usageMetadata;
+  if (u && Number.isFinite(Number(u.totalTokenCount))) d.token = Number(u.totalTokenCount);
+  if (msg.goAway) console.warn(`[ASSISTENTE PM] ${s.idCalendar}: goAway da Gemini (timeLeft ${msg.goAway.timeLeft || '?'}) dopo ${secondiDa(d.connessaIl)} s di connessione`);
+}
+const secondiDa = (t) => (t ? Math.round((Date.now() - t) / 1000) : '?');
+// Riga di stato per il log; azzera i tipi di messaggio contati (si riparte dal turno dopo).
+function rigaDiagnostica(s) {
+  const d = s.diag;
+  const tipi = Object.entries(d.tipi).map(([k, n]) => `${k}×${n}`).join(', ') || 'nessuno';
+  d.tipi = {};
+  return `connessione n.${d.connessioni} aperta da ${secondiDa(d.connessaIl)} s · ultimo messaggio da Gemini ${secondiDa(d.ultimoMsg)} s fa · token contesto ${d.token ?? '?'} · ws ${s.ws ? s.ws.readyState : '-'} · ricevuti dal turno prima: ${tipi}`;
+}
+
 function connetti(s) {
   if (s.chiusa) return;
   s.pronta = false;
   const ws = new WebSocket(`${WS_URL}?key=${encodeURIComponent(s.apiKey)}`);
   ws.binaryType = 'arraybuffer';
   s.ws = ws;
+  s.diag.connessioni++;
+  s.diag.connessaIl = Date.now();
   ws.addEventListener('open', () => {
     const setup = {
       model: `models/${MODELLI[s.modelloIdx]}`,
@@ -196,6 +221,7 @@ function connetti(s) {
       msg = JSON.parse(raw);
     } catch { return; }
     if (s.ws !== ws) return; // connessione abbandonata (sbloccaGemini): risposte in ritardo ignorate
+    notaDiagnostica(s, msg);
     gestisciMessaggio(s, ws, msg);
   });
   ws.addEventListener('error', (ev) => {
@@ -344,7 +370,8 @@ function gestisciMessaggio(s, ws, msg) {
     if (scartata) console.log(`[ASSISTENTE PM] ${s.idCalendar}: risposta senza parola chiave scartata (${testo.length} caratteri)`);
     if (silenzio) s.silenzi++;
     else aggiungi(s, 'ai', testo);
-    console.log(`[ASSISTENTE PM] ${s.idCalendar}: risposta ${s.valutazioni} (turni chiesti ${s.turniChiesti}) ${sc.interrupted ? 'interrotta' : 'completa'}, ${silenzio ? 'nessun suggerimento' : `suggerimento di ${testo.length} caratteri`}`);
+    console.log(`[ASSISTENTE PM] ${s.idCalendar}: risposta ${s.valutazioni} (turni chiesti ${s.turniChiesti}) ${sc.interrupted ? 'interrotta' : 'completa'}, ${silenzio ? 'nessun suggerimento' : `suggerimento di ${testo.length} caratteri`} · token contesto ${s.diag.token ?? '?'} · connessione n.${s.diag.connessioni} da ${secondiDa(s.diag.connessaIl)} s`);
+    s.diag.tipi = {};
     s.riconnessioni = 0;
     s.senzaRispostaDiFila = 0;
     s.sblocchi = 0;
@@ -385,7 +412,7 @@ function chiudiTurnoAudio(s) {
       if (!s.attesaRisposta) return;
       s.senzaRisposta++;
       s.senzaRispostaDiFila++;
-      console.warn(`[ASSISTENTE PM] ${s.idCalendar}: turno ${s.turniChiesti} senza risposta da Gemini dopo ${ATTESA_RISPOSTA_MS / 1000} s`);
+      console.warn(`[ASSISTENTE PM] ${s.idCalendar}: turno ${s.turniChiesti} senza risposta da Gemini dopo ${ATTESA_RISPOSTA_MS / 1000} s · ${rigaDiagnostica(s)}`);
       if (s.senzaRispostaDiFila >= SBLOCCO_TURNI) { sbloccaGemini(s); return; }
       fineAttesaRisposta(s);
     }, ATTESA_RISPOSTA_MS);
@@ -549,6 +576,7 @@ router.post('/avvia', requireAuth, async (req, res) => {
       coda: [], inTurno: false, risposta: '', ascoltato: '', attesaAudio: [], timerTurno: null, riconnessioni: 0,
       timerAudio: null, attivitaAperta: false, audioNuovo: false, valutazioni: 0, silenzi: 0, rispostaLibera: false,
       attesaRisposta: false, timerRisposta: null, turniChiesti: 0, senzaRisposta: 0, senzaRispostaDiFila: 0, sblocchi: 0,
+      diag: { connessioni: 0, connessaIl: 0, ultimoMsg: 0, token: null, tipi: {} },
       modelloIdx: 0, contestoRipresa: '',
       messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve()
     };
