@@ -165,7 +165,9 @@
         finally { inCorso = false; }
     }
 
-    setTimeout(() => { controlla(); setInterval(controlla, 60000); }, 20000);
+    // Solo nella dashboard: aprendo altre pagine di Projexa (es. Schedulazioni) il controllo si ferma
+    // e riparte al ritorno, con l'esecuzione rimasta in attesa.
+    setTimeout(() => { controlla(); setInterval(controlla, 60000); }, 5000);
 
     window.MySupportCartella = { attiva, disattiva, supportato, esegui: controlla };
 })();
