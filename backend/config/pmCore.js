@@ -255,7 +255,12 @@ export async function righeGantt(user, projectId) {
       baselineFine: dataIso(x.baseline_fine),
       baselineIl: x.baseline_il || null,
       stima,
-      effettivo: numero(x.effettivo)
+      effettivo: numero(x.effettivo),
+      // Per il piano dal Gantt (capacita.js): effort per fase e persone dell'attività
+      // (nominativo: anche più nomi separati da «, »; ownerTipo = Interno/Cliente/Fornitore).
+      fasi: Object.fromEntries(['analisi', 'configurazione', 'formazione', 'programmazione'].map((c) => [c, numero(x[c])])),
+      nominativo: String(x.nominativo || '').trim(),
+      ownerTipo: String(x.owner || '').trim().toLowerCase()
     };
   });
 }

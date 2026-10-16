@@ -24,6 +24,8 @@ export const CAMPO = 'capacità e allocazione risorse';
 export const TABELLE = ['pm_risorse', 'pm_risorse_assenza', 'pm_allocazioni'];
 const ORE_GIORNATA = 8;
 const ORE_SETT_DEFAULT = 32; // ore lavorate a settimana se la persona non è in Rubrica
+// Fasi di effort comuni a Gantt, Licenze da Attivare e Costi Progetto (colonne <fase>_hh / _gg).
+const FASI = ['analisi', 'configurazione', 'formazione', 'programmazione'];
 
 export async function capacitaAttiva(user) {
   const r = (await db.query(
@@ -128,7 +130,8 @@ async function effortPerRuolo(user, projectId) {
   const r = await db.query(
     `SELECT COALESCE(cv.descr, wc.desc_worker, 'Senza voce') AS voce, hh.gestione_hh AS hh,
             SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.offerta_effort_hh, 0) ELSE COALESCE(a.offerta_effort_gg, 0) END) AS offerta,
-            SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END) AS speso
+            SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.time_spent_hh, 0) ELSE COALESCE(a.time_spent_gg, 0) END) AS speso,
+            ${FASI.map((f) => `SUM(COALESCE((to_jsonb(a) ->> (CASE WHEN hh.gestione_hh THEN '${f}_hh' ELSE '${f}_gg' END))::numeric, 0)) AS ${f}`).join(',\n            ')}
        FROM proj_worker a
        LEFT JOIN proj_worker_cost wc ON wc.id = a.worker_cost_id AND wc.scadenza >= CURRENT_DATE
        LEFT JOIN LATERAL (
@@ -146,7 +149,10 @@ async function effortPerRuolo(user, projectId) {
       WHERE a.tenant_id = $1 AND a.user_id = $2 AND a.project_id::text = $3 AND a.scadenza >= CURRENT_DATE
       GROUP BY 1, 2`,
     [user.tenant_id, user.user_id, projectId]);
-  return { aOre: r.rows.some((x) => x.hh), voci: r.rows.map((x) => ({ voce: x.voce, offerta: Number(x.offerta) || 0, speso: Number(x.speso) || 0 })) };
+  return {
+    aOre: r.rows.some((x) => x.hh),
+    voci: r.rows.map((x) => ({ voce: x.voce, offerta: Number(x.offerta) || 0, speso: Number(x.speso) || 0, fasi: Object.fromEntries(FASI.map((f) => [f, Number(x[f]) || 0])) }))
+  };
 }
 
 async function fabbisognoProgetto(user, p, oggi) {
@@ -530,6 +536,28 @@ export async function copertura(user, { mesi = 6, fab: fabPronto = null } = {}) 
   const m0 = mm[mm.length - 1];
   const ultimoMese = new Date(Date.UTC(+m0.slice(0, 4), +m0.slice(5, 7), 0)).toISOString().slice(0, 10);
   const attive = all.filter((x) => x.al >= oggi);
+  // Fasi del Gantt (Analisi, Configurazione…) che la persona ha nel periodo di ogni allocazione:
+  // attività con effort per fase, non finite, con date che toccano il periodo e con la persona nel
+  // Nominativo (o Nominativo vuoto = chi del team è allocato). Per il tooltip della Copertura.
+  const gantt = new Map(await Promise.all([...new Set(attive.map((a) => a.project_id))]
+    .map(async (id) => [id, await righeGantt(user, id).catch(() => [])])));
+  const fasiNelPeriodo = (a, nominativo) => {
+    const righeG = gantt.get(a.project_id) || [];
+    const haFigli = new Set(righeG.map((x) => x.chiave.split('.').slice(0, -1).join('.')).filter(Boolean));
+    const top = new Map(righeG.filter((x) => x.livello === 1).map((x) => [x.chiave, x.nome]));
+    const perFase = new Map();
+    for (const x of righeG) {
+      if (haFigli.has(x.chiave) || x.avanzamento >= 100 || !x.inizio || !x.fine || x.fine < a.dal || x.inizio > a.al) continue;
+      const nomi = x.nominativo ? x.nominativo.split(',').map((s) => normNome(s)) : [];
+      if (nomi.length && !nomi.includes(normNome(nominativo))) continue;
+      const modulo = String(top.get(x.chiave.split('.')[0]) || '').replace(/^Modulo\s+/i, '');
+      for (const f of FASI) if (x.fasi && x.fasi[f] > 0) {
+        if (!perFase.has(f)) perFase.set(f, new Set());
+        if (modulo) perFase.get(f).add(modulo);
+      }
+    }
+    return FASI.filter((f) => perFase.has(f)).map((f) => ({ fase: f, moduli: [...perFase.get(f)] }));
+  };
   for (const a of attive) {
     const r = perRis.get(a.risorsa_id);
     if (!r) continue;
@@ -546,7 +574,7 @@ export async function copertura(user, { mesi = 6, fab: fabPronto = null } = {}) 
       if (d <= ultimoMese && x.perMese[m]) { x.perMese[m].all += fattore; perMeseP[m] = (perMeseP[m] || 0) + fattore; }
     }
     x.coperto += tot;
-    x.persone.push({ id: a.id, nominativo: r.nominativo, perc: a.perc, dal: a.dal, al: a.al, giornate: tot, perMese: perMeseP, oreSett: ore.ore(r) });
+    x.persone.push({ id: a.id, nominativo: r.nominativo, perc: a.perc, dal: a.dal, al: a.al, note: a.note || '', attivita: fasiNelPeriodo(a, r.nominativo), giornate: tot, perMese: perMeseP, oreSett: ore.ore(r) });
   }
   const lista = [...righe.values()].map((x) => ({ ...x, scoperto: Math.max(0, x.daPianificare - x.coperto), eccesso: Math.max(0, x.coperto - x.daPianificare) }));
   // Raggruppate per progetto, prima i progetti con più giornate scoperte.
@@ -575,7 +603,14 @@ export async function copertura(user, { mesi = 6, fab: fabPronto = null } = {}) 
       avvisi.push({ tipo: 'eccesso', gravita: 'bassa', projectId: x.projectId, testo: `${nomeP(x)} · ${x.ruolo}: allocate ${fmtG(x.coperto)} giornate, più delle ${fmtG(x.daPianificare)} da fare` });
     }
   }
+  // Fine dell'allocazione per persona e progetto: l'ultima dei suoi periodi (il piano dal Gantt
+  // ne crea più d'uno, uno dopo l'altro: conta solo dove finisce l'ultimo).
+  const ultime = new Map();
   for (const a of attive) {
+    const k = `${a.project_id}|${a.risorsa_id}`;
+    if (!ultime.has(k) || a.al > ultime.get(k).al) ultime.set(k, a);
+  }
+  for (const a of ultime.values()) {
     const dp = datiProgetto.get(a.project_id);
     const r = perRis.get(a.risorsa_id);
     if (!dp || !dp.fine || !r) continue;
@@ -699,6 +734,10 @@ export async function pianoProgetto(user, projectId, { consegna = null } = {}) {
     if (al < dal) return 0;
     return giorniLavorativi(dal, al).length * (Number(a.perc) / 100) * (oreSett / 5 / ORE_GIORNATA);
   };
+  // Con il Gantt a fasi (analisi/configurazione/formazione/programmazione) e i Costi Progetto
+  // ripartiti per fase il piano segue le attività del Gantt (pianoDaGantt); altrimenti è uniforme.
+  const daGantt = await pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo: team.motivo || null, team, tutteAll, altriPm, ore, giornate });
+  if (daGantt) return daGantt;
   const ruoli = new Map();
   for (const r of fab.ruoli) for (const p of r.progetti) if (p.projectId === projectId) {
     const x = ruoli.get(r.chiave) || { ruolo: r.ruolo, chiave: r.chiave, stima: 0, consuntivo: 0, persone: [] };
@@ -734,4 +773,218 @@ export async function pianoProgetto(user, projectId, { consegna = null } = {}) {
     oggi, consegna: fine, consegnaProgetto: fineProgetto, motivo: team.motivo || null,
     giorni: nG, settimane: [...settimane.entries()].map(([lun, n]) => ({ lun, giorni: n })), ruoli: lista
   };
+}
+
+// ----------------------------------------------------------------------------
+// PIANO DAL GANTT (Cruscotto PM › Risorse, 2026-10-16)
+// ----------------------------------------------------------------------------
+// Incrocia le attività del Gantt (licenza/modulo → fasi con date, avanzamento e Nominativo),
+// la ripartizione per fase dei Costi Progetto (Analisi, Configurazione, Formazione,
+// Programmazione per ruolo: le stesse della griglia Licenze da Attivare) e stima/consuntivo.
+// Scelte dell'utente:
+//   - per ogni fase: stima = effort della fase × quota del ruolo (Costi Progetto); ore lavorate =
+//     Effettivo del Gantt se scritto, altrimenti stima × avanzamento %; da fare = stima − lavorate
+//     (le ore lavorate sono il dato giusto, scelta dell'utente; il consuntivo Qlik dei Costi
+//     Progetto resta solo come confronto);
+//   - chi le fa = Nominativo dell'attività (Owner Interno, anche più persone); se vuoto, le
+//     persone del team con quel ruolo («Nel piano» acceso). Divise in base alle ore settimanali;
+//   - fasi senza data di fine: da oggi alla consegna, con avviso; fasi scadute e non finite:
+//     nei prossimi 5 giorni lavorativi, con avviso;
+//   - ruoli senza ripartizione per fase (es. Project Manager) esclusi dal piano.
+// null = il progetto non ha i dati per questo piano (si usa quello uniforme).
+async function pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo, team, tutteAll, altriPm, ore, giornate }) {
+  if (!(await tabellaPresente('conf_worker_cost'))) return null;
+  const [eco, righe] = await Promise.all([effortPerRuolo(user, projectId), righeGantt(user, projectId)]);
+  const gg = (v) => (eco.aOre ? (Number(v) || 0) / ORE_GIORNATA : (Number(v) || 0));
+  const tondo = (v) => Math.round(v * 100) / 100;
+  // Ruoli che fanno ogni fase, con la loro quota (Costi Progetto).
+  const ruoli = new Map(); // chiave -> { ruolo, stima, consuntivo, fasi, resto, peso }
+  const esclusi = [];
+  for (const v of eco.voci) {
+    const k = normVoce(v.voce);
+    const stima = gg(v.offerta), consuntivo = gg(v.speso);
+    if (!FASI.some((f) => v.fasi[f] > 0)) {
+      if (stima - consuntivo > 0.05) esclusi.push({ ruolo: v.voce, resto: tondo(stima - consuntivo) });
+      continue;
+    }
+    const r = ruoli.get(k) || { ruolo: v.voce, chiave: k, stima: 0, consuntivo: 0, fasi: Object.fromEntries(FASI.map((f) => [f, 0])), peso: 0 };
+    r.stima += stima; r.consuntivo += consuntivo;
+    FASI.forEach((f) => { r.fasi[f] += v.fasi[f]; });
+    ruoli.set(k, r);
+  }
+  // Ruoli chiusi: ore vendute già tutte consuntivate in Qlik (es. Delivery Automation 2 h su 2):
+  // fuori dal piano, e la loro quota delle fasi torna agli altri ruoli.
+  const chiusi = [];
+  for (const [k, r] of ruoli) {
+    if (r.stima > 0 && r.consuntivo >= r.stima - 0.001) { chiusi.push({ ruolo: r.ruolo, stima: tondo(r.stima), consuntivo: tondo(r.consuntivo) }); ruoli.delete(k); }
+  }
+  const ruoliFase = new Map();
+  for (const r of ruoli.values()) r.resto = Math.max(0, r.stima - r.consuntivo);
+  for (const f of FASI) {
+    const l = [...ruoli.values()].filter((r) => r.fasi[f] > 0);
+    const tot = l.reduce((s, r) => s + r.fasi[f], 0);
+    ruoliFase.set(f, l.map((r) => ({ r, quota: r.fasi[f] / tot })));
+  }
+  // Attività foglia del Gantt con effort per fase.
+  const haFigli = new Set();
+  for (const x of righe) { const p = x.chiave.split('.'); if (p.length > 1) haFigli.add(p.slice(0, -1).join('.')); }
+  const perChiave = new Map(righe.map((x) => [x.chiave, x]));
+  const foglie = righe.filter((x) => !haFigli.has(x.chiave) && FASI.some((f) => x.fasi[f] > 0));
+  if (!ruoli.size || !foglie.length) return null;
+
+  const { normNome } = await import('./azioniCliente.js');
+  const persTeam = team.persone;
+  const perNome = new Map(persTeam.map((p) => [normNome(p.nominativo), p]));
+  const oreDi = (p) => (p.email && ore.perEmail.get(String(p.email).trim().toLowerCase())) || ORE_SETT_DEFAULT;
+  const prossimi = giorniLavorativi(oggi, piu(oggi, 14)).slice(0, 5);
+  const fineRitardo = prossimi[prossimi.length - 1] || oggi;
+
+  // Pesi per ruolo: effort della fase × quota del ruolo × parte non ancora fatta.
+  const quote = [];
+  for (const x of foglie) {
+    const modulo = x.livello > 1 ? (perChiave.get(x.chiave.split('.')[0])?.nome || '') : '';
+    for (const f of FASI) {
+      if (!(x.fasi[f] > 0)) continue;
+      const aperto = 1 - x.avanzamento / 100;
+      const chi = ruoliFase.get(f);
+      // Consuntivo della fase: Effettivo del Gantt (diviso tra fasi e ruoli in proporzione alla
+      // stima) se compilato, altrimenti si ripartisce dopo il consuntivo del ruolo (vedi sotto).
+      const stimaFoglia = FASI.reduce((t, k) => t + gg(x.fasi[k]), 0);
+      const eff = (s) => (x.effettivo != null && stimaFoglia > 0 ? gg(x.effettivo) * (s / stimaFoglia) : null);
+      if (!chi.length) { quote.push({ x, modulo, fase: f, r: null, peso: 0, stimaFase: gg(x.fasi[f]), eff: eff(gg(x.fasi[f])), fatto: 0 }); continue; }
+      for (const { r, quota } of chi) {
+        const peso = gg(x.fasi[f]) * quota * aperto;
+        const stimaFase = gg(x.fasi[f]) * quota;
+        const q = { x, modulo, fase: f, r, peso, stimaFase, eff: eff(stimaFase), fatto: stimaFase * (x.avanzamento / 100) };
+        r.peso += peso;
+        if (q.eff != null) r.effTot = (r.effTot || 0) + q.eff; else r.fattoPeso = (r.fattoPeso || 0) + q.fatto;
+        quote.push(q);
+      }
+    }
+  }
+
+  const persone = new Map(); // «ruolo|persona» -> riga del piano
+  const fasi = [];
+  const avvisi = { senzaDate: [], inRitardo: [], fuoriTeam: new Set(), senzaRuolo: [], senzaPersone: [] };
+  for (const q of quote) {
+    const nome = `${q.modulo ? `${q.modulo} › ` : ''}${q.x.nome}`;
+    if (!q.r) { avvisi.senzaRuolo.push(`${nome} (${q.fase})`); continue; }
+    // Ore lavorate della fase (scelta dell'utente: è il dato giusto): Effettivo del Gantt se
+    // scritto, altrimenti stima della fase × avanzamento % dell'attività (figlio) nel Gantt.
+    // Da fare = stima − lavorate (mai sotto zero).
+    const cons = q.eff != null ? q.eff : q.fatto;
+    const da = Math.max(0, q.stimaFase - cons);
+    q.r.lavorate = (q.r.lavorate || 0) + cons;
+    q.r.stimaGantt = (q.r.stimaGantt || 0) + q.stimaFase;
+    q.r.daFare = (q.r.daFare || 0) + da;
+    // Periodo: date dell'attività da oggi in poi; senza fine = fino alla consegna; scaduta = prossimi 5 giorni.
+    let dal = q.x.inizio, al = q.x.fine, avviso = null;
+    if (!al) { dal = oggi; al = fine && fine >= oggi ? fine : null; avviso = 'senzaDate'; }
+    else if (al < oggi) { if (da > 0.001) { dal = oggi; al = fineRitardo; avviso = 'inRitardo'; } }
+    else if (!dal || dal < oggi) dal = oggi;
+    // Chi: Nominativo dell'attività (Owner Interno), altrimenti il team con quel ruolo.
+    let chi = [], fonte = 'team';
+    if (q.x.nominativo && (q.x.ownerTipo === 'interno' || !q.x.ownerTipo)) {
+      chi = q.x.nominativo.split(',').map((s) => s.trim()).filter(Boolean).map((n) => {
+        const t = perNome.get(normNome(n));
+        if (!t) avvisi.fuoriTeam.add(n);
+        return t || { nominativo: n, email: null, ruolo: q.r.ruolo, risorsaId: null, nelPiano: true, consuntivo: 0, fuoriTeam: true };
+      })
+        // Solo chi nel team ha QUESTO ruolo (o non ha ruolo): la quota di un altro ruolo della
+        // stessa fase va al team di quel ruolo, non alle persone del Nominativo.
+        .filter((p) => p.nelPiano !== false && (!p.ruolo || normVoce(p.ruolo) === q.r.chiave));
+      if (chi.length) fonte = 'gantt';
+    }
+    if (!chi.length) chi = persTeam.filter((p) => p.nelPiano !== false && normVoce(p.ruolo || '') === q.r.chiave);
+    fasi.push({
+      id: q.x.id, modulo: q.modulo, attivita: q.x.nome, fase: q.fase, ruolo: q.r.ruolo, avanzamento: q.x.avanzamento,
+      inizio: q.x.inizio, fine: q.x.fine, dal: al ? dal : null, al, avviso,
+      stima: tondo(q.stimaFase), daFare: tondo(da), consuntivo: tondo(cons), consFonte: q.eff != null ? 'effettivo' : 'avanzamento', persone: chi.map((p) => p.nominativo), fonte
+    });
+    if (da <= 0.001) continue;
+    if (avviso === 'senzaDate') avvisi.senzaDate.push(nome);
+    if (avviso === 'inRitardo') avvisi.inRitardo.push(nome);
+    if (!chi.length) { avvisi.senzaPersone.push(`${nome} (${q.r.ruolo})`); continue; }
+    const giorni = al && al >= dal ? giorniLavorativi(dal, al) : [];
+    if (!giorni.length) continue;
+    const capTot = chi.reduce((s, p) => s + oreDi(p), 0);
+    for (const p of chi) {
+      const k = `${q.r.chiave}|${p.email || normNome(p.nominativo)}`;
+      const riga = persone.get(k) || {
+        chiaveRuolo: q.r.chiave, nominativo: p.nominativo, email: p.email || null, risorsaId: p.risorsaId || null,
+        oreSett: oreDi(p), fuoriTeam: !!p.fuoriTeam, fatte: tondo(p.consuntivo || 0), perGiorno: new Map(), attivita: new Set(), lavori: new Map()
+      };
+      const alGiorno = (da * oreDi(p)) / capTot / giorni.length;
+      for (const d of giorni) riga.perGiorno.set(d, (riga.perGiorno.get(d) || 0) + alGiorno);
+      riga.attivita.add(nome);
+      // Fasi della persona per la timeline: periodo usato dal piano e giornate a suo carico.
+      const lav = riga.lavori.get(nome) || { nome, modulo: q.modulo, attivita: q.x.nome, fase: q.fase, dal, al, avviso, gg: 0 };
+      lav.gg += (da * oreDi(p)) / capTot;
+      riga.lavori.set(nome, lav);
+      persone.set(k, riga);
+    }
+  }
+
+  // Settimane da oggi all'ultima giornata pianificata (almeno fino alla consegna).
+  let ultimo = fine && fine >= oggi ? fine : oggi;
+  for (const r of persone.values()) for (const d of r.perGiorno.keys()) if (d > ultimo) ultimo = d;
+  const lunDi = (d) => { const t = giornoUtc(d); t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7)); return iso(t); };
+  const settimane = new Map();
+  for (const d of giorniLavorativi(oggi, ultimo)) settimane.set(lunDi(d), (settimane.get(lunDi(d)) || 0) + 1);
+  const giorniFino = fine && fine >= oggi ? giorniLavorativi(oggi, fine).length : 0;
+
+  const lista = [...ruoli.values()].map((r) => {
+    const pers = [...persone.values()].filter((p) => p.chiaveRuolo === r.chiave).map((p) => {
+      const perSett = {};
+      for (const [d, v] of p.perGiorno) perSett[lunDi(d)] = (perSett[lunDi(d)] || 0) + v;
+      const email = String(p.email || '').trim().toLowerCase();
+      const mie = p.risorsaId ? tutteAll.filter((a) => a.risorsa_id === p.risorsaId) : [];
+      const qui = mie.filter((a) => a.project_id === projectId && a.al >= oggi);
+      const corrente = qui.find((a) => a.dal <= oggi) || qui[0] || null;
+      const altrove = [
+        ...mie.filter((a) => a.project_id !== projectId).map((a) => ({ gg: giornate(a, p.oreSett), nome: [a.cliente, a.progetto].filter(Boolean).join(' · ') })),
+        ...(email ? altriPm.filter((a) => a.email === email).map((a) => ({ gg: giornate(a, p.oreSett), nome: `${[a.cliente, a.progetto].filter(Boolean).join(' · ')} (${a.pm})` })) : [])
+      ].filter((a) => a.gg > 0.001);
+      return {
+        nominativo: p.nominativo, email: p.email, ruolo: r.ruolo, risorsaId: p.risorsaId, oreSett: p.oreSett, fuoriTeam: p.fuoriTeam, fatte: p.fatte,
+        totale: tondo([...p.perGiorno.values()].reduce((a, b) => a + b, 0)),
+        perSett: Object.fromEntries(Object.entries(perSett).map(([k, v]) => [k, Math.round(v * 1000) / 1000])),
+        attivita: [...p.attivita],
+        lavori: [...p.lavori.values()].map((l) => ({ ...l, gg: tondo(l.gg) })).sort((a, b) => a.dal.localeCompare(b.dal) || b.gg - a.gg),
+        oggiPerc: corrente ? corrente.perc : 0, allocazioni: qui.map((a) => ({ id: a.id, perc: a.perc, dal: a.dal, al: a.al, note: a.note || '' })),
+        altriGgSett: giorniFino ? tondo((altrove.reduce((t, a) => t + a.gg, 0) / giorniFino) * 5) : 0,
+        altriDett: [...new Set(altrove.map((a) => a.nome))].join(', ')
+      };
+    }).sort((a, b) => b.totale - a.totale || a.nominativo.localeCompare(b.nominativo, 'it'));
+    return {
+      // Dal Gantt: stima delle fasi, ore lavorate (Effettivo o stima × avanzamento), da fare = stima − lavorate.
+      ruolo: r.ruolo, chiave: r.chiave, stima: tondo(r.stimaGantt || 0), lavorate: tondo(r.lavorate || 0), resto: tondo(r.daFare || 0),
+      // Dai Costi Progetto (Qlik), solo per confronto: stima venduta e ore consuntivate.
+      stimaCosti: tondo(r.stima), consuntivo: tondo(r.consuntivo),
+      distribuito: tondo(pers.reduce((s, p) => s + p.totale, 0)),
+      persone: pers
+    };
+  }).filter((r) => r.resto > 0.05 || r.persone.length).sort((a, b) => b.resto - a.resto);
+
+  return {
+    modo: 'gantt', oggi, consegna: fine, consegnaProgetto: fineProgetto, motivo, aOre: eco.aOre,
+    giorni: [...settimane.values()].reduce((a, b) => a + b, 0),
+    settimane: [...settimane.entries()].map(([lun, n]) => ({ lun, giorni: n })),
+    ruoli: lista, fasi, esclusi, chiusi, consegneLicenze: consegneLicenze(righe),
+    avvisi: { ...avvisi, fuoriTeam: [...avvisi.fuoriTeam] }
+  };
+}
+
+// Data di consegna di ogni licenza (argomento di primo livello del Gantt): la data della sua
+// attività «Go-live» se c'è, altrimenti l'ultima data di fine delle sue attività.
+function consegneLicenze(righe) {
+  const out = {};
+  for (const top of righe.filter((x) => x.livello === 1)) {
+    const figli = righe.filter((x) => x.chiave.startsWith(`${top.chiave}.`));
+    const golive = figli.find((x) => /go[\s-]*live/i.test(x.nome) && (x.fine || x.inizio));
+    const fini = [top.fine, ...figli.map((x) => x.fine)].filter(Boolean).sort();
+    const data = golive ? (golive.fine || golive.inizio) : (fini[fini.length - 1] || null);
+    if (data) out[top.nome] = { data, golive: !!golive };
+  }
+  return out;
 }

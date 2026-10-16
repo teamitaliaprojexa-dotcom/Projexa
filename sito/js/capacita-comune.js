@@ -58,6 +58,16 @@
         .cop-mancano { display: inline-block; background: #FEE2E2; color: #B91C1C; font-weight: 700; border-radius: 99px; padding: 0.05rem 0.5rem; font-size: 0.8rem; }
         .cop-mancano.forte { background: #DC2626; color: #fff; }
         .cop-okt { color: #059669; }
+        .cop-dasist > summary { list-style: none; cursor: pointer; user-select: none; }
+        .cop-dasist > summary::-webkit-details-marker { display: none; }
+        .cop-dasist > summary h2 { margin: 0; display: flex; align-items: center; gap: 0.45rem; }
+        .cop-dasist[open] > summary h2 { margin-bottom: 0.7rem; }
+        .cop-dasist .cop-freccia { font-size: 0.75rem; color: #9CA3AF; transition: transform .15s; width: 12px; }
+        .cop-dasist[open] .cop-freccia { transform: rotate(90deg); }
+        .cop-periodi { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+        .cop-periodo { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.76rem; color: #065F46; background: #ECFDF5; border: 1px solid #A7F3D0; border-radius: 999px; padding: 0.05rem 0.55rem; white-space: nowrap; }
+        .cop-periodo b { color: #047857; }
+        .cop-periodo:hover { background: #D1FAE5; border-color: #6EE7B7; }
         tr.cop-prog td { border-top: 2px solid #EEF2FF; }
         /* Prima colonna (persona / ruolo / progetto) ferma durante lo scorrimento orizzontale */
         table.cap-fissa > thead > tr > th:first-child,

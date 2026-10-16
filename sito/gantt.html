@@ -276,6 +276,15 @@
         .flyout-body input[readonly] { background: #F3F4F6; color: var(--dark); }
         .flyout-body input.cfg-calc.pos { color: #059669; font-weight: 600; }
         .flyout-body input.cfg-calc.neg { color: #DC2626; font-weight: 600; }
+        /* Nominativo a scelta multipla (Owner Interno/Cliente): tendina con caselle */
+        .nom-multi { position: relative; }
+        .nom-multi-btn { width: 100%; height: 24px; padding: 0 1.4rem 0 0.45rem; border: 1px solid #D1D5DB; border-radius: 5px; background: white; font-size: 0.78rem; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; }
+        .nom-multi-btn::after { content: '\25BE'; position: absolute; right: 0.45rem; top: 50%; transform: translateY(-50%); color: var(--text-muted); }
+        .nom-multi-panel { display: none; position: absolute; z-index: 20; left: 0; right: 0; top: 100%; margin-top: 2px; max-height: 220px; overflow: auto; background: white; border: 1px solid #D1D5DB; border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.12); padding: 4px 0; }
+        .nom-multi.open .nom-multi-panel { display: block; }
+        .flyout-body .nom-multi-panel label { display: flex; align-items: center; gap: 6px; margin: 0; padding: 4px 8px; font-size: 0.78rem; font-weight: 400; color: var(--dark); cursor: pointer; white-space: nowrap; }
+        .flyout-body .nom-multi-panel label:hover { background: #F3F4F6; }
+        .nom-multi-panel .nom-vuoto { padding: 4px 8px; font-size: 0.75rem; color: var(--text-muted); }
         .flyout-body .row2 { display: flex; gap: 10px; }
         .flyout-body .row2 > div { flex: 1; min-width: 0; }
         /* Etichette su una riga sola: i campi affiancati restano allineati */
@@ -379,7 +388,7 @@
         .tree-cell .node-btn.lv1 { font-weight: 700; font-size: 0.88rem; }
         .tree-cell .node-btn.ms { color: var(--text-muted); }
         .tree-cell .done-ck { color: #059669; font-size: 0.85rem; }
-        .av { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 0.6rem; font-weight: 700; flex: 0 0 auto; }
+        .av { min-width: 22px; height: 22px; padding: 0 4px; box-sizing: border-box; border-radius: 11px; display: inline-grid; place-items: center; font-size: 0.6rem; font-weight: 700; flex: 0 0 auto; }
 
         .gantt-readonly .title::after {
             content: 'Sola visualizzazione'; margin-left: 10px; padding: 2px 8px;
@@ -553,7 +562,11 @@
                 <div>
                     <label for="cfgNominativo">Nominativo</label>
                     <input type="text" id="cfgNominativo">
-                    <select id="cfgNominativoSel" style="display:none;"></select>
+                    <!-- Interno/Cliente: più persone, salvate in nominativo separate da ", " -->
+                    <div class="nom-multi" id="cfgNominativoSel" style="display:none;">
+                        <button type="button" class="nom-multi-btn" id="cfgNominativoBtn">—</button>
+                        <div class="nom-multi-panel" id="cfgNominativoPanel"></div>
+                    </div>
                 </div>
             </div>
             <div>
@@ -1240,10 +1253,11 @@
             if (Number(node.avanzamento) >= 100) out += '<i class="fas fa-circle-check done-ck" title="Completata"></i>';
             if (ritardo.has(String(node.id))) out += '<span class="pill warn" title="Data di fine passata e attività non completata">in ritardo</span>';
             if (cons && cons.sforamento > 0) out += `<span class="pill neg" title="Effettivo oltre la stima">+${escapeHtml(fmtEff(cons.sforamento))}</span>`;
-            const nome = String(node.nominativo || '').trim();
-            if (nome) {
-                const iniz = nome.split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0].toUpperCase()).join('');
-                out += `<span class="av" title="${escapeHtml(nome)}${node.owner ? ` (${escapeHtml(node.owner)})` : ''}" style="background:${tint(rootColor(node), 0.82)}; color:${rootColor(node)};">${escapeHtml(iniz)}</span>`;
+            const nomi = nominativiDi(node); // anche più persone, separate da ", "
+            if (nomi.length) {
+                const iniz = nomi[0].split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0].toUpperCase()).join('')
+                    + (nomi.length > 1 ? `+${nomi.length - 1}` : '');
+                out += `<span class="av" title="${escapeHtml(nomi.join(', '))}${node.owner ? ` (${escapeHtml(node.owner)})` : ''}" style="background:${tint(rootColor(node), 0.82)}; color:${rootColor(node)};">${escapeHtml(iniz)}</span>`;
             }
             return out;
         }
@@ -1812,6 +1826,7 @@
             const owner = String(node.owner || '').trim().toLowerCase();
             const inp = document.getElementById('cfgNominativo');
             const sel = document.getElementById('cfgNominativoSel');
+            sel.classList.remove('open');
             const elenco = !personeGantt ? null
                 : owner === 'interno' ? personeGantt.interno : owner === 'cliente' ? personeGantt.cliente : null;
             if (owner !== 'interno' && owner !== 'cliente') {
@@ -1820,29 +1835,70 @@
                 inp.placeholder = owner === 'fornitore' ? 'Nome del fornitore' : '';
                 return;
             }
-            const cur = node.nominativo == null ? '' : String(node.nominativo);
-            const lista = elenco || [];
-            const opts = ['<option value="">—</option>'].concat(lista.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`));
-            if (cur && !lista.includes(cur)) opts.push(`<option value="${escapeHtml(cur)}">${escapeHtml(cur)}</option>`);
+            const scelti = nominativiDi(node);
+            const lista = (elenco || []).slice();
+            scelti.forEach(n => { if (!lista.includes(n)) lista.push(n); }); // nomi non più in elenco restano spuntabili
+            const righe = lista.map(n => `<label><input type="checkbox" value="${escapeHtml(n)}"${scelti.includes(n) ? ' checked' : ''}> ${escapeHtml(n)}</label>`);
             if (elenco && !lista.length) {
-                opts.push(`<option value="" disabled>${owner === 'interno' ? 'Nessuna persona nel team del progetto' : 'Nessun contatto per questo cliente'}</option>`);
+                righe.push(`<div class="nom-vuoto">${owner === 'interno' ? 'Nessuna persona nel team del progetto' : 'Nessun contatto per questo cliente'}</div>`);
             }
-            if (!elenco) opts.push('<option value="" disabled>Caricamento…</option>');
-            sel.innerHTML = opts.join('');
-            sel.value = cur;
+            if (!elenco) righe.push('<div class="nom-vuoto">Caricamento…</div>');
+            document.getElementById('cfgNominativoPanel').innerHTML = righe.join('');
+            aggiornaEtichettaNominativo(scelti);
             inp.style.display = 'none'; sel.style.display = '';
+        }
+        // Nominativo può contenere più persone separate da ", ".
+        function nominativiDi(node) {
+            return String(node.nominativo || '').split(',').map(s => s.trim()).filter(Boolean);
+        }
+        function aggiornaEtichettaNominativo(scelti) {
+            const btn = document.getElementById('cfgNominativoBtn');
+            btn.textContent = scelti.length ? scelti.join(', ') : '—';
+            btn.title = scelti.join('\n');
+        }
+        // Owner e nominativo del padre scendono su tutte le sotto attività (che poi si
+        // possono cambiare una per una): vale a ogni modifica fatta sul padre.
+        function propagaNominativo(node) {
+            const giu = (n) => n.children.forEach(f => { f.owner = node.owner || null; f.nominativo = node.nominativo || null; giu(f); });
+            if (!node.children.length) return;
+            giu(node);
+            render();
         }
         // Cambio di Owner: il nominativo dell'altro elenco non vale più.
         document.getElementById('cfgOwner').addEventListener('change', () => {
             if (!selectedNode) return;
             selectedNode.nominativo = null;
+            propagaNominativo(selectedNode);
             scheduleSave();
             aggiornaNominativo(selectedNode);
         });
-        document.getElementById('cfgNominativoSel').addEventListener('change', () => {
+        // Nominativo scritto a mano (Fornitore o Owner vuoto): il valore è già sul nodo.
+        document.getElementById('cfgNominativo').addEventListener('change', () => {
             if (!selectedNode) return;
-            selectedNode.nominativo = document.getElementById('cfgNominativoSel').value || null;
+            propagaNominativo(selectedNode);
             scheduleSave();
+        });
+        document.getElementById('cfgNominativoBtn').addEventListener('click', () => {
+            document.getElementById('cfgNominativoSel').classList.toggle('open');
+        });
+        document.addEventListener('mousedown', (e) => {
+            const box = document.getElementById('cfgNominativoSel');
+            if (box.classList.contains('open') && !box.contains(e.target)) box.classList.remove('open');
+        });
+        document.getElementById('cfgNominativoPanel').addEventListener('change', () => {
+            if (!selectedNode) return;
+            const scelti = [...document.querySelectorAll('#cfgNominativoPanel input:checked')].map(c => c.value);
+            const testo = scelti.join(', ');
+            if (testo.length > 255) { // colonna VARCHAR(255)
+                alert('Troppi nominativi selezionati: il campo accetta al massimo 255 caratteri.');
+                aggiornaNominativo(selectedNode);
+                return;
+            }
+            selectedNode.nominativo = testo || null;
+            aggiornaEtichettaNominativo(scelti);
+            propagaNominativo(selectedNode);
+            scheduleSave();
+            render(); // aggiorna le iniziali sulla riga
         });
 
         // "Mostra al cliente": se disattivo l'attività sparisce dalla vista "Mostra gantt"

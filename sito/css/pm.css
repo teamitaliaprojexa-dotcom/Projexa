@@ -173,3 +173,13 @@ table.pm-t tr.click:hover td { background: #F9FAFB; }
 .eco-costo { width: 7rem; text-align: right; padding: 0.25rem 0.4rem; }
 .eco-valuta { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; }
 .eco-valuta label { display: flex; align-items: center; gap: 0.4rem; font-weight: 600; font-size: 0.85rem; }
+
+/* Interruttore moderno (es. «Nel piano» in Cruscotto › Risorse): <label class="pa-switch"><input type="checkbox"><span></span></label> */
+.pa-switch { position: relative; display: inline-block; width: 38px; height: 22px; cursor: pointer; vertical-align: middle; }
+.pa-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.pa-switch span { position: absolute; inset: 0; border-radius: 999px; background: #E5E7EB; box-shadow: inset 0 1px 2px rgba(17, 24, 39, .12); transition: background .2s; }
+.pa-switch span::before { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(17, 24, 39, .25); transition: transform .2s; }
+.pa-switch input:checked + span { background: linear-gradient(120deg, #4F46E5, #7C3AED); }
+.pa-switch input:checked + span::before { transform: translateX(16px); }
+.pa-switch input:focus-visible + span { outline: 2px solid #A78BFA; outline-offset: 2px; }
+.pa-switch input:disabled + span { opacity: .5; cursor: default; }

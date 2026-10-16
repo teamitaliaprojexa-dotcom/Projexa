@@ -91,6 +91,7 @@
         const copChiusi = new Set();      // progetti chiusi a mano
         const copPersone = new Set();     // «progetto|ruolo» con le persone aperte
         let copAvvisiTutti = false;
+        let copAvvisiAperto = false; // «Da sistemare» chiuso di default (resta come lo lascia l'utente)
         function classeCop(fab, all) {
             if (fab < 0.05) return all > 0.05 ? 'cop-extra' : 'cop-vuoto';
             const r = all / fab;
@@ -133,11 +134,25 @@
                 const sub = aperto ? p.ruoli.map((r) => {
                     const kp = `${p.projectId}|${r.chiave}`;
                     const pers = copPersone.has(kp);
-                    const persone = pers ? (r.persone.length ? r.persone.map((x) => `<tr class="azc-pers pm-nota click" data-cop-all="${esc(x.id)}" title="Modifica l'allocazione"><td style="padding-left:3.4rem"><i class="fas fa-user" style="color:#9CA3AF; width:14px"></i> ${esc(x.nominativo)} <i class="fas fa-pen" style="color:#9CA3AF; font-size:0.7rem"></i></td>
-                            <td class="cap-cell"></td><td class="cap-cell">${g(x.giornate)}</td><td class="cap-cell"></td>
-                            <td colspan="${c.mesi.length}" style="color:#065F46"><i class="fas fa-user-clock"></i> ${x.perc}% dal ${dataIt(x.dal)} al ${dataIt(x.al)}</td></tr>`).join('')
+                    // Una riga per persona: le sue allocazioni (anche più periodi, es. dal piano del
+                    // Gantt) come etichette in ordine di data, ognuna cliccabile per modificarla.
+                    const perPersona = [];
+                    for (const x of r.persone) {
+                        let y = perPersona.find((q) => q.nominativo === x.nominativo);
+                        if (!y) { y = { nominativo: x.nominativo, giornate: 0, all: [] }; perPersona.push(y); }
+                        y.giornate += x.giornate || 0; y.all.push(x);
+                    }
+                    const persone = pers ? (perPersona.length ? perPersona.map((y) => `<tr class="azc-pers pm-nota"><td style="padding-left:3.4rem"><i class="fas fa-user" style="color:#9CA3AF; width:14px"></i> ${esc(y.nominativo)}</td>
+                            <td class="cap-cell"></td><td class="cap-cell">${g(y.giornate)}</td><td class="cap-cell"></td>
+                            <td colspan="${c.mesi.length}"><div class="cop-periodi">${y.all.sort((a, b) => a.dal.localeCompare(b.dal)).map((x) => `<span class="cop-periodo click" data-cop-all="${esc(x.id)}" data-tip="${esc(`${x.perc}% dal ${dataIt(x.dal)} al ${dataIt(x.al)} · ${g(x.giornate)} gg${(() => {
+                                // Fasi del Gantt della persona in questo periodo (calcolate dal server).
+                                const FN = { analisi: 'Analisi', configurazione: 'Configurazione', formazione: 'Formazione', programmazione: 'Programmazione' };
+                                if ((x.attivita || []).length) return `\nDeve fare:${x.attivita.map((a) => `\n• ${FN[a.fase] || a.fase}${a.moduli.length ? `: ${a.moduli.join(', ')}` : ''}`).join('')}`;
+                                if (/^Piano dal Gantt/i.test(String(x.note || ''))) return '\nℹ Nessuna fase con date in questo periodo: ore delle fasi senza date nel Gantt';
+                                return x.note ? `\n${x.note}` : '';
+                            })()}\nℹ Clic per modificare`)}"><b>${x.perc}%</b> ${esc(dataIt(x.dal).slice(0, 5))} → ${esc(dataIt(x.al).slice(0, 5))}</span>`).join('')}</div></td></tr>`).join('')
                         : `<tr class="pm-nota"><td colspan="${nCol}" style="padding-left:3.4rem; color:#9CA3AF">Nessuna persona allocata: usa «Alloca tutti i team» in alto o la scheda Risorse del Cruscotto del progetto.</td></tr>`) : '';
-                    return `<tr class="pm-nota"><td style="padding-left:1.8rem"><button type="button" class="cap-pers-btn" data-cop-pers="${esc(kp)}" title="Persone allocate (${r.persone.length})"><i class="fas fa-user-group"></i> <small>${r.persone.length}</small></button> ${esc(r.ruolo)}</td>
+                    return `<tr class="pm-nota"><td style="padding-left:1.8rem"><button type="button" class="cap-pers-btn" data-cop-pers="${esc(kp)}" title="Persone allocate (${new Set(r.persone.map((x) => x.nominativo)).size})"><i class="fas fa-user-group"></i> <small>${new Set(r.persone.map((x) => x.nominativo)).size}</small></button> ${esc(r.ruolo)}</td>
                         <td class="cap-cell">${g(r.daPianificare)}</td><td class="cap-cell">${g(r.coperto)}</td>
                         <td class="cap-cell">${r.scoperto >= 0.05 ? `<span class="cop-mancano">${g(r.scoperto)}</span>` : '<span class="cop-okt"><i class="fas fa-check"></i></span>'}</td>
                         ${c.mesi.map((m) => cellaCop(r.perMese[m], m, r, c)).join('')}</tr>${persone}`;
@@ -154,9 +169,9 @@
                     <div class="${t.scoperto >= 0.5 ? 'ko' : 'ok'}"><small>Scoperte</small><b>${g(t.scoperto)}</b><span>${t.scoperto >= 0.5 ? 'servono persone' : 'tutto coperto'}</span></div>
                     <div><small>Copertura</small><b>${percTot}%</b><span class="cop-prog-bar grande"><i style="width:${percTot}%" class="${percTot >= 95 ? 'ok' : percTot >= 50 ? 'parz' : 'ko'}"></i></span></div>
                 </div>
-                ${c.avvisi.length ? `<div class="pm-card"><h2><i class="fas fa-bell"></i> Da sistemare <span class="pill">${c.avvisi.length}</span></h2>
+                ${c.avvisi.length ? `<details class="pm-card cop-dasist" id="copDaSistemare"${copAvvisiAperto ? ' open' : ''}><summary><h2><i class="fas fa-chevron-right cop-freccia"></i><i class="fas fa-bell"></i> Da sistemare <span class="pill">${c.avvisi.length}</span></h2></summary>
                     <ul class="cop-avvisi">${avvisi.map((a) => `<li class="${a.gravita}"><i class="fas ${ICONE[a.gravita]}"></i> <span>${esc(a.testo)}</span></li>`).join('')}</ul>
-                    ${c.avvisi.length > 8 ? `<button type="button" class="pm-btn piccolo" id="copAvvisiTutti">${copAvvisiTutti ? 'Mostra meno' : `Mostra tutti (${c.avvisi.length})`}</button>` : ''}</div>` : ''}
+                    ${c.avvisi.length > 8 ? `<button type="button" class="pm-btn piccolo" id="copAvvisiTutti">${copAvvisiTutti ? 'Mostra meno' : `Mostra tutti (${c.avvisi.length})`}</button>` : ''}</details>` : ''}
                 <div class="pm-card">
                     <h2><i class="fas fa-shield-halved"></i> Copertura per progetto e ruolo <span class="azioni"><button class="pm-btn piccolo primario" id="copAllocaTeam" title="Proponi le allocazioni per le persone dei team (Kick-off) dei progetti con giornate da fare: le controlli e le salvi"><i class="fas fa-file-import"></i> Alloca tutti i team</button></span></h2>
                     <p class="pm-nota" style="margin-top:0">Per ogni progetto e ruolo: giornate <b>da pianificare</b> (Stima − Consuntivo dei Costi Progetto) contro giornate <b>coperte</b> dalle allocazioni (da oggi, festività e assenze escluse). Nei mesi: <b>coperte / da fare</b>, verde se coperte, arancione se in parte, rosso se scoperte. Prima i progetti con più giornate scoperte. Non serve conoscere il resto dell'agenda delle persone. Clic sull'icona delle persone per vedere chi è allocato, clic su una persona per cambiarne percentuale e periodo.</p>
@@ -165,6 +180,7 @@
                 </div>`;
             attivaTooltip(box);
             box.querySelector('#copAvvisiTutti')?.addEventListener('click', () => { copAvvisiTutti = !copAvvisiTutti; renderCopertura(); });
+            box.querySelector('#copDaSistemare')?.addEventListener('toggle', (e) => { copAvvisiAperto = e.currentTarget.open; });
             box.querySelector('#copAllocaTeam')?.addEventListener('click', proposteAllocazioni);
             box.querySelectorAll('[data-cop-all]').forEach((tr) => tr.addEventListener('click', () => {
                 const x = dati.allocazioni.find((a) => a.id === tr.dataset.copAll);

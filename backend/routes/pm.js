@@ -1383,7 +1383,8 @@ router.put('/capacita/progetto/nel-piano', async (req, res) => {
 // sostituiscono con una sola, da oggi alla consegna con la % del piano (quelle già iniziate
 // finiscono ieri, le future si chiudono). perc 0 = persona tolta dal piano: solo chiusura.
 // Le persone non ancora tra le risorse si aggiungono (come «Alloca»).
-// Body: { projectId, consegna, persone: [{ email, nominativo, ruolo, perc }] }.
+// Body: { projectId, consegna, persone: [{ email, nominativo, ruolo, perc, periodi? }] };
+// periodi = [{ dal, al, perc }] del piano dal Gantt: un'allocazione per periodo al posto di quella unica.
 router.post('/capacita/piano', async (req, res) => {
   try {
     await richiedeCapacita(req, { scrittura: true });
@@ -1416,7 +1417,17 @@ router.post('/capacita/piano', async (req, res) => {
         else await chiudiCap(req, 'pm_allocazioni', a.id);
         chiuse += 1;
       }
-      if (perc > 0) {
+      // Piano dal Gantt: più periodi con la loro % (il carico cambia con le fasi).
+      const periodi = (Array.isArray(p.periodi) ? p.periodi.slice(0, 120) : [])
+        .map((x) => ({ dal: String(x.dal || ''), al: String(x.al || ''), perc: Math.min(100, Math.round(Number(x.perc) || 0)), note: String(x.note || '').trim().slice(0, 500) || 'Piano dal Gantt' }))
+        .filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x.dal) && /^\d{4}-\d{2}-\d{2}$/.test(x.al) && x.al >= x.dal && x.al >= oggi && x.perc > 0)
+        .map((x) => ({ ...x, dal: x.dal < oggi ? oggi : x.dal }));
+      if (periodi.length) {
+        for (const x of periodi) {
+          await inserisci(db, 'pm_allocazioni', { ...baseCap(req), ...(await datiAllocazione(req, { risorsa_id: r.id, projectId: prog.projectId, perc: x.perc, dal: x.dal, al: x.al, note: x.note })) });
+          allocate += 1;
+        }
+      } else if (perc > 0) {
         await inserisci(db, 'pm_allocazioni', { ...baseCap(req), ...(await datiAllocazione(req, { risorsa_id: r.id, projectId: prog.projectId, perc: Math.min(100, perc), dal: oggi, al: consegna, note: 'Piano automatico' })) });
         allocate += 1;
       }
