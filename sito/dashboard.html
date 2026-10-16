@@ -9492,9 +9492,11 @@
                     const ris = d.risultato || {};
                     const testoBox = (t) => `<div class="air-testo">${escapeHtml(t || '')}</div>`;
                     const copia = (t) => ['<i class="fas fa-copy"></i> Copia', '', async () => { await navigator.clipboard.writeText(t || ''); showNotification('Testo copiato', 'success'); }];
-                    if (l.operazione === 'email_attivita') {
+                    if (l.operazione === 'email_attivita' || l.operazione === 'email_azioni_cliente') {
+                        // Azioni del cliente: i destinatari (rubrica dei referenti) li calcola il server.
+                        const dest = (Array.isArray(ris.to) && ris.to.length ? ris.to : null) || (d.richiesta.extra && d.richiesta.extra.to) || [];
                         dett.innerHTML = testoBox(ris.testo);
-                        bottoni.push(['<i class="fas fa-envelope"></i> Apri email', 'primario', () => airApriEmail(ris.testo, (d.richiesta.extra && d.richiesta.extra.to) || [])], copia(ris.testo));
+                        bottoni.push(['<i class="fas fa-envelope"></i> Apri email', 'primario', () => airApriEmail(ris.testo, dest)], copia(ris.testo));
                     } else if (l.operazione === 'pm_chiedi') {
                         dett.innerHTML = `<div class="air-nota"><b>Domanda:</b> ${escapeHtml(ris.domanda || (d.richiesta.body && d.richiesta.body.domanda) || '')}</div>${testoBox(ris.risposta)}<div class="air-nota">${escapeHtml(ris.ai || '')}</div>`;
                         bottoni.push(copia(ris.risposta));
@@ -11122,6 +11124,16 @@
                     <small>${t.assegnato ? `<i class="fas fa-user"></i> ${escapeHtml(t.assegnato)}` : 'non assegnata'}${t.scadenza ? ` · <span class="${t.scaduta ? 'mp-scaduta' : ''}">scadenza ${dataIt(t.scadenza)}${t.scaduta ? ' (scaduta)' : ''}</span>` : ''}</small></span></label></li>`).join('')}</ul>`
                 : '<div class="mp-vuoto">Nessuna To-Do aperta' + (r.projectId ? ' per questo progetto' : ' del cliente senza progetto') + '.</div>';
 
+            // 2b. Azioni a carico del cliente (lette dai recap cliente: /api/pm/azioni-cliente)
+            const az = Array.isArray(d.azioniCliente) ? d.azioniCliente : null;
+            const azAperte = az ? az.filter((a) => a.stato === 'aperta').length : 0;
+            const azHtml = !az ? '<div class="mp-vuoto">Registro delle azioni del cliente non attivo (script azioni_cliente.sql).</div>'
+                : az.length ? `<ul class="mp-lista">${az.map((a) => `<li class="${a.stato === 'fatta' ? 'fatto' : ''}">
+                    <label><input type="checkbox" data-mp-azcli="${escapeHtml(a.id)}" ${a.stato === 'fatta' ? 'checked' : ''}>
+                    <span><b>${escapeHtml(a.descrizione || '')}</b>
+                    <small>${a.referente ? `<i class="fas fa-user"></i> ${escapeHtml(a.referente)}` : 'referente non indicato'}${a.data_scadenza ? ` · <span class="${a.scaduta ? 'mp-scaduta' : ''}">entro il ${dataIt(a.data_scadenza)}${a.scaduta ? ` (scaduta da ${-a.giorni} gg)` : ''}</span>` : ' · scadenza da definire'}${a.riunione_data ? ` · dalla riunione del ${dataIt(a.riunione_data)}` : ''}</small></span></label></li>`).join('')}</ul>`
+                : '<div class="mp-vuoto">Nessuna azione aperta del cliente' + (r.projectId ? ' per questo progetto' : ' (riunioni senza progetto)') + '.</div>';
+
             // 3. Task Jira, quotazioni, MySupport
             // Lente davanti a ogni riga: finestra con tutti i campi della riga (s.campi / s.dettagli).
             const ICONE = { task: 'fa-list-check', quotazioni: 'fa-file-invoice-dollar', mysupport: 'fa-headset' };
@@ -11132,6 +11144,7 @@
                     : `<div class="mp-vuoto">Niente di aperto${s.ambito === 'progetto' ? ' collegato a questo progetto' : s.ambito === 'cliente' ? ' del cliente senza progetto' : ''}.</div>`, s.righe.length > 0)).join('');
 
             body.innerHTML = sez('Dalla riunione precedente', 'fa-clock-rotate-left', nPrec, prec)
+                + sez('Azioni del cliente', 'fa-handshake', azAperte, azHtml)
                 + sez('To-Do', 'fa-square-check', aperte, todo) + altre;
         }
 
@@ -11259,18 +11272,20 @@
             });
             // Caselle «fatto»: attività della riunione precedente e To-Do.
             panel.addEventListener('change', async (e) => {
-                const box = e.target.closest('input[data-mp-att], input[data-mp-task]');
+                const box = e.target.closest('input[data-mp-att], input[data-mp-task], input[data-mp-azcli]');
                 if (!box) return;
                 const att = box.dataset.mpAtt;
-                const url = att ? `${API_URL}/meeting-panel/attivita/${encodeURIComponent(att)}` : `${API_URL}/meeting-panel/task/${encodeURIComponent(box.dataset.mpTask)}`;
+                const azcli = box.dataset.mpAzcli; // azione del cliente: /api/pm/azioni-cliente/:id/fatto (POST)
+                const url = azcli ? `${API_URL}/pm/azioni-cliente/${encodeURIComponent(azcli)}/fatto`
+                    : att ? `${API_URL}/meeting-panel/attivita/${encodeURIComponent(att)}` : `${API_URL}/meeting-panel/task/${encodeURIComponent(box.dataset.mpTask)}`;
                 box.disabled = true;
                 try {
-                    const r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }, body: JSON.stringify({ fatto: box.checked }) });
+                    const r = await fetch(url, { method: azcli ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }, body: JSON.stringify({ fatto: box.checked }) });
                     const d = await r.json().catch(() => ({}));
                     if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
                     box.closest('li')?.classList.toggle('fatto', box.checked);
                     // La To-Do della dashboard resta allineata.
-                    if (!att && typeof loadTodoData === 'function') loadTodoData().catch(() => {});
+                    if (!att && !azcli && typeof loadTodoData === 'function') loadTodoData().catch(() => {});
                 } catch (err) {
                     box.checked = !box.checked;
                     showNotification('Errore: ' + err.message, 'info');
@@ -13379,8 +13394,8 @@
             const delBtn = document.getElementById('notifDelBtn');
             const countEl = document.getElementById('notifCount');
             const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines', progetto: 'fas fa-gauge-high', ai: 'fas fa-wand-magic-sparkles' };
-            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione', progetto: 'Progetto', ai: 'AI' };
+            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines', progetto: 'fas fa-gauge-high', ai: 'fas fa-wand-magic-sparkles', cliente: 'fas fa-handshake' };
+            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione', progetto: 'Progetto', ai: 'AI', cliente: 'Azione cliente' };
             let elenco = [];
 
             function mostraConteggio(n) {
@@ -13431,6 +13446,7 @@
                             ${n.tabella === 'tasks' && n.riga_id ? `<button type="button" class="notif-go" data-vai="${esc(n.riga_id)}" title="Apri la To-Do">Vai <i class="fas fa-arrow-right"></i></button>` : ''}
                             ${n.tabella === 'ai_lavori' && n.riga_id ? `<button type="button" class="notif-go" data-ai-lavoro="${esc(n.riga_id)}" title="Apri in Risultati AI">Apri <i class="fas fa-arrow-right"></i></button>` : ''}
                             ${n.fonte === 'progetto' && n.riga_id ? `<a class="notif-go" href="pm.html?projectId=${encodeURIComponent(n.riga_id)}" title="Apri il Cruscotto PM del progetto" style="text-decoration:none">Vai <i class="fas fa-arrow-right"></i></a>` : ''}
+                            ${n.tabella === 'pm_azioni_cliente' && n.riga_id ? `<a class="notif-go" href="portfolio.html?azione=${encodeURIComponent(n.riga_id)}" data-apri-pagina title="Apri l'azione del cliente nel Portfolio" style="text-decoration:none">Vai <i class="fas fa-arrow-right"></i></a>` : ''}
                             ${n.vai ? `<button type="button" class="notif-go" data-vai-dest="${esc(n.id)}" title="${n.vai.projectId ? 'Apri il progetto' : 'Apri il cliente'}${n.vai.fieldId ? ' e la sua griglia' : ''}">Vai <i class="fas fa-arrow-right"></i></button>` : ''}
                         </div>
                     </div>`).join('')
@@ -13535,6 +13551,16 @@
             // Clic sulla notifica (non sulla casella): diventa letta.
             list.addEventListener('click', async (e) => {
                 if (e.target.matches('input[data-id]')) { aggiornaStrumenti(); return; }
+                // Link a Cruscotto PM / Portfolio: notifica letta e pagina aperta con apriPagina
+                // (con una registrazione in corso si apre dentro la dashboard).
+                const link = e.target.closest('a.notif-go[data-apri-pagina]');
+                if (link) {
+                    e.preventDefault();
+                    const n = elenco.find((x) => x.id === link.closest('.notif-item')?.dataset.id);
+                    if (n && !n.letta) { azione('lette', { ids: [n.id] }).then(() => aggiornaConteggio()).catch(() => {}); n.letta = true; }
+                    apriPagina(link.getAttribute('href'));
+                    return;
+                }
                 const vaiDest = e.target.closest('[data-vai-dest]');
                 if (vaiDest) {
                     const n = elenco.find((x) => x.id === vaiDest.dataset.vaiDest);

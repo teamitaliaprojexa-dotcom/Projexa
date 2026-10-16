@@ -380,7 +380,8 @@ function avvisaTabellaMancante() {
 // ----------------------------------------------------------------------------
 // To-Do (tabella tasks) aperte (Da fare / In corso) con due_date domani, oggi o ieri
 // (= scaduta). Conta SOLO due_date: la colonna scadenza ha un'altra funzione e non si usa.
-// Destinatario: il proprietario. Per ora solo le To-Do (altre scadenze: in seguito).
+// Destinatario: il proprietario. In più (2026-10-16) i promemoria delle azioni a carico del
+// cliente (config/azioniCliente.js, fonte «cliente»).
 const STATI_APERTI = ['todo', 'in_progress'];
 const SOGLIE = {
   domani: { titolo: 'To-Do in scadenza domani' },
@@ -418,6 +419,15 @@ export async function eseguiNotificheScadenze() {
       if (!x.rows.length) report.giaPresenti += 1;
       else if (x.rows[0].nuova) report.create += 1;
       else report.rimesseDaLeggere += 1;
+    }
+    // Azioni a carico del cliente (config/azioniCliente.js): lettura dei recap nuovi e
+    // promemoria al PM (in scadenza / da sollecitare). Un errore qui non blocca le To-Do.
+    try {
+      const { promemoriaAzioniCliente } = await import('../config/azioniCliente.js');
+      report.azioniCliente = await promemoriaAzioniCliente();
+      report.create += (report.azioniCliente.preavvisi || 0) + (report.azioniCliente.solleciti || 0);
+    } catch (e) {
+      report.azioniCliente = { errore: e.message };
     }
     // Pulizia: notifiche lette da più di 90 giorni.
     report.eliminateVecchie = (await notifDb.query("DELETE FROM notifiche WHERE letta AND letta_il < now() - interval '90 days'")).rowCount;

@@ -104,6 +104,53 @@ export function parseRecapActions(recap, variants) {
   return items;
 }
 
+// Azioni a carico del CLIENTE (registro pm_azioni_cliente, config/azioniCliente.js): righe della
+// sezione «AZIONI IN CARICO AL CLIENTE» (o «A CARICO DEL CLIENTE») del recap cliente. Qui ogni
+// blocco è del cliente: l'intestazione è il referente. Le sezioni «AZIONI IN CARICO» senza
+// «cliente» non si leggono (possono contenere i compiti del team).
+//   -> [{ referente, description }] nell'ordine del recap.
+const SEZIONE_CLIENTE = /^\s*(?:\d+[.)]\s*)?azioni\s+(?:in|a)\s+carico\s+(?:al|del|dei)\s+client[ei]\b/i;
+export function parseAzioniCliente(recap) {
+  const lines = String(recap || '').replace(/\r\n?/g, '\n').split('\n');
+  const start = lines.findIndex((l) => SEZIONE_CLIENTE.test(norm(l)));
+  if (start < 0) return [];
+  const items = [];
+  let referente = null;
+  let prevBlank = true;
+  let lastInBlock = null;
+  for (let i = start + 1; i < lines.length; i++) {
+    const raw = lines[i];
+    const text = raw.trim();
+    if (!text || /^[—–\-_=]{3,}$/.test(text)) { prevBlank = true; continue; }
+    if (CLOSING.test(text)) break;
+    // Un'altra sezione «AZIONI IN CARICO …» (es. del team) dopo quella del cliente: fine.
+    if (/^\s*(?:\d+[.)]\s*)?azioni\s+(?:in|a)\s+carico\b/i.test(norm(text))) break;
+    const b = BULLET.exec(raw);
+    if (!b) {
+      referente = text.replace(/[\[\]*_]/g, '').replace(/\s*:\s*$/, '').trim() || null;
+      lastInBlock = null;
+      prevBlank = false;
+      continue;
+    }
+    const indent = b[1].replace(/\t/g, '  ').length;
+    const body = b[2];
+    if (prevBlank && indent === 0 && looksLikeHeader(body)) {
+      referente = body.replace(/[\[\]*_]/g, '').replace(/\s*:\s*$/, '').trim() || null;
+      lastInBlock = null;
+      prevBlank = false;
+      continue;
+    }
+    prevBlank = false;
+    if (indent >= 2 && lastInBlock) {
+      lastInBlock.description += ` – ${body}`;
+      continue;
+    }
+    lastInBlock = { referente, description: body };
+    items.push(lastInBlock);
+  }
+  return items;
+}
+
 const pad = (n) => String(n).padStart(2, '0');
 const iso = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
 const validDay = (y, m, d) => {

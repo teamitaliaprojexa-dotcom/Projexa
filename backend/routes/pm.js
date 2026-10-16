@@ -33,6 +33,11 @@ import {
   chiediAi, leggiJson
 } from '../config/pmCore.js';
 import { economiaEuro, normVoce, VALUTE, CATEGORIE_ESTERNE } from '../config/pmEconomia.js';
+import {
+  TABELLA as AZ_TABELLA, STATI as AZ_STATI, REGOLE_DEFAULT as AZ_REGOLE,
+  sincronizzaAzioniCliente, elencoAzioniCliente, regolePromemoria, regoleDaBody,
+  abbinaReferenti, rubricaUtente, contattiClienti, normNome
+} from '../config/azioniCliente.js';
 
 const router = express.Router();
 
@@ -1082,13 +1087,207 @@ router.post('/consuntivo/completamento', async (req, res) => {
 });
 
 // ============================================================================
+// AZIONI A CARICO DEL CLIENTE (config/azioniCliente.js, Supporto/CreaDB/azioni_cliente.sql)
+// ============================================================================
+// Lette in automatico dal recap cliente; nessuna email al cliente, solo promemoria al PM.
+// GET senza projectId = tutte (Portfolio); con projectId = quelle del progetto (Cruscotto).
+async function richiedeAzioni() {
+  if (!(await tabellaPresente(AZ_TABELLA))) throw errore(503, 'Funzione non ancora attiva: va eseguito lo script Supporto/CreaDB/azioni_cliente.sql sul database');
+}
+// Azione dell'utente del login (tenant + proprietario), con il controllo del ruolo in scrittura.
+async function azioneUtente(req, id) {
+  if (!UUID_RE.test(String(id))) throw errore(400, 'Id non valido');
+  const r = (await db.query(
+    `SELECT id::text AS id, stato, data_scadenza::text AS data_scadenza, id_roles_write FROM ${AZ_TABELLA}
+      WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+    [id, req.user.tenant_id, req.user.user_id])).rows[0];
+  if (!r) throw errore(404, 'Azione non trovata');
+  if (!puoScrivere(req, r.id_roles_write)) throw errore(403, READ_ONLY);
+  return r;
+}
+async function scriviAzione(req, id, dati) {
+  const { data } = await encryptRowForWrite(db, AZ_TABELLA, dati, { id });
+  const cols = Object.keys(data);
+  if (!cols.length) return;
+  await db.query(
+    `UPDATE ${AZ_TABELLA} SET ${cols.map((c, i) => `"${c}" = $${i + 1}`).join(', ')}, updated_at = now()
+      WHERE id::text = $${cols.length + 1} AND tenant_id = $${cols.length + 2} AND user_id = $${cols.length + 3}`,
+    [...cols.map((c) => data[c]), id, req.user.tenant_id, req.user.user_id]);
+}
+// Stato «fatta» con la data; tornando «aperta» la data si toglie.
+const datiStato = (stato) => ({ stato, fatta_il: stato === 'fatta' ? oggiIso() : null });
+
+router.get('/azioni-cliente', async (req, res) => {
+  try {
+    const tabelle = await tabellaPresente(AZ_TABELLA);
+    const projectId = req.query.projectId ? (await progettoUtente(req.user, req.query.projectId)).projectId : null;
+    let lettura = null;
+    if (tabelle) {
+      // Recap nuovi o cambiati: si leggono adesso (non si aspetta il job della mattina).
+      try { lettura = await sincronizzaAzioniCliente(req.user); } catch (e) { console.error('❌ PM AZIONI_CLIENTE lettura recap:', e.message); }
+    }
+    const azioni = tabelle ? await abbinaReferenti(req.user, await elencoAzioniCliente(req.user, { projectId, tutte: req.query.tutte === '1' })) : [];
+    res.json({ oggi: oggiIso(), tabelle, lettura, regole: await regolePromemoria(req.user), azioni: conPermesso(req, azioni),
+      sceltaReferente: tabelle && (await colonneTabella(AZ_TABELLA)).has('contatto_id') });
+  } catch (e) { invia(res, e, 'AZIONI_CLIENTE'); }
+});
+
+function datiAzione(b, parziale = false) {
+  const d = {};
+  const set = (k, v) => { if (!parziale || Object.prototype.hasOwnProperty.call(b, k)) d[k] = v; };
+  set('referente', testo(b.referente, 300));
+  set('descrizione', testo(b.descrizione));
+  set('data_scadenza', dataOpz(b.data_scadenza));
+  set('note', testo(b.note));
+  if ((!parziale || 'descrizione' in d) && !d.descrizione) throw errore(400, 'Scrivi che cosa deve fare il cliente');
+  return d;
+}
+
+// Nuova azione a mano (dal Cruscotto del progetto).
+router.post('/azioni-cliente', async (req, res) => {
+  try {
+    await richiedeAzioni();
+    const prog = await progettoUtente(req.user, pid(req));
+    const id = await inserisci(db, AZ_TABELLA, { ...baseRiga(req, prog), ...datiAzione(req.body || {}), stato: 'aperta', origine: 'manuale', modificata: true });
+    res.status(201).json({ id });
+  } catch (e) { invia(res, e, 'AZIONI_CLIENTE_NEW'); }
+});
+
+router.put('/azioni-cliente/:id', async (req, res) => {
+  try {
+    await richiedeAzioni();
+    const x = await azioneUtente(req, req.params.id);
+    const b = req.body || {};
+    const d = { ...datiAzione(b, true), modificata: true };
+    if (Object.prototype.hasOwnProperty.call(b, 'stato')) Object.assign(d, datiStato(scelta(b.stato, AZ_STATI, 'aperta')));
+    // Referente riscritto a mano: il contatto scelto prima non vale più (si riabbina per nome).
+    const colAz = await colonneTabella(AZ_TABELLA);
+    if ('referente' in d && colAz.has('rubrica_id')) {
+      const prima = (await db.query(`SELECT referente FROM ${AZ_TABELLA} WHERE id::text = $1`, [x.id])).rows[0];
+      if (normNome(prima && prima.referente) !== normNome(d.referente)) { d.rubrica_id = null; if (colAz.has('contatto_id')) d.contatto_id = null; }
+    }
+    // Scadenza cambiata (es. il cliente ha chiesto più tempo): i promemoria ripartono da capo.
+    if ('data_scadenza' in d && d.data_scadenza !== x.data_scadenza) Object.assign(d, { preavviso_il: null, solleciti: 0, ultimo_sollecito: null });
+    await scriviAzione(req, x.id, d);
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'AZIONI_CLIENTE_UPD'); }
+});
+
+// Casella «fatto» (Cruscotto, Portfolio, Linea della riunione).
+router.post('/azioni-cliente/:id/fatto', async (req, res) => {
+  try {
+    await richiedeAzioni();
+    const x = await azioneUtente(req, req.params.id);
+    await scriviAzione(req, x.id, { ...datiStato(req.body && req.body.fatto === true ? 'fatta' : 'aperta'), modificata: true });
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'AZIONI_CLIENTE_FATTO'); }
+});
+
+// Persone tra cui scegliere il referente (triangolo giallo): Contatti del cliente, poi Rubrica.
+router.get('/rubrica-contatti', async (req, res) => {
+  try {
+    const clientId = UUID_RE.test(String(req.query.clientId || '')) ? String(req.query.clientId) : null;
+    res.json([...(clientId ? await contattiClienti(req.user, [clientId]) : []), ...(await rubricaUtente(req.user))]);
+  } catch (e) { invia(res, e, 'RUBRICA_CONTATTI'); }
+});
+
+// Referente scelto dai Contatti del cliente (fonte «cliente») o dalla Rubrica (fonte «rubrica»).
+// tutte = anche le altre azioni aperte dello stesso cliente con lo stesso nome di referente
+// scritto nel recap e senza contatto scelto.
+router.put('/azioni-cliente/:id/referente', async (req, res) => {
+  try {
+    await richiedeAzioni();
+    const cols = await colonneTabella(AZ_TABELLA);
+    if (!cols.has('rubrica_id') || !cols.has('contatto_id')) throw errore(503, 'Va rieseguito lo script Supporto/CreaDB/azioni_cliente.sql (colonne rubrica_id e contatto_id)');
+    const x = await azioneUtente(req, req.params.id);
+    const b = req.body || {};
+    const id = String(b.id || '');
+    const fonte = b.fonte === 'cliente' ? 'cliente' : 'rubrica';
+    if (!UUID_RE.test(id)) throw errore(400, 'Scegli un contatto');
+    const vecchio = (await db.query(`SELECT referente, client_id::text AS client_id FROM ${AZ_TABELLA} WHERE id::text = $1`, [x.id])).rows[0];
+    const elenco = fonte === 'cliente' ? await contattiClienti(req.user, [vecchio.client_id]) : await rubricaUtente(req.user);
+    const c = elenco.find((r) => r.id === id);
+    if (!c) throw errore(404, 'Contatto non trovato');
+    const ids = [x.id];
+    if (b.tutte !== false && normNome(vecchio.referente)) {
+      const altre = (await db.query(
+        `SELECT id::text AS id, referente, id_roles_write FROM ${AZ_TABELLA}
+          WHERE tenant_id = $1 AND user_id = $2 AND stato = 'aperta' AND rubrica_id IS NULL AND contatto_id IS NULL AND id::text <> $3
+            AND client_id IS NOT DISTINCT FROM $4::uuid AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+        [req.user.tenant_id, req.user.user_id, x.id, vecchio.client_id])).rows;
+      for (const a of altre) if (normNome(a.referente) === normNome(vecchio.referente) && puoScrivere(req, a.id_roles_write)) ids.push(a.id);
+    }
+    const dati = { contatto_id: fonte === 'cliente' ? c.id : null, rubrica_id: fonte === 'rubrica' ? c.id : null, referente: c.nominativo, modificata: true };
+    for (const k of ids) await scriviAzione(req, k, dati);
+    res.json({ ok: true, aggiornate: ids.length, contatto: c });
+  } catch (e) { invia(res, e, 'AZIONI_CLIENTE_REFERENTE'); }
+});
+
+// «Email»: testo dell'email ai referenti del cliente con le azioni APERTE, raggruppate per
+// referente, scritto dall'AI con il prompt AZIONI_CLIENTE_EMAIL. AI ed esecuzione = quelle
+// dell'email della To-Do (Impostazioni › AI › «AI Email attività»; anche in Batch, «Apri email»
+// in Risultati AI). Body: { projectId } (Cruscotto) oppure { clientId } (Portfolio, tutti i
+// progetti del cliente). Destinatari = email dei referenti (Contatti del cliente o Rubrica).
+// L'email la apre il browser: Projexa non invia nulla.
+router.post('/azioni-cliente/email', ...rottaAi('email_azioni_cliente', async (req, res) => {
+  try {
+    await richiedeAzioni();
+    const b = req.body || {};
+    let filtro;
+    if (b.projectId) filtro = { projectId: (await progettoUtente(req.user, b.projectId)).projectId };
+    else if (UUID_RE.test(String(b.clientId || ''))) filtro = { clientId: String(b.clientId) };
+    else throw errore(400, 'Indica il progetto o il cliente');
+    const azioni = await abbinaReferenti(req.user, await elencoAzioniCliente(req.user, filtro));
+    if (!azioni.length) throw errore(400, 'Nessuna azione aperta del cliente da ricordare');
+    const cliente = azioni.find((a) => a.cliente)?.cliente || 'Cliente';
+    const progetti = [...new Set(azioni.map((a) => a.progetto).filter(Boolean))];
+    // Gruppi per referente (contatto di rubrica se c'è), nell'ordine delle azioni.
+    const gruppi = new Map();
+    for (const a of azioni) {
+      const nome = (a.contatto && a.contatto.nominativo) || a.referente || 'Referente da definire';
+      const k = a.contatto ? `c:${a.contatto.id}` : `n:${normNome(nome)}`;
+      if (!gruppi.has(k)) gruppi.set(k, { nome, azioni: [] });
+      gruppi.get(k).azioni.push(a);
+    }
+    const oggi = oggiIso();
+    const elenco = [...gruppi.values()].map((g) => [
+      g.nome,
+      ...g.azioni.map((a) => `- ${a.descrizione}${progetti.length > 1 && a.progetto ? ` | Progetto: ${a.progetto}` : ''} | Scadenza: ${a.data_scadenza ? dataIt(a.data_scadenza) : 'da definire'}${a.scaduta ? ` (scaduta da ${-a.giorni} giorni)` : ''}`)
+    ].join('\n')).join('\n\n');
+    const to = [...new Set(azioni.map((a) => a.contatto && a.contatto.email).filter(Boolean))];
+    const senzaEmail = [...new Set(azioni.filter((a) => !a.contatto || !a.contatto.email).map((a) => a.referente || 'referente da definire'))];
+    const utente = String(await speakerName(req.user) || '').trim() || req.user.email || '';
+    const tpl = (await getPromptFor('AZIONI_CLIENTE_EMAIL', req.user)).testo;
+    const vars = { CLIENTE: cliente, PROGETTO: progetti.length === 1 ? `progetto «${progetti[0]}»` : (progetti.length ? `progetti ${progetti.map((p) => `«${p}»`).join(', ')}` : 'attività generali'), DATA: dataIt(oggi), UTENTE: utente };
+    const build = (d) => (tpl.includes('{{AZIONI}}') ? tpl : `${tpl}\n\nATTIVITÀ PER REFERENTE\n{{AZIONI}}`)
+      .replace(/\{\{(CLIENTE|PROGETTO|AZIONI|DATA|UTENTE)\}\}/g, (m, k) => (k === 'AZIONI' ? d : vars[k] || ''));
+    const r = await chiediAi(req.user, build, elenco, { ai: req.aiScelta });
+    const testo = stripMarkdown(r.testo).trim();
+    if (!testo) throw errore(502, `${r.label} non ha restituito alcun testo`);
+    res.json({ testo, ai: `${r.label}${r.model ? ` (${r.model})` : ''}`, to, senzaEmail, cliente, azioni: azioni.length });
+  } catch (e) { invia(res, e, 'AZIONI_CLIENTE_EMAIL'); }
+}));
+
+// Elimina = la riga si chiude (scadenza a ieri) e non torna rileggendo il recap.
+router.delete('/azioni-cliente/:id', async (req, res) => {
+  try {
+    await richiedeAzioni();
+    const x = await azioneUtente(req, req.params.id);
+    await db.query(`UPDATE ${AZ_TABELLA} SET scadenza = CURRENT_DATE - 1, updated_at = now() WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`,
+      [x.id, req.user.tenant_id, req.user.user_id]);
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'AZIONI_CLIENTE_DEL'); }
+});
+
+// ============================================================================
 // PREFERENZE E DIGEST
 // ============================================================================
 router.get('/preferenze', async (req, res) => {
   try {
-    if (!(await tabellaPresente('pm_preferenze'))) return res.json({ digest: false, notifiche_prog: true, tabelle: false });
+    if (!(await tabellaPresente('pm_preferenze'))) return res.json({ digest: false, notifiche_prog: true, ...AZ_REGOLE, tabelle: false, tabelleAzioni: false });
     const r = (await db.query('SELECT digest, notifiche_prog FROM pm_preferenze WHERE tenant_id = $1 AND user_id = $2', [req.user.tenant_id, req.user.user_id])).rows[0];
-    res.json({ ...(r || { digest: false, notifiche_prog: true }), tabelle: true });
+    const az = await regolePromemoria(req.user);
+    res.json({ ...(r || { digest: false, notifiche_prog: true }), ...az, tabelle: true, tabelleAzioni: az.tabelle });
   } catch (e) { invia(res, e, 'PREF'); }
 });
 router.put('/preferenze', async (req, res) => {
@@ -1099,6 +1298,14 @@ router.put('/preferenze', async (req, res) => {
       `INSERT INTO pm_preferenze (tenant_id, user_id, digest, notifiche_prog) VALUES ($1, $2, $3, $4)
        ON CONFLICT (tenant_id, user_id) DO UPDATE SET digest = EXCLUDED.digest, notifiche_prog = EXCLUDED.notifiche_prog, updated_at = now()`,
       [req.user.tenant_id, req.user.user_id, b.digest === true, b.notifiche_prog !== false]);
+    // Regole dei promemoria delle azioni del cliente (solo dopo azioni_cliente.sql).
+    if ('az_giorni_prima' in b && (await colonneTabella('pm_preferenze')).has('az_giorni_prima')) {
+      const az = regoleDaBody(b);
+      await db.query(
+        `UPDATE pm_preferenze SET az_notifiche = $3, az_giorni_prima = $4, az_ogni_giorni = $5, az_max_solleciti = $6, updated_at = now()
+          WHERE tenant_id = $1 AND user_id = $2`,
+        [req.user.tenant_id, req.user.user_id, az.az_notifiche, az.az_giorni_prima, az.az_ogni_giorni, az.az_max_solleciti]);
+    }
     res.json({ ok: true });
   } catch (e) { invia(res, e, 'PREF_SALVA'); }
 });

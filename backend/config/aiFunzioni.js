@@ -27,6 +27,8 @@ export const FUNZIONI = {
 // facoltativa = la funzione funziona anche senza AI (solo dati, con un avviso al posto del testo).
 export const OPERAZIONI = {
   email_attivita: { funzione: 'email_attivita', etichetta: 'Email attività a carico', locale: true },
+  // Pulsante «Email» del registro delle azioni a carico del cliente: stessa AI/esecuzione.
+  email_azioni_cliente: { funzione: 'email_attivita', etichetta: 'Email azioni del cliente', locale: true },
   dossier: { funzione: 'dossier', etichetta: 'Dossier Cliente', locale: true, facoltativa: true },
   kickoff: { funzione: 'kickoff', etichetta: 'Slide Kick-off', locale: false, file: true },
   offerta: { funzione: 'offerta', etichetta: 'Offerta Economica', locale: false, file: true },

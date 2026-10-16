@@ -306,6 +306,11 @@
                 dt.issue.map((x) => [dataIt(x.data_segnalazione), x.descrizione || '', x.categoria || '', x.priorita || '', x.owner || '', x.stato || '', dataIt(x.scadenza)]));
             h += tab('Change Request', [{ t: 'Codice' }, { t: 'Titolo' }, { t: 'Stato' }, { t: 'Richiesta il' }, { t: 'Richiesta da' }, { t: `Effort (${u})`, n: 1 }, { t: 'Importo', n: 1 }, { t: 'Tempi (gg)', n: 1 }, { t: 'Decisa il' }],
                 dt.cr.map((x) => ({ celle: [x.codice || '', x.titolo || '', STATI_CR[x.stato] || x.stato || '', dataIt(x.data_richiesta), x.richiesta_da || '', nfmt(x.effort_delta), euro(x.importo_delta), x.giorni_delta ?? '', dataIt(x.data_decisione)], completato: x.completato })));
+            // Azioni a carico del cliente non completate (lette dai recap; registro del Cruscotto PM).
+            h += tab('Azioni a carico del cliente non completate', [{ t: 'Azione' }, { t: 'Referente' }, { t: 'Scadenza' }, { t: 'Riunione' }, { t: 'Promemoria', n: 1 }, { t: 'Note' }],
+                (dt.azioniCliente || []).map((x) => [x.descrizione || '', x.referente || '',
+                    x.scadenza ? (x.scaduta ? { html: `<span style="color:#DC2626;font-weight:600">${esc(dataIt(x.scadenza))} (scaduta da ${-x.giorni} gg)</span>` } : dataIt(x.scadenza)) : 'da definire',
+                    dataIt(x.riunione), x.solleciti || '', x.note || '']));
             h += ganttHtml(dt.gantt);
             return h + '</div>';
         }

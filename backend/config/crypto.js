@@ -265,6 +265,8 @@ const TABLE_COLUMN_ALLOWLIST = {
   pm_stakeholder: new Set(['nominativo', 'email', 'ruolo', 'strategia', 'comunicazione']),
   pm_chiusura: new Set(['accettato_da', 'nota_soddisfazione', 'obiettivi_raggiunti', 'attivita_residue']),
   pm_lesson: new Set(['testo', 'raccomandazione']),
+  // Azioni a carico del cliente (Supporto/CreaDB/azioni_cliente.sql)
+  pm_azioni_cliente: new Set(['referente', 'descrizione', 'note']),
   // Economia del progetto (Supporto/CreaDB/pm_economia.sql): importi e categorie in chiaro (si sommano in SQL)
   pm_costo_esterno: new Set(['descrizione', 'fornitore', 'note'])
 };

@@ -9,7 +9,8 @@
     <!--
       CRUSCOTTO PM del progetto (pulsante «Cruscotto PM» nella scheda progetto della dashboard).
       Schede: Panoramica (semaforo di salute, previsione a finire, tempi e Gantt), RAID (rischi,
-      decisioni, dipendenze + azioni e issue), Change Request, Economia (valore guadagnato in euro,
+      decisioni, dipendenze + azioni e issue), Azioni cliente (lette dal recap, promemoria al PM),
+      Change Request, Economia (valore guadagnato in euro,
       CPI/SPI, margine, costi esterni, valuta), Stakeholder e RACI, Chiusura
       (accettazione, soddisfazione, lessons learned, verbale), Chiedi al progetto (AI).
       In alto: Briefing pre-riunione e Status Report. API: /api/pm (backend/routes/pm.js).
@@ -29,6 +30,7 @@
     <nav class="pm-tabs" id="tabs">
         <button class="pm-tab on" data-tab="panoramica"><i class="fas fa-heart-pulse"></i> Panoramica</button>
         <button class="pm-tab" data-tab="raid"><i class="fas fa-shield-halved"></i> RAID <span class="cnt" id="cntRaid"></span></button>
+        <button class="pm-tab" data-tab="azioni"><i class="fas fa-handshake"></i> Azioni cliente <span class="cnt" id="cntAzioni"></span></button>
         <button class="pm-tab" data-tab="cr"><i class="fas fa-code-pull-request"></i> Change Request <span class="cnt" id="cntCr"></span></button>
         <button class="pm-tab" data-tab="economia"><i class="fas fa-euro-sign"></i> Economia</button>
         <button class="pm-tab" data-tab="stakeholder"><i class="fas fa-users"></i> Stakeholder e RACI</button>
@@ -39,6 +41,7 @@
         <div id="avvisi"></div>
         <section class="pm-pannello on" id="p-panoramica"><div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> Calcolo la salute del progetto…</div></section>
         <section class="pm-pannello" id="p-raid"></section>
+        <section class="pm-pannello" id="p-azioni"></section>
         <section class="pm-pannello" id="p-cr"></section>
         <section class="pm-pannello" id="p-economia"></section>
         <section class="pm-pannello" id="p-stakeholder"></section>
@@ -48,6 +51,7 @@
 
     <script src="js/ai-scelta.js"></script>
     <script src="js/pm-comune.js"></script>
+    <script src="js/azioni-cliente.js"></script>
     <script>
     (function () {
         const { esc, api, fmt, euro, dataIt, badge, toast, testoAiHtml, modale, valori } = PM;
@@ -1072,7 +1076,15 @@
         window.addEventListener('focus', () => {
             if (caricati.raid && pannello('raid').classList.contains('on') && !document.querySelector('.pm-modal-mask')) caricaRaid();
         });
-        const CARICA = { panoramica: caricaPanoramica, raid: caricaRaid, cr: caricaCr, economia: caricaEconomia, stakeholder: caricaStakeholder, chiusura: caricaChiusura, chiedi: caricaChiedi };
+        // ================= AZIONI A CARICO DEL CLIENTE (js/azioni-cliente.js) =================
+        function caricaAzioni() {
+            AzioniCliente.monta(pannello('azioni'), {
+                projectId,
+                onCambio: (n) => { document.getElementById('cntAzioni').textContent = n || ''; }
+            });
+        }
+
+        const CARICA = { panoramica: caricaPanoramica, raid: caricaRaid, azioni: caricaAzioni, cr: caricaCr, economia: caricaEconomia, stakeholder: caricaStakeholder, chiusura: caricaChiusura, chiedi: caricaChiedi };
         // Da una riunione (finestra del recap): progetto della riunione, scheda RAID, estrazione.
         if (!projectId && qs.get('da_riunione')) {
             api(`/riunione?id_calendar=${encodeURIComponent(qs.get('da_riunione'))}`)

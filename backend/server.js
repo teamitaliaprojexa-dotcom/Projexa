@@ -26,6 +26,7 @@ import jobSchedulesRoutes from './routes/job-schedules.js';
 import auditLogRoutes from './routes/audit-log.js';
 import notificheRoutes from './routes/notifiche.js';
 import pmRoutes from './routes/pm.js';
+import { sincronizzaAzioniCliente, elencoAzioniCliente, abbinaReferenti } from './config/azioniCliente.js';
 import recapInternoRoutes from './routes/recapInterno.js';
 import { notificheNuoviMySupport } from './jobs/notifiche.js';
 import auditEventiRoutes from './routes/audit-eventi.js';
@@ -7706,7 +7707,8 @@ async function dosProgetti(req, owner, clientId, opz = {}) {
 // In fondo al dossier, per ogni progetto non chiuso: offerta/ordine con data, ordine interno e
 // ODA, commesse, Team Work, gestione a ore o giorni, a consuntivo, Licenze da Attivare,
 // riunioni (data, orario, recap), dal Cruscotto PM salute, effort per voce di costo, costi
-// esterni, rischi, decisioni, dipendenze e assunzioni, issue, Change Request e il riepilogo del
+// esterni, rischi, decisioni, dipendenze e assunzioni, issue, Change Request, azioni a carico
+// del cliente non completate e il riepilogo del
 // Gantt come nella pagina Gantt (schede in alto + attività con effort e avanzamento). Task e
 // quotazioni del progetto arrivano già dalle sezioni del dossier. Dati del PROPRIETARIO del
 // cliente (owner): un Manager vede quelli del suo diretto. Niente di questo va all'AI.
@@ -7740,6 +7742,9 @@ async function dosDettaglioProgetto(req, owner, p) {
       [user.tenant_id, owner, p.id]).then((r) => r.rows.map((x) => ({ cod: x.cod, nome: x.nome || '', completato: !!x.completato }))).catch(() => p.commesse || []),
     dosVociCommessa(user, p.id, p.aOre)
   ]);
+  // Azioni a carico del cliente NON completate (config/azioniCliente.js), con referente di rubrica.
+  let azioniCliente = [];
+  try { azioniCliente = await abbinaReferenti(user, await elencoAzioniCliente(user, { projectId: p.id })); } catch (e) { console.error('[DOSSIER] azioni cliente:', e.message); }
   const riga = (x, campi) => Object.fromEntries(campi.map((k) => [k, x[k] ?? null]));
   return {
     offerta: siData('Offerta inviata al Cliente'),
@@ -7763,6 +7768,10 @@ async function dosDettaglioProgetto(req, owner, p) {
     raid: raid.map((x) => ({ ...riga(x, ['tipo', 'titolo', 'descrizione', 'probabilita', 'impatto', 'punteggio', 'owner', 'mitigazione', 'data_revisione', 'decisa_da', 'stato']), completato: !!x.riga_chiusa })),
     issue: issue.map((x) => riga(x, ['data_segnalazione', 'descrizione', 'categoria', 'priorita', 'owner', 'stato', 'scadenza'])),
     cr,
+    azioniCliente: azioniCliente.map((a) => ({
+      descrizione: a.descrizione, referente: (a.contatto && a.contatto.nominativo) || a.referente || '',
+      scadenza: a.data_scadenza, scaduta: a.scaduta, giorni: a.giorni, riunione: a.riunione_data, solleciti: a.solleciti || 0, note: a.note || ''
+    })),
     gantt
   };
 }
@@ -8111,6 +8120,16 @@ app.get('/api/meeting-panel', requireAuth, async (req, res) => {
       [req.user.tenant_id, req.user.user_id, m.project_id || m.client_id])).rows
       .map((t) => ({ ...t, fatto: t.stato === 'completed', scaduta: t.stato !== 'completed' && !!t.scadenza && t.scadenza < new Date().toISOString().slice(0, 10) }));
 
+    // Azioni a carico del cliente (config/azioniCliente.js): aperte + fatte negli ultimi 7
+    // giorni, stessa regola progetto/cliente delle To-Do. I recap nuovi si leggono adesso.
+    let azioniCliente = null;
+    try {
+      const letti = await sincronizzaAzioniCliente(req.user);
+      if (letti.tabelle !== false) azioniCliente = await elencoAzioniCliente(req.user, m.project_id
+        ? { projectId: m.project_id, recentiGiorni: 7 }
+        : { clientId: m.client_id, senzaProgetto: true, recentiGiorni: 7 });
+    } catch (e) { console.error('PANNELLO_RIUNIONE azioni cliente:', e.message); }
+
     // Task Jira, quotazioni e MySupport del cliente (solo quelli non chiusi). Regola dell'utente
     // (2026-10-13), uguale per To-Do e riunione precedente: riunione con cliente e progetto ->
     // solo i dati di QUEL progetto; riunione con il solo cliente -> solo i dati del cliente SENZA
@@ -8145,7 +8164,7 @@ app.get('/api/meeting-panel', requireAuth, async (req, res) => {
         });
       } catch (e) { console.error(`PANNELLO_RIUNIONE ${key}:`, e.message); }
     }
-    res.json({ riunione, precedente, precedenti, todo, sezioni, puoSegnareAttivita: colsAtt.has('completata') });
+    res.json({ riunione, precedente, precedenti, todo, azioniCliente, sezioni, puoSegnareAttivita: colsAtt.has('completata') });
   } catch (error) {
     console.error('❌ PANNELLO_RIUNIONE:', error.message);
     res.status(error.statusCode || 500).json({ error: error.message });

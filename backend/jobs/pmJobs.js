@@ -11,7 +11,7 @@
 //        Chi non le vuole le spegne nel Portfolio (pm_preferenze.notifiche_prog).
 //   pm_digest_settimanale  (lunedì) email di riepilogo ai PM che l'hanno attivata nel
 //        Portfolio (pm_preferenze.digest): progetti in rosso/giallo, To-Do scadute e della
-//        settimana, riunioni senza recap inviato, ordini da sollecitare, rischi, CR in attesa,
+//        settimana, azioni del cliente scadute o in scadenza, riunioni senza recap inviato, ordini da sollecitare, rischi, CR in attesa,
 //        milestone delle prossime due settimane. Nessuna AI: testo composto da Projexa.
 // ============================================================================
 import db from '../config/database.js';
@@ -167,6 +167,20 @@ export async function costruisciDigest(user) {
       righe: t.rows.map((x) => ({ testo: `${x.due < oggi ? '⚠️ scaduta' : '📅'} ${dataIt(x.due)} – ${x.titile || '(senza titolo)'}` }))
     });
   }
+  // Azioni a carico del cliente scadute o in scadenza nella settimana (config/azioniCliente.js).
+  try {
+    const { elencoAzioniCliente } = await import('../config/azioniCliente.js');
+    const az = (await elencoAzioniCliente(user)).filter((a) => a.data_scadenza && a.giorni <= 7);
+    if (az.length) {
+      sez.push({
+        titolo: `Azioni del cliente scadute o in scadenza entro 7 giorni (${az.length})`,
+        righe: az.slice(0, 50).map((a) => ({
+          testo: `${a.scaduta ? '⚠️ scaduta' : '📅'} ${dataIt(a.data_scadenza)} – ${[a.cliente, a.progetto].filter(Boolean).join(' · ')}${a.cliente || a.progetto ? ': ' : ''}${String(a.descrizione || '').slice(0, 200)}${a.referente ? ` (${a.referente})` : ''}`,
+          link: `${APP_URL()}/portfolio.html?azione=${encodeURIComponent(a.id)}`
+        }))
+      });
+    }
+  } catch (e) { console.error('DIGEST azioni cliente:', e.message); }
   const m = await db.query(
     `SELECT oggetto, data_calendar::text AS d FROM rec_meeting
       WHERE tenant_id = $1 AND user_id = $2 AND inviata IS NOT TRUE AND recap IS NOT NULL AND BTRIM(recap) <> ''

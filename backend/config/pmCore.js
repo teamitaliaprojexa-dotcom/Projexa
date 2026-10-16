@@ -803,6 +803,12 @@ export async function contestoProgetto(user, projectId, { riunioni = 5, dal = nu
     task.slice(0, 60).forEach((t) => L.push(`- ${t.titolo}${t.descrizione ? `: ${t.descrizione.slice(0, 200)}` : ''} | ${t.assegnato || 'non assegnata'} | scadenza ${dataIt(t.scadenza) || '-'}${t.scaduta ? ' (SCADUTA)' : ''}`));
     L.push('');
   }
+  // Azioni a carico del cliente (config/azioniCliente.js, import dinamico: si usano a vicenda).
+  try {
+    const { testoAzioniCliente } = await import('./azioniCliente.js');
+    const ta = await testoAzioniCliente(user, projectId);
+    if (ta) { L.push(ta); L.push(''); }
+  } catch (err) { console.error('PM contesto azioni cliente:', err.message); }
   if (issue.length) {
     L.push('ISSUE APERTE');
     issue.slice(0, 40).forEach((i) => L.push(`- [${i.priorita || '-'}] ${String(i.descrizione || '').slice(0, 250)} | owner ${i.owner || '-'} | stato ${i.stato || '-'}`));

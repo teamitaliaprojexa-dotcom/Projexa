@@ -9,8 +9,9 @@
     <!--
       PORTFOLIO (voce «Portfolio» della barra laterale): salute di tutti i progetti aperti del PM
       (semaforo e 5 indicatori, previsione a finire), timeline di tutti i progetti con baseline e
-      milestone, preferenze del digest settimanale via email e delle notifiche proattive.
-      API: GET /api/pm/portfolio, /api/pm/preferenze, /api/pm/digest/* (backend/routes/pm.js).
+      milestone, preferenze del digest settimanale via email e delle notifiche proattive, azioni
+      a carico del cliente di tutti i progetti (js/azioni-cliente.js) con le regole dei promemoria.
+      API: GET /api/pm/portfolio, /api/pm/preferenze, /api/pm/digest/*, /api/pm/azioni-cliente (backend/routes/pm.js).
     -->
     <style>
         .filtri { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.9rem; align-items: center; }
@@ -51,8 +52,11 @@
     </div>
     <main class="pm-main">
         <div id="contenuto"><div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> Calcolo la salute di tutti i tuoi progetti…</div></div>
+        <div id="azioniBox" style="margin-top:1rem"></div>
     </main>
+    <script src="js/ai-scelta.js"></script>
     <script src="js/pm-comune.js"></script>
+    <script src="js/azioni-cliente.js"></script>
     <script>
     (function () {
         const { esc, api, fmt, dataIt, badge, toast, modale } = PM;
@@ -115,6 +119,12 @@
                     <div class="pref">
                         <label><input type="checkbox" id="prefDigest" ${p.digest ? 'checked' : ''}> <span><b>Digest settimanale via email</b><br><span class="pm-nota">Ogni lunedì mattina: progetti rossi e gialli, To-Do scadute e della settimana, riunioni con recap non inviato, ordini da sollecitare, rischi, Change Request in attesa, milestone delle prossime 2 settimane.</span></span></label>
                         <label><input type="checkbox" id="prefNotif" ${p.notifiche_prog !== false ? 'checked' : ''}> <span><b>Notifiche dei progetti in campanella</b><br><span class="pm-nota">Budget all'80% e superato, stima a finire oltre il 110%, data di fine superata, attività in ritardo, milestone superate o raggiunte (si può fatturare), rischi da rivedere, progetto diventato rosso.</span></span></label>
+                        <label><input type="checkbox" id="prefAz" ${p.az_notifiche !== false ? 'checked' : ''} ${p.tabelleAzioni ? '' : 'disabled'}> <span><b>Promemoria delle azioni a carico del cliente</b><br><span class="pm-nota">Solo a te in campanella, mai email al cliente.${p.tabelleAzioni ? '' : ' Per attivarli va eseguito lo script Supporto/CreaDB/azioni_cliente.sql.'}</span>
+                            <span class="az-regole" style="display:flex; gap:0.6rem; flex-wrap:wrap; align-items:center; margin-top:0.4rem; font-size:0.84rem">
+                                Avvisami <input type="number" id="azPrima" class="pm-input" style="width:64px" min="0" max="30" value="${p.az_giorni_prima ?? 2}" ${p.tabelleAzioni ? '' : 'disabled'}> giorni prima della scadenza;
+                                se scade, il giorno dopo e poi ogni <input type="number" id="azOgni" class="pm-input" style="width:64px" min="1" max="30" value="${p.az_ogni_giorni ?? 5}" ${p.tabelleAzioni ? '' : 'disabled'}> giorni lavorativi,
+                                al massimo <input type="number" id="azMax" class="pm-input" style="width:64px" min="0" max="10" value="${p.az_max_solleciti ?? 3}" ${p.tabelleAzioni ? '' : 'disabled'}> volte.
+                            </span></span></label>
                     </div>
                     <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.9rem">
                         <button class="pm-btn primario" id="salvaPref"><i class="fas fa-floppy-disk"></i> Salva</button>
@@ -128,7 +138,9 @@
             timeline(box.querySelector('#timeline'), lista);
             box.querySelector('#salvaPref').addEventListener('click', async (e) => {
                 e.currentTarget.disabled = true;
-                try { await api('/preferenze', { metodo: 'PUT', corpo: { digest: box.querySelector('#prefDigest').checked, notifiche_prog: box.querySelector('#prefNotif').checked } }); toast('Preferenze salvate'); }
+                const corpo = { digest: box.querySelector('#prefDigest').checked, notifiche_prog: box.querySelector('#prefNotif').checked };
+                if (p.tabelleAzioni) Object.assign(corpo, { az_notifiche: box.querySelector('#prefAz').checked, az_giorni_prima: box.querySelector('#azPrima').value, az_ogni_giorni: box.querySelector('#azOgni').value, az_max_solleciti: box.querySelector('#azMax').value });
+                try { await api('/preferenze', { metodo: 'PUT', corpo }); toast('Preferenze salvate'); dati.pref = await api('/preferenze'); azioni && azioni.ricarica(); }
                 catch (err) { toast(err.message, 'errore'); } finally { e.currentTarget.disabled = false; }
             });
             box.querySelector('#anteprima').addEventListener('click', async () => {
@@ -168,7 +180,13 @@
                 }).join('')}</div>`;
         }
 
-        document.getElementById('aggiorna').addEventListener('click', carica);
+        // Azioni a carico del cliente di tutti i progetti e clienti (js/azioni-cliente.js).
+        // ?azione=<id> (pulsante «Vai» del promemoria in campanella, link del digest): la evidenzia.
+        const evidenzia = new URLSearchParams(location.search).get('azione');
+        const azioni = AzioniCliente.monta(document.getElementById('azioniBox'), { evidenzia });
+        if (evidenzia) document.getElementById('azioniBox').scrollIntoView({ block: 'start' });
+
+        document.getElementById('aggiorna').addEventListener('click', () => { carica(); azioni.ricarica(); });
         carica();
     })();
     </script>

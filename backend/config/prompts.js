@@ -46,6 +46,13 @@ export const PROMPT_FUNCTIONS = {
     titolo: 'Task in Carico',
     segnaposto: ['NOMINATIVO', 'TASK', 'DATA', 'UTENTE']
   },
+  // Registro «Azioni a carico del cliente» (Cruscotto PM / Portfolio) › pulsante «Email»: email
+  // ai referenti del cliente con le azioni aperte raggruppate per referente (routes/pm.js).
+  // AI ed esecuzione = quelle dell'email della To-Do («AI Email attività»).
+  AZIONI_CLIENTE_EMAIL: {
+    titolo: 'Email azioni a carico del cliente',
+    segnaposto: ['CLIENTE', 'PROGETTO', 'AZIONI', 'DATA', 'UTENTE']
+  },
   // Pulsante «Dossier Cliente» della scheda cliente: l'AI scrive solo sintesi e punti di
   // attenzione; tabelle e numeri li compone Projexa. Il blocco COLONNE in testa al prompt
   // (sezione: colonne con i nomi visti dall'utente) sceglie le colonne delle tabelle:
