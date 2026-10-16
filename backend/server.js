@@ -6720,7 +6720,8 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
             scadenzaRepairClause += `,
                  time_spent_fatt_hh = ${p},
                  time_spent_fatt_gg = (${p}) / 8.0`;
-            scadenzaChanged += ` OR time_spent_fatt_hh IS DISTINCT FROM ${p}`;
+            scadenzaChanged += ` OR time_spent_fatt_hh IS DISTINCT FROM ${p}
+                    OR time_spent_fatt_gg IS DISTINCT FROM ROUND((${p}) / 8.0, 2)`;
           }
           // Cast esplicito a numeric: se time_spent_hh/time_spent_gg non sono già di
           // tipo numerico (es. varchar, o una precisione che non accetta il valore
@@ -6730,7 +6731,8 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
              SET time_spent_hh = $1::numeric,
                  time_spent_gg = ($1::numeric) / 8.0${scadenzaRepairClause}${updatedAtClause}
              WHERE id = $2 AND tenant_id = $3
-               AND (time_spent_hh IS DISTINCT FROM $1::numeric${scadenzaChanged})
+               AND (time_spent_hh IS DISTINCT FROM $1::numeric
+                    OR time_spent_gg IS DISTINCT FROM ROUND($1::numeric / 8.0, 2)${scadenzaChanged})
              RETURNING id`,
             updateParams
           );
@@ -6792,7 +6794,12 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
                ${perCommessa
                  ? `AND pw.commessa_id IS NOT DISTINCT FROM agg.commessa_id`
                  : ''}
-               AND (pw.time_spent_hh IS DISTINCT FROM agg.total_hh${workerFatt ? '\n                    OR pw.time_spent_fatt_hh IS DISTINCT FROM agg.total_fatt_hh' : ''})
+               -- Anche i giorni: una riga con le ore giuste ma i giorni vuoti (scritta da
+               -- altre funzioni) va riscritta, la griglia Costi Progetto mostra i giorni.
+               AND (pw.time_spent_hh IS DISTINCT FROM agg.total_hh
+                    OR pw.time_spent_gg IS DISTINCT FROM ROUND(agg.total_hh / 8.0, 2)${workerFatt ? `
+                    OR pw.time_spent_fatt_hh IS DISTINCT FROM agg.total_fatt_hh
+                    OR pw.time_spent_fatt_gg IS DISTINCT FROM ROUND(agg.total_fatt_hh / 8.0, 2)` : ''})
              RETURNING pw.id`,
             [req.user.tenant_id, projectIds]
           );
