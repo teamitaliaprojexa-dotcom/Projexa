@@ -237,7 +237,7 @@ export async function righeGantt(user, projectId) {
     const chiave = [x.ordinamento1, x.ordinamento2, x.ordinamento3, x.ordinamento4].slice(0, livello).map((n) => n ?? 0).join('.');
     // Stima dell'attività (come la pagina Gantt): analisi + configurazione + formazione,
     // senza valori il totale. Effettivo scritto a mano (Supporto/CreaDB/proj_activity_effettivo.sql).
-    const parti = ['analisi', 'configurazione', 'formazione'].map((c) => numero(x[c])).filter((v) => v != null);
+    const parti = ['analisi', 'configurazione', 'formazione', 'programmazione'].map((c) => numero(x[c])).filter((v) => v != null);
     const stima = parti.length ? parti.reduce((a, b) => a + b, 0) : numero(x.totale);
     return {
       id: String(x.id),

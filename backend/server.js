@@ -4138,8 +4138,9 @@ const GANTT_COLUMNS = ['argomento1', 'ordinamento1', 'argomento2', 'ordinamento2
   // scrive solo «Congela baseline», POST /api/pm/gantt/baseline). Se le colonne non ci sono
   // ancora vengono ignorate.
   'milestone', 'baseline_inizio', 'baseline_fine',
-  // Effort per attività, NUMERIC(12,2) (colonne aggiunte a mano il 2026-10-11).
-  'analisi', 'configurazione', 'formazione', 'totale',
+  // Effort per attività, NUMERIC(12,2) (colonne aggiunte a mano il 2026-10-11; programmazione dal
+  // 2026-10-16, Supporto/CreaDB/programmazione.sql: ignorata finché la colonna non esiste).
+  'analisi', 'configurazione', 'formazione', 'programmazione', 'totale',
   // Supporto/CreaDB/proj_activity_effettivo.sql: effettivo (a mano) e marginalità/sforamento
   // (calcolati dalla pagina Gantt rispetto alla stima).
   'effettivo', 'marginalita', 'sforamento'];
@@ -4730,12 +4731,13 @@ app.post('/api/projects/gantt-activity/genera', requireAuth, async (req, res) =>
     }
 
     // Effort per licenza dalla griglia «Licenze da Attivare» (proj_licenze), per nome licenza:
-    // l'argomento della licenza riceve il totale, le sue attività analisi/configurazione/formazione.
+    // l'argomento della licenza riceve il totale, le sue attività analisi/configurazione/formazione/programmazione.
     const normLic = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
     const effortLicenza = new Map();
     if ((await db.query(`SELECT to_regclass('public.proj_licenze') IS NOT NULL AS c`)).rows[0].c) {
       const eff = await db.query(
-        `SELECT cl.description AS nome, pl.totale, pl.analisi, pl.configurazione, pl.formazione
+        `SELECT cl.description AS nome, pl.totale, pl.analisi, pl.configurazione, pl.formazione,
+                (to_jsonb(pl) ->> 'programmazione')::numeric AS programmazione
            FROM proj_licenze pl JOIN conf_licenze_app cl ON cl.id = pl.licenza_id
           WHERE pl.tenant_id = $1 AND pl.user_id = $2 AND pl.project_id::text = $3
             AND (pl.scadenza IS NULL OR pl.scadenza >= CURRENT_DATE)
@@ -4744,8 +4746,8 @@ app.post('/api/projects/gantt-activity/genera', requireAuth, async (req, res) =>
       );
       for (const e of eff.rows) if (!effortLicenza.has(normLic(e.nome))) effortLicenza.set(normLic(e.nome), e);
     }
-    // Attività che parlano di analisi / configurazione / formazione: ricevono solo quel valore.
-    const EFFORT_ATTIVITA = [['analisi', /analis/i], ['configurazione', /configur/i], ['formazione', /formazion/i]];
+    // Attività che parlano di analisi / configurazione / formazione / programmazione: ricevono solo quel valore.
+    const EFFORT_ATTIVITA = [['analisi', /analis/i], ['configurazione', /configur/i], ['formazione', /formazion/i], ['programmazione', /programmazion|sviluppo/i]];
 
     // Albero: una fase per sezione (padre + licenza), le attività sotto la loro fase.
     const fasi = [];
@@ -7856,7 +7858,7 @@ async function dosLicenzeProgetto(user, projectId) {
   const r = await db.query(
     `SELECT cl.description AS licenza, COALESCE(rb.nominativo, pl.referente::text) AS referente,
             pl.analisi::float8 AS analisi, pl.configurazione::float8 AS configurazione,
-            pl.formazione::float8 AS formazione, pl.totale::float8 AS totale, (pl.scadenza < CURRENT_DATE) AS completato
+            pl.formazione::float8 AS formazione, (to_jsonb(pl) ->> 'programmazione')::float8 AS programmazione, pl.totale::float8 AS totale, (pl.scadenza < CURRENT_DATE) AS completato
        FROM proj_licenze pl
        LEFT JOIN conf_licenze_app cl ON cl.id = pl.licenza_id
        LEFT JOIN rubrica rb ON rb.id::text = pl.referente::text AND rb.tenant_id = pl.tenant_id
@@ -7868,7 +7870,7 @@ async function dosLicenzeProgetto(user, projectId) {
 
 // Riepilogo del Gantt come la pagina Gantt (sito/gantt.html, projectSummaryHtml e render):
 // schede Stima progetto / Completamento / Consuntivo / Fatturato / Effettivo / Marginalità /
-// Sforamento e righe delle attività con effort (analisi, configurazione, formazione, totale)
+// Sforamento e righe delle attività con effort (analisi, configurazione, formazione, programmazione, totale)
 // e avanzamento. Stessi calcoli della pagina (rootEffort, consuntivoNodo, badge).
 async function dosGanttProgetto(user, projectId, aOre, aConsuntivo, pm) {
   const r = await db.query(
@@ -7878,7 +7880,7 @@ async function dosGanttProgetto(user, projectId, aOre, aConsuntivo, pm) {
   if (!r.rows.length) return null;
   const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
   const r2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
-  const PARTI = ['analisi', 'configurazione', 'formazione'];
+  const PARTI = ['analisi', 'configurazione', 'formazione', 'programmazione'];
   // Albero dalle chiavi di ordinamento (come righeGantt del Cruscotto).
   const nodi = r.rows.map((x) => {
     const livello = x.argomento4 ? 4 : x.argomento3 ? 3 : x.argomento2 ? 2 : 1;
@@ -7888,7 +7890,7 @@ async function dosGanttProgetto(user, projectId, aOre, aConsuntivo, pm) {
       nome: String(x[`argomento${livello}`] || '').trim() || '(senza nome)',
       milestone: x.milestone === true,
       avanzamento: Math.max(0, Math.min(100, Number(x.avanzamento) || 0)),
-      totale: num(x.totale), analisi: num(x.analisi), configurazione: num(x.configurazione), formazione: num(x.formazione),
+      totale: num(x.totale), analisi: num(x.analisi), configurazione: num(x.configurazione), formazione: num(x.formazione), programmazione: num(x.programmazione),
       effettivo: num(x.effettivo)
     };
   });
@@ -9453,10 +9455,12 @@ const DASHBOARD_FLAGS = {
   todo: 'mostra todolist',
   issue: 'mostra funzione issue',
   reporting: 'mostra reporting',
-  registra: 'mostra registra'
+  registra: 'mostra registra',
+  // Capacità e allocazione risorse (facoltativa, config/capacita.js): voce «Capacità» del menu.
+  capacita: 'capacità e allocazione risorse'
 };
 // Flag che senza riga in settings valgono false (moduli nuovi, da attivare esplicitamente).
-const DASHBOARD_FLAGS_DEFAULT_OFF = new Set(['reporting']);
+const DASHBOARD_FLAGS_DEFAULT_OFF = new Set(['reporting', 'capacita']);
 async function readDashboardFlags(user) {
   const r = await db.query(
     `SELECT LOWER(REGEXP_REPLACE(BTRIM(campo), '^\\(\\*\\)\\s*', '')) AS campo, valore1

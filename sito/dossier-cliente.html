@@ -278,8 +278,8 @@
                 <span>A consuntivo:</span><b>${dt.aConsuntivo ? 'Sì' : 'No'}</b>
             </div>`;
             h += tab('Team Work', [{ t: 'Nominativo' }, { t: 'Ruolo' }, { t: 'Email' }], perCommessa(dt.team, (x) => [x.nominativo, x.ruolo, x.email]));
-            h += tab('Licenze da Attivare', [{ t: 'Licenza' }, { t: 'Referente' }, { t: `Analisi (${u})`, n: 1 }, { t: `Configurazione (${u})`, n: 1 }, { t: `Formazione (${u})`, n: 1 }, { t: `Totale (${u})`, n: 1 }],
-                dt.licenze.map((x) => ({ celle: [x.licenza || '', x.referente || '', nfmt(x.analisi), nfmt(x.configurazione), nfmt(x.formazione), nfmt(x.totale)], completato: x.completato })));
+            h += tab('Licenze da Attivare', [{ t: 'Licenza' }, { t: 'Referente' }, { t: `Analisi (${u})`, n: 1 }, { t: `Configurazione (${u})`, n: 1 }, { t: `Formazione (${u})`, n: 1 }, { t: `Programmazione (${u})`, n: 1 }, { t: `Totale (${u})`, n: 1 }],
+                dt.licenze.map((x) => ({ celle: [x.licenza || '', x.referente || '', nfmt(x.analisi), nfmt(x.configurazione), nfmt(x.formazione), nfmt(x.programmazione), nfmt(x.totale)], completato: x.completato })));
             h += blocchiTq;
             h += tab('Meeting e recap', [{ t: 'Data' }, { t: 'Orario' }], dt.riunioni.map((x) => [dataIt(x.data), x.orario]));
 
@@ -316,7 +316,7 @@
         }
 
         // Gantt come nella pagina Gantt: schede di riepilogo e attività con effort e avanzamento.
-        const COLORI_PARTE = { totale: '#1E40AF', analisi: '#0EA5E9', configurazione: '#10B981', formazione: '#F59E0B', nessuna: '#94A3B8' };
+        const COLORI_PARTE = { totale: '#1E40AF', analisi: '#0EA5E9', configurazione: '#10B981', formazione: '#F59E0B', programmazione: '#8B5CF6', nessuna: '#94A3B8' };
         function ganttHtml(g) {
             if (!g) return '<h3>Gantt</h3><div class="vuoto">Nessuna attività nel Gantt.</div>';
             const f = (v) => `${Number(v).toLocaleString('it-IT', { maximumFractionDigits: 2 })} ${g.unita}`;

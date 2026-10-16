@@ -116,6 +116,23 @@ export async function eseguiNotificheProgetti() {
           if (await notificaUnaVolta(user, pid, `${pid}|${chiave}`, titolo, msg)) report.notifiche += 1;
         }
       }
+      // Capacità e allocazione risorse (facoltativa, config/capacita.js): persona sovrallocata
+      // nelle prossime 4 settimane, una notifica per persona e settimana. Solo se accesa.
+      try {
+        const Cap = await import('../config/capacita.js');
+        if (await Cap.capacitaAttiva(user) && await Cap.tabellePresenti()) {
+          for (const s of await Cap.sovrallocazioni(user, 4)) {
+            const r = await notifDb.query(
+              `INSERT INTO notifiche (tenant_id, user_id, fonte, titolo, messaggio, tabella, riga_id, chiave_dedup)
+               VALUES ($1, $2, 'capacita', $3, $4, 'pm_risorse', $5, $6)
+               ON CONFLICT (tenant_id, user_id, chiave_dedup) WHERE chiave_dedup IS NOT NULL DO NOTHING RETURNING id`,
+              [user.tenant_id, user.user_id, cifra(`Risorsa sovrallocata: ${s.nominativo}`),
+                cifra(`Settimana del ${dataIt(s.settimana)}: allocate ${fmt(s.allocato)} giornate su ${fmt(s.capacita)} disponibili${s.carico != null ? ` (${fmt(s.carico, 0)}%)` : ' (assente)'}`),
+                s.risorsaId, `capacita|${s.risorsaId}|${s.settimana}`]);
+            if (r.rowCount) report.notifiche += 1;
+          }
+        }
+      } catch (e) { report.errori.push(`capacità ${user.user_id}: ${e.message}`); }
     } catch (err) {
       if (err.code === '42P01' && /notifiche/.test(err.message)) throw new Error('Tabelle delle notifiche assenti su projexa_notif: eseguire Supporto/CreaDB/notifiche.sql');
       report.errori.push(`${user.user_id}: ${err.message}`);

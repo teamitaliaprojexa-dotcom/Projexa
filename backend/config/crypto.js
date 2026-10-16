@@ -267,6 +267,10 @@ const TABLE_COLUMN_ALLOWLIST = {
   pm_lesson: new Set(['testo', 'raccomandazione']),
   // Azioni a carico del cliente (Supporto/CreaDB/azioni_cliente.sql)
   pm_azioni_cliente: new Set(['referente', 'descrizione', 'note']),
+  // Capacità e allocazione risorse (Supporto/CreaDB/capacita_risorse.sql); ruolo in chiaro (si raggruppa)
+  pm_risorse: new Set(['nominativo', 'email', 'note']),
+  pm_risorse_assenza: new Set(['nota']),
+  pm_allocazioni: new Set(['note']),
   // Economia del progetto (Supporto/CreaDB/pm_economia.sql): importi e categorie in chiaro (si sommano in SQL)
   pm_costo_esterno: new Set(['descrizione', 'fornitore', 'note'])
 };

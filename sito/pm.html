@@ -33,6 +33,8 @@
         <button class="pm-tab" data-tab="azioni"><i class="fas fa-handshake"></i> Azioni cliente <span class="cnt" id="cntAzioni"></span></button>
         <button class="pm-tab" data-tab="cr"><i class="fas fa-code-pull-request"></i> Change Request <span class="cnt" id="cntCr"></span></button>
         <button class="pm-tab" data-tab="economia"><i class="fas fa-euro-sign"></i> Economia</button>
+        <!-- Facoltativa: visibile solo con Impostazioni › Preferenze › «Capacità e allocazione risorse» acceso -->
+        <button class="pm-tab" data-tab="risorse" id="tabRisorse" style="display:none"><i class="fas fa-people-group"></i> Risorse <span class="cnt" id="cntRisorse"></span></button>
         <button class="pm-tab" data-tab="stakeholder"><i class="fas fa-users"></i> Stakeholder e RACI</button>
         <button class="pm-tab" data-tab="chiusura"><i class="fas fa-flag-checkered"></i> Chiusura</button>
         <button class="pm-tab" data-tab="chiedi"><i class="fas fa-comments"></i> Chiedi al progetto</button>
@@ -44,6 +46,7 @@
         <section class="pm-pannello" id="p-azioni"></section>
         <section class="pm-pannello" id="p-cr"></section>
         <section class="pm-pannello" id="p-economia"></section>
+        <section class="pm-pannello" id="p-risorse"></section>
         <section class="pm-pannello" id="p-stakeholder"></section>
         <section class="pm-pannello" id="p-chiusura"></section>
         <section class="pm-pannello" id="p-chiedi"></section>
@@ -52,6 +55,7 @@
     <script src="js/ai-scelta.js"></script>
     <script src="js/pm-comune.js"></script>
     <script src="js/azioni-cliente.js"></script>
+    <script src="js/capacita-comune.js"></script>
     <script>
     (function () {
         const { esc, api, fmt, euro, dataIt, badge, toast, testoAiHtml, modale, valori } = PM;
@@ -1084,7 +1088,62 @@
             });
         }
 
-        const CARICA = { panoramica: caricaPanoramica, raid: caricaRaid, azioni: caricaAzioni, cr: caricaCr, economia: caricaEconomia, stakeholder: caricaStakeholder, chiusura: caricaChiusura, chiedi: caricaChiedi };
+        // ================= RISORSE (Capacità e allocazione, FACOLTATIVA: js/capacita-comune.js) =================
+        // La scheda compare solo se l'interruttore delle Preferenze è acceso (/capacita/stato).
+        api('/capacita/stato').then((st) => {
+            if (!st.attiva) return;
+            document.getElementById('tabRisorse').style.display = '';
+            if (qs.get('tab') === 'risorse' && caricati.panoramica) apriTab('risorse');
+        }).catch(() => {});
+        // Giorni lavorativi (lun-ven) tra due date comprese (stima delle giornate allocate per mese).
+        function lavorativi(dal, al) {
+            let n = 0;
+            for (let t = Date.parse(`${dal}T12:00:00Z`); t <= Date.parse(`${al}T12:00:00Z`); t += 86400000) { const w = new Date(t).getUTCDay(); if (w && w !== 6) n += 1; }
+            return n;
+        }
+        async function caricaRisorse() {
+            const p = pannello('risorse');
+            p.innerHTML = attesa('Carico fabbisogno e allocazioni del progetto…');
+            let d;
+            try { d = await api(`/capacita/progetto?projectId=${encodeURIComponent(projectId)}`); } catch (e) { p.innerHTML = errore(e); return; }
+            const { g, meseIt, formAllocazione } = CapacitaUI;
+            const f = d.fabbisogno;
+            const oggi = f.oggi;
+            document.getElementById('cntRisorse').textContent = d.allocazioni.filter((a) => a.al >= oggi).length || '';
+            // Giornate allocate su QUESTO progetto per ruolo e mese.
+            const allRuolo = {};
+            for (const a of d.allocazioni) for (const m of f.mesi) {
+                const ini = [a.dal, oggi, `${m}-01`].sort().pop();
+                const fm = new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).toISOString().slice(0, 10);
+                const fin = [a.al, fm].sort()[0];
+                if (fin < ini) continue;
+                const k = String(a.ruolo || 'Senza ruolo').trim().toLowerCase().replace(/\s+/g, ' ');
+                allRuolo[k] = allRuolo[k] || {};
+                allRuolo[k][m] = (allRuolo[k][m] || 0) + lavorativi(ini, fin) * (a.perc / 100) * ((a.ore_giorno || 8) / 8);
+            }
+            const cella = (r, m) => {
+                const fab = r.perMese[m] || 0;
+                const al = (allRuolo[r.chiave] || {})[m] || 0;
+                return `<td class="cap-cell ${al ? (al + 0.05 < fab ? 'cap-att' : 'cap-ok') : ''}">${fab ? g(fab) : '–'}${al ? `<small>alloc. ${g(al)}</small>` : ''}</td>`;
+            };
+            p.innerHTML = `${d.tabelle ? '' : '<div class="pm-avviso"><i class="fas fa-database"></i> Per salvare le allocazioni va eseguito lo script <b>Supporto/CreaDB/capacita_risorse.sql</b>.</div>'}
+                <div class="pm-card"><h2><i class="fas fa-chart-column"></i> Giornate da pianificare per ruolo</h2>
+                    <p class="pm-nota" style="margin-top:0">Stima (effort venduto) − Consuntivo (effort speso, ore Qlik, non il fatturato) per voce di costo dei Costi Progetto, in giornate, distribuito da oggi alla fine del progetto. Sotto il numero: giornate già coperte dalle allocazioni di questo progetto (festività e assenze sono considerate nella pagina Capacità).</p>
+                    ${f.ruoli.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Ruolo</th><th class="n">Stima</th><th class="n" title="Effort già speso (ore Qlik), non il fatturato">Consuntivo</th><th class="n" title="Stima − Consuntivo">Da pianificare</th>${f.mesi.map((m) => `<th class="n">${esc(meseIt(m))}</th>`).join('')}<th class="n">Oltre</th></tr></thead><tbody>
+                        ${f.ruoli.map((r) => `<tr><td><b>${esc(r.ruolo)}</b></td><td class="cap-cell">${g(r.stima)}</td><td class="cap-cell">${g(r.consuntivo)}</td><td class="cap-cell" style="background:#EEF2FF"><b>${g(r.daPianificare)}</b></td>${f.mesi.map((m) => cella(r, m)).join('')}<td class="cap-cell">${r.oltre ? g(r.oltre) : '–'}</td></tr>`).join('')}
+                        </tbody></table></div>${f.ruoli.some((r) => r.senzaDate) ? '<p class="pm-nota" style="color:#B45309">Il progetto non ha la data di fine o è già superata: le giornate da pianificare non si possono distribuire nei mesi. Aggiorna il campo End della scheda o il Gantt.</p>' : ''}` : `<div class="pm-vuoto">Nessuna giornata da pianificare${(f.progettiEsauriti || []).length ? ': il consuntivo ha già raggiunto la stima in tutte le voci' : ' nei Costi Progetto'}.</div>`}
+                </div>
+                <div class="pm-card"><h2><i class="fas fa-user-clock"></i> Persone sul progetto <span class="azioni"><a class="pm-btn piccolo" href="capacita.html?scheda=risorse"><i class="fas fa-id-badge"></i> Gestisci le persone</a><a class="pm-btn piccolo" href="capacita.html?scheda=carico"><i class="fas fa-table-cells"></i> Carico di tutte</a><button class="pm-btn piccolo primario" id="nuovaAllP"><i class="fas fa-plus"></i> Allocazione</button></span></h2>
+                    ${d.allocazioni.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Persona</th><th>Ruolo</th><th class="n">%</th><th>Dal</th><th>Al</th><th>Note</th></tr></thead><tbody>
+                        ${d.allocazioni.map((a) => `<tr class="click${a.al < oggi ? ' chiuso' : ''}" data-id="${esc(a.id)}"><td><b>${esc(a.nominativo || '')}</b></td><td>${esc(a.ruolo || '')}</td><td class="n">${a.perc}%</td><td>${dataIt(a.dal)}</td><td>${dataIt(a.al)}</td><td>${esc(a.note || '')}</td></tr>`).join('')}
+                        </tbody></table></div>` : `<div class="pm-vuoto">Nessuna persona allocata. ${d.risorse.length ? 'Usa «Allocazione».' : 'Prima aggiungi le persone nella pagina <a href="capacita.html?scheda=risorse">Capacità › Risorse</a>.'}</div>`}
+                </div>`;
+            const ok = () => caricaRisorse();
+            p.querySelector('#nuovaAllP').addEventListener('click', () => formAllocazione({ risorse: d.risorse, projectId, onSalvato: ok }));
+            p.querySelectorAll('tr.click').forEach((tr) => tr.addEventListener('click', () => formAllocazione({ x: d.allocazioni.find((a) => a.id === tr.dataset.id), risorse: d.risorse, projectId, onSalvato: ok })));
+        }
+
+        const CARICA = { panoramica: caricaPanoramica, raid: caricaRaid, azioni: caricaAzioni, risorse: caricaRisorse, cr: caricaCr, economia: caricaEconomia, stakeholder: caricaStakeholder, chiusura: caricaChiusura, chiedi: caricaChiedi };
         // Da una riunione (finestra del recap): progetto della riunione, scheda RAID, estrazione.
         if (!projectId && qs.get('da_riunione')) {
             api(`/riunione?id_calendar=${encodeURIComponent(qs.get('da_riunione'))}`)

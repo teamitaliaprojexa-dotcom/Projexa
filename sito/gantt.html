@@ -173,7 +173,7 @@
         .gantt-grid-line { position: absolute; top: 0; bottom: 0; width: 1px; background: #EEF1F5; }
         /* Funzioni da PM senior: milestone (rombo), baseline (barra grigia sotto), percorso critico */
         .gantt-bar.gantt-ms { position: absolute; top: 12px; width: 18px; height: 18px; min-width: 0; transform: translateX(-9px) rotate(45deg); border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,0.25); z-index: 1; }
-        /* Colonna Effort: barre di totale (argomenti) e analisi/configurazione/formazione */
+        /* Colonna Effort: barre di totale (argomenti) e analisi/configurazione/formazione/programmazione */
         .eff-head { flex: 0 0 414px; width: 414px; padding: 0 8px 8px; font-size: 0.7rem; color: var(--text-muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
         .eff-head .eff-leg { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
         .eff-head .eff-leg i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
@@ -467,6 +467,10 @@
                     <label for="cfgFormazione">Formazione</label>
                     <input type="number" id="cfgFormazione" step="0.01">
                 </div>
+                <div>
+                    <label for="cfgProgrammazione" title="Programmazione">Progr.</label>
+                    <input type="number" id="cfgProgrammazione" step="0.01">
+                </div>
             </div>
             <!-- Totale: solo per gli argomenti (livello 1), nascosto sulle sotto attività -->
             <div id="cfgTotaleRow">
@@ -714,7 +718,7 @@
             'nr_mesi', 'nr_giorni', 'stato', 'avanzamento', 'rischio',
             'owner', 'nominativo', 'note_interne', 'mostra_cliente',
             'name_arg1', 'name_arg2', 'name_arg3', 'name_arg4', 'milestone',
-            'analisi', 'configurazione', 'formazione', 'totale',
+            'analisi', 'configurazione', 'formazione', 'programmazione', 'totale',
             'effettivo', 'marginalita', 'sforamento'];
         // Cruscotto PM (api/pm/gantt): analisi del progetto (percorso critico, completamento) e
         // disponibilità di milestone/baseline (colonne di Supporto/CreaDB/pm_senior.sql).
@@ -722,10 +726,10 @@
         // Colonne aggiuntive della tabella, modificabili dal flyout Configurazione.
         const GANTT_EXTRA_COLS = ['nr_mesi', 'nr_giorni', 'stato', 'avanzamento',
             'rischio', 'owner', 'nominativo', 'note_interne',
-            'analisi', 'configurazione', 'formazione', 'totale',
+            'analisi', 'configurazione', 'formazione', 'programmazione', 'totale',
             'effettivo', 'marginalita', 'sforamento'];
         // Numerici con 2 decimali (proj_activity NUMERIC(12,2)). totale: solo livello 1.
-        const GANTT_DECIMAL_COLS = new Set(['analisi', 'configurazione', 'formazione', 'totale', 'effettivo']);
+        const GANTT_DECIMAL_COLS = new Set(['analisi', 'configurazione', 'formazione', 'programmazione', 'totale', 'effettivo']);
         const DEFAULT_COLOR = '#3B82F6';
         const DEFAULT_COL_LABELS = ['Argomento 1', 'Argomento 2', 'Argomento 3', 'Argomento 4'];
         // Etichette delle 4 colonne: valgono per l'intero progetto e vengono scritte in
@@ -885,7 +889,7 @@
             }
             const eff = num(node.effettivo);
             if (eff == null) return { effettivo: null, marginalita: null, sforamento: null };
-            const parti = ['analisi', 'configurazione', 'formazione'].map(c => num(node[c])).filter(v => v != null);
+            const parti = ['analisi', 'configurazione', 'formazione', 'programmazione'].map(c => num(node[c])).filter(v => v != null);
             const stima = parti.length ? parti.reduce((a, b) => a + b, 0) : (num(node.totale) || 0);
             return { effettivo: r2(eff), marginalita: r2(Math.max(0, stima - eff)), sforamento: r2(Math.max(0, eff - stima)) };
         }
@@ -1136,7 +1140,7 @@
         // Barre dell'effort: colore del totale e delle tre parti.
         const EFF_TOT_COLOR = '#1E40AF';
         const EFF_AVZ_COLOR = '#10B981'; // avanzamento (come nel riepilogo del progetto)
-        const EFF_PARTI = [['analisi', 'Analisi', '#0EA5E9'], ['configurazione', 'Configurazione', '#10B981'], ['formazione', 'Formazione', '#F59E0B']];
+        const EFF_PARTI = [['analisi', 'Analisi', '#0EA5E9'], ['configurazione', 'Configurazione', '#10B981'], ['formazione', 'Formazione', '#F59E0B'], ['programmazione', 'Programmazione', '#8B5CF6']];
         // Unità dell'effort del progetto: 'h' (Gestione a HH) o 'g' (giorni), dal server.
         let effUnit = 'g';
         let ganttEconomia = null; // { offerta, consuntivo, fatturato } dai Costi Progetto
@@ -1766,6 +1770,7 @@
             ['cfgAnalisi', 'analisi'],
             ['cfgConfigurazione', 'configurazione'],
             ['cfgFormazione', 'formazione'],
+            ['cfgProgrammazione', 'programmazione'],
             ['cfgTotale', 'totale'],
             ['cfgEffettivo', 'effettivo']
         ];
@@ -2226,7 +2231,7 @@
                 effUnit = payload.unita === 'h' ? 'h' : 'g';
                 ganttEconomia = payload.economia || null;
                 // Etichette del pannello Configurazione con l'unità, es. «Analisi (h)».
-                [['cfgAnalisi', 'Analisi'], ['cfgConfigurazione', 'Config.'], ['cfgFormazione', 'Formazione'], ['cfgTotale', 'Totale'],
+                [['cfgAnalisi', 'Analisi'], ['cfgConfigurazione', 'Config.'], ['cfgFormazione', 'Formazione'], ['cfgProgrammazione', 'Progr.'], ['cfgTotale', 'Totale'],
                  ['cfgEffettivo', 'Effettivo'], ['cfgMarginalita', 'Marginalità'], ['cfgSforamento', 'Sforamento']]
                     .forEach(([id, l]) => { const lab = document.querySelector(`label[for="${id}"]`); if (lab) lab.textContent = `${l} (${effUnit})`; });
                 buildTree(Array.isArray(payload.rows) ? payload.rows : []);

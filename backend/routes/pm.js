@@ -30,7 +30,7 @@ import {
   UUID_RE, errore, oggiIso, dataIt, dataIso, numero, fmt, euro, tabellaPresente, colonneTabella,
   progettoUtente, schedaProgetto, campiProgetto, economiaProgetto, saluteProgetto, saluteTuttiProgetti, righeGantt, analisiGantt,
   raidProgetto, crProgetto, crApprovata, taskProgetto, issueProgetto, riunioniProgetto, contestoProgetto,
-  chiediAi, leggiJson
+  chiediAi, leggiJson, progettiAperti
 } from '../config/pmCore.js';
 import { economiaEuro, normVoce, VALUTE, CATEGORIE_ESTERNE } from '../config/pmEconomia.js';
 import {
@@ -38,6 +38,7 @@ import {
   sincronizzaAzioniCliente, elencoAzioniCliente, regolePromemoria, regoleDaBody,
   abbinaReferenti, rubricaUtente, contattiClienti, normNome
 } from '../config/azioniCliente.js';
+import * as Cap from '../config/capacita.js';
 
 const router = express.Router();
 
@@ -1277,6 +1278,217 @@ router.delete('/azioni-cliente/:id', async (req, res) => {
       [x.id, req.user.tenant_id, req.user.user_id]);
     res.json({ ok: true });
   } catch (e) { invia(res, e, 'AZIONI_CLIENTE_DEL'); }
+});
+
+// ============================================================================
+// CAPACITÀ E ALLOCAZIONE DELLE RISORSE (config/capacita.js) - FACOLTATIVA
+// ============================================================================
+// Tutto risponde solo con Impostazioni › Preferenze › «Capacità e allocazione risorse» acceso.
+// GET /capacita/stato dice alle pagine se mostrare la funzione (attiva + tabelle presenti).
+async function richiedeCapacita(req, { scrittura = false } = {}) {
+  if (!(await Cap.capacitaAttiva(req.user))) throw errore(403, 'Funzione non attiva: accendi «Capacità e allocazione risorse» in Impostazioni › Preferenze');
+  if (scrittura && !(await Cap.tabellePresenti())) throw errore(503, 'Funzione non ancora attiva: va eseguito lo script Supporto/CreaDB/capacita_risorse.sql sul database');
+}
+router.get('/capacita/stato', async (req, res) => {
+  try { res.json({ attiva: await Cap.capacitaAttiva(req.user), tabelle: await Cap.tabellePresenti() }); } catch (e) { invia(res, e, 'CAP_STATO'); }
+});
+// Pagina Capacità: fabbisogno per ruolo (livello 0), capacità/allocato per ruolo, carico persone.
+router.get('/capacita', async (req, res) => {
+  try {
+    await richiedeCapacita(req);
+    const mesi = Math.min(12, Math.max(3, Number(req.query.mesi) || 6));
+    // Settimane del Carico = stesso orizzonte del Fabbisogno (3/6/12 mesi), se non indicate.
+    const settimane = Math.min(56, Math.max(4, Number(req.query.settimane) || Math.ceil((mesi * 365) / 12 / 7)));
+    const [fab, cc, ris, all, ass] = await Promise.all([
+      Cap.fabbisogno(req.user, { mesi }),
+      Cap.capacitaECarico(req.user, { mesi, settimane }),
+      Cap.risorse(req.user, { tutte: true }), Cap.allocazioni(req.user), Cap.assenze(req.user)
+    ]);
+    const progetti = (await progettiAperti(req.user)).map((p) => ({ projectId: p.projectId, nome: p.nome, cliente: p.cliente }));
+    res.json({ tabelle: await Cap.tabellePresenti(), fabbisogno: fab, carico: cc, risorse: conPermesso(req, ris), allocazioni: conPermesso(req, all), assenze: conPermesso(req, ass), progetti });
+  } catch (e) { invia(res, e, 'CAPACITA'); }
+});
+// Scheda «Risorse» del Cruscotto: fabbisogno del progetto per ruolo e allocazioni del progetto.
+router.get('/capacita/progetto', async (req, res) => {
+  try {
+    await richiedeCapacita(req);
+    const prog = await progettoUtente(req.user, pid(req));
+    const [fab, all, ris] = await Promise.all([
+      Cap.fabbisogno(req.user, { mesi: 6, projectId: prog.projectId }),
+      Cap.allocazioni(req.user, { projectId: prog.projectId }), Cap.risorse(req.user)
+    ]);
+    res.json({ tabelle: await Cap.tabellePresenti(), progetto: prog, fabbisogno: fab, allocazioni: conPermesso(req, all), risorse: ris });
+  } catch (e) { invia(res, e, 'CAPACITA_PROGETTO'); }
+});
+
+// Righe delle tre tabelle: controllo proprietario + ruolo in scrittura, poi INSERT/UPDATE/chiusura.
+async function rigaCap(req, tabella, id) {
+  if (!UUID_RE.test(String(id))) throw errore(400, 'Id non valido');
+  const r = (await db.query(`SELECT id::text AS id, id_roles_write FROM ${tabella} WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+    [id, req.user.tenant_id, req.user.user_id])).rows[0];
+  if (!r) throw errore(404, 'Elemento non trovato');
+  if (!puoScrivere(req, r.id_roles_write)) throw errore(403, READ_ONLY);
+  return r;
+}
+async function aggiornaCap(req, tabella, id, dati, conUpdatedAt = true) {
+  const { data } = await encryptRowForWrite(db, tabella, dati, { id });
+  const cols = Object.keys(data);
+  if (!cols.length) return;
+  await db.query(`UPDATE ${tabella} SET ${cols.map((c, i) => `"${c}" = $${i + 1}`).join(', ')}${conUpdatedAt ? ', updated_at = now()' : ''}
+      WHERE id::text = $${cols.length + 1} AND tenant_id = $${cols.length + 2} AND user_id = $${cols.length + 3}`,
+    [...cols.map((c) => data[c]), id, req.user.tenant_id, req.user.user_id]);
+}
+const chiudiCap = (req, tabella, id) => db.query(`UPDATE ${tabella} SET scadenza = CURRENT_DATE - 1 WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`, [id, req.user.tenant_id, req.user.user_id]);
+const baseCap = (req) => ({ tenant_id: req.user.tenant_id, user_id: req.user.user_id, id_roles_write: ruolo(req), crypto: 1 });
+const dataObbl = (v, nome) => { const d = dataOpz(v); if (!d) throw errore(400, `${nome}: data obbligatoria`); return d; };
+
+function datiRisorsa(b, parziale = false) {
+  const d = {};
+  const set = (k, v) => { if (!parziale || Object.prototype.hasOwnProperty.call(b, k)) d[k] = v; };
+  set('nominativo', testo(b.nominativo, 300));
+  set('email', testo(b.email, 300));
+  set('ruolo', testo(b.ruolo, 200));
+  set('ore_giorno', (() => { const n = decimale(b.ore_giorno); if (n != null && (n <= 0 || n > 24)) throw errore(400, 'Ore al giorno tra 0 e 24'); return n ?? 8; })());
+  set('perc_progetti', intero(b.perc_progetti, 0, 100) ?? 100);
+  set('attiva', b.attiva !== false && b.attiva !== 'false');
+  set('note', testo(b.note));
+  if ((!parziale || 'nominativo' in d) && !d.nominativo) throw errore(400, 'Il nominativo è obbligatorio');
+  return d;
+}
+router.post('/capacita/risorse', async (req, res) => {
+  try {
+    await richiedeCapacita(req, { scrittura: true });
+    res.status(201).json({ id: await inserisci(db, 'pm_risorse', { ...baseCap(req), ...datiRisorsa(req.body || {}) }) });
+  } catch (e) { invia(res, e, 'CAP_RIS_NEW'); }
+});
+router.put('/capacita/risorse/:id', async (req, res) => {
+  try {
+    await richiedeCapacita(req, { scrittura: true });
+    const x = await rigaCap(req, 'pm_risorse', req.params.id);
+    await aggiornaCap(req, 'pm_risorse', x.id, datiRisorsa(req.body || {}, true));
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'CAP_RIS_UPD'); }
+});
+// Elimina la persona: si chiudono anche le sue allocazioni e assenze.
+router.delete('/capacita/risorse/:id', async (req, res) => {
+  try {
+    await richiedeCapacita(req, { scrittura: true });
+    const x = await rigaCap(req, 'pm_risorse', req.params.id);
+    await chiudiCap(req, 'pm_risorse', x.id);
+    for (const t of ['pm_allocazioni', 'pm_risorse_assenza']) {
+      await db.query(`UPDATE ${t} SET scadenza = CURRENT_DATE - 1 WHERE risorsa_id::text = $1 AND tenant_id = $2 AND user_id = $3 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+        [x.id, req.user.tenant_id, req.user.user_id]);
+    }
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'CAP_RIS_DEL'); }
+});
+// Persone proposte per partire in fretta: team dei progetti aperti (Kick-off) non ancora tra
+// le risorse, con il ruolo dalla voce di costo più usata nei Costi Progetto, se c'è.
+router.get('/capacita/proposte', async (req, res) => {
+  try {
+    await richiedeCapacita(req);
+    const gia = new Set((await Cap.risorse(req.user, { tutte: true })).map((r) => String(r.email || r.nominativo).trim().toLowerCase()));
+    // Team dei progetti con il ruolo (voce di costo del team, riportata alla voce del tenant).
+    const t = await Cap.teamConRuolo(req.user);
+    // Nel team a volte c'è solo il cognome («orlandi»): nominativo completo dalla Rubrica, per email.
+    const daRubrica = new Map((await rubricaUtente(req.user)).filter((c) => c.email).map((c) => [c.email.toLowerCase(), c.nominativo]));
+    const visti = new Map();
+    for (const x of t) {
+      const nome = daRubrica.get(String(x.email || '').trim().toLowerCase()) || String(x.nominativo || '').trim();
+      if (!nome) continue;
+      const k = String(x.email || nome).trim().toLowerCase();
+      if (gia.has(k)) continue;
+      if (!visti.has(k)) visti.set(k, { nominativo: nome, email: String(x.email || '').trim(), conteggio: {} });
+      if (x.ruolo) { const c = visti.get(k).conteggio; c[x.ruolo] = (c[x.ruolo] || 0) + 1; }
+    }
+    // Ruolo proposto = quello che la persona ha nel maggior numero di progetti.
+    for (const v of visti.values()) {
+      v.ruolo = Object.entries(v.conteggio).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+      delete v.conteggio;
+    }
+    // Ruoli = voci di costo del TENANT (conf_worker_cost, «Configurazione gruppi Billing» gestita
+    // dall'Admin; qui si leggono solo i nomi). Tenant senza voci: quelle dei Costi Progetto dell'utente.
+    let voci = (await db.query(
+      `SELECT DISTINCT desc_worker AS voce FROM conf_worker_cost
+        WHERE tenant_id = $1 AND desc_worker IS NOT NULL AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+          AND (data_inizio IS NULL OR data_inizio <= CURRENT_DATE)`,
+      [req.user.tenant_id]).catch(() => ({ rows: [] }))).rows.map((x) => String(x.voce).trim()).filter(Boolean);
+    if (!voci.length) {
+      voci = (await db.query(
+        `SELECT DISTINCT desc_worker AS voce FROM proj_worker_cost WHERE tenant_id = $1 AND user_id = $2 AND scadenza >= CURRENT_DATE AND desc_worker IS NOT NULL`,
+        [req.user.tenant_id, req.user.user_id]).catch(() => ({ rows: [] }))).rows.map((x) => String(x.voce).trim()).filter(Boolean);
+    }
+    res.json({ persone: [...visti.values()].sort((a, b) => a.nominativo.localeCompare(b.nominativo, 'it')), ruoli: [...new Set(voci)].sort((a, b) => a.localeCompare(b, 'it')) });
+  } catch (e) { invia(res, e, 'CAP_PROPOSTE'); }
+});
+
+// Allocazioni proposte dai team dei progetti (persone già tra le Risorse), da rivedere e salvare.
+router.get('/capacita/proposte-allocazioni', async (req, res) => {
+  try {
+    await richiedeCapacita(req);
+    res.json(await Cap.proposteAllocazioni(req.user));
+  } catch (e) { invia(res, e, 'CAP_PROPOSTE_ALL'); }
+});
+
+function datiAssenza(b) {
+  const d = { dal: dataObbl(b.dal, 'Dal'), al: dataObbl(b.al || b.dal, 'Al'), nota: testo(b.nota, 300) };
+  if (d.al < d.dal) throw errore(400, 'La data «al» è prima di «dal»');
+  return d;
+}
+router.post('/capacita/assenze', async (req, res) => {
+  try {
+    await richiedeCapacita(req, { scrittura: true });
+    const r = await rigaCap(req, 'pm_risorse', (req.body || {}).risorsa_id);
+    res.status(201).json({ id: await inserisci(db, 'pm_risorse_assenza', { ...baseCap(req), risorsa_id: r.id, ...datiAssenza(req.body || {}) }) });
+  } catch (e) { invia(res, e, 'CAP_ASS_NEW'); }
+});
+router.delete('/capacita/assenze/:id', async (req, res) => {
+  try {
+    await richiedeCapacita(req, { scrittura: true });
+    const x = await rigaCap(req, 'pm_risorse_assenza', req.params.id);
+    await chiudiCap(req, 'pm_risorse_assenza', x.id);
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'CAP_ASS_DEL'); }
+});
+
+async function datiAllocazione(req, b, parziale = false) {
+  const d = {};
+  const has = (k) => !parziale || Object.prototype.hasOwnProperty.call(b, k);
+  if (has('risorsa_id')) d.risorsa_id = (await rigaCap(req, 'pm_risorse', b.risorsa_id)).id;
+  if (has('projectId')) { const p = await progettoUtente(req.user, b.projectId); d.project_id = p.projectId; d.client_id = p.clientId || null; }
+  if (has('perc')) { d.perc = intero(b.perc, 1, 100); if (d.perc == null) throw errore(400, 'Percentuale tra 1 e 100'); }
+  if (has('dal')) d.dal = dataObbl(b.dal, 'Dal');
+  if (has('al')) d.al = dataObbl(b.al, 'Al');
+  if (d.dal && d.al && d.al < d.dal) throw errore(400, 'La data «al» è prima di «dal»');
+  if (has('note')) d.note = testo(b.note);
+  return d;
+}
+router.post('/capacita/allocazioni', async (req, res) => {
+  try {
+    await richiedeCapacita(req, { scrittura: true });
+    res.status(201).json({ id: await inserisci(db, 'pm_allocazioni', { ...baseCap(req), ...(await datiAllocazione(req, req.body || {})) }) });
+  } catch (e) { invia(res, e, 'CAP_ALL_NEW'); }
+});
+router.put('/capacita/allocazioni/:id', async (req, res) => {
+  try {
+    await richiedeCapacita(req, { scrittura: true });
+    const x = await rigaCap(req, 'pm_allocazioni', req.params.id);
+    const d = await datiAllocazione(req, req.body || {}, true);
+    if ((d.dal && !d.al) || (!d.dal && d.al)) {
+      const cur = (await db.query('SELECT dal::text AS dal, al::text AS al FROM pm_allocazioni WHERE id::text = $1', [x.id])).rows[0];
+      if ((d.dal || cur.dal) > (d.al || cur.al)) throw errore(400, 'La data «al» è prima di «dal»');
+    }
+    await aggiornaCap(req, 'pm_allocazioni', x.id, d);
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'CAP_ALL_UPD'); }
+});
+router.delete('/capacita/allocazioni/:id', async (req, res) => {
+  try {
+    await richiedeCapacita(req, { scrittura: true });
+    const x = await rigaCap(req, 'pm_allocazioni', req.params.id);
+    await chiudiCap(req, 'pm_allocazioni', x.id);
+    res.json({ ok: true });
+  } catch (e) { invia(res, e, 'CAP_ALL_DEL'); }
 });
 
 // ============================================================================

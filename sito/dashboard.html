@@ -4061,6 +4061,7 @@
         .sidebar #navReporting > a { --tile: linear-gradient(180deg, #FDBA74, #EA580C); }
         .sidebar #navIssue > a { --tile: linear-gradient(180deg, #FCA5A5, #DC2626); }
         .sidebar #navPortfolio > a { --tile: linear-gradient(180deg, #A5B4FC, #4F46E5); }
+        .sidebar #navCapacita > a { --tile: linear-gradient(180deg, #99F6E4, #0D9488); }
         .sidebar .sidebar-menu li.nav-projects > a { --tile: linear-gradient(180deg, #FCD34D, #F59E0B); }
         .sidebar #navJira > a { --tile: linear-gradient(180deg, #FFFFFF, #EEF2F7); }
         .sidebar #navQlik > a { --tile: linear-gradient(180deg, #FFFFFF, #EEF2F7); }
@@ -4357,6 +4358,8 @@
             <li id="navIssue" data-dash-flag="issue"><a href="issue.html"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1.1 15.5h-2.2v-2.2h2.2v2.2Zm0-4.2h-2.2V6.5h2.2v6.8Z"/></svg> <span>Issue</span></a></li>
             <!-- Portfolio (funzioni da PM senior): salute di tutti i progetti, timeline, digest settimanale -->
             <li id="navPortfolio"><a href="portfolio.html" title="Salute di tutti i tuoi progetti"><i class="fas fa-layer-group"></i> <span>Portfolio</span></a></li>
+            <!-- Capacità e allocazione risorse: FACOLTATIVA, visibile solo con Impostazioni › Preferenze › «Capacità e allocazione risorse» acceso -->
+            <li id="navCapacita" data-dash-flag="capacita" class="dash-flag-off"><a href="capacita.html" title="Fabbisogno per ruolo, capacità e carico delle persone"><i class="fas fa-people-group"></i> <span>Capacità</span></a></li>
             <li class="nav-projects" style="position: relative;">
                 <a href="#"><svg class="sidebar-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 5.5C2 4.7 2.7 4 3.5 4h6l2 2h9c.8 0 1.5.7 1.5 1.5v11c0 .8-.7 1.5-1.5 1.5h-17C2.7 20 2 19.3 2 18.5v-13Z"/></svg> <span>Progetti clienti</span></a>
                 <div class="settings-flyout">
@@ -8653,7 +8656,7 @@
         // flyout, se uno di questi è stato modificato, la pagina si ricarica così chatbot e sezioni
         // compaiono/scompaiono subito. Nomi campo (minuscoli, senza "(*) ") allineati a
         // DASHBOARD_FLAGS in server.js.
-        const DASHBOARD_FLAG_CAMPI = ['chat-bot projexa', 'mostra kpi fatturato', 'mostra calendario', 'mostra todolist', 'mostra funzione issue', 'mostra reporting', 'mostra registra'];
+        const DASHBOARD_FLAG_CAMPI = ['chat-bot projexa', 'mostra kpi fatturato', 'mostra calendario', 'mostra todolist', 'mostra funzione issue', 'mostra reporting', 'mostra registra', 'capacità e allocazione risorse'];
 
         document.addEventListener('change', async (e) => {
             const toggle = e.target;
@@ -13394,8 +13397,8 @@
             const delBtn = document.getElementById('notifDelBtn');
             const countEl = document.getElementById('notifCount');
             const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines', progetto: 'fas fa-gauge-high', ai: 'fas fa-wand-magic-sparkles', cliente: 'fas fa-handshake' };
-            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione', progetto: 'Progetto', ai: 'AI', cliente: 'Azione cliente' };
+            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines', progetto: 'fas fa-gauge-high', ai: 'fas fa-wand-magic-sparkles', cliente: 'fas fa-handshake', capacita: 'fas fa-people-group' };
+            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione', progetto: 'Progetto', ai: 'AI', cliente: 'Azione cliente', capacita: 'Capacità' };
             let elenco = [];
 
             function mostraConteggio(n) {
@@ -13447,6 +13450,7 @@
                             ${n.tabella === 'ai_lavori' && n.riga_id ? `<button type="button" class="notif-go" data-ai-lavoro="${esc(n.riga_id)}" title="Apri in Risultati AI">Apri <i class="fas fa-arrow-right"></i></button>` : ''}
                             ${n.fonte === 'progetto' && n.riga_id ? `<a class="notif-go" href="pm.html?projectId=${encodeURIComponent(n.riga_id)}" title="Apri il Cruscotto PM del progetto" style="text-decoration:none">Vai <i class="fas fa-arrow-right"></i></a>` : ''}
                             ${n.tabella === 'pm_azioni_cliente' && n.riga_id ? `<a class="notif-go" href="portfolio.html?azione=${encodeURIComponent(n.riga_id)}" data-apri-pagina title="Apri l'azione del cliente nel Portfolio" style="text-decoration:none">Vai <i class="fas fa-arrow-right"></i></a>` : ''}
+                            ${n.fonte === 'capacita' ? `<a class="notif-go" href="capacita.html?scheda=carico" data-apri-pagina title="Apri il carico delle persone" style="text-decoration:none">Vai <i class="fas fa-arrow-right"></i></a>` : ''}
                             ${n.vai ? `<button type="button" class="notif-go" data-vai-dest="${esc(n.id)}" title="${n.vai.projectId ? 'Apri il progetto' : 'Apri il cliente'}${n.vai.fieldId ? ' e la sua griglia' : ''}">Vai <i class="fas fa-arrow-right"></i></button>` : ''}
                         </div>
                     </div>`).join('')
