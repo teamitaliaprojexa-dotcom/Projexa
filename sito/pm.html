@@ -25,7 +25,7 @@
         <span class="spazio"></span>
         <button class="pm-btn" id="btnBriefing" title="Briefing da leggere prima della prossima riunione (AI)"><i class="fas fa-clipboard-list"></i> Briefing riunione</button>
         <button class="pm-btn primario" id="btnStatus" title="Status Report (SAL) del progetto, scritto con l'AI"><i class="fas fa-file-lines"></i> Status Report</button>
-        <a class="pm-btn" href="portfolio.html" title="Tutti i tuoi progetti"><i class="fas fa-layer-group"></i> Portfolio</a>
+        <a class="pm-btn" href="portfolio.html" id="vaiPortfolio" title="Tutti i tuoi progetti"><i class="fas fa-layer-group"></i> Portfolio</a>
     </div>
     <nav class="pm-tabs" id="tabs">
         <button class="pm-tab on" data-tab="panoramica"><i class="fas fa-heart-pulse"></i> Panoramica</button>
@@ -79,6 +79,12 @@
             history.replaceState(null, '', `${location.pathname}?${new URLSearchParams({ ...Object.fromEntries(qs), tab: nome }).toString()}`);
         }
         tabs.addEventListener('click', (e) => { const b = e.target.closest('.pm-tab'); if (b) apriTab(b.dataset.tab); });
+        // Portfolio: porta con sé progetto e scheda aperta, per il pulsante «Torna al progetto».
+        document.getElementById('vaiPortfolio').addEventListener('click', (e) => {
+            if (!projectId) return;
+            const t = tabs.querySelector('.pm-tab.on');
+            e.currentTarget.href = `portfolio.html?da=${encodeURIComponent(projectId)}${t ? `&tab=${encodeURIComponent(t.dataset.tab)}` : ''}`;
+        });
 
         const pannello = (id) => document.getElementById(`p-${id}`);
         const attesa = (t) => `<div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> ${esc(t)}</div>`;
@@ -1106,12 +1112,13 @@
             p.innerHTML = attesa('Carico fabbisogno e allocazioni del progetto…');
             let d;
             try { d = await api(`/capacita/progetto?projectId=${encodeURIComponent(projectId)}`); } catch (e) { p.innerHTML = errore(e); return; }
-            const { g, meseIt, formAllocazione } = CapacitaUI;
+            const { g, meseIt, formAllocazione, attivaTooltip } = CapacitaUI;
             const f = d.fabbisogno;
             const oggi = f.oggi;
             document.getElementById('cntRisorse').textContent = d.allocazioni.filter((a) => a.al >= oggi).length || '';
             // Giornate allocate su QUESTO progetto per ruolo e mese.
             const allRuolo = {};
+            const allPers = {}; // ruolo -> mese -> [{ nominativo, perc, gg }] (dettaglio del tooltip)
             for (const a of d.allocazioni) for (const m of f.mesi) {
                 const ini = [a.dal, oggi, `${m}-01`].sort().pop();
                 const fm = new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).toISOString().slice(0, 10);
@@ -1119,28 +1126,64 @@
                 if (fin < ini) continue;
                 const k = String(a.ruolo || 'Senza ruolo').trim().toLowerCase().replace(/\s+/g, ' ');
                 allRuolo[k] = allRuolo[k] || {};
-                allRuolo[k][m] = (allRuolo[k][m] || 0) + lavorativi(ini, fin) * (a.perc / 100) * ((a.ore_giorno || 8) / 8);
+                const gg = lavorativi(ini, fin) * (a.perc / 100) * ((a.ore_sett || 32) / 5 / 8);
+                allRuolo[k][m] = (allRuolo[k][m] || 0) + gg;
+                allPers[k] = allPers[k] || {};
+                (allPers[k][m] = allPers[k][m] || []).push({ nominativo: a.nominativo || '', perc: a.perc, ore: a.ore_sett || 32, gg });
             }
             const cella = (r, m) => {
                 const fab = r.perMese[m] || 0;
                 const al = (allRuolo[r.chiave] || {})[m] || 0;
-                return `<td class="cap-cell ${al ? (al + 0.05 < fab ? 'cap-att' : 'cap-ok') : ''}">${fab ? g(fab) : '–'}${al ? `<small>alloc. ${g(al)}</small>` : ''}</td>`;
+                const cl = al ? (al + 0.05 < fab ? 'cap-att' : 'cap-ok') : '';
+                // Tooltip: valori con due decimali (le celle arrotondano a uno), chi copre e perché quel colore.
+                const d2 = (v) => fmt(v, 2);
+                const righe = [`${r.ruolo} · ${meseIt(m)}`, `Da fare: ${d2(fab)} gg`, `Allocate: ${d2(al)} gg`];
+                ((allPers[r.chiave] || {})[m] || []).forEach((x) => righe.push(`• ${x.nominativo}: ${x.perc}% di ${g(x.ore)} h/sett → ${d2(x.gg)} gg`));
+                if (!fab && !al) return '<td class="cap-cell">–</td>';
+                if (!al) righe.push('= Nessuna persona allocata in questo mese');
+                else if (cl === 'cap-att') righe.push(`= Giallo: mancano ${d2(fab - al)} gg`, `ℹ Le celle mostrano un solo decimale: se i due numeri sembrano uguali la differenza è di pochi centesimi di giornata, dovuta all'arrotondamento della % al 5 e ai giorni lavorativi del mese. Basta aumentare di poco la percentuale (clic sull'allocazione) se vuoi il verde.`);
+                else righe.push(al > fab + 0.05 ? `= Verde: coperto, ${d2(al - fab)} gg in più` : '= Verde: coperto');
+                return `<td class="cap-cell ${cl}" data-tip="${esc(righe.join('\n'))}">${fab ? g(fab) : '–'}${al ? `<small>alloc. ${g(al)}</small>` : ''}</td>`;
             };
+            // Persone del team del progetto (proj_componenti), con allocazioni o proposta.
+            const team = (d.team && d.team.persone) || [];
+            const daAllocare = team.filter((x) => !x.allocazioni.length && x.proposta);
+            const righeTeam = team.map((x, i) => `<tr><td><b>${esc(x.nominativo)}</b><div class="pm-nota">${esc(x.email || '')}${x.risorsaId ? '' : ' · mai allocata'}</div></td>
+                <td>${esc(x.ruolo || '–')}</td><td class="n">${x.consuntivo ? `${g(x.consuntivo)} gg` : '–'}</td>
+                <td>${x.allocazioni.length ? x.allocazioni.map((a) => `<span class="pill aperto click" data-all-id="${esc(a.id)}" style="cursor:pointer" title="Modifica l'allocazione">${a.perc}% dal ${dataIt(a.dal)} al ${dataIt(a.al)}</span>`).join(' ')
+                    : x.proposta ? `<span class="pm-nota">non allocata · proposta <b>${x.proposta.perc}%</b> dal ${dataIt(x.proposta.dal)} al ${dataIt(x.proposta.al)} (${g(x.proposta.giornate)} gg)</span>`
+                    : `<span class="pm-nota">non allocata${x.motivoNoProposta ? ` · ${esc(x.motivoNoProposta)}` : ''}</span>`}</td>
+                <td class="n">${!x.allocazioni.length && x.proposta ? `<button type="button" class="pm-btn piccolo primario" data-alloca="${i}"><i class="fas fa-plus"></i> Alloca</button>` : ''}</td></tr>`);
+            // Allocazioni di persone che non sono (più) nel team del progetto.
+            const nelTeam = new Set(team.map((x) => x.risorsaId).filter(Boolean));
+            const extra = d.allocazioni.filter((a) => !nelTeam.has(a.risorsa_id)).map((a) => `<tr class="${a.al < oggi ? 'chiuso' : ''}"><td><b>${esc(a.nominativo || '')}</b><div class="pm-nota">non nel team del progetto</div></td><td>${esc(a.ruolo || '')}</td><td class="n">–</td>
+                <td><span class="pill aperto" data-all-id="${esc(a.id)}" style="cursor:pointer" title="Modifica l'allocazione">${a.perc}% dal ${dataIt(a.dal)} al ${dataIt(a.al)}</span></td><td></td></tr>`);
             p.innerHTML = `${d.tabelle ? '' : '<div class="pm-avviso"><i class="fas fa-database"></i> Per salvare le allocazioni va eseguito lo script <b>Supporto/CreaDB/capacita_risorse.sql</b>.</div>'}
                 <div class="pm-card"><h2><i class="fas fa-chart-column"></i> Giornate da pianificare per ruolo</h2>
-                    <p class="pm-nota" style="margin-top:0">Stima (effort venduto) − Consuntivo (effort speso, ore Qlik, non il fatturato) per voce di costo dei Costi Progetto, in giornate, distribuito da oggi alla fine del progetto. Sotto il numero: giornate già coperte dalle allocazioni di questo progetto (festività e assenze sono considerate nella pagina Capacità).</p>
+                    <p class="pm-nota" style="margin-top:0">Stima (effort venduto) − Consuntivo (effort speso, ore Qlik, non il fatturato) per voce di costo dei Costi Progetto, in giornate, distribuito da oggi alla fine del progetto. Sotto il numero: giornate già coperte dalle allocazioni di questo progetto (festività e assenze sono considerate nella pagina Capacità). Verde = coperto, giallo = allocato meno del necessario; passa sopra una cella per i valori esatti e il motivo.</p>
                     ${f.ruoli.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Ruolo</th><th class="n">Stima</th><th class="n" title="Effort già speso (ore Qlik), non il fatturato">Consuntivo</th><th class="n" title="Stima − Consuntivo">Da pianificare</th>${f.mesi.map((m) => `<th class="n">${esc(meseIt(m))}</th>`).join('')}<th class="n">Oltre</th></tr></thead><tbody>
                         ${f.ruoli.map((r) => `<tr><td><b>${esc(r.ruolo)}</b></td><td class="cap-cell">${g(r.stima)}</td><td class="cap-cell">${g(r.consuntivo)}</td><td class="cap-cell" style="background:#EEF2FF"><b>${g(r.daPianificare)}</b></td>${f.mesi.map((m) => cella(r, m)).join('')}<td class="cap-cell">${r.oltre ? g(r.oltre) : '–'}</td></tr>`).join('')}
                         </tbody></table></div>${f.ruoli.some((r) => r.senzaDate) ? '<p class="pm-nota" style="color:#B45309">Il progetto non ha la data di fine o è già superata: le giornate da pianificare non si possono distribuire nei mesi. Aggiorna il campo End della scheda o il Gantt.</p>' : ''}` : `<div class="pm-vuoto">Nessuna giornata da pianificare${(f.progettiEsauriti || []).length ? ': il consuntivo ha già raggiunto la stima in tutte le voci' : ' nei Costi Progetto'}.</div>`}
                 </div>
-                <div class="pm-card"><h2><i class="fas fa-user-clock"></i> Persone sul progetto <span class="azioni"><a class="pm-btn piccolo" href="capacita.html?scheda=risorse"><i class="fas fa-id-badge"></i> Gestisci le persone</a><a class="pm-btn piccolo" href="capacita.html?scheda=carico"><i class="fas fa-table-cells"></i> Carico di tutte</a><button class="pm-btn piccolo primario" id="nuovaAllP"><i class="fas fa-plus"></i> Allocazione</button></span></h2>
-                    ${d.allocazioni.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Persona</th><th>Ruolo</th><th class="n">%</th><th>Dal</th><th>Al</th><th>Note</th></tr></thead><tbody>
-                        ${d.allocazioni.map((a) => `<tr class="click${a.al < oggi ? ' chiuso' : ''}" data-id="${esc(a.id)}"><td><b>${esc(a.nominativo || '')}</b></td><td>${esc(a.ruolo || '')}</td><td class="n">${a.perc}%</td><td>${dataIt(a.dal)}</td><td>${dataIt(a.al)}</td><td>${esc(a.note || '')}</td></tr>`).join('')}
-                        </tbody></table></div>` : `<div class="pm-vuoto">Nessuna persona allocata. ${d.risorse.length ? 'Usa «Allocazione».' : 'Prima aggiungi le persone nella pagina <a href="capacita.html?scheda=risorse">Capacità › Risorse</a>.'}</div>`}
+                <div class="pm-card"><h2><i class="fas fa-user-clock"></i> Persone sul progetto <span class="azioni"><a class="pm-btn piccolo" href="capacita.html?scheda=carico&da=${encodeURIComponent(projectId)}"><i class="fas fa-table-cells"></i> Carico di tutte</a>${daAllocare.length ? `<button class="pm-btn piccolo verde" id="allocaTutti" title="Alloca le ${daAllocare.length} persone del team non ancora allocate, con la proposta mostrata"><i class="fas fa-wand-magic-sparkles"></i> Alloca tutto il team (${daAllocare.length})</button>` : ''}<button class="pm-btn piccolo primario" id="nuovaAllP"><i class="fas fa-plus"></i> Allocazione</button></span></h2>
+                    <p class="pm-nota" style="margin-top:0">Le persone arrivano dal <b>team del progetto</b> (Kick-off), con il loro ruolo nel progetto. Per chi non è allocato Projexa propone periodo e percentuale: giornate da fare del ruolo divise tra le persone del team con quel ruolo, sulle ore settimanali della persona. «Alloca» la conferma. Clic su un'allocazione per cambiarla; le ore settimanali vengono dalla Rubrica (32 h se non indicate).</p>
+                    ${righeTeam.length || extra.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Persona</th><th>Ruolo nel progetto</th><th class="n">Consuntivo</th><th>Allocazione</th><th></th></tr></thead><tbody>${righeTeam.join('')}${extra.join('')}</tbody></table></div>`
+                        : '<div class="pm-vuoto">Nessuna persona nel team del progetto: aggiungile nel Team Work della scheda progetto (o con il Kick-off), poi torna qui.</div>'}
                 </div>`;
+            if (!p.dataset.tooltipAttivo) { p.dataset.tooltipAttivo = '1'; attivaTooltip(p); } // una volta: il pannello resta, cambia solo il contenuto
             const ok = () => caricaRisorse();
+            const alloca = async (lista, btn) => {
+                if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'; }
+                try {
+                    const r = await api('/capacita/progetto/alloca', { metodo: 'POST', corpo: { projectId, persone: lista.map((x) => ({ email: x.email, nominativo: x.nominativo, ruolo: x.ruolo, perc: x.proposta.perc, dal: x.proposta.dal, al: x.proposta.al })) } });
+                    toast(`${r.allocate} allocazion${r.allocate === 1 ? 'e' : 'i'} salvat${r.allocate === 1 ? 'a' : 'e'}${r.create ? ` · ${r.create} person${r.create === 1 ? 'a aggiunta' : 'e aggiunte'} alla pianificazione` : ''}`);
+                    ok();
+                } catch (e) { toast(e.message, 'errore'); if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i> Alloca'; } }
+            };
             p.querySelector('#nuovaAllP').addEventListener('click', () => formAllocazione({ risorse: d.risorse, projectId, onSalvato: ok }));
-            p.querySelectorAll('tr.click').forEach((tr) => tr.addEventListener('click', () => formAllocazione({ x: d.allocazioni.find((a) => a.id === tr.dataset.id), risorse: d.risorse, projectId, onSalvato: ok })));
+            p.querySelector('#allocaTutti')?.addEventListener('click', (e) => alloca(daAllocare, e.currentTarget));
+            p.querySelectorAll('[data-alloca]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); alloca([team[Number(b.dataset.alloca)]], b); }));
+            p.querySelectorAll('[data-all-id]').forEach((el) => el.addEventListener('click', () => formAllocazione({ x: d.allocazioni.find((a) => a.id === el.dataset.allId), risorse: d.risorse, projectId, onSalvato: ok })));
         }
 
         const CARICA = { panoramica: caricaPanoramica, raid: caricaRaid, azioni: caricaAzioni, risorse: caricaRisorse, cr: caricaCr, economia: caricaEconomia, stakeholder: caricaStakeholder, chiusura: caricaChiusura, chiedi: caricaChiedi };

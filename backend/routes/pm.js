@@ -1144,12 +1144,24 @@ function datiAzione(b, parziale = false) {
   return d;
 }
 
+// Contatto scelto dall'elenco del campo Referente: deve essere tra i Contatti del cliente
+// dell'azione; il referente diventa il suo nominativo. null = nessun contatto scelto.
+async function contattoScelto(req, clientId, contattoId) {
+  if (!contattoId) return null;
+  if (!UUID_RE.test(String(contattoId))) throw errore(400, 'Contatto non valido');
+  if (!(await colonneTabella(AZ_TABELLA)).has('contatto_id')) return null;
+  const c = (await contattiClienti(req.user, [clientId])).find((x) => x.id === String(contattoId));
+  if (!c) throw errore(404, 'Contatto non trovato tra i Contatti del cliente');
+  return { contatto_id: c.id, rubrica_id: null, referente: c.nominativo };
+}
+
 // Nuova azione a mano (dal Cruscotto del progetto).
 router.post('/azioni-cliente', async (req, res) => {
   try {
     await richiedeAzioni();
     const prog = await progettoUtente(req.user, pid(req));
-    const id = await inserisci(db, AZ_TABELLA, { ...baseRiga(req, prog), ...datiAzione(req.body || {}), stato: 'aperta', origine: 'manuale', modificata: true });
+    const con = await contattoScelto(req, prog.clientId, (req.body || {}).contatto_id);
+    const id = await inserisci(db, AZ_TABELLA, { ...baseRiga(req, prog), ...datiAzione(req.body || {}), ...(con || {}), stato: 'aperta', origine: 'manuale', modificata: true });
     res.status(201).json({ id });
   } catch (e) { invia(res, e, 'AZIONI_CLIENTE_NEW'); }
 });
@@ -1166,6 +1178,11 @@ router.put('/azioni-cliente/:id', async (req, res) => {
     if ('referente' in d && colAz.has('rubrica_id')) {
       const prima = (await db.query(`SELECT referente FROM ${AZ_TABELLA} WHERE id::text = $1`, [x.id])).rows[0];
       if (normNome(prima && prima.referente) !== normNome(d.referente)) { d.rubrica_id = null; if (colAz.has('contatto_id')) d.contatto_id = null; }
+    }
+    // Contatto scelto dall'elenco: vince sul testo scritto.
+    if (b.contatto_id) {
+      const cli = (await db.query(`SELECT client_id::text AS client_id FROM ${AZ_TABELLA} WHERE id::text = $1`, [x.id])).rows[0];
+      Object.assign(d, (await contattoScelto(req, cli && cli.client_id, b.contatto_id)) || {});
     }
     // Scadenza cambiata (es. il cliente ha chiesto più tempo): i promemoria ripartono da capo.
     if ('data_scadenza' in d && d.data_scadenza !== x.data_scadenza) Object.assign(d, { preavviso_il: null, solleciti: 0, ultimo_sollecito: null });
@@ -1184,11 +1201,14 @@ router.post('/azioni-cliente/:id/fatto', async (req, res) => {
   } catch (e) { invia(res, e, 'AZIONI_CLIENTE_FATTO'); }
 });
 
-// Persone tra cui scegliere il referente (triangolo giallo): Contatti del cliente, poi Rubrica.
+// Persone tra cui scegliere il referente (triangolo giallo): Contatti del cliente.
 router.get('/rubrica-contatti', async (req, res) => {
   try {
-    const clientId = UUID_RE.test(String(req.query.clientId || '')) ? String(req.query.clientId) : null;
-    res.json([...(clientId ? await contattiClienti(req.user, [clientId]) : []), ...(await rubricaUtente(req.user))]);
+    let clientId = UUID_RE.test(String(req.query.clientId || '')) ? String(req.query.clientId) : null;
+    // Azione nuova dal Cruscotto: il cliente è quello del progetto.
+    if (!clientId && req.query.projectId) clientId = (await progettoUtente(req.user, req.query.projectId)).clientId || null;
+    // Solo i Contatti del cliente: la Rubrica (colleghi interni) non si propone più (2026-10-16).
+    res.json(clientId ? await contattiClienti(req.user, [clientId]) : []);
   } catch (e) { invia(res, e, 'RUBRICA_CONTATTI'); }
 });
 
@@ -1274,7 +1294,8 @@ router.delete('/azioni-cliente/:id', async (req, res) => {
   try {
     await richiedeAzioni();
     const x = await azioneUtente(req, req.params.id);
-    await db.query(`UPDATE ${AZ_TABELLA} SET scadenza = CURRENT_DATE - 1, updated_at = now() WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`,
+    // Cancellazione vera (scelta dell'utente 2026-10-16): la riga esce dalla tabella.
+    await db.query(`DELETE FROM ${AZ_TABELLA} WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`,
       [x.id, req.user.tenant_id, req.user.user_id]);
     res.json({ ok: true });
   } catch (e) { invia(res, e, 'AZIONI_CLIENTE_DEL'); }
@@ -1299,13 +1320,15 @@ router.get('/capacita', async (req, res) => {
     const mesi = Math.min(12, Math.max(3, Number(req.query.mesi) || 6));
     // Settimane del Carico = stesso orizzonte del Fabbisogno (3/6/12 mesi), se non indicate.
     const settimane = Math.min(56, Math.max(4, Number(req.query.settimane) || Math.ceil((mesi * 365) / 12 / 7)));
-    const [fab, cc, ris, all, ass] = await Promise.all([
-      Cap.fabbisogno(req.user, { mesi }),
+    const fabPronto = await Cap.fabbisogno(req.user, { mesi });
+    const [fab, cc, ris, all, ass, cop] = await Promise.all([
+      fabPronto,
       Cap.capacitaECarico(req.user, { mesi, settimane }),
-      Cap.risorse(req.user, { tutte: true }), Cap.allocazioni(req.user), Cap.assenze(req.user)
+      Cap.risorse(req.user, { tutte: true }), Cap.allocazioni(req.user), Cap.assenze(req.user),
+      Cap.copertura(req.user, { mesi, fab: fabPronto })
     ]);
     const progetti = (await progettiAperti(req.user)).map((p) => ({ projectId: p.projectId, nome: p.nome, cliente: p.cliente }));
-    res.json({ tabelle: await Cap.tabellePresenti(), fabbisogno: fab, carico: cc, risorse: conPermesso(req, ris), allocazioni: conPermesso(req, all), assenze: conPermesso(req, ass), progetti });
+    res.json({ tabelle: await Cap.tabellePresenti(), fabbisogno: fab, carico: cc, risorse: conPermesso(req, ris), allocazioni: conPermesso(req, all), assenze: conPermesso(req, ass), progetti, copertura: cop });
   } catch (e) { invia(res, e, 'CAPACITA'); }
 });
 // Scheda «Risorse» del Cruscotto: fabbisogno del progetto per ruolo e allocazioni del progetto.
@@ -1313,12 +1336,44 @@ router.get('/capacita/progetto', async (req, res) => {
   try {
     await richiedeCapacita(req);
     const prog = await progettoUtente(req.user, pid(req));
-    const [fab, all, ris] = await Promise.all([
-      Cap.fabbisogno(req.user, { mesi: 6, projectId: prog.projectId }),
-      Cap.allocazioni(req.user, { projectId: prog.projectId }), Cap.risorse(req.user)
+    const fab = await Cap.fabbisogno(req.user, { mesi: 6, projectId: prog.projectId });
+    const [all, ris, team] = await Promise.all([
+      Cap.allocazioni(req.user, { projectId: prog.projectId }), Cap.risorse(req.user),
+      Cap.teamProgetto(req.user, prog.projectId, fab)
     ]);
-    res.json({ tabelle: await Cap.tabellePresenti(), progetto: prog, fabbisogno: fab, allocazioni: conPermesso(req, all), risorse: ris });
+    // Ore settimanali della persona (Rubrica) su ogni allocazione: servono al conteggio per ruolo.
+    const ore = await Cap.oreSettimanali(req.user);
+    const allOre = all.map((a) => ({ ...a, ore_sett: ore.ore(a) }));
+    res.json({ tabelle: await Cap.tabellePresenti(), progetto: prog, fabbisogno: fab, allocazioni: conPermesso(req, allOre), risorse: ris, team });
   } catch (e) { invia(res, e, 'CAPACITA_PROGETTO'); }
+});
+
+// Alloca persone del team (pulsanti «Alloca» / «Alloca tutto il team»): se la persona non è
+// ancora tra le Risorse la si aggiunge (nome, email, ruolo del team). Body: { projectId,
+// persone: [{ email, nominativo, ruolo, perc, dal, al }] }.
+router.post('/capacita/progetto/alloca', async (req, res) => {
+  try {
+    await richiedeCapacita(req, { scrittura: true });
+    const prog = await progettoUtente(req.user, pid(req));
+    const lista = Array.isArray(req.body && req.body.persone) ? req.body.persone.slice(0, 100) : [];
+    if (!lista.length) throw errore(400, 'Nessuna persona da allocare');
+    const ris = await Cap.risorse(req.user, { tutte: true });
+    let create = 0, allocate = 0;
+    for (const p of lista) {
+      const email = String(p.email || '').trim().toLowerCase();
+      let r = ris.find((x) => email && String(x.email || '').trim().toLowerCase() === email)
+        || ris.find((x) => normNome(x.nominativo) === normNome(p.nominativo));
+      if (!r) {
+        const id = await inserisci(db, 'pm_risorse', { ...baseCap(req), ...datiRisorsa({ nominativo: p.nominativo, email: p.email, ruolo: p.ruolo }) });
+        r = { id, nominativo: p.nominativo, email: p.email };
+        ris.push(r);
+        create += 1;
+      }
+      await inserisci(db, 'pm_allocazioni', { ...baseCap(req), ...(await datiAllocazione(req, { risorsa_id: r.id, projectId: prog.projectId, perc: p.perc, dal: p.dal, al: p.al, note: 'Dal team del progetto' })) });
+      allocate += 1;
+    }
+    res.json({ ok: true, create, allocate });
+  } catch (e) { invia(res, e, 'CAP_ALLOCA_TEAM'); }
 });
 
 // Righe delle tre tabelle: controllo proprietario + ruolo in scrittura, poi INSERT/UPDATE/chiusura.

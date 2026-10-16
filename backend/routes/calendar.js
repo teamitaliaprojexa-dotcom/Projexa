@@ -24,6 +24,7 @@ import {
 } from '../jobs/meetingTranscription.js';
 import { inviaRecapBatch, controllaRecapBatchUtente } from '../jobs/recapBatch.js';
 import { parseRecapActions, parseDueDate, ownerVariants } from '../jobs/recapTasks.js';
+import { proposteDaRecap, salvaDaRecap } from '../config/azioniCliente.js';
 import { encryptRowForWrite } from '../config/crypto.js';
 import { localRecapMode, aiCollegate, PROVIDERS as AI_PROVIDERS } from './ai.js';
 import JWT_SECRET from '../config/jwt.js';
@@ -920,7 +921,9 @@ router.get('/meetings/managed/recap-tasks', requireAuth, async (req, res) => {
       project: m.project_id ? { id: m.project_id, name: await name('projects', m.project_id) } : null,
       assigned_to: me,
       owners: variants,
-      items
+      items,
+      // Azioni a carico del cliente (sezione del recap): si salvano solo quelle spuntate.
+      cliente: await proposteDaRecap(req.user, { ...m, id_calendar: idCalendar }).catch((e) => { console.error('REC_MEETING_TASKS azioni cliente:', e.message); return { disponibile: false, items: [] }; })
     });
   } catch (error) {
     console.error('❌ REC_MEETING_TASKS_PREVIEW:', error.message);
@@ -982,6 +985,27 @@ router.post('/meetings/managed/recap-tasks', requireAuth, async (req, res) => {
     res.status(error.status || 500).json({ error: error.message });
   } finally {
     if (client) client.release();
+  }
+});
+
+// Azioni a carico del cliente spuntate nella finestra «Crea task» -> pm_azioni_cliente
+// (config/azioniCliente.js). Cliente e progetto della riunione.
+router.post('/meetings/managed/recap-azioni-cliente', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    const azioni = (Array.isArray(b.azioni) ? b.azioni : [])
+      .map((x) => ({ descrizione: String((x && x.descrizione) || '').trim().slice(0, 4000), referente: String((x && x.referente) || '').trim().slice(0, 300), data_scadenza: x && x.data_scadenza ? String(x.data_scadenza).trim() : null }))
+      .filter((x) => x.descrizione);
+    if (!azioni.length) return res.status(400).json({ error: 'Nessuna azione da salvare' });
+    if (azioni.length > 50) return res.status(400).json({ error: 'Al massimo 50 azioni per volta' });
+    if (azioni.some((x) => x.data_scadenza && !DATE_RE.test(x.data_scadenza))) return res.status(400).json({ error: 'Data di scadenza non valida' });
+    const { meeting: m } = await recapTaskContext(req, idCalendar);
+    res.status(201).json({ success: true, ...(await salvaDaRecap(req.user, { ...m, id_calendar: idCalendar }, azioni)) });
+  } catch (error) {
+    console.error('❌ REC_MEETING_AZIONI_CLIENTE:', error.message);
+    res.status(error.status || 500).json({ error: error.message });
   }
 });
 

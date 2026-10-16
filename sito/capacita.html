@@ -9,41 +9,50 @@
     <!--
       CAPACITÀ E ALLOCAZIONE DELLE RISORSE (2026-10-16) - FUNZIONE FACOLTATIVA: la voce «Capacità»
       del menu compare solo con Impostazioni › Preferenze › «Capacità e allocazione risorse» acceso.
-      Schede: Fabbisogno (per ruolo e mese, dai Costi Progetto: funziona anche senza persone),
-      Carico persone (settimane), Risorse (persone e assenze), Allocazioni (persona × progetto).
+      Schede: Copertura (prima vista: giornate da fare contro giornate coperte dalle allocazioni,
+      per progetto e ruolo, con gli avvisi di incoerenza), Fabbisogno (per ruolo e mese, dai Costi Progetto: funziona anche senza persone),
+      Carico persone (settimane; clic sul nome = assenze). Le persone e le allocazioni non hanno più una
+      scheda propria: arrivano dai team dei progetti («Alloca tutti i team» nella Copertura, Cruscotto › Risorse),
+      le ore settimanali dalla Rubrica.
       API: /api/pm/capacita* (backend/routes/pm.js, backend/config/capacita.js).
     -->
 </head>
 <body>
     <div class="pm-top">
         <a class="pm-btn" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
+        <a class="pm-btn" id="tornaProgetto" style="display:none"><i class="fas fa-arrow-left"></i> Torna al progetto</a>
         <h1><i class="fas fa-people-group"></i> Capacità e risorse</h1>
         <span class="sub" id="sottotitolo"></span>
         <span class="spazio"></span>
         <label class="pm-nota">Orizzonte <select id="orizzonte" class="pm-input" style="width:auto; display:inline-block"><option value="3">3 mesi</option><option value="6" selected>6 mesi</option><option value="12">12 mesi</option></select></label>
-        <a class="pm-btn" href="portfolio.html"><i class="fas fa-layer-group"></i> Portfolio</a>
+        <a class="pm-btn" href="portfolio.html" id="vaiPortfolio"><i class="fas fa-layer-group"></i> Portfolio</a>
         <button class="pm-btn" id="aggiorna"><i class="fas fa-rotate"></i> Aggiorna</button>
     </div>
     <nav class="pm-tabs" id="tabs">
-        <button class="pm-tab on" data-tab="fabbisogno"><i class="fas fa-chart-column"></i> Fabbisogno per ruolo</button>
+        <button class="pm-tab on" data-tab="copertura"><i class="fas fa-shield-halved"></i> Copertura</button>
+        <button class="pm-tab" data-tab="fabbisogno"><i class="fas fa-chart-column"></i> Fabbisogno per ruolo</button>
         <button class="pm-tab" data-tab="carico"><i class="fas fa-table-cells"></i> Carico persone</button>
-        <button class="pm-tab" data-tab="risorse"><i class="fas fa-id-badge"></i> Risorse <span class="cnt" id="cntRis"></span></button>
-        <button class="pm-tab" data-tab="allocazioni"><i class="fas fa-user-clock"></i> Allocazioni <span class="cnt" id="cntAll"></span></button>
     </nav>
     <main class="pm-main">
         <div id="avvisi"></div>
-        <section class="pm-pannello on" id="p-fabbisogno"><div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> Calcolo il fabbisogno dei tuoi progetti…</div></section>
+        <section class="pm-pannello on" id="p-copertura"><div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> Calcolo la copertura dei tuoi progetti…</div></section>
+        <section class="pm-pannello" id="p-fabbisogno"></section>
         <section class="pm-pannello" id="p-carico"></section>
-        <section class="pm-pannello" id="p-risorse"></section>
-        <section class="pm-pannello" id="p-allocazioni"></section>
     </main>
     <script src="js/pm-comune.js"></script>
     <script src="js/capacita-comune.js"></script>
     <script>
     (function () {
         const { esc, api, fmt, dataIt, toast, modale, valori } = PM;
-        const { g, classeCarico, classeFabbisogno, meseIt, formAllocazione } = CapacitaUI;
+        const { g, classeCarico, classeFabbisogno, meseIt, formAllocazione, attivaTooltip } = CapacitaUI;
         const qs = new URLSearchParams(location.search);
+        const daProgetto = qs.get('da') || '';
+        if (daProgetto) {
+            const b = document.getElementById('tornaProgetto');
+            b.href = `pm.html?projectId=${encodeURIComponent(daProgetto)}&tab=risorse`;
+            b.style.display = '';
+            document.getElementById('vaiPortfolio').href = `portfolio.html?da=${encodeURIComponent(daProgetto)}&tab=risorse`;
+        }
         let dati = null;
         const chiusi = new Set(); // ruoli chiusi a mano nel fabbisogno (di default tutti aperti)
         const personeAperte = new Set(); // «ruolo|progetto» con le persone mostrate (icona davanti al progetto)
@@ -55,12 +64,12 @@
         function apriTab(nome) {
             tabs.querySelectorAll('.pm-tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === nome));
             document.querySelectorAll('.pm-pannello').forEach((p) => p.classList.toggle('on', p.id === `p-${nome}`));
-            history.replaceState(null, '', `${location.pathname}?scheda=${nome}`);
+            history.replaceState(null, '', `${location.pathname}?scheda=${nome}${daProgetto ? `&da=${encodeURIComponent(daProgetto)}` : ''}`);
         }
         tabs.addEventListener('click', (e) => { const b = e.target.closest('.pm-tab'); if (b) apriTab(b.dataset.tab); });
 
         async function carica() {
-            pannello('fabbisogno').innerHTML = '<div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> Calcolo il fabbisogno dei tuoi progetti…</div>';
+            pannello('copertura').innerHTML = '<div class="pm-attesa"><i class="fas fa-spinner fa-spin"></i> Calcolo la copertura dei tuoi progetti…</div>';
             try {
                 dati = await api(`/capacita?mesi=${encodeURIComponent(document.getElementById('orizzonte').value)}`);
                 render();
@@ -71,17 +80,110 @@
         }
         function render() {
             document.getElementById('avvisi').innerHTML = dati.tabelle ? '' : '<div class="pm-avviso"><i class="fas fa-database"></i> Per salvare persone, assenze e allocazioni va eseguito lo script <b>Supporto/CreaDB/capacita_risorse.sql</b>. Il fabbisogno per ruolo funziona già.</div>';
-            document.getElementById('sottotitolo').textContent = `${dati.risorse.filter((r) => r.attiva).length} persone · ${dati.allocazioni.length} allocazioni · aggiornato al ${dataIt(dati.fabbisogno.oggi)}`;
-            document.getElementById('cntRis').textContent = dati.risorse.filter((r) => r.attiva).length || '';
-            document.getElementById('cntAll').textContent = dati.allocazioni.length || '';
-            renderFabbisogno(); renderCarico(); renderRisorse(); renderAllocazioni();
+            document.getElementById('sottotitolo').textContent = `${dati.carico.persone.length} persone · ${dati.allocazioni.filter((a) => a.al >= dati.fabbisogno.oggi).length} allocazioni · aggiornato al ${dataIt(dati.fabbisogno.oggi)}`;
+            renderCopertura(); renderFabbisogno(); renderCarico();
+        }
+
+        // ================= COPERTURA (prima vista) =================
+        // Per progetto e ruolo: giornate da pianificare contro giornate coperte dalle allocazioni,
+        // mese per mese, e avvisi di incoerenza. Risponde a «sui miei progetti ho abbastanza
+        // persone, nei mesi giusti?» senza bisogno di conoscere il resto della loro agenda.
+        const copChiusi = new Set();      // progetti chiusi a mano
+        const copPersone = new Set();     // «progetto|ruolo» con le persone aperte
+        let copAvvisiTutti = false;
+        function classeCop(fab, all) {
+            if (fab < 0.05) return all > 0.05 ? 'cop-extra' : 'cop-vuoto';
+            const r = all / fab;
+            return r >= 0.95 ? 'cop-ok' : r >= 0.5 ? 'cop-parz' : 'cop-ko';
+        }
+        // Tooltip della cella: mese, giorni lavorativi, da fare, coperte per persona, esito, come si calcola.
+        function tipCop(v, m, r, c) {
+            const gm = (c.giorniMese || {})[m];
+            const nomeMese = new Date(`${m}-01T12:00:00Z`).toLocaleDateString('it-IT', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+            const righe = [`${r.ruolo} · ${nomeMese}${gm != null ? ` (${gm} giorni lavorativi${m === c.mesi[0] ? ' da oggi' : ''})` : ''}`];
+            righe.push(`Da fare: ${g(v.fab)} gg`);
+            righe.push(`Coperte: ${g(v.all)} gg${v.fab > 0.05 ? ` (${Math.round((v.all / v.fab) * 100)}%)` : ''}`);
+            const chi = (r.persone || []).filter((x) => x.perMese && x.perMese[m] > 0.001);
+            chi.forEach((x) => righe.push(`• ${x.nominativo}: ${x.perc}% di ${g(x.oreSett)} h/sett → ${g(x.perMese[m])} gg`));
+            if (!chi.length && v.all <= 0.001) righe.push('• nessuna persona allocata in questo mese');
+            const diff = v.all - v.fab;
+            righe.push(Math.abs(diff) < 0.05 ? '= Coperto' : diff < 0 ? `= Mancano ${g(-diff)} gg` : `= In più ${g(diff)} gg`);
+            righe.push(`ℹ Da fare = giornate da pianificare del ruolo (${g(r.daPianificare)} gg) distribuite sui giorni lavorativi da oggi alla fine del progetto${r.fine ? ` (${dataIt(r.fine)})` : ''}. Coperte = % allocata × ore settimanali della persona ÷ 5 ÷ 8 per ogni giorno lavorativo (festività e assenze escluse). Verde dal 95%.`);
+            return righe.join('\n');
+        }
+        function cellaCop(v, m, r, c) {
+            const cl = classeCop(v.fab, v.all);
+            if (cl === 'cop-vuoto') return '<td class="cop cop-vuoto">–</td>';
+            const perc = v.fab > 0.05 ? Math.min(100, Math.round((v.all / v.fab) * 100)) : 100;
+            return `<td class="cop ${cl}" data-tip="${esc(tipCop(v, m, r, c))}">
+                <div class="cop-num"><b>${g(v.all)}</b><span>/ ${g(v.fab)}</span></div><div class="cop-bar"><i style="width:${perc}%"></i></div></td>`;
+        }
+        function renderCopertura() {
+            const c = dati.copertura;
+            const box = pannello('copertura');
+            if (!c) { box.innerHTML = '<div class="pm-vuoto">Copertura non disponibile.</div>'; return; }
+            const t = c.totali;
+            const percTot = t.daPianificare > 0 ? Math.round((Math.min(t.coperto, t.daPianificare) / t.daPianificare) * 100) : 100;
+            const ICONE = { alta: 'fa-circle-exclamation', media: 'fa-triangle-exclamation', bassa: 'fa-circle-info' };
+            const avvisi = copAvvisiTutti ? c.avvisi : c.avvisi.slice(0, 8);
+            const nCol = 4 + c.mesi.length;
+            const righe = c.progetti.map((p) => {
+                const aperto = !copChiusi.has(p.projectId);
+                const percP = p.daPianificare > 0 ? Math.round((p.coperto / p.daPianificare) * 100) : 100;
+                const sub = aperto ? p.ruoli.map((r) => {
+                    const kp = `${p.projectId}|${r.chiave}`;
+                    const pers = copPersone.has(kp);
+                    const persone = pers ? (r.persone.length ? r.persone.map((x) => `<tr class="azc-pers pm-nota click" data-cop-all="${esc(x.id)}" title="Modifica l'allocazione"><td style="padding-left:3.4rem"><i class="fas fa-user" style="color:#9CA3AF; width:14px"></i> ${esc(x.nominativo)} <i class="fas fa-pen" style="color:#9CA3AF; font-size:0.7rem"></i></td>
+                            <td class="cap-cell"></td><td class="cap-cell">${g(x.giornate)}</td><td class="cap-cell"></td>
+                            <td colspan="${c.mesi.length}" style="color:#065F46"><i class="fas fa-user-clock"></i> ${x.perc}% dal ${dataIt(x.dal)} al ${dataIt(x.al)}</td></tr>`).join('')
+                        : `<tr class="pm-nota"><td colspan="${nCol}" style="padding-left:3.4rem; color:#9CA3AF">Nessuna persona allocata: usa «Alloca tutti i team» in alto o la scheda Risorse del Cruscotto del progetto.</td></tr>`) : '';
+                    return `<tr class="pm-nota"><td style="padding-left:1.8rem"><button type="button" class="cap-pers-btn" data-cop-pers="${esc(kp)}" title="Persone allocate (${r.persone.length})"><i class="fas fa-user-group"></i> <small>${r.persone.length}</small></button> ${esc(r.ruolo)}</td>
+                        <td class="cap-cell">${g(r.daPianificare)}</td><td class="cap-cell">${g(r.coperto)}</td>
+                        <td class="cap-cell">${r.scoperto >= 0.05 ? `<span class="cop-mancano">${g(r.scoperto)}</span>` : '<span class="cop-okt"><i class="fas fa-check"></i></span>'}</td>
+                        ${c.mesi.map((m) => cellaCop(r.perMese[m], m, r, c)).join('')}</tr>${persone}`;
+                }).join('') : '';
+                return `<tr class="click cop-prog" data-cop-prog="${esc(p.projectId)}"><td><i class="fas fa-chevron-${aperto ? 'down' : 'right'}" style="width:12px; color:#9CA3AF"></i> <a href="pm.html?projectId=${encodeURIComponent(p.projectId)}&tab=risorse"><b>${esc(p.cliente ? `${p.cliente} · ` : '')}${esc(p.nome)}</b></a>
+                        <div class="cop-prog-bar" title="Coperto ${percP}%"><i style="width:${Math.min(100, percP)}%" class="${percP >= 95 ? 'ok' : percP >= 50 ? 'parz' : 'ko'}"></i></div><div class="pm-nota">${p.fine ? `fine ${dataIt(p.fine)} · ` : ''}coperto ${percP}%</div></td>
+                    <td class="cap-cell"><b>${g(p.daPianificare)}</b></td><td class="cap-cell"><b>${g(p.coperto)}</b></td>
+                    <td class="cap-cell">${p.scoperto >= 0.05 ? `<span class="cop-mancano forte">${g(p.scoperto)}</span>` : '<span class="cop-okt"><i class="fas fa-check"></i></span>'}</td>
+                    <td colspan="${c.mesi.length}"></td></tr>${sub}`;
+            }).join('');
+            box.innerHTML = `<div class="cop-kpi">
+                    <div><small>Da pianificare</small><b>${g(t.daPianificare)}</b><span>giornate nei progetti aperti</span></div>
+                    <div><small>Coperte</small><b>${g(Math.min(t.coperto, t.daPianificare))}</b><span>dalle allocazioni</span></div>
+                    <div class="${t.scoperto >= 0.5 ? 'ko' : 'ok'}"><small>Scoperte</small><b>${g(t.scoperto)}</b><span>${t.scoperto >= 0.5 ? 'servono persone' : 'tutto coperto'}</span></div>
+                    <div><small>Copertura</small><b>${percTot}%</b><span class="cop-prog-bar grande"><i style="width:${percTot}%" class="${percTot >= 95 ? 'ok' : percTot >= 50 ? 'parz' : 'ko'}"></i></span></div>
+                </div>
+                ${c.avvisi.length ? `<div class="pm-card"><h2><i class="fas fa-bell"></i> Da sistemare <span class="pill">${c.avvisi.length}</span></h2>
+                    <ul class="cop-avvisi">${avvisi.map((a) => `<li class="${a.gravita}"><i class="fas ${ICONE[a.gravita]}"></i> <span>${esc(a.testo)}</span></li>`).join('')}</ul>
+                    ${c.avvisi.length > 8 ? `<button type="button" class="pm-btn piccolo" id="copAvvisiTutti">${copAvvisiTutti ? 'Mostra meno' : `Mostra tutti (${c.avvisi.length})`}</button>` : ''}</div>` : ''}
+                <div class="pm-card">
+                    <h2><i class="fas fa-shield-halved"></i> Copertura per progetto e ruolo <span class="azioni"><button class="pm-btn piccolo primario" id="copAllocaTeam" title="Proponi le allocazioni per le persone dei team (Kick-off) dei progetti con giornate da fare: le controlli e le salvi"><i class="fas fa-file-import"></i> Alloca tutti i team</button></span></h2>
+                    <p class="pm-nota" style="margin-top:0">Per ogni progetto e ruolo: giornate <b>da pianificare</b> (Stima − Consuntivo dei Costi Progetto) contro giornate <b>coperte</b> dalle allocazioni (da oggi, festività e assenze escluse). Nei mesi: <b>coperte / da fare</b>, verde se coperte, arancione se in parte, rosso se scoperte. Prima i progetti con più giornate scoperte. Non serve conoscere il resto dell'agenda delle persone. Clic sull'icona delle persone per vedere chi è allocato, clic su una persona per cambiarne percentuale e periodo.</p>
+                    ${c.progetti.length ? `<div class="cop-legenda"><span class="es"><b>7,9</b><span>/ 7,8</span></span> = giornate <b>coperte</b> / giornate <b>da fare</b> nel mese · <span style="color:#059669">■</span> coperte · <span style="color:#D97706">■</span> in parte · <span style="color:#DC2626">■</span> scoperte · <span style="color:#3B82F6">■</span> allocate senza giornate da fare · passa sopra una cella per il dettaglio</div><div class="pm-scroll"><table class="pm-t cap-fissa cop-tab"><thead><tr><th>Progetto / ruolo</th><th class="n" data-tip="Da pianificare\nGiornate ancora da fare = Stima − Consuntivo dei Costi Progetto (ore Qlik, non il fatturato), per ruolo.">Da pianificare</th><th class="n" data-tip="Coperte\nGiornate coperte dalle allocazioni da oggi alla loro fine: % allocata × ore settimanali della persona ÷ 5 ÷ 8 per ogni giorno lavorativo.\nℹ Nel totale del progetto si contano al massimo le giornate da fare di ogni ruolo.">Coperte</th><th class="n" data-tip="Scoperte\nDa pianificare − Coperte: giornate per cui non c’è ancora nessuno allocato.\nℹ Il segno ✓ vuol dire che il ruolo è coperto.">Scoperte</th>${c.mesi.map((m) => `<th class="n" data-tip="${esc(meseIt(m))}\nIn ogni cella: giornate coperte / giornate da fare nel mese.${(c.giorniMese || {})[m] != null ? `\n${c.giorniMese[m]} giorni lavorativi${m === c.mesi[0] ? ' da oggi' : ''}` : ''}">${esc(meseIt(m))}</th>`).join('')}</tr></thead><tbody>${righe}</tbody></table></div>`
+                        : '<div class="pm-vuoto">Nessuna giornata da pianificare nei progetti aperti.</div>'}
+                </div>`;
+            attivaTooltip(box);
+            box.querySelector('#copAvvisiTutti')?.addEventListener('click', () => { copAvvisiTutti = !copAvvisiTutti; renderCopertura(); });
+            box.querySelector('#copAllocaTeam')?.addEventListener('click', proposteAllocazioni);
+            box.querySelectorAll('[data-cop-all]').forEach((tr) => tr.addEventListener('click', () => {
+                const x = dati.allocazioni.find((a) => a.id === tr.dataset.copAll);
+                if (x) formAllocazione({ x, risorse: dati.risorse, progetti: dati.progetti, onSalvato: carica });
+            }));
+            box.querySelectorAll('[data-cop-pers]').forEach((b) => b.addEventListener('click', (e) => {
+                e.stopPropagation(); const k = b.dataset.copPers; if (copPersone.has(k)) copPersone.delete(k); else copPersone.add(k); renderCopertura();
+            }));
+            box.querySelectorAll('tr[data-cop-prog]').forEach((tr) => tr.addEventListener('click', (e) => {
+                if (e.target.closest('a')) return;
+                const k = tr.dataset.copProg; if (copChiusi.has(k)) copChiusi.delete(k); else copChiusi.add(k); renderCopertura();
+            }));
         }
 
         // ================= FABBISOGNO PER RUOLO =================
         function renderFabbisogno() {
             const f = dati.fabbisogno;
             const cap = new Map((dati.carico.ruoli || []).map((r) => [r.chiave, r]));
-            const conPersone = dati.risorse.some((r) => r.attiva);
+            const conPersone = dati.carico.persone.length > 0;
             const tot = (o) => Object.values(o).reduce((s, v) => s + v, 0);
             // Colonne: Stima, Consuntivo (ore spese da Qlik, non il fatturato), Da pianificare =
             // Stima - Consuntivo, poi come si distribuisce nei mesi, Oltre l'orizzonte e Senza date.
@@ -151,7 +253,7 @@
                         <button type="button" role="radio" aria-checked="${!perProgetto}" class="${perProgetto ? '' : 'on'}" data-vista="ruolo" title="Righe per ruolo con sotto i progetti (e la capacità)"><i class="fas fa-user-tag"></i> Per ruolo</button>
                         <button type="button" role="radio" aria-checked="${perProgetto}" class="${perProgetto ? 'on' : ''}" data-vista="progetto" title="Righe per progetto con sotto i ruoli"><i class="fas fa-diagram-project"></i> Per progetto</button>
                     </span></span></h2>
-                <p class="pm-nota" style="margin-top:0">Dai <b>Costi Progetto</b> dei tuoi progetti aperti, in giornate (progetti a ore: 8 ore = 1 giornata): <b>Stima</b> = effort venduto, <b>Consuntivo</b> = effort già speso (ore Qlik, non il fatturato), <b>Da pianificare</b> = Stima − Consuntivo. I mesi mostrano come il «Da pianificare» si distribuisce sui giorni lavorativi da oggi alla fine del progetto (campo End, altrimenti la fine del Gantt); <b>Oltre</b> = dopo l'orizzonte scelto${conSenzaDate ? '; <b>Senza date</b> = progetti senza data di fine o con la fine superata, da ripianificare' : ''}. Il ruolo è la voce di costo del tenant (Configurazione gruppi Billing) con lo stesso codice di fatturazione della voce del progetto. ${conPersone ? 'Sotto ogni mese la <b>capacità</b> delle persone con quel ruolo (festività, assenze e quota di tempo sui progetti già tolte): rosso = servono più giornate di quante ne hai.' : 'Aggiungi le persone nella scheda <b>Risorse</b> per vedere la capacità accanto al fabbisogno: senza persone questa vista funziona comunque.'} Clic sul ruolo per chiudere o riaprire i suoi progetti.</p>
+                <p class="pm-nota" style="margin-top:0">Dai <b>Costi Progetto</b> dei tuoi progetti aperti, in giornate (progetti a ore: 8 ore = 1 giornata): <b>Stima</b> = effort venduto, <b>Consuntivo</b> = effort già speso (ore Qlik, non il fatturato), <b>Da pianificare</b> = Stima − Consuntivo. I mesi mostrano come il «Da pianificare» si distribuisce sui giorni lavorativi da oggi alla fine del progetto (campo End, altrimenti la fine del Gantt); <b>Oltre</b> = dopo l'orizzonte scelto${conSenzaDate ? '; <b>Senza date</b> = progetti senza data di fine o con la fine superata, da ripianificare' : ''}. Il ruolo è la voce di costo del tenant (Configurazione gruppi Billing) con lo stesso codice di fatturazione della voce del progetto. ${conPersone ? 'Sotto ogni mese la <b>capacità</b> delle persone con quel ruolo (ore settimanali della Rubrica, festività e assenze già tolte): rosso = servono più giornate di quante ne hai.' : 'Alloca le persone dei team (Copertura › «Alloca tutti i team») per vedere la capacità accanto al fabbisogno: senza persone questa vista funziona comunque.'} Clic sul ruolo per chiudere o riaprire i suoi progetti.</p>
                 ${f.ruoli.length ? `<div class="pm-scroll"><table class="pm-t cap-fissa"><thead><tr><th>${perProgetto ? 'Progetto / ruolo' : 'Ruolo (voce di costo)'}</th><th class="n">Stima</th><th class="n" title="Effort già speso (ore Qlik), non il fatturato">Consuntivo</th><th class="n" title="Stima − Consuntivo">Da pianificare</th>${f.mesi.map((m) => `<th class="n">${esc(meseIt(m))}</th>`).join('')}<th class="n" title="Giornate dopo l'orizzonte scelto">Oltre</th>${conSenzaDate ? '<th class="n" title="Progetti senza data di fine o con la fine già superata">Senza date</th>' : ''}</tr></thead><tbody>${righe}
                     <tr><td><b>Totale</b></td>${num(somma('stima'), true)}${num(somma('consuntivo'), true)}${num(somma('daPianificare'), true)}${f.mesi.map((m) => `<td class="cap-cell"><b>${g(f.ruoli.reduce((s, r) => s + (r.perMese[m] || 0), 0))}</b></td>`).join('')}${num(somma('oltre'), true)}${conSenzaDate ? num(somma('senzaDate'), true) : ''}</tr>
                     </tbody></table></div>` : '<div class="pm-vuoto">Nessuna giornata da pianificare: nei progetti aperti il consuntivo ha già raggiunto la stima, oppure mancano i Costi Progetto.</div>'}
@@ -190,162 +292,88 @@
             const coinvolte = c.persone.filter((p) => p.settimane.some((s) => s.allocato > 0));
             const lista = soloCoinvolte ? coinvolte : c.persone;
             const filtro = `<button type="button" class="cap-pers-btn" id="filtroCarico" title="${soloCoinvolte ? `Mostrate solo le persone con giornate allocate nel periodo (${coinvolte.length} su ${c.persone.length}): clic per vederle tutte` : 'Mostrate tutte le persone: clic per vedere solo quelle coinvolte'}" style="${soloCoinvolte ? 'background:#EEF2FF; border-color:#A5B4FC' : ''}"><i class="fas fa-filter"></i>${soloCoinvolte ? ' coinvolte' : ''}</button>`;
+            // Colore: ore allocate da TUTTO il tenant (tue + altri PM) contro le ore disponibili della persona.
+            const classe = (s) => {
+                if (s.oreDisp <= 0 && s.oreTot <= 0) return s.assenze ? 'assente' : 'zero';
+                if (s.sovra) return 'alto';
+                if (s.oreTot <= 0) return 'zero';
+                return s.carico != null && s.carico >= 80 ? 'medio' : 'basso';
+            };
+            const settAllerta = new Set();
+            lista.forEach((p) => p.settimane.forEach((s) => { if (s.sovra) settAllerta.add(s.dal); }));
+            const conAltri = lista.some((p) => p.conAltri);
             pannello('carico').innerHTML = `<div class="pm-card">
                 <h2><i class="fas fa-table-cells"></i> Carico delle persone per settimana</h2>
-                <p class="pm-nota" style="margin-top:0">Settimane dello stesso orizzonte scelto in alto (3, 6 o 12 mesi). Percentuale = giornate allocate sui progetti / giornate disponibili della settimana (giorni lavorativi senza festività e assenze, per la quota di tempo che la persona dedica ai progetti). Passa sopra una cella per vedere i progetti.</p>
-                <div class="cap-legenda" style="margin-bottom:0.6rem"><span><i style="background:#D1FAE5"></i>sotto l'80%</span><span><i style="background:#FDE68A"></i>80-100%</span><span><i style="background:#FCA5A5"></i>oltre il 100% (sovrallocata)</span><span><i style="background:repeating-linear-gradient(45deg,#E5E7EB,#E5E7EB 4px,#F9FAFB 4px,#F9FAFB 8px)"></i>assente</span></div>
-                ${c.persone.length ? `<div class="pm-scroll"><table class="pm-t cap-heat cap-fissa"><thead><tr><th>Persona ${filtro}</th>${c.settimane.map((s) => `<th class="n" title="Settimana dal ${dataIt(s)}">${esc(dataIt(s).slice(0, 5))}</th>`).join('')}</tr></thead><tbody>
+                <p class="pm-nota" style="margin-top:0">Giornate allocate a ogni persona settimana per settimana (stesso orizzonte scelto in alto): le tue in grassetto, quelle degli <b style="color:#6D28D9">altri PM del tenant</b> sulla stessa persona (stessa email) in viola. La disponibilità viene dalle <b>ore lavorate a settimana</b> della Rubrica (32 h se non indicate), ridotte nelle settimane con festività o assenze; anche le percentuali allocate si calcolano su quelle ore. Il colore confronta il totale di tutto il tenant con le ore disponibili: <b style="color:#B91C1C">⚠</b> = la persona supera le sue ore nella settimana. Passa sopra una cella per il dettaglio, clic sul nome per le <b>assenze</b>.</p>
+                <div class="cap-legenda" style="margin-bottom:0.6rem"><span><i style="background:#D1FAE5"></i>sotto l'80%</span><span><i style="background:#FDE68A"></i>80-100%</span><span><i style="background:#FCA5A5; box-shadow: inset 0 0 0 2px #DC2626"></i>oltre le ore della persona ⚠</span><span><i style="background:repeating-linear-gradient(45deg,#E5E7EB,#E5E7EB 4px,#F9FAFB 4px,#F9FAFB 8px)"></i>assente</span><span><b>1 gg</b> = tue allocazioni</span><span style="color:#6D28D9"><b>+2 gg</b> = altri PM${conAltri ? '' : ' (al momento nessuna)'}</span></div>
+                ${c.persone.length ? `<div class="pm-scroll"><table class="pm-t cap-heat cap-fissa cap-tenant"><thead><tr><th>Persona ${filtro}</th>${c.settimane.map((s) => `<th class="n${settAllerta.has(s) ? ' w-alert' : ''}" title="Settimana dal ${dataIt(s)}${settAllerta.has(s) ? ': almeno una persona supera le sue ore' : ''}">${esc(dataIt(s).slice(0, 5))}</th>`).join('')}</tr></thead><tbody>
                     ${lista.length ? '' : `<tr><td colspan="${c.settimane.length + 1}" class="pm-vuoto">Nessuna persona con giornate allocate nel periodo: clic sul filtro accanto a «Persona» per vederle tutte (${c.persone.length}).</td></tr>`}
-                    ${lista.map((p) => `<tr><td><b>${esc(p.nominativo)}</b><div class="pm-nota">${esc(p.ruolo || 'senza ruolo')}${p.perc_progetti < 100 ? ` · ${p.perc_progetti}% sui progetti` : ''}</div></td>
+                    ${lista.map((p) => `<tr><td><button type="button" class="cap-nome" data-ass-pers="${esc(p.id)}" title="Assenze di ${esc(p.nominativo)} (ferie, permessi…)"><b>${esc(p.nominativo)}</b> <i class="far fa-calendar-xmark"></i></button>${p.settimaneSovra ? `<span class="cap-flag" title="Supera le sue ore in ${p.settimaneSovra} settimane, sommando le allocazioni di tutti i PM del tenant"><i class="fas fa-triangle-exclamation"></i> ${p.settimaneSovra} sett.</span>` : ''}
+                        <div class="pm-nota">${esc(p.ruolo || 'senza ruolo')}</div>
+                        <span class="cap-ore" title="${p.oreDaRubrica ? 'Ore lavorate a settimana dalla Rubrica' : 'Persona non trovata in Rubrica (stessa email): 32 h a settimana'}"><i class="far fa-clock"></i> ${fmt(p.oreSett, 1)} h/sett${p.oreDaRubrica ? '' : ' *'}</span></td>
                         ${p.settimane.map((s) => {
-                            const cl = classeCarico(s);
-                            const tit = [`Settimana dal ${dataIt(s.dal)}`, `Allocate ${g(s.allocato)} gg su ${g(s.capacita)} disponibili`, s.assenze ? `${s.assenze} giorni di assenza` : '', ...Object.entries(s.progetti).map(([id, v]) => `• ${nomeProg(id)}: ${g(v)} gg`)].filter(Boolean).join('\n');
-                            const txt = cl === 'assente' ? 'assente' : (s.carico == null ? '!' : (s.allocato > 0 ? `${fmt(s.carico, 0)}%` : '–'));
+                            const cl = classe(s);
+                            const tit = [`Settimana dal ${dataIt(s.dal)}${s.assenze ? ` (${s.assenze} giorni di assenza)` : ''}`,
+                                `Disponibili: ${g(s.oreDisp)} h (${fmt(p.oreSett, 1)} h/sett)`,
+                                `Tue allocazioni: ${g(s.allocato)} gg = ${g(s.allocato * 8)} h`,
+                                ...Object.entries(s.progetti).map(([id, v]) => `   • ${nomeProg(id)}: ${g(v)} gg`),
+                                s.altri > 0 ? `Altri PM: ${g(s.altri)} gg = ${g(s.altri * 8)} h` : 'Altri PM: nessuna allocazione',
+                                ...Object.entries(s.altriDett || {}).map(([k, v]) => `   • ${k}: ${g(v)} gg`),
+                                `Totale tenant: ${g(s.oreTot)} h su ${g(s.oreDisp)} h${s.carico != null ? ` (${fmt(s.carico, 0)}%)` : ''}${s.sovra ? ' ⚠ SOVRACCARICO' : ''}`].join('\n');
+                            const txt = cl === 'assente' ? 'assente'
+                                : s.oreTot > 0 ? `${s.allocato > 0 ? `<span class="mie">${g(s.allocato)} gg</span>` : '<span class="mie">–</span>'}${s.altri > 0 ? `<span class="altri">+${g(s.altri)} gg altri</span>` : ''}<span class="tot">${g(s.oreTot)}/${g(s.oreDisp)} h</span>`
+                                : '–';
                             return `<td class="h ${cl}" title="${esc(tit)}">${txt}</td>`;
                         }).join('')}</tr>`).join('')}
-                    </tbody></table></div>` : '<div class="pm-vuoto">Nessuna persona: aggiungile nella scheda <b>Risorse</b> e assegnale ai progetti nella scheda <b>Allocazioni</b> (o dal Cruscotto PM › Risorse).</div>'}
+                    </tbody></table></div>` : '<div class="pm-vuoto">Nessuna persona allocata: usa «Alloca tutti i team» nella scheda <b>Copertura</b> (o il Cruscotto PM › Risorse).</div>'}
             </div>`;
             pannello('carico').querySelector('#filtroCarico')?.addEventListener('click', () => { soloCoinvolte = !soloCoinvolte; renderCarico(); });
+            pannello('carico').querySelectorAll('[data-ass-pers]').forEach((b) => b.addEventListener('click', () => finestraAssenze(b.dataset.assPers)));
         }
 
-        // ================= RISORSE =================
-        // Filtro della colonna Allocazioni: di default solo le persone con almeno un'allocazione.
-        let soloAllocate = true;
-        function renderRisorse() {
-            const nAll = (id) => dati.allocazioni.filter((a) => a.risorsa_id === id).length;
-            const tutte = dati.risorse;
-            const l = soloAllocate ? tutte.filter((r) => nAll(r.id) > 0) : tutte;
-            const ass = (id) => dati.assenze.filter((a) => a.risorsa_id === id && a.al >= dati.fabbisogno.oggi);
-            const filtro = `<button type="button" class="cap-pers-btn" id="filtroAll" title="${soloAllocate ? `Mostrate solo le persone con allocazioni (${l.length} su ${tutte.length}): clic per vederle tutte` : 'Mostrate tutte le persone: clic per vedere solo quelle con allocazioni'}" style="${soloAllocate ? 'background:#EEF2FF; border-color:#A5B4FC' : ''}"><i class="fas fa-filter"></i>${soloAllocate ? ' &gt; 0' : ''}</button>`;
-            pannello('risorse').innerHTML = `<div class="pm-card">
-                <h2><i class="fas fa-id-badge"></i> Persone pianificabili <span class="azioni"><button class="pm-btn piccolo" id="importaTeam" title="Aggiungi le persone dei team dei tuoi progetti (Kick-off)"><i class="fas fa-file-import"></i> Dal team dei progetti</button><button class="pm-btn piccolo primario" id="nuovaRis"><i class="fas fa-plus"></i> Nuova persona</button></span></h2>
-                <p class="pm-nota" style="margin-top:0">Inserisci solo le persone di cui conosci la disponibilità: non serve che abbiano una licenza Projexa. Il <b>ruolo</b> si sceglie tra le voci di costo del tenant (Configurazione gruppi Billing), così la capacità si confronta con il fabbisogno.</p>
-                ${tutte.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Persona</th><th>Ruolo</th><th class="n">Ore/giorno</th><th class="n">% sui progetti</th><th>Prossime assenze</th><th class="n">Allocazioni ${filtro}</th></tr></thead><tbody>
-                    ${l.length ? '' : `<tr><td colspan="6" class="pm-vuoto">Nessuna persona con allocazioni: clic sul filtro accanto ad «Allocazioni» per vederle tutte (${tutte.length}).</td></tr>`}
-                    ${l.map((r) => `<tr class="click${r.attiva ? '' : ' chiuso'}" data-id="${esc(r.id)}"><td><b>${esc(r.nominativo)}</b>${r.attiva ? '' : ' <span class="pill">non attiva</span>'}${r.email ? `<div class="pm-nota">${esc(r.email)}</div>` : ''}</td><td>${esc(r.ruolo || '–')}</td><td class="n">${fmt(r.ore_giorno)}</td><td class="n">${r.perc_progetti}%</td>
-                        <td>${ass(r.id).slice(0, 3).map((a) => `${dataIt(a.dal)}${a.al !== a.dal ? ` → ${dataIt(a.al)}` : ''}`).join('<br>') || '–'}</td><td class="n">${nAll(r.id) || '–'}</td></tr>`).join('')}
-                    </tbody></table></div>` : '<div class="pm-vuoto">Nessuna persona. Parti da «Dal team dei progetti» o aggiungile a mano.</div>'}
-            </div>`;
-            pannello('risorse').querySelector('#filtroAll')?.addEventListener('click', () => { soloAllocate = !soloAllocate; renderRisorse(); });
-            pannello('risorse').querySelector('#nuovaRis').addEventListener('click', () => formRisorsa({}));
-            pannello('risorse').querySelector('#importaTeam').addEventListener('click', importaTeam);
-            pannello('risorse').querySelectorAll('tr.click').forEach((tr) => tr.addEventListener('click', () => formRisorsa(l.find((x) => x.id === tr.dataset.id))));
-        }
-        let ruoliNoti = null;
-        async function elencoRuoli() {
-            if (!ruoliNoti) { try { ruoliNoti = (await api('/capacita/proposte')).ruoli; } catch (e) { ruoliNoti = []; } }
-            // Ruoli = voci di costo del tenant (Configurazione gruppi Billing); solo se il tenant
-            // non ne ha, i ruoli del fabbisogno.
-            const da = new Set(ruoliNoti.length ? ruoliNoti : dati.fabbisogno.ruoli.map((r) => r.ruolo));
-            return [...da].sort((a, b) => a.localeCompare(b, 'it'));
-        }
-        // Menu a tendina del ruolo: tutte le voci (un ruolo già salvato fuori elenco resta scelto).
-        function selectRuolo(attr, ruoli, valore) {
-            const v = String(valore || '').trim();
-            const extra = v && !ruoli.some((r) => r.toLowerCase() === v.toLowerCase()) ? [v] : [];
-            return `<select ${attr}><option value="">— scegli il ruolo —</option>${[...ruoli, ...extra].map((r) => `<option value="${esc(r)}" ${r.toLowerCase() === v.toLowerCase() ? 'selected' : ''}>${esc(r)}${extra.includes(r) ? ' (non tra le voci del tenant)' : ''}</option>`).join('')}</select>`;
-        }
-        async function formRisorsa(x) {
-            const ruoli = await elencoRuoli();
-            const nuovo = !x.id;
-            const sola = !nuovo && x.puoModificare === false;
-            const assL = nuovo ? [] : dati.assenze.filter((a) => a.risorsa_id === x.id);
+        // ================= ASSENZE (clic sul nome nel Carico) =================
+        // Ferie, permessi…: la persona risulta «non disponibile» in quei giorni (Carico e Copertura).
+        function finestraAssenze(id) {
+            const r = dati.risorse.find((x) => x.id === id) || dati.carico.persone.find((x) => x.id === id);
+            if (!r) return;
+            const sola = r.puoModificare === false;
+            const assL = dati.assenze.filter((a) => a.risorsa_id === id && a.al >= dati.fabbisogno.oggi).sort((a, b) => a.dal.localeCompare(b.dal));
+            const riapri = async (m) => { m.remove(); await carica(); finestraAssenze(id); };
             const m = modale({
-                titolo: `<i class="fas fa-id-badge"></i> ${nuovo ? 'Nuova persona' : esc(x.nominativo)}`,
-                larga: !nuovo,
-                corpo: `${sola ? '<div class="pm-avviso">Sola lettura.</div>' : ''}<div class="pm-form">
-                    <label>Nominativo<input name="nominativo" value="${esc(x.nominativo || '')}"></label>
-                    <label>Email<input name="email" value="${esc(x.email || '')}"></label>
-                    <label>Ruolo (voce di costo)${selectRuolo('name="ruolo"', ruoli, x.ruolo)}</label>
-                    <label>Ore al giorno<input name="ore_giorno" inputmode="decimal" value="${esc(x.ore_giorno ?? 8)}"></label>
-                    <label>% del tempo sui progetti<input name="perc_progetti" type="number" min="0" max="100" value="${esc(x.perc_progetti ?? 100)}"></label>
-                    <label>Attiva<select name="attiva"><option value="true" ${x.attiva !== false ? 'selected' : ''}>Sì</option><option value="false" ${x.attiva === false ? 'selected' : ''}>No (non conta nella capacità)</option></select></label>
-                    <label class="largo">Note<textarea name="note" style="min-height:45px">${esc(x.note || '')}</textarea></label></div>
-                    ${nuovo ? '' : `<h4 style="margin:1rem 0 0.4rem">Assenze (ferie, permessi…)</h4>
-                    <div data-assenze>${assL.length ? `<table class="pm-t"><tbody>${assL.map((a) => `<tr><td>${dataIt(a.dal)}${a.al !== a.dal ? ` → ${dataIt(a.al)}` : ''}</td><td>${esc(a.nota || '')}</td><td class="n">${sola ? '' : `<button type="button" class="pm-btn piccolo pericolo" data-del-ass="${esc(a.id)}"><i class="fas fa-trash"></i></button>`}</td></tr>`).join('')}</tbody></table>` : '<div class="pm-nota">Nessuna assenza.</div>'}</div>
-                    ${sola ? '' : `<div style="display:flex; gap:0.5rem; align-items:flex-end; flex-wrap:wrap; margin-top:0.5rem">
+                titolo: `<i class="far fa-calendar-xmark"></i> Assenze di ${esc(r.nominativo)}`,
+                corpo: `${sola ? '<div class="pm-avviso">Sola lettura.</div>' : ''}
+                    ${assL.length ? `<table class="pm-t"><tbody>${assL.map((a) => `<tr><td>${dataIt(a.dal)}${a.al !== a.dal ? ` → ${dataIt(a.al)}` : ''}</td><td>${esc(a.nota || '')}</td><td class="n">${sola ? '' : `<button type="button" class="pm-btn piccolo pericolo" data-del-ass="${esc(a.id)}" title="Togli l'assenza"><i class="fas fa-trash"></i></button>`}</td></tr>`).join('')}</tbody></table>` : '<div class="pm-nota">Nessuna assenza da oggi in avanti.</div>'}
+                    ${sola ? '' : `<div style="display:flex; gap:0.5rem; align-items:flex-end; flex-wrap:wrap; margin-top:0.8rem">
                         <label class="pm-nota">Dal<input type="date" class="pm-input" data-ass-dal></label><label class="pm-nota">Al<input type="date" class="pm-input" data-ass-al></label>
                         <label class="pm-nota" style="flex:1">Nota (facoltativa)<input class="pm-input" data-ass-nota placeholder="es. ferie"></label>
-                        <button type="button" class="pm-btn piccolo" data-add-ass><i class="fas fa-plus"></i> Aggiungi assenza</button></div>`}
-                    <p class="pm-nota">Le assenze si vedono solo come «non disponibile»: la nota è facoltativa.</p>`}`,
-                pulsanti: [
-                    ...(!nuovo && !sola ? [{ testo: '<i class="fas fa-trash"></i> Elimina', classe: 'pericolo', azione: async () => {
-                        if (!confirm('Eliminare la persona? Si tolgono anche le sue allocazioni e assenze.')) return false;
-                        await api(`/capacita/risorse/${encodeURIComponent(x.id)}`, { metodo: 'DELETE' }); toast('Persona eliminata'); carica();
-                    } }] : []),
-                    { testo: 'Chiudi' },
-                    ...(!sola ? [{ testo: '<i class="fas fa-floppy-disk"></i> Salva', classe: 'primario', azione: async (mm) => {
-                        const v = valori(mm.querySelector('.pm-form'));
-                        v.attiva = v.attiva === 'true';
-                        if (!v.nominativo.trim()) throw new Error('Il nominativo è obbligatorio');
-                        if (nuovo) await api('/capacita/risorse', { metodo: 'POST', corpo: v }); else await api(`/capacita/risorse/${encodeURIComponent(x.id)}`, { metodo: 'PUT', corpo: v });
-                        toast('Persona salvata'); carica();
-                    } }] : [])
-                ]
+                        <button type="button" class="pm-btn piccolo primario" data-add-ass><i class="fas fa-plus"></i> Aggiungi</button></div>`}
+                    <p class="pm-nota">Nei giorni di assenza la persona non è disponibile: il Carico e la Copertura ne tengono conto. La nota è facoltativa.</p>`,
+                pulsanti: [{ testo: 'Chiudi' }]
             });
-            if (sola) m.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; });
             m.querySelector('[data-add-ass]')?.addEventListener('click', async () => {
                 const dal = m.querySelector('[data-ass-dal]').value, al = m.querySelector('[data-ass-al]').value || dal;
                 if (!dal) { toast('Indica la data di inizio dell\'assenza', 'errore'); return; }
-                try { await api('/capacita/assenze', { metodo: 'POST', corpo: { risorsa_id: x.id, dal, al, nota: m.querySelector('[data-ass-nota]').value } }); toast('Assenza aggiunta'); m.remove(); await carica(); formRisorsa(dati.risorse.find((r) => r.id === x.id)); }
+                if (al < dal) { toast('La fine non può essere prima dell\'inizio', 'errore'); return; }
+                try { await api('/capacita/assenze', { metodo: 'POST', corpo: { risorsa_id: id, dal, al, nota: m.querySelector('[data-ass-nota]').value } }); toast('Assenza aggiunta'); await riapri(m); }
                 catch (e) { toast(e.message, 'errore'); }
             });
             m.querySelectorAll('[data-del-ass]').forEach((b) => b.addEventListener('click', async () => {
-                try { await api(`/capacita/assenze/${encodeURIComponent(b.dataset.delAss)}`, { metodo: 'DELETE' }); m.remove(); await carica(); formRisorsa(dati.risorse.find((r) => r.id === x.id)); }
+                try { await api(`/capacita/assenze/${encodeURIComponent(b.dataset.delAss)}`, { metodo: 'DELETE' }); toast('Assenza tolta'); await riapri(m); }
                 catch (e) { toast(e.message, 'errore'); }
             }));
-        }
-        async function importaTeam() {
-            let p;
-            try { p = await api('/capacita/proposte'); } catch (e) { toast(e.message, 'errore'); return; }
-            ruoliNoti = p.ruoli;
-            const ruoli = await elencoRuoli();
-            if (!p.persone.length) { toast('Nessuna persona nuova nei team dei tuoi progetti'); return; }
-            modale({
-                titolo: '<i class="fas fa-file-import"></i> Persone dai team dei progetti',
-                larga: true,
-                corpo: `<p class="pm-nota" style="margin-top:0">Spunta solo le persone di cui conosci la disponibilità. Il ruolo è già proposto dalla voce che la persona ha nel team dei progetti (la più frequente): cambialo se serve. Ore al giorno 8 e 100% sui progetti: si cambiano dopo.</p>
-                    <div class="pm-scroll" style="max-height:420px"><table class="pm-t"><thead><tr><th></th><th>Persona</th><th>Ruolo</th></tr></thead><tbody>
-                    ${p.persone.map((x, i) => `<tr><td><input type="checkbox" data-i="${i}"></td><td><b>${esc(x.nominativo)}</b><div class="pm-nota">${esc(x.email || '')}</div></td><td>${selectRuolo(`class="pm-input" data-ruolo="${i}"`, ruoli, x.ruolo)}</td></tr>`).join('')}
-                    </tbody></table></div>`,
-                pulsanti: [{ testo: 'Annulla' }, { testo: '<i class="fas fa-plus"></i> Aggiungi le selezionate', classe: 'primario', azione: async (mm) => {
-                    const sel = [...mm.querySelectorAll('input[data-i]:checked')].map((c) => Number(c.dataset.i));
-                    if (!sel.length) throw new Error('Spunta almeno una persona');
-                    for (const i of sel) await api('/capacita/risorse', { metodo: 'POST', corpo: { ...p.persone[i], ruolo: mm.querySelector(`[data-ruolo="${i}"]`).value } });
-                    toast(`${sel.length} persone aggiunte`); carica();
-                } }]
-            });
-        }
-
-        // ================= ALLOCAZIONI =================
-        function renderAllocazioni() {
-            const l = dati.allocazioni;
-            const oggi = dati.fabbisogno.oggi;
-            pannello('allocazioni').innerHTML = `<div class="pm-card">
-                <h2><i class="fas fa-user-clock"></i> Allocazioni persona × progetto <span class="azioni"><button class="pm-btn piccolo" id="proposteAll" title="Proponi le allocazioni dalle persone dei team dei progetti già presenti tra le Risorse"><i class="fas fa-file-import"></i> Dai team dei progetti</button><button class="pm-btn piccolo primario" id="nuovaAll"><i class="fas fa-plus"></i> Nuova allocazione</button></span></h2>
-                <p class="pm-nota" style="margin-top:0">Quanta parte del suo tempo una persona dedica a un progetto e in quale periodo. Si possono inserire anche dal Cruscotto PM del progetto, scheda Risorse.</p>
-                ${l.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Persona</th><th>Progetto</th><th class="n">%</th><th>Dal</th><th>Al</th><th>Note</th></tr></thead><tbody>
-                    ${l.map((a) => `<tr class="click${a.al < oggi ? ' chiuso' : ''}" data-id="${esc(a.id)}"><td><b>${esc(a.nominativo || '')}</b><div class="pm-nota">${esc(a.ruolo || '')}</div></td><td>${esc(a.cliente ? `${a.cliente} · ` : '')}${esc(a.progetto || '')}</td><td class="n">${a.perc}%</td><td>${dataIt(a.dal)}</td><td>${dataIt(a.al)}${a.al < oggi ? ' <span class="pill">conclusa</span>' : ''}</td><td>${esc(a.note || '')}</td></tr>`).join('')}
-                    </tbody></table></div>` : '<div class="pm-vuoto">Nessuna allocazione.</div>'}
-            </div>`;
-            const salvato = () => carica();
-            pannello('allocazioni').querySelector('#proposteAll').addEventListener('click', proposteAllocazioni);
-            pannello('allocazioni').querySelector('#nuovaAll').addEventListener('click', () => formAllocazione({ risorse: dati.risorse.filter((r) => r.attiva), progetti: dati.progetti, onSalvato: salvato }));
-            pannello('allocazioni').querySelectorAll('tr.click').forEach((tr) => tr.addEventListener('click', () => formAllocazione({ x: l.find((a) => a.id === tr.dataset.id), risorse: dati.risorse, progetti: dati.progetti, onSalvato: salvato })));
         }
 
         // Proposte dai team dei progetti: una riga per persona e progetto, % e date modificabili.
         async function proposteAllocazioni() {
-            if (!dati.risorse.some((r) => r.attiva)) { toast('Prima aggiungi le persone nella scheda Risorse', 'errore'); return; }
             let d;
             try { d = await api('/capacita/proposte-allocazioni'); } catch (e) { toast(e.message, 'errore'); return; }
             const s = d.saltate || {};
             const note = [s.giaAllocate ? `${s.giaAllocate} già allocate` : '', s.senzaFine ? `${s.senzaFine} su progetti senza data di fine valida (campo End o Gantt)` : '', s.ruoloSenzaEffort ? `${s.ruoloSenzaEffort} con un ruolo senza giornate da fare nel progetto` : ''].filter(Boolean);
-            if (!d.proposte.length) { toast(`Nessuna allocazione da proporre${note.length ? `: ${note.join(', ')}` : ': le persone delle Risorse non sono nei team dei progetti con giornate da fare'}`, 'errore'); return; }
+            if (!d.proposte.length) { toast(`Nessuna allocazione da proporre${note.length ? `: ${note.join(', ')}` : ': nessuna persona nei team (Kick-off) dei progetti con giornate da fare'}`, 'errore'); return; }
             modale({
-                titolo: '<i class="fas fa-file-import"></i> Allocazioni dai team dei progetti',
+                titolo: '<i class="fas fa-file-import"></i> Alloca tutti i team',
                 larga: true,
-                corpo: `<p class="pm-nota" style="margin-top:0">Persone delle Risorse presenti nel team (Kick-off) dei progetti con giornate ancora da fare. La percentuale è una stima: giornate da fare per il ruolo della persona, divise tra i colleghi del team con lo stesso ruolo, sui giorni disponibili fino alla fine del progetto. Correggi e spunta quelle da salvare.${note.length ? `<br>Non proposte: ${esc(note.join('; '))}.` : ''}</p>
+                corpo: `<p class="pm-nota" style="margin-top:0">Persone del team (Kick-off) dei progetti con giornate ancora da fare, con il loro ruolo nel progetto. La percentuale è una stima: giornate da fare per il ruolo della persona, divise tra i colleghi del team con lo stesso ruolo, sui giorni disponibili fino alla fine del progetto. Correggi e spunta quelle da salvare.${note.length ? `<br>Non proposte: ${esc(note.join('; '))}.` : ''}</p>
                     <div class="pm-scroll" style="max-height:440px"><table class="pm-t"><thead><tr><th><input type="checkbox" data-tutte checked title="Tutte"></th><th>Persona</th><th>Progetto</th><th class="n">Giornate</th><th>%</th><th>Dal</th><th>Al</th></tr></thead><tbody>
                     ${d.proposte.map((x, i) => `<tr><td><input type="checkbox" data-i="${i}" checked></td><td><b>${esc(x.nominativo)}</b><div class="pm-nota">${esc(x.ruolo)}</div></td>
                         <td>${esc(x.cliente ? `${x.cliente} · ` : '')}${esc(x.progetto)}</td>
@@ -360,7 +388,10 @@
                     let fatte = 0;
                     for (const i of sel) {
                         const x = d.proposte[i];
-                        await api('/capacita/allocazioni', { metodo: 'POST', corpo: { risorsa_id: x.risorsa_id, projectId: x.projectId, perc: mm.querySelector(`[data-perc="${i}"]`).value, dal: mm.querySelector(`[data-dal="${i}"]`).value, al: mm.querySelector(`[data-al="${i}"]`).value, note: 'Dal team del progetto' } });
+                        const v = { perc: mm.querySelector(`[data-perc="${i}"]`).value, dal: mm.querySelector(`[data-dal="${i}"]`).value, al: mm.querySelector(`[data-al="${i}"]`).value };
+                        // Persona non ancora tra le risorse: la crea il server insieme all'allocazione.
+                        if (x.risorsa_id) await api('/capacita/allocazioni', { metodo: 'POST', corpo: { risorsa_id: x.risorsa_id, projectId: x.projectId, ...v, note: 'Dal team del progetto' } });
+                        else await api('/capacita/progetto/alloca', { metodo: 'POST', corpo: { projectId: x.projectId, persone: [{ nominativo: x.nominativo, email: x.email, ruolo: x.ruolo, ...v }] } });
                         fatte += 1;
                     }
                     toast(`${fatte} allocazioni salvate`); carica();
@@ -373,6 +404,7 @@
         document.getElementById('aggiorna').addEventListener('click', carica);
         document.getElementById('orizzonte').addEventListener('change', carica);
         if (qs.get('scheda') && pannello(qs.get('scheda'))) apriTab(qs.get('scheda'));
+        else if (qs.get('scheda')) apriTab('copertura'); // vecchie schede Risorse/Allocazioni
         carica();
     })();
     </script>

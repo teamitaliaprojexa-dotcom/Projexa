@@ -372,11 +372,12 @@ function isAdminUser(req) {
 //   - table_structures: quali tabelle sono modificabili dal form generico;
 //   - kpi_tab/function_db: contengono SQL e istruzioni eseguite dal server;
 //   - tipo_valore: quali tipi di campo può configurare ciascun ruolo;
-//   - conf_worker_cost: voci di costo predefinite del tenant (vedi TENANT_ADMIN_TABLES).
-const ROLE_PROTECTED_TABLES = new Set(['user_tenants', 'roles', 'table_structures', 'kpi_tab', 'function_db', 'tipo_valore', 'conf_worker_cost']);
+//   - conf_worker_cost: voci di costo predefinite del tenant (vedi TENANT_ADMIN_TABLES);
+//   - release_prodotto: release del prodotto con la data di rilascio (KPI «Rilascio release»).
+const ROLE_PROTECTED_TABLES = new Set(['user_tenants', 'roles', 'table_structures', 'kpi_tab', 'function_db', 'tipo_valore', 'conf_worker_cost', 'release_prodotto']);
 // Configurazioni del tenant senza user_id: nelle griglie tipo 11 si filtrano solo per
 // tenant e sono visibili (non solo modificabili) esclusivamente all'Admin.
-const TENANT_ADMIN_TABLES = new Set(['conf_worker_cost']);
+const TENANT_ADMIN_TABLES = new Set(['conf_worker_cost', 'release_prodotto']);
 function assertCanReadTenantAdminTable(req, tableName) {
   if (TENANT_ADMIN_TABLES.has(String(tableName || '').toLowerCase()) && !isAdminUser(req)) {
     throw Object.assign(new Error('Tabella riservata all\'amministratore'), { statusCode: 403 });
@@ -5589,6 +5590,51 @@ app.get('/api/dashboard/kpis/:id/detail', requireAuth, async (req, res) => {
   }
 });
 
+// KPI RILASCI (sezione in fondo alla dashboard, Preferenze › «Mostra kpi Rilasci»): task Jira
+// (task_app) aperti con la versione della PROSSIMA release del tenant (vista release_prossima:
+// prima release_prodotto con data di rilascio da oggi, Supporto/CreaDB/release_prodotto.sql).
+// Filtro clienti della dashboard facoltativo (clientId). ?release=5.28 = un'altra release
+// dell'elenco (scelta nel riquadro); senza, la prossima. «releases» = tutte quelle del tenant
+// con data, con il numero di task aperti di ognuna (pulsanti e frecce di scelta).
+app.get('/api/dashboard/rilasci', requireAuth, async (req, res) => {
+  try {
+    const vista = (await db.query(`SELECT to_regclass('release_prossima') IS NOT NULL AS ok`)).rows[0];
+    if (!vista.ok) return res.json({ release: null, items: [], releases: [], nota: 'Va eseguito lo script Supporto/CreaDB/release_prodotto.sql' });
+    const releases = (await db.query(
+      `SELECT x."release", x.data_release::text AS data_release,
+              (SELECT count(*)::int FROM task_app t WHERE t.tenant_id = $1 AND t.user_id = $2 AND BTRIM(t.versione) = x."release" AND t.scadenza >= CURRENT_DATE) AS task
+         FROM (SELECT BTRIM(r."release") AS "release", MIN(r.data_release) AS data_release
+                 FROM release_prodotto r
+                WHERE r.tenant_id = $1 AND r.data_release IS NOT NULL AND NULLIF(BTRIM(r."release"), '') IS NOT NULL
+                  AND (r.scadenza IS NULL OR r.scadenza >= CURRENT_DATE)
+                GROUP BY BTRIM(r."release")) x
+        ORDER BY x.data_release, x."release"`,
+      [req.user.tenant_id, req.user.user_id])).rows;
+    const prossima = (await db.query(`SELECT "release" FROM release_prossima WHERE tenant_id = $1`, [req.user.tenant_id])).rows[0];
+    const chiesta = String(req.query.release || '').trim();
+    const rel = (chiesta && releases.find((r) => r.release === chiesta)) || (prossima && releases.find((r) => r.release === prossima.release)) || null;
+    const base = { releases, prossima: prossima ? prossima.release : null };
+    if (!rel) return res.json({ ...base, release: null, items: [] });
+    const params = [req.user.tenant_id, req.user.user_id, rel.release];
+    const clientIds = parseClientIdsFromQuery(req);
+    const rows = (await db.query(
+      `SELECT client_id::text AS client_id, project_id::text AS project_id, cod_task, link_task, descrizione, versione, stato, assegnatario
+         FROM task_app
+        WHERE tenant_id = $1 AND user_id = $2 AND BTRIM(versione) = $3 AND scadenza >= CURRENT_DATE
+          ${clientIds.length ? `AND client_id::text = ANY($${params.push(clientIds)}::text[])` : ''}`, params)).rows;
+    const clienti = await resolveClientDescriptions(rows.map((r) => r.client_id), req.user.tenant_id).catch(() => new Map());
+    const progetti = await resolveProjectDescriptions(rows.map((r) => r.project_id), req.user.tenant_id, req.user.user_id).catch(() => new Map());
+    const items = rows.map((r) => {
+      const p = r.project_id ? progetti.get(String(r.project_id)) : null;
+      return { ...r, cliente: clienti.get(String(r.client_id)) || null, progetto: p ? p.name : null, project_id: p ? String(p.id) : r.project_id };
+    }).sort((a, b) => String(a.cliente || '~').localeCompare(String(b.cliente || '~'), 'it') || String(a.cod_task).localeCompare(String(b.cod_task), 'it'));
+    res.json({ ...base, release: rel.release, data_release: rel.data_release, items });
+  } catch (error) {
+    console.error('[KPI RILASCI]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Dynamic Generic Table Routes - reads from table_structures
 // Supporta filtri per colonna: qualsiasi query param con chiave = nome di una colonna
 // filtra quella colonna con ILIKE %valore% (case-insensitive, ricerca parziale).
@@ -9457,10 +9503,14 @@ const DASHBOARD_FLAGS = {
   reporting: 'mostra reporting',
   registra: 'mostra registra',
   // Capacità e allocazione risorse (facoltativa, config/capacita.js): voce «Capacità» del menu.
-  capacita: 'capacità e allocazione risorse'
+  capacita: 'capacità e allocazione risorse',
+  // Sezioni KPI in fondo alla dashboard (2026-10-16).
+  kpiGestioneProgetto: 'mostra kpi gestione progetto',
+  kpiOfferte: 'mostra kpi offerte e ordini',
+  kpiRilasci: 'mostra kpi rilasci'
 };
 // Flag che senza riga in settings valgono false (moduli nuovi, da attivare esplicitamente).
-const DASHBOARD_FLAGS_DEFAULT_OFF = new Set(['reporting', 'capacita']);
+const DASHBOARD_FLAGS_DEFAULT_OFF = new Set(['reporting', 'capacita', 'kpiRilasci']);
 async function readDashboardFlags(user) {
   const r = await db.query(
     `SELECT LOWER(REGEXP_REPLACE(BTRIM(campo), '^\\(\\*\\)\\s*', '')) AS campo, valore1

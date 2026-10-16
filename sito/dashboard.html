@@ -2063,6 +2063,83 @@
         .ms-ap-track { height: 12px; border-radius: 999px; background: #f1f5f9; overflow: hidden; }
         .ms-ap-bar { height: 100%; min-width: 4px; border-radius: 999px; background: var(--c); }
         .ms-ap-n { font-size: 0.8rem; font-weight: 700; color: var(--dark); text-align: right; font-variant-numeric: tabular-nums; }
+        /* KPI Rilascio release (v2): banner con conto alla rovescia, scelta della release,
+           riepilogo per stato e tabella con badge. Palette viola/indaco. */
+        .rel-head { display: inline-flex; align-items: baseline; gap: 0.6rem; padding: 0.45rem 1.2rem; border-radius: 999px; background: #F5F3FF; color: #5B21B6; font-weight: 700; font-size: 1.2rem; }
+        .rel-head small { font-weight: 500; font-size: 0.95rem; color: #7C3AED; }
+        .rel-hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1.5rem; align-items: center; padding: 1.5rem 1.75rem; border-radius: 18px; color: #fff;
+            background: radial-gradient(circle at 85% 20%, rgba(255,255,255,0.18), transparent 45%), linear-gradient(120deg, #4F46E5 0%, #7C3AED 55%, #A855F7 100%);
+            box-shadow: 0 12px 30px -12px rgba(91, 33, 182, 0.55); margin-bottom: 1.1rem; }
+        .rel-hero.passata { background: linear-gradient(120deg, #475569 0%, #64748B 100%); box-shadow: 0 12px 30px -14px rgba(51, 65, 85, 0.5); }
+        .rel-hero .eti { font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.85; font-weight: 600; }
+        .rel-hero .ver { font-size: 2.6rem; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; margin: 0.15rem 0 0.35rem; }
+        .rel-hero .ver-riga { display: flex; align-items: baseline; gap: 1.1rem; flex-wrap: wrap; margin: 0.15rem 0 0.2rem; }
+        .rel-hero .ver-riga .ver { margin: 0; }
+        /* Frecce su/giù accanto al numero della release (data prima / data dopo) */
+        .rel-frecce { display: inline-flex; flex-direction: column; gap: 3px; align-self: center; margin-left: -0.5rem; }
+        .rel-freccia { width: 26px; height: 22px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.35); background: rgba(255,255,255,0.15); color: #fff; font-size: 0.7rem; cursor: pointer; display: grid; place-items: center; padding: 0; transition: background .15s ease, transform .15s ease; }
+        .rel-freccia:hover:not(:disabled) { background: rgba(255,255,255,0.32); transform: scale(1.08); }
+        .rel-freccia:disabled { opacity: 0.3; cursor: default; }
+        .rel-hero .ver-riga .stati { margin-top: 0; align-self: baseline; } /* stessa linea di base del numero e della data */
+        .rel-hero .quando { font-size: 1.05rem; opacity: 0.95; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+        .rel-hero .stati { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+        .rel-hero .stati span { background: rgba(255,255,255,0.16); border: 1px solid rgba(255,255,255,0.28); padding: 0.3rem 0.75rem; border-radius: 999px; font-size: 0.85rem; backdrop-filter: blur(4px); }
+        .rel-hero .stati b { font-weight: 800; margin-right: 0.25rem; }
+        .rel-count { width: 132px; height: 132px; border-radius: 50%; display: grid; place-items: center; text-align: center;
+            background: conic-gradient(#fff var(--p, 0%), rgba(255,255,255,0.22) 0); padding: 9px; }
+        .rel-count > div { width: 100%; height: 100%; border-radius: 50%; background: rgba(76, 29, 149, 0.55); display: grid; place-content: center; }
+        .rel-count b { font-size: 2.3rem; font-weight: 800; line-height: 1; }
+        .rel-count small { font-size: 0.78rem; opacity: 0.9; margin-top: 0.2rem; }
+        .rel-scelta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 1.1rem; }
+        .rel-scelta .lab { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-right: 0.2rem; }
+        .rel-chip { display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.9rem; border-radius: 12px; border: 1px solid #E0E7FF; background: #fff; color: #3730A3; font: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all .15s ease; }
+        .rel-chip small { font-weight: 500; color: #6B7280; font-size: 0.78rem; }
+        .rel-chip .n { background: #EEF2FF; color: #4338CA; border-radius: 999px; padding: 0 0.45rem; font-size: 0.75rem; }
+        .rel-chip:hover { border-color: #A5B4FC; box-shadow: 0 4px 12px -6px rgba(79, 70, 229, 0.45); transform: translateY(-1px); }
+        .rel-chip.on { background: linear-gradient(120deg, #4F46E5, #7C3AED); color: #fff; border-color: transparent; box-shadow: 0 6px 16px -8px rgba(91, 33, 182, 0.8); }
+        .rel-chip.on small { color: rgba(255,255,255,0.85); } .rel-chip.on .n { background: rgba(255,255,255,0.22); color: #fff; }
+        .rel-chip.passata:not(.on) { color: #64748B; border-color: #E5E7EB; background: #F8FAFC; }
+        .rel-chip .prox { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; background: #DCFCE7; color: #166534; border-radius: 6px; padding: 0.05rem 0.35rem; }
+        .rel-chip.on .prox { background: rgba(255,255,255,0.25); color: #fff; }
+        .rel-torna { margin-left: auto; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.95rem; border-radius: 12px; border: 1px dashed #A78BFA; background: #FAF5FF; color: #6D28D9; font: inherit; font-size: 0.88rem; font-weight: 600; cursor: pointer; }
+        .rel-torna:hover { background: #F3E8FF; }
+        /* Scelta della release dentro il banner: chip bianchi trasparenti, quella scelta piena */
+        .rel-hero .rel-scelta { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 0 0.6rem; align-self: baseline; } /* stessa linea di base di task e completati */
+        .rel-hero .rel-chip { background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.4); color: #fff; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+        .rel-hero .rel-chip small { color: rgba(255,255,255,0.8); }
+        .rel-hero .rel-chip .n { background: rgba(255,255,255,0.22); color: #fff; }
+        .rel-hero .rel-chip:hover { background: rgba(255,255,255,0.28); border-color: #fff; box-shadow: none; }
+        .rel-hero .rel-chip.on { background: #fff; color: #5B21B6; border-color: #fff; box-shadow: 0 6px 16px -8px rgba(0,0,0,0.35); }
+        .rel-hero .rel-chip.on small { color: #7C3AED; } .rel-hero .rel-chip.on .n { background: #EDE9FE; color: #5B21B6; }
+        .rel-hero .rel-chip .prox { background: rgba(255,255,255,0.25); color: #fff; } .rel-hero .rel-chip.on .prox { background: #DCFCE7; color: #166534; }
+        .rel-hero .rel-torna { margin-left: 0; align-self: baseline; background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.5); color: #fff; }
+        .rel-hero .rel-torna:hover { background: rgba(255,255,255,0.3); }
+        .rel-tab { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.95rem; }
+        .rel-tab th { text-align: left; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; color: #6B7280; padding: 0.7rem 0.8rem; background: #F9FAFB; border-bottom: 1px solid var(--border); }
+        .rel-tab th:first-child { border-top-left-radius: 10px; } .rel-tab th:last-child { border-top-right-radius: 10px; }
+        .rel-tab td { padding: 0.75rem 0.8rem; border-bottom: 1px solid #F1F5F9; vertical-align: middle; }
+        .rel-tab tbody tr { transition: background .12s ease; }
+        .rel-tab tbody tr:hover td { background: #F8F7FF; }
+        .rel-tab a { color: #4F46E5; text-decoration: none; font-weight: 600; }
+        .rel-tab a:hover { text-decoration: underline; }
+        .rel-cli { display: flex; align-items: center; gap: 0.6rem; font-weight: 600; color: var(--dark); }
+        .rel-av { flex: none; width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; font-size: 0.75rem; font-weight: 800; color: #fff; }
+        .rel-task { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.6rem; border-radius: 8px; background: #EEF2FF; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.85rem; }
+        .rel-nop { color: #CBD5E1; }
+        .rel-ver { font-weight: 700; color: #6D28D9; }
+        .rel-stato { display: inline-block; padding: 0.22rem 0.65rem; border-radius: 999px; font-size: 0.78rem; font-weight: 700; white-space: nowrap; }
+        .rel-stato.ok { background: #DCFCE7; color: #166534; } .rel-stato.test { background: #DBEAFE; color: #1E40AF; }
+        .rel-stato.att { background: #FEF3C7; color: #92400E; } .rel-stato.ko { background: #FEE2E2; color: #991B1B; }
+        .rel-stato.todo { background: #F1F5F9; color: #475569; }
+        /* Task completati: spunta verde accanto allo stato e riga appena evidenziata */
+        .rel-stato-cell { display: inline-flex; align-items: center; gap: 0.5rem; }
+        .rel-fatto { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 0.72rem;
+            background: linear-gradient(135deg, #34D399, #059669); box-shadow: 0 0 0 3px #D1FAE5, 0 4px 10px -3px rgba(5, 150, 105, 0.6); animation: relPop .45s cubic-bezier(.34,1.56,.64,1) both; }
+        @keyframes relPop { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        .rel-tab tbody tr.rel-ok td { background: linear-gradient(90deg, rgba(220, 252, 231, 0.35), transparent 60%); }
+        .rel-tab tbody tr.rel-ok:hover td { background: #F0FDF4; }
+        .rel-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; }
+        @media (max-width: 760px) { .rel-hero { grid-template-columns: 1fr; } .rel-count { width: 104px; height: 104px; } .rel-hero .ver { font-size: 2rem; } .rel-torna { margin-left: 0; } }
         .gp-card { margin-bottom: 3rem; background: white; padding: 1.75rem 2rem 2rem; border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04); }
         .gp-legend { display: flex; gap: 0.9rem; flex-wrap: wrap; font-size: 0.75rem; color: var(--text-muted); }
         .gp-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
@@ -2837,6 +2914,14 @@
         .recap-task-del:hover { color: #B91C1C; }
         .recap-task-exists { display: inline-block; margin-top: 0.25rem; font-size: 0.72rem; color: #B45309; }
         .recap-tasks-head { display: grid; grid-template-columns: 1.4rem minmax(0, 1fr) 9.5rem 1.8rem; gap: 0.6rem; font-size: 0.72rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
+        /* Azioni a carico del cliente nella stessa finestra: in più la colonna Referente */
+        .recap-tasks-sez { margin: 1.3rem 0 0.3rem; font-size: 0.92rem; font-weight: 700; color: var(--dark); display: flex; gap: 0.5rem; align-items: center; }
+        .recap-tasks-sez i { color: #6366F1; }
+        .recap-tasks-nota { font-size: 0.78rem; color: var(--text-muted); margin: 0 0 0.6rem; line-height: 1.5; }
+        .recap-task-row.cli, .recap-tasks-head.cli { grid-template-columns: 1.4rem minmax(0, 1fr) 10rem 9.5rem 1.8rem; }
+        .recap-task-row.cli input[type="checkbox"] { accent-color: #6366F1; }
+        .recap-task-row input.recap-cli-ref { width: 100%; padding: 0.4rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 0.84rem; }
+        .recap-task-row.off input.recap-cli-ref { opacity: 0.5; }
 
         .client-logo-action {
             display: flex;
@@ -4983,8 +5068,8 @@
 
             <!-- KPI OFFERTE E ORDINI: per cliente, i progetti in corso con offerta inviata e
                  ordine ricevuto, per sapere a chi sollecitare l'ordine (serve per fatturare).
-                 Visibile insieme a Gestione Progetto (stesso interruttore delle Preferenze). -->
-            <div data-dash-flag="kpiGestioneProgetto" class="gp-card" id="gpoCard">
+                 Interruttore delle Preferenze «Mostra kpi Offerte e ordini». -->
+            <div data-dash-flag="kpiOfferte" class="gp-card" id="gpoCard">
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
                     <div class="section-title" style="margin: 0;">
                         <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--primary);"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v.5l8 5 8-5V6H4Zm16 2.85-7.47 4.67a1 1 0 0 1-1.06 0L4 8.85V18h16V8.85Z"/></svg>
@@ -5019,6 +5104,20 @@
                     </div>
                 </div>
                 <div id="msApContent" class="gp-content"><div class="gp-empty">Caricamento…</div></div>
+            </div>
+
+            <!-- KPI RILASCI: task Jira aperti con la versione della prossima release del prodotto
+                 (Impostazioni › Release di prodotto, solo Admin). Preferenze › «Mostra kpi Rilasci».
+                 API /api/dashboard/rilasci (backend/server.js). -->
+            <div data-dash-flag="kpiRilasci" class="gp-card dash-flag-off" id="relCard">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                    <div class="section-title" style="margin: 0;">
+                        <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: #7C3AED;"><path d="M12 2c3.5 2 5.5 5.6 5.5 9.5 0 1.3-.2 2.5-.6 3.6l2.6 2.6-1.4 1.4-2.1-2.1A8 8 0 0 1 12 19a8 8 0 0 1-4-2.1l-2.1 2.1-1.4-1.4 2.6-2.6c-.4-1.1-.6-2.3-.6-3.6C6.5 7.6 8.5 4 12 2Zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm-2 13h4v1.5h-4V21Z"/></svg>
+                        Rilascio release
+                    </div>
+                    <div class="gp-legend" id="relInfo"></div>
+                </div>
+                <div id="relContent" class="gp-content"><div class="gp-empty">Caricamento…</div></div>
             </div>
 
         </div>
@@ -5412,6 +5511,11 @@
                     value = new Date(raw).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' });
                 } else if (typeof raw === 'object') value = JSON.stringify(raw);
                 const label = key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+                // Indirizzi web (es. link del task Jira): cliccabili, in una nuova scheda.
+                if (typeof value === 'string' && /^https?:\/\/\S+$/i.test(value.trim())) {
+                    parts.push(`<span><strong>${escapeHtml(label)}:</strong> <a href="${escapeHtml(value.trim())}" target="_blank" rel="noopener" class="kpi-item-link">${escapeHtml(value.trim())}</a></span>`);
+                    continue;
+                }
                 parts.push(`<span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</span>`);
             }
             return parts.length ? `<div class="kpi-item-extra">${parts.join('')}</div>` : '';
@@ -5459,8 +5563,10 @@
                     closeKpiModal();
                     openProjectDetail(projectId, name, clientId);
                 };
-                el.addEventListener('click', open);
+                // Il link (es. task Jira) apre solo la sua pagina, non il progetto.
+                el.addEventListener('click', (e) => { if (!e.target.closest('a')) open(); });
                 el.addEventListener('keydown', (e) => {
+                    if (e.target.closest('a')) return;
                     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
                 });
             });
@@ -6006,6 +6112,120 @@
             }).join('');
             return `<div class="gp-summary">${tiles}</div>`
                 + (cards ? `<div class="gp-grid">${cards}</div>` : '<div class="gp-empty">Nessun progetto in questo stato.</div>');
+        }
+
+        // === KPI RILASCIO RELEASE ===
+        // Task Jira aperti con la versione di una release (release_prodotto). Di default la
+        // prossima; i pulsanti scelgono un'altra release e «Torna alla prossima» la ripristina.
+        // Solo con Preferenze › «Mostra kpi Rilasci»: la sezione nascosta non interroga il server.
+        let relScelta = null; // null = la prossima release
+        function relClasseStato(st) {
+            const v = String(st || '').toLowerCase();
+            if (/rifiut|annull|cancel|won.?t/.test(v)) return 'ko';
+            // Spunta verde solo per i task davvero chiusi (Completata, Done, Chiusa, Risolta, Rilasciata);
+            // «DEV Completed» è solo sviluppo finito: va con i test.
+            if (/^(completat[ao]|completed|done|chius[ao]|risolt[ao]|rilasciat[ao])$/.test(v.trim())) return 'ok';
+            if (/test|verific|collaud|dev complet/.test(v)) return 'test';
+            if (/sospes|bloc|attesa|hold/.test(v)) return 'att';
+            return 'todo';
+        }
+        const REL_COLORI = ['#4F46E5', '#7C3AED', '#DB2777', '#0891B2', '#059669', '#D97706', '#DC2626', '#2563EB'];
+        function relAvatar(nome) {
+            const n = String(nome || '?').trim();
+            const ini = n.split(/\s+/).filter((p) => /[A-Za-zÀ-ÿ]/.test(p)).slice(0, 2).map((p) => p[0]).join('').toUpperCase() || '?';
+            let h = 0; for (const c of n) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+            return `<span class="rel-av" style="background:${REL_COLORI[h % REL_COLORI.length]}">${escapeHtml(ini)}</span>`;
+        }
+        async function loadKpiRilasci() {
+            const card = document.getElementById('relCard');
+            const box = document.getElementById('relContent');
+            const info = document.getElementById('relInfo');
+            if (!card || !box || card.classList.contains('dash-flag-off')) return;
+            try {
+                const p = new URLSearchParams(buildKpiQueryString());
+                if (relScelta) p.set('release', relScelta);
+                const qs = p.toString();
+                const res = await fetch(`${API_URL}/dashboard/rilasci${qs ? `?${qs}` : ''}`, { headers: getAuthHeaders() });
+                const d = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(d.error || `Errore ${res.status}`);
+                const dataIt = (v) => v ? String(v).slice(0, 10).split('-').reverse().join('/') : '';
+                const oggi = new Date().toISOString().slice(0, 10);
+                const gg = (v) => Math.round((Date.parse(`${v}T12:00:00Z`) - Date.parse(`${oggi}T12:00:00Z`)) / 86400000);
+                const releases = d.releases || [];
+                if (!d.release) {
+                    info.innerHTML = '';
+                    box.innerHTML = `<div class="gp-empty">${escapeHtml(d.nota || 'Nessuna release con data di rilascio da oggi in avanti: l\'Admin la inserisce in Impostazioni › Gestione Progetti › Release di prodotto.')}</div>`;
+                    return;
+                }
+                const giorni = gg(d.data_release);
+                const passata = giorni < 0;
+                const nTask = d.items.length;
+                info.innerHTML = ''; // release, data e task sono già nel banner
+                // Riepilogo per stato e avanzamento (task completati sul totale) per l'anello.
+                const fatti = d.items.filter((x) => relClasseStato(x.stato) === 'ok').length;
+                const perc = nTask ? Math.round((fatti / nTask) * 100) : 0;
+                // Elenco sopra il banner: solo le release con almeno un task (scelta dell'utente);
+                // le altre si raggiungono con le frecce accanto al numero. Fuori dalla prossima
+                // compare «Torna alla prossima» nel banner.
+                // Senza la release già mostrata nel banner (sarebbe ridondante).
+                const conTask = releases.filter((r) => r.task > 0 && r.release !== d.release);
+                const scelta = conTask.length ? `<span class="rel-scelta" title="Release con task">
+                        ${conTask.map((r) => `<button type="button" class="rel-chip${r.release === d.release ? ' on' : ''}${gg(r.data_release) < 0 ? ' passata' : ''}" data-rel-scegli="${escapeHtml(r.release)}" title="Rilascio ${dataIt(r.data_release)}">
+                            ${escapeHtml(r.release)} <small>${dataIt(r.data_release).slice(0, 5)}</small> <span class="n">${r.task}</span>${r.release === d.prossima ? '<span class="prox">prossima</span>' : ''}</button>`).join('')}</span>` : '';
+                const torna = d.prossima && d.release !== d.prossima
+                    ? `<button type="button" class="rel-torna" data-rel-torna><i class="fas fa-rotate-left"></i> Torna alla prossima (${escapeHtml(d.prossima)})</button>` : '';
+                // Frecce accanto al numero: su = release con la data prima, giù = quella dopo
+                // (releases arriva ordinato per data di rilascio).
+                const pos = releases.findIndex((r) => r.release === d.release);
+                const prima = pos > 0 ? releases[pos - 1] : null;
+                const dopo = pos >= 0 && pos < releases.length - 1 ? releases[pos + 1] : null;
+                const freccia = (r, icona, testo, manca) => r
+                    ? `<button type="button" class="rel-freccia" data-rel-scegli="${escapeHtml(r.release)}" title="${testo}: ${escapeHtml(r.release)} (${dataIt(r.data_release)})" aria-label="${testo}: ${escapeHtml(r.release)}"><i class="fas ${icona}"></i></button>`
+                    : `<button type="button" class="rel-freccia" disabled title="${manca}" aria-label="${manca}"><i class="fas ${icona}"></i></button>`;
+                const frecce = `<span class="rel-frecce">${freccia(prima, 'fa-chevron-up', 'Release precedente', 'Nessuna release con data prima')}${freccia(dopo, 'fa-chevron-down', 'Release successiva', 'Nessuna release con data dopo')}</span>`;
+                const hero = `<div class="rel-hero${passata ? ' passata' : ''}">
+                        <div>
+                            <div class="eti">${d.release === d.prossima ? 'Prossima release' : passata ? 'Release rilasciata' : 'Release'}</div>
+                            <div class="ver-riga"><span class="ver">${escapeHtml(d.release)}</span>${frecce}
+                            <span class="quando"><i class="far fa-calendar"></i> Rilascio ${new Date(`${d.data_release}T12:00:00Z`).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}</span>
+                            <span class="stati"><span><b>${nTask}</b>task</span><span><b>${fatti}</b>completati (${perc}%)</span></span>${scelta}${torna}</div>
+                        </div>
+                        <div class="rel-count" style="--p:${perc}%" title="${fatti} task completati su ${nTask}"><div><b>${passata ? '✓' : giorni}</b><small>${passata ? 'rilasciata' : giorni === 1 ? 'giorno' : 'giorni'}</small></div></div>
+                    </div>`;
+                const tabella = nTask ? `<div class="rel-scroll"><table class="rel-tab"><thead><tr><th>Cliente</th><th>Progetto</th><th>Task</th><th>Descrizione</th><th>Stato</th></tr></thead><tbody>
+                    ${d.items.map((x) => {
+                        const link = safeUrl(x.link_task);
+                        const prog = x.progetto && x.project_id && x.client_id
+                            ? `<a href="#" data-rel-project="${escapeHtml(x.project_id)}" data-rel-client="${escapeHtml(x.client_id)}" data-rel-name="${escapeHtml(x.progetto)}">${escapeHtml(x.progetto)}</a>`
+                            : '<span class="rel-nop">—</span>';
+                        return `<tr${relClasseStato(x.stato) === 'ok' ? ' class="rel-ok"' : ''}><td><div class="rel-cli">${relAvatar(x.cliente)}${escapeHtml(x.cliente || '—')}</div></td><td>${prog}</td>
+                            <td>${link ? `<a class="rel-task" href="${escapeHtml(link)}" target="_blank" rel="noopener" title="Apri in Jira">${escapeHtml(x.cod_task || 'apri')} <i class="fas fa-arrow-up-right-from-square" style="font-size:0.7rem"></i></a>` : `<span class="rel-task">${escapeHtml(x.cod_task || '')}</span>`}</td>
+                            <td>${escapeHtml(x.descrizione || '')}</td><td><div class="rel-stato-cell">${relClasseStato(x.stato) === 'ok' ? '<span class="rel-fatto" title="Completata"><i class="fas fa-check"></i></span>' : ''}<span class="rel-stato ${relClasseStato(x.stato)}">${escapeHtml(x.stato || '—')}</span></div></td></tr>`;
+                    }).join('')}</tbody></table></div>` : `<div class="gp-empty">Nessun task aperto con versione ${escapeHtml(d.release)}.</div>`;
+                box.innerHTML = hero + tabella;
+            } catch (e) {
+                info.innerHTML = '';
+                box.innerHTML = `<div class="gp-empty">${escapeHtml(e.message)}</div>`;
+            }
+        }
+        function initKpiRilasci() {
+            const card = document.getElementById('relCard');
+            if (!card || card.dataset.bound) return;
+            card.dataset.bound = '1';
+            // Nome del progetto: apre la scheda del progetto (come Offerte e ordini).
+            card.addEventListener('click', (e) => {
+                // Scelta della release e ritorno alla prossima.
+                const sc = e.target.closest('[data-rel-scegli]');
+                if (sc) { relScelta = sc.dataset.relScegli; loadKpiRilasci(); return; }
+                if (e.target.closest('[data-rel-torna]')) { relScelta = null; loadKpiRilasci(); return; }
+                const p = e.target.closest('[data-rel-project]');
+                if (!p) return;
+                e.preventDefault();
+                detailNavStack = [];
+                currentView = null;
+                openProjectDetail(p.dataset.relProject, p.dataset.relName || '', p.dataset.relClient);
+            });
+            // Spenta di default (moduli nuovi): si accende e si carica quando arrivano i flag.
         }
 
         async function loadOrdiniProgetto({ anima = true } = {}) {
@@ -6653,6 +6873,7 @@
             loadOrdiniProgetto();
             msCliente = null; // nuovo filtro clienti: il KPI MySupport torna a tutti i clienti del filtro
             loadKpiMySupport();
+            loadKpiRilasci();
             refreshProjectSearch();
         }
 
@@ -8338,6 +8559,7 @@
             await passo('mini KPI', () => loadDashboardKpis({ anima: false }));
             await passo('gestione progetto', () => loadGestioneProgetto({ anima: false })); // resta al livello in cui sei
             await passo('offerte e ordini', () => loadOrdiniProgetto({ anima: false }));
+            await passo('rilasci', () => loadKpiRilasci());
         }
 
         // Sostituzione standard delle etichette della pagina tramite set_label.
@@ -10121,6 +10343,23 @@
             </div>`;
         }
 
+        // Azioni a carico del cliente (sezione «AZIONI IN CARICO AL CLIENTE» del recap): dal
+        // 2026-10-16 non si salvano più da sole, il PM spunta qui quelle da tenere (registro
+        // pm_azioni_cliente: Cruscotto, Portfolio, Linea della riunione).
+        function recapCliRowHtml(item = {}) {
+            const off = item.esiste ? ' off' : '';
+            return `<div class="recap-task-row cli${off}">
+                <input type="checkbox" class="recap-task-on" ${item.esiste ? '' : 'checked'} aria-label="Salva questa azione del cliente">
+                <div>
+                    <textarea class="recap-task-desc" rows="2" placeholder="Che cosa deve fare il cliente">${escapeHtml(item.descrizione || '')}</textarea>
+                    ${item.esiste ? '<span class="recap-task-exists"><i class="fas fa-circle-info"></i> Già tra le azioni del cliente di questa riunione: non selezionata</span>' : ''}
+                </div>
+                <input type="text" class="recap-cli-ref" value="${escapeHtml(item.referente || '')}" maxlength="300" placeholder="Referente" aria-label="Referente del cliente">
+                <input type="date" class="recap-task-due" value="${escapeHtml(item.data_scadenza || '')}" aria-label="Scadenza">
+                <button type="button" class="recap-task-del" title="Togli questa riga" aria-label="Togli questa riga"><i class="fas fa-trash"></i></button>
+            </div>`;
+        }
+
         async function openRecapTasks() {
             const textModal = document.getElementById('meetingTextModal');
             const modal = document.getElementById('recapTasksModal');
@@ -10140,6 +10379,7 @@
                     ? `<b>${escapeHtml(d.assigned_to.name)}</b>`
                     : '<span class="recap-tasks-warn">non trovato in rubrica (nessun contatto con la tua email): i task resteranno senza assegnatario</span>';
                 const items = Array.isArray(d.items) ? d.items : [];
+                const cli = d.cliente && d.cliente.disponibile ? { disponibile: true, items: Array.isArray(d.cliente.items) ? d.cliente.items : [] } : { disponibile: false, items: [] };
                 body.innerHTML = `
                     <label for="recapTasksTitolo" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);">Titolo</label>
                     <input id="recapTasksTitolo" type="text" value="${escapeHtml(d.titile || '')}" style="width: 100%; padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; margin-top: 0.2rem;">
@@ -10150,7 +10390,18 @@
                     </div>
                     ${items.length ? '' : `<p class="recap-tasks-warn" style="font-size: 0.85rem;">Nessuna azione trovata nei blocchi intestati a: ${escapeHtml((d.owners || []).join(', '))}. Puoi aggiungere le righe a mano.</p>`}
                     <div class="recap-tasks-head"><span></span><span>Descrizione</span><span>Scadenza</span><span></span></div>
-                    <div id="recapTasksRows">${items.map(recapTaskRowHtml).join('')}</div>`;
+                    <div id="recapTasksRows">${items.map(recapTaskRowHtml).join('')}</div>
+                    ${cli.disponibile ? `<div class="recap-tasks-sez"><i class="fas fa-handshake"></i> Azioni a carico del cliente</div>
+                    <p class="recap-tasks-nota">Dalla sezione «AZIONI IN CARICO AL CLIENTE» del recap. Spunta solo quelle da tenere: finiscono in <b>Azioni a carico del cliente</b> (Portfolio, Cruscotto PM, Linea della riunione) con il cliente e il progetto della riunione, e ricevi i promemoria se hanno una scadenza. Puoi correggere testo, referente e scadenza.</p>
+                    ${cli.items.length ? '' : '<p class="recap-tasks-warn" style="font-size: 0.85rem;">Nessuna azione nella sezione del cliente del recap. Puoi aggiungerle a mano.</p>'}
+                    <div class="recap-tasks-head cli"><span></span><span>Azione del cliente</span><span>Referente</span><span>Scadenza</span><span></span></div>
+                    <div id="recapCliRows">${cli.items.map(recapCliRowHtml).join('')}</div>
+                    <button type="button" id="recapCliAdd" style="margin-top: 0.5rem; padding: 0.4rem 0.8rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer; font-size: 0.82rem;"><i class="fas fa-plus"></i> Aggiungi azione del cliente</button>` : ''}`;
+                document.getElementById('recapCliAdd')?.addEventListener('click', () => {
+                    const list = document.getElementById('recapCliRows');
+                    list.insertAdjacentHTML('beforeend', recapCliRowHtml({}));
+                    list.lastElementChild?.querySelector('textarea')?.focus();
+                });
             } catch (e) {
                 body.innerHTML = `<p class="meeting-text-empty" style="color:#B91C1C;">${escapeHtml(e.message)}</p>`;
             }
@@ -10162,24 +10413,42 @@
                 .filter((r) => r.querySelector('.recap-task-on').checked)
                 .map((r) => ({ description: r.querySelector('.recap-task-desc').value.trim(), due_date: r.querySelector('.recap-task-due').value || null }))
                 .filter((x) => x.description);
+            // Azioni del cliente spuntate (sezione sotto i task).
+            const azioni = [...document.querySelectorAll('#recapCliRows .recap-task-row')]
+                .filter((r) => r.querySelector('.recap-task-on').checked)
+                .map((r) => ({ descrizione: r.querySelector('.recap-task-desc').value.trim(), referente: r.querySelector('.recap-cli-ref').value.trim(), data_scadenza: r.querySelector('.recap-task-due').value || null }))
+                .filter((x) => x.descrizione);
             const titile = (document.getElementById('recapTasksTitolo')?.value || '').trim();
-            if (!titile) { showNotification('Il titolo è obbligatorio', 'info'); return; }
-            if (!items.length) { showNotification('Seleziona almeno un task con la descrizione', 'info'); return; }
+            if (items.length && !titile) { showNotification('Il titolo è obbligatorio', 'info'); return; }
+            if (!items.length && !azioni.length) { showNotification('Seleziona almeno un task o un\'azione del cliente con la descrizione', 'info'); return; }
             const btn = document.getElementById('recapTasksSave');
             btn.disabled = true;
+            const fatto = [];
             try {
-                const res = await fetch(`${API_URL}/calendar/meetings/managed/recap-tasks`, {
-                    method: 'POST',
-                    headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id_calendar: recapTasksEventId, titile, items })
-                });
-                const d = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(d.error || `Errore ${res.status}`);
+                const invia = async (url, corpo) => {
+                    const res = await fetch(`${API_URL}${url}`, {
+                        method: 'POST',
+                        headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                        body: JSON.stringify(corpo)
+                    });
+                    const d = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(d.error || `Errore ${res.status}`);
+                    return d;
+                };
+                if (items.length) {
+                    const d = await invia('/calendar/meetings/managed/recap-tasks', { id_calendar: recapTasksEventId, titile, items });
+                    fatto.push(`${d.created === 1 ? 'creato 1 task' : `creati ${d.created} task`}${d.assigned ? '' : ' (senza assegnatario)'}`);
+                    if (typeof loadTodoData === 'function') loadTodoData(); // aggiorna l'elenco dei task
+                }
+                if (azioni.length) {
+                    const d = await invia('/calendar/meetings/managed/recap-azioni-cliente', { id_calendar: recapTasksEventId, azioni });
+                    fatto.push(`${d.create === 1 ? '1 azione del cliente salvata' : `${d.create} azioni del cliente salvate`}${d.saltate ? ` (${d.saltate} già presenti)` : ''}`);
+                }
                 document.getElementById('recapTasksModal').classList.remove('open');
-                showNotification(`${d.created === 1 ? 'Creato 1 task' : `Creati ${d.created} task`}${d.assigned ? '' : ' (senza assegnatario)'}`, 'success');
-                if (typeof loadTodoData === 'function') loadTodoData(); // aggiorna l'elenco dei task
+                const testo = fatto.join(' · ');
+                showNotification(testo.charAt(0).toUpperCase() + testo.slice(1), 'success');
             } catch (e) {
-                showNotification('Task non creati: ' + e.message, 'info');
+                showNotification(`${fatto.length ? `Fatto: ${fatto.join(' · ')}. ` : ''}Non salvato: ${e.message}`, 'info');
             } finally {
                 btn.disabled = false;
             }
@@ -17553,6 +17822,7 @@
                 document.querySelectorAll('[data-dash-flag]').forEach(el => {
                     el.classList.toggle('dash-flag-off', flags[el.dataset.dashFlag] === false);
                 });
+                if (flags.kpiRilasci && typeof loadKpiRilasci === 'function') loadKpiRilasci();
             } catch (e) { /* ignore */ }
         })();
 
@@ -22521,6 +22791,7 @@
             await initRevenueChart(); // carica anni disponibili + dati kpi_fatturazione filtrati
             initGestioneProgetto();   // KPI Gestione Progetto (offerta / time spent)
             initOrdiniProgetto();     // KPI Offerte e ordini (sotto Gestione Progetto)
+            initKpiRilasci();         // KPI Rilascio release (in fondo, Preferenze › Mostra kpi Rilasci)
             initKpiMySupport();       // KPI MySupport: tempi di chiusura (in fondo)
             initClientFilter();
             initProjectSearch();
@@ -22542,7 +22813,7 @@
                     <input id="meetingAudioFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.webm" style="display: none;">
                     <button id="meetingTextSave" type="button" class="mt-btn mt-primary" style="display: none;" title="Salva il recap modificato, con la formattazione e i destinatari dell'email"><i class="fas fa-floppy-disk"></i> Salva</button>
                     <button id="meetingTextEmail" type="button" class="mt-btn" style="display: none;" title="Apri una nuova email con destinatari, oggetto e testo (Outlook del computer o Gmail, secondo il calendario default)"><i class="fas fa-envelope"></i> Email</button>
-                    <button id="meetingTextTasks" type="button" class="mt-btn mt-green" style="display: none;" title="Crea i task dalle tue righe di &quot;AZIONI IN CARICO&quot; (li rivedi prima di salvarli)"><i class="fas fa-list-check"></i> Crea task</button>
+                    <button id="meetingTextTasks" type="button" class="mt-btn mt-green" style="display: none;" title="Crea i task dalle tue righe di &quot;AZIONI IN CARICO&quot; e scegli le azioni a carico del cliente (le rivedi prima di salvarle)"><i class="fas fa-list-check"></i> Crea task</button>
                     <button id="meetingTextRaid" type="button" class="mt-btn" style="display: none;" title="L'AI propone rischi, decisioni, dipendenze e Change Request (in bozza) da registrare nel Cruscotto PM del progetto della riunione"><i class="fas fa-shield-halved"></i> Rischi e decisioni</button>
                     <button id="meetingTextFix" type="button" class="mt-btn" title="Applica al testo le correzioni automatiche (parole sbagliate → giuste) impostate per te e per il cliente della riunione"><i class="fas fa-spell-check"></i> Applica correzioni</button>
                     <button id="meetingTextUpload" type="button" class="mt-btn" title="Carica un file .txt o .vtt: sostituisce il testo di questa riunione"><i class="fas fa-upload"></i> Carica file</button>
@@ -22625,14 +22896,14 @@
     <div id="recapTasksModal" class="task-modal" style="z-index: 820;" role="dialog" aria-modal="true" aria-labelledby="recapTasksTitle">
         <div class="task-modal-card" style="width: min(920px, calc(96vw * var(--ui-zoom-inv, 1)));">
             <div class="task-modal-header">
-                <h3 id="recapTasksTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-list-check" style="color: #10B981;"></i> Crea task dalle azioni in carico</h3>
+                <h3 id="recapTasksTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-list-check" style="color: #10B981;"></i> Crea task e azioni del cliente</h3>
                 <button id="recapTasksClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
             </div>
             <div id="recapTasksBody" class="recap-tasks-body"></div>
             <div class="task-modal-footer">
                 <button id="recapTasksAdd" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer; margin-right: auto;"><i class="fas fa-plus"></i> Aggiungi riga</button>
                 <button id="recapTasksCancel" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
-                <button id="recapTasksSave" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-check"></i> Salva task</button>
+                <button id="recapTasksSave" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-check"></i> Salva selezionate</button>
             </div>
         </div>
     </div>

@@ -1,10 +1,11 @@
 // ============================================================================
 // AZIONI A CARICO DEL CLIENTE + PROMEMORIA AL PM (2026-10-16)
 // ----------------------------------------------------------------------------
-// Registro pm_azioni_cliente (Supporto/CreaDB/azioni_cliente.sql). Le righe nascono da sole
-// leggendo, senza AI, la sezione «AZIONI IN CARICO AL CLIENTE» del recap cliente delle
-// riunioni (jobs/recapTasks.js › parseAzioniCliente); il PM può aggiungerne a mano dal
-// Cruscotto. Si vedono nel Cruscotto PM (scheda «Azioni cliente»), nel Portfolio e nella
+// Registro pm_azioni_cliente (Supporto/CreaDB/azioni_cliente.sql). Dal 2026-10-16 (scelta
+// dell'utente) le righe NON nascono più da sole: nella finestra del recap «Crea task» Projexa
+// propone, senza AI, le righe della sezione «AZIONI IN CARICO AL CLIENTE» (jobs/recapTasks.js ›
+// parseAzioniCliente) e il PM spunta quelle da salvare (proposteDaRecap / salvaDaRecap); il PM
+// può aggiungerne a mano dal Cruscotto. «Elimina» cancella la riga dalla tabella. Si vedono nel Cruscotto PM (scheda «Azioni cliente»), nel Portfolio e nella
 // Linea della riunione (server.js › /api/meeting-panel).
 //
 // Scelta dell'utente: NESSUNA email al cliente. Solo promemoria al PM in campanella
@@ -14,9 +15,8 @@
 //     (az_ogni_giorni, 5) fino a un massimo (az_max_solleciti, 3).
 // Regole per PM in pm_preferenze (Portfolio › Avvisi e digest).
 //
-// Rilettura del recap: rec_meeting.azioni_cliente_hash = md5 del recap già letto; si rilegge
-// solo se il recap cambia. Ogni azione ha una «chiave» (impronta del testo): le azioni nuove si
-// aggiungono, quelle sparite dal recap si tolgono SOLO se ancora aperte e mai modificate a mano.
+// Ogni azione presa dal recap ha una «chiave» (impronta del testo): nella finestra «Crea task»
+// le azioni già salvate per quella riunione si mostrano non spuntate.
 // ============================================================================
 import { createHash } from 'crypto';
 import db from './database.js';
@@ -29,7 +29,6 @@ import { stripMarkdown } from '../jobs/meetingTranscription.js';
 export const TABELLA = 'pm_azioni_cliente';
 export const STATI = ['aperta', 'fatta', 'annullata'];
 export const REGOLE_DEFAULT = { az_notifiche: true, az_giorni_prima: 2, az_ogni_giorni: 5, az_max_solleciti: 3 };
-const GIORNI_RECAP = 60;       // si leggono i recap delle riunioni degli ultimi N giorni
 const PRIMO_SOLLECITO_MAX = 30; // azioni scadute da più di N giorni: nessun primo promemoria (arretrato)
 
 const normTesto = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N} ]+/gu, ' ').replace(/\s+/g, ' ').trim();
@@ -42,72 +41,72 @@ async function ruoloUtente(user) {
 }
 
 // ----------------------------------------------------------------------------
-// LETTURA DEI RECAP
+// AZIONI DAL RECAP (finestra «Crea task» del recap, routes/calendar.js)
 // ----------------------------------------------------------------------------
-// Rilegge i recap cambiati dell'utente (o di una riunione) e allinea il registro.
-// Un lock per utente evita i doppioni se due richieste arrivano insieme.
-export async function sincronizzaAzioniCliente(user, { idCalendar = null } = {}) {
-  const out = { riunioni: 0, aggiunte: 0, tolte: 0 };
-  if (!(await tabellaPresente(TABELLA)) || !(await colonneTabella('rec_meeting')).has('azioni_cliente_hash')) return { ...out, tabelle: false };
+// Riunione collegata (o ricollegata) a cliente/progetto dopo aver salvato le azioni: le azioni
+// la seguono. Non legge più i recap (nome rimasto per i chiamanti).
+export async function sincronizzaAzioniCliente(user) {
+  if (!(await tabellaPresente(TABELLA))) return { tabelle: false };
+  await db.query(
+    `UPDATE ${TABELLA} a SET client_id = m.client_id, project_id = m.project_id, updated_at = now()
+       FROM rec_meeting m
+      WHERE a.tenant_id = $1 AND a.user_id = $2 AND a.id_calendar IS NOT NULL
+        AND m.tenant_id = a.tenant_id AND m.user_id = a.user_id AND m.id_calendar = a.id_calendar
+        AND (a.client_id IS DISTINCT FROM m.client_id OR a.project_id IS DISTINCT FROM m.project_id)`,
+    [user.tenant_id, user.user_id]);
+  return { tabelle: true };
+}
+
+// Proposte per la finestra: righe della sezione del cliente del recap della riunione m
+// ({ id_calendar, recap, data_calendar }), con referente, scadenza letta dal testo e «esiste»
+// se già salvata per questa riunione.
+export async function proposteDaRecap(user, m) {
+  if (!(await tabellaPresente(TABELLA))) return { disponibile: false, items: [] };
+  const data = m.data_calendar ? String(m.data_calendar).slice(0, 10) : null;
+  const gia = new Set((await db.query(
+    `SELECT chiave FROM ${TABELLA} WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND chiave IS NOT NULL
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+    [user.tenant_id, user.user_id, m.id_calendar])).rows.map((x) => x.chiave));
+  const visti = new Set();
+  const items = [];
+  for (const a of parseAzioniCliente(stripMarkdown(m.recap || ''))) {
+    const chiave = chiaveDi(a.description);
+    if (visti.has(chiave)) continue;
+    visti.add(chiave);
+    items.push({ descrizione: a.description, referente: a.referente || '', data_scadenza: parseDueDate(a.description, data), esiste: gia.has(chiave) });
+  }
+  return { disponibile: true, items };
+}
+
+// Salva le azioni spuntate (testo, referente e scadenza come corretti nella finestra).
+// Cliente e progetto = quelli della riunione. Le azioni già salvate (stessa impronta) si saltano.
+export async function salvaDaRecap(user, m, azioni) {
+  if (!(await tabellaPresente(TABELLA))) { const e = new Error('Va eseguito lo script Supporto/CreaDB/azioni_cliente.sql'); e.status = 503; throw e; }
+  const ruolo = await ruoloUtente(user);
   const client = await db.connect();
+  let create = 0, saltate = 0;
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`azioni_cliente|${user.tenant_id}|${user.user_id}`]);
-    // Riunione collegata (o ricollegata) a cliente/progetto dopo il recap: le azioni seguono.
-    await client.query(
-      `UPDATE ${TABELLA} a SET client_id = m.client_id, project_id = m.project_id, updated_at = now()
-         FROM rec_meeting m
-        WHERE a.tenant_id = $1 AND a.user_id = $2 AND a.id_calendar IS NOT NULL
-          AND m.tenant_id = a.tenant_id AND m.user_id = a.user_id AND m.id_calendar = a.id_calendar
-          AND (a.client_id IS DISTINCT FROM m.client_id OR a.project_id IS DISTINCT FROM m.project_id)`,
-      [user.tenant_id, user.user_id]);
-    const params = [user.tenant_id, user.user_id];
-    if (idCalendar) params.push(idCalendar);
-    const meet = (await client.query(
-      `SELECT id_calendar, recap, md5(recap) AS h, client_id, project_id, data_calendar::text AS data
-         FROM rec_meeting
-        WHERE tenant_id = $1 AND user_id = $2 AND recap IS NOT NULL AND BTRIM(recap) <> ''
-          AND azioni_cliente_hash IS DISTINCT FROM md5(recap)
-          AND ${idCalendar ? 'id_calendar = $3' : `data_calendar >= CURRENT_DATE - ${GIORNI_RECAP}`}
-        ORDER BY data_calendar LIMIT 200`, params)).rows;
-    if (meet.length) {
-      const ruolo = await ruoloUtente(user);
-      for (const m of meet) {
-        out.riunioni += 1;
-        const azioni = parseAzioniCliente(stripMarkdown(m.recap));
-        const esistenti = (await client.query(
-          `SELECT id::text AS id, chiave, stato, modificata, (scadenza IS NULL OR scadenza >= CURRENT_DATE) AS valida
-             FROM ${TABELLA} WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND origine = 'recap'`,
-          [user.tenant_id, user.user_id, m.id_calendar])).rows;
-        const note = new Set(esistenti.map((x) => x.chiave));
-        const nuove = new Set();
-        let ordine = 0;
-        for (const a of azioni) {
-          const chiave = chiaveDi(a.description);
-          if (nuove.has(chiave)) continue;
-          nuove.add(chiave);
-          ordine += 1;
-          if (note.has(chiave)) continue; // già nel registro (anche se poi eliminata a mano: non si ricrea)
-          const riga = {
-            tenant_id: user.tenant_id, user_id: user.user_id, client_id: m.client_id || null, project_id: m.project_id || null,
-            id_calendar: m.id_calendar, referente: a.referente ? String(a.referente).slice(0, 300) : null,
-            descrizione: String(a.description).slice(0, 4000), data_scadenza: parseDueDate(a.description, m.data ? m.data.slice(0, 10) : null),
-            stato: 'aperta', origine: 'recap', chiave, id_roles_write: ruolo, crypto: 1
-          };
-          const { data } = await encryptRowForWrite(db, TABELLA, riga);
-          const cols = Object.keys(data);
-          await client.query(`INSERT INTO ${TABELLA} (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')})`,
-            cols.map((c) => data[c]));
-          out.aggiunte += 1;
-        }
-        // Sparite dal recap (recap rigenerato o corretto): si tolgono solo se aperte e mai toccate.
-        const daTogliere = esistenti.filter((x) => x.valida && !nuove.has(x.chiave) && x.stato === 'aperta' && !x.modificata).map((x) => x.id);
-        if (daTogliere.length) {
-          out.tolte += (await client.query(`UPDATE ${TABELLA} SET scadenza = CURRENT_DATE - 1, updated_at = now() WHERE id::text = ANY($1::text[])`, [daTogliere])).rowCount;
-        }
-        await client.query('UPDATE rec_meeting SET azioni_cliente_hash = $4 WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3',
-          [user.tenant_id, user.user_id, m.id_calendar, m.h]);
-      }
+    const gia = new Set((await client.query(
+      `SELECT chiave FROM ${TABELLA} WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND chiave IS NOT NULL
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+      [user.tenant_id, user.user_id, m.id_calendar])).rows.map((x) => x.chiave));
+    for (const a of azioni) {
+      const chiave = chiaveDi(a.descrizione);
+      if (gia.has(chiave)) { saltate += 1; continue; }
+      gia.add(chiave);
+      const riga = {
+        tenant_id: user.tenant_id, user_id: user.user_id, client_id: m.client_id || null, project_id: m.project_id || null,
+        id_calendar: m.id_calendar, referente: a.referente ? String(a.referente).slice(0, 300) : null,
+        descrizione: String(a.descrizione).slice(0, 4000), data_scadenza: a.data_scadenza || null,
+        stato: 'aperta', origine: 'recap', chiave, modificata: true, id_roles_write: ruolo, crypto: 1
+      };
+      const { data } = await encryptRowForWrite(db, TABELLA, riga);
+      const cols = Object.keys(data);
+      await client.query(`INSERT INTO ${TABELLA} (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map((_, k) => `$${k + 1}`).join(', ')})`,
+        cols.map((c) => data[c]));
+      create += 1;
     }
     await client.query('COMMIT');
   } catch (e) {
@@ -116,7 +115,7 @@ export async function sincronizzaAzioniCliente(user, { idCalendar = null } = {})
   } finally {
     client.release();
   }
-  return out;
+  return { create, saltate };
 }
 
 // ----------------------------------------------------------------------------
@@ -216,7 +215,6 @@ export async function abbinaReferenti(user, azioni) {
     for (const c of lista) { const k = normNome(c.nominativo); if (k) m.set(k, m.has(k) ? null : c); } // null = omonimi
     return m;
   };
-  const rubNome = indice(rubrica);
   const perCliente = new Map(); // client_id -> { nomi, contatti }
   for (const c of contatti) {
     if (!perCliente.has(c.clientId)) perCliente.set(c.clientId, []);
@@ -234,7 +232,8 @@ export async function abbinaReferenti(user, azioni) {
         if (t.length === 1) return t[0];
       }
     }
-    return rubNome.get(k) || null;
+    // Solo i Contatti del cliente (scelta dell'utente 2026-10-16): la Rubrica ha i colleghi interni.
+    return null;
   };
   return azioni.map((a) => {
     let c = (a.contatto_id && conId.get(a.contatto_id)) || (a.rubrica_id && rubId.get(a.rubrica_id)) || null;
@@ -290,20 +289,10 @@ function lavorativiDopo(da, a) {
 // PROMEMORIA IN CAMPANELLA (chiamato dal job notifiche_scadenze, tutti i tenant)
 // ----------------------------------------------------------------------------
 export async function promemoriaAzioniCliente() {
-  const report = { recapLetti: 0, azioniAggiunte: 0, controllate: 0, preavvisi: 0, solleciti: 0, errori: [] };
+  const report = { controllate: 0, preavvisi: 0, solleciti: 0, errori: [] };
   if (!(await tabellaPresente(TABELLA))) return { ...report, nota: 'Tabella pm_azioni_cliente assente: eseguire Supporto/CreaDB/azioni_cliente.sql' };
-  // 1. Recap nuovi o cambiati di tutti gli utenti.
-  const utenti = (await db.query(
-    `SELECT DISTINCT tenant_id::text AS tenant_id, user_id::text AS user_id FROM rec_meeting
-      WHERE recap IS NOT NULL AND BTRIM(recap) <> '' AND azioni_cliente_hash IS DISTINCT FROM md5(recap)
-        AND data_calendar >= CURRENT_DATE - ${GIORNI_RECAP}`)).rows;
-  for (const u of utenti) {
-    try {
-      const s = await sincronizzaAzioniCliente(u);
-      report.recapLetti += s.riunioni; report.azioniAggiunte += s.aggiunte;
-    } catch (e) { report.errori.push(`lettura recap ${u.user_id}: ${e.message}`); }
-  }
-  // 2. Azioni aperte con scadenza: preavviso e solleciti secondo le regole del PM.
+  // (Dal 2026-10-16 i recap non si leggono più qui: le azioni si scelgono in «Crea task».)
+  // Azioni aperte con scadenza: preavviso e solleciti secondo le regole del PM.
   const oggi = oggiIso();
   const azioni = (await db.query(
     `SELECT a.id::text AS id, a.tenant_id::text AS tenant_id, a.user_id::text AS user_id, a.descrizione, a.referente,

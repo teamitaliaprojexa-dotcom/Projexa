@@ -23,6 +23,13 @@
         .azc-del:hover { color: var(--pm-rosso); background: var(--pm-rosso-bg); }
         .azc-tri { border: none; background: none; padding: 0 0.25rem 0 0; cursor: pointer; color: #D97706; font-size: 0.95rem; vertical-align: -1px; }
         .azc-tri:hover { color: #B45309; transform: scale(1.12); }
+        .azc-ref-campo { position: relative; }
+        .azc-ref-menu { position: absolute; left: 0; right: 0; top: 100%; z-index: 20; margin-top: 2px; max-height: 240px; overflow-y: auto; background: #fff; border: 1px solid var(--pm-bordo); border-radius: 8px; box-shadow: 0 8px 24px rgba(15,23,42,0.12); }
+        .azc-ref-menu button { display: flex; flex-direction: column; align-items: flex-start; width: 100%; border: 0; border-bottom: 1px solid #F3F4F6; background: none; padding: 0.4rem 0.7rem; cursor: pointer; text-align: left; font: inherit; font-size: 0.86rem; font-weight: 400; }
+        .azc-ref-menu button small { color: var(--pm-tenue); font-size: 0.76rem; }
+        .azc-ref-menu button:hover, .azc-ref-menu button.on { background: #EEF2FF; }
+        .azc-ref-menu .vuoto { padding: 0.5rem 0.7rem; color: var(--pm-tenue); font-size: 0.82rem; font-weight: 400; }
+        .azc-ref-info { display: block; min-height: 1em; color: var(--pm-tenue); font-size: 0.76rem; font-weight: 400; margin-top: 0.2rem; }
         .azc-rub { max-height: 320px; overflow-y: auto; border: 1px solid var(--pm-bordo); border-radius: 8px; margin-top: 0.5rem; }
         .azc-rub label { display: flex; gap: 0.55rem; align-items: center; padding: 0.4rem 0.6rem; border-bottom: 1px solid #F3F4F6; cursor: pointer; font-size: 0.86rem; }
         .azc-rub label:hover { background: #F9FAFB; }
@@ -116,7 +123,7 @@
                 <div class="pm-card" id="azioni-cliente">
                     <h2><i class="fas fa-handshake"></i> Azioni a carico del cliente
                         <span class="azioni">${aperte.length ? `<button class="pm-btn piccolo" data-azc-email title="Prepara con l'AI l'email ai referenti del cliente con le azioni aperte, raggruppate per referente (destinatari dai Contatti del cliente)"><i class="fas fa-envelope"></i> Email</button>` : ''}${projectId ? '<button class="pm-btn piccolo primario" data-azc-nuova><i class="fas fa-plus"></i> Nuova azione</button>' : ''}</span></h2>
-                    <p class="pm-nota" style="margin-top:0">Lette in automatico dalla sezione «AZIONI IN CARICO AL CLIENTE» del recap cliente delle riunioni${projectId ? ' del progetto' : ''}, più quelle aggiunte a mano. Al cliente non parte nessuna email: ricevi tu i promemoria in campanella${rg.az_notifiche === false ? ' (<b>spenti</b> nel Portfolio)' : ` (${rg.az_giorni_prima} giorni prima della scadenza, poi il giorno dopo e ogni ${rg.az_ogni_giorni} giorni lavorativi, al massimo ${rg.az_max_solleciti} volte)`}.${dati.lettura && dati.lettura.aggiunte ? ` <b>${dati.lettura.aggiunte} nuove azioni lette adesso dai recap.</b>` : ''}</p>
+                    <p class="pm-nota" style="margin-top:0">Le azioni che hai scelto con «Crea task» nel recap cliente delle riunioni${projectId ? ' del progetto' : ''}, più quelle aggiunte a mano. Al cliente non parte nessuna email: ricevi tu i promemoria in campanella${rg.az_notifiche === false ? ' (<b>spenti</b> nel Portfolio)' : ` (${rg.az_giorni_prima} giorni prima della scadenza, poi il giorno dopo e ogni ${rg.az_ogni_giorni} giorni lavorativi, al massimo ${rg.az_max_solleciti} volte)`}.</p>
                     <div class="pm-kpi" style="margin-bottom:0.9rem">${kpi.map(([t, v]) => `<div><small>${t}</small><b>${v}</b></div>`).join('')}</div>
                     <div class="azc-barra">
                         <input class="pm-input" data-azc-cerca placeholder="Cerca azione, referente, cliente…" value="${esc(cerca)}">
@@ -141,7 +148,7 @@
             box.querySelectorAll('[data-azc-del]').forEach((b) => b.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 const x = tutte.find((a) => a.id === b.dataset.azcDel);
-                if (!x || !confirm(`Eliminare l'azione «${String(x.descrizione).slice(0, 120)}»?\nNon verrà più mostrata e non tornerà rileggendo il recap.`)) return;
+                if (!x || !confirm(`Eliminare l'azione «${String(x.descrizione).slice(0, 120)}»?\nViene cancellata definitivamente.`)) return;
                 b.disabled = true;
                 try { await eliminaAzione(x.id); } catch (err) { b.disabled = false; toast(err.message, 'errore'); }
             }));
@@ -178,7 +185,7 @@
         // rilettura del recap non la ricrea (il server la riconosce dalla sua impronta).
         async function eliminaAzione(id) {
             await api(`/azioni-cliente/${encodeURIComponent(id)}`, { metodo: 'DELETE' });
-            toast('Azione eliminata: non verrà più riproposta');
+            toast('Azione eliminata');
             carica();
         }
 
@@ -197,7 +204,7 @@
         }
 
         // Scelta del referente dalla rubrica (anche per le altre azioni aperte con lo stesso nome).
-        // Persone: prima i Contatti del cliente (dove stanno i referenti), poi la Rubrica.
+        // Persone: solo i Contatti del cliente (la Rubrica ha i colleghi interni, scelta dell'utente).
         async function scegliReferente(x) {
             let contatti;
             try { contatti = await api(`/rubrica-contatti${x.client_id ? `?clientId=${encodeURIComponent(x.client_id)}` : ''}`); } catch (e) { toast(e.message, 'errore'); return; }
@@ -206,14 +213,12 @@
             const lista = (q) => {
                 const f = (c) => !q || `${c.nominativo} ${c.email}`.toLowerCase().includes(q.toLowerCase());
                 const cli = contatti.filter((c) => c.fonte === 'cliente' && f(c));
-                const rub = contatti.filter((c) => c.fonte === 'rubrica' && f(c));
                 return (cli.length ? `<div class="pm-nota" style="padding:0.35rem 0.6rem; font-weight:700">Contatti del cliente</div>${cli.map(voce).join('')}` : '')
-                    + (rub.length ? `<div class="pm-nota" style="padding:0.35rem 0.6rem; font-weight:700">Rubrica</div>${rub.map(voce).join('')}` : '')
                     || '<div class="pm-vuoto">Nessun contatto trovato.</div>';
             };
             const m = modale({
                 titolo: '<i class="fas fa-address-book"></i> Referente del cliente',
-                corpo: `<p class="pm-nota" style="margin-top:0">Nel recap il referente è <b>${esc(x.referente || '(non indicato)')}</b>${x.cliente ? ` (${esc(x.cliente)})` : ''}: scegli la persona a cui scrivere, tra i Contatti del cliente o in Rubrica.</p>
+                corpo: `<p class="pm-nota" style="margin-top:0">Nel recap il referente è <b>${esc(x.referente || '(non indicato)')}</b>${x.cliente ? ` (${esc(x.cliente)})` : ''}: scegli la persona a cui scrivere tra i Contatti del cliente.</p>
                     <input class="pm-input" data-azc-rcerca placeholder="Cerca nome o email…" value="${esc(String(x.referente || '').replace(/\(.*?\)/g, '').split(/\s+[-–]\s+/)[0].trim().split(/\s+/)[0] || '')}">
                     <div class="azc-rub" data-azc-rlista></div>
                     ${altre ? `<label style="display:flex; gap:0.5rem; align-items:center; margin-top:0.7rem; font-size:0.85rem"><input type="checkbox" data-azc-rtutte checked> Applica anche alle altre ${altre} azioni aperte con referente «${esc(x.referente)}»</label>` : ''}
@@ -293,7 +298,8 @@
                     ${!nuovo && (x.cliente || x.progetto) ? `<p class="pm-nota" style="margin-top:0">${esc([x.cliente, x.progetto].filter(Boolean).join(' · '))}${x.riunione ? ` — dalla riunione «${esc(x.riunione)}» del ${dataIt(x.riunione_data)}` : ''}</p>` : ''}
                     <div class="pm-form">
                     <label class="largo">Che cosa deve fare il cliente<textarea name="descrizione">${esc(x.descrizione || '')}</textarea></label>
-                    <label>Referente del cliente<input name="referente" value="${esc(x.referente || '')}" maxlength="300" placeholder="es. Mario Rossi / Ufficio paghe"></label>
+                    <label class="azc-ref-campo">Referente del cliente<input name="referente" value="${esc((x.contatto && x.contatto.nominativo) || x.referente || '')}" maxlength="300" autocomplete="off" placeholder="Scrivi per cercare tra i Contatti del cliente">
+                        <div class="azc-ref-menu" data-azc-refmenu hidden></div><small class="azc-ref-info" data-azc-refinfo></small></label>
                     <label>Entro il<input type="date" name="data_scadenza" value="${esc(x.data_scadenza || '')}"></label>
                     ${nuovo ? '' : `<label>Stato<select name="stato">${Object.entries(STATI).map(([k, v]) => `<option value="${k}" ${k === x.stato ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
                     <label>Promemoria già ricevuti<input value="${x.solleciti || 0}${x.ultimo_sollecito ? ` (ultimo il ${dataIt(x.ultimo_sollecito)})` : ''}" disabled></label>`}
@@ -301,13 +307,14 @@
                     <p class="pm-nota">Cambiando la data di scadenza i promemoria ripartono da capo. Le azioni modificate a mano non vengono più toccate se il recap della riunione viene rigenerato.</p>`,
                 pulsanti: [
                     ...(!nuovo && !sola ? [{ testo: '<i class="fas fa-trash"></i> Elimina', classe: 'pericolo', azione: async () => {
-                        if (!confirm('Eliminare questa azione dal registro? Non verrà più mostrata e non tornerà rileggendo il recap.')) return false;
+                        if (!confirm('Eliminare definitivamente questa azione?')) return false;
                         await eliminaAzione(x.id);
                     } }] : []),
                     { testo: 'Annulla' },
                     ...(!sola ? [{ testo: '<i class="fas fa-floppy-disk"></i> Salva', classe: 'primario', azione: async (mm) => {
                         const v = valori(mm);
                         if (!String(v.descrizione || '').trim()) throw new Error('Scrivi che cosa deve fare il cliente');
+                        if (contattoId) v.contatto_id = contattoId;
                         if (nuovo) await api('/azioni-cliente', { metodo: 'POST', corpo: { ...v, projectId } });
                         else await api(`/azioni-cliente/${encodeURIComponent(x.id)}`, { metodo: 'PUT', corpo: v });
                         toast('Azione salvata'); carica();
@@ -315,6 +322,46 @@
                 ]
             });
             if (sola) m.querySelectorAll('input, select, textarea').forEach((el) => { el.disabled = true; });
+            // Referente: elenco dinamico dei Contatti del cliente mentre scrivi (testo libero ammesso).
+            let contattoId = null;
+            const inp = m.querySelector('input[name="referente"]');
+            const menu = m.querySelector('[data-azc-refmenu]');
+            const info = m.querySelector('[data-azc-refinfo]');
+            const mostraInfo = () => {
+                const c = contattoId && contatti.find((k) => k.id === contattoId);
+                const att = !contattoId && x.contatto && x.contatto.nominativo === inp.value.trim() ? x.contatto : null;
+                const k = c || att;
+                info.innerHTML = k ? `<i class="fas fa-address-book"></i> ${esc(k.email || 'contatto senza email')}` : (inp.value.trim() && contatti.length ? '<i class="fas fa-triangle-exclamation" style="color:#D97706"></i> non è tra i Contatti del cliente' : '');
+            };
+            let contatti = [];
+            const qCli = x.client_id ? `?clientId=${encodeURIComponent(x.client_id)}` : (projectId ? `?projectId=${encodeURIComponent(projectId)}` : '');
+            if (!sola && qCli) api(`/rubrica-contatti${qCli}`).then((l) => { contatti = l || []; mostraInfo(); }).catch(() => {});
+            let attivo = -1;
+            const disegna = () => {
+                const q = inp.value.trim().toLowerCase();
+                const l = contatti.filter((c) => !q || `${c.nominativo} ${c.email}`.toLowerCase().includes(q)).slice(0, 30);
+                if (!contatti.length) { menu.hidden = true; return; }
+                menu.innerHTML = l.length ? l.map((c, i) => `<button type="button" class="${i === attivo ? 'on' : ''}" data-id="${esc(c.id)}"><b>${esc(c.nominativo)}</b><small>${esc(c.email || 'senza email')}</small></button>`).join('')
+                    : '<div class="vuoto">Nessun contatto: resta il testo scritto. Per aggiungerlo usa i Contatti della scheda del cliente.</div>';
+                menu.hidden = false;
+            };
+            const scegli = (id) => {
+                const c = contatti.find((k) => k.id === id);
+                if (!c) return;
+                inp.value = c.nominativo; contattoId = c.id; menu.hidden = true; attivo = -1; mostraInfo();
+            };
+            inp.addEventListener('focus', () => { attivo = -1; disegna(); });
+            inp.addEventListener('input', () => { contattoId = null; attivo = -1; disegna(); mostraInfo(); });
+            inp.addEventListener('keydown', (e) => {
+                const n = menu.querySelectorAll('button').length;
+                if (menu.hidden || !n) return;
+                if (e.key === 'ArrowDown') { e.preventDefault(); attivo = (attivo + 1) % n; disegna(); }
+                else if (e.key === 'ArrowUp') { e.preventDefault(); attivo = (attivo - 1 + n) % n; disegna(); }
+                else if (e.key === 'Enter') { e.preventDefault(); scegli(menu.querySelectorAll('button')[Math.max(0, attivo)].dataset.id); }
+                else if (e.key === 'Escape') { e.stopPropagation(); menu.hidden = true; }
+            });
+            menu.addEventListener('mousedown', (e) => { const b = e.target.closest('button[data-id]'); if (b) { e.preventDefault(); scegli(b.dataset.id); } });
+            inp.addEventListener('blur', () => { setTimeout(() => { menu.hidden = true; }, 150); });
         }
 
         tipoEmail(); // letto subito: all'«Email» la scheda di Gmail deve aprirsi dentro il clic
