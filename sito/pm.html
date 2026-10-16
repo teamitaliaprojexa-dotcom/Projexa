@@ -56,6 +56,7 @@
     <script src="js/pm-comune.js"></script>
     <script src="js/azioni-cliente.js"></script>
     <script src="js/capacita-comune.js"></script>
+    <script src="js/piano-automatico.js"></script>
     <script>
     (function () {
         const { esc, api, fmt, euro, dataIt, badge, toast, testoAiHtml, modale, valori } = PM;
@@ -1101,50 +1102,15 @@
             document.getElementById('tabRisorse').style.display = '';
             if (qs.get('tab') === 'risorse' && caricati.panoramica) apriTab('risorse');
         }).catch(() => {});
-        // Giorni lavorativi (lun-ven) tra due date comprese (stima delle giornate allocate per mese).
-        function lavorativi(dal, al) {
-            let n = 0;
-            for (let t = Date.parse(`${dal}T12:00:00Z`); t <= Date.parse(`${al}T12:00:00Z`); t += 86400000) { const w = new Date(t).getUTCDay(); if (w && w !== 6) n += 1; }
-            return n;
-        }
         async function caricaRisorse() {
             const p = pannello('risorse');
             p.innerHTML = attesa('Carico fabbisogno e allocazioni del progetto…');
             let d;
             try { d = await api(`/capacita/progetto?projectId=${encodeURIComponent(projectId)}`); } catch (e) { p.innerHTML = errore(e); return; }
-            const { g, meseIt, formAllocazione, attivaTooltip } = CapacitaUI;
+            const { g, formAllocazione, attivaTooltip } = CapacitaUI;
             const f = d.fabbisogno;
             const oggi = f.oggi;
             document.getElementById('cntRisorse').textContent = d.allocazioni.filter((a) => a.al >= oggi).length || '';
-            // Giornate allocate su QUESTO progetto per ruolo e mese.
-            const allRuolo = {};
-            const allPers = {}; // ruolo -> mese -> [{ nominativo, perc, gg }] (dettaglio del tooltip)
-            for (const a of d.allocazioni) for (const m of f.mesi) {
-                const ini = [a.dal, oggi, `${m}-01`].sort().pop();
-                const fm = new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).toISOString().slice(0, 10);
-                const fin = [a.al, fm].sort()[0];
-                if (fin < ini) continue;
-                const k = String(a.ruolo || 'Senza ruolo').trim().toLowerCase().replace(/\s+/g, ' ');
-                allRuolo[k] = allRuolo[k] || {};
-                const gg = lavorativi(ini, fin) * (a.perc / 100) * ((a.ore_sett || 32) / 5 / 8);
-                allRuolo[k][m] = (allRuolo[k][m] || 0) + gg;
-                allPers[k] = allPers[k] || {};
-                (allPers[k][m] = allPers[k][m] || []).push({ nominativo: a.nominativo || '', perc: a.perc, ore: a.ore_sett || 32, gg });
-            }
-            const cella = (r, m) => {
-                const fab = r.perMese[m] || 0;
-                const al = (allRuolo[r.chiave] || {})[m] || 0;
-                const cl = al ? (al + 0.05 < fab ? 'cap-att' : 'cap-ok') : '';
-                // Tooltip: valori con due decimali (le celle arrotondano a uno), chi copre e perché quel colore.
-                const d2 = (v) => fmt(v, 2);
-                const righe = [`${r.ruolo} · ${meseIt(m)}`, `Da fare: ${d2(fab)} gg`, `Allocate: ${d2(al)} gg`];
-                ((allPers[r.chiave] || {})[m] || []).forEach((x) => righe.push(`• ${x.nominativo}: ${x.perc}% di ${g(x.ore)} h/sett → ${d2(x.gg)} gg`));
-                if (!fab && !al) return '<td class="cap-cell">–</td>';
-                if (!al) righe.push('= Nessuna persona allocata in questo mese');
-                else if (cl === 'cap-att') righe.push(`= Giallo: mancano ${d2(fab - al)} gg`, `ℹ Le celle mostrano un solo decimale: se i due numeri sembrano uguali la differenza è di pochi centesimi di giornata, dovuta all'arrotondamento della % al 5 e ai giorni lavorativi del mese. Basta aumentare di poco la percentuale (clic sull'allocazione) se vuoi il verde.`);
-                else righe.push(al > fab + 0.05 ? `= Verde: coperto, ${d2(al - fab)} gg in più` : '= Verde: coperto');
-                return `<td class="cap-cell ${cl}" data-tip="${esc(righe.join('\n'))}">${fab ? g(fab) : '–'}${al ? `<small>alloc. ${g(al)}</small>` : ''}</td>`;
-            };
             // Persone del team del progetto (proj_componenti), con allocazioni o proposta.
             const team = (d.team && d.team.persone) || [];
             const daAllocare = team.filter((x) => !x.allocazioni.length && x.proposta);
@@ -1153,23 +1119,21 @@
                 <td>${x.allocazioni.length ? x.allocazioni.map((a) => `<span class="pill aperto click" data-all-id="${esc(a.id)}" style="cursor:pointer" title="Modifica l'allocazione">${a.perc}% dal ${dataIt(a.dal)} al ${dataIt(a.al)}</span>`).join(' ')
                     : x.proposta ? `<span class="pm-nota">non allocata · proposta <b>${x.proposta.perc}%</b> dal ${dataIt(x.proposta.dal)} al ${dataIt(x.proposta.al)} (${g(x.proposta.giornate)} gg)</span>`
                     : `<span class="pm-nota">non allocata${x.motivoNoProposta ? ` · ${esc(x.motivoNoProposta)}` : ''}</span>`}</td>
-                <td class="n">${!x.allocazioni.length && x.proposta ? `<button type="button" class="pm-btn piccolo primario" data-alloca="${i}"><i class="fas fa-plus"></i> Alloca</button>` : ''}</td></tr>`);
+                <td class="n">${!x.allocazioni.length && x.proposta ? `<button type="button" class="pm-btn piccolo primario" data-alloca="${i}"><i class="fas fa-plus"></i> Alloca</button>` : ''}</td>
+                <td class="n"><label class="pa-switch" title="${x.nelPiano === false ? 'Fuori dal Piano automatico: clic per includerla' : 'Nel Piano automatico: clic per escluderla'}"><input type="checkbox" data-nel-piano="${i}" ${x.nelPiano === false ? '' : 'checked'}><span></span></label></td></tr>`);
             // Allocazioni di persone che non sono (più) nel team del progetto.
             const nelTeam = new Set(team.map((x) => x.risorsaId).filter(Boolean));
             const extra = d.allocazioni.filter((a) => !nelTeam.has(a.risorsa_id)).map((a) => `<tr class="${a.al < oggi ? 'chiuso' : ''}"><td><b>${esc(a.nominativo || '')}</b><div class="pm-nota">non nel team del progetto</div></td><td>${esc(a.ruolo || '')}</td><td class="n">–</td>
-                <td><span class="pill aperto" data-all-id="${esc(a.id)}" style="cursor:pointer" title="Modifica l'allocazione">${a.perc}% dal ${dataIt(a.dal)} al ${dataIt(a.al)}</span></td><td></td></tr>`);
+                <td><span class="pill aperto" data-all-id="${esc(a.id)}" style="cursor:pointer" title="Modifica l'allocazione">${a.perc}% dal ${dataIt(a.dal)} al ${dataIt(a.al)}</span></td><td></td><td></td></tr>`);
             p.innerHTML = `${d.tabelle ? '' : '<div class="pm-avviso"><i class="fas fa-database"></i> Per salvare le allocazioni va eseguito lo script <b>Supporto/CreaDB/capacita_risorse.sql</b>.</div>'}
-                <div class="pm-card"><h2><i class="fas fa-chart-column"></i> Giornate da pianificare per ruolo</h2>
-                    <p class="pm-nota" style="margin-top:0">Stima (effort venduto) − Consuntivo (effort speso, ore Qlik, non il fatturato) per voce di costo dei Costi Progetto, in giornate, distribuito da oggi alla fine del progetto. Sotto il numero: giornate già coperte dalle allocazioni di questo progetto (festività e assenze sono considerate nella pagina Capacità). Verde = coperto, giallo = allocato meno del necessario; passa sopra una cella per i valori esatti e il motivo.</p>
-                    ${f.ruoli.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Ruolo</th><th class="n">Stima</th><th class="n" title="Effort già speso (ore Qlik), non il fatturato">Consuntivo</th><th class="n" title="Stima − Consuntivo">Da pianificare</th>${f.mesi.map((m) => `<th class="n">${esc(meseIt(m))}</th>`).join('')}<th class="n">Oltre</th></tr></thead><tbody>
-                        ${f.ruoli.map((r) => `<tr><td><b>${esc(r.ruolo)}</b></td><td class="cap-cell">${g(r.stima)}</td><td class="cap-cell">${g(r.consuntivo)}</td><td class="cap-cell" style="background:#EEF2FF"><b>${g(r.daPianificare)}</b></td>${f.mesi.map((m) => cella(r, m)).join('')}<td class="cap-cell">${r.oltre ? g(r.oltre) : '–'}</td></tr>`).join('')}
-                        </tbody></table></div>${f.ruoli.some((r) => r.senzaDate) ? '<p class="pm-nota" style="color:#B45309">Il progetto non ha la data di fine o è già superata: le giornate da pianificare non si possono distribuire nei mesi. Aggiorna il campo End della scheda o il Gantt.</p>' : ''}` : `<div class="pm-vuoto">Nessuna giornata da pianificare${(f.progettiEsauriti || []).length ? ': il consuntivo ha già raggiunto la stima in tutte le voci' : ' nei Costi Progetto'}.</div>`}
-                </div>
+                <div id="paBox"></div>
                 <div class="pm-card"><h2><i class="fas fa-user-clock"></i> Persone sul progetto <span class="azioni"><a class="pm-btn piccolo" href="capacita.html?scheda=carico&da=${encodeURIComponent(projectId)}"><i class="fas fa-table-cells"></i> Carico di tutte</a>${daAllocare.length ? `<button class="pm-btn piccolo verde" id="allocaTutti" title="Alloca le ${daAllocare.length} persone del team non ancora allocate, con la proposta mostrata"><i class="fas fa-wand-magic-sparkles"></i> Alloca tutto il team (${daAllocare.length})</button>` : ''}<button class="pm-btn piccolo primario" id="nuovaAllP"><i class="fas fa-plus"></i> Allocazione</button></span></h2>
-                    <p class="pm-nota" style="margin-top:0">Le persone arrivano dal <b>team del progetto</b> (Kick-off), con il loro ruolo nel progetto. Per chi non è allocato Projexa propone periodo e percentuale: giornate da fare del ruolo divise tra le persone del team con quel ruolo, sulle ore settimanali della persona. «Alloca» la conferma. Clic su un'allocazione per cambiarla; le ore settimanali vengono dalla Rubrica (32 h se non indicate).</p>
-                    ${righeTeam.length || extra.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Persona</th><th>Ruolo nel progetto</th><th class="n">Consuntivo</th><th>Allocazione</th><th></th></tr></thead><tbody>${righeTeam.join('')}${extra.join('')}</tbody></table></div>`
+                    <p class="pm-nota" style="margin-top:0">Le persone arrivano dal <b>team del progetto</b> (Kick-off), con il loro ruolo nel progetto. Per chi non è allocato Projexa propone periodo e percentuale: giornate da fare del ruolo divise tra le persone del team con quel ruolo, sulle ore settimanali della persona. «Alloca» la conferma. Clic su un'allocazione per cambiarla. Con <b>Nel piano</b> scegli chi partecipa al Piano automatico qui sopra: il lavoro del ruolo si divide solo tra le persone attive; le ore settimanali vengono dalla Rubrica (32 h se non indicate).</p>
+                    ${righeTeam.length || extra.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Persona</th><th>Ruolo nel progetto</th><th class="n">Consuntivo</th><th>Allocazione</th><th></th><th class="n" title="Chi è nel piano partecipa al Piano automatico: il lavoro del suo ruolo si divide tra le persone attive">Nel piano</th></tr></thead><tbody>${righeTeam.join('')}${extra.join('')}</tbody></table></div>`
                         : '<div class="pm-vuoto">Nessuna persona nel team del progetto: aggiungile nel Team Work della scheda progetto (o con il Kick-off), poi torna qui.</div>'}
                 </div>`;
+            // Piano automatico (js/piano-automatico.js): consegna, stima e consuntivo -> % per persona.
+            PianoAutomatico.monta(p.querySelector('#paBox'), { projectId, onApplicato: () => caricaRisorse() });
             if (!p.dataset.tooltipAttivo) { p.dataset.tooltipAttivo = '1'; attivaTooltip(p); } // una volta: il pannello resta, cambia solo il contenuto
             const ok = () => caricaRisorse();
             const alloca = async (lista, btn) => {
@@ -1183,6 +1147,16 @@
             p.querySelector('#nuovaAllP').addEventListener('click', () => formAllocazione({ risorse: d.risorse, projectId, onSalvato: ok }));
             p.querySelector('#allocaTutti')?.addEventListener('click', (e) => alloca(daAllocare, e.currentTarget));
             p.querySelectorAll('[data-alloca]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); alloca([team[Number(b.dataset.alloca)]], b); }));
+            // «Nel piano»: salvato sul team del progetto, poi si ricalcola tutta la scheda (piano compreso).
+            p.querySelectorAll('[data-nel-piano]').forEach((cb) => cb.addEventListener('change', async () => {
+                const x = team[Number(cb.dataset.nelPiano)];
+                cb.disabled = true;
+                try {
+                    await api('/capacita/progetto/nel-piano', { metodo: 'PUT', corpo: { projectId, email: x.email, nominativo: x.nominativo, attivo: cb.checked } });
+                    toast(cb.checked ? `${x.nominativo} è nel piano` : `${x.nominativo} è fuori dal piano`);
+                    ok();
+                } catch (e) { toast(e.message, 'errore'); cb.checked = !cb.checked; cb.disabled = false; }
+            }));
             p.querySelectorAll('[data-all-id]').forEach((el) => el.addEventListener('click', () => formAllocazione({ x: d.allocazioni.find((a) => a.id === el.dataset.allId), risorse: d.risorse, projectId, onSalvato: ok })));
         }
 

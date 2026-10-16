@@ -400,8 +400,11 @@ export async function teamConRuolo(user, projectIds = null) {
                   WHERE k.tenant_id = c.tenant_id AND BTRIM(k.cod_billing) = BTRIM(w.cod_billing)
                     AND (k.scadenza IS NULL OR k.scadenza >= CURRENT_DATE) ORDER BY k.desc_worker LIMIT 1), w.desc_worker)`
     : 'w.desc_worker';
+  // nel_piano (Supporto/CreaDB/team_nel_piano.sql): senza colonna tutti nel piano.
+  const colTeam = await colonneTabella('proj_componenti');
   return (await db.query(
-    `SELECT c.project_id::text AS project_id, c.nominativo, c.email, c.time_spent_hh, ${ruolo} AS ruolo
+    `SELECT c.id::text AS id, c.project_id::text AS project_id, c.nominativo, c.email, c.time_spent_hh, ${ruolo} AS ruolo,
+            ${colTeam.has('nel_piano') ? 'c.nel_piano' : 'true'} AS nel_piano, ${colTeam.has('id_roles_write') ? 'c.id_roles_write' : 'NULL'} AS id_roles_write
        FROM proj_componenti c
        LEFT JOIN proj_worker_cost w ON w.id = c.team_pro
       WHERE c.tenant_id = $1 AND c.user_id = $2 AND (c.scadenza IS NULL OR c.scadenza >= CURRENT_DATE)
@@ -635,13 +638,15 @@ export async function teamProgetto(user, projectId, fab) {
     const k = email || normNome(t.nominativo);
     if (!k) continue;
     const r = (email && perEmail.get(email)) || perNome.get(normNome(t.nominativo)) || null;
-    const x = persone.get(k) || { email, nominativo: (r && r.nominativo) || String(t.nominativo || email).trim(), ruolo: t.ruolo || (r && r.ruolo) || '', risorsaId: r ? r.id : null, consuntivo: 0 };
+    const x = persone.get(k) || { email, nominativo: (r && r.nominativo) || String(t.nominativo || email).trim(), ruolo: t.ruolo || (r && r.ruolo) || '', risorsaId: r ? r.id : null, consuntivo: 0, nelPiano: false, righe: [] };
     x.consuntivo += (Number(t.time_spent_hh) || 0) / ORE_GIORNATA;
+    x.nelPiano = x.nelPiano || t.nel_piano !== false;
+    x.righe.push(t.id);
     persone.set(k, x);
   }
   const lista = [...persone.values()];
   const perRuolo = new Map();
-  lista.forEach((x) => { const k = normVoce(x.ruolo); perRuolo.set(k, (perRuolo.get(k) || 0) + 1); });
+  lista.filter((x) => x.nelPiano).forEach((x) => { const k = normVoce(x.ruolo); perRuolo.set(k, (perRuolo.get(k) || 0) + 1); });
   const dal = inizio && inizio > oggi ? inizio : oggi;
   const giorni = fine && !motivo ? giorniLavorativi(dal, fine).length : 0;
   for (const x of lista) {
@@ -650,11 +655,83 @@ export async function teamProgetto(user, projectId, fab) {
     const oreSett = x.risorsaId ? ore.ore(perEmail.get(x.email) || ris.find((r) => r.id === x.risorsaId)) : (ore.perEmail.get(x.email) || ORE_SETT_DEFAULT);
     const giornate = res / (perRuolo.get(normVoce(x.ruolo)) || 1);
     const disponibili = giorni * (oreSett / 5 / ORE_GIORNATA);
-    x.proposta = giorni && giornate > 0
+    x.proposta = x.nelPiano && giorni && giornate > 0
       ? { dal, al: fine, giornate: Math.round(giornate * 10) / 10, perc: disponibili > 0 ? Math.min(100, Math.max(5, Math.round(((giornate / disponibili) * 100) / 5) * 5)) : 100 }
       : null;
-    x.motivoNoProposta = !giorni ? (motivo || 'progetto senza data di fine') : (giornate <= 0 ? 'nessuna giornata da fare per il suo ruolo' : null);
+    x.motivoNoProposta = !x.nelPiano ? 'fuori dal piano' : !giorni ? (motivo || 'progetto senza data di fine') : (giornate <= 0 ? 'nessuna giornata da fare per il suo ruolo' : null);
   }
   lista.sort((a, b) => a.ruolo.localeCompare(b.ruolo, 'it') || a.nominativo.localeCompare(b.nominativo, 'it'));
   return { fine, motivo, persone: lista };
+}
+
+// ----------------------------------------------------------------------------
+// PIANO AUTOMATICO DEL PROGETTO (Cruscotto PM › Risorse, 2026-10-16)
+// ----------------------------------------------------------------------------
+// Dati per il piano: per ogni ruolo (voce di costo) le giornate che restano = Stima −
+// Consuntivo dei Costi Progetto, i giorni lavorativi da oggi alla consegna (campo End o
+// fine Gantt, oppure la data scelta nel Cruscotto) e le persone del team con quel ruolo:
+// ore settimanali (Rubrica), giornate già fatte qui, allocazione di oggi su questo progetto
+// e giornate a settimana già impegnate altrove (altri progetti del PM + altri PM del tenant,
+// stessa email) nel periodo fino alla consegna. La divisione tra le persone e le percentuali
+// le calcola la pagina (si possono togliere persone e cambiare la data senza salvare).
+export async function pianoProgetto(user, projectId, { consegna = null } = {}) {
+  const oggi = oggiIso();
+  const fab = await fabbisogno(user, { mesi: 12, projectId });
+  const [team, tutteAll, altriPm, ore] = await Promise.all([
+    teamProgetto(user, projectId, fab), allocazioni(user), allocazioniAltriPm(user), oreSettimanali(user)
+  ]);
+  const fineProgetto = team.fine || null;
+  const fine = consegna && consegna >= oggi ? consegna : fineProgetto;
+  const giorni = fine && fine >= oggi ? giorniLavorativi(oggi, fine) : [];
+  const nG = giorni.length;
+  // Settimane (lunedì) con i giorni lavorativi di ognuna, per la striscia settimana per settimana.
+  const settimane = new Map();
+  for (const d of giorni) {
+    const t = Date.parse(`${d}T12:00:00Z`);
+    const lun = new Date(t - (((new Date(t).getUTCDay() + 6) % 7) * 86400000)).toISOString().slice(0, 10);
+    settimane.set(lun, (settimane.get(lun) || 0) + 1);
+  }
+  // Giornate di un'allocazione dentro [oggi, fine]: giorni lavorativi × % × ore/sett ÷ 5 ÷ 8.
+  const giornate = (a, oreSett) => {
+    if (!nG) return 0;
+    const dal = a.dal > oggi ? a.dal : oggi;
+    const al = a.al < fine ? a.al : fine;
+    if (al < dal) return 0;
+    return giorniLavorativi(dal, al).length * (Number(a.perc) / 100) * (oreSett / 5 / ORE_GIORNATA);
+  };
+  const ruoli = new Map();
+  for (const r of fab.ruoli) for (const p of r.progetti) if (p.projectId === projectId) {
+    const x = ruoli.get(r.chiave) || { ruolo: r.ruolo, chiave: r.chiave, stima: 0, consuntivo: 0, persone: [] };
+    x.stima += p.stima || 0; x.consuntivo += p.consuntivo || 0;
+    ruoli.set(r.chiave, x);
+  }
+  for (const x of team.persone) {
+    const k = normVoce(x.ruolo || '');
+    const r = ruoli.get(k);
+    if (!r) continue; // ruolo senza voce nei Costi Progetto: niente da pianificare
+    const email = String(x.email || '').trim().toLowerCase();
+    const oreSett = (email && ore.perEmail.get(email)) || ORE_SETT_DEFAULT;
+    const mie = x.risorsaId ? tutteAll.filter((a) => a.risorsa_id === x.risorsaId) : [];
+    const qui = mie.filter((a) => a.project_id === projectId && a.al >= oggi);
+    const corrente = qui.find((a) => a.dal <= oggi) || qui[0] || null;
+    const altrove = [
+      ...mie.filter((a) => a.project_id !== projectId).map((a) => ({ gg: giornate(a, oreSett), nome: [a.cliente, a.progetto].filter(Boolean).join(' · ') })),
+      ...(email ? altriPm.filter((a) => a.email === email).map((a) => ({ gg: giornate(a, oreSett), nome: `${[a.cliente, a.progetto].filter(Boolean).join(' · ')} (${a.pm})` })) : [])
+    ].filter((a) => a.gg > 0.001);
+    const ggAltrove = altrove.reduce((t, a) => t + a.gg, 0);
+    r.persone.push({
+      nominativo: x.nominativo, email: x.email || null, ruolo: x.ruolo, risorsaId: x.risorsaId, oreSett, nelPiano: x.nelPiano,
+      fatte: Math.round(x.consuntivo * 100) / 100,
+      oggiPerc: corrente ? corrente.perc : 0, allocazioni: qui.map((a) => ({ id: a.id, perc: a.perc, dal: a.dal, al: a.al })),
+      altriGgSett: nG ? Math.round((ggAltrove / nG) * 5 * 100) / 100 : 0,
+      altriDett: [...new Set(altrove.map((a) => a.nome))].join(', ')
+    });
+  }
+  const lista = [...ruoli.values()].map((r) => ({ ...r, stima: Math.round(r.stima * 100) / 100, consuntivo: Math.round(r.consuntivo * 100) / 100, resto: Math.max(0, Math.round((r.stima - r.consuntivo) * 100) / 100) }))
+    .filter((r) => r.resto > 0.05 || r.persone.some((p) => p.oggiPerc > 0))
+    .sort((a, b) => b.resto - a.resto);
+  return {
+    oggi, consegna: fine, consegnaProgetto: fineProgetto, motivo: team.motivo || null,
+    giorni: nG, settimane: [...settimane.entries()].map(([lun, n]) => ({ lun, giorni: n })), ruoli: lista
+  };
 }

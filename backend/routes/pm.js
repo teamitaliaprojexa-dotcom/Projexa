@@ -1348,6 +1348,83 @@ router.get('/capacita/progetto', async (req, res) => {
   } catch (e) { invia(res, e, 'CAPACITA_PROGETTO'); }
 });
 
+// Piano automatico del progetto (Cruscotto › Risorse): dati per ruolo e persona; ?consegna=
+// prova un'altra data di consegna (non si salva).
+router.get('/capacita/piano', async (req, res) => {
+  try {
+    await richiedeCapacita(req);
+    const prog = await progettoUtente(req.user, pid(req));
+    const consegna = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.consegna || '')) ? String(req.query.consegna) : null;
+    res.json({ progetto: prog, ...(await Cap.pianoProgetto(req.user, prog.projectId, { consegna })) });
+  } catch (e) { invia(res, e, 'CAP_PIANO'); }
+});
+
+// Interruttore «Nel piano» (Persone sul progetto): tutte le righe del team del progetto di
+// quella persona (stessa email, o stesso nome) diventano attive o no per il Piano automatico.
+// Body: { projectId, email, nominativo, attivo }.
+router.put('/capacita/progetto/nel-piano', async (req, res) => {
+  try {
+    await richiedeCapacita(req, { scrittura: true });
+    if (!(await colonneTabella('proj_componenti')).has('nel_piano')) throw errore(503, 'Va eseguito lo script Supporto/CreaDB/team_nel_piano.sql');
+    const prog = await progettoUtente(req.user, pid(req));
+    const b = req.body || {};
+    const email = String(b.email || '').trim().toLowerCase();
+    const righe = (await Cap.teamConRuolo(req.user, [prog.projectId]))
+      .filter((t) => (email && String(t.email || '').trim().toLowerCase() === email) || (!email && normNome(t.nominativo) === normNome(b.nominativo)));
+    if (!righe.length) throw errore(404, 'Persona non trovata nel team del progetto');
+    if (righe.some((t) => t.id_roles_write != null && !puoScrivere(req, t.id_roles_write))) throw errore(403, READ_ONLY);
+    await db.query(`UPDATE proj_componenti SET nel_piano = $1 WHERE id::text = ANY($2::text[]) AND tenant_id = $3 AND user_id = $4`,
+      [b.attivo !== false, righe.map((t) => t.id), req.user.tenant_id, req.user.user_id]);
+    res.json({ ok: true, righe: righe.length });
+  } catch (e) { invia(res, e, 'CAP_NEL_PIANO'); }
+});
+
+// «Applica il piano»: per ogni persona le allocazioni su QUESTO progetto da oggi in poi si
+// sostituiscono con una sola, da oggi alla consegna con la % del piano (quelle già iniziate
+// finiscono ieri, le future si chiudono). perc 0 = persona tolta dal piano: solo chiusura.
+// Le persone non ancora tra le risorse si aggiungono (come «Alloca»).
+// Body: { projectId, consegna, persone: [{ email, nominativo, ruolo, perc }] }.
+router.post('/capacita/piano', async (req, res) => {
+  try {
+    await richiedeCapacita(req, { scrittura: true });
+    const prog = await progettoUtente(req.user, pid(req));
+    const b = req.body || {};
+    const oggi = oggiIso();
+    const consegna = dataObbl(b.consegna, 'Consegna');
+    if (consegna < oggi) throw errore(400, 'La consegna è già passata');
+    const lista = Array.isArray(b.persone) ? b.persone.slice(0, 100) : [];
+    if (!lista.length) throw errore(400, 'Nessuna persona nel piano');
+    const ieri = new Date(Date.parse(`${oggi}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
+    const ris = await Cap.risorse(req.user, { tutte: true });
+    const esistenti = await Cap.allocazioni(req.user, { projectId: prog.projectId });
+    let create = 0, allocate = 0, chiuse = 0;
+    for (const p of lista) {
+      const perc = Number(p.perc) || 0;
+      const email = String(p.email || '').trim().toLowerCase();
+      let r = ris.find((x) => email && String(x.email || '').trim().toLowerCase() === email)
+        || ris.find((x) => normNome(x.nominativo) === normNome(p.nominativo));
+      if (!r && perc <= 0) continue;
+      if (!r) {
+        const id = await inserisci(db, 'pm_risorse', { ...baseCap(req), ...datiRisorsa({ nominativo: p.nominativo, email: p.email, ruolo: p.ruolo }) });
+        r = { id, nominativo: p.nominativo, email: p.email };
+        ris.push(r);
+        create += 1;
+      }
+      for (const a of esistenti.filter((x) => x.risorsa_id === r.id && x.al >= oggi)) {
+        if (!puoScrivere(req, a.id_roles_write)) throw errore(403, READ_ONLY);
+        if (a.dal < oggi) await aggiornaCap(req, 'pm_allocazioni', a.id, { al: ieri });
+        else await chiudiCap(req, 'pm_allocazioni', a.id);
+        chiuse += 1;
+      }
+      if (perc > 0) {
+        await inserisci(db, 'pm_allocazioni', { ...baseCap(req), ...(await datiAllocazione(req, { risorsa_id: r.id, projectId: prog.projectId, perc: Math.min(100, perc), dal: oggi, al: consegna, note: 'Piano automatico' })) });
+        allocate += 1;
+      }
+    }
+    res.json({ ok: true, create, allocate, chiuse });
+  } catch (e) { invia(res, e, 'CAP_PIANO_APPLICA'); }
+});
+
 // Alloca persone del team (pulsanti «Alloca» / «Alloca tutto il team»): se la persona non è
 // ancora tra le Risorse la si aggiunge (nome, email, ruolo del team). Body: { projectId,
 // persone: [{ email, nominativo, ruolo, perc, dal, al }] }.
