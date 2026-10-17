@@ -234,10 +234,10 @@
                     <button id="qlikTypeVoucher" type="button" style="padding:0.75rem 1rem; text-align:left; background:#3B82F6; color:white; border:none; border-radius:7px; font-weight:600; cursor:pointer;">
                         Voucher <span style="display:block; font-size:0.78rem; font-weight:400; opacity:0.9; margin-top:0.2rem;">Ore attività sulle commesse dei progetti</span>
                     </button>
-                    <!-- MySupport: import manuale disattivato (2026-10-15). Il file arriva da solo dalla
-                         cartella scelta con «DataBricks» in Impostazioni (js/mysupport-cartella.js). -->
+                    <!-- MySupport: import manuale disattivato (2026-10-15). I dati li invia (dal 2026-10-17) lo
+                         script schedulato del PC (token di Impostazioni › «DataBricks», js/mysupport-push.js). -->
                     <div style="padding:0.75rem 1rem; background:#F9FAFB; color:#9CA3AF; border:1px dashed #D1D5DB; border-radius:7px; font-weight:600; cursor:not-allowed;" title="Import manuale disattivato">
-                        MySupport <span style="display:block; font-size:0.78rem; font-weight:400; margin-top:0.2rem;">Import automatico dal file MySupport.xlsx della cartella scelta in Impostazioni › DataBricks (orari nella pagina Schedulazioni)</span>
+                        MySupport <span style="display:block; font-size:0.78rem; font-weight:400; margin-top:0.2rem;">Arriva da solo: lo invia lo script del report MySupport del PC (token in Impostazioni › DataBricks)</span>
                     </div>
                 </div>
                 <div style="display:flex; justify-content:flex-end; margin-top:1rem;">
@@ -336,7 +336,7 @@
         showMySupportResultModal(tot, fileName);
     }
 
-    // Import MySupport senza finestre (schedulazione «DataBricks», js/mysupport-cartella.js):
+    // Import MySupport senza finestre (non più usato dal 2026-10-17: i dati li invia lo script del PC):
     // legge il file (primo foglio, intestazioni in prima riga) e lo importa. Restituisce i
     // totali { totale, inserted, updated, unchanged, invalid, nonTrovati: n, ambigui: n }.
     QlikVoucher.importaMySupportFile = async function (file) {

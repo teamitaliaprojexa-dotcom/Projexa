@@ -20,7 +20,7 @@ import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
 import assistentePmRoutes from './routes/assistentePm.js';
-import mysupportCartellaRoutes from './routes/mysupportCartella.js';
+import mysupportPushRoutes, { utenteDaTokenPush, registraInvioPush } from './routes/mysupportPush.js';
 import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
 import jobSchedulesRoutes from './routes/job-schedules.js';
 import auditLogRoutes from './routes/audit-log.js';
@@ -216,8 +216,8 @@ app.use('/api/audit', auditEventiRoutes);
 app.use('/api/chatbot', chatbotRoutes);
 // Finestra «Assistente PM» durante la registrazione (Gemini Live): routes/assistentePm.js.
 app.use('/api/assistente-pm', assistentePmRoutes);
-// Import MySupport dalla cartella del PC (interruttore «DataBricks»): routes/mysupportCartella.js.
-app.use('/api/mysupport/cartella', mysupportCartellaRoutes);
+// Token dello script del PC che invia MySupport (interruttore «DataBricks»): routes/mysupportPush.js.
+app.use('/api/mysupport/push', mysupportPushRoutes);
 // Cruscotto PM e Portfolio (funzioni da PM senior: salute, RAID, Change Request, stakeholder,
 // chiusura, documenti AI, Chiedi al progetto, briefing, baseline del Gantt): routes/pm.js.
 app.use('/api/pm', requireAuth, pmRoutes);
@@ -4942,12 +4942,13 @@ const gpStatoEsclusoCond = (idExpr, alias) => `NOT EXISTS (
        AND an.valore3 > EXTRACT(YEAR FROM CURRENT_DATE)
   )`;
 
-app.get('/api/kpi-gestione-progetto', requireAuth, async (req, res) => {
-  try {
-    const clientIds = parseClientIdsFromQuery(req).filter((id) => GP_UUID.test(id));
-    const params = [req.user.tenant_id, req.user.user_id];
+// Righe del KPI per tenant e utente, con filtro facoltativo su clienti o su un solo progetto
+// (Dossier Cliente/Progetto, dosKpiProgetto).
+async function gpAvanzamento(tenantId, userId, { clientIds = [], projectId = null } = {}) {
+    const params = [tenantId, userId];
     let clientCond = '';
-    if (clientIds.length) { params.push(clientIds); clientCond = `AND a.client_id = ANY($3::uuid[])`; }
+    if (clientIds.length) { params.push(clientIds); clientCond = `AND a.client_id = ANY($${params.length}::uuid[])`; }
+    if (projectId) { params.push(projectId); clientCond += ` AND a.project_id = $${params.length}::uuid`; }
     const r = await db.query(
       `SELECT a.client_id, a.project_id, hh.gestione_hh AS hh, comp.completamento,
               SUM(CASE WHEN hh.gestione_hh THEN COALESCE(a.offerta_effort_hh, 0) ELSE COALESCE(a.offerta_effort_gg, 0) END) AS offerta,
@@ -5017,9 +5018,9 @@ app.get('/api/kpi-gestione-progetto', requireAuth, async (req, res) => {
     });
     vociByProject.forEach((list) => list.sort((a, b) => String(a.worker || '').localeCompare(String(b.worker || ''), 'it')));
 
-    const clients = await resolveClientDescriptions(r.rows.map((x) => x.client_id), req.user.tenant_id);
-    const projects = await resolveProjectDescriptions(r.rows.map((x) => x.project_id), req.user.tenant_id, req.user.user_id);
-    const items = r.rows.map((x) => ({
+    const clients = await resolveClientDescriptions(r.rows.map((x) => x.client_id), tenantId);
+    const projects = await resolveProjectDescriptions(r.rows.map((x) => x.project_id), tenantId, userId);
+    return r.rows.map((x) => ({
       voci: vociByProject.get(String(x.project_id)) || [],
       client_id: x.client_id,
       client: clients.get(String(x.client_id)) || null,
@@ -5033,7 +5034,12 @@ app.get('/api/kpi-gestione-progetto', requireAuth, async (req, res) => {
       pm: x.ha_pm ? { offerta: gpNum(x.pm_offerta), time_spent: gpNum(x.pm_spent) } : null
     })).sort((a, b) => String(a.client || '').localeCompare(String(b.client || ''), 'it')
       || String(a.project || '').localeCompare(String(b.project || ''), 'it'));
-    res.json(items);
+}
+
+app.get('/api/kpi-gestione-progetto', requireAuth, async (req, res) => {
+  try {
+    const clientIds = parseClientIdsFromQuery(req).filter((id) => GP_UUID.test(id));
+    res.json(await gpAvanzamento(req.user.tenant_id, req.user.user_id, { clientIds }));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -5253,12 +5259,13 @@ app.get('/api/kpi-mysupport', requireAuth, async (req, res) => {
 // a chi sollecitare l'ordine. Sempre per tenant_id e user_id del login; filtro clienti
 // facoltativo come la scheda Avanzamento. MAX(): una sola data anche se un campo fosse doppio.
 // Lo stato (da sollecitare, in attesa...) lo calcola la dashboard sulla data di oggi locale.
-app.get('/api/kpi-gestione-progetto/ordini', requireAuth, async (req, res) => {
-  try {
-    const clientIds = parseClientIdsFromQuery(req).filter((id) => GP_UUID.test(id));
-    const params = [req.user.tenant_id, req.user.user_id];
+// Righe del riquadro per tenant e utente, con filtro facoltativo su clienti o su un solo
+// progetto (Dossier Cliente/Progetto, dosKpiProgetto).
+async function gpOrdini(tenantId, userId, { clientIds = [], projectId = null } = {}) {
+    const params = [tenantId, userId];
     let clientCond = '';
-    if (clientIds.length) { params.push(clientIds); clientCond = 'AND a.client_id = ANY($3::uuid[])'; }
+    if (clientIds.length) { params.push(clientIds); clientCond = `AND a.client_id = ANY($${params.length}::uuid[])`; }
+    if (projectId) { params.push(projectId); clientCond += ` AND a.id = $${params.length}::uuid`; }
     const dataCampo = (campo) => `(SELECT MAX(x.valore2) FROM projects x
         WHERE x.campo = '${campo}' AND x.argument = a.id::text
           AND x.tenant_id = a.tenant_id AND x.user_id = a.user_id AND x.scadenza >= CURRENT_DATE)`;
@@ -5281,7 +5288,7 @@ app.get('/api/kpi-gestione-progetto/ordini', requireAuth, async (req, res) => {
           AND ${gpStatoEsclusoCond('a.id', 'a')}`,
       params
     );
-    const clients = await resolveClientDescriptions(r.rows.map((x) => x.client_id), req.user.tenant_id);
+    const clients = await resolveClientDescriptions(r.rows.map((x) => x.client_id), tenantId);
     const soloData = (v) => {
       if (v == null || String(v).trim() === '') return null;
       const s = String(v).trim();
@@ -5289,7 +5296,7 @@ app.get('/api/kpi-gestione-progetto/ordini', requireAuth, async (req, res) => {
       const d = new Date(s);
       return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
     };
-    res.json(r.rows.map((x) => ({
+    return r.rows.map((x) => ({
       project_id: x.project_id,
       client_id: x.client_id,
       client: clients.get(String(x.client_id)) || null,
@@ -5298,7 +5305,13 @@ app.get('/api/kpi-gestione-progetto/ordini', requireAuth, async (req, res) => {
       end: soloData(x.end),
       offerta_inviata: soloData(x.offerta_inviata),
       ordine_ricevuto: soloData(x.ordine_ricevuto)
-    })));
+    }));
+}
+
+app.get('/api/kpi-gestione-progetto/ordini', requireAuth, async (req, res) => {
+  try {
+    const clientIds = parseClientIdsFromQuery(req).filter((id) => GP_UUID.test(id));
+    res.json(await gpOrdini(req.user.tenant_id, req.user.user_id, { clientIds }));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -6897,104 +6910,132 @@ const MYSUPPORT_COLONNE = ['stato_finale', 'mycliente', 'procedura', 'data_apert
   'modulo', 'urgenza', 'year_tkt', 'operatore'];
 const mySupportNorm = (v) => String(v == null ? '' : v).normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
 
+// Import di un blocco di righe (massimo 5000) nel tenant indicato. Lo usano il browser
+// (Qlik › MySupport, utente del login) e lo script schedulato del PC (/api/mysupport/push, utente
+// del token). Gli errori dovuti ai dati inviati hanno statusCode 400.
+async function importaRigheMySupport(tenantId, rowsIn) {
+  const errore400 = (msg) => Object.assign(new Error(msg), { statusCode: 400 });
+  if (!rowsIn.length) throw errore400('Nessuna riga da importare');
+  if (rowsIn.length > 5000) throw errore400('Troppe righe in una sola richiesta (massimo 5000)');
+  const cols = await getTableColumns('mysupport');
+  if (!cols.size) throw errore400('Tabella mysupport non trovata');
+
+  // Testo (max lunghezza della colonna), data/ora 'AAAA-MM-GG HH:MM:SS', anno intero.
+  const testo = (v, max) => { const s = String(v == null ? '' : v).trim(); return s ? s.slice(0, max) : null; };
+  const dataOra = (v) => (/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/.test(String(v || '').trim()) ? String(v).trim() : null);
+  const anno = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n > 1900 && n < 3000 ? n : null; };
+
+  // 1) Clienti del tenant con il campo "My Support" compilato (anche "(*) My Support").
+  //    Il valore può essere cifrato: il confronto si fa dopo la lettura.
+  const campi = await db.query(
+    `SELECT argument, valore2 FROM clients
+      WHERE tenant_id = $1 AND LOWER(BTRIM(regexp_replace(campo, '^\\(\\*\\)\\s*', ''))) = 'my support'
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+    [tenantId]
+  );
+  const clientiPerNome = new Map(); // nome normalizzato -> Map(clientId -> ownerUserId)
+  for (const c of campi.rows) {
+    const nome = mySupportNorm(c.valore2);
+    if (!nome) continue;
+    const root = await resolveClientRoot(c.argument, tenantId);
+    if (!root) continue;
+    if (!clientiPerNome.has(nome)) clientiPerNome.set(nome, new Map());
+    clientiPerNome.get(nome).set(String(root.clientId), root.ownerUserId);
+  }
+
+  let inserted = 0, updated = 0, unchanged = 0, invalid = 0;
+  const nuovi = []; // ticket inseriti (non gli aggiornati): notifiche dopo il COMMIT
+  const nonTrovati = new Map(); // nome cliente del file -> numero righe
+  const ambigui = new Set();
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    for (const r of rowsIn) {
+      const codice = testo(r && r.codice_quesito, 50);
+      if (!codice) { invalid += 1; continue; }
+      const nomeFile = testo(r.mycliente, 255);
+      const abbinati = clientiPerNome.get(mySupportNorm(nomeFile));
+      if (!abbinati) { const k = nomeFile || '(vuoto)'; nonTrovati.set(k, (nonTrovati.get(k) || 0) + 1); continue; }
+      if (abbinati.size > 1) { ambigui.add(nomeFile); continue; } // stesso valore su più clienti
+      const [[clientId, ownerUserId]] = [...abbinati];
+      const valori = {
+        stato_finale: testo(r.stato_finale, 100),
+        mycliente: nomeFile,
+        procedura: testo(r.procedura, 255),
+        data_apertura: dataOra(r.data_apertura),
+        data_chiusura: dataOra(r.data_chiusura),
+        modulo: testo(r.modulo, 255),
+        urgenza: testo(r.urgenza, 100),
+        year_tkt: anno(r.year_tkt),
+        operatore: testo(r.operatore, 255)
+      };
+      const params = [tenantId, ownerUserId, clientId, codice, ...MYSUPPORT_COLONNE.map((k) => valori[k])];
+      const segn = MYSUPPORT_COLONNE.map((k, i) => {
+        const p = `$${i + 5}`;
+        return (k === 'data_apertura' || k === 'data_chiusura') ? `${p}::timestamp` : (k === 'year_tkt' ? `${p}::integer` : p);
+      });
+      // UPDATE solo se cambia qualcosa (cliente/proprietario compresi); xmax = 0 -> inserita.
+      const confronto = ['user_id', 'client_id', ...MYSUPPORT_COLONNE];
+      const out = await client.query(
+        `INSERT INTO mysupport (tenant_id, user_id, client_id, codice_quesito, ${MYSUPPORT_COLONNE.join(', ')})
+         VALUES ($1, $2, $3, $4, ${segn.join(', ')})
+         ON CONFLICT (tenant_id, codice_quesito) DO UPDATE SET
+           user_id = EXCLUDED.user_id, client_id = EXCLUDED.client_id,
+           ${MYSUPPORT_COLONNE.map((k) => `${k} = EXCLUDED.${k}`).join(', ')}
+         WHERE (${confronto.map((k) => `mysupport.${k}`).join(', ')})
+               IS DISTINCT FROM (${confronto.map((k) => `EXCLUDED.${k}`).join(', ')})
+         RETURNING id, (xmax = 0) AS inserita`,
+        params
+      );
+      if (!out.rows.length) unchanged += 1;
+      else if (out.rows[0].inserita) {
+        inserted += 1;
+        nuovi.push({ id: out.rows[0].id, tenantId: tenantId, userId: ownerUserId, clientId, codice });
+      } else updated += 1;
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+  // Campanella: solo i ticket nuovi (numero e cliente abbinato), mai gli aggiornamenti.
+  // Gli errori delle notifiche non fanno fallire l'import (già salvato).
+  if (nuovi.length) await notificheNuoviMySupport(nuovi);
+  return {
+    totale: rowsIn.length, inserted, updated, unchanged, invalid,
+    nonTrovati: [...nonTrovati].map(([nome, righe]) => ({ nome, righe })).sort((a, b) => b.righe - a.righe),
+    ambigui: [...ambigui]
+  };
+}
+
 app.post('/api/mysupport/import', requireAuth, async (req, res) => {
   try {
-    const rowsIn = Array.isArray(req.body?.rows) ? req.body.rows : [];
-    if (!rowsIn.length) return res.status(400).json({ error: 'Nessuna riga da importare' });
-    if (rowsIn.length > 5000) return res.status(400).json({ error: 'Troppe righe in una sola richiesta (massimo 5000)' });
-    const cols = await getTableColumns('mysupport');
-    if (!cols.size) return res.status(400).json({ error: 'Tabella mysupport non trovata' });
-
-    // Testo (max lunghezza della colonna), data/ora 'AAAA-MM-GG HH:MM:SS', anno intero.
-    const testo = (v, max) => { const s = String(v == null ? '' : v).trim(); return s ? s.slice(0, max) : null; };
-    const dataOra = (v) => (/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/.test(String(v || '').trim()) ? String(v).trim() : null);
-    const anno = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n > 1900 && n < 3000 ? n : null; };
-
-    // 1) Clienti del tenant con il campo "My Support" compilato (anche "(*) My Support").
-    //    Il valore può essere cifrato: il confronto si fa dopo la lettura.
-    const campi = await db.query(
-      `SELECT argument, valore2 FROM clients
-        WHERE tenant_id = $1 AND LOWER(BTRIM(regexp_replace(campo, '^\\(\\*\\)\\s*', ''))) = 'my support'
-          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
-      [req.user.tenant_id]
-    );
-    const clientiPerNome = new Map(); // nome normalizzato -> Map(clientId -> ownerUserId)
-    for (const c of campi.rows) {
-      const nome = mySupportNorm(c.valore2);
-      if (!nome) continue;
-      const root = await resolveClientRoot(c.argument, req.user.tenant_id);
-      if (!root) continue;
-      if (!clientiPerNome.has(nome)) clientiPerNome.set(nome, new Map());
-      clientiPerNome.get(nome).set(String(root.clientId), root.ownerUserId);
-    }
-
-    let inserted = 0, updated = 0, unchanged = 0, invalid = 0;
-    const nuovi = []; // ticket inseriti (non gli aggiornati): notifiche dopo il COMMIT
-    const nonTrovati = new Map(); // nome cliente del file -> numero righe
-    const ambigui = new Set();
-    const client = await db.connect();
-    try {
-      await client.query('BEGIN');
-      for (const r of rowsIn) {
-        const codice = testo(r && r.codice_quesito, 50);
-        if (!codice) { invalid += 1; continue; }
-        const nomeFile = testo(r.mycliente, 255);
-        const abbinati = clientiPerNome.get(mySupportNorm(nomeFile));
-        if (!abbinati) { const k = nomeFile || '(vuoto)'; nonTrovati.set(k, (nonTrovati.get(k) || 0) + 1); continue; }
-        if (abbinati.size > 1) { ambigui.add(nomeFile); continue; } // stesso valore su più clienti
-        const [[clientId, ownerUserId]] = [...abbinati];
-        const valori = {
-          stato_finale: testo(r.stato_finale, 100),
-          mycliente: nomeFile,
-          procedura: testo(r.procedura, 255),
-          data_apertura: dataOra(r.data_apertura),
-          data_chiusura: dataOra(r.data_chiusura),
-          modulo: testo(r.modulo, 255),
-          urgenza: testo(r.urgenza, 100),
-          year_tkt: anno(r.year_tkt),
-          operatore: testo(r.operatore, 255)
-        };
-        const params = [req.user.tenant_id, ownerUserId, clientId, codice, ...MYSUPPORT_COLONNE.map((k) => valori[k])];
-        const segn = MYSUPPORT_COLONNE.map((k, i) => {
-          const p = `$${i + 5}`;
-          return (k === 'data_apertura' || k === 'data_chiusura') ? `${p}::timestamp` : (k === 'year_tkt' ? `${p}::integer` : p);
-        });
-        // UPDATE solo se cambia qualcosa (cliente/proprietario compresi); xmax = 0 -> inserita.
-        const confronto = ['user_id', 'client_id', ...MYSUPPORT_COLONNE];
-        const out = await client.query(
-          `INSERT INTO mysupport (tenant_id, user_id, client_id, codice_quesito, ${MYSUPPORT_COLONNE.join(', ')})
-           VALUES ($1, $2, $3, $4, ${segn.join(', ')})
-           ON CONFLICT (tenant_id, codice_quesito) DO UPDATE SET
-             user_id = EXCLUDED.user_id, client_id = EXCLUDED.client_id,
-             ${MYSUPPORT_COLONNE.map((k) => `${k} = EXCLUDED.${k}`).join(', ')}
-           WHERE (${confronto.map((k) => `mysupport.${k}`).join(', ')})
-                 IS DISTINCT FROM (${confronto.map((k) => `EXCLUDED.${k}`).join(', ')})
-           RETURNING id, (xmax = 0) AS inserita`,
-          params
-        );
-        if (!out.rows.length) unchanged += 1;
-        else if (out.rows[0].inserita) {
-          inserted += 1;
-          nuovi.push({ id: out.rows[0].id, tenantId: req.user.tenant_id, userId: ownerUserId, clientId, codice });
-        } else updated += 1;
-      }
-      await client.query('COMMIT');
-    } catch (e) {
-      await client.query('ROLLBACK');
-      throw e;
-    } finally {
-      client.release();
-    }
-    // Campanella: solo i ticket nuovi (numero e cliente abbinato), mai gli aggiornamenti.
-    // Gli errori delle notifiche non fanno fallire l'import (già salvato).
-    if (nuovi.length) await notificheNuoviMySupport(nuovi);
-    res.json({
-      totale: rowsIn.length, inserted, updated, unchanged, invalid,
-      nonTrovati: [...nonTrovati].map(([nome, righe]) => ({ nome, righe })).sort((a, b) => b.righe - a.righe),
-      ambigui: [...ambigui]
-    });
+    res.json(await importaRigheMySupport(req.user.tenant_id, Array.isArray(req.body?.rows) ? req.body.rows : []));
   } catch (error) {
     console.error('[MYSUPPORT IMPORT]', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+// Righe inviate dallo script schedulato del PC (MySupport-Report.ps1) dopo aver creato
+// MySupport.xlsx: niente cookie di sessione, solo «Authorization: Bearer pxms_…», il token
+// generato in Impostazioni › «DataBricks» (routes/mysupportPush.js). Body: { rows, blocco, blocchi }
+// (blocchi da 5000 righe, anche compressi gzip: express.json li decomprime da sé).
+app.post('/api/mysupport/push', async (req, res) => {
+  try {
+    const tok = await utenteDaTokenPush(req);
+    if (!tok) return res.status(401).json({ error: 'Token non valido o revocato: generane uno nuovo in Impostazioni › DataBricks' });
+    const blocco = Math.max(1, parseInt(req.body?.blocco, 10) || 1);
+    const blocchi = Math.max(blocco, parseInt(req.body?.blocchi, 10) || 1);
+    const esito = await importaRigheMySupport(tok.tenant_id, Array.isArray(req.body?.rows) ? req.body.rows : []);
+    await registraInvioPush(tok.id, blocco, blocchi, { ...esito, nonTrovati: esito.nonTrovati.length, ambigui: esito.ambigui.length });
+    if (blocco === blocchi) console.log(`[MYSUPPORT PUSH] utente ${tok.user_id}: invio completato (${blocchi} blocchi)`);
+    res.json(esito);
+  } catch (error) {
+    if (error.code === '42P01') return res.status(503).json({ error: 'Tabella api_token mancante: eseguire Supporto/CreaDB/mysupport_push.sql' });
+    console.error('[MYSUPPORT PUSH]', error);
     res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
@@ -7820,7 +7861,148 @@ async function dosDettaglioProgetto(req, owner, p) {
       descrizione: a.descrizione, referente: (a.contatto && a.contatto.nominativo) || a.referente || '',
       scadenza: a.data_scadenza, scaduta: a.scaduta, giorni: a.giorni, riunione: a.riunione_data, solleciti: a.solleciti || 0, note: a.note || ''
     })),
-    gantt
+    gantt,
+    kpi: await dosKpiProgetto(user, p.id)
+  };
+}
+
+// ==========================================
+// DOSSIER: KPI DELLA DASHBOARD LIMITATI AL PROGETTO (2026-10-17)
+// ==========================================
+// Nel dettaglio di ogni progetto (Dossier Cliente e Dossier Progetto), con gli stessi calcoli
+// della dashboard ma solo per quel progetto e con i dati del PROPRIETARIO del cliente:
+//   - Gestione Progetto (gpAvanzamento): offerta contro tempo speso, per voce di costo;
+//   - Offerte e ordini (gpOrdini): date e stato, stesse regole di gpOrdStato in dashboard.html;
+//   - Rilascio release: task aperti del progetto con la versione di una release non ancora uscita;
+//   - Capacità e risorse (config/capacita.js), solo con «Capacità e allocazione risorse» acceso:
+//     Risorse (team del Cruscotto › Risorse), Fabbisogno per ruolo, Copertura.
+// Un progetto escluso da un KPI (es. senza commessa, Stato escluso) restituisce null per quel
+// KPI, come in dashboard dove non compare. Niente di questo va all'AI.
+const DOS_SOLLECITO_GIORNI = 15; // = GP_SOLLECITO_GIORNI della dashboard
+function dosStatoOrdine(it, oggi) {
+  const giorni = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
+  const it_ = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+  if (it.ordine_ricevuto) {
+    const attesa = it.offerta_inviata ? giorni(it.offerta_inviata, it.ordine_ricevuto) : null;
+    return { stato: 'ricevuto', nota: attesa != null && attesa >= 0 ? `arrivato ${attesa} giorni dopo l'offerta` : '' };
+  }
+  const iniziato = !!it.start && it.start <= oggi;
+  if (!it.offerta_inviata) return { stato: 'offerta', nota: iniziato ? `progetto iniziato il ${it_(it.start)}` : '' };
+  const g = giorni(it.offerta_inviata, oggi);
+  const inviata = `offerta inviata da ${g} giorn${g === 1 ? 'o' : 'i'}`;
+  if (iniziato) return { stato: 'sollecitare', nota: `progetto iniziato senza ordine · ${inviata}` };
+  if (g >= DOS_SOLLECITO_GIORNI) return { stato: 'sollecitare', nota: inviata };
+  return { stato: 'attesa', nota: inviata };
+}
+
+async function dosKpiProgetto(user, projectId) {
+  const errore = (nome) => (e) => { console.error(`[DOSSIER] KPI ${nome}:`, e.message); return { errore: e.message }; };
+  const oggi = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
+  const [gp, ord, rilasci, capacita] = await Promise.all([
+    gpAvanzamento(user.tenant_id, user.user_id, { projectId }).then((l) => l[0] || null).catch(errore('gestione progetto')),
+    gpOrdini(user.tenant_id, user.user_id, { projectId }).then((l) => (l[0] ? { ...l[0], ...dosStatoOrdine(l[0], oggi) } : null)).catch(errore('offerte e ordini')),
+    dosRilasciProgetto(user, projectId).catch(errore('rilasci')),
+    dosCapacitaProgetto(user, projectId).catch(errore('capacità'))
+  ]);
+  const gestione = gp && !gp.errore ? {
+    hh: gp.hh, completamento: gp.completamento, offerta: gp.offerta, speso: gp.time_spent,
+    perc: gp.offerta > 0 ? Math.round((gp.time_spent / gp.offerta) * 100) : null,
+    fabbrica: gp.fabbrica, pm: gp.pm,
+    voci: gp.voci.map((v) => ({ voce: v.worker || 'Senza voce', offerta: v.offerta, speso: v.time_spent }))
+  } : gp;
+  const ordini = ord && !ord.errore
+    ? { start: ord.start, end: ord.end, offerta: ord.offerta_inviata, ordine: ord.ordine_ricevuto, stato: ord.stato, nota: ord.nota }
+    : ord;
+  return { gestione, ordini, rilasci, capacita };
+}
+
+// Task del progetto (task_app, non chiusi) con la versione di una release di prodotto non ancora
+// uscita (release_prodotto con data da oggi), come il KPI Rilascio release; [] se nessuno.
+async function dosRilasciProgetto(user, projectId) {
+  if (!(await db.query(`SELECT to_regclass('public.release_prodotto') IS NOT NULL AS c`)).rows[0].c) return [];
+  const r = await db.query(
+    `WITH rel AS (
+       SELECT BTRIM("release") AS "release", MIN(data_release) AS data_release
+         FROM release_prodotto
+        WHERE tenant_id = $1 AND data_release >= CURRENT_DATE AND NULLIF(BTRIM("release"), '') IS NOT NULL
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+        GROUP BY BTRIM("release"))
+     SELECT rel."release", rel.data_release::text AS data_release, t.cod_task, t.descrizione, t.stato, t.assegnatario
+       FROM task_app t JOIN rel ON rel."release" = BTRIM(t.versione)
+      WHERE t.tenant_id = $1 AND t.user_id = $2 AND t.project_id::text = $3 AND t.scadenza >= CURRENT_DATE
+      ORDER BY rel.data_release, t.cod_task`,
+    [user.tenant_id, user.user_id, projectId]);
+  const perRelease = new Map();
+  for (const x of r.rows) {
+    if (!perRelease.has(x.release)) perRelease.set(x.release, { release: x.release, data: x.data_release, task: [] });
+    perRelease.get(x.release).task.push({ codice: x.cod_task, descrizione: x.descrizione || '', stato: x.stato || '', assegnatario: x.assegnatario || '' });
+  }
+  return [...perRelease.values()];
+}
+
+// Capacità e risorse del progetto (funzione facoltativa del proprietario): null se spenta.
+async function dosCapacitaProgetto(user, projectId) {
+  const Cap = await import('./config/capacita.js');
+  if (!(await Cap.capacitaAttiva(user))) return null;
+  const mesi = 6;
+  const fab = await Cap.fabbisogno(user, { mesi, projectId });
+  const [team, cop] = await Promise.all([Cap.teamProgetto(user, projectId, fab), Cap.copertura(user, { mesi, fab })]);
+  const r1 = (v) => Math.round((Number(v) || 0) * 10) / 10;
+  const copP = cop.progetti.find((x) => x.projectId === projectId) || null;
+  return {
+    mesi: fab.mesi,
+    risorse: team.persone.map((x) => ({
+      nominativo: x.nominativo, ruolo: x.ruolo, consuntivo: r1(x.consuntivo),
+      allocazioni: x.allocazioni.map((a) => ({ perc: a.perc, dal: a.dal, al: a.al })),
+      proposta: x.proposta, nota: x.motivoNoProposta
+    })),
+    fabbisogno: fab.ruoli.map((r) => {
+      const p = r.progetti.find((x) => x.projectId === projectId) || r;
+      return { ruolo: r.ruolo, stima: r1(p.stima), consuntivo: r1(p.consuntivo), daFare: r1(p.daPianificare),
+        perMese: fab.mesi.map((m) => r1(p.perMese[m])), oltre: r1(p.oltre), senzaDate: r1(p.senzaDate), motivo: p.motivo || null };
+    }),
+    copertura: copP ? {
+      daFare: r1(copP.daPianificare), coperto: r1(copP.coperto), scoperto: r1(copP.scoperto),
+      ruoli: copP.ruoli.map((x) => ({
+        ruolo: x.ruolo, daFare: r1(x.daPianificare), coperto: r1(x.coperto), scoperto: r1(x.scoperto),
+        perMese: cop.mesi.map((m) => ({ fab: r1(x.perMese[m].fab), all: r1(x.perMese[m].all) })),
+        persone: x.persone.map((pp) => `${pp.nominativo} ${pp.perc}%`)
+      }))
+    } : null,
+    avvisi: cop.avvisi.filter((a) => a.projectId === projectId).map((a) => ({ gravita: a.gravita, testo: a.testo }))
+  };
+}
+
+// MySupport del cliente: tempi di chiusura per anno (fasce del KPI, MYSUPPORT_FASCE) e quesiti
+// non chiusi per stato. MySupport è sempre legato al cliente (non al progetto): nel Dossier
+// Progetto compare lo stesso riepilogo del cliente.
+async function dosMySupportTempi(user, clientId) {
+  if (!(await db.query(`SELECT to_regclass('public.mysupport') IS NOT NULL AS c`)).rows[0].c) return null;
+  const ore = `EXTRACT(EPOCH FROM (data_chiusura - data_apertura)) / 3600.0`;
+  const colFasce = MYSUPPORT_FASCE.map((f, i) => {
+    const min = i ? MYSUPPORT_FASCE[i - 1].maxOre : null;
+    const cond = [min != null ? `${ore} > ${min}` : null, f.maxOre != null ? `${ore} <= ${f.maxOre}` : null].filter(Boolean).join(' AND ');
+    return `COUNT(*) FILTER (WHERE ${cond || 'true'})::int AS "${f.key}"`;
+  }).join(', ');
+  const [chiusi, aperti] = await Promise.all([
+    db.query(
+      `SELECT EXTRACT(YEAR FROM data_chiusura)::int AS anno, COUNT(*)::int AS n, AVG(${ore}) AS media_ore,
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY ${ore}) AS mediana_ore, ${colFasce}
+         FROM mysupport
+        WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3 AND LOWER(BTRIM(stato_finale)) = 'chiuso'
+          AND data_apertura IS NOT NULL AND data_chiusura IS NOT NULL AND data_chiusura >= data_apertura
+        GROUP BY 1 ORDER BY 1 DESC`, [user.tenant_id, user.user_id, clientId]),
+    db.query(
+      `SELECT COALESCE(NULLIF(BTRIM(stato_finale), ''), '(senza stato)') AS stato, COUNT(*)::int AS n
+         FROM mysupport
+        WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3 AND LOWER(BTRIM(COALESCE(stato_finale, ''))) <> 'chiuso'
+        GROUP BY 1 ORDER BY 2 DESC`, [user.tenant_id, user.user_id, clientId])
+  ]);
+  const num = (v) => (v == null ? null : Math.round(Number(v) * 10) / 10);
+  return {
+    fasce: MYSUPPORT_FASCE.map((f) => f.label),
+    anni: chiusi.rows.map((x) => ({ anno: x.anno, n: x.n, mediaOre: num(x.media_ore), medianaOre: num(x.mediana_ore), fasce: MYSUPPORT_FASCE.map((f) => x[f.key]) })),
+    aperti: aperti.rows
   };
 }
 
@@ -8471,7 +8653,11 @@ app.get('/api/clients/dossier', requireAuth, ...rottaAi('dossier', async (req, r
       }
     }
 
-    res.json({ cliente, data: oggi, utente, filtro: opz, soloProgetto, progetti, totali, fatturatoAnni, sezioni, dettagli, ai, colonneIgnorate: ignorate });
+    // MySupport: tempi di chiusura del cliente (anche nel Dossier Progetto: MySupport è del cliente).
+    let mysupportTempi = null;
+    try { mysupportTempi = await dosMySupportTempi({ tenant_id: req.user.tenant_id, user_id: owner }, clientId); } catch (e) { console.error('[DOSSIER] MySupport tempi:', e.message); }
+
+    res.json({ cliente, data: oggi, utente, filtro: opz, soloProgetto, progetti, totali, fatturatoAnni, sezioni, dettagli, mysupportTempi, ai, colonneIgnorate: ignorate });
   } catch (error) {
     console.error('[DOSSIER CLIENTE]', error.message);
     res.status(error.statusCode || error.status || 500).json({ error: error.message });

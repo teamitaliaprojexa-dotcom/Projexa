@@ -257,7 +257,7 @@
         const pallino = (stato) => ({ html: `<span class="sem sem-${esc(stato || 'nd')}"></span>${esc(SEMAFORO[stato] || stato || '')}` });
         const siDataTxt = (x) => (!x ? '—' : x.si || x.data ? `Sì${x.data ? ` il ${dataIt(x.data)}` : ''}` : 'No');
 
-        function dettaglioProgettoHtml(p, dt, sez) {
+        function dettaglioProgettoHtml(p, dt, sez, msTempi) {
             const testa = `<h2>Progetto: ${esc(p.nome)}${p.chiuso ? ' <span class="chiuso">chiuso</span>' : ''}</h2>`;
             const blocchiTq = ['task', 'quotazioni'].filter((k) => sez[k]).map((k) => {
                 const righe = sez[k].righe.filter((r) => r.progetto === p.id);
@@ -312,7 +312,109 @@
                     x.scadenza ? (x.scaduta ? { html: `<span style="color:#DC2626;font-weight:600">${esc(dataIt(x.scadenza))} (scaduta da ${-x.giorni} gg)</span>` } : dataIt(x.scadenza)) : 'da definire',
                     dataIt(x.riunione), x.solleciti || '', x.note || '']));
             h += ganttHtml(dt.gantt);
+            h += kpiProgettoHtml(dt.kpi, u, msTempi);
             return h + '</div>';
+        }
+
+        // ===== KPI della dashboard limitati al progetto (dosKpiProgetto in backend/server.js) =====
+        // Gestione Progetto, Offerte e ordini, Rilascio release, MySupport (solo nel Dossier
+        // Progetto: nel Dossier Cliente è una volta sola, a livello di cliente) e, con la funzione
+        // «Capacità e allocazione risorse» accesa, Risorse, Fabbisogno per ruolo e Copertura.
+        const STATI_ORDINE = {
+            sollecitare: { cls: 'neg', label: 'Da sollecitare' }, attesa: { cls: 'warn', label: "In attesa d'ordine" },
+            offerta: { cls: 'mut', label: 'Offerta da inviare' }, ricevuto: { cls: 'ok', label: 'Ordine ricevuto' }
+        };
+        const MESI_BREVI = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
+        const meseBreve = (m) => `${MESI_BREVI[Number(m.slice(5, 7)) - 1]} ${m.slice(2, 4)}`;
+        const oreGiorni = (ore) => (ore == null ? '' : ore < 24 ? `${nfmt(ore)} h` : `${nfmt(Math.round((ore / 24) * 10) / 10)} gg`);
+        const nonDisp = (titolo, x) => `<h3>${esc(titolo)}</h3><div class="vuoto">Non disponibile: ${esc(x.errore)}.</div>`;
+
+        function kpiProgettoHtml(k, u, msTempi) {
+            if (!k) return '';
+            let h = '<h3 class="sotto">KPI della dashboard</h3>';
+            // Gestione Progetto: offerta (100%) contro tempo speso.
+            const g = k.gestione;
+            if (g && g.errore) h += nonDisp('Gestione Progetto', g);
+            else if (!g) h += '<h3>Gestione Progetto</h3><div class="vuoto">Progetto non incluso nel KPI (serve una commessa attiva con codice e un\'offerta nei Costi Progetto; esclusi gli Stati Annullato e In negoziazione).</div>';
+            else {
+                const ug = g.hh ? 'h' : 'gg';
+                const pct = g.perc == null ? 0 : g.perc;
+                const col = pct > 100 ? '#DC2626' : pct > 80 ? '#F59E0B' : '#10B981';
+                const note = [];
+                if (g.fabbrica && !g.fabbrica.time_spent) note.push('<span class="warn">Fabbrica senza tempo speso</span>');
+                if (g.pm && !g.pm.time_spent) note.push('<span class="warn">Project Manager senza tempo speso</span>');
+                h += `<h3>Gestione Progetto</h3><div class="gk-row">
+                    <div class="gk wide"><small>Tempo speso sull'offerta</small><b>${nfmt(g.speso)} / ${nfmt(g.offerta)} ${ug}</b>
+                        <div class="gk-bar"><span class="trk"><span class="fil" style="background:linear-gradient(to right, ${col} ${Math.min(100, pct)}%, ${col}30 ${Math.min(100, pct)}%);"></span></span><span class="avz">${g.perc == null ? '–' : pct + '%'}</span></div>
+                        ${note.length ? `<div class="gk-note">${note.join(' · ')}</div>` : ''}</div>
+                    <div class="gk"><small>Completamento</small><b>${g.completamento == null ? '–' : nfmt(g.completamento) + '%'}</b><div class="gk-note">campo della scheda</div></div>
+                </div>`;
+                h += tab('Gestione Progetto per voce di costo', [{ t: 'Voce di costo' }, { t: `Offerta (${ug})`, n: 1 }, { t: `Speso (${ug})`, n: 1 }, { t: 'Speso sull\'offerta', n: 1 }],
+                    g.voci.map((v) => [v.voce, nfmt(v.offerta), nfmt(v.speso), v.offerta > 0 ? Math.round((v.speso / v.offerta) * 100) + '%' : '']));
+            }
+            // Offerte e ordini.
+            const o = k.ordini;
+            if (o && o.errore) h += nonDisp('Offerte e ordini', o);
+            else if (!o) h += '<h3>Offerte e ordini</h3><div class="vuoto">Progetto non incluso nel KPI (Tipologia Previsione, Stato escluso o progetto chiuso).</div>';
+            else {
+                const st = STATI_ORDINE[o.stato] || { cls: 'mut', label: o.stato };
+                h += `<h3>Offerte e ordini: <span class="pill ${st.cls}">${esc(st.label)}</span>${o.nota ? ` <span style="font-weight:400;color:#6B7280;font-size:10.5px;">${esc(o.nota)}</span>` : ''}</h3>`
+                    + tabella(['Inizio', 'Fine', 'Offerta inviata il', 'Ordine ricevuto il'], [[dataIt(o.start) || '—', dataIt(o.end) || '—', dataIt(o.offerta) || '—', dataIt(o.ordine) || '—']]);
+            }
+            // Rilascio release: task del progetto nelle release non ancora uscite.
+            const r = k.rilasci;
+            if (r && r.errore) h += nonDisp('Rilascio release', r);
+            else {
+                const righe = [];
+                (r || []).forEach((x) => {
+                    righe.push({ gruppo: `Release ${x.release} · rilascio il ${dataIt(x.data)} (${x.task.length} task)` });
+                    x.task.forEach((t) => righe.push([t.codice || '', t.descrizione, t.stato, t.assegnatario]));
+                });
+                h += tab('Rilascio release', [{ t: 'Task' }, { t: 'Descrizione' }, { t: 'Stato' }, { t: 'Assegnatario' }], righe);
+            }
+            if (msTempi) h += mySupportTempiHtml(msTempi, 'h3');
+            // Capacità e risorse (solo con la funzione accesa: altrimenti null e niente sezione).
+            const c = k.capacita;
+            if (c && c.errore) h += `<h3 class="sotto">Capacità e risorse</h3><div class="vuoto">Non disponibile: ${esc(c.errore)}.</div>`;
+            else if (c) h += capacitaHtml(c);
+            return h;
+        }
+
+        function capacitaHtml(c) {
+            let h = '<h3 class="sotto">Capacità e risorse <span style="font-weight:400;color:#6B7280;font-size:10px;">(giornate, prossimi 6 mesi)</span></h3>';
+            const periodo = (a) => `${a.perc}% dal ${dataIt(a.dal)} al ${dataIt(a.al)}`;
+            h += tab('Risorse', [{ t: 'Nominativo' }, { t: 'Ruolo' }, { t: 'Consuntivo (gg)', n: 1 }, { t: 'Allocazioni' }, { t: 'Proposta' }],
+                c.risorse.map((x) => [x.nominativo, x.ruolo, nfmt(x.consuntivo), x.allocazioni.map(periodo).join(' · ') || '—',
+                    x.proposta ? `${x.proposta.perc}% dal ${dataIt(x.proposta.dal)} al ${dataIt(x.proposta.al)} (${nfmt(x.proposta.giornate)} gg)` : (x.nota || '—')]));
+            const mesi = c.mesi.map(meseBreve);
+            h += tab('Fabbisogno per ruolo', [{ t: 'Ruolo' }, { t: 'Stima', n: 1 }, { t: 'Consuntivo', n: 1 }, { t: 'Da fare', n: 1 }, ...mesi.map((m) => ({ t: m, n: 1 })), { t: 'Oltre', n: 1 }, { t: 'Senza date', n: 1 }],
+                c.fabbisogno.map((x) => [x.motivo ? { html: `${esc(x.ruolo)} <span class="pill warn" title="${esc(x.motivo)}">senza date</span>` } : x.ruolo,
+                    nfmt(x.stima), nfmt(x.consuntivo), nfmt(x.daFare), ...x.perMese.map((v) => (v ? nfmt(v) : '')), x.oltre ? nfmt(x.oltre) : '', x.senzaDate ? nfmt(x.senzaDate) : '']));
+            const cp = c.copertura;
+            if (!cp) h += '<h3>Copertura</h3><div class="vuoto">Nessuna giornata da fare né persone allocate sul progetto.</div>';
+            else {
+                h += `<h3>Copertura: ${nfmt(cp.coperto)} giornate coperte su ${nfmt(cp.daFare)} da fare${cp.scoperto >= 0.5 ? ` · <span style="color:#DC2626">${nfmt(cp.scoperto)} scoperte</span>` : ''}</h3>`;
+                h += tab('Copertura per ruolo (fabbisogno / allocato nel mese)', [{ t: 'Ruolo' }, { t: 'Da fare', n: 1 }, { t: 'Coperto', n: 1 }, { t: 'Scoperto', n: 1 }, ...mesi.map((m) => ({ t: m, n: 1 })), { t: 'Persone allocate' }],
+                    cp.ruoli.map((x) => [x.ruolo, nfmt(x.daFare), nfmt(x.coperto),
+                        x.scoperto >= 0.5 ? { html: `<span style="color:#DC2626;font-weight:700">${esc(nfmt(x.scoperto))}</span>` } : nfmt(x.scoperto),
+                        ...x.perMese.map((m) => (m.fab || m.all ? `${nfmt(m.fab)} / ${nfmt(m.all)}` : '')), x.persone.join(', ') || '—']));
+            }
+            if (c.avvisi.length) h += `<h3>Avvisi (${c.avvisi.length})</h3><ul style="margin:0 0 2mm 5mm;font-size:10.5px;">${c.avvisi.map((a) => `<li style="color:${a.gravita === 'alta' ? '#DC2626' : a.gravita === 'media' ? '#B45309' : '#4B5563'}">${esc(a.testo)}</li>`).join('')}</ul>`;
+            return h;
+        }
+
+        // MySupport del cliente: tempi di chiusura per anno (fasce del KPI) e ticket non chiusi per stato.
+        function mySupportTempiHtml(ms, livello = 'h2') {
+            const titolo = `<${livello}>MySupport – tempi di chiusura${livello === 'h3' ? ' (cliente)' : ''}</${livello}>`;
+            if (!ms.anni.length && !ms.aperti.length) return titolo + '<div class="vuoto">Nessun ticket MySupport.</div>';
+            let h = titolo;
+            if (ms.anni.length) {
+                h += `<table><thead><tr><th>Anno di chiusura</th><th class="n">Chiusi</th><th class="n">Tempo medio</th><th class="n">Tempo mediano</th>${ms.fasce.map((x) => `<th class="n">${esc(x)}</th>`).join('')}</tr></thead>
+                <tbody>${ms.anni.map((a) => `<tr><td>${a.anno}</td><td class="n">${a.n}</td><td class="n">${esc(oreGiorni(a.mediaOre))}</td><td class="n">${esc(oreGiorni(a.medianaOre))}</td>${a.fasce.map((v) => `<td class="n">${v ? `${v} <small style="color:#6B7280">(${Math.round((v / a.n) * 100)}%)</small>` : ''}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+            }
+            const tot = ms.aperti.reduce((t, x) => t + x.n, 0);
+            if (tot) h += `<div style="margin-top:1.5mm;font-size:10.5px;">Ticket non chiusi oggi: <b>${tot}</b> – ${ms.aperti.map((x) => `${esc(x.stato)} ${x.n}`).join(' · ')}</div>`;
+            return h;
         }
 
         // Gantt come nella pagina Gantt: schede di riepilogo e attività con effort e avanzamento.
@@ -441,12 +543,13 @@
                     if (sez.task) html += sezioneHtml(sez.task, sez.task.righe.filter((r) => !r.progetto), 'Task senza progetto');
                     if (sez.quotazioni) html += sezioneHtml(sez.quotazioni, sez.quotazioni.righe.filter((r) => !r.progetto), 'Quotazioni senza progetto');
                     if (sez.mysupport) html += sezioneHtml(sez.mysupport, sez.mysupport.righe, 'Ticket MySupport non chiusi');
+                    if (d.mysupportTempi) html += mySupportTempiHtml(d.mysupportTempi);
                     if (sez.issue) html += sezioneHtml(sez.issue, sez.issue.righe, 'Issue');
                 }
 
                 // In fondo: il dettaglio di ogni progetto (in corso: con dati del Cruscotto e del
                 // Gantt; chiuso, con «Anche chiusi»: solo task e quotazioni come prima).
-                for (const p of d.progetti) html += dettaglioProgettoHtml(p, (d.dettagli || {})[p.id], sez);
+                for (const p of d.progetti) html += dettaglioProgettoHtml(p, (d.dettagli || {})[p.id], sez, soloProg ? d.mysupportTempi : null);
                 html += `<div class="piede"><span>Projexa · ${soloProg ? `Dossier Progetto · ${esc(soloProg.nome)} · ` : 'Dossier Cliente · '}${esc(c.nome)}</span><span>${esc(d.data)}</span></div>`;
 
                 $('pagina').innerHTML = html;

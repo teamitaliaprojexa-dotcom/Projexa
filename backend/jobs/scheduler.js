@@ -57,10 +57,9 @@ const JOBS = {
 
 // Job eseguiti dal BROWSER dell'utente (utente_config) mentre Projexa è aperta, non dal
 // server: lo schedulatore ne calcola solo la prossima esecuzione e non li prenota mai.
-//   import_mysupport_cartella = file «MySupport.xlsx» della cartella scelta con l'interruttore
-//   «DataBricks» (Impostazioni), importato come Qlik › MySupport (routes/mysupportCartella.js,
-//   sito/js/mysupport-cartella.js). Il server non vede il PC dell'utente.
-export const JOBS_BROWSER = ['import_mysupport_cartella'];
+// Oggi nessuno: import_mysupport_cartella (file MySupport.xlsx letto dal browser) è stato
+// sostituito il 2026-10-17 dall'invio diretto dello script del PC (routes/mysupportPush.js).
+export const JOBS_BROWSER = [];
 
 // Nomi dei job schedulabili (usati dalla pagina di gestione per l'elenco a discesa).
 export const NOMI_JOB = [...Object.keys(JOBS), ...JOBS_BROWSER];
@@ -75,8 +74,7 @@ export const INFO_JOB = {
   pm_notifiche_progetti: { etichetta: 'Salute progetti: notifiche e fotografia giornaliera', jira: false },
   pm_digest_settimanale: { etichetta: 'Digest settimanale via email ai PM', jira: false },
   recap_batch: { etichetta: 'Recap in modalità Batch: raccoglie quelli pronti', jira: false },
-  lavori_ai: { etichetta: 'Lavori AI in Batch: ripresa e pulizia', jira: false },
-  import_mysupport_cartella: { etichetta: 'Import MySupport dalla cartella del PC (browser con Projexa aperta)', jira: false }
+  lavori_ai: { etichetta: 'Lavori AI in Batch: ripresa e pulizia', jira: false }
 };
 
 export function schedulerAttivo() {
