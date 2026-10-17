@@ -5134,7 +5134,7 @@
         function urlSicuro(value) {
             const u = String(value ?? '').trim();
             if (!u) return '#';
-            const pulito = u.replace(/[ -s]+/g, '');
+            const pulito = u.replace(/[\u0000-\u001f\u007f\s]+/g, '');
             const m = /^([a-z][a-z0-9+.-]*):/i.exec(pulito);
             if (!m) return u;                                   // relativo o percorso
             if (/^[a-z]$/i.test(m[1])) return u;               // percorso Windows (C:...)
