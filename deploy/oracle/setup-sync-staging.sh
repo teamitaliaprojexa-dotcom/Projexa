@@ -9,6 +9,7 @@ set -euo pipefail
 APP_DIR=/opt/projexa
 
 install -m 750 "$(dirname "$0")/sync-staging.sh" "$APP_DIR/sync-staging.sh"
+install -m 640 "$(dirname "$0")/staging-anonimizza.sql" "$APP_DIR/staging-anonimizza.sql"  # anonimizzazione (obbligatoria)
 
 sudo tee /etc/systemd/system/projexa-sync-staging.service >/dev/null <<UNIT
 [Unit]

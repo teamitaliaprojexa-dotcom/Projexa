@@ -47,6 +47,22 @@ migrazione, non dopo.
 4. Elenco chiuso per tabella:
    - **clients** → solo `valore2` e `valore3`
    - **projects** → solo `valore2`
+   - **rubrica** → `nominativo`, `email`, `ruolo`, `foto_nome`
+   - **mysupport** → solo `operatore` (stato, procedura, cliente e date servono ai KPI in SQL)
+   - altre tabelle con elenco: vedi `TABLE_COLUMN_ALLOWLIST` in `backend/config/crypto.js`
+
+   **clients e projects: regola per CAMPO (dal 2026-10-17).** Sono tabelle EAV: il flag
+   `crypto` di ogni riga lo decide il nome del campo (`CAMPI_CIFRATI` in `crypto.js`), a
+   ogni scrittura: anagrafica e recapiti del cliente, descrizione e note del progetto si
+   cifrano; Stato Progetto, Tipologia, Anno, Start/End, Offerta/Ordine, My Support…
+   restano in chiaro perché il server li filtra in SQL. Prima il flag si ereditava dalle righe
+   vicine e alcuni clienti/progetti erano rimasti in chiaro. I valori numerici (`valore3`)
+   non si cifrano comunque (vedi sotto).
+
+   **Allineamento dei dati esistenti:** `Supporto/CreaDB/cifratura_completa.sql` (segna le
+   righe) e poi `node scripts/cifra-tabelle.js rubrica mysupport clients projects --esegui`
+   dalla cartella `backend` (cifra i valori in chiaro, una transazione per tabella con
+   verifica; senza `--esegui` conta soltanto). Eseguiti il 2026-10-17.
 5. Tutte le altre tabelle: ogni colonna testuale che supera il punto 3.
 
 ### Colonne calcolate (contacts.nominativo)

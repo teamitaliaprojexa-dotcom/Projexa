@@ -5,7 +5,11 @@
 #   - SOVRASCRIVE i dati di staging (le modifiche fatte in staging si perdono): è lo scopo;
 #   - gli URL di staging stanno in /opt/projexa/staging-sync.env (STAGING_DATABASE_URL, ...),
 #     separati dal .env di produzione, che non contiene nessun URL Neon;
-#   - per sicurezza la destinazione deve essere un host *.neon.tech, mai localhost.
+#   - per sicurezza la destinazione deve essere un host *.neon.tech, mai localhost;
+#   - dal 2026-10-17 i dati vengono ANONIMIZZATI nella stessa transazione del ripristino
+#     (staging-anonimizza.sql, accanto a questo script): su Neon non arrivano dati personali
+#     né token. Restano gli account di STAGING_EMAIL_CONSENTITE (staging-sync.env, email separate
+#     da virgola) per accedere allo staging. Senza il file SQL la copia non parte.
 # Uso:  sync-staging.sh            copia tutti e 4 i database
 #       sync-staging.sh projexa    solo quelli indicati (projexa auth lic notif)
 # Avviato dal timer projexa-sync-staging.timer, se abilitato (vedi setup-sync-staging.sh).
@@ -38,6 +42,10 @@ NAMES=("$@")
 [ ${#NAMES[@]} -gt 0 ] || NAMES=(projexa auth lic notif)
 
 [ -r "$STAGING_ENV" ] || { log "ERRORE: manca $STAGING_ENV"; exit 1; }
+ANON_SQL="$(dirname "$(readlink -f "$0")")/staging-anonimizza.sql"
+[ -r "$ANON_SQL" ] || { log "ERRORE: manca $ANON_SQL (anonimizzazione): copia annullata"; exit 1; }
+KEEP=$(env_value "$STAGING_ENV" STAGING_EMAIL_CONSENTITE || true)
+KEEP=${KEEP:-team.italia.projexa@gmail.com,y.dacco@teamsystem.com}
 mkdir -p -m 700 "$WORK"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -87,9 +95,10 @@ BEGIN
 END $$;
 SQL
     "$BIN/pg_restore" --clean --if-exists --no-owner --no-privileges --file=- "$dump"
-  } | "$BIN/psql" --quiet --no-psqlrc --single-transaction -v ON_ERROR_STOP=1 \
+    cat "$ANON_SQL"
+  } | "$BIN/psql" --quiet --no-psqlrc --single-transaction -v ON_ERROR_STOP=1 -v keep="$KEEP" \
         --dbname="$(neon_url "$dst")" >/dev/null
-  log "$name -> staging ($dst_host): $(du -h "$dump" | cut -f1) copiati"
+  log "$name -> staging ($dst_host): $(du -h "$dump" | cut -f1) copiati e anonimizzati"
   rm -f "$dump"
 done
 

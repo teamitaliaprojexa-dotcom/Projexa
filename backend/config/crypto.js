@@ -272,8 +272,36 @@ const TABLE_COLUMN_ALLOWLIST = {
   pm_risorse_assenza: new Set(['nota']),
   pm_allocazioni: new Set(['note']),
   // Economia del progetto (Supporto/CreaDB/pm_economia.sql): importi e categorie in chiaro (si sommano in SQL)
-  pm_costo_esterno: new Set(['descrizione', 'fornitore', 'note'])
+  pm_costo_esterno: new Set(['descrizione', 'fornitore', 'note']),
+  // Ticket MySupport (2026-10-17, Supporto/CreaDB/cifratura_completa.sql): solo il nome
+  // dell'operatore (dato personale). Stato, procedura, cliente e date restano in chiaro:
+  // i KPI li filtrano e raggruppano in SQL e l'import abbina il cliente per nome.
+  mysupport: new Set(['operatore']),
+  // Rubrica (2026-10-17): nominativo, email, ruolo e nome del file della foto. foto_mime resta
+  // in chiaro (tipo del file, non personale). Abbinamenti per email fatti dopo la lettura.
+  rubrica: new Set(['nominativo', 'email', 'ruolo', 'foto_nome'])
 };
+
+// ----------------------------------------------------------------------------
+// CAMPI CIFRATI DI CLIENTI E PROGETTI (2026-10-17)
+// ----------------------------------------------------------------------------
+// clients e projects sono tabelle EAV (una riga per campo): la cifratura vale per CAMPO.
+// Si cifrano i dati sensibili (anagrafica, recapiti, importi, descrizioni); restano in chiaro
+// i campi che il server filtra o confronta in SQL (Stato Progetto, Tipologia, Anno, Start,
+// End, Offerta/Ordine, My Support, Completamento…). Prima il flag si ereditava dalle righe
+// vicine e i clienti/progetti creati da altre strade restavano in chiaro: ora decide questa
+// lista, a ogni scrittura. Nomi confrontati senza il prefisso "(*) " e senza maiuscole.
+export const CAMPI_CIFRATI = {
+  clients: new Set(['cliente', 'ragione sociale', 'cod fiscale', 'p.iva', 'email', 'pec', 'indirizzo',
+    'nr dipendenti', 'id. ambiente cliente prod', 'id. ambiente cliente staging']),
+  projects: new Set(['progetto', 'descrizione', 'note', 'importo', 'importo non scontato_gg', 'importo non scontato_hh',
+    'fatturato', 'fatturato futuro', 'da fatturare', 'ordine interno', 'tariffa synestesia', 'link fatturazioen synestesia'])
+};
+export const campoNorm = (campo) => String(campo == null ? '' : campo).replace(/^\(\*\)\s*/, '').trim().toLowerCase();
+export function campoDaCifrare(tableName, campo) {
+  const set = CAMPI_CIFRATI[tableName];
+  return set ? set.has(campoNorm(campo)) : null;
+}
 
 // Decide se una colonna è cifrabile e, in caso contrario, perché (serve alla UI).
 export function columnDecision(tableName, columnName, dataType) {
@@ -401,6 +429,15 @@ async function resolveCryptoFlag(pool, tableName, policy, data, { id = null } = 
   if (fromPayload !== null) return fromPayload;
 
   const q = (pool.rawQuery || pool.query).bind(pool);
+
+  // clients/projects: decide il nome del campo (CAMPI_CIFRATI), non le righe vicine.
+  if (CAMPI_CIFRATI[tableName]) {
+    let campo = data.campo;
+    if (campo == null && id) {
+      try { campo = (await q(`SELECT campo FROM "${tableName}" WHERE id = $1 LIMIT 1`, [id])).rows[0]?.campo; } catch (e) { /* riga assente */ }
+    }
+    if (campo != null) return campoDaCifrare(tableName, campo) ? 1 : 0;
+  }
 
   if (id) {
     try {

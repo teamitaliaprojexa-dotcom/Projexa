@@ -45,7 +45,7 @@ import { avviaScheduler, schedulerAttivo } from './jobs/scheduler.js';
 import { avviaInvioAudit } from './jobs/auditShipper.js';
 import { allowedOrigins } from './config/origins.js';
 import { requireAuth } from './middleware/auth.js';
-import { encryptRowForWrite } from './config/crypto.js';
+import { encryptRowForWrite, encryptValue, hasEncryptionKey, getCryptoPolicy } from './config/crypto.js';
 import { buildGanttXlsx } from './config/ganttXlsx.js';
 import { resolveDbUrl } from './config/dbEnv.js';
 import { impronteScriptInline } from './config/cspHash.js';
@@ -6363,6 +6363,11 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
           if (tableColumns.has('tenant_id') && !admin) {
             data.tenant_id = req.user.tenant_id;
           }
+          // Isolamento tra utenti (2026-10-17): le righe importate da un non-admin sono sue
+          // (user_id del login) e un id già esistente aggiorna solo una riga sua (conflictWhere).
+          if (tableColumns.has('user_id') && !admin && dbKey === 'main') {
+            data.user_id = req.user.user_id;
+          }
 
           const hasId = data.id !== undefined && data.id !== null && data.id !== '';
           if (!hasId) delete data.id;
@@ -6419,6 +6424,11 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
                   // I non-admin non possono aggiornare righe di altri tenant
                   conflictWhere = ` WHERE "${tableName}".tenant_id = $${columns.length + 1}`;
                   params = [...values, req.user.tenant_id];
+                }
+                if (tableColumns.has('user_id') && !admin && dbKey === 'main') {
+                  // ...né quelle dei colleghi dello stesso tenant
+                  params = [...params, req.user.user_id];
+                  conflictWhere += `${conflictWhere ? ' AND' : ' WHERE'} "${tableName}".user_id = $${params.length}`;
                 }
                 query = `INSERT INTO "${tableName}" (${quotedCols}) VALUES (${placeholders})
                          ON CONFLICT (id) DO UPDATE SET ${setClause}${setExtra}${conflictWhere}
@@ -7018,6 +7028,12 @@ async function importaRigheMySupport(tenantId, rowsIn) {
     clientiPerNome.get(nome).set(String(root.clientId), root.ownerUserId);
   }
 
+  // Cifratura dell'operatore (config/crypto.js, mysupport: solo «operatore»), se la tabella ha
+  // la colonna crypto e c'è la chiave. Il cifrato cambia a ogni scrittura (IV casuale): per
+  // decidere se un ticket è cambiato l'operatore non si confronta, si riscrive solo insieme
+  // agli altri campi (un cambio del solo operatore aspetta il primo cambio del ticket).
+  let cifraOperatore = false;
+  try { cifraOperatore = hasEncryptionKey() && (await getCryptoPolicy(db, 'mysupport')).encryptColumns.includes('operatore'); } catch (e) { cifraOperatore = false; }
   let inserted = 0, updated = 0, unchanged = 0, invalid = 0;
   const nuovi = []; // ticket inseriti (non gli aggiornati): notifiche dopo il COMMIT
   const nonTrovati = new Map(); // nome cliente del file -> numero righe
@@ -7042,7 +7058,7 @@ async function importaRigheMySupport(tenantId, rowsIn) {
         modulo: testo(r.modulo, 255),
         urgenza: testo(r.urgenza, 100),
         year_tkt: anno(r.year_tkt),
-        operatore: testo(r.operatore, 255)
+        operatore: cifraOperatore ? (testo(r.operatore, 150) ? encryptValue(testo(r.operatore, 150)) : null) : testo(r.operatore, 255)
       };
       const params = [tenantId, ownerUserId, clientId, codice, ...MYSUPPORT_COLONNE.map((k) => valori[k])];
       const segn = MYSUPPORT_COLONNE.map((k, i) => {
@@ -7050,7 +7066,7 @@ async function importaRigheMySupport(tenantId, rowsIn) {
         return (k === 'data_apertura' || k === 'data_chiusura') ? `${p}::timestamp` : (k === 'year_tkt' ? `${p}::integer` : p);
       });
       // UPDATE solo se cambia qualcosa (cliente/proprietario compresi); xmax = 0 -> inserita.
-      const confronto = ['user_id', 'client_id', ...MYSUPPORT_COLONNE];
+      const confronto = ['user_id', 'client_id', ...MYSUPPORT_COLONNE.filter((k) => !(cifraOperatore && k === 'operatore'))];
       const out = await client.query(
         `INSERT INTO mysupport (tenant_id, user_id, client_id, codice_quesito, ${MYSUPPORT_COLONNE.join(', ')})
          VALUES ($1, $2, $3, $4, ${segn.join(', ')})
@@ -8902,7 +8918,9 @@ app.put('/api/rubrica/:id/foto', requireAuth, fotoBody, async (req, res) => {
     let nome = 'foto';
     try { nome = decodeURIComponent(String(req.get('x-file-name') || 'foto')); } catch (e) { /* usa il nome di riserva */ }
     nome = path.basename(nome).replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 255) || 'foto';
-    await db.query('UPDATE rubrica SET foto = $1, foto_mime = $2, foto_nome = $3 WHERE id = $4', [req.body, mimeType, nome, r.id]);
+    // Nome del file cifrato come gli altri dati della rubrica (config/crypto.js).
+    const cifrato = await cryptoWrite(db, 'main', 'rubrica', { foto_nome: nome }, r.id);
+    await db.query('UPDATE rubrica SET foto = $1, foto_mime = $2, foto_nome = $3 WHERE id = $4', [req.body, mimeType, cifrato.foto_nome, r.id]);
     return res.json({ success: true, size: req.body.length });
   } catch (error) {
     return res.status(error.statusCode || 500).json({ error: error.message });
