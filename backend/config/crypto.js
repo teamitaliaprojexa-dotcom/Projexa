@@ -267,6 +267,8 @@ const TABLE_COLUMN_ALLOWLIST = {
   pm_lesson: new Set(['testo', 'raccomandazione']),
   // Azioni a carico del cliente (Supporto/CreaDB/azioni_cliente.sql)
   pm_azioni_cliente: new Set(['referente', 'descrizione', 'note']),
+  // Copia di riserva delle azioni eliminate il 2026-10-16 (non usata dall'applicazione).
+  pm_azioni_cliente_bk_20261016_eliminate: new Set(['referente', 'descrizione', 'note']),
   // Capacità e allocazione risorse (Supporto/CreaDB/capacita_risorse.sql); ruolo in chiaro (si raggruppa)
   pm_risorse: new Set(['nominativo', 'email', 'note']),
   pm_risorse_assenza: new Set(['nota']),
