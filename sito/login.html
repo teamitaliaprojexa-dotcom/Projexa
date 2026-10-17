@@ -366,6 +366,7 @@
             }
         }
     </style>
+    <script src="js/azioni.js?v=20261017-1"></script>
 </head>
 <body>
     <div class="login-container">
@@ -399,7 +400,7 @@
                     <div class="error-message" id="errorMessage"></div>
                     <div id="successMessage" style="display:none; background:#ECFDF5; color:#065F46; border:1px solid #A7F3D0; border-radius:8px; padding:0.6rem 0.8rem; font-size:0.9rem; margin-bottom:0.75rem;"></div>
 
-                    <form id="emailForm" onsubmit="handleEmailLogin(event)">
+                    <form id="emailForm" data-submit="handleEmailLogin">
                         <div class="form-group">
                             <label>Email</label>
                             <input type="email" id="emailInput" placeholder="name@company.com" required>
@@ -408,7 +409,7 @@
                         <div class="form-group">
                             <div class="forgot-password">
                                 <label>Password</label>
-                                <a href="#" id="forgotPasswordLink" onclick="requestPasswordReset(event)">Dimenticata?</a>
+                                <a href="#" id="forgotPasswordLink" data-click="requestPasswordReset">Dimenticata?</a>
                             </div>
                             <input type="password" id="passwordInput" placeholder="••••••••" required>
                         </div>
@@ -430,11 +431,11 @@
                     </div>
 
                     <div class="oauth-buttons">
-                        <button type="button" class="oauth-btn" onclick="loginWithGoogle()">
+                        <button type="button" class="oauth-btn" data-click="loginWithGoogle">
                             <i class="fab fa-google"></i>
                             <span>Google</span>
                         </button>
-                        <button type="button" class="oauth-btn" onclick="loginWithMicrosoft()">
+                        <button type="button" class="oauth-btn" data-click="loginWithMicrosoft">
                             <i class="fab fa-microsoft"></i>
                             <span>Microsoft</span>
                         </button>
@@ -442,7 +443,7 @@
 
                     <!-- Metodi di accesso alternativi (Passkey e Authenticator: solo UI, logica da implementare) -->
                     <div class="oauth-buttons" style="grid-template-columns: 1fr; gap: 0.75rem;">
-                        <button type="button" class="oauth-btn" id="magicLinkBtn" onclick="requestMagicLink()" title="Ricevi via email un link per accedere senza password">
+                        <button type="button" class="oauth-btn" id="magicLinkBtn" data-click="requestMagicLink" title="Ricevi via email un link per accedere senza password">
                             <i class="fas fa-wand-magic-sparkles"></i>
                             <span>Magic link</span>
                         </button>
@@ -465,7 +466,7 @@
             <h2 class="modal-title">Scegli il tuo tenant</h2>
             <p class="modal-description">Hai accesso a più organizzazioni. Seleziona quella che vuoi usare:</p>
             <div id="tenantList"></div>
-            <button type="button" class="btn btn-primary" onclick="selectTenant()" style="margin-top: 1rem;">Continua</button>
+            <button type="button" class="btn btn-primary" data-click="selectTenant" style="margin-top: 1rem;">Continua</button>
         </div>
     </div>
 

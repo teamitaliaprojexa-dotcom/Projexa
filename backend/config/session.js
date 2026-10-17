@@ -21,7 +21,14 @@ import { readCookie, setCookie, clearCookie } from './cookies.js';
 
 export const SESSION_TYP = 'session';
 export const SESSION_COOKIE = 'px_session';
+// Durata: al massimo 24 ore dal login (SESSION_TTL_SEC, claim lat = momento del login) e
+// scadenza per INATTIVITÀ (2026-10-17): il token vale SESSION_IDLE_MIN minuti (default 120)
+// e si rinnova da solo a ogni richiesta dell'utente (rinnovaSessione, da requireAuth). Le
+// richieste automatiche della pagina (header X-Projexa-Polling: 1, es. conteggio notifiche)
+// non contano come attività: una scheda lasciata aperta scade lo stesso.
 const SESSION_TTL_SEC = 24 * 60 * 60;
+const SESSION_IDLE_SEC = Math.max(5, Number(process.env.SESSION_IDLE_MIN) || 120) * 60;
+const RINNOVO_DOPO_SEC = 5 * 60; // un token si riemette al massimo ogni 5 minuti
 const SIG_CACHE_MS = 60 * 1000;
 
 export function passwordSignature(passwordHash) {
@@ -31,9 +38,26 @@ export function passwordSignature(passwordHash) {
 // claims: user_id, email, tenant_id, tenant_name, role_id, id_roles, role_name.
 // Eventuali typ/psig/iat/exp/jti in ingresso (es. da un token esistente) vengono sostituiti.
 export function signSessionToken(claims, passwordHash) {
-  const { iat, exp, typ, psig, jti, ...rest } = claims || {};
-  return jwt.sign({ ...rest, typ: SESSION_TYP, psig: passwordSignature(passwordHash) }, JWT_SECRET,
-    { expiresIn: SESSION_TTL_SEC, jwtid: crypto.randomUUID() });
+  const { iat, exp, typ, psig, jti, lat, ...rest } = claims || {};
+  return jwt.sign({ ...rest, typ: SESSION_TYP, psig: passwordSignature(passwordHash), lat: Math.floor(Date.now() / 1000) }, JWT_SECRET,
+    { expiresIn: Math.min(SESSION_IDLE_SEC, SESSION_TTL_SEC), jwtid: crypto.randomUUID() });
+}
+
+// Sessione attiva: riemette il token (stesso jti, stessa firma della password, stesso
+// momento del login) con la scadenza spostata di SESSION_IDLE_SEC, mai oltre le 24 ore dal
+// login. payload = claims verificati (verifySessionToken). Non fa nulla se il token è stato
+// emesso da meno di 5 minuti o se la richiesta è automatica (polling).
+export function rinnovaSessione(req, res, payload) {
+  if (String(req.get('x-projexa-polling') || '') === '1') return;
+  const ora = Math.floor(Date.now() / 1000);
+  if (!payload || !payload.iat || ora - payload.iat < RINNOVO_DOPO_SEC) return;
+  const login = Number(payload.lat) || Number(payload.iat);
+  const fine = login + SESSION_TTL_SEC;
+  const exp = Math.min(ora + SESSION_IDLE_SEC, fine);
+  if (exp <= payload.exp) return;
+  const { iat, exp: _vecchia, role_id, id_roles, role_name, tenant_name, ...rest } = payload;
+  const token = jwt.sign({ ...rest, role_id, id_roles, role_name, tenant_name, lat: login, iat: ora, exp }, JWT_SECRET);
+  setCookie(req, res, SESSION_COOKIE, token, { path: '/api', maxAgeSec: fine - ora, sameSite: 'Strict' });
 }
 
 // ----------------------------------------------------------------------------

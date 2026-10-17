@@ -1,4 +1,4 @@
-import { verifySessionToken, readSessionCookie } from '../config/session.js';
+import { verifySessionToken, readSessionCookie, rinnovaSessione } from '../config/session.js';
 import { contestoDaRichiesta } from '../config/auditContext.js';
 
 // Middleware di autenticazione: verifica il token di sessione del cookie HttpOnly px_session
@@ -25,6 +25,8 @@ export async function requireAuth(req, res, next) {
     console.error('❌ AUTH: verifica sessione non riuscita:', error.message);
     return res.status(503).json({ error: 'Servizio temporaneamente non disponibile' });
   }
+  // Scadenza per inattività: a ogni richiesta dell'utente il token si allunga (config/session.js).
+  try { rinnovaSessione(req, res, req.user); } catch (e) { console.error('❌ AUTH: rinnovo sessione non riuscito:', e.message); }
   // Utente e tenant della richiesta arrivano ai trigger del log variazioni.
   contestoDaRichiesta(req, next);
 }

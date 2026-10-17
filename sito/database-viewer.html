@@ -65,6 +65,7 @@
       margin-top: 10px;
     }
   </style>
+    <script src="js/azioni.js?v=20261017-1"></script>
 </head>
 <body class="dashboard-page">
   <div class="dashboard-container">
@@ -80,7 +81,7 @@
       <div class="sidebar-section" style="margin-top: 2rem;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
           <h4 style="margin: 0; font-size: 0.85rem; color: var(--gray-600); text-transform: uppercase;">Tables</h4>
-          <button onclick="loadTableStructuresTable()" style="background: #3B82F6; color: white; border: none; border-radius: 4px; width: 24px; height: 24px; cursor: pointer; font-weight: bold; padding: 0;">+</button>
+          <button data-click="loadTableStructuresTable" style="background: #3B82F6; color: white; border: none; border-radius: 4px; width: 24px; height: 24px; cursor: pointer; font-weight: bold; padding: 0;">+</button>
         </div>
         <div id="tablesList"></div>
       </div>
@@ -98,10 +99,10 @@
               <option value="notif">Projexa-Notif</option>
             </select>
           </label>
-          <button onclick="openCryptoMigration()" style="background: #F59E0B; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; margin-right: 1rem;">
+          <button data-click="openCryptoMigration" style="background: #F59E0B; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; margin-right: 1rem;">
             <i class="fas fa-lock"></i> Migrazione Crypto
           </button>
-          <button onclick="window.location.href='sql-editor.html'" style="background: #8B5CF6; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; margin-right: 1rem;">
+          <button data-click="vaiA" data-arg="sql-editor.html" style="background: #8B5CF6; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; margin-right: 1rem;">
             <i class="fas fa-code"></i> SQL Editor
           </button>
           <span id="userInfo">User</span>
@@ -127,10 +128,10 @@
   <div id="recordModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
     <div style="background: white; border-radius: 8px; padding: 2rem; max-width: 500px; width: 90%; max-height: calc(80vh * var(--ui-zoom-inv, 1)); overflow-y: auto;">
       <h2 id="modalTitle">Edit Record</h2>
-      <form id="recordForm" onsubmit="saveRecord(event)">
+      <form id="recordForm" data-submit="saveRecord">
         <div id="formFields"></div>
         <div style="display: flex; gap: 10px; margin-top: 2rem; justify-content: flex-end;">
-          <button type="button" onclick="closeModal()" style="padding: 10px 20px; background: #e5e7eb; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Annulla</button>
+          <button type="button" data-click="closeModal" style="padding: 10px 20px; background: #e5e7eb; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Annulla</button>
           <button type="submit" style="padding: 10px 20px; background: #10B981; color: white; border: none; border-radius: 4px; cursor: pointer;">Salva</button>
         </div>
       </form>
@@ -169,9 +170,9 @@
       <div id="cryptoResult" style="margin-bottom: 1rem;"></div>
 
       <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
-        <button type="button" onclick="closeCryptoMigration()" style="padding: 10px 20px; background: #e5e7eb; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Chiudi</button>
-        <button type="button" id="cryptoDecryptBtn" onclick="runCryptoMigration('decrypt')" style="display: none; padding: 10px 20px; background: #6B7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Decripta</button>
-        <button type="button" id="cryptoEncryptBtn" onclick="runCryptoMigration('encrypt')" style="display: none; padding: 10px 20px; background: #DC2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Crypta</button>
+        <button type="button" data-click="closeCryptoMigration" style="padding: 10px 20px; background: #e5e7eb; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Chiudi</button>
+        <button type="button" id="cryptoDecryptBtn" data-click="runCryptoMigration" data-arg="decrypt" style="display: none; padding: 10px 20px; background: #6B7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Decripta</button>
+        <button type="button" id="cryptoEncryptBtn" data-click="runCryptoMigration" data-arg="encrypt" style="display: none; padding: 10px 20px; background: #DC2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Crypta</button>
       </div>
     </div>
   </div>

@@ -5,6 +5,7 @@ import path from 'path';
 import tls from 'tls';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import db from './config/database.js';
 import authDb from './config/authDatabase.js';
 import licenseDb from './config/licenseDatabase.js';
@@ -47,6 +48,7 @@ import { requireAuth } from './middleware/auth.js';
 import { encryptRowForWrite } from './config/crypto.js';
 import { buildGanttXlsx } from './config/ganttXlsx.js';
 import { resolveDbUrl } from './config/dbEnv.js';
+import { impronteScriptInline } from './config/cspHash.js';
 
 dotenv.config();
 
@@ -93,9 +95,13 @@ app.disable('x-powered-by'); // non dichiarare che il server è Express
 // Dal 2026-09-29 non ci sono più modelli che girano nel browser (trascrizione Browser-leggero/
 // pesante e recap Browser-Medio/Alto eliminati): tolti jsdelivr, huggingface,
 // raw.githubusercontent, 'wasm-unsafe-eval' e blob: negli script, che servivano solo a loro.
-const CONTENT_SECURITY_POLICY = [
+// Dal 2026-10-17 script-src NON ha più 'unsafe-inline': sono ammessi solo i file di Projexa,
+// cdnjs, Google e gli script inline delle pagine di sito/ con la loro impronta sha256
+// (config/cspHash.js, ricalcolata se una pagina cambia). Un attributo onclick="..." o uno
+// script iniettato in una pagina non viene eseguito. Gli stili inline restano ammessi.
+const CSP_SCRIPT_BASE = "'self' https://cdnjs.cloudflare.com https://accounts.google.com";
+const CSP_ALTRE = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://accounts.google.com",
   "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://accounts.google.com",
   "font-src 'self' data: https://cdnjs.cloudflare.com",
   "img-src 'self' data: blob: https:",
@@ -108,7 +114,11 @@ const CONTENT_SECURITY_POLICY = [
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'self'"
-].join('; ');
+];
+const sitoPathCsp = path.join(path.dirname(fileURLToPath(import.meta.url)), '../sito');
+function contentSecurityPolicy() {
+  return [`script-src ${CSP_SCRIPT_BASE} ${impronteScriptInline(sitoPathCsp).join(' ')}`.trim(), "script-src-attr 'none'", ...CSP_ALTRE].join('; ');
+}
 
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -117,7 +127,7 @@ app.use((req, res, next) => {
   // Microfono consentito solo alle pagine di Projexa (self): serve alla finestra
   // "Dispositivi audio" delle riunioni. Geolocalizzazione e fotocamera restano vietate.
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(self), camera=()');
-  res.setHeader('Content-Security-Policy', CONTENT_SECURITY_POLICY);
+  res.setHeader('Content-Security-Policy', contentSecurityPolicy());
   // HSTS solo su HTTPS (dietro Caddy req.secure viene da X-Forwarded-Proto): il browser
   // userà sempre HTTPS per 180 giorni, anche se l'utente scrive http://.
   if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
@@ -128,6 +138,27 @@ app.use((req, res, next) => {
 // l'import Qlik voucher (gruppi aggregati da file Excel di migliaia di righe)
 // o altri batch consistenti (es. import CSV). Alzato a 15mb.
 app.use(express.json({ limit: '15mb' }));
+
+// Messaggi tecnici negli errori (2026-10-17): molti endpoint rispondono 500 con error.message,
+// che per gli errori del database contiene nomi di tabelle, colonne e vincoli. In produzione
+// questi messaggi non arrivano al browser: al loro posto un testo generico con un codice di
+// riferimento, e il dettaglio va nel log del server (pm2 logs) con lo stesso codice. I
+// messaggi scritti per l'utente (in italiano, es. «L'AI non ha risposto») restano visibili.
+const ERRORE_TECNICO = /relation "|column "|syntax error|violates|duplicate key|invalid input (syntax|value)|null value in column|does not exist|ECONN|ETIMEDOUT|ENOTFOUND|getaddrinfo|permission denied for|out of range for type|current transaction is aborted|Cannot read propert|is not a function|is not defined|Unexpected token/i;
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    const json = res.json.bind(res);
+    res.json = (body) => {
+      if (res.statusCode >= 500 && body && typeof body.error === 'string' && ERRORE_TECNICO.test(body.error)) {
+        const rif = crypto.randomBytes(4).toString('hex');
+        console.error(`[ERRORE ${rif}] ${req.method} ${req.originalUrl}: ${body.error}`);
+        return json({ ...body, error: `Errore interno del server (riferimento ${rif}).` });
+      }
+      return json(body);
+    };
+    next();
+  });
+}
 
 // Corpo JSON malformato (o oltre il limite): il parser lancia un errore che senza questo
 // handler diventerebbe un 500 generico. Qui si risponde con un 400 chiaro.
@@ -436,6 +467,37 @@ async function assertRowsWritable(req, pool, tableName, ids, tableColumns = null
     throw Object.assign(new Error(READ_ONLY_ERROR), { statusCode: 403 });
   }
 }
+// ---------- Isolamento tra utenti dello stesso tenant (form generico /api/data) ----------
+// Prima del 2026-10-17 GET/PUT/DELETE di /api/data/:table filtravano solo per tenant: un
+// utente poteva leggere (e, con lo stesso ruolo, modificare o eliminare) le righe dei colleghi.
+// Ora, per i non admin e le tabelle con user_id del database principale:
+//   lettura   = righe proprie + righe dei collaboratori del team (Manager, sola lettura)
+//               + righe di un cliente condiviso con me (client_shares): colonna client_id,
+//               oppure, nella tabella clients, la riga del cliente e i suoi campi diretti;
+//   scrittura = righe proprie + righe di un cliente condiviso con me IN SCRITTURA.
+// Condizione SQL da aggiungere al WHERE ('' = nessun limite). alias = 'src.' o ''.
+async function userScopeSql(req, params, tableName, tableColumns, { alias = '', write = false } = {}) {
+  if (isAdminUser(req) || !tableColumns.has('user_id')) return '';
+  params.push(String(req.user.user_id));
+  const me = `$${params.length}`;
+  const permesso = write ? ` AND s.permission = 'write'` : '';
+  const condivisi = [];
+  if (tableColumns.has('client_id')) condivisi.push(`s.client_id = ${alias}client_id`);
+  if (String(tableName).toLowerCase() === 'clients') condivisi.push(`s.client_id = ${alias}id`, `s.client_id::text = ${alias}argument`);
+  const parti = [`${alias}user_id::text = ${me}`];
+  if (!write) {
+    const team = await teamMemberIds(req);
+    if (team.length) { params.push(team); parti.push(`${alias}user_id::text = ANY($${params.length}::text[])`); }
+  }
+  if (condivisi.length) {
+    params.push(req.user.tenant_id); // solo se usato: un parametro non usato fa fallire la query
+    const tenant = `$${params.length}`;
+    parti.push(`EXISTS (SELECT 1 FROM client_shares s WHERE s.tenant_id = ${tenant} AND s.shared_with_user_id::text = ${me}${permesso}
+                AND (${condivisi.join(' OR ')}))`);
+  }
+  return ` AND (${parti.join(' OR ')})`;
+}
+
 // Condizione SQL da aggiungere alle UPDATE/DELETE massive: limita alle righe modificabili.
 // Per l'admin (o tabelle senza colonna) non aggiunge nulla. alias = 'f.' o ''.
 function roleWriteSql(req, params, alias = '', tableColumns = null, tableName = null) {
@@ -5692,6 +5754,11 @@ app.get('/api/data/:table', requireAuth, async (req, res) => {
         params.push(req.user.tenant_id);
         conditions.push(`src.tenant_id = $${params.length}`);
       }
+      // Isolamento tra utenti dello stesso tenant: proprie, team, clienti condivisi.
+      if (dbKey === 'main') {
+        const scope = await userScopeSql(req, params, tableName, columns, { alias: 'src.' });
+        if (scope) conditions.push(scope.replace(/^ AND /, ''));
+      }
     }
 
     const whereClause = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
@@ -6072,6 +6139,9 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
       values.push(req.user.tenant_id);
       whereClause += ` AND tenant_id = $${columns.length + 2}`;
     }
+    // Isolamento tra utenti: righe proprie o di un cliente condiviso in scrittura (per clients
+    // vale il controllo clientAccessByArgument qui sopra). Riga di un collega -> 404.
+    if (dbKey === 'main' && tableName !== 'clients') whereClause += await userScopeSql(req, values, tableName, tableColumns, { write: true });
 
     // Aggiorna updated_at solo se la tabella ha quella colonna (alcune tabelle non ce l'hanno)
     const updatedAtClause = tableColumns.has('updated_at') ? ', updated_at = CURRENT_TIMESTAMP' : '';
@@ -6194,6 +6264,11 @@ app.delete('/api/data/:table/:id', requireAuth, async (req, res) => {
     if (tableColumns.has('tenant_id') && !isAdminUser(req)) {
       query = `DELETE FROM "${tableName}" WHERE id = $1 AND tenant_id = $2 RETURNING *`;
       values.push(req.user.tenant_id);
+    }
+    // Isolamento tra utenti: come la PUT (per clients vale clientAccessByArgument).
+    if (dbKey === 'main' && tableName !== 'clients') {
+      const scope = await userScopeSql(req, values, tableName, tableColumns, { write: true });
+      if (scope) query = query.replace(' RETURNING *', `${scope} RETURNING *`);
     }
 
     const result = await pool.query(query, values);
@@ -12085,8 +12160,11 @@ app.post('/api/gdpr/richiesta-cancellazione', requireAuth, async (req, res) => {
 // possono leggere/modificare i dati di TUTTI i tenant e di tutti i database, compreso
 // Projexa-Auth. In produzione (VM) vanno spenti con DISABLE_SQL_EDITOR=true nel .env:
 // l'editor si usa in locale.
+// Dal 2026-10-17 con NODE_ENV=production (VM) è spento anche se DISABLE_SQL_EDITOR mancasse:
+// per riaccenderlo in produzione serve ENABLE_SQL_EDITOR_IN_PRODUZIONE=true, scritto apposta.
 
-const SQL_EDITOR_ENABLED = process.env.DISABLE_SQL_EDITOR !== 'true';
+const SQL_EDITOR_ENABLED = process.env.DISABLE_SQL_EDITOR !== 'true'
+  && (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SQL_EDITOR_IN_PRODUZIONE === 'true');
 
 // Transazioni attive per utente: tokenId -> client dedicato del pool.
 // Fondamentale usare un singolo client per la transazione: BEGIN/COMMIT/ROLLBACK

@@ -214,7 +214,9 @@ router.get('/microsoft-callback', async (req, res) => {
 });
 
 // === HEALTH CHECK ENDPOINT (per debugging) ===
+// Pubblico: in produzione dice solo se è configurato, senza pezzi di identificativi (2026-10-17).
 router.get('/microsoft-check', (req, res) => {
+  if (process.env.NODE_ENV === 'production') return res.json({ status: 'ok', configurato: !!(MICROSOFT_CLIENT_ID && MICROSOFT_TENANT_ID) });
   res.json({
     status: 'ok',
     message: 'Microsoft OAuth endpoint is ready',

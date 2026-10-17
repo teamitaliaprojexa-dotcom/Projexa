@@ -76,12 +76,37 @@ function checkLicenseExpiry(userData) {
 }
 
 // Login endpoint
+// Limite per ACCOUNT (2026-10-17), oltre a quello per IP di server.js: 10 password errate in
+// 15 minuti sulla stessa email bloccano i tentativi su quell'email per 15 minuti, anche se
+// arrivano da IP diversi. La risposta è la stessa per email esistenti e non (niente
+// enumerazione). Un login riuscito azzera il conteggio.
+const LOGIN_ERRATI_MAX = 10;
+const LOGIN_ERRATI_FINESTRA_MS = 15 * 60 * 1000;
+const loginErrati = new Map(); // email -> { count, first }
+function loginEmailBloccata(email) {
+  const rec = loginErrati.get(email);
+  if (!rec) return false;
+  if (Date.now() - rec.first > LOGIN_ERRATI_FINESTRA_MS) { loginErrati.delete(email); return false; }
+  return rec.count >= LOGIN_ERRATI_MAX;
+}
+function contaLoginErrato(email) {
+  if (loginErrati.size > 10000) for (const [k, v] of loginErrati) if (Date.now() - v.first > LOGIN_ERRATI_FINESTRA_MS) loginErrati.delete(k);
+  const rec = loginErrati.get(email);
+  if (!rec || Date.now() - rec.first > LOGIN_ERRATI_FINESTRA_MS) loginErrati.set(email, { count: 1, first: Date.now() });
+  else rec.count += 1;
+}
+
 router.post('/login', async (req, res) => {
   try {
     const { email, password, tenant_code } = req.body;
 
     if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
       return res.status(400).json({ error: 'Email e password obbligatorie.' });
+    }
+    const emailChiave = email.trim().toLowerCase();
+    if (loginEmailBloccata(emailChiave)) {
+      registraAccesso(req, { evento: 'login', esito: 'ko', email, dettaglio: 'troppi tentativi sullo stesso account' });
+      return res.status(429).json({ error: 'Troppi tentativi di accesso. Riprova tra qualche minuto.' });
     }
 
     // FASE 1 (Projexa-Auth): trova l'utente per email, verifica password e scadenza licenza.
@@ -99,8 +124,10 @@ router.post('/login', async (req, res) => {
         evento: 'login', esito: 'ko', userId: authUser ? authUser.id : undefined, email,
         dettaglio: authUser ? 'password errata' : 'email non registrata'
       });
+      contaLoginErrato(emailChiave);
       return res.status(401).json({ error: LOGIN_ERROR });
     }
+    loginErrati.delete(emailChiave);
 
     // Verifica scadenza licenza (scadenza è su Projexa-Auth)
     const licenseCheck = checkLicenseExpiry(authUser);
@@ -561,7 +588,28 @@ router.post('/reset-password', async (req, res) => {
 //    sistemi che "pre-aprono" i link nelle email non lo consumano) e riceve il token di
 //    sessione, come dopo un login normale.
 const MAGIC_LINK_SECONDS = 60;
-const usedMagicLinks = new Map(); // jti -> scadenza (ms): link già usati
+const usedMagicLinks = new Map(); // jti -> scadenza (ms): link già usati (copia in memoria)
+
+// Monouso anche dopo un riavvio del server (2026-10-17): il jti del link usato si scrive in
+// session_revoked (Projexa-Auth, stessa tabella dei logout: jti univoco e scadenza). L'INSERT
+// è atomico: se due richieste usano lo stesso link insieme, solo una ottiene la riga.
+// true = primo utilizzo. Tabella assente: resta il controllo in memoria.
+async function prenotaMagicLink(d) {
+  const now = Date.now();
+  for (const [k, exp] of usedMagicLinks) if (exp < now) usedMagicLinks.delete(k);
+  if (usedMagicLinks.has(d.jti)) return false;
+  usedMagicLinks.set(d.jti, d.exp * 1000);
+  try {
+    const r = await authDb.query(
+      `INSERT INTO session_revoked (jti, user_id, expires_at) VALUES ($1, $2, to_timestamp($3))
+       ON CONFLICT (jti) DO NOTHING RETURNING jti`, [d.jti, d.uid, d.exp]);
+    return r.rows.length > 0;
+  } catch (e) {
+    if (e.code !== '42P01') throw e;
+    console.warn('⚠️ MAGIC-LINK: tabella session_revoked assente, link monouso solo in memoria');
+    return true;
+  }
+}
 
 // Max 5 richieste ogni 15 minuti per IP e per email: evita di inondare una casella.
 const magicAttempts = new Map(); // chiave -> { count, first }
@@ -629,11 +677,8 @@ router.post('/magic-link/verify', async (req, res) => {
   try {
     if (d.purpose !== 'magic-link' || !d.uid || !d.jti) return res.status(400).json({ error: 'Link non valido.' });
 
-    // Monouso: il primo utilizzo annota il jti fino alla sua scadenza.
-    const now = Date.now();
-    for (const [k, exp] of usedMagicLinks) if (exp < now) usedMagicLinks.delete(k);
-    if (usedMagicLinks.has(d.jti)) return res.status(400).json({ error: 'Link già utilizzato: richiedine uno nuovo.' });
-    usedMagicLinks.set(d.jti, d.exp * 1000);
+    // Monouso: il primo utilizzo annota il jti fino alla sua scadenza (memoria + database).
+    if (!(await prenotaMagicLink(d))) return res.status(400).json({ error: 'Link già utilizzato: richiedine uno nuovo.' });
 
     const a = await authDb.query('SELECT id, email, password_hash, scadenza FROM users WHERE id = $1', [d.uid]);
     const authUser = a.rows[0];

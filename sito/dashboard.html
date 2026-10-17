@@ -4411,6 +4411,7 @@
             .sidebar .sidebar-menu li.dock-bounce > a { animation: none; }
         }
     </style>
+    <script src="js/azioni.js?v=20261017-1"></script>
 </head>
 <body>
     <!-- SIDEBAR -->
@@ -4680,8 +4681,8 @@
                 <select id="newUserRole" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;"></select>
             </div>
             <div style="display:flex; gap:0.5rem; margin-top:1rem;">
-                <button id="newUserSave" type="button" onclick="saveNewUser()" style="flex:1; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva</button>
-                <button id="newUserCancel" type="button" onclick="document.getElementById('newUserModal').style.display='none'" style="flex:0 0 auto; padding:0.6rem 0.9rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button>
+                <button id="newUserSave" type="button" data-click="saveNewUser" style="flex:1; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva</button>
+                <button id="newUserCancel" type="button" data-click="nascondi" data-arg="newUserModal" style="flex:0 0 auto; padding:0.6rem 0.9rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button>
             </div>
         </div>
     </div>
@@ -4697,7 +4698,7 @@
                 <input id="changePasswordCurrent" type="password" autocomplete="current-password" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">
                 <!-- Password dimenticata: invia all'email dell'utente un link per impostarne una nuova. -->
                 <div style="text-align:right; margin-top:0.25rem;">
-                    <button id="changePasswordForgot" type="button" onclick="sendForgotPasswordLink()" style="border:none; background:transparent; padding:0; font-size:0.78rem; color:var(--primary); text-decoration:underline; cursor:pointer;">Password dimenticata?</button>
+                    <button id="changePasswordForgot" type="button" data-click="sendForgotPasswordLink" style="border:none; background:transparent; padding:0; font-size:0.78rem; color:var(--primary); text-decoration:underline; cursor:pointer;">Password dimenticata?</button>
                 </div>
             </div>
             <div style="margin-bottom: 0.6rem;">
@@ -4715,8 +4716,8 @@
             <div id="changePasswordError" style="display:none; font-size:0.8rem; color:#EF4444; margin-top:0.5rem;"></div>
             <div id="changePasswordInfo" style="display:none; font-size:0.8rem; color:#065F46; background:#ECFDF5; border:1px solid #A7F3D0; border-radius:6px; padding:0.5rem 0.6rem; margin-top:0.5rem;"></div>
             <div style="display:flex; gap:0.5rem; margin-top:1rem;">
-                <button id="changePasswordSave" type="button" onclick="saveChangePassword()" style="flex:1; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva</button>
-                <button id="changePasswordCancel" type="button" onclick="closeChangePasswordModal()" style="flex:0 0 auto; padding:0.6rem 0.9rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button>
+                <button id="changePasswordSave" type="button" data-click="saveChangePassword" style="flex:1; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva</button>
+                <button id="changePasswordCancel" type="button" data-click="closeChangePasswordModal" style="flex:0 0 auto; padding:0.6rem 0.9rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button>
             </div>
         </div>
     </div>
@@ -4833,7 +4834,7 @@
             <!-- Mini KPI + pulsante di ricalcolo sulla destra -->
             <div class="kpi-grid-row">
                 <div class="stats-grid" id="dashboardKpiGrid"></div>
-                <button type="button" id="kpiRefreshBtn" class="kpi-refresh-btn" title="Ricalcola i KPI" aria-label="Ricalcola i KPI" onclick="refreshDashboardKpis()"><i class="fas fa-sync-alt"></i></button>
+                <button type="button" id="kpiRefreshBtn" class="kpi-refresh-btn" title="Ricalcola i KPI" aria-label="Ricalcola i KPI" data-click="refreshDashboardKpis"><i class="fas fa-sync-alt"></i></button>
             </div>
 
             <!-- RIUNIONI DI OGGI - GOOGLE CALENDAR -->
@@ -5041,7 +5042,7 @@
                 </div>
                 <div class="kpi-mbo-legend">
                     <div class="kpi-mbo-toggle-row">
-                        <button type="button" id="mboToggle" class="kpi-mbo-toggle" aria-pressed="false" onclick="toggleMboAmounts()">Mostra</button>
+                        <button type="button" id="mboToggle" class="kpi-mbo-toggle" aria-pressed="false" data-click="toggleMboAmounts">Mostra</button>
                     </div>
                     <div id="mboLegend" class="kpi-mbo-legend-rows"></div>
                 </div>
@@ -8924,7 +8925,8 @@
             if (!b || !window.MySupportPush) return;
             e.preventDefault();
             e.stopPropagation();
-            const yes = await confirmCalendarDisconnect('il token attuale (lo script del PC andrà aggiornato con quello nuovo)', 'Genera un nuovo token');
+            // Primo token (data-dbx-primo): nessuna conferma, non c'è un token da invalidare.
+            const yes = b.dataset.dbxPrimo === '1' || await confirmCalendarDisconnect('il token attuale (lo script del PC andrà aggiornato con quello nuovo)', 'Genera un nuovo token');
             if (!yes || !(await window.MySupportPush.attiva())) return;
             const toggle = document.querySelector(`.dbx-toggle[data-setting-id="${b.dataset.dbxNuovo}"]`);
             if (toggle) { toggle.checked = true; dbxDopo(toggle, true); }
@@ -13674,7 +13676,8 @@
             }
             async function aggiornaConteggio() {
                 try {
-                    const r = await fetch(`${API_URL}/notifiche/conteggio`, { headers: getAuthHeaders() });
+                    // Richiesta automatica: non tiene viva la sessione (scadenza per inattività, config/session.js).
+                    const r = await fetch(`${API_URL}/notifiche/conteggio`, { headers: { ...getAuthHeaders(), 'X-Projexa-Polling': '1' } });
                     if (!r.ok) return;
                     mostraConteggio((await r.json()).nonLette || 0);
                 } catch (e) { /* rete assente: si riprova al giro dopo */ }
@@ -20704,7 +20707,7 @@
             // Trascinabile solo in riordino e solo se la struttura del campo è modificabile.
             const drag = (detailReorderMode && canStructure) ? ' draggable="true"' : '';
             const earlyDeleteCheckbox = (mode === 'delete' && canDelete)
-                ? `<input type="checkbox" class="field-del-check" data-campo="${campo}" onclick="event.stopPropagation();" style="margin-right:8px; cursor:pointer; flex:0 0 auto;">`
+                ? `<input type="checkbox" class="field-del-check" data-campo="${campo}" data-stop style="margin-right:8px; cursor:pointer; flex:0 0 auto;">`
                 : '';
 
             if (tipo === 0) {
@@ -20929,7 +20932,7 @@
                 // In modalità 'delete' mostra anche sui campi griglia (tipo 11) la checkbox
                 // di selezione, come per gli altri tipi di campo.
                 const checkbox11 = (mode === 'delete' && canDelete)
-                    ? `<input type="checkbox" class="field-del-check" data-campo="${campo}" onclick="event.stopPropagation();" style="margin-right: 8px; cursor: pointer; flex: 0 0 auto;">`
+                    ? `<input type="checkbox" class="field-del-check" data-campo="${campo}" data-stop style="margin-right: 8px; cursor: pointer; flex: 0 0 auto;">`
                     : '';
                 // La barra del nome campo funge anche da maniglia di trascinamento quando il
                 // riordino è attivo, così la griglia (tipo 11) si può spostare come gli altri campi.
@@ -21005,8 +21008,8 @@
                 const key = uploadKeyFromCampo(row.campo);
                 input = key
                     ? `<span class="upload-actions">
-                            <button type="button" class="upload-btn" onclick="event.stopPropagation(); downloadUploadTemplate('${key}', this)" title="Scarica il file modello da compilare"><i class="fas fa-file-download"></i> Scarica template</button>
-                            <button type="button" class="upload-btn primary" onclick="event.stopPropagation(); startUploadImport('${key}')" title="Importa il file compilato"><i class="fas fa-file-upload"></i> Importa</button>
+                            <button type="button" class="upload-btn" data-stop data-click="downloadUploadTemplate" data-arg="${key}" title="Scarica il file modello da compilare"><i class="fas fa-file-download"></i> Scarica template</button>
+                            <button type="button" class="upload-btn primary" data-stop data-click="startUploadImport" data-arg="${key}" title="Importa il file compilato"><i class="fas fa-file-upload"></i> Importa</button>
                        </span>`
                     : `<span style="color: var(--text-muted);" title="Caricamento non previsto per questo campo">—</span>`;
             } else if (tipo === 40) {
@@ -23243,7 +23246,7 @@
     <!-- Versione esplicita per evitare che il browser mantenga in cache una precedente
          risposta 404 del modulo: senza questo script la voce Qlik resta display:none. -->
     <script src="js/Qlik_voucher.js?v=20261015-1"></script>
-    <script src="js/mysupport-push.js?v=20261017-1"></script>
+    <script src="js/mysupport-push.js?v=20261017-2"></script>
 <script>
 (function () {
     const colorClasses = [

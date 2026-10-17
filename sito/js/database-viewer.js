@@ -246,8 +246,8 @@ async function selectTable(tableId) {
   buttonsDiv.className = 'table-action-buttons';
   buttonsDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 20px;';
   buttonsDiv.innerHTML = `
-    <button onclick="newRecord('${table.table_name}')" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
-    <button onclick="importCsv('${table.table_name}')" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Import CSV</button>
+    <button data-click="newRecord" data-arg="${table.table_name}" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
+    <button data-click="importCsv" data-arg="${table.table_name}" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Import CSV</button>
   `;
   tableData.insertBefore(buttonsDiv, tableData.firstChild);
 
@@ -448,8 +448,8 @@ async function loadTableStructuresTable() {
   buttonsDiv.className = 'table-action-buttons';
   buttonsDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 20px;';
   buttonsDiv.innerHTML = `
-    <button onclick="newRecord('table_structures')" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
-    <button onclick="importCsv('table_structures')" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Import CSV</button>
+    <button data-click="newRecord" data-arg="table_structures" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
+    <button data-click="importCsv" data-arg="table_structures" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Import CSV</button>
   `;
   tableData.insertBefore(buttonsDiv, tableData.firstChild);
 

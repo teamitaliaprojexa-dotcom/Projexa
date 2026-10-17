@@ -599,6 +599,7 @@
             }
         }
     </style>
+    <script src="js/azioni.js?v=20261017-1"></script>
 </head>
 <body>
     <header>
@@ -628,7 +629,7 @@
                 <h1>Trasforma il caos in ordine</h1>
                 <p>Projexa legge meeting, email e ticket per creare automaticamente piani di progetto, Gantt, e registri rischi.</p>
                 <div class="hero-buttons">
-                    <button class="btn btn-secondary btn-lg" onclick="navigateTo('features')">Scopri di più</button>
+                    <button class="btn btn-secondary btn-lg" data-click="navigateTo" data-arg="features">Scopri di più</button>
                 </div>
                 <div class="hero-image">
                     <i class="fas fa-chart-gantt"></i>
@@ -813,7 +814,7 @@
                         <h3>Enterprise</h3>
                         <p style="color: var(--text-muted); margin-bottom: 1rem;">Per PMO e grandi organizzazioni</p>
                         <div class="price">Custom<span class="price-period">/anno</span></div>
-                        <button class="btn btn-secondary" style="width: 100%; margin-bottom: 1.5rem;" onclick="navigateTo('contact')">Contattaci</button>
+                        <button class="btn btn-secondary" style="width: 100%; margin-bottom: 1.5rem;" data-click="navigateTo" data-arg="contact">Contattaci</button>
                         <ul class="features-list">
                             <li>Tutto il Professional +</li>
                             <li>SSO e SAML</li>
@@ -919,7 +920,7 @@
                 </div>
                 <div class="faq-list">
                     <div class="faq-item">
-                        <div class="faq-header" onclick="toggleFaq(this)">
+                        <div class="faq-header" data-click="toggleFaq" data-el>
                             <span>Come funziona l'AI di ProjectAI?</span>
                             <i class="fas fa-chevron-down faq-icon"></i>
                         </div>
@@ -929,7 +930,7 @@
                     </div>
 
                     <div class="faq-item">
-                        <div class="faq-header" onclick="toggleFaq(this)">
+                        <div class="faq-header" data-click="toggleFaq" data-el>
                             <span>I miei dati sono al sicuro?</span>
                             <i class="fas fa-chevron-down faq-icon"></i>
                         </div>
@@ -939,7 +940,7 @@
                     </div>
 
                     <div class="faq-item">
-                        <div class="faq-header" onclick="toggleFaq(this)">
+                        <div class="faq-header" data-click="toggleFaq" data-el>
                             <span>Quanto tempo ci vuole per fare un piano di progetto?</span>
                             <i class="fas fa-chevron-down faq-icon"></i>
                         </div>
@@ -949,7 +950,7 @@
                     </div>
 
                     <div class="faq-item">
-                        <div class="faq-header" onclick="toggleFaq(this)">
+                        <div class="faq-header" data-click="toggleFaq" data-el>
                             <span>Posso modificare il piano generato dall'AI?</span>
                             <i class="fas fa-chevron-down faq-icon"></i>
                         </div>
@@ -959,7 +960,7 @@
                     </div>
 
                     <div class="faq-item">
-                        <div class="faq-header" onclick="toggleFaq(this)">
+                        <div class="faq-header" data-click="toggleFaq" data-el>
                             <span>Quali integrazioni supportate nel piano Free?</span>
                             <i class="fas fa-chevron-down faq-icon"></i>
                         </div>
@@ -969,7 +970,7 @@
                     </div>
 
                     <div class="faq-item">
-                        <div class="faq-header" onclick="toggleFaq(this)">
+                        <div class="faq-header" data-click="toggleFaq" data-el>
                             <span>Posso invitare il mio team?</span>
                             <i class="fas fa-chevron-down faq-icon"></i>
                         </div>
@@ -979,7 +980,7 @@
                     </div>
 
                     <div class="faq-item">
-                        <div class="faq-header" onclick="toggleFaq(this)">
+                        <div class="faq-header" data-click="toggleFaq" data-el>
                             <span>Posso cancellare la mia subscription in qualsiasi momento?</span>
                             <i class="fas fa-chevron-down faq-icon"></i>
                         </div>
@@ -1043,7 +1044,7 @@
                     <p>Abbiamo domande? Siamo qui per aiutare</p>
                 </div>
                 <div class="contact-content">
-                    <form onsubmit="handleSubmit(event)">
+                    <form data-submit="handleSubmit">
                         <div class="form-group">
                             <label>Nome</label>
                             <input type="text" required placeholder="Il tuo nome">
@@ -1080,7 +1081,7 @@
                     <a href="#" data-page="features">Features</a>
                     <a href="#" data-page="pricing">Pricing</a>
                     <a href="#" data-page="integrations">Integrazioni</a>
-                    <a href="#" onclick="navigateTo('contact')">Contatti</a>
+                    <a href="#" data-click="navigateTo" data-arg="contact">Contatti</a>
                 </div>
                 <div class="footer-section">
                     <h4>Company</h4>

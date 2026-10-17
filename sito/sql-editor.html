@@ -225,6 +225,7 @@
             }
         }
     </style>
+    <script src="js/azioni.js?v=20261017-1"></script>
 </head>
 <body>
     <div class="container">
@@ -239,7 +240,7 @@
                         <option value="notif">Projexa-Notif</option>
                     </select>
                 </label>
-                <button class="btn btn-primary" onclick="goBack()">
+                <button class="btn btn-primary" data-click="goBack">
                     <i class="fas fa-arrow-left"></i> Indietro
                 </button>
             </div>
@@ -256,13 +257,13 @@
             <textarea id="sqlEditor"></textarea>
 
             <div class="header-actions" style="margin-top: 1.5rem;">
-                <button class="btn btn-success" onclick="executeQuery()">
+                <button class="btn btn-success" data-click="executeQuery">
                     <i class="fas fa-play"></i> Esegui (Ctrl+Enter)
                 </button>
-                <button class="btn btn-warning" id="commitBtn" onclick="commitTransaction()" disabled>
+                <button class="btn btn-warning" id="commitBtn" data-click="commitTransaction" disabled>
                     <i class="fas fa-check"></i> Commit
                 </button>
-                <button class="btn btn-danger" id="rollbackBtn" onclick="rollbackTransaction()" disabled>
+                <button class="btn btn-danger" id="rollbackBtn" data-click="rollbackTransaction" disabled>
                     <i class="fas fa-undo"></i> Rollback
                 </button>
             </div>
@@ -272,16 +273,16 @@
             <div class="results-header" style="display: flex; justify-content: space-between; align-items: center;">
                 <span>Risultati</span>
                 <div id="downloadMenu" style="display: none;">
-                    <button class="btn btn-primary" onclick="downloadResults('csv')" style="font-size: 0.9rem; padding: 6px 12px;">
+                    <button class="btn btn-primary" data-click="downloadResults" data-arg="csv" style="font-size: 0.9rem; padding: 6px 12px;">
                         <i class="fas fa-download"></i> CSV
                     </button>
-                    <button class="btn btn-primary" onclick="downloadResults('json')" style="font-size: 0.9rem; padding: 6px 12px;">
+                    <button class="btn btn-primary" data-click="downloadResults" data-arg="json" style="font-size: 0.9rem; padding: 6px 12px;">
                         <i class="fas fa-download"></i> JSON
                     </button>
-                    <button class="btn btn-primary" onclick="downloadResults('xlsx')" style="font-size: 0.9rem; padding: 6px 12px;">
+                    <button class="btn btn-primary" data-click="downloadResults" data-arg="xlsx" style="font-size: 0.9rem; padding: 6px 12px;">
                         <i class="fas fa-download"></i> Excel
                     </button>
-                    <button class="btn btn-primary" onclick="downloadResults('xml')" style="font-size: 0.9rem; padding: 6px 12px;">
+                    <button class="btn btn-primary" data-click="downloadResults" data-arg="xml" style="font-size: 0.9rem; padding: 6px 12px;">
                         <i class="fas fa-download"></i> XML
                     </button>
                 </div>

@@ -82,7 +82,12 @@
         if (!el) return;
         let s;
         try { s = await chiama('GET'); } catch (e) { el.innerHTML = `<span class="calendar-conn-account" style="color:#B91C1C;">${esc(e.message)}</span>`; return; }
-        if (!s.attivo) { el.innerHTML = ''; return; }
+        // Interruttore acceso ma nessun token (es. acceso con il vecchio import dalla cartella).
+        if (!s.attivo) {
+            el.innerHTML = '<span class="calendar-conn-account" style="color:#B45309;"><i class="fas fa-key"></i> Nessun token: lo script del PC non può inviare i dati</span>'
+                + `<button type="button" class="calendar-conn-btn calendar-conn-on" data-dbx-nuovo="${esc(settingId)}" data-dbx-primo="1"><i class="fas fa-key"></i> Genera token</button>`;
+            return;
+        }
         const r = s.ultimoReport;
         const invio = !s.ultimoUso ? 'nessun invio ricevuto finora'
             : `ultimo invio ${dataOra(s.ultimoUso)}${r ? `: ${r.inserted || 0} nuovi, ${r.updated || 0} aggiornati${r.ricevuti < r.blocchi ? ` (incompleto: ${r.ricevuti}/${r.blocchi} blocchi)` : ''}` : ''}`;
