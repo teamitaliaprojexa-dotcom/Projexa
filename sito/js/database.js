@@ -65,7 +65,8 @@ if (tableSelect) {
         setTimeout(() => window.location.href = 'login.html', 2000);
       } else {
         const error = await response.json();
-        tableData.innerHTML = `<p class="loading">Error: ${error.error || 'Failed to load data'}</p>`;
+        const escTesto = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        tableData.innerHTML = `<p class="loading">Error: ${escTesto(error.error || 'Failed to load data')}</p>`;
       }
     } catch (error) {
       console.error('Error loading table:', error);

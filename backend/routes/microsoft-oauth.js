@@ -121,7 +121,35 @@ router.get('/microsoft-callback', async (req, res) => {
     console.log(`[MICROSOFT_AUTH] User: ${email}, Name: ${displayName}`);
 
     // === STEP 3: Cerca l'utente su Projexa-Auth. ===
-    let authUser = (await authDb.query('SELECT id, email, scadenza, password_hash FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [email])).rows[0];
+    // Legame con l'id Microsoft (oid, 2026-10-17): il campo mail di Graph lo può cambiare un
+    // amministratore della directory, quindi da solo non basta. Al primo accesso l'oid viene
+    // salvato in users.microsoft_oid; da lì l'account si riconosce dall'oid, e una mail che
+    // punta a un account già legato a un ALTRO oid viene rifiutata.
+    // Colonna assente (SQL Supporto/CreaDB/microsoft_oid.sql non eseguito): comportamento di prima.
+    const oid = String(microsoftId || '').trim();
+    let colonnaOid = true;
+    let authUser = null;
+    if (oid) {
+      try {
+        authUser = (await authDb.query('SELECT id, email, scadenza, password_hash, microsoft_oid FROM users WHERE microsoft_oid = $1 LIMIT 1', [oid])).rows[0] || null;
+      } catch (e) {
+        if (e.code !== '42703') throw e;
+        colonnaOid = false;
+        console.warn('[MICROSOFT_AUTH] Colonna users.microsoft_oid assente: eseguire Supporto/CreaDB/microsoft_oid.sql su Projexa-Auth');
+      }
+    }
+    if (!authUser) {
+      authUser = (await authDb.query(`SELECT id, email, scadenza, password_hash${colonnaOid ? ', microsoft_oid' : ''} FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`, [email])).rows[0];
+      if (authUser && colonnaOid && authUser.microsoft_oid && authUser.microsoft_oid !== oid) {
+        console.warn(`[MICROSOFT_AUTH] Email ${email} legata a un altro account Microsoft: accesso rifiutato`);
+        registraAccesso(req, { evento: 'microsoft', esito: 'ko', userId: authUser.id, email, dettaglio: 'oid diverso da quello legato' });
+        return res.redirect('/login.html?error=accesso_microsoft_non_riuscito');
+      }
+      if (authUser && colonnaOid && oid && !authUser.microsoft_oid) {
+        await authDb.query('UPDATE users SET microsoft_oid = $2 WHERE id = $1 AND microsoft_oid IS NULL', [authUser.id, oid]);
+        console.log(`[MICROSOFT_AUTH] Account ${authUser.id} legato all'id Microsoft`);
+      }
+    }
     if (!authUser) {
       // Nuovo utente: instradalo alla pagina "Prova gratuita" (niente auto-creazione qui).
       console.log(`[MICROSOFT_AUTH] Nuovo utente, redirect a prova gratuita: ${email}`);
@@ -171,7 +199,7 @@ router.get('/microsoft-callback', async (req, res) => {
     const jwtToken = signSessionToken(
       {
         user_id: userDbData.id,
-        email: email,
+        email: authUser.email || email, // email dell'account Projexa, non quella (modificabile) di Graph
         tenant_id: selectedTenant.id,
         tenant_name: selectedTenant.name,
         role_id: userRole.role_id,

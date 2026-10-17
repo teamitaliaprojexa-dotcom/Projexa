@@ -135,12 +135,14 @@ if (document.getElementById('loginForm')) {
     if (!tenantList) return;
 
     tenantList.innerHTML = '';
+    const escTesto = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
     tenants.forEach(tenant => {
       const tenantItem = document.createElement('div');
       tenantItem.className = 'tenant-item';
+      // Il nome dell'azienda lo sceglie chi si registra: escape obbligatorio (2026-10-17).
       tenantItem.innerHTML = `
-        <h3>${tenant.name}</h3>
+        <h3>${escTesto(tenant.name)}</h3>
         <p>Click to select this workspace</p>
       `;
 

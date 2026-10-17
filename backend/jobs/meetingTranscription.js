@@ -1271,10 +1271,13 @@ async function runWorker() {
 // o con TRASCRIZIONE_WORKER_ENABLED=true. In locale il backend usa il database di produzione
 // (tunnel): senza questo blocco prenderebbe i blocchi audio degli utenti veri e li finalizzerebbe
 // con chiavi e servizi locali. TRASCRIZIONE_WORKER_ENABLED=false lo spegne anche in produzione.
+// Senza TRASCRIZIONE_WORKER_ENABLED esplicito il worker gira solo sulla VM, riconosciuta da
+// JOB_SCHEDULER_ENABLED=true (impostato solo lì). NON da NODE_ENV: anche il .env del PC ha
+// NODE_ENV=production e il backend locale usa il database di produzione. 2026-10-17
 export function trascrizioneWorkerAttivo() {
   const v = String(process.env.TRASCRIZIONE_WORKER_ENABLED || '').toLowerCase();
   if (v === 'false') return false;
-  return v === 'true' || process.env.NODE_ENV === 'production';
+  return v === 'true' || String(process.env.JOB_SCHEDULER_ENABLED || '').toLowerCase() === 'true';
 }
 
 export function kickTranscriptionWorker() {

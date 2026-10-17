@@ -5128,6 +5128,19 @@
         // === HELPER DI SICUREZZA ===
         // Esegue l'escaping dei caratteri HTML per evitare XSS quando si inseriscono
         // dati non fidati (URL, API, calendari) in innerHTML.
+        // Indirizzo per un href (2026-10-17): l'escape non basta, «javascript:...» resterebbe un
+        // link eseguibile al clic. Passano solo http(s), mailto, tel, file e i percorsi (relativi,
+        // /, \server); il resto diventa «#». Il risultato va comunque passato da escapeHtml.
+        function urlSicuro(value) {
+            const u = String(value ?? '').trim();
+            if (!u) return '#';
+            const pulito = u.replace(/[ -s]+/g, '');
+            const m = /^([a-z][a-z0-9+.-]*):/i.exec(pulito);
+            if (!m) return u;                                   // relativo o percorso
+            if (/^[a-z]$/i.test(m[1])) return u;               // percorso Windows (C:...)
+            return /^(https?|mailto|tel|file)$/i.test(m[1]) ? u : '#';
+        }
+
         function escapeHtml(value) {
             if (value === null || value === undefined) return '';
             return String(value)
@@ -5514,7 +5527,7 @@
                 const label = key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
                 // Indirizzi web (es. link del task Jira): cliccabili, in una nuova scheda.
                 if (typeof value === 'string' && /^https?:\/\/\S+$/i.test(value.trim())) {
-                    parts.push(`<span><strong>${escapeHtml(label)}:</strong> <a href="${escapeHtml(value.trim())}" target="_blank" rel="noopener" class="kpi-item-link">${escapeHtml(value.trim())}</a></span>`);
+                    parts.push(`<span><strong>${escapeHtml(label)}:</strong> <a href="${escapeHtml(urlSicuro(value))}" target="_blank" rel="noopener" class="kpi-item-link">${escapeHtml(value.trim())}</a></span>`);
                     continue;
                 }
                 parts.push(`<span><strong>${escapeHtml(label)}:</strong> ${escapeHtml(String(value))}</span>`);
@@ -6200,7 +6213,7 @@
                             ? `<a href="#" data-rel-project="${escapeHtml(x.project_id)}" data-rel-client="${escapeHtml(x.client_id)}" data-rel-name="${escapeHtml(x.progetto)}">${escapeHtml(x.progetto)}</a>`
                             : '<span class="rel-nop">—</span>';
                         return `<tr${relClasseStato(x.stato) === 'ok' ? ' class="rel-ok"' : ''}><td><div class="rel-cli">${relAvatar(x.cliente)}${escapeHtml(x.cliente || '—')}</div></td><td>${prog}</td>
-                            <td>${link ? `<a class="rel-task" href="${escapeHtml(link)}" target="_blank" rel="noopener" title="Apri in Jira">${escapeHtml(x.cod_task || 'apri')} <i class="fas fa-arrow-up-right-from-square" style="font-size:0.7rem"></i></a>` : `<span class="rel-task">${escapeHtml(x.cod_task || '')}</span>`}</td>
+                            <td>${link ? `<a class="rel-task" href="${escapeHtml(urlSicuro(link))}" target="_blank" rel="noopener" title="Apri in Jira">${escapeHtml(x.cod_task || 'apri')} <i class="fas fa-arrow-up-right-from-square" style="font-size:0.7rem"></i></a>` : `<span class="rel-task">${escapeHtml(x.cod_task || '')}</span>`}</td>
                             <td>${escapeHtml(x.descrizione || '')}</td><td><div class="rel-stato-cell">${relClasseStato(x.stato) === 'ok' ? '<span class="rel-fatto" title="Completata"><i class="fas fa-check"></i></span>' : ''}<span class="rel-stato ${relClasseStato(x.stato)}">${escapeHtml(x.stato || '—')}</span></div></td></tr>`;
                     }).join('')}</tbody></table></div>` : `<div class="gp-empty">Nessun task aperto con versione ${escapeHtml(d.release)}.</div>`;
                 box.innerHTML = hero + tabella;
@@ -11590,7 +11603,7 @@
                 ? `<dl class="mp-dett">${campi.map(([c, v]) => {
                     const t = String(v).trim();
                     const dd = /^https?:\/\/\S+$/i.test(t)
-                        ? `<a href="${escapeHtml(t)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t)} <i class="fas fa-arrow-up-right-from-square"></i></a>`
+                        ? `<a href="${escapeHtml(urlSicuro(t))}" target="_blank" rel="noopener noreferrer">${escapeHtml(t)} <i class="fas fa-arrow-up-right-from-square"></i></a>`
                         : escapeHtml(v).replace(/\n/g, '<br>');
                     return `<dt>${escapeHtml(c)}</dt><dd>${dd}</dd>`;
                 }).join('')}</dl>`
@@ -13584,7 +13597,7 @@
             container.innerHTML = `
                 <div class="meeting-empty">
                     <i class="fas fa-exclamation-circle" style="font-size: 2rem; color: var(--warning); margin-bottom: 1rem;"></i>
-                    <p style="font-size: 0.95rem; margin: 0; color: var(--dark);">⚠️ ${message}</p>
+                    <p style="font-size: 0.95rem; margin: 0; color: var(--dark);">⚠️ ${escapeHtml(message)}</p>
                     <p style="font-size: 0.8rem; margin-top: 0.75rem; color: var(--text-muted);">Se il problema persiste, prova a scollegare e ricollegare il calendario</p>
                 </div>
             `;
@@ -18694,7 +18707,7 @@
             }
             const url = type11UrlValue(value);
             if (!url) return escapeHtml(formatType11Cell(value, column));
-            return `<a class="type11-cell-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(url)}"><i class="fas fa-globe"></i></a>`;
+            return `<a class="type11-cell-link" href="${escapeHtml(urlSicuro(url))}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(url)}"><i class="fas fa-globe"></i></a>`;
         }
 
         // Colonne mostrate come numero (non valuta) anche se il nome ricade in una regola
@@ -20864,7 +20877,7 @@
                 // URL -> valore2: testo editabile + link cliccabile (icona dentro la casella)
                 const val = row.valore2 == null ? '' : row.valore2;
                 const link = campoUrlLink(val);
-                const icon = link ? `<a class="field-icon" href="${escapeHtml(link)}" target="_blank" rel="noopener" title="Apri">🔗</a>` : '';
+                const icon = link ? `<a class="field-icon" href="${escapeHtml(urlSicuro(link))}" target="_blank" rel="noopener" title="Apri">🔗</a>` : '';
                 input = `<span class="field-icon-wrap">${icon}<input type="text" data-setting-id="${id}" data-field="valore2" value="${escapeHtml(val)}" placeholder="https://..."></span>`;
             } else if (tipo === 6) {
                 // Email -> valore2: testo editabile + link mailto (icona dentro la casella).
@@ -21001,7 +21014,7 @@
                 if (!url) {
                     input = `<span style="color: var(--text-muted);" title="VariabDB non risolto">—</span>`;
                 } else {
-                    const href = escapeHtml(url);
+                    const href = escapeHtml(urlSicuro(url));
                     input = `<a class="type12-link-button" href="${href}" target="_blank" rel="noopener noreferrer" title="Apri collegamento"><i class="fas fa-folder-open"></i><span>${label}</span></a>`;
                 }
             } else if (tipo === 15) {

@@ -77,10 +77,15 @@ app.set('trust proxy', 1);
 // CORS ristretto: consenti le richieste same-origin (Origin assente) e solo le origini
 // in whitelist (localhost per lo sviluppo + quelle in ALLOWED_ORIGINS, es. l'URL di produzione).
 // La lista sta in config/origins.js perché la usa anche il flusso OAuth di Jira.
+// Origine non consentita: rifiuto pulito 403 (prima l'errore del middleware diventava un 500).
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && !allowedOrigins.has(origin)) return res.status(403).json({ error: 'Origine non consentita' });
+  next();
+});
 app.use(cors({
   origin(origin, cb) {
-    if (!origin || allowedOrigins.has(origin)) return cb(null, true);
-    return cb(new Error('Origine non consentita (CORS)'));
+    cb(null, !origin || allowedOrigins.has(origin));
   }
 }));
 
@@ -199,7 +204,9 @@ function registerRateLimit(req, res, next) {
 // Serve static files from sito folder
 const sitoPath = path.join(__dirname, '../sito');
 // Database viewer: solo in locale (localhost). Altrove risponde 404, anche se il file esiste.
-const SOLO_LOCALE = new Set(['/database-viewer.html', '/js/database-viewer.js']);
+// Dal 2026-10-17 anche l'editor SQL (le sue API sono spente sulla VM) e i vecchi script
+// js/app.js e js/data.js, non più usati da nessuna pagina.
+const SOLO_LOCALE = new Set(['/database-viewer.html', '/js/database-viewer.js', '/sql-editor.html', '/js/app.js', '/js/data.js']);
 app.use((req, res, next) => {
   if (!SOLO_LOCALE.has(req.path)) return next();
   const host = String(req.hostname || '').toLowerCase();
@@ -7677,6 +7684,17 @@ async function assertOwnedClientLogoContext(clientId, req) {
 // ==========================================
 // DOSSIER CLIENTE (pulsante «Dossier Cliente» nella scheda cliente, a destra dei mini KPI)
 // ==========================================
+// Errore di una sezione del dossier (2026-10-17): nel documento va un testo leggibile con un
+// codice di riferimento, il dettaglio tecnico (messaggi del database, nomi di tabelle e
+// colonne) solo nel log del server. Prima il messaggio grezzo finiva nella risposta 200.
+// Gli errori «nostri» (con status, es. tabella non attiva) restano leggibili così come sono.
+function erroreDossier(sezione, e) {
+  if (e && e.status && e.status < 500) return e.message;
+  const rif = crypto.randomBytes(3).toString('hex');
+  console.error(`[DOSSIER] ${sezione} (rif. ${rif}):`, e && e.message);
+  return `Dati non disponibili (riferimento ${rif})`;
+}
+
 // GET /api/clients/dossier?clientId=...  dati dell'anteprima da stampare (sito/dossier-cliente.html)
 // GET /api/clients/dossier/colonne       sezioni e colonne scegliibili (editor dei prompt)
 // Perimetro: cliente a cui l'utente ha accesso (proprietario o condiviso); i dati sono quelli
@@ -8012,7 +8030,7 @@ async function dosDettaglioProgetto(req, owner, p) {
     return { si: dosVero(r.valore1), data: c.data(nome) };
   };
   const [salute, team, licenze, riunioni, esterni, raid, issue, cr, gantt, commesse, voci] = await Promise.all([
-    pm.saluteProgetto(user, p.id).catch((e) => ({ errore: e.message })),
+    pm.saluteProgetto(user, p.id).catch((e) => ({ errore: erroreDossier('salute progetto', e) })),
     dosTeamProgetto(user, p.id),
     dosLicenzeProgetto(user, p.id),
     db.query(
@@ -8097,7 +8115,7 @@ function dosStatoOrdine(it, oggi) {
 }
 
 async function dosKpiProgetto(user, projectId) {
-  const errore = (nome) => (e) => { console.error(`[DOSSIER] KPI ${nome}:`, e.message); return { errore: e.message }; };
+  const errore = (nome) => (e) => ({ errore: erroreDossier(`KPI ${nome}`, e) });
   const oggi = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
   const [gp, ord, rilasci, capacita] = await Promise.all([
     gpAvanzamento(user.tenant_id, user.user_id, { projectId }).then((l) => l[0] || null).catch(errore('gestione progetto')),
@@ -8841,7 +8859,7 @@ app.get('/api/clients/dossier', requireAuth, ...rottaAi('dossier', async (req, r
           : await askAiProvider(req.user.user_id, providerName, build(datiAi));
         ai = { testo: stripMarkdown(String(r.text || '')).trim(), label: r.label || providerName, errore: '' };
       } catch (e) {
-        ai.errore = `L'AI non ha risposto (${e.message}): il dossier è senza sintesi.`;
+        ai.errore = `L'AI non ha risposto (${e.status ? e.message : erroreDossier('sintesi AI', e)}): il dossier è senza sintesi.`;
       }
     }
 
@@ -8849,8 +8867,7 @@ app.get('/api/clients/dossier', requireAuth, ...rottaAi('dossier', async (req, r
     const dettagli = {};
     for (const p of progetti.filter((x) => soloProgetto || !x.chiuso)) {
       try { dettagli[p.id] = await dosDettaglioProgetto(req, owner, p); } catch (e) {
-        console.error(`[DOSSIER CLIENTE] dettaglio progetto ${p.id}:`, e.message);
-        dettagli[p.id] = { errore: e.message };
+        dettagli[p.id] = { errore: erroreDossier(`dettaglio progetto ${p.id}`, e) };
       }
     }
 
@@ -12317,11 +12334,14 @@ app.post('/api/gdpr/richiesta-cancellazione', requireAuth, async (req, res) => {
 // possono leggere/modificare i dati di TUTTI i tenant e di tutti i database, compreso
 // Projexa-Auth. In produzione (VM) vanno spenti con DISABLE_SQL_EDITOR=true nel .env:
 // l'editor si usa in locale.
-// Dal 2026-10-17 con NODE_ENV=production (VM) è spento anche se DISABLE_SQL_EDITOR mancasse:
+// (storico) Con NODE_ENV=production era spento anche se DISABLE_SQL_EDITOR mancasse:
 // per riaccenderlo in produzione serve ENABLE_SQL_EDITOR_IN_PRODUZIONE=true, scritto apposta.
 
+// La VM si riconosce da JOB_SCHEDULER_ENABLED=true (non da NODE_ENV, che vale production
+// anche nel .env del PC, dove l'editor serve). 2026-10-17
+const SU_VM = String(process.env.JOB_SCHEDULER_ENABLED || '').toLowerCase() === 'true';
 const SQL_EDITOR_ENABLED = process.env.DISABLE_SQL_EDITOR !== 'true'
-  && (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SQL_EDITOR_IN_PRODUZIONE === 'true');
+  && (!SU_VM || process.env.ENABLE_SQL_EDITOR_IN_PRODUZIONE === 'true');
 
 // Transazioni attive per utente: tokenId -> client dedicato del pool.
 // Fondamentale usare un singolo client per la transazione: BEGIN/COMMIT/ROLLBACK
