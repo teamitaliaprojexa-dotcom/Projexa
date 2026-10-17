@@ -14,8 +14,12 @@
 //     Pulizia automatica: una forma (cerchio, riquadro…) i cui testi collegati sono stati
 //     svuotati o tolti dall'AI viene tolta insieme alle icone che contiene, così una persona o
 //     una licenza non usata non lascia forme vuote sulla slide.
-import JSZip from 'jszip';
+import { apriZipSicuro } from './zipSicuro.js';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
+
+// Caratteri vietati in XML 1.0 (es. U+000B che Word mette per l'a capo manuale): il
+// serializzatore non li toglie e il file risultava illeggibile. 2026-10-17
+const xmlSicuro = (v) => String(v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '').replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
 
 const NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const NS_P = 'http://schemas.openxmlformats.org/presentationml/2006/main';
@@ -79,7 +83,7 @@ function scriviCorpo(txBody, testo) {
         r.appendChild(rPr);
       }
       const t = doc.createElementNS(NS_A, 'a:t');
-      t.appendChild(doc.createTextNode(riga));
+      t.appendChild(doc.createTextNode(xmlSicuro(riga)));
       r.appendChild(t);
       const end = figli(p, NS_A, 'endParaRPr')[0];
       if (end) p.insertBefore(r, end); else p.appendChild(r);
@@ -198,7 +202,8 @@ export async function leggiTemplate(buffer) {
     throw httpError(400, 'Il file non è un .pptx: i vecchi file .ppt vanno prima salvati come .pptx da PowerPoint');
   }
   let zip;
-  try { zip = await JSZip.loadAsync(buffer); } catch { throw httpError(400, 'File .pptx danneggiato o non leggibile'); }
+  // Dimensioni decompresse controllate prima di leggere (zip bomb). 2026-10-17
+  try { zip = await apriZipSicuro(buffer, { nome: 'modello .pptx' }); } catch (e) { throw e.status ? e : httpError(400, 'File .pptx danneggiato o non leggibile'); }
   const { presDoc, relDoc, slideSize, elenco } = await struttura(zip);
   if (!elenco.length) throw httpError(400, 'La presentazione non contiene slide');
   if (elenco.length > MAX_SLIDE) throw httpError(400, `La presentazione ha troppe slide (massimo ${MAX_SLIDE})`);

@@ -5,6 +5,7 @@
 // Anche i file da scaricare (Word, PDF, Excel, testo) vengono generati al volo dal testo
 // della risposta e rispediti al browser, senza passare da disco o database.
 import mammoth from 'mammoth';
+import { controllaZip } from './zipSicuro.js';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType } from 'docx';
@@ -77,6 +78,8 @@ export async function prepareAttachments(files) {
     }
     let text;
     try {
+      // .docx/.xlsx: dimensioni decompresse controllate prima di aprirli (zip bomb). 2026-10-17
+      if (ext === 'docx' || ext === 'xlsx') await controllaZip(buffer, { nome: name, maxTotaleMb: 80, maxParteMb: 40 });
       if (ext === 'docx') text = (await mammoth.extractRawText({ buffer })).value;
       else if (ext === 'xlsx') text = await xlsxToText(buffer);
       else if (TEXT_EXT.has(ext)) text = buffer.toString('utf8').replace(/^﻿/, '');

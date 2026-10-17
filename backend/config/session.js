@@ -126,18 +126,22 @@ async function isRevoked(jti, exp) {
   return revoked;
 }
 
-// Revoca la sessione del token indicato (firma verificata, anche se il resto non è più valido).
+// Revoca la sessione del token indicato (firma verificata, anche se il token è scaduto).
+// Con il rinnovo (rinnovaSessione) esistono più copie dello stesso jti con scadenze diverse:
+// la revoca vale fino alla vita MASSIMA del jti (login + 24 ore), non solo fino alla scadenza
+// della copia presentata, e si applica anche se quella copia è già scaduta (2026-10-17).
 export async function revokeSessionToken(token) {
   let p;
-  try { p = jwt.verify(token, JWT_SECRET); } catch { return; }
+  try { p = jwt.verify(token, JWT_SECRET, { ignoreExpiration: true }); } catch { return; }
   if (p.typ !== SESSION_TYP || !p.jti) return;
-  revokedCache.set(p.jti, { revoked: true, at: Date.now(), exp: p.exp });
+  const fine = Math.max(Number(p.exp) || 0, (Number(p.lat) || Number(p.iat) || 0) + SESSION_TTL_SEC);
+  revokedCache.set(p.jti, { revoked: true, at: Date.now(), exp: fine });
   if (revokedTableMissing) return;
   try {
     await authDb.query(
       `INSERT INTO session_revoked (jti, user_id, expires_at) VALUES ($1, $2, to_timestamp($3))
-       ON CONFLICT (jti) DO NOTHING`,
-      [p.jti, p.user_id || null, p.exp]
+       ON CONFLICT (jti) DO UPDATE SET expires_at = GREATEST(session_revoked.expires_at, EXCLUDED.expires_at)`,
+      [p.jti, p.user_id || null, fine]
     );
     await authDb.query('DELETE FROM session_revoked WHERE expires_at < NOW()');
   } catch (e) {
@@ -209,14 +213,18 @@ export async function verifySessionToken(token) {
   if (payload.typ !== SESSION_TYP || !payload.user_id || !payload.tenant_id || !payload.psig || !payload.jti) {
     throw unauthorized('Token non valido o scaduto');
   }
-  if (await isRevoked(payload.jti, payload.exp)) {
+  // Le tre letture sono indipendenti: in parallelo (ognuna ha la sua cache di 60 s).
+  const [revocata, sig, m] = await Promise.all([
+    isRevoked(payload.jti, payload.exp),
+    currentSignature(payload.user_id),
+    currentMembership(payload.user_id, payload.tenant_id)
+  ]);
+  if (revocata) {
     throw unauthorized('Sessione chiusa: accedi di nuovo');
   }
-  const sig = await currentSignature(payload.user_id);
   if (!sig || sig !== payload.psig) {
     throw unauthorized('Sessione non più valida: accedi di nuovo');
   }
-  const m = await currentMembership(payload.user_id, payload.tenant_id);
   if (!m) {
     throw unauthorized('Non hai più accesso a questo spazio di lavoro: accedi di nuovo');
   }

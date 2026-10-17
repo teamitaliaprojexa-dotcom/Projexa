@@ -35,6 +35,10 @@ const MAX_HISTORY_CHARS = 4000;
 // Limiti per utente: la chiave è una sola per tutti i tenant (piano gratuito di Gemini).
 const LIMIT_PER_MINUTE = 6;
 const LIMIT_PER_DAY = 100;
+// Tetti comuni sulla chiave Gemini condivisa (2026-10-17): per azienda e totali al giorno,
+// così molti utenti (o account creati apposta) non esauriscono la quota per tutti.
+const LIMIT_TENANT_PER_DAY = Number(process.env.CHATBOT_LIMITE_AZIENDA_GIORNO) || 400;
+const LIMIT_TOTALE_PER_DAY = Number(process.env.CHATBOT_LIMITE_TOTALE_GIORNO) || 2000;
 
 const SYSTEM_INSTRUCTION = `Sei "Projexa", l'assistente virtuale della piattaforma Projexa (project management).
 Rispondi alle domande degli utenti su come usare Projexa basandoti SOLO sul Manuale Utente qui sotto.
@@ -171,9 +175,15 @@ async function generate(apiKey, model, contents, cacheName, man) {
 
 // --- Limite di richieste per utente (in memoria) ---
 const usage = new Map(); // user_id -> { minute: [timestamp], day, dayKey }
-function checkRate(userId) {
+const usageComune = { dayKey: '', totale: 0, tenant: new Map() };
+function checkRate(userId, tenantId) {
   const now = Date.now();
   const dayKey = new Date().toISOString().slice(0, 10);
+  if (usageComune.dayKey !== dayKey) { usageComune.dayKey = dayKey; usageComune.totale = 0; usageComune.tenant.clear(); }
+  const perAzienda = usageComune.tenant.get(String(tenantId)) || 0;
+  if (perAzienda >= LIMIT_TENANT_PER_DAY || usageComune.totale >= LIMIT_TOTALE_PER_DAY) {
+    throw httpError(429, 'Il chatbot ha raggiunto il limite di domande di oggi: riprova domani.');
+  }
   const u = usage.get(userId) || { minute: [], day: 0, dayKey };
   if (u.dayKey !== dayKey) { u.day = 0; u.dayKey = dayKey; }
   u.minute = u.minute.filter((t) => now - t < 60000);
@@ -182,6 +192,8 @@ function checkRate(userId) {
   u.minute.push(now);
   u.day += 1;
   usage.set(userId, u);
+  usageComune.tenant.set(String(tenantId), perAzienda + 1);
+  usageComune.totale += 1;
 }
 
 // --- Contesto di chi scrive (dal token e dal database, mai dal browser) ---
@@ -234,7 +246,7 @@ router.post('/', requireAuth, async (req, res) => {
     const messaggio = typeof req.body?.messaggio === 'string' ? req.body.messaggio.trim() : '';
     if (!messaggio) throw httpError(400, 'Scrivi una domanda');
     if (messaggio.length > MAX_MESSAGE_CHARS) throw httpError(400, `La domanda supera ${MAX_MESSAGE_CHARS} caratteri`);
-    checkRate(req.user.user_id);
+    checkRate(req.user.user_id, req.user.tenant_id);
 
     const [man, apiKey, contesto] = await Promise.all([loadManual(), getChatbotKey(), userContextText(req.user)]);
     const model = chatbotModel();

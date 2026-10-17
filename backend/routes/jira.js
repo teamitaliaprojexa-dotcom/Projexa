@@ -114,6 +114,61 @@ function tokenElements(tokenData) {
 // Restituisce un access token valido, rinnovandolo se scaduto o in scadenza.
 // Se il refresh fallisce (consenso revocato, token ruotato altrove) cancella
 // l'integrazione e segnala che serve rifare l'autorizzazione.
+// Rinnovo serializzato per utente (2026-10-17): il refresh token di Atlassian ruota a ogni
+// uso, quindi due rinnovi contemporanei (sync + pagina) facevano ricevere invalid_grant a uno
+// dei due, che cancellava l'integrazione. Chi arriva mentre un rinnovo è in corso lo aspetta.
+const rinnoviJira = new Map();
+async function rinnovaTokenJira(userId, refreshUsato) {
+  try {
+    const tokenData = await exchangeToken({ grant_type: 'refresh_token', refresh_token: refreshUsato });
+    const { elements, expiry } = tokenElements(tokenData);
+    await updateIntegrationElements(userId, PROVIDER, TIPO_INTEGRAZIONE, elements, expiry);
+    console.log(`[JIRA] Access token rinnovato per l'utente ${userId}`);
+    return elements.jira_access_token;
+  } catch (error) {
+    // Un altro processo (es. la VM) può aver già ruotato il token: se nel DB c'è un refresh
+    // token diverso da quello usato, non si cancella nulla e si usa quello nuovo.
+    const ora = await getIntegration(userId, PROVIDER).catch(() => ({}));
+    if (ora.jira_refresh_token && ora.jira_refresh_token !== refreshUsato && ora.jira_access_token) return ora.jira_access_token;
+    const definitivo = /invalid_grant/i.test(String(error.body || error.message)) || error.status === 400 || error.status === 401 || error.status === 403;
+    if (!definitivo) {
+      console.error('[JIRA] Rinnovo token non riuscito (temporaneo):', error.message);
+      const err = new Error('Jira momentaneamente non raggiungibile: riprova tra poco');
+      err.status = 503;
+      err.code = 'JIRA_TEMP_ERROR';
+      throw err;
+    }
+    console.error('[JIRA] Refresh token non più valido:', error.message);
+    await deleteIntegration(userId, PROVIDER);
+    const err = new Error('Autorizzazione Jira scaduta: ricollega il tuo account');
+    err.status = 428;
+    err.code = 'JIRA_REAUTH_REQUIRED';
+    throw err;
+  }
+}
+
+function rinnovoSerializzato(userId, refreshUsato) {
+  const chiave = String(userId);
+  let p = rinnoviJira.get(chiave);
+  if (!p) {
+    p = rinnovaTokenJira(userId, refreshUsato).finally(() => rinnoviJira.delete(chiave));
+    rinnoviJira.set(chiave, p);
+  }
+  return p;
+}
+
+// 401 durante una sessione lunga (sync oltre l'ora di validità del token): si prende il token
+// già rinnovato da altri o se ne chiede uno nuovo, una volta sola per chiamata.
+async function aggiornaSessioneJira(session) {
+  const el = await getIntegration(session.userId, PROVIDER);
+  if (el.jira_access_token && el.jira_access_token !== session.accessToken) {
+    session.accessToken = el.jira_access_token;
+    return;
+  }
+  if (!el.jira_refresh_token) throw Object.assign(new Error('Jira non collegato'), { status: 428, code: 'JIRA_NOT_CONNECTED' });
+  session.accessToken = await rinnovoSerializzato(session.userId, el.jira_refresh_token);
+}
+
 async function getJiraSession(userId) {
   const el = await getIntegration(userId, PROVIDER);
   if (!el.jira_refresh_token || !el.jira_cloud_id) {
@@ -126,25 +181,10 @@ async function getJiraSession(userId) {
   const expiresAt = Date.parse(el.jira_token_expires_at || '');
   const stillValid = el.jira_access_token && Number.isFinite(expiresAt) && expiresAt - Date.now() > 60000;
 
-  if (!stillValid) {
-    let tokenData;
-    try {
-      tokenData = await exchangeToken({ grant_type: 'refresh_token', refresh_token: el.jira_refresh_token });
-    } catch (error) {
-      console.error('[JIRA] Refresh token non più valido:', error.message);
-      await deleteIntegration(userId, PROVIDER);
-      const err = new Error('Autorizzazione Jira scaduta: ricollega il tuo account');
-      err.status = 428;
-      err.code = 'JIRA_REAUTH_REQUIRED';
-      throw err;
-    }
-    const { elements, expiry } = tokenElements(tokenData);
-    await updateIntegrationElements(userId, PROVIDER, TIPO_INTEGRAZIONE, elements, expiry);
-    el.jira_access_token = elements.jira_access_token;
-    console.log(`[JIRA] Access token rinnovato per l'utente ${userId}`);
-  }
+  if (!stillValid) el.jira_access_token = await rinnovoSerializzato(userId, el.jira_refresh_token);
 
   const session = {
+    userId,
     accessToken: el.jira_access_token,
     cloudId: el.jira_cloud_id,
     siteUrl: el.jira_site_url || '',
@@ -194,6 +234,7 @@ function attesaPrimaDiRiprovare(response, tentativo) {
 // subito, si aspetta e si riprova: un 429 è una richiesta di rallentare, non un
 // errore vero. Stesso trattamento per il 503 (servizio momentaneamente occupato).
 async function jiraApi(session, path, { method = 'GET', body, tentativiMax = 4 } = {}) {
+  let rinnovato = false;
   for (let tentativo = 0; ; tentativo++) {
     let response;
     try {
@@ -224,6 +265,13 @@ async function jiraApi(session, path, { method = 'GET', body, tentativiMax = 4 }
     if (response.ok) {
       const text = await response.text();
       return text ? JSON.parse(text) : {};
+    }
+
+    if (response.status === 401 && !rinnovato && session.userId) {
+      rinnovato = true;
+      await aggiornaSessioneJira(session);
+      tentativo--;
+      continue;
     }
 
     if ((response.status === 429 || response.status === 503) && tentativo < tentativiMax) {
@@ -454,16 +502,17 @@ router.get('/authorize-url', requireAuth, requireJiraEnabled, async (req, res) =
 // ha aperto il popup e si chiude. I dati sono serializzati in JSON con "<" neutralizzato
 // per evitare qualsiasi rottura del tag <script>.
 function callbackPage(origin, payload) {
-  const json = JSON.stringify({ source: 'projexa-jira', ...payload }).replace(/</g, '\\u003c');
-  const safeOrigin = JSON.stringify(origin).replace(/</g, '\\u003c');
+  // Dati negli attributi (testo con escape HTML): lo script è il file statico
+  // sito/js/oauth-callback.js, perché la CSP blocca gli script inline generati al volo.
+  const attr = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const json = attr(JSON.stringify({ source: 'projexa-jira', ...payload }));
+  const safeOrigin = attr(origin);
   return `<!DOCTYPE html>
 <html lang="it"><head><meta charset="utf-8"><title>Jira</title></head>
 <body style="font-family: system-ui, sans-serif; padding: 2rem; color: #1F2937;">
 <p>${payload.ok ? 'Collegamento a Jira completato. Puoi chiudere questa finestra.' : 'Collegamento a Jira non riuscito. Puoi chiudere questa finestra.'}</p>
-<script>
-  try { if (window.opener) window.opener.postMessage(${json}, ${safeOrigin}); } catch (e) {}
-  setTimeout(function () { window.close(); }, 800);
-</script>
+<div id="oauthEsito" data-msg="${json}" data-origin="${safeOrigin}" hidden></div>
+<script src="/js/oauth-callback.js"></script>
 </body></html>`;
 }
 

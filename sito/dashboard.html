@@ -4411,7 +4411,7 @@
             .sidebar .sidebar-menu li.dock-bounce > a { animation: none; }
         }
     </style>
-    <script src="js/azioni.js?v=20261017-1"></script>
+    <script src="js/azioni.js?v=20261017-2"></script>
 </head>
 <body>
     <!-- SIDEBAR -->
@@ -11264,6 +11264,9 @@
         // REC_CHUNK_MIN/MAX_SECONDS): meno frasi spezzate ai bordi e più contesto per Whisper.
         const REC_CHUNK_SECONDS = 120;
         let meetingRec = null;
+        // Registrazione in corso: le sue richieste tengono viva la sessione anche se nessuno
+        // tocca il PC durante la riunione (js/azioni.js, scadenza per inattività).
+        window.ProjexaRegistrazioneAttiva = () => !!(meetingRec && (meetingRec.running || meetingRec.starting));
 
         function recUi() {
             return {
@@ -18357,7 +18360,11 @@
             modal.style.display = 'flex';
             try {
                 const res = await fetch(`${API_URL}/provisioning/new-user-config`, { headers: getAuthHeaders() });
-                if (!res.ok) { fieldsEl.innerHTML = '<div style="color:#EF4444;">Errore nel caricamento</div>'; return; }
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    fieldsEl.innerHTML = `<div style="color:#EF4444;">${escapeHtml(err.error || 'Errore nel caricamento')}</div>`;
+                    return;
+                }
                 const cfg = await res.json();
                 if (tenantEl) tenantEl.textContent = cfg.tenantName || '';
                 fieldsEl.innerHTML = (cfg.fields || []).map(f => {

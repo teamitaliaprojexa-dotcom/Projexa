@@ -27,6 +27,8 @@
                 const res = await fetch('/api/auth/oauth-exchange', { method: 'POST', credentials: 'same-origin' });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok || !data.token) throw new Error(data.error || 'Accesso non riuscito');
+                // Nuovo login: niente stato di impersonificazione rimasto da una sessione precedente.
+                localStorage.removeItem('originalToken'); localStorage.removeItem('originalUser');
                 localStorage.setItem('authToken', data.token);
                 localStorage.setItem('user', JSON.stringify(data.user || {}));
                 window.location.replace('dashboard.html');

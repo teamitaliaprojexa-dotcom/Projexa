@@ -55,9 +55,25 @@ export async function sendMail({ to, subject, html, text, log = null }) {
   }
 }
 
+// Nome nel saluto (2026-10-17): lo sceglie chi si registra, quindi può contenere HTML o un
+// link ("Mario, il tuo account è bloccato: vai su http://...") e l'email partirebbe dalla
+// casella Projexa verso un indirizzo qualsiasi. Si tolgono caratteri di controllo, link e
+// indirizzi web, si tronca a 60 caratteri; nell'HTML si applica anche l'escape.
+const escHtml = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function nomeSaluto(nome) {
+  const n = String(nome || '')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ')
+    .replace(/\b(?:https?|ftp|mailto):\S*/gi, '')
+    .replace(/\bwww\.\S*/gi, '')
+    .replace(/\S+\.[a-z]{2,}(?:\/\S*)?/gi, '')
+    .replace(/[<>]/g, '')
+    .replace(/\s+/g, ' ').trim().slice(0, 60).trim();
+  return { html: n ? `Ciao ${escHtml(n)},` : 'Ciao,', text: n ? `Ciao ${n},` : 'Ciao,' };
+}
+
 // Costruisce l'HTML dell'email di conferma iscrizione con il pulsante "Conferma iscrizione".
 export function buildConfirmEmail({ nome, confirmUrl }) {
-  const saluto = nome ? `Ciao ${nome},` : 'Ciao,';
+  const { html: saluto, text: salutoTxt } = nomeSaluto(nome);
   const html = `
   <div style="font-family:Arial,Helvetica,sans-serif; max-width:520px; margin:0 auto; color:#111827;">
     <div style="text-align:center; padding:16px 0;">
@@ -76,14 +92,14 @@ export function buildConfirmEmail({ nome, confirmUrl }) {
     </div>
     <p style="text-align:center; font-size:12px; color:#9CA3AF; margin-top:16px;">© Projexa</p>
   </div>`;
-  const text = `${saluto}\n\nIl team Projexa ti ringrazia per esserti iscritto.\nPer completare l'iscrizione e attivare la prova gratuita di 1 mese, apri questo link:\n${confirmUrl}\n\nSe non hai richiesto tu questa iscrizione, ignora questa email.`;
+  const text = `${salutoTxt}\n\nIl team Projexa ti ringrazia per esserti iscritto.\nPer completare l'iscrizione e attivare la prova gratuita di 1 mese, apri questo link:\n${confirmUrl}\n\nSe non hai richiesto tu questa iscrizione, ignora questa email.`;
   return { html, text };
 }
 
 // Costruisce l'HTML dell'email di reimpostazione password ("Password dimenticata").
 // Il link porta a reset-password.html con un token a scadenza breve.
 export function buildResetPasswordEmail({ nome, resetUrl, validHours = 1 }) {
-  const saluto = nome ? `Ciao ${nome},` : 'Ciao,';
+  const { html: saluto, text: salutoTxt } = nomeSaluto(nome);
   const durata = validHours === 1 ? '1 ora' : `${validHours} ore`;
   const html = `
   <div style="font-family:Arial,Helvetica,sans-serif; max-width:520px; margin:0 auto; color:#111827;">
@@ -104,7 +120,7 @@ export function buildResetPasswordEmail({ nome, resetUrl, validHours = 1 }) {
     </div>
     <p style="text-align:center; font-size:12px; color:#9CA3AF; margin-top:16px;">© Projexa</p>
   </div>`;
-  const text = `${saluto}\n\nAbbiamo ricevuto una richiesta di reimpostazione della password del tuo account Projexa.\nApri questo link per scegliere una nuova password:\n${resetUrl}\n\nIl link è valido per ${durata} e può essere usato una sola volta.\nSe non hai richiesto tu il cambio password, ignora questa email.`;
+  const text = `${salutoTxt}\n\nAbbiamo ricevuto una richiesta di reimpostazione della password del tuo account Projexa.\nApri questo link per scegliere una nuova password:\n${resetUrl}\n\nIl link è valido per ${durata} e può essere usato una sola volta.\nSe non hai richiesto tu il cambio password, ignora questa email.`;
   return { html, text };
 }
 
@@ -113,8 +129,7 @@ export function buildResetPasswordEmail({ nome, resetUrl, validHours = 1 }) {
 // rivelare quali email sono registrate) e qui il vero titolare trova come accedere,
 // con un link per reimpostare la password.
 export function buildAccountEsistenteEmail({ nome, loginUrl, resetUrl, validHours = 1 }) {
-  const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const saluto = nome ? `Ciao ${esc(nome)},` : 'Ciao,';
+  const { html: saluto, text: salutoTxt } = nomeSaluto(nome);
   const durata = validHours === 1 ? '1 ora' : `${validHours} ore`;
   const html = `
   <div style="font-family:Arial,Helvetica,sans-serif; max-width:520px; margin:0 auto; color:#111827;">
@@ -132,7 +147,7 @@ export function buildAccountEsistenteEmail({ nome, loginUrl, resetUrl, validHour
     </div>
     <p style="text-align:center; font-size:12px; color:#9CA3AF; margin-top:16px;">© Projexa</p>
   </div>`;
-  const text = `${nome ? `Ciao ${nome},` : 'Ciao,'}
+  const text = `${salutoTxt}
 
 Abbiamo ricevuto una richiesta di iscrizione a Projexa con questo indirizzo email, ma hai già un account: non ne è stato creato un altro.
 
@@ -147,7 +162,7 @@ Se non hai chiesto tu l'iscrizione, ignora questa email: il tuo account e la tua
 // Costruisce l'email del "Magic link": accesso a Projexa senza password.
 // Il link porta a magic-link.html con un token valido pochi secondi e monouso.
 export function buildMagicLinkEmail({ nome, magicUrl, validSeconds = 60 }) {
-  const saluto = nome ? `Ciao ${nome},` : 'Ciao,';
+  const { html: saluto, text: salutoTxt } = nomeSaluto(nome);
   const html = `
   <div style="font-family:Arial,Helvetica,sans-serif; max-width:520px; margin:0 auto; color:#111827;">
     <div style="text-align:center; padding:16px 0;">
@@ -166,7 +181,7 @@ export function buildMagicLinkEmail({ nome, magicUrl, validSeconds = 60 }) {
     </div>
     <p style="text-align:center; font-size:12px; color:#9CA3AF; margin-top:16px;">© Projexa</p>
   </div>`;
-  const text = `${saluto}\n\nEcco il tuo link di accesso a Projexa (senza password):\n${magicUrl}\n\nIl link è valido per ${validSeconds} secondi e può essere usato una sola volta.\nSe non hai richiesto tu l'accesso, ignora questa email.`;
+  const text = `${salutoTxt}\n\nEcco il tuo link di accesso a Projexa (senza password):\n${magicUrl}\n\nIl link è valido per ${validSeconds} secondi e può essere usato una sola volta.\nSe non hai richiesto tu l'accesso, ignora questa email.`;
   return { html, text };
 }
 

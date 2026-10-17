@@ -37,6 +37,31 @@
         if (el) esegui(e, el, el.getAttribute('data-submit'));
     }, true);
 
+    // Scadenza della sessione per inattività (backend/config/session.js): il server rinnova la
+    // sessione a ogni richiesta, tranne quelle con X-Projexa-Polling: 1. Qui ogni chiamata
+    // /api partita quando l'utente non tocca la pagina da più di 10 minuti (timer di
+    // aggiornamento, scheda in secondo piano) viene marcata come automatica, così una pagina
+    // lasciata aperta scade lo stesso. Eccezione: registrazione in corso (dashboard).
+    const INATTIVO_MS = 10 * 60 * 1000;
+    let ultimaAttivita = Date.now();
+    ['mousedown', 'keydown', 'touchstart', 'wheel', 'input'].forEach((ev) =>
+        document.addEventListener(ev, () => { ultimaAttivita = Date.now(); }, { capture: true, passive: true }));
+    const fetchOriginale = window.fetch.bind(window);
+    window.fetch = function (risorsa, opzioni) {
+        try {
+            const url = typeof risorsa === 'string' ? risorsa : (risorsa && risorsa.url) || '';
+            const registrazione = typeof window.ProjexaRegistrazioneAttiva === 'function' && window.ProjexaRegistrazioneAttiva();
+            if (/\/api\//.test(url) && Date.now() - ultimaAttivita > INATTIVO_MS && !registrazione) {
+                const o = { ...(opzioni || {}) };
+                const h = new Headers(o.headers || (risorsa && risorsa.headers) || {});
+                h.set('X-Projexa-Polling', '1');
+                o.headers = h;
+                return fetchOriginale(risorsa, o);
+            }
+        } catch (e) { /* in caso di dubbio la richiesta parte invariata */ }
+        return fetchOriginale(risorsa, opzioni);
+    };
+
     // Azioni comuni a più pagine.
     // Pulsante «Indietro» delle pagine aperte nella stessa scheda (o dentro la dashboard
     // durante una registrazione: area interna).

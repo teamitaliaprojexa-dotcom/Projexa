@@ -671,12 +671,25 @@ export async function generateRecap(user, idCalendar, { origine = null, ai = nul
 
 // Salva il recap prodotto dall'AI (result: { text, label, model }) sulla riunione: correzioni,
 // oggetto, log e campanella. Usata anche dai recap in modalità Batch (jobs/recapBatch.js).
+// Un recap scritto ora (immediato, file caricato o modificato a mano) rende superata la
+// richiesta Batch del recap ancora in attesa: senza questo, la risposta arrivata ore dopo
+// sovrascriveva il recap più recente. Tabella assente = Batch mai attivato. 2026-10-17
+export async function annullaRecapBatchInAttesa(user, idCalendar) {
+  await db.query(
+    `UPDATE rec_meeting_batch b SET stato = 'sostituito', concluso_il = now()
+      WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND stato = 'in_corso'
+        AND COALESCE(to_jsonb(b) ->> 'tipo', 'recap') = 'recap'`,
+    [user.tenant_id, user.user_id, idCalendar]
+  ).catch((e) => { if (e.code !== '42P01') console.warn('[RECAP] Batch in attesa non annullato:', e.message); });
+}
+
 export async function salvaRecap(user, idCalendar, result, { rules, vars, origine = null }) {
   // e sul recap prodotto (l'AI può riscrivere a modo suo un nome già corretto)
   const recap = forceSubject(stripMarkdown(applyCorrections(String(result.text || '').trim(), rules).text).trim(), vars);
   if (!recap) throw httpError(502, `${result.label} non ha restituito alcun testo`);
 
   const recapCifrato = encRec(recap);
+  if (origine !== 'job:recap_batch') await annullaRecapBatchInAttesa(user, idCalendar);
   await senzaLog(
     // recap_html = NULL: un recap rigenerato sostituisce anche la versione modificata a mano.
     `UPDATE rec_meeting SET recap = $1, recap_html = NULL, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
@@ -846,13 +859,25 @@ export async function copiaTrascrizioneCondivisa(source, idCalendar, soloUtente 
   const params = [source.tenant_id, source.user_id, idCalendar];
   if (soloUtente) params.push(soloUtente);
   const followers = (await db.query(
-    `SELECT user_id, id_calendar FROM rec_meeting
+    `SELECT user_id, id_calendar, trascrizione FROM rec_meeting
       WHERE tenant_id = $1 AND trascrizione_da_user = $2 AND trascrizione_da_calendar = $3
         ${soloUtente ? 'AND user_id = $4' : ''}`,
     params
   )).rows;
   const testo = encRec(src.trascrizione);
+  let copiate = 0;
   for (const f of followers) {
+    // Si copia solo se la trascrizione del collega è vuota o è ancora la copia precedente
+    // (la sorgente l'ha solo allungata): se il collega l'ha modificata non la si tocca più.
+    // Prima ogni nuova finalizzazione della sorgente ricopiava tutto e rifaceva il recap. 2026-10-17
+    const sua = String(f.trascrizione || '').trim();
+    const nuova = src.trascrizione.trim();
+    if (sua === nuova) continue;
+    if (sua && !nuova.startsWith(sua)) {
+      console.log(`[TRASCRIZIONE CONDIVISA] ${idCalendar}: utente ${f.user_id} ha modificato la sua copia, non aggiornata`);
+      continue;
+    }
+    copiate += 1;
     // Fuori dal log: la riga con la trascrizione completa la registra il recap prenotato
     // qui sotto (processFinalize del collega), come per una registrazione sua.
     await senzaLog(
@@ -862,13 +887,24 @@ export async function copiaTrascrizioneCondivisa(source, idCalendar, soloUtente 
     trascrizioniDaRegistrare.add(recapKey({ tenant_id: source.tenant_id, user_id: f.user_id }, f.id_calendar));
     await enqueueFinalize({ tenant_id: source.tenant_id, user_id: f.user_id, email: null }, f.id_calendar);
   }
-  if (followers.length) console.log(`[TRASCRIZIONE CONDIVISA] ${idCalendar}: copiata su ${followers.length} riunion${followers.length === 1 ? 'e' : 'i'} di altri utenti`);
-  return followers.length;
+  if (copiate) console.log(`[TRASCRIZIONE CONDIVISA] ${idCalendar}: copiata su ${copiate} riunion${copiate === 1 ? 'e' : 'i'} di altri utenti`);
+  return copiate;
 }
 
-// Recap a fine registrazione. La riga "finalize" è già stata tolta dalla coda (sotto lock):
-// in caso di errore temporaneo viene rimessa in coda con un nuovo tentativo.
+// Recap a fine registrazione. La riga "finalize" resta in coda, prenotata per 2 ore
+// (next_try_at), e si cancella solo a recap concluso: prima veniva cancellata subito e un
+// riavvio del server durante il recap lo perdeva per sempre. Errore temporaneo = stessa riga
+// riprogrammata con un nuovo tentativo. 2026-10-17
 async function processFinalize(job) {
+  let riprogrammata = false;
+  try {
+    riprogrammata = (await processFinalizeInterno(job)) === 'riprogrammata';
+  } finally {
+    if (!riprogrammata) await db.query('DELETE FROM rec_meeting_chunks WHERE id = $1', [job.id]).catch((e) => console.error(`❌ [RECAP] riga ${job.id} non tolta dalla coda: ${e.message}`));
+  }
+}
+
+async function processFinalizeInterno(job) {
   const user = jobUser(job);
   // Trascrizione finita: UNA riga nel log con tutto il testo (i blocchi non sono stati
   // registrati uno per uno). Solo se il testo è cambiato dall'ultima riga registrata.
@@ -950,16 +986,12 @@ async function processFinalize(job) {
   } catch (error) {
     const attempts = (Number(job.attempts) || 0) + 1;
     if (isTemporary(error) && attempts < 10) {
-      const params = [user.tenant_id, user.user_id, user.email ? encRec(user.email) : null, job.id_calendar, attempts,
-        encRec(String(error.message || error).slice(0, 500))];
-      if (job.recap_ai) params.push(job.recap_ai);
       await db.query(
-        `INSERT INTO rec_meeting_chunks (tenant_id, user_id, user_email, id_calendar, kind, attempts, last_error, next_try_at${job.recap_ai ? ', recap_ai' : ''})
-         VALUES ($1, $2, $3, $4, 'finalize', $5, $6, NOW() + interval '2 minutes'${job.recap_ai ? ', $7' : ''})`,
-        params
+        `UPDATE rec_meeting_chunks SET attempts = $2, last_error = $3, next_try_at = NOW() + interval '2 minutes' WHERE id = $1`,
+        [job.id, attempts, encRec(String(error.message || error).slice(0, 500))]
       );
       console.warn(`[RECAP] ${job.id_calendar}: tentativo ${attempts} fallito (${error.message}), nuovo tentativo tra 2 minuti`);
-      return;
+      return 'riprogrammata';
     }
     console.error(`❌ [RECAP] ${job.id_calendar} non generato: ${error.message}`);
   }
@@ -975,6 +1007,7 @@ const finalizing = new Map(); // id riga finalize -> promise
 async function flushInOrder() {
   const client = await db.connect();
   const toFinalize = [];
+  const scartateNelGiro = new Set();
   try {
     await client.query('BEGIN');
     const got = (await client.query('SELECT pg_try_advisory_xact_lock($1) AS ok', [FLUSH_LOCK_KEY])).rows[0].ok;
@@ -987,14 +1020,27 @@ async function flushInOrder() {
       );
       let progressed = false;
       for (const head of heads.rows) {
-        if (head.kind === 'audio' && head.state === 'done') {
-          await appendTranscript(client, jobUser(head), head.id_calendar, String(head.result || '').trim() ? head.result : '');
-          await client.query('DELETE FROM rec_meeting_chunks WHERE id = $1', [head.id]);
-          progressed = true;
-        } else if (head.kind === 'finalize' && new Date(head.next_try_at) <= new Date()) {
-          await client.query('DELETE FROM rec_meeting_chunks WHERE id = $1', [head.id]);
-          toFinalize.push(head);
-          progressed = true;
+        // Savepoint per riunione: un errore su una riga (es. testo non decifrabile) annullava
+        // tutto il giro e fermava il montaggio di tutte le riunioni. Ora si salta solo quella
+        // riunione, che resta in coda (e nel log) per il prossimo giro. 2026-10-17
+        if (scartateNelGiro.has(head.id)) continue;
+        await client.query('SAVEPOINT sp_head');
+        try {
+          if (head.kind === 'audio' && head.state === 'done') {
+            await appendTranscript(client, jobUser(head), head.id_calendar, String(head.result || '').trim() ? head.result : '');
+            await client.query('DELETE FROM rec_meeting_chunks WHERE id = $1', [head.id]);
+            progressed = true;
+          } else if (head.kind === 'finalize' && new Date(head.next_try_at) <= new Date() && !finalizing.has(head.id)) {
+            // Prenotata per 2 ore: la cancella processFinalize a recap concluso.
+            await client.query(`UPDATE rec_meeting_chunks SET next_try_at = NOW() + interval '2 hours' WHERE id = $1`, [head.id]);
+            toFinalize.push(head);
+          }
+          await client.query('RELEASE SAVEPOINT sp_head');
+        } catch (error) {
+          await client.query('ROLLBACK TO SAVEPOINT sp_head');
+          await client.query('RELEASE SAVEPOINT sp_head');
+          scartateNelGiro.add(head.id);
+          console.error(`❌ [TRASCRIZIONE] ${head.id_calendar}: blocco ${head.id} non montato (${error.message}), riprovo al prossimo giro`);
         }
       }
       if (!progressed) break;
@@ -1193,14 +1239,15 @@ async function runWorker() {
         // (esclusi i blocchi Background-Veloce e quelli della corsia Gemini)
         const free = urls.filter((u) => !busyUrls.has(u) && urlReady(u));
         start(await claimAudioJobs(free.length, { keys: [...fastKeys, ...geminiKeys], include: false }), free);
-      } else {
-        // Nessun servizio configurato: i blocchi vengono chiusi con una nota (non restano in coda).
-        // Quelli della corsia Gemini no: li trascrive Gemini.
-        const orphan = await claimAudioJobs(50, { keys: geminiKeys, include: false });
-        for (const job of orphan) await processAudioJob(job, null);
       }
+      // Nessun servizio Whisper configurato: i blocchi restano in coda (prima venivano chiusi con
+      // una nota e l'audio cancellato: un processo senza Whisper distruggeva l'audio degli altri).
+      // Li trascriverà il backend che ha Whisper; la pulizia dei blocchi vecchi resta quella di sempre.
 
       if (!inflight.size && !finalizing.size && !(await hasPendingJobs())) break; // coda vuota: fine
+      // Senza Whisper (e senza Gemini o finalizzazioni in corso) i blocchi restano in coda: si
+      // esce, si riparte al prossimo blocco caricato o al prossimo avvio.
+      if (!urls.length && !cppUrls.length && !inflight.size && !finalizing.size && !geminiOccupati) break;
       // Si riparte appena finisce una trascrizione o un recap, o dopo qualche secondo (blocchi
       // in attesa di un nuovo tentativo o servizi che si stanno svegliando).
       await Promise.race([
@@ -1220,6 +1267,17 @@ async function runWorker() {
 
 // Avvia l'elaborazione (se non è già in corso). Chiamata a ogni nuovo blocco e all'avvio
 // del server, per riprendere i blocchi rimasti in coda.
+// Il worker gira solo dove deve trascrivere (2026-10-17): in produzione (NODE_ENV=production)
+// o con TRASCRIZIONE_WORKER_ENABLED=true. In locale il backend usa il database di produzione
+// (tunnel): senza questo blocco prenderebbe i blocchi audio degli utenti veri e li finalizzerebbe
+// con chiavi e servizi locali. TRASCRIZIONE_WORKER_ENABLED=false lo spegne anche in produzione.
+export function trascrizioneWorkerAttivo() {
+  const v = String(process.env.TRASCRIZIONE_WORKER_ENABLED || '').toLowerCase();
+  if (v === 'false') return false;
+  return v === 'true' || process.env.NODE_ENV === 'production';
+}
+
 export function kickTranscriptionWorker() {
+  if (!trascrizioneWorkerAttivo()) return;
   runWorker().catch(() => {});
 }

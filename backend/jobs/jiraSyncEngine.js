@@ -667,6 +667,12 @@ export async function runJiraSync(config, ctx) {
   //   sono di un altro cliente o di nessuno (richiesta dell'utente, 2026-10-02).
   //   INSERIMENTO: invariato. Serve il cliente abbinato e si inserisce solo se per quel
   //   cliente la riga con quel codice non c'è ancora (perimetro cliente + codice).
+  let erroriNonElencati = 0;
+  function annotaErrore(testo) {
+    if (report.errori.length < 20) { report.errori.push(testo); return; }
+    erroriNonElencati += 1;
+  }
+
   async function elaboraPrincipale(righe, conteggi) {
     for (const issue of righe) {
       try {
@@ -733,11 +739,9 @@ export async function runJiraSync(config, ctx) {
         }
         // Riga già presente per questo cliente: è fra quelle aggiornate sopra per codice.
       } catch (e) {
-        report.errori.push(`${issue.key || '?'}: ${e.message}`);
-        if (report.errori.length >= 20) {
-          report.errori.push('… ulteriori errori non elencati');
-          return;
-        }
+        // Il limite vale per l'elenco degli errori, non per l'elaborazione: prima, al 20°
+        // errore, si smetteva di aggiornare tutti i ticket rimanenti. 2026-10-17
+        annotaErrore(`${issue.key || '?'}: ${e.message}`);
       }
     }
   }
@@ -764,11 +768,9 @@ export async function runJiraSync(config, ctx) {
           else conteggi.invariate += 1;
         }
       } catch (e) {
-        report.errori.push(`${issue.key || '?'}: ${e.message}`);
-        if (report.errori.length >= 20) {
-          report.errori.push('… ulteriori errori non elencati');
-          return;
-        }
+        // Il limite vale per l'elenco degli errori, non per l'elaborazione: prima, al 20°
+        // errore, si smetteva di aggiornare tutti i ticket rimanenti. 2026-10-17
+        annotaErrore(`${issue.key || '?'}: ${e.message}`);
       }
     }
   }
@@ -817,6 +819,7 @@ export async function runJiraSync(config, ctx) {
       : '')
   );
 
+  if (erroriNonElencati) report.errori.push(`… altri ${erroriNonElencati} errori non elencati`);
   return report;
 }
 
@@ -828,7 +831,11 @@ export async function runJiraSync(config, ctx) {
 // quelli di cui si può usare la configurazione (mappatura + account Jira).
 async function utentiConMappatura(tabella, tenantId) {
   const { rows } = await db.query(
-    `SELECT DISTINCT user_id FROM "${tabella}" WHERE tenant_id = $1 AND user_id IS NOT NULL`,
+    // Solo utenti ancora nel tenant: le righe di chi è uscito restano, ma il suo account
+    // Jira non va più usato per aggiornare i dati dell'azienda. 2026-10-17
+    `SELECT DISTINCT m.user_id FROM "${tabella}" m
+      WHERE m.tenant_id = $1 AND m.user_id IS NOT NULL
+        AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = m.user_id AND ut.tenant_id = m.tenant_id)`,
     [tenantId]
   );
   const ids = rows.map((r) => String(r.user_id));

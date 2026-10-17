@@ -55,8 +55,13 @@ export const giorniTra = (a, b) => giorno(b) - giorno(a);
 
 // Giorni lavorativi (lun-ven) strettamente compresi tra due date.
 function lavorativiTra(a, b) {
-  let n = 0;
-  for (let d = giorno(a) + 1; d < giorno(b); d++) {
+  // Settimane intere contate in blocco (5 giorni l'una): niente ciclo su ogni giorno, che
+  // con date lontane (anno 9999) bloccava il server. Stesso risultato del conteggio giornaliero.
+  const da = giorno(a) + 1, a2 = giorno(b);
+  if (!(a2 > da)) return 0;
+  const totale = a2 - da;
+  let n = Math.floor(totale / 7) * 5;
+  for (let d = da + Math.floor(totale / 7) * 7; d < a2; d++) {
     const w = new Date(d * 86400000).getUTCDay();
     if (w !== 0 && w !== 6) n += 1;
   }

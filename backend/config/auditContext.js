@@ -61,7 +61,13 @@ export function withAuditContext(pool) {
     const client = await connectInterna(...args);
     const ctx = contestoAudit();
     if (ctx && client && !client.__auditRelease) {
-      await client.query(IMPOSTA_SQL, [ctx.userId, ctx.tenantId, ctx.origine, false]);
+      try {
+        await client.query(IMPOSTA_SQL, [ctx.userId, ctx.tenantId, ctx.origine, false]);
+      } catch (e) {
+        // Connessione rotta: va restituita al pool (scartata), altrimenti resta occupata per sempre.
+        client.release(e);
+        throw e;
+      }
       const release = client.release.bind(client);
       client.release = function (...r) {
         // Le query di un client sono in coda: l'azzeramento parte prima di qualsiasi

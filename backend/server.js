@@ -21,7 +21,7 @@ import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
 import assistentePmRoutes from './routes/assistentePm.js';
-import mysupportPushRoutes, { utenteDaTokenPush, registraInvioPush } from './routes/mysupportPush.js';
+import mysupportPushRoutes, { utenteDaTokenPush, registraInvioPush, pushLimitato } from './routes/mysupportPush.js';
 import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
 import jobSchedulesRoutes from './routes/job-schedules.js';
 import auditLogRoutes from './routes/audit-log.js';
@@ -476,6 +476,9 @@ async function assertRowsWritable(req, pool, tableName, ids, tableColumns = null
 //               oppure, nella tabella clients, la riga del cliente e i suoi campi diretti;
 //   scrittura = righe proprie + righe di un cliente condiviso con me IN SCRITTURA.
 // Condizione SQL da aggiungere al WHERE ('' = nessun limite). alias = 'src.' o ''.
+// Tabelle che il Manager legge anche per i suoi diretti: clienti, progetti e dati del fatturato.
+// To Do, riunioni, impostazioni e il resto restano personali (regola del Manager). 2026-10-17
+const TABELLE_VISTA_TEAM = new Set(['clients', 'projects', 'invoice', 'proj_fatturato', 'proj_licenze', 'proj_sconto']);
 async function userScopeSql(req, params, tableName, tableColumns, { alias = '', write = false } = {}) {
   if (isAdminUser(req) || !tableColumns.has('user_id')) return '';
   params.push(String(req.user.user_id));
@@ -485,7 +488,9 @@ async function userScopeSql(req, params, tableName, tableColumns, { alias = '', 
   if (tableColumns.has('client_id')) condivisi.push(`s.client_id = ${alias}client_id`);
   if (String(tableName).toLowerCase() === 'clients') condivisi.push(`s.client_id = ${alias}id`, `s.client_id::text = ${alias}argument`);
   const parti = [`${alias}user_id::text = ${me}`];
-  if (!write) {
+  // Righe di configurazione del tenant (user_id vuoto): visibili in lettura, come prima del filtro.
+  if (!write) parti.push(`${alias}user_id IS NULL`);
+  if (!write && TABELLE_VISTA_TEAM.has(String(tableName).toLowerCase())) {
     const team = await teamMemberIds(req);
     if (team.length) { params.push(team); parti.push(`${alias}user_id::text = ANY($${params.length}::text[])`); }
   }
@@ -602,6 +607,29 @@ async function tipoValoreRoleLevel(code) {
 //   - tabella/colonna: mai verso tabelle di ruoli/configurazione o anagrafiche.
 const FIELD_SOURCES = new Set(['settings', 'clients', 'projects']);
 const FIELD_CONFIG_KEYS = ['tipo_valore', 'tabella', 'colonna', 'VariabDB'];
+// ---------- Tabelle collegabili ai campi (tabella/colonna) per i non admin (2026-10-17) ----------
+// Un campo può leggere (tipi 4/17/18, elenchi, decode) o scrivere (reference-value) la tabella
+// indicata nella sua configurazione. Prima bastava che non fosse riservata all'admin: un
+// utente poteva puntare un campo su client_shares (e prendersi le condivisioni con
+// reference-value) o su tabelle di sistema (lettura di dati di altre aziende). Ora, per i non admin:
+//   lettura   = tabelle gestite (table_structures) o già usate dai campi esistenti
+//               (TABELLE_CAMPI_EXTRA), mai le tabelle di sistema né quelle riservate all'admin;
+//   scrittura = in più la tabella deve avere user_id (si scrive solo la propria riga) oppure
+//               essere users/tenants (riga del login, campi del Profilo).
+const TABELLE_CAMPI_EXTRA = new Set(['conf_worker_cost', 'config_chek_list', 'invoice', 'jira_quotazioni', 'mbo',
+  'proj_fatturato', 'proj_licenze', 'proj_sconto', 'rec_correzioni', 'rec_meeting', 'release_prodotto', 'rubrica']);
+const TABELLE_MAI_NEI_CAMPI = new Set(['api_token', 'audit_outbox', 'session_revoked', 'integr_tok_auth', 'job_schedules',
+  'job_scheduler_stato', 'ai_lavori', 'ai_lavori_passi', 'rec_meeting_chunks', 'user_tenants', 'activity_logs']);
+async function tabellaCampoConsentita(req, tabella, { scrittura = false } = {}) {
+  if (isAdminUser(req)) return true;
+  const t = String(tabella || '').trim().toLowerCase();
+  if (!t || TABELLE_MAI_NEI_CAMPI.has(t) || TENANT_ADMIN_TABLES.has(t)) return false;
+  if (!TABELLE_CAMPI_EXTRA.has(t) && !(await isManagedTable(t))) return false;
+  if (!scrittura) return true;
+  if (IDENTITY_TABLES.has(t)) return true;
+  return (await getTableColumns(t)).has('user_id');
+}
+
 async function assertFieldConfigAllowed(req, source, data, original) {
   if (isAdminUser(req) || !FIELD_SOURCES.has(source) || !data) return;
   const norm = (v) => (v == null ? '' : String(v).trim());
@@ -625,7 +653,7 @@ async function assertFieldConfigAllowed(req, source, data, original) {
   }
   const tab = norm(has('tabella') ? data.tabella : original && original.tabella).toLowerCase();
   if ((changed.includes('tabella') || changed.includes('colonna')) && tab
-      && (ROLE_PROTECTED_TABLES.has(tab) || IDENTITY_TABLES.has(tab))) {
+      && (ROLE_PROTECTED_TABLES.has(tab) || IDENTITY_TABLES.has(tab) || !(await tabellaCampoConsentita(req, tab)))) {
     deny('Tabella riservata all\'amministratore');
   }
 }
@@ -674,6 +702,25 @@ async function eavContainerChain(source, containerId, tenantId, pool = db) {
 // chain.length-1 vincola solo l'ultimo nodo (stesso nodo in QUALSIASI contenitore).
 // matchRootValue = riconosce la radice anche dal nome (valore2): serve ai clienti/progetti,
 // dove tutte le righe identità condividono campo e argument.
+// Righe identità (Cliente/Progetto) con lo stesso nome in TUTTI i tenant (2026-10-17).
+// Il nome (valore2) è cifrato con IV casuale: il confronto «valore2 = nome» in SQL non trovava
+// mai nulla e le propagazioni dell'admin per nome non toccavano gli altri tenant. Si leggono
+// le righe (il pool decifra) e si confronta qui; il risultato va in SQL come elenco di id.
+async function idRadiciPerNome(source, campo, nome, argument) {
+  const target = String(nome ?? '').trim();
+  if (!target) return [];
+  const params = [campo];
+  let filtro = '';
+  if (argument !== undefined) { params.push(argument); filtro = ' AND argument IS NOT DISTINCT FROM $2'; }
+  const r = await db.query(`SELECT id::text AS id, valore2 FROM "${source}" WHERE campo = $1${filtro}`, params);
+  return r.rows.filter((x) => String(x.valore2 ?? '').trim() === target).map((x) => x.id);
+}
+// Prepara chain[0].radiciIds (se la radice si riconosce dal nome): da chiamare prima di eavChainSql.
+async function preparaRadiciCatena(source, chain, startIndex, matchRootValue) {
+  if (!chain || startIndex !== 0 || !matchRootValue || chain[0].valore2 == null) return;
+  chain[0].radiciIds = await idRadiciPerNome(source, chain[0].campo, chain[0].valore2, chain[0].argument);
+}
+
 function eavChainSql(source, chain, startIndex, params, matchRootValue) {
   const froms = [], conds = [];
   chain.slice(startIndex).forEach((row, i) => {
@@ -684,7 +731,10 @@ function eavChainSql(source, chain, startIndex, params, matchRootValue) {
     if (i === 0 && startIndex === 0) {
       params.push(row.argument);
       conds.push(`${alias}.argument IS NOT DISTINCT FROM $${params.length}`);
-      if (matchRootValue && row.valore2 != null) {
+      if (matchRootValue && Array.isArray(row.radiciIds)) {
+        params.push(row.radiciIds);
+        conds.push(`${alias}.id::text = ANY($${params.length}::text[])`);
+      } else if (matchRootValue && row.valore2 != null) {
         params.push(row.valore2);
         conds.push(`${alias}.valore2 = $${params.length}`);
       }
@@ -1110,6 +1160,14 @@ app.get('/api/dashboard/tasks/foreign-options/:column', requireAuth, async (req,
       parameters.push(req.user.user_id);
       conditions.push(`ref.user_id = $${parameters.length}`);
     }
+    // tenants: solo il proprio. Altre tabelle senza tenant_id/user_id: solo l'admin (prima
+    // l'elenco partiva senza filtri e mostrava righe di tutte le aziende). 2026-10-17
+    if (foreignTable === 'tenants') {
+      parameters.push(req.user.tenant_id);
+      conditions.push(`ref.id = $${parameters.length}`);
+    } else if (!conditions.length && !isAdminUser(req)) {
+      return res.status(403).json({ error: 'Elenco non disponibile' });
+    }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await db.query(
       `SELECT ref."${foreignColumn}"::text AS value,
@@ -1487,11 +1545,15 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     // Sola lettura: cliente condiviso in lettura o cliente/progetto di un collaboratore del
     // team del Manager (la griglia si mostra come una view: niente Nuova riga/Modifica/Elimina).
     let readOnlyAccess = false;
+    let clienteAutorizzato = null; // cliente per cui l'accesso è stato verificato (source = clients)
+    let accessoAltrui = false;     // dati di un altro utente (condivisione o team)
     if (source === 'clients') {
       const access = await clientAccessByArgument(config.argument, req, false);
       if (!access) return res.status(403).json({ error: 'Non autorizzato' });
       effectiveUserId = access.ownerUserId;
       readOnlyAccess = access.permission === 'read';
+      clienteAutorizzato = String(access.clientId);
+      accessoAltrui = String(access.ownerUserId) !== String(req.user.user_id);
       if (String(config.user_id) !== String(effectiveUserId)) {
         return res.status(403).json({ error: 'Non autorizzato' });
       }
@@ -1547,10 +1609,19 @@ app.get('/api/:source(settings|clients|projects)/grid-widget', requireAuth, asyn
     );
     const isView = tableTypeResult.rows[0]?.table_type === 'VIEW';
 
-    let clientId = String(req.query.clientId || config.client_id || '').trim();
+    // In Clienti il cliente è sempre quello per cui si è verificato l'accesso: un clientId
+    // passato dal browser non può aprire un altro cliente del proprietario (2026-10-17).
+    let clientId = source === 'clients' && clienteAutorizzato
+      ? clienteAutorizzato
+      : String(req.query.clientId || config.client_id || '').trim();
     if (!clientId && source === 'clients') {
       const root = await resolveClientRoot(config.argument, req.user.tenant_id);
       clientId = root ? String(root.clientId) : '';
+    }
+    // Cliente condiviso: una tabella senza client_id mostrerebbe le righe del proprietario di
+    // tutti i suoi clienti (es. tutta la rubrica). In quel caso la griglia non si apre.
+    if (accessoAltrui && !tableColumns.has('client_id')) {
+      return res.status(403).json({ error: 'Griglia non disponibile per un cliente condiviso' });
     }
     // Il filtro per cliente si applica solo se la tabella ha la colonna e il contesto
     // corrente ha un cliente. In Clienti e Progetti il cliente c'è sempre, quindi la sua
@@ -3663,6 +3734,15 @@ app.get('/api/:source(settings|clients|projects)/grid-widget/fk-options', requir
     if (foreignColumns.has('user_id')) { params.push(effectiveUserId); conds.push(`user_id = $${params.length}`); }
     if (foreignColumns.has('client_id') && clientId) { params.push(clientId); conds.push(`client_id = $${params.length}`); }
     if (foreignColumns.has('project_id') && source === 'projects') { params.push(config.argument); conds.push(`project_id = $${params.length}`); }
+    // users/tenants (es. colonna user_id/tenant_id) e tabelle senza perimetro: mai elenchi
+    // di altre aziende per i non admin. 2026-10-17
+    if (foreignTable === 'tenants') { params.push(req.user.tenant_id); conds.push(`id = $${params.length}`); }
+    else if (foreignTable === 'users') {
+      params.push(req.user.tenant_id);
+      conds.push(`"${foreignColumn}" IN (SELECT user_id FROM user_tenants WHERE tenant_id = $${params.length})`);
+    } else if (!conds.length && !isAdminUser(req)) {
+      return res.status(403).json({ error: 'Elenco non disponibile' });
+    }
     const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
 
     // Valori usati dal browser per compilare altre colonne alla scelta dell'opzione
@@ -6180,9 +6260,9 @@ app.put('/api/data/:table/:id', requireAuth, async (req, res) => {
             // Per all-tenants il contenitore viene individuato logicamente tramite
             // la riga identità (campo Cliente/Progetto + valore2), non tramite UUID.
             if (scope === 'this' && originalFieldRow.containerValue != null) {
-              pParams.push(originalFieldRow.containerCampo || (tableName === 'projects' ? 'Progetto' : 'Cliente'));
-              where += ` AND argument IN (SELECT id::text FROM "${tableName}" roots WHERE roots.campo = $${pParams.length} AND roots.valore2 = $${pParams.length + 1})`;
-              pParams.push(originalFieldRow.containerValue);
+              const radici = await idRadiciPerNome(tableName, originalFieldRow.containerCampo || (tableName === 'projects' ? 'Progetto' : 'Cliente'), originalFieldRow.containerValue);
+              pParams.push(radici);
+              where += ` AND argument = ANY($${pParams.length}::text[])`;
             }
             // scope='all' non aggiunge filtro tenant/user: tutti i tenant.
           } else if (allTenants) {
@@ -6343,6 +6423,7 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
       await client.query('BEGIN');
 
       for (let i = 0; i < rows.length; i++) {
+        let spAperto = false;
         try {
           let data = { ...rows[i] };
 
@@ -6386,6 +6467,11 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
             else data.id_roles_write = roleWriteValue(req);
           }
 
+          // Savepoint PRIMA delle letture della riga (configurazione, cifratura): un id non
+          // valido fa fallire anche quelle query e senza savepoint la transazione restava
+          // annullata, con l'import segnalato come riuscito. 2026-10-17
+          await client.query('SAVEPOINT sp_import');
+          spAperto = true;
           // Configurazione dei campi settings/clients/projects secondo il ruolo (non admin):
           // confronto con la riga esistente del tenant, se l'id c'è già.
           if (FIELD_SOURCES.has(tableName) && !admin) {
@@ -6403,6 +6489,8 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
 
           const columns = Object.keys(data).map(assertValidIdentifier);
           if (columns.length === 0) {
+            await client.query('RELEASE SAVEPOINT sp_import');
+            spAperto = false;
             errors.push({ row: i + 1, error: 'Riga vuota' });
             continue;
           }
@@ -6410,7 +6498,6 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
           const placeholders = columns.map((_, idx) => `$${idx + 1}`).join(', ');
           const quotedCols = columns.map((c) => `"${c}"`).join(', ');
 
-          await client.query('SAVEPOINT sp_import');
           try {
             if (hasId) {
               const updateCols = columns.filter((c) => c !== 'id');
@@ -6450,11 +6537,16 @@ app.post('/api/data/:table/import', requireAuth, async (req, res) => {
               inserted++;
             }
             await client.query('RELEASE SAVEPOINT sp_import');
+            spAperto = false;
           } catch (dbErr) {
-            await client.query('ROLLBACK TO SAVEPOINT sp_import');
             throw dbErr;
           }
         } catch (rowErr) {
+          if (spAperto) {
+            await client.query('ROLLBACK TO SAVEPOINT sp_import');
+            await client.query('RELEASE SAVEPOINT sp_import');
+            spAperto = false;
+          }
           errors.push({ row: i + 1, error: rowErr.message });
         }
       }
@@ -7116,6 +7208,7 @@ app.post('/api/mysupport/import', requireAuth, async (req, res) => {
 // (blocchi da 5000 righe, anche compressi gzip: express.json li decomprime da sé).
 app.post('/api/mysupport/push', async (req, res) => {
   try {
+    if (pushLimitato('ip:' + (req.ip || ''))) return res.status(429).json({ error: 'Troppe richieste: riprova tra qualche minuto' });
     const tok = await utenteDaTokenPush(req);
     if (!tok) return res.status(401).json({ error: 'Token non valido o revocato: generane uno nuovo in Impostazioni › DataBricks' });
     const blocco = Math.max(1, parseInt(req.body?.blocco, 10) || 1);
@@ -7238,10 +7331,19 @@ app.post('/api/settings/argument', requireAuth, async (req, res) => {
 // crypto = marcatore di cifratura a riposo della riga, gestito dal sistema.
 const NEW_USER_HIDDEN = new Set(['id', 'created_at', 'updated_at', 'updated_by', 'password_hash', 'crypto']);
 const NEW_USER_LABELS = { email: 'Email', name: 'Nome', cognome: 'Cognome', scadenza: 'Scadenza' };
+// Solo i super-utenti creano utenti (2026-10-17): id_roles <= 50 = Admin, Programmatore,
+// Supporto, Super User. Prima bastava non assegnare un ruolo più alto del proprio, quindi
+// anche un Project Manager o un Team Member poteva aggiungere account all'azienda.
+const NEW_USER_MAX_ROLE = 50;
+function puoCreareUtenti(req) {
+  const livello = Number(req.user && req.user.id_roles);
+  return isAdminUser(req) || (Number.isFinite(livello) && livello <= NEW_USER_MAX_ROLE);
+}
 
 // Config del form: campi editabili delle due tabelle users + ruoli selezionabili (>= al proprio) +
 // scadenza ereditata dal creatore (sola lettura).
 app.get('/api/provisioning/new-user-config', requireAuth, async (req, res) => {
+  if (!puoCreareUtenti(req)) return res.status(403).json({ error: 'Solo un super-utente può creare nuovi utenti' });
   try {
     const mainCols = await getTableColumns('users', db, 'main');
     const authCols = await getTableColumns('users', authDb, 'auth');
@@ -7296,10 +7398,16 @@ app.get('/api/provisioning/new-user-config', requireAuth, async (req, res) => {
 app.post('/api/provisioning/new-user', requireAuth, async (req, res) => {
   const fieldsIn = (req.body && req.body.fields) || {};
   const roleId = (req.body && req.body.roleId) ? String(req.body.roleId) : '';
-  const email = String(fieldsIn.email || '').trim();
+  // Email sempre in minuscolo: «A@x.it» e «a@x.it» erano due account distinti.
+  const email = String(fieldsIn.email || '').trim().toLowerCase();
   const name = String(fieldsIn.name || '').trim();
+  if (!puoCreareUtenti(req)) return res.status(403).json({ error: 'Solo un super-utente può creare nuovi utenti' });
   try {
     if (!email) return res.status(400).json({ error: 'Email obbligatoria' });
+    if (!/^[^s@]+@[^s@]+.[^s@]+$/.test(email)) return res.status(400).json({ error: 'Email non valida' });
+    // Account già esistente con la stessa email in maiuscolo/minuscolo diverso.
+    const giaPresente = await authDb.query('SELECT 1 FROM users WHERE LOWER(email) = $1 LIMIT 1', [email]);
+    if (giaPresente.rows.length) return res.status(409).json({ error: 'Email già registrata' });
     if (!name) return res.status(400).json({ error: 'Nome obbligatorio' });
     if (!roleId) return res.status(400).json({ error: 'Ruolo obbligatorio' });
 
@@ -9212,14 +9320,20 @@ app.post('/api/:source(settings|clients)/share-client', requireAuth, async (req,
     );
     if (tgt.rows.length === 0) return res.status(400).json({ error: 'Utente non appartenente al tenant' });
 
-    // Crea/aggiorna la condivisione (ri-condividere aggiorna il permesso).
-    await db.query(
+    // Crea/aggiorna la condivisione (ri-condividere aggiorna il permesso). Solo il proprietario
+    // può cambiare una condivisione esistente: chi ha una condivisione in scrittura può
+    // aggiungere colleghi ma non alzare a «write» chi il proprietario ha messo in lettura. 2026-10-17
+    const proprietario = String(acc.ownerUserId) === String(req.user.user_id) || isAdminUser(req);
+    const r = await db.query(
       `INSERT INTO client_shares (tenant_id, client_id, shared_with_user_id, owner_user_id, permission, created_by)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (client_id, shared_with_user_id)
-       DO UPDATE SET permission = EXCLUDED.permission`,
+       ${proprietario ? 'DO UPDATE SET permission = EXCLUDED.permission' : 'DO NOTHING'}`,
       [req.user.tenant_id, clientId, targetUserId, acc.ownerUserId, permission, req.user.user_id]
     );
+    if (!proprietario && r.rowCount === 0) {
+      return res.status(403).json({ error: 'Solo il proprietario può modificare una condivisione esistente' });
+    }
     res.json({ success: true });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
@@ -10444,6 +10558,7 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
       // 'all' (clienti/progetti) = lo stesso nodo dentro ogni contenitore: si vincola solo
       // l'ultimo livello. Altrimenti si vincola la catena intera, cioè quel nodo lì.
       const startIndex = (scope === 'all' && isNodeContainer) ? containerChainRows.length - 1 : 0;
+      await preparaRadiciCatena(source, containerChainRows, startIndex, source !== 'settings');
       const j = eavChainSql(source, containerChainRows, startIndex, params, source !== 'settings');
       const conds = [...j.conds];
       if (!wantsAllTenants) {
@@ -10525,8 +10640,8 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
         containerValue = currentContainer.rows[0]?.valore2 ?? null;
       }
       const rootCampo = source === 'projects' ? 'Progetto' : containerCampo;
-      const whereValue = (scope === 'this' && containerValue != null)
-        ? ' AND c.valore2 = $10' : '';
+      const radiciNome = (scope === 'this' && containerValue != null) ? await idRadiciPerNome(source, rootCampo, containerValue) : null;
+      const whereValue = radiciNome ? ' AND c.id::text = ANY($10::text[])' : '';
       // Progetti: la tabella richiede sempre client_id. Nel contenitore sorgente (c)
       // il client_id è già presente: lo trasciniamo nella nuova riga.
       const clientIdCol = source === 'projects' ? ', client_id' : '';
@@ -10537,7 +10652,7 @@ app.post('/api/:source(settings|clients|projects)/field', requireAuth, async (re
         FROM "${source}" c
         WHERE c.campo = $9${whereValue}`;
       const params = [campo, tipoValore, tabella, colonna, variabDb, valore2, bandBase, idRoles, rootCampo];
-      if (scope === 'this' && containerValue != null) params.push(containerValue);
+      if (radiciNome) params.push(radiciNome);
       const result = await insertField(q, params);
       return res.status(201).json({ inserted: result.rowCount });
     }
@@ -10638,8 +10753,9 @@ app.post('/api/:source(settings|clients|projects)/delete-fields', requireAuth, a
         const root = await db.query(`SELECT valore2 FROM "${source}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [clientId, req.user.tenant_id]);
         const logicalValue = root.rows[0]?.valore2 ?? null;
         if (logicalValue != null) {
-          query = `DELETE FROM "${source}" f USING "${source}" c WHERE f.campo = ANY($1::text[]) AND c.id::text = f.argument AND c.campo = $2 AND c.valore2 = $3 ${ordGuard}`;
-          params = [campos, source === 'projects' ? 'Progetto' : 'Cliente', logicalValue];
+          const radici = await idRadiciPerNome(source, source === 'projects' ? 'Progetto' : 'Cliente', logicalValue);
+          query = `DELETE FROM "${source}" f USING "${source}" c WHERE f.campo = ANY($1::text[]) AND c.id::text = f.argument AND c.campo = $2 AND c.id::text = ANY($3::text[]) ${ordGuard}`;
+          params = [campos, source === 'projects' ? 'Progetto' : 'Cliente', radici];
         } else {
           return res.status(400).json({ error: 'Impossibile determinare il contenitore corrispondente negli altri tenant' });
         }
@@ -10727,9 +10843,10 @@ app.post('/api/:source(settings|clients|projects)/rename-fields', requireAuth, a
           const root = await db.query(`SELECT valore2 FROM "${source}" WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [clientId, req.user.tenant_id]);
           const logicalValue = root.rows[0]?.valore2 ?? null;
           if (logicalValue != null) {
+            const radici = await idRadiciPerNome(source, source === 'projects' ? 'Progetto' : 'Cliente', logicalValue);
             query = `UPDATE "${source}" f SET campo = $1 FROM "${source}" c
-                     WHERE c.id::text = f.argument AND c.campo = $2 AND c.valore2 = $3 AND f.campo = $4${custGuard}`;
-            params = [newName, source === 'projects' ? 'Progetto' : 'Cliente', logicalValue, oldName];
+                     WHERE c.id::text = f.argument AND c.campo = $2 AND c.id::text = ANY($3::text[]) AND f.campo = $4${custGuard}`;
+            params = [newName, source === 'projects' ? 'Progetto' : 'Cliente', radici, oldName];
           } else {
             return res.status(400).json({ error: 'Impossibile determinare il contenitore corrispondente negli altri tenant' });
           }
@@ -10838,6 +10955,7 @@ app.post('/api/:source(settings|clients|projects)/reorder-fields', requireAuth, 
       if (useChain) {
         params = [...head];
         const startIndex = (containerScope === 'all' && isNodeContainer) ? chain.length - 1 : 0;
+        await preparaRadiciCatena(source, chain, startIndex, source !== 'settings');
         const j = eavChainSql(source, chain, startIndex, params, source !== 'settings');
         params.push(campo);
         let where = `${j.conds.join(' AND ')} AND f.argument = ${j.alias}.id::text AND f.campo = $${params.length}`;
@@ -10869,6 +10987,9 @@ app.post('/api/:source(settings|clients|projects)/reorder-fields', requireAuth, 
       } else {
         query = `UPDATE "${source}" SET ${set} WHERE argument = $${n + 1} AND campo = $${n + 2} AND tenant_id = $${n + 3}`;
         params = [...head, argument, campo, req.user.tenant_id];
+        // Non admin: solo le proprie righe (prima bastava l'id del contenitore di un collega
+        // per spostare i campi nella sua scheda). 2026-10-17
+        if (!isAdmin) { params.push(req.user.user_id); query += ` AND user_id = $${params.length}`; }
       }
       // Solo i campi modificabili dal ruolo del contesto (id_roles_write).
       query += roleWriteSql(req, params, /"\s+f\s+SET/.test(query) ? 'f.' : '', null, source);
@@ -10993,6 +11114,8 @@ app.get('/api/:source(settings|clients)/field-options', requireAuth, async (req,
     const variab = (f.rows[0].variabdb || '').trim();
     const mode = (f.rows[0].valore3 == null) ? null : Number(f.rows[0].valore3); // valore3 = modalità
     if (!tabella || !colonna) return res.status(400).json({ error: 'tabella/colonna non impostate sul campo' });
+    // Tabella consentita (anche per il ramo decode, che prima non la controllava).
+    if (!(await tabellaCampoConsentita(req, tabella))) return res.status(404).json({ error: 'Tabella non gestita' });
     // Elenco "decodificato" (colonna con token decode:...): risoluzione id -> nome leggibile.
     if (/(^|,)\s*decode:/i.test(colonna)) {
       return await respondDecodedOptions(req, res, tabella, colonna, campo, mode);
@@ -11348,14 +11471,16 @@ async function linkedFieldContext(source, fieldId, req, cols) {
   if (source !== 'clients') return null;
   const acc = await clientAccessByArgument(row.argument, req, false);
   if (!acc || String(acc.ownerUserId) !== row.owner_id) return null;
-  return { row, ownerUserId: row.owner_id, readOnly: acc.permission === 'read' };
+  // Cliente condiviso: si leggono solo le righe di QUEL cliente (clientId), non di tutti i
+  // clienti del proprietario (2026-10-17).
+  return { row, ownerUserId: row.owner_id, readOnly: acc.permission === 'read', altrui: true, clientId: String(acc.clientId) };
 }
 
 app.get('/api/:source(settings|clients)/linked-list', requireAuth, async (req, res) => {
   try {
     const source = req.params.source;
     const fieldId = ((req.query && req.query.fieldId) || '').trim();
-    const clientId = ((req.query && req.query.clientId) || '').trim();
+    const clientIdRichiesto = ((req.query && req.query.clientId) || '').trim();
     if (!fieldId) {
       return res.status(400).json({ error: 'fieldId richiesto' });
     }
@@ -11373,6 +11498,8 @@ app.get('/api/:source(settings|clients)/linked-list', requireAuth, async (req, r
     const params = [];
     if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
     if (cols.has('user_id')) { params.push(lctx.ownerUserId); conds.push(`user_id = $${params.length}`); }
+    if (lctx.altrui && !cols.has('client_id') && !cols.has('id_cliente')) return res.status(403).json({ error: 'Elenco non disponibile per un cliente condiviso' });
+    const clientId = lctx.altrui ? lctx.clientId : clientIdRichiesto;
     if (clientId) {
       const clientIdColumn = cols.has('client_id') ? 'client_id' : cols.has('id_cliente') ? 'id_cliente' : null;
       if (clientIdColumn) { params.push(clientId); conds.push(`"${clientIdColumn}" = $${params.length}`); }
@@ -11406,7 +11533,7 @@ app.get('/api/:source(settings|clients)/linked-row', requireAuth, async (req, re
   try {
     const source = req.params.source;
     const fieldId = ((req.query && req.query.fieldId) || '').trim();
-    const clientId = ((req.query && req.query.clientId) || '').trim();
+    const clientIdRichiesto = ((req.query && req.query.clientId) || '').trim();
     const rowId = ((req.query && req.query.rowId) || '').trim();
     if (!fieldId || !rowId) {
       return res.status(400).json({ error: 'fieldId e rowId richiesti' });
@@ -11423,6 +11550,8 @@ app.get('/api/:source(settings|clients)/linked-row', requireAuth, async (req, re
     const params = [rowId];
     if (cols.has('tenant_id')) { params.push(req.user.tenant_id); conds.push(`tenant_id = $${params.length}`); }
     if (cols.has('user_id')) { params.push(lctx.ownerUserId); conds.push(`user_id = $${params.length}`); }
+    if (lctx.altrui && !cols.has('client_id') && !cols.has('id_cliente')) return res.status(403).json({ error: 'Riga non disponibile per un cliente condiviso' });
+    const clientId = lctx.altrui ? lctx.clientId : clientIdRichiesto;
     if (clientId) {
       const clientIdColumn = cols.has('client_id') ? 'client_id' : cols.has('id_cliente') ? 'id_cliente' : null;
       if (clientIdColumn) { params.push(clientId); conds.push(`"${clientIdColumn}" = $${params.length}`); }
@@ -11766,6 +11895,7 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
         try {
           assertValidIdentifier(row.tabella);
           assertValidIdentifier(row.colonna);
+          if (!(await tabellaCampoConsentita(req, row.tabella))) throw new Error('tabella non consentita');
           const keys = await referenceKeys(row.tabella, contextUser, { clientId: clientContextId, projectId: projectContextId });
           let where = keys.length
             ? 'WHERE ' + keys.map((k, i) => `"${k.col}" = $${i + 1}`).join(' AND ')
@@ -11818,6 +11948,7 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
         try {
           assertValidIdentifier(row.tabella);
           assertValidIdentifier(row.colonna);
+          if (!(await tabellaCampoConsentita(req, row.tabella))) throw new Error('tabella non consentita');
           const keys = await referenceKeys(row.tabella, contextUser, { clientId: clientContextId, projectId: projectContextId });
           const params = keys.map(k => k.val);
           const conds = keys.map((k, i) => `"${k.col}" = $${i + 1}`);
@@ -11948,6 +12079,7 @@ async function tipo4AllineaProgetto(user, projectId, clientId) {
     try {
       const tabella = assertValidIdentifier(String(c.tabella).trim());
       const colonna = assertValidIdentifier(String(c.colonna).trim());
+      if (!(await tabellaCampoConsentita({ user }, tabella))) continue;
       // Stessa lettura della scheda (GET dei campi), con il progetto vero come contesto.
       const keys = await referenceKeys(tabella, user, { clientId: c.client_id || clientId, projectId });
       let where = keys.length ? 'WHERE ' + keys.map((k, i) => `"${k.col}" = $${i + 1}`).join(' AND ') : '';
@@ -12046,6 +12178,11 @@ app.put('/api/:source(settings|clients|projects)/:id/reference-value', requireAu
     assertValidIdentifier(colonna);
     // Consentite anche users/tenants: la scrittura tocca solo la riga del login (Profilo).
     assertCanWriteTable(req, tabella, 'main', { ownRowOnly: true });
+    // Solo tabelle con user_id (si aggiorna la propria riga), mai tabelle di sistema:
+    // senza user_id l'UPDATE varrebbe per tutto il tenant (es. client_shares).
+    if (!(await tabellaCampoConsentita(req, tabella, { scrittura: true }))) {
+      return res.status(403).json({ error: 'Tabella non consentita per questo campo' });
+    }
 
     // Contesto aggiuntivo: per "clients" risale alla riga identità (Cliente) partendo
     // dall'argument del campo; per "projects" il client_id è già in colonna sulla riga

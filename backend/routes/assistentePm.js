@@ -94,6 +94,8 @@ const SUGGERIMENTO_RE = /^\W*(DOMANDA|RISCHIO|CR|ATTENZIONE|AGENDA)\s*:/i;
 
 // "tenant|utente|id_calendar" -> sessione
 const sessioni = new Map();
+const MAX_SESSIONI_UTENTE = 2;   // sessioni Gemini Live aperte contemporaneamente per utente
+const MAX_BLOCCHI_IN_CODA = 6;   // blocchi audio in attesa di trascrizione per sessione
 const chiave = (user, id) => `${user.tenant_id}|${user.user_id}|${id}`;
 
 // Impostazione dell'utente: { attiva, ai } (ai = voce scelta, es. «Gemini»).
@@ -567,12 +569,22 @@ router.post('/avvia', requireAuth, async (req, res) => {
     const { ai, apiKey } = x;
 
     const k = chiave(req.user, idCalendar);
+    // Istruzioni lette PRIMA di guardare la sessione esistente: tra controllo e scrittura non
+    // ci sono più attese, quindi due /avvia insieme non lasciano una sessione orfana aperta
+    // verso Gemini (la seconda chiude sempre la prima). 2026-10-17
+    const testoIstruzioni = await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita);
     const vecchia = sessioni.get(k);
     if (vecchia) chiudi(vecchia); // registrazione ripresa: sessione nuova
+    // Al massimo MAX_SESSIONI_UTENTE sessioni aperte per utente (ognuna è un WebSocket Gemini
+    // Live fino a 4 ore): oltre, si chiudono le più vecchie.
+    const prefisso = chiave(req.user, '');
+    const mie = [...sessioni.values()].filter((x) => !x.chiusa && x.chiave !== k && String(x.chiave).startsWith(prefisso))
+      .sort((a, b2) => a.creataIl - b2.creataIl);
+    while (mie.length >= MAX_SESSIONI_UTENTE) chiudi(mie.shift());
     const s = {
       chiave: k, idCalendar, apiKey, modalita, handle: null, ws: null, pronta: false, avviata: false, chiusa: false,
       titolo: String(b.titolo || '').trim().slice(0, 200) || 'Riunione', creataIl: Date.now(), chiusaIl: 0,
-      istruzioni: await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita),
+      istruzioni: testoIstruzioni, bloccoInCoda: 0,
       coda: [], inTurno: false, risposta: '', ascoltato: '', attesaAudio: [], timerTurno: null, riconnessioni: 0,
       timerAudio: null, attivitaAperta: false, audioNuovo: false, valutazioni: 0, silenzi: 0, rispostaLibera: false,
       attesaRisposta: false, timerRisposta: null, turniChiesti: 0, senzaRisposta: 0, senzaRispostaDiFila: 0, sblocchi: 0,
@@ -608,10 +620,14 @@ router.post('/blocco', requireAuth, (req, res) => {
     names: (Array.isArray(b.names) ? b.names : []).map((n) => String(n || '').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean).slice(0, 20)
   };
   const offset = Math.max(0, Number(b.offset_sec) || 0);
+  // Coda limitata: ogni blocco tiene in memoria fino a ~4 MB di audio finché non è trascritto.
+  // Se la trascrizione è più lenta dell'arrivo dei blocchi, i nuovi si scartano. 2026-10-17
+  if (s.bloccoInCoda >= MAX_BLOCCHI_IN_CODA) return res.status(429).json({ error: 'Assistente PM in ritardo: blocco scartato' });
+  s.bloccoInCoda += 1;
   const user = { tenant_id: req.user.tenant_id, user_id: req.user.user_id, email: req.user.email };
   s.ultimoUso = Date.now();
   s.blocchi = s.blocchi.then(async () => {
-    if (s.chiusa) return;
+    if (s.chiusa) { s.bloccoInCoda -= 1; return; }
     try {
       const testo = await trascriviBloccoBreve(user, s.idCalendar, { audioB64: audio, energy, offset });
       if (!testo || s.chiusa) return;
@@ -620,6 +636,8 @@ router.post('/blocco', requireAuth, (req, res) => {
     } catch (e) {
       console.warn(`[ASSISTENTE PM] ${s.idCalendar}: blocco non trascritto (${e.message})`);
       aggiungi(s, 'avviso', `Un pezzo di riunione non è stato trascritto per l'assistente (${e.message}).`);
+    } finally {
+      s.bloccoInCoda -= 1;
     }
   });
   res.status(202).json({ ok: true });

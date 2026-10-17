@@ -26,10 +26,29 @@ const impronta = (token) => crypto.createHash('sha256').update(String(token)).di
 export async function utenteDaTokenPush(req) {
   const m = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization || ''));
   if (!m || !m[1].startsWith(PREFISSO)) return null;
+  // L'utente deve appartenere ancora al tenant del token (uscito dall'azienda = token inutile).
   const r = await db.query(
-    'SELECT id, tenant_id, user_id FROM api_token WHERE token_hash = $1 AND scopo = $2',
+    `SELECT t.id, t.tenant_id, t.user_id FROM api_token t
+      WHERE t.token_hash = $1 AND t.scopo = $2
+        AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = t.user_id AND ut.tenant_id = t.tenant_id)`,
     [impronta(m[1]), SCOPO]);
   return r.rows[0] || null;
+}
+
+// Limite di richieste per /api/mysupport/push (in memoria, finestra di 10 minuti): un invio
+// normale sono pochi blocchi da 5000 righe, quindi 120 richieste per IP bastano e avanzano.
+const PUSH_FINESTRA_MS = 10 * 60 * 1000;
+const PUSH_MAX = 120;
+const pushContatori = new Map();
+export function pushLimitato(chiave) {
+  const ora = Date.now();
+  let c = pushContatori.get(chiave);
+  if (!c || ora - c.inizio > PUSH_FINESTRA_MS) { c = { inizio: ora, n: 0 }; pushContatori.set(chiave, c); }
+  c.n += 1;
+  if (pushContatori.size > 5000) {
+    for (const [k, v] of pushContatori) if (ora - v.inizio > PUSH_FINESTRA_MS) pushContatori.delete(k);
+  }
+  return c.n > PUSH_MAX;
 }
 
 // Esito di un blocco inviato: i totali di un invio (blocchi 1..n) si sommano in ultimo_report.

@@ -19,24 +19,32 @@ export async function seedSettingsFromTemplate(dbClient, tenantId, userId) {
         AND is_generated = 'NEVER' AND is_identity = 'NO'
       ORDER BY ordinal_position`
   );
-  const copyCols = colsRes.rows.map((r) => r.column_name).filter((c) => !SKIP.has(c));
+  const tutte = colsRes.rows.map((r) => r.column_name);
+  const copyCols = tutte.filter((c) => !SKIP.has(c));
   const q = (c) => `"${String(c).replace(/"/g, '""')}"`;
+  // Campi che puntano a una persona (tipo 19 = Manager): il valore del modello non ha senso
+  // per un'altra azienda, si copia la riga vuota. 2026-10-17
+  const PERSONALI = "COALESCE(src.tipo_valore::text, '') = '19'";
+  const valore = (c) => (/^valored*$/.test(c) && tutte.includes('tipo_valore')
+    ? `CASE WHEN ${PERSONALI} THEN NULL ELSE src.${q(c)} END` : `src.${q(c)}`);
+  // Righe chiuse (scadenza passata) del modello: non si copiano.
+  const nonScadute = tutte.includes('scadenza') ? 'AND (s.scadenza IS NULL OR s.scadenza >= CURRENT_DATE)' : '';
 
-  // Tenant sorgente: quello PROJEXA dell'utente modello (se ne ha più d'uno).
+  // Tenant sorgente: SOLO quello PROJEXA dell'utente modello. Prima, se mancava, si ripiegava
+  // su un altro tenant dell'utente modello copiandone i valori in una nuova azienda.
   const r = await dbClient.query(
     `WITH src_tenant AS (
        SELECT s.tenant_id FROM settings s JOIN tenants t ON t.id = s.tenant_id
-        WHERE s.user_id = $1
-        ORDER BY (UPPER(BTRIM(t.name)) = 'PROJEXA') DESC
+        WHERE s.user_id = $1 AND UPPER(BTRIM(t.name)) = 'PROJEXA'
         LIMIT 1
      ), src AS MATERIALIZED (
        SELECT s.*, gen_random_uuid() AS __new_id
          FROM settings s
-        WHERE s.user_id = $1 AND s.tenant_id = (SELECT tenant_id FROM src_tenant)
+        WHERE s.user_id = $1 AND s.tenant_id = (SELECT tenant_id FROM src_tenant) ${nonScadute}
      )
      INSERT INTO settings (id, tenant_id, user_id, argument${copyCols.map((c) => ', ' + q(c)).join('')})
      SELECT src.__new_id, $2::uuid, $3::uuid, COALESCE(parent.__new_id::text, src.argument)
-            ${copyCols.map((c) => ', src.' + q(c)).join('')}
+            ${copyCols.map((c) => ', ' + valore(c)).join('')}
        FROM src
        LEFT JOIN src parent ON parent.id::text = src.argument`,
     [SETTINGS_TEMPLATE_USER_ID, tenantId, userId]

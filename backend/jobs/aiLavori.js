@@ -225,7 +225,10 @@ async function attendiBatch(lavoro, providerName, prompt, opzioni = {}) {
     const r = (await db.query(
       `SELECT inviato_il < now() - ($3 || ' hours')::interval AS scaduto FROM ai_lavori_passi WHERE lavoro_id = $1 AND chiave = $2`,
       [lavoro.id, chiave, String(SCADENZA_ORE)])).rows[0];
-    passo.scaduto = r && r.scaduto;
+    // Lavoro eliminato dall'utente (la riga del passo sparisce in cascata): ci si ferma, invece
+    // di interrogare il fornitore per sempre (prima r mancante = mai scaduto). 2026-10-17
+    if (!r) throw errore(410, 'Lavoro eliminato');
+    passo.scaduto = r.scaduto;
   }
 }
 
@@ -276,20 +279,24 @@ export async function eseguiLavoro(id) {
       const info = Object.fromEntries(Object.entries(res.headers).filter(([k]) => k.startsWith('x-')).map(([k, v]) => {
         try { return [k, decodeURIComponent(String(v))]; } catch { return [k, String(v)]; }
       }));
-      await db.query(
+      const u = await db.query(
         `UPDATE ai_lavori SET stato = 'pronto', file_path = $2, file_nome = $3, file_mime = $4, risultato = $5, errore = $6, concluso_il = now(), heartbeat = now() WHERE id = $1`,
         [l.id, percorso, cifra(nome), String(res.getHeader('content-type') || 'application/octet-stream'), cifra(JSON.stringify({ info })), l.ripiego || null]
       );
+      // Lavoro eliminato nel frattempo: il file non lo scaricherà nessuno.
+      if (!u.rowCount) { await fs.rm(percorso, { force: true }).catch(() => {}); throw errore(410, 'Lavoro eliminato'); }
     } else {
-      await db.query(
+      const u = await db.query(
         `UPDATE ai_lavori SET stato = 'pronto', risultato = $2, errore = $3, concluso_il = now(), heartbeat = now() WHERE id = $1`,
         [l.id, cifra(JSON.stringify(res.corpo === undefined ? {} : res.corpo)), l.ripiego || null]
       );
+      if (!u.rowCount) throw errore(410, 'Lavoro eliminato');
     }
     console.log(`[AI BATCH] ✓ Lavoro ${l.id} (${l.operazione}) pronto${l.ripiego ? ' (eseguito Immediato: Batch non disponibile)' : ''}`);
     await notificaLavoroAi({ tenantId: l.tenant_id, userId: l.user_id, lavoroId: l.id, operazione: OPERAZIONI[l.operazione].etichetta, titolo: l.titolo, ok: true, nota: l.ripiego });
   } catch (e) {
     if (!l) throw e;
+    if (e.status === 410) { console.log(`[AI BATCH] Lavoro ${l.id} (${l.operazione}) eliminato dall'utente: interrotto`); return; }
     console.error(`❌ [AI BATCH] Lavoro ${l.id} (${l.operazione}):`, e.message);
     await db.query(`UPDATE ai_lavori SET stato = 'errore', errore = $2, concluso_il = now() WHERE id = $1`, [l.id, String(e.message || e).slice(0, 1000)]).catch(() => {});
     await notificaLavoroAi({ tenantId: l.tenant_id, userId: l.user_id, lavoroId: l.id, operazione: OPERAZIONI[l.operazione]?.etichetta || l.operazione, titolo: l.titolo, ok: false, errore: e.message });

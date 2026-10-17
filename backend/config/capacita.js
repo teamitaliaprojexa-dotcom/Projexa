@@ -62,9 +62,14 @@ function festivita(anno) {
 }
 export const lavorativo = (s) => { const g = giornoUtc(s).getUTCDay(); return g !== 0 && g !== 6 && !festivita(Number(s.slice(0, 4))).has(s); };
 // Giorni lavorativi da «dal» ad «al» compresi.
+// Al massimo 10 anni: una data come 9999-12-31 bloccava il server in un ciclo di milioni
+// di giorni (con festività calcolate per ogni anno). 2026-10-17
+const MAX_GIORNI_CICLO = 3660;
 export function giorniLavorativi(dal, al) {
   const out = [];
   if (!dal || !al || al < dal) return out;
+  const limite = piu(dal, MAX_GIORNI_CICLO);
+  if (al > limite) al = limite;
   for (let s = dal; s <= al; s = piu(s, 1)) if (lavorativo(s)) out.push(s);
   return out;
 }

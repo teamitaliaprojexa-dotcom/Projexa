@@ -3,7 +3,6 @@ import db from '../config/database.js';
 import authDb from '../config/authDatabase.js';
 import { signSessionToken } from '../config/session.js';
 import { checkOAuthState, deliverLoginToken } from '../config/oauthLogin.js';
-import { seedSettingsFromTemplate } from '../config/settingsSeed.js';
 import { registraAccesso } from '../config/audit.js';
 
 const router = express.Router();
@@ -122,7 +121,7 @@ router.get('/microsoft-callback', async (req, res) => {
     console.log(`[MICROSOFT_AUTH] User: ${email}, Name: ${displayName}`);
 
     // === STEP 3: Cerca l'utente su Projexa-Auth. ===
-    let authUser = (await authDb.query('SELECT id, email, scadenza, password_hash FROM users WHERE email = $1', [email])).rows[0];
+    let authUser = (await authDb.query('SELECT id, email, scadenza, password_hash FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [email])).rows[0];
     if (!authUser) {
       // Nuovo utente: instradalo alla pagina "Prova gratuita" (niente auto-creazione qui).
       console.log(`[MICROSOFT_AUTH] Nuovo utente, redirect a prova gratuita: ${email}`);
@@ -145,30 +144,15 @@ router.get('/microsoft-callback', async (req, res) => {
     }
 
     // === STEP 5: Ottieni i tenant dell'utente ===
-    let tenants = await db.query(
-      'SELECT id, name FROM tenants WHERE id IN (SELECT tenant_id FROM user_tenants WHERE user_id = $1)',
+    // Ordine alfabetico come gli altri login. Senza tenant si rifiuta come il login con password:
+    // prima se ne creava uno nuovo, aggirando la rimozione decisa dall'amministratore (2026-10-17).
+    const tenants = await db.query(
+      'SELECT id, name FROM tenants WHERE id IN (SELECT tenant_id FROM user_tenants WHERE user_id = $1) ORDER BY name',
       [userDbData.id]
     );
-
-    // Fallback: se non ha tenant, crea uno
     if (tenants.rows.length === 0) {
-      console.warn(`[MICROSOFT_AUTH] User ${email} has no tenant, creating one...`);
-      const slug = `${email.split('@')[0]}-backup`.toLowerCase().replace(/[^a-z0-9]/g, '-');
-      
-      const defaultTenant = await db.query(
-        `INSERT INTO tenants (name, slug, created_at)
-         VALUES ($1, $2, NOW())
-         RETURNING id, name`,
-        [`${displayName}'s Workspace Backup`, slug]
-      );
-
-      await db.query(
-        'INSERT INTO user_tenants (user_id, tenant_id, role_id, id_roles) VALUES ($1, $2, $3, $4)',
-        [userDbData.id, defaultTenant.rows[0].id, 'Project Manager', 70]
-      );
-      await seedSettingsFromTemplate(db, defaultTenant.rows[0].id, userDbData.id);
-
-      tenants = defaultTenant;
+      console.warn(`[MICROSOFT_AUTH] Utente ${userDbData.id} senza organizzazione: accesso rifiutato`);
+      return res.redirect('/login.html?error=nessuna_organizzazione');
     }
 
     const selectedTenant = tenants.rows[0];

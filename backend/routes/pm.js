@@ -78,6 +78,9 @@ const dataOpz = (v) => {
   if (v === '' || v == null) return null;
   const d = dataIso(v);
   if (!d) throw errore(400, 'Data non valida');
+  // Date assurde (es. 9999) fanno girare a vuoto i calcoli giorno per giorno.
+  const anno = Number(String(d).slice(0, 4));
+  if (anno < 2000 || anno > 2100) throw errore(400, 'Data fuori intervallo (2000-2100)');
   return d;
 };
 const scelta = (v, ammessi, def) => {
@@ -658,8 +661,8 @@ router.get('/stakeholder/proposte', async (req, res) => {
         WHERE tenant_id = $1 AND user_id = $2 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE) LIMIT 3000`,
       [req.user.tenant_id, req.user.user_id])).rows;
     const team = new Set((await db.query(
-      `SELECT LOWER(email) AS e FROM proj_componenti WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
-      [req.user.tenant_id, req.user.user_id, prog.projectId])).rows.map((x) => x.e));
+      `SELECT email AS e FROM proj_componenti WHERE tenant_id = $1 AND user_id = $2 AND project_id::text = $3 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+      [req.user.tenant_id, req.user.user_id, prog.projectId])).rows.map((x) => String(x.e || '').trim().toLowerCase())); // email cifrata: minuscolo dopo la decifratura, non in SQL
     const out = rb.filter(cerca)
       .map((x) => ({ nominativo: x.nominativo, email: x.email || '', ruolo: x.ruolo || '', team: team.has(String(x.email || '').toLowerCase()) }))
       .sort((a, b) => (b.team - a.team) || a.nominativo.localeCompare(b.nominativo, 'it')).slice(0, 25);
@@ -1398,7 +1401,19 @@ router.post('/capacita/piano', async (req, res) => {
     const ieri = new Date(Date.parse(`${oggi}T12:00:00Z`) - 86400000).toISOString().slice(0, 10);
     const ris = await Cap.risorse(req.user, { tutte: true });
     const esistenti = await Cap.allocazioni(req.user, { projectId: prog.projectId });
+    // Tutto in una transazione: prima un errore a metà (permessi, validazione) lasciava il
+    // piano applicato a metà. 2026-10-17
+    const base = await datiAllocazione(req, { projectId: prog.projectId }, true);
+    const allocazione = (risorsaId, perc, dal, al, note) => {
+      const d = { risorsa_id: risorsaId, ...base, perc: intero(perc, 1, 100), dal, al, note: testo(note) };
+      if (d.perc == null) throw errore(400, 'Percentuale tra 1 e 100');
+      if (d.al < d.dal) throw errore(400, 'La data «al» è prima di «dal»');
+      return d;
+    };
+    const tx = await db.connect();
     let create = 0, allocate = 0, chiuse = 0;
+    try {
+    await tx.query('BEGIN');
     for (const p of lista) {
       const perc = Number(p.perc) || 0;
       const email = String(p.email || '').trim().toLowerCase();
@@ -1406,15 +1421,15 @@ router.post('/capacita/piano', async (req, res) => {
         || ris.find((x) => normNome(x.nominativo) === normNome(p.nominativo));
       if (!r && perc <= 0) continue;
       if (!r) {
-        const id = await inserisci(db, 'pm_risorse', { ...baseCap(req), ...datiRisorsa({ nominativo: p.nominativo, email: p.email, ruolo: p.ruolo }) });
+        const id = await inserisci(tx, 'pm_risorse', { ...baseCap(req), ...datiRisorsa({ nominativo: p.nominativo, email: p.email, ruolo: p.ruolo }) });
         r = { id, nominativo: p.nominativo, email: p.email };
         ris.push(r);
         create += 1;
       }
       for (const a of esistenti.filter((x) => x.risorsa_id === r.id && x.al >= oggi)) {
         if (!puoScrivere(req, a.id_roles_write)) throw errore(403, READ_ONLY);
-        if (a.dal < oggi) await aggiornaCap(req, 'pm_allocazioni', a.id, { al: ieri });
-        else await chiudiCap(req, 'pm_allocazioni', a.id);
+        if (a.dal < oggi) await aggiornaCap(req, 'pm_allocazioni', a.id, { al: ieri }, true, tx);
+        else await chiudiCap(req, 'pm_allocazioni', a.id, tx);
         chiuse += 1;
       }
       // Piano dal Gantt: più periodi con la loro % (il carico cambia con le fasi).
@@ -1424,13 +1439,20 @@ router.post('/capacita/piano', async (req, res) => {
         .map((x) => ({ ...x, dal: x.dal < oggi ? oggi : x.dal }));
       if (periodi.length) {
         for (const x of periodi) {
-          await inserisci(db, 'pm_allocazioni', { ...baseCap(req), ...(await datiAllocazione(req, { risorsa_id: r.id, projectId: prog.projectId, perc: x.perc, dal: x.dal, al: x.al, note: x.note })) });
+          await inserisci(tx, 'pm_allocazioni', { ...baseCap(req), ...allocazione(r.id, x.perc, x.dal, x.al, x.note) });
           allocate += 1;
         }
       } else if (perc > 0) {
-        await inserisci(db, 'pm_allocazioni', { ...baseCap(req), ...(await datiAllocazione(req, { risorsa_id: r.id, projectId: prog.projectId, perc: Math.min(100, perc), dal: oggi, al: consegna, note: 'Piano automatico' })) });
+        await inserisci(tx, 'pm_allocazioni', { ...baseCap(req), ...allocazione(r.id, Math.min(100, perc), oggi, consegna, 'Piano automatico') });
         allocate += 1;
       }
+    }
+    await tx.query('COMMIT');
+    } catch (e) {
+      await tx.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      tx.release();
     }
     res.json({ ok: true, create, allocate, chiuse });
   } catch (e) { invia(res, e, 'CAP_PIANO_APPLICA'); }
@@ -1473,15 +1495,15 @@ async function rigaCap(req, tabella, id) {
   if (!puoScrivere(req, r.id_roles_write)) throw errore(403, READ_ONLY);
   return r;
 }
-async function aggiornaCap(req, tabella, id, dati, conUpdatedAt = true) {
+async function aggiornaCap(req, tabella, id, dati, conUpdatedAt = true, ex = db) {
   const { data } = await encryptRowForWrite(db, tabella, dati, { id });
   const cols = Object.keys(data);
   if (!cols.length) return;
-  await db.query(`UPDATE ${tabella} SET ${cols.map((c, i) => `"${c}" = $${i + 1}`).join(', ')}${conUpdatedAt ? ', updated_at = now()' : ''}
+  await ex.query(`UPDATE ${tabella} SET ${cols.map((c, i) => `"${c}" = $${i + 1}`).join(', ')}${conUpdatedAt ? ', updated_at = now()' : ''}
       WHERE id::text = $${cols.length + 1} AND tenant_id = $${cols.length + 2} AND user_id = $${cols.length + 3}`,
     [...cols.map((c) => data[c]), id, req.user.tenant_id, req.user.user_id]);
 }
-const chiudiCap = (req, tabella, id) => db.query(`UPDATE ${tabella} SET scadenza = CURRENT_DATE - 1 WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`, [id, req.user.tenant_id, req.user.user_id]);
+const chiudiCap = (req, tabella, id, ex = db) => ex.query(`UPDATE ${tabella} SET scadenza = CURRENT_DATE - 1 WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`, [id, req.user.tenant_id, req.user.user_id]);
 const baseCap = (req) => ({ tenant_id: req.user.tenant_id, user_id: req.user.user_id, id_roles_write: ruolo(req), crypto: 1 });
 const dataObbl = (v, nome) => { const d = dataOpz(v); if (!d) throw errore(400, `${nome}: data obbligatoria`); return d; };
 

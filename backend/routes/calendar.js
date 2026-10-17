@@ -20,7 +20,7 @@ import db from '../config/database.js';
 import {
   encRec, enqueueChunk, enqueueLostNotes, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices,
   recapInProgress, recapBatchInCorso, recapAutomaticoInCorso, loadCorrections, applyCorrections, applyCorrectionsHtml, stripMarkdown, speakerName,
-  copiaTrascrizioneCondivisa, recapAiImpostata, recapEsecuzione, isChiediSempre
+  copiaTrascrizioneCondivisa, recapAiImpostata, recapEsecuzione, isChiediSempre, annullaRecapBatchInAttesa
 } from '../jobs/meetingTranscription.js';
 import { inviaRecapBatch, controllaRecapBatchUtente } from '../jobs/recapBatch.js';
 import { parseRecapActions, parseDueDate, ownerVariants } from '../jobs/recapTasks.js';
@@ -180,6 +180,16 @@ async function getCalendarSession(userId, key) {
     try {
       tokenData = await refreshAccessToken(cfg, el[`${p}_refresh_token`]);
     } catch (error) {
+      // Si scollega solo se il provider rifiuta il refresh token (invalid_grant, 400/401):
+      // rete, timeout, 429 o 5xx sono temporanei e prima cancellavano l'integrazione. 2026-10-17
+      const definitivo = /invalid_grant/i.test(error.message) || error.status === 400 || error.status === 401;
+      if (!definitivo) {
+        console.error(`[CALENDAR:${key}] Rinnovo token non riuscito (temporaneo):`, error.message);
+        const err = new Error(`${cfg.label} momentaneamente non raggiungibile: riprova tra poco`);
+        err.status = 503;
+        err.code = 'CALENDAR_TEMP_ERROR';
+        throw err;
+      }
       console.error(`[CALENDAR:${key}] Refresh token non più valido:`, error.message);
       await deleteIntegration(userId, cfg.provider);
       const err = new Error(`Autorizzazione ${cfg.label} scaduta: ricollega il calendario`);
@@ -309,16 +319,17 @@ router.get('/:provider(google|outlook)/authorize-url', requireAuth, requireProvi
 // Pagina restituita al termine del consenso: comunica l'esito alla finestra che ha
 // aperto il popup (window.opener) e si chiude, esattamente come per Jira.
 function callbackPage(origin, payload) {
-  const json = JSON.stringify({ source: 'projexa-calendar', ...payload }).replace(/</g, '\\u003c');
-  const safeOrigin = JSON.stringify(origin).replace(/</g, '\\u003c');
+  // Dati negli attributi (testo con escape HTML): lo script è il file statico
+  // sito/js/oauth-callback.js, perché la CSP blocca gli script inline generati al volo.
+  const attr = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const json = attr(JSON.stringify({ source: 'projexa-calendar', ...payload }));
+  const safeOrigin = attr(origin);
   return `<!DOCTYPE html>
 <html lang="it"><head><meta charset="utf-8"><title>Calendario</title></head>
 <body style="font-family: system-ui, sans-serif; padding: 2rem; color: #1F2937;">
 <p>${payload.ok ? 'Collegamento al calendario completato. Puoi chiudere questa finestra.' : 'Collegamento al calendario non riuscito. Puoi chiudere questa finestra.'}</p>
-<script>
-  try { if (window.opener) window.opener.postMessage(${json}, ${safeOrigin}); } catch (e) {}
-  setTimeout(function () { window.close(); }, 800);
-</script>
+<div id="oauthEsito" data-msg="${json}" data-origin="${safeOrigin}" hidden></div>
+<script src="/js/oauth-callback.js"></script>
 </body></html>`;
 }
 
@@ -609,10 +620,51 @@ router.post('/meetings/managed', requireAuth, async (req, res) => {
 // Risposta: { shared: false } oppure { shared: true, by: 'Nome Cognome', copied: bool }.
 const normTitolo = (t) => String(t || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
+// La riunione è davvero un evento del calendario collegato dell'utente? (2026-10-17)
+// Prima la registrazione veniva collegata a quella di un collega solo se titolo, data e ora
+// coincidevano: valori che l'utente stesso scrive con POST /meetings/managed, quindi bastava
+// copiarli per ricevere la trascrizione di una riunione altrui. Ora l'id della riunione deve
+// essere un evento del suo calendario (Google, Outlook o calendario ICS pubblicato). Senza
+// calendario collegato o in caso di errore: nessuna condivisione, ognuno registra la propria.
+async function eventoNelCalendario(user, idCalendar, provider, dataCal) {
+  try {
+    const p = String(provider || '').toLowerCase();
+    const key = p.includes('outlook') ? 'outlook' : (p.includes('google') ? 'google' : null);
+    if (!key) return false;
+    const giorno = dataCal instanceof Date
+      ? `${dataCal.getFullYear()}-${String(dataCal.getMonth() + 1).padStart(2, '0')}-${String(dataCal.getDate()).padStart(2, '0')}`
+      : String(dataCal || '').slice(0, 10);
+    const centro = new Date(`${giorno}T12:00:00Z`);
+    if (Number.isNaN(centro.getTime())) return false;
+    const timeMin = new Date(centro.getTime() - 36 * 3600 * 1000).toISOString();
+    const timeMax = new Date(centro.getTime() + 36 * 3600 * 1000).toISOString();
+    let eventi = null;
+    if (key === 'outlook') {
+      const el = await getIntegration(user.user_id, PROVIDERS.outlook.provider);
+      if (el && el.outlook_ics_url) eventi = await fetchIcsEvents(el.outlook_ics_url, timeMin, timeMax);
+    }
+    if (!eventi) {
+      const session = await getCalendarSession(user.user_id, key);
+      eventi = key === 'outlook' ? await fetchOutlookEvents(session, timeMin, timeMax) : await fetchGoogleEvents(session, timeMin, timeMax);
+    }
+    return (eventi || []).some((e) => String(e && e.id) === String(idCalendar));
+  } catch (e) {
+    return false;
+  }
+}
+
 router.post('/meetings/managed/claim-recording', requireAuth, async (req, res) => {
   const idCalendar = String((req.body && req.body.id_calendar) || '').trim();
   if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
   const { tenant_id: tenantId, user_id: userId } = req.user;
+  // Verifica sul calendario prima della transazione (chiamata esterna, non sotto lock).
+  let nelCalendario = false;
+  if (!idCalendar.startsWith('manual:')) {
+    const pre = (await db.query(
+      'SELECT provider, data_calendar FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1',
+      [tenantId, userId, idCalendar])).rows[0];
+    if (pre) nelCalendario = await eventoNelCalendario(req.user, idCalendar, pre.provider, pre.data_calendar);
+  }
   const client = await db.connect();
   let source = null;
   let copiaSubito = false;
@@ -642,7 +694,7 @@ router.post('/meetings/managed/claim-recording', requireAuth, async (req, res) =
 
     // Registrazioni libere (microfono) e chi ha già registrato questa riunione: nessun controllo.
     const libera = idCalendar.startsWith('manual:');
-    if (!source && !libera && !(me.registrazione_avviata_il && !me.trascrizione_da_user)) {
+    if (!source && !libera && nelCalendario && !(me.registrazione_avviata_il && !me.trascrizione_da_user)) {
       const candidati = (await client.query(
         `SELECT user_id, id_calendar, oggetto FROM rec_meeting
           WHERE tenant_id = $1 AND user_id <> $2
@@ -709,6 +761,17 @@ router.patch('/meetings/managed', requireAuth, async (req, res) => {
     if (clientId && !UUID_RE.test(clientId)) return res.status(400).json({ error: 'client_id non valido' });
     if (projectId && !UUID_RE.test(projectId)) return res.status(400).json({ error: 'project_id non valido' });
     if (projectId && !clientId) return res.status(400).json({ error: 'Seleziona prima il cliente' });
+
+    // Anche il solo cliente va verificato: proprio (stesso tenant e utente). 2026-10-17
+    if (clientId && !projectId) {
+      const check = await db.query(
+        `SELECT 1 FROM clients
+          WHERE id = $1 AND tenant_id = $2 AND user_id = $3 AND argument = 'Cliente' AND campo = 'Cliente'
+          LIMIT 1`,
+        [clientId, req.user.tenant_id, req.user.user_id]
+      );
+      if (check.rows.length === 0) return res.status(400).json({ error: 'Cliente non valido' });
+    }
 
     if (projectId) {
       const check = await db.query(
@@ -782,6 +845,7 @@ router.put('/meetings/managed/text', requireAuth, async (req, res) => {
       [encRec(fixed), req.user.tenant_id, req.user.user_id, idCalendar]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    if (col === 'recap') await annullaRecapBatchInAttesa(req.user, idCalendar);
     // Trascrizione caricata a mano: «AI Automatizza (solo Batch)» come a fine trascrizione
     // (jobs/aiAutomatizza.js). Si attende l'invio (pochi secondi) così la griglia, aggiornata
     // subito dopo, mostra già il pulsante Recap arancione; gli errori non annullano il caricamento.
@@ -1191,6 +1255,7 @@ router.put('/meetings/managed/recap-edit', requireAuth, async (req, res) => {
         req.user.tenant_id, req.user.user_id, idCalendar]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    await annullaRecapBatchInAttesa(req.user, idCalendar); // recap modificato a mano: vince sul Batch in attesa
     res.json({ success: true });
   } catch (error) {
     console.error('❌ REC_MEETING_RECAP_EDIT:', error.message);

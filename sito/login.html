@@ -366,7 +366,7 @@
             }
         }
     </style>
-    <script src="js/azioni.js?v=20261017-1"></script>
+    <script src="js/azioni.js?v=20261017-2"></script>
 </head>
 <body>
     <div class="login-container">
@@ -515,6 +515,8 @@
                 const data = await response.json();
 
                 if (response.status === 200) {
+                    // Nuovo login: niente stato di impersonificazione rimasto da una sessione precedente.
+                    localStorage.removeItem('originalToken'); localStorage.removeItem('originalUser');
                     localStorage.setItem('authToken', data.token);
                     localStorage.setItem('user', JSON.stringify(data.user));
                     window.location.href = './dashboard.html';
@@ -581,6 +583,8 @@
                 const data = await response.json();
 
                 if (response.ok) {
+                    // Nuovo login: niente stato di impersonificazione rimasto da una sessione precedente.
+                    localStorage.removeItem('originalToken'); localStorage.removeItem('originalUser');
                     localStorage.setItem('authToken', data.token);
                     localStorage.setItem('user', JSON.stringify(data.user));
                     window.location.href = './dashboard.html';

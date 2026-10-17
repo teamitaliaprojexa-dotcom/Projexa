@@ -57,7 +57,15 @@ export async function getPoolOracle() {
   return poolOracle;
 }
 
-const testo = (v, max) => (v === null || v === undefined || v === '' ? null : String(v).slice(0, max));
+// Troncamento in BYTE UTF-8: le colonne VARCHAR2 di Oracle contano byte, e un testo con
+// accenti o emoji tagliato a caratteri poteva superare il limite (ORA-12899). 2026-10-17
+const testo = (v, max) => {
+  if (v === null || v === undefined || v === '') return null;
+  let t = String(v).slice(0, max);
+  while (Buffer.byteLength(t, 'utf8') > max) t = t.slice(0, Math.max(0, t.length - Math.ceil((Buffer.byteLength(t, 'utf8') - max) / 4) - 1));
+  if (/[�-�]$/.test(t)) t = t.slice(0, -1);
+  return t;
+};
 const json = (v) => (v === null || v === undefined ? null : JSON.stringify(v));
 
 const SQL_ACCESSI = `INSERT INTO ${SCHEMA}.log_accessi
@@ -197,13 +205,19 @@ function rigaVariazione(r) {
   };
 }
 
-// Inserisce le righe; i doppioni (ORA-00001 sul vincolo UNIQUE) vengono ignorati,
-// qualsiasi altro errore annulla tutto l'invio.
+// Inserisce le righe; i doppioni (ORA-00001 sul vincolo UNIQUE) vengono ignorati. Un errore
+// su singole righe (valore troppo lungo, dato non valido) non blocca più l'intero lotto,
+// che prima veniva ritentato identico ogni minuto fermando tutti i log: la riga viene
+// segnalata nel log del server e tolta dalla coda. Gli errori di connessione/tabella
+// (executeMany che fallisce) annullano ancora tutto l'invio.
 async function inserisci(conn, sql, righe, bindDefs) {
   if (!righe.length) return;
   const r = await conn.executeMany(sql, righe, { bindDefs, batchErrors: true, autoCommit: false });
   const veri = (r.batchErrors || []).filter((e) => e.errorNum !== 1);
-  if (veri.length) throw new Error(`Oracle: ${veri[0].message} (${veri.length} righe)`);
+  for (const e of veri) {
+    const riga = righe[e.offset] || {};
+    console.error(`[AUDIT] Riga ${riga.id_coda ?? '?'} scartata da Oracle: ${e.message}`);
+  }
 }
 
 // Un blocco: restituisce il numero di righe inviate (0 = coda vuota).

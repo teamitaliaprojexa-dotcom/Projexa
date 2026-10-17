@@ -76,11 +76,12 @@ function checkLicenseExpiry(userData) {
 }
 
 // Login endpoint
-// Limite per ACCOUNT (2026-10-17), oltre a quello per IP di server.js: 10 password errate in
-// 15 minuti sulla stessa email bloccano i tentativi su quell'email per 15 minuti, anche se
-// arrivano da IP diversi. La risposta è la stessa per email esistenti e non (niente
+// Limite per ACCOUNT (2026-10-17), oltre a quello per IP di server.js (10 tentativi ogni 15
+// minuti): 30 password errate in 15 minuti sulla stessa email bloccano i tentativi su
+// quell'email per 15 minuti. La soglia è più alta di quella per IP, così un solo indirizzo non
+// basta a tenere bloccato l'account di un altro. La risposta è la stessa per email esistenti e non (niente
 // enumerazione). Un login riuscito azzera il conteggio.
-const LOGIN_ERRATI_MAX = 10;
+const LOGIN_ERRATI_MAX = 30;
 const LOGIN_ERRATI_FINESTRA_MS = 15 * 60 * 1000;
 const loginErrati = new Map(); // email -> { count, first }
 function loginEmailBloccata(email) {
@@ -147,8 +148,9 @@ router.post('/login', async (req, res) => {
     console.log(`[LOGIN] User authenticated: ${userData.email}, ID: ${userData.id}`);
 
     // Get user's tenants
+    // Ordine alfabetico, come il magic link e il login Google: stesso tenant predefinito.
     const tenants = await db.query(
-      'SELECT id, name FROM tenants WHERE id IN (SELECT tenant_id FROM user_tenants WHERE user_id = $1)',
+      'SELECT id, name FROM tenants WHERE id IN (SELECT tenant_id FROM user_tenants WHERE user_id = $1) ORDER BY name',
       [userData.id]
     );
 
@@ -200,7 +202,7 @@ router.post('/login', async (req, res) => {
 
     res.json({
       success: true,
-      token: issueSession(req, res, token),
+      token: nuovaSessioneLogin(req, res, token),
       user: {
         id: userData.id,
         email: userData.email,
@@ -229,6 +231,11 @@ router.post('/register', async (req, res) => {
 
     if (!email || !nome || !cognome || !tenantName) {
       return res.status(400).json({ error: 'Compila tutti i campi obbligatori (email, nome, cognome, workspace).' });
+    }
+    // Nome e cognome finiscono nel saluto delle email: niente testi lunghi, link o tag.
+    if (nome.length > 60 || cognome.length > 60 || tenantName.length > 100
+        || [nome, cognome].some((v) => /[<>]|https?:|www\.|[\u0000-\u001f]/i.test(v))) {
+      return res.status(400).json({ error: 'Nome o cognome non validi.' });
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'Email non valida.' });
@@ -370,7 +377,11 @@ router.post('/confirm', async (req, res) => {
     if (d.purpose !== 'signup-confirm') return res.status(400).json({ error: 'Token non valido' });
     const r = await authDb.query(
       `UPDATE users SET scadenza = CURRENT_DATE + INTERVAL '1 month', updated_at = NOW()
-       WHERE id = $1 AND scadenza < CURRENT_DATE RETURNING id`,
+       WHERE id = $1 AND scadenza < CURRENT_DATE
+         -- mai confermato: scadenza ancora quella della registrazione (giorno prima della
+         -- creazione), non un account scaduto o disattivato in seguito
+         AND scadenza::date < created_at::date
+       RETURNING id`,
       [d.uid]
     );
     if (r.rowCount === 0) {
@@ -493,7 +504,7 @@ router.post('/forgot-password', async (req, res) => {
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'Email non valida.' });
     }
-    if (forgotRateLimited(req.ip || 'unknown')) {
+    if (forgotRateLimited(req.ip || 'unknown') || forgotRateLimited('email:' + email)) {
       return res.status(429).json({ error: 'Troppe richieste. Riprova tra qualche minuto.' });
     }
 
@@ -566,8 +577,10 @@ router.post('/reset-password', async (req, res) => {
       [newHash, info.uid]
     );
     changePwdAttempts.delete(info.uid);
+    loginErrati.delete(String(info.email || '').trim().toLowerCase()); // nuova password: niente blocco residuo
     forgetSessionSignature(info.uid); // chiude le sessioni aperte con la vecchia password
     console.log(`[RESET-PASSWORD] Password reimpostata per utente ${info.uid}`);
+    registraAccesso(req, { evento: 'reset_password', userId: info.uid, email: info.email, dettaglio: 'password reimpostata con il link via email' });
 
     res.json({ success: true });
   } catch (error) {
@@ -718,7 +731,7 @@ router.post('/magic-link/verify', async (req, res) => {
     registraAccesso(req, { evento: 'magic_link', userId: authUser.id, email: authUser.email, tenantId: tenant.id });
     res.json({
       success: true,
-      token: issueSession(req, res, sessionToken),
+      token: nuovaSessioneLogin(req, res, sessionToken),
       user: {
         id: authUser.id,
         email: authUser.email,
@@ -741,7 +754,8 @@ router.get('/verify', async (req, res) => {
       return res.status(401).json({ error: 'No token provided' });
     }
 
-    const decoded = await verifySessionToken(token);
+    // Stessa vista ridotta delle risposte di login: senza firma della password né jti.
+    const { psig, jti, ...decoded } = await verifySessionToken(token);
     res.json({ valid: true, user: decoded });
   } catch (error) {
     res.status(401).json({ valid: false, error: 'Invalid token' });
@@ -753,7 +767,8 @@ router.get('/verify', async (req, res) => {
 // funzionare anche con una sessione già scaduta.
 router.post('/logout', async (req, res) => {
   const token = readSessionCookie(req);
-  const adminToken = readCookie(req, IMPERSONATE_ADMIN_COOKIE);
+  // Cookie admin: { a: token dell'admin, i: jti della sessione impersonata } (vedi sotto).
+  const adminToken = (leggiCookieAdmin(req) || {}).a;
   try {
     if (token) await revokeSessionToken(token);
     if (adminToken) await revokeSessionToken(adminToken);
@@ -775,7 +790,7 @@ router.post('/oauth-exchange', async (req, res) => {
   if (!data || !data.t) return res.status(401).json({ error: 'Accesso non riuscito o scaduto: riprova' });
   try {
     await verifySessionToken(data.t);
-    res.json({ token: issueSession(req, res, data.t), user: data.u || {} });
+    res.json({ token: nuovaSessioneLogin(req, res, data.t), user: data.u || {} });
   } catch (e) {
     res.status(401).json({ error: 'Accesso non riuscito o scaduto: riprova' });
   }
@@ -809,7 +824,7 @@ router.get('/google-callback', async (req, res) => {
 
     if (!tokenResponse.ok) {
       console.error('❌ Google Token Error:', await tokenResponse.text());
-      return res.redirect('/sito/?error=token_exchange_failed');
+      return res.redirect('/login.html?error=accesso_google_non_riuscito');
     }
 
     const tokenData = await tokenResponse.json();
@@ -833,7 +848,8 @@ router.get('/google-callback', async (req, res) => {
     }
 
     // Cerca l'utente su Projexa-Auth.
-    let authUser = (await authDb.query('SELECT id, email, scadenza, password_hash FROM users WHERE email = $1', [email])).rows[0];
+    // Senza distinguere maiuscole/minuscole, come il login con password (email salvate come scritte).
+    let authUser = (await authDb.query('SELECT id, email, scadenza, password_hash FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [email])).rows[0];
     if (!authUser) {
       // Nuovo utente: instradalo alla pagina "Prova gratuita" (niente auto-creazione qui,
       // così sceglie nome workspace/nome/cognome ed evitiamo collisioni sul nome tenant).
@@ -854,36 +870,17 @@ router.get('/google-callback', async (req, res) => {
       return res.redirect(`/license-expired.html?expiry=${licenseCheck.expiry}&email=${encodeURIComponent(licenseCheck.email)}`);
     }
 
-    // Ottieni il tenant dell'utente (deve esistere sempre)
-    let tenants = await db.query(
-      'SELECT id, name FROM tenants WHERE id IN (SELECT tenant_id FROM user_tenants WHERE user_id = $1)',
+    // Tenant dell'utente (ordine alfabetico, come gli altri login). Senza tenant si rifiuta come
+    // il login con password: prima se ne creava uno nuovo, aggirando la rimozione decisa
+    // dall'amministratore (2026-10-17).
+    const tenants = await db.query(
+      'SELECT id, name FROM tenants WHERE id IN (SELECT tenant_id FROM user_tenants WHERE user_id = $1) ORDER BY name',
       [userData.id]
     );
-
-    console.log(`[GOOGLE_AUTH] Found tenants:`, tenants.rows.length);
-
-    // Fallback: se per qualche motivo non ha tenant (non dovrebbe succedere), crea uno
     if (tenants.rows.length === 0) {
-      console.warn(`[GOOGLE_AUTH] User ${email} has no tenant, creating one...`);
-      const slug = `${email.split('@')[0]}-backup`.toLowerCase().replace(/[^a-z0-9]/g, '-');
-      
-      const defaultTenant = await db.query(
-        `INSERT INTO tenants (name, slug, created_at)
-         VALUES ($1, $2, NOW())
-         RETURNING id, name`,
-        [`${name}'s Workspace Backup`, slug]
-      );
-
-      // Assegna il ruolo "Project Manager" (id_roles = 70)
-      const roleId = 70;
-
-      await db.query(
-        'INSERT INTO user_tenants (user_id, tenant_id, role_id, id_roles) VALUES ($1, $2, $3, $4)',
-        [userData.id, defaultTenant.rows[0].id, 'Project Manager', roleId]
-      );
-      await seedSettingsFromTemplate(db, defaultTenant.rows[0].id, userData.id);
-
-      tenants = defaultTenant;
+      console.warn(`[GOOGLE_AUTH] Utente ${userData.id} senza organizzazione: accesso rifiutato`);
+      registraAccesso(req, { evento: 'google', esito: 'ko', userId: userData.id, email: userData.email, dettaglio: 'nessuna organizzazione' });
+      return res.redirect('/login.html?error=nessuna_organizzazione');
     }
 
     const selectedTenant = tenants.rows[0];
@@ -979,8 +976,30 @@ router.get('/impersonate/users', requireAuth, requireAdmin, async (req, res) => 
 
 // Durante l'impersonificazione la sessione dell'admin resta in un cookie HttpOnly a parte,
 // per il pulsante "Ritorna" (/impersonate/return): il browser non la vede mai.
+// Dal 2026-10-17 il cookie contiene { a: token dell'admin, i: jti della sessione impersonata }:
+// "Ritorna" funziona solo dalla sessione impersonata creata insieme al cookie (non da quella di
+// chi accede dopo sullo stesso browser) e ogni nuovo login lo cancella (nuovaSessioneLogin).
+// Il token dell'admin conservato vale fino alle 24 ore dal suo login: la sessione impersonata
+// si rinnova con l'attività, quella dell'admin nel cookie no.
 const IMPERSONATE_ADMIN_COOKIE = 'px_session_admin';
 const IMPERSONATE_ADMIN_COOKIE_OPTS = { path: '/api/auth', sameSite: 'Strict' };
+const SESSIONE_MAX_SEC = 24 * 60 * 60;
+
+function leggiCookieAdmin(req) {
+  const raw = readCookie(req, IMPERSONATE_ADMIN_COOKIE);
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    return v && v.a && v.i ? v : null;
+  } catch { return null; }
+}
+
+// Sessione di un nuovo login (password, magic link, Google/Microsoft): toglie l'eventuale
+// sessione admin rimasta da un'impersonificazione non chiusa su questo browser.
+function nuovaSessioneLogin(req, res, token) {
+  if (readCookie(req, IMPERSONATE_ADMIN_COOKIE)) clearCookie(req, res, IMPERSONATE_ADMIN_COOKIE, IMPERSONATE_ADMIN_COOKIE_OPTS);
+  return issueSession(req, res, token);
+}
 
 // Genera un token impersonando l'utente scelto nel tenant scelto
 router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
@@ -1024,12 +1043,22 @@ router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
       evento: 'impersonazione', userId: req.user.user_id, email: req.user.email, tenantId: tenant_id,
       dettaglio: `impersona ${email || user_id} (utente ${user_id}) nel tenant ${row.tenant_name || tenant_id}`
     });
-    // Sessione dell'admin da ripristinare al "Ritorna": solo alla prima impersonificazione,
-    // così passando da un utente impersonato all'altro si torna sempre all'admin.
-    if (!readCookie(req, IMPERSONATE_ADMIN_COOKIE)) {
-      setCookie(req, res, IMPERSONATE_ADMIN_COOKIE, readSessionCookie(req),
-        { ...IMPERSONATE_ADMIN_COOKIE_OPTS, maxAgeSec: Math.max(0, Number(req.user.exp || 0) - Math.floor(Date.now() / 1000)) });
+    // Sessione dell'admin da ripristinare al "Ritorna". Se si sta già impersonando (cookie
+    // legato alla sessione corrente) resta l'admin originale, altrimenti è la sessione attuale.
+    // Il token si riemette con scadenza alle 24 ore dal login dell'admin (stesso jti e firma).
+    const ora = Math.floor(Date.now() / 1000);
+    const esistente = leggiCookieAdmin(req);
+    let adminToken = esistente && esistente.i === req.user.jti ? esistente.a : readSessionCookie(req);
+    const ap = jwt.decode(adminToken) || {};
+    const fineAdmin = (Number(ap.lat) || Number(ap.iat) || ora) + SESSIONE_MAX_SEC;
+    if (fineAdmin > ora) {
+      const { exp: _e, iat: _i, ...resto } = ap;
+      adminToken = jwt.sign({ ...resto, iat: ora, exp: fineAdmin }, JWT_SECRET);
     }
+    const jtiImpersonata = (jwt.decode(token) || {}).jti;
+    setCookie(req, res, IMPERSONATE_ADMIN_COOKIE,
+      Buffer.from(JSON.stringify({ a: adminToken, i: jtiImpersonata })).toString('base64url'),
+      { ...IMPERSONATE_ADMIN_COOKIE_OPTS, maxAgeSec: Math.max(0, fineAdmin - ora) });
     res.json({
       token: issueSession(req, res, token),
       user: {
@@ -1047,9 +1076,14 @@ router.post('/impersonate', requireAuth, requireAdmin, async (req, res) => {
 // "Ritorna" dall'impersonificazione: ripristina la sessione dell'admin conservata nel
 // cookie px_session_admin. La sessione impersonata viene revocata.
 router.post('/impersonate/return', requireAuth, async (req, res) => {
-  const adminToken = readCookie(req, IMPERSONATE_ADMIN_COOKIE);
+  const salvata = leggiCookieAdmin(req);
   clearCookie(req, res, IMPERSONATE_ADMIN_COOKIE, IMPERSONATE_ADMIN_COOKIE_OPTS);
-  if (!adminToken) return res.status(401).json({ error: 'Sessione amministratore non disponibile: accedi di nuovo' });
+  // Solo dalla sessione impersonata nata con questo cookie (non da chi accede dopo).
+  if (!salvata || salvata.i !== req.user.jti) {
+    if (salvata) console.warn(`[IMPERSONATE] Ritorno rifiutato: la sessione di ${req.user.user_id} non è quella impersonata`);
+    return res.status(401).json({ error: 'Sessione amministratore non disponibile: accedi di nuovo' });
+  }
+  const adminToken = salvata.a;
   try {
     const admin = await verifySessionToken(adminToken);
     if (Number(admin.id_roles) !== 1) throw Object.assign(new Error('ruolo'), { status: 401 });

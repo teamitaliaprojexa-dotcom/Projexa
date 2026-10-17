@@ -449,8 +449,16 @@ router.post('/task', async (req, res) => {
     const titolo = `${String(m.oggetto || 'Riunione').trim()} - Attività interne`.slice(0, 200);
     client = await db.connect();
     await client.query('BEGIN');
+    // Le attività si bloccano (FOR UPDATE) e si ricontrolla task_id dentro la transazione:
+    // due «Crea task» insieme (doppio clic, due schede) creavano task doppi. 2026-10-17
+    const libere = new Set((await client.query(
+      `SELECT id::text AS id FROM rec_meeting_attivita
+        WHERE tenant_id = $1 AND user_id = $2 AND id::text = ANY($3::text[]) AND task_id IS NULL FOR UPDATE`,
+      [req.user.tenant_id, req.user.user_id, righe.map((a) => a.id)]
+    )).rows.map((x) => x.id));
     let creati = 0;
     for (const a of righe) {
+      if (!libere.has(a.id)) continue;
       const row = {
         tenant_id: req.user.tenant_id, user_id: req.user.user_id,
         client_id: m.client_id || null, project_id: m.project_id || null,
@@ -470,7 +478,7 @@ router.post('/task', async (req, res) => {
         `INSERT INTO tasks (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id`,
         cols.map((c) => data[c])
       );
-      await client.query('UPDATE rec_meeting_attivita SET task_id = $1 WHERE id::text = $2', [t.rows[0].id, a.id]);
+      await client.query('UPDATE rec_meeting_attivita SET task_id = $1 WHERE id::text = $2 AND task_id IS NULL', [t.rows[0].id, a.id]);
       creati += 1;
     }
     await client.query('COMMIT');

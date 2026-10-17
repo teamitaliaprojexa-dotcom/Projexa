@@ -420,16 +420,15 @@ function truthyFlag(v) {
 }
 
 // Determina se la riga che si sta scrivendo va cifrata:
-//   - se il payload contiene "crypto", vince quello (l'utente lo sta impostando);
+//   - un payload con crypto = 1 lo accende; crypto = 0 dal payload NON lo spegne (2026-10-17:
+//     il browser poteva salvare in chiaro dati da cifrare). Per tenere una riga in chiaro
+//     si usa SQL, dall'amministratore;
 //   - in UPDATE si legge il valore attuale della riga;
 //   - in INSERT sulle tabelle EAV (settings/clients/projects) si eredita il flag
 //     dalle righe sorelle dello stesso contenitore (argument), così i campi
 //     aggiunti dopo la migrazione seguono le altre righe del cliente/progetto;
 //   - altrimenti vale il DEFAULT della colonna crypto.
 async function resolveCryptoFlag(pool, tableName, policy, data, { id = null } = {}) {
-  const fromPayload = truthyFlag(data.crypto);
-  if (fromPayload !== null) return fromPayload;
-
   const q = (pool.rawQuery || pool.query).bind(pool);
 
   // clients/projects: decide il nome del campo (CAMPI_CIFRATI), non le righe vicine.
@@ -440,6 +439,9 @@ async function resolveCryptoFlag(pool, tableName, policy, data, { id = null } = 
     }
     if (campo != null) return campoDaCifrare(tableName, campo) ? 1 : 0;
   }
+
+  // Altre tabelle: il payload può solo accendere la cifratura.
+  if (truthyFlag(data.crypto) === 1) return 1;
 
   if (id) {
     try {
@@ -494,7 +496,8 @@ export async function encryptRowForWrite(pool, tableName, data, { id = null, dbK
     encrypted += 1;
   }
   // Se abbiamo cifrato qualcosa, la riga deve risultare marcata crypto = 1.
-  if (encrypted > 0 && truthyFlag(out.crypto) === null) out.crypto = 1;
+  // La riga resta marcata come cifrata anche se il payload chiedeva crypto = 0.
+  out.crypto = 1;
 
   return { data: out, encrypted, cryptoFlag: flag };
 }

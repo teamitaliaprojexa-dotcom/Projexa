@@ -12,8 +12,12 @@
 //       { id: "P12", elimina }    toglie il paragrafo o la tabella.
 // Stile di paragrafo (titoli, elenchi, allineamento) e carattere del primo pezzo di testo
 // restano quelli del template.
-import JSZip from 'jszip';
+import { apriZipSicuro } from './zipSicuro.js';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
+
+// Caratteri vietati in XML 1.0 (es. U+000B che Word mette per l'a capo manuale): il
+// serializzatore non li toglie e il file risultava illeggibile. 2026-10-17
+const xmlSicuro = (v) => String(v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, '').replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
 
 const NS_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 
@@ -78,7 +82,7 @@ function riempiParagrafo(p, testo, rPr) {
       if (pezzo === '') return;
       const t = doc.createElementNS(NS_W, 'w:t');
       t.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:space', 'preserve');
-      t.appendChild(doc.createTextNode(pezzo));
+      t.appendChild(doc.createTextNode(xmlSicuro(pezzo)));
       r.appendChild(t);
     });
     p.appendChild(r);
@@ -139,7 +143,8 @@ export async function leggiTemplate(buffer) {
     throw httpError(400, 'Il file non è un .docx: i vecchi file .doc vanno prima salvati come .docx da Word');
   }
   let zip;
-  try { zip = await JSZip.loadAsync(buffer); } catch { throw httpError(400, 'File .docx danneggiato o non leggibile'); }
+  // Dimensioni decompresse controllate prima di leggere (zip bomb). 2026-10-17
+  try { zip = await apriZipSicuro(buffer, { nome: 'modello .docx' }); } catch (e) { throw e.status ? e : httpError(400, 'File .docx danneggiato o non leggibile'); }
   const principale = zip.file('word/document.xml');
   if (!principale) throw httpError(400, 'Il file non è un documento Word (.docx) valido');
   const parti = [{ file: 'word/document.xml', doc: parseXml(await principale.async('string')) }];
