@@ -7219,7 +7219,9 @@ app.post('/api/mysupport/push', async (req, res) => {
     res.json(esito);
   } catch (error) {
     if (error.code === '42P01') return res.status(503).json({ error: 'Tabella api_token mancante: eseguire Supporto/CreaDB/mysupport_push.sql' });
-    console.error('[MYSUPPORT PUSH]', error);
+    // Dati non validi inviati dallo script (es. file vuoto): una riga di avviso, non un errore con stack.
+    if (error.statusCode >= 400 && error.statusCode < 500) console.warn(`[MYSUPPORT PUSH] ${error.message}`);
+    else console.error('[MYSUPPORT PUSH]', error);
     res.status(error.statusCode || 500).json({ error: error.message });
   }
 });

@@ -9855,11 +9855,16 @@
             const ids = rows.map((r) => r.dataset.eventId).filter(Boolean);
             if (!ids.length) return;
             meetingStatusBusy = true;
+            // Tempo massimo: una richiesta rimasta appesa lasciava meetingStatusBusy acceso e
+            // la griglia smetteva di aggiornarsi (pulsante Recap arancione anche a recap pronto).
+            const stop = new AbortController();
+            const timer = setTimeout(() => stop.abort(), 20000);
             try {
                 const res = await fetch(`${API_URL}/calendar/meetings/managed/status`, {
                     method: 'POST',
                     headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ids })
+                    body: JSON.stringify({ ids }),
+                    signal: stop.signal
                 });
                 if (!res.ok) return;
                 const map = (await res.json()).meetings || {};
@@ -9921,6 +9926,7 @@
             } catch (e) {
                 /* nuovo tentativo al giro successivo */
             } finally {
+                clearTimeout(timer);
                 meetingStatusBusy = false;
             }
         }
@@ -13671,8 +13677,13 @@
             const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines', progetto: 'fas fa-gauge-high', ai: 'fas fa-wand-magic-sparkles', cliente: 'fas fa-handshake', capacita: 'fas fa-people-group' };
             const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione', progetto: 'Progetto', ai: 'AI', cliente: 'Azione cliente', capacita: 'Capacità' };
             let elenco = [];
+            let ultimoConteggio = null;
 
             function mostraConteggio(n) {
+                // Notifica nuova (es. «Recap pronto»): la griglia riunioni si aggiorna subito,
+                // senza aspettare il suo giro da 15 s (prima la campanella arrivava prima del pulsante).
+                if (ultimoConteggio !== null && n > ultimoConteggio && typeof refreshMeetingStatuses === 'function') refreshMeetingStatuses();
+                ultimoConteggio = n;
                 badge.style.display = n > 0 ? '' : 'none';
                 badge.textContent = n > 99 ? '99+' : String(n);
                 btn.title = n > 0 ? `Notifiche: ${n} da leggere` : 'Notifiche';
