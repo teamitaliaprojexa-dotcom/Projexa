@@ -595,12 +595,13 @@ router.post('/reset-password', async (req, res) => {
 //
 // 1. L'utente scrive l'email nella pagina di login e clicca "Magic link": se l'email è
 //    registrata gli arriva un link a magic-link.html con un token firmato.
-// 2. Il token vale MAGIC_LINK_SECONDS secondi (60), si usa una sola volta (jti annotato
-//    alla prima verifica) ed è legato alla password attuale, come il link di reset.
+// 2. Il token vale MAGIC_LINK_SECONDS secondi (180 = 3 minuti: l'email può metterci un po'
+//    ad arrivare), si usa una sola volta (jti annotato alla prima verifica) ed è legato
+//    alla password attuale, come il link di reset.
 // 3. magic-link.html manda il token a /magic-link/verify con una POST (non un GET: i
 //    sistemi che "pre-aprono" i link nelle email non lo consumano) e riceve il token di
 //    sessione, come dopo un login normale.
-const MAGIC_LINK_SECONDS = 60;
+const MAGIC_LINK_SECONDS = 180;
 const usedMagicLinks = new Map(); // jti -> scadenza (ms): link già usati (copia in memoria)
 
 // Monouso anche dopo un riavvio del server (2026-10-17): il jti del link usato si scrive in

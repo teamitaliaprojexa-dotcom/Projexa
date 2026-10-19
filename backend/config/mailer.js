@@ -159,10 +159,20 @@ Se non hai chiesto tu l'iscrizione, ignora questa email: il tuo account e la tua
   return { html, text };
 }
 
+// Durata in parole: "3 minuti", "1 minuto", "90 secondi" (i minuti interi in minuti,
+// il resto in secondi). Usata nell'email del magic link.
+export function durataInParole(secondi) {
+  const s = Math.max(0, Math.round(Number(secondi) || 0));
+  if (s < 60 || s % 60 !== 0) return `${s} secondi`;
+  const m = s / 60;
+  return m === 1 ? '1 minuto' : `${m} minuti`;
+}
+
 // Costruisce l'email del "Magic link": accesso a Projexa senza password.
-// Il link porta a magic-link.html con un token valido pochi secondi e monouso.
-export function buildMagicLinkEmail({ nome, magicUrl, validSeconds = 60 }) {
+// Il link porta a magic-link.html con un token di breve durata e monouso.
+export function buildMagicLinkEmail({ nome, magicUrl, validSeconds = 180 }) {
   const { html: saluto, text: salutoTxt } = nomeSaluto(nome);
+  const validita = durataInParole(validSeconds);
   const html = `
   <div style="font-family:Arial,Helvetica,sans-serif; max-width:520px; margin:0 auto; color:#111827;">
     <div style="text-align:center; padding:16px 0;">
@@ -176,12 +186,12 @@ export function buildMagicLinkEmail({ nome, magicUrl, validSeconds = 60 }) {
       </div>
       <p style="font-size:13px; color:#6B7280;">Se il pulsante non funziona, copia e incolla questo link nel browser:<br>
       <a href="${magicUrl}" style="color:#059669; word-break:break-all;">${magicUrl}</a></p>
-      <p style="font-size:13px; color:#6B7280;">Il link è valido per <strong>${validSeconds} secondi</strong> e può essere usato una sola volta. Se è scaduto, richiedine uno nuovo dalla pagina di accesso.</p>
+      <p style="font-size:13px; color:#6B7280;">Il link è valido per <strong>${validita}</strong> e può essere usato una sola volta. Se è scaduto, richiedine uno nuovo dalla pagina di accesso.</p>
       <p style="font-size:13px; color:#6B7280;">Se non hai richiesto tu l'accesso, ignora questa email: nessuno può entrare senza aprire questo link.</p>
     </div>
     <p style="text-align:center; font-size:12px; color:#9CA3AF; margin-top:16px;">© Projexa</p>
   </div>`;
-  const text = `${salutoTxt}\n\nEcco il tuo link di accesso a Projexa (senza password):\n${magicUrl}\n\nIl link è valido per ${validSeconds} secondi e può essere usato una sola volta.\nSe non hai richiesto tu l'accesso, ignora questa email.`;
+  const text = `${salutoTxt}\n\nEcco il tuo link di accesso a Projexa (senza password):\n${magicUrl}\n\nIl link è valido per ${validita} e può essere usato una sola volta.\nSe non hai richiesto tu l'accesso, ignora questa email.`;
   return { html, text };
 }
 
