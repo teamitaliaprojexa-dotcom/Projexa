@@ -599,7 +599,7 @@
         }
 
         // Magic link: invia all'email scritta nel campo "Email" un link di accesso
-        // (valido 3 minuti, monouso). L'email deve essere già registrata.
+        // (valido 5 minuti, monouso). L'email deve essere già registrata.
         // "Dimenticata?": invia il link per reimpostare la password all'email scritta nel campo.
         // Risposta neutra: lo stesso messaggio sia per email registrate sia non registrate.
         async function requestPasswordReset(event) {
@@ -656,7 +656,7 @@
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
                 // Validità in parole ("3 minuti"): la durata la decide il server (MAGIC_LINK_SECONDS).
-                const sec = Number(data.validSeconds) || 180;
+                const sec = Number(data.validSeconds) || 300;
                 const validita = sec >= 60 && sec % 60 === 0 ? (sec / 60 === 1 ? '1 minuto' : `${sec / 60} minuti`) : `${sec} secondi`;
                 okDiv.textContent = `Se ${email} è registrata, riceverai a breve un link di accesso. Aprilo entro ${validita}: dopo scade.`;
                 okDiv.style.display = 'block';

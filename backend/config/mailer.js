@@ -170,7 +170,7 @@ export function durataInParole(secondi) {
 
 // Costruisce l'email del "Magic link": accesso a Projexa senza password.
 // Il link porta a magic-link.html con un token di breve durata e monouso.
-export function buildMagicLinkEmail({ nome, magicUrl, validSeconds = 180 }) {
+export function buildMagicLinkEmail({ nome, magicUrl, validSeconds = 300 }) {
   const { html: saluto, text: salutoTxt } = nomeSaluto(nome);
   const validita = durataInParole(validSeconds);
   const html = `
