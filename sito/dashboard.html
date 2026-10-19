@@ -7086,10 +7086,20 @@
         const todoAssigneeName = (t) => String(t.assigned_to || '').trim();
         let todoAssigneeSignature = '';
 
+        // Task dei clienti scelti nel filtro in alto alla dashboard (currentClientFilter contiene
+        // i NOMI dei clienti, come la colonna client_id delle task, che arriva già risolta in
+        // chiaro; array vuoto = tutti i clienti). La usano sia i filtri della lista sia le voci
+        // di "Assegnato a", così l'elenco dei nominativi segue il cliente filtrato.
+        function todoDeiClientiScelti() {
+            if (currentClientFilter.length === 0) return [...todoData];
+            return todoData.filter(t => currentClientFilter.includes(String(t.client_id || '')));
+        }
+
         function renderAssigneeFilterOptions() {
             const panel = document.getElementById('assigneeFilterPanel');
             if (!panel) return;
-            const names = [...new Set(todoData.map(todoAssigneeName).filter(Boolean))]
+            // Solo i nominativi che compaiono nelle task dei clienti filtrati.
+            const names = [...new Set(todoDeiClientiScelti().map(todoAssigneeName).filter(Boolean))]
                 .sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }));
             const signature = names.join('\u0001');
             // Scelte non più presenti tra le task: si tolgono.
@@ -7103,6 +7113,9 @@
                 divider.insertAdjacentHTML('beforebegin', options.map(o =>
                     `<label class="todo-multiselect-option"><input type="checkbox" value="${escapeHtml(o.value)}"> ${escapeHtml(o.label)}</label>`).join(''));
                 panel.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+                    // Le caselle sono nuove: si ripristinano le scelte ancora valide (cambiando
+                    // cliente l'elenco si rifà, ma un nominativo presente anche lì resta spuntato).
+                    checkbox.checked = currentAssigneeFilter.includes(checkbox.value);
                     checkbox.addEventListener('change', () => {
                         const current = new Set(currentAssigneeFilter);
                         if (checkbox.checked) current.add(checkbox.value); else current.delete(checkbox.value);
@@ -7317,12 +7330,8 @@
         }
 
         function getFilteredTodos() {
-            let filtered = [...todoData];
-
-            // Filtra per cliente
-            if (currentClientFilter.length > 0) {
-                filtered = filtered.filter(t => currentClientFilter.includes(String(t.client_id || '')));
-            }
+            // Filtra per cliente (stesso criterio delle voci di "Assegnato a")
+            let filtered = todoDeiClientiScelti();
 
             // Filtra per priorità (selezione multipla; array vuoto = tutte)
             if (currentPriorityFilter.length > 0) {
