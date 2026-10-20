@@ -238,7 +238,7 @@ function serviceUnits() {
   if (whisperCppUrls().length) units.push({ unit: 'projexa-whisper-cpp', label: 'Whisper.cpp (Background-Veloce)' });
   const assistente = whisperAssistentePorta();
   if (assistente) units.push({ unit: 'projexa-whisper-assistente', label: `Whisper.cpp (Assistente PM, ${assistente})` });
-  units.push({ unit: 'ollama', label: 'Ollama (Recap lento, Assistente PM)' });
+  units.push({ unit: 'ollama', label: 'Ollama (Projexa: recap e Assistente PM)' });
   // Backup notturno: dal 2026-10-01 è un job dello schedulatore (pagina Schedulazioni), non più un timer.
   units.push({ unit: 'projexa-monitor.timer', label: 'Controlli di salute' });
   return units;
@@ -317,7 +317,12 @@ router.get('/status', requireAuth, requireMonitorAccess, async (req, res) => {
       sampleSeconds: SAMPLE_MS / 1000,
       historyFrom: history.length ? history[0].t : null,
       series: downsample(points, 240),
-      processes: lastProcs.slice().sort((a, b) => b.rss - a.rss).slice(0, 10),
+      // I 10 più grandi per RAM, più Ollama sempre (a riposo occupa poco e restava fuori elenco).
+      processes: (() => {
+        const ordinati = lastProcs.slice().sort((a, b) => b.rss - a.rss);
+        const primi = ordinati.slice(0, 10);
+        return [...primi, ...ordinati.slice(10).filter((p) => p.name.startsWith('Ollama'))];
+      })(),
       services,
       databases,
       queue
