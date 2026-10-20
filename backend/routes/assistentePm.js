@@ -74,8 +74,16 @@ const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativel
 // chiave API e solo in modalità testo.
 const AI_SUPPORTATE = {
   gemini: { provider: 'Gemini', prefix: 'gemini', prompt: 'ASSISTENTE_PM' },
-  projexa: { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA' }
+  projexa: { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA' },
+  // Voci con il filtro scelto dall'utente (2026-10-20, per le prove): il modello che scrive è
+  // sempre pm-projexa (Qwen3 8B); cambia il filtro veloce davanti. «Projexa» = filtro del .env.
+  'projexa 3b + 8b': { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA', filtro: 'qwen2.5:3b' },
+  'projexa 4b + 8b': { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA', filtro: 'qwen3:4b-instruct' }
 };
+// Voce del campo -> chiave di AI_SUPPORTATE («Projexa 4B+8B», «projexa  4b + 8B» -> 'projexa 4b + 8b').
+const chiaveAi = (v) => String(v || '').toLowerCase().replace(/\s*\+\s*/g, ' + ').replace(/\s+/g, ' ').trim();
+// Filtro veloce della voce scelta ('' = nessun filtro, lavora solo il modello grande).
+const filtroDi = (ai) => (ai && ai.locale ? (ai.filtro || OLLAMA_PM_FILTRO_MODEL) : '');
 
 // --- Pm projexa (Ollama) ---
 const OLLAMA_PM_URL = String(process.env.ASSISTENTE_PM_OLLAMA_URL || process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
@@ -713,13 +721,14 @@ function prossimo(s) {
 // volta all'avvio (preriscaldamento), mentre la riunione comincia.
 
 // POST /api/chat; se il modello pm-projexa non esiste sulla VM si passa a quello di riserva.
-// filtro = chiamata al modello piccolo (OLLAMA_PM_FILTRO_MODEL), con le sue opzioni.
+// filtro = chiamata al modello piccolo della sessione (s.filtroModello: voce scelta o
+// OLLAMA_PM_FILTRO_MODEL), con le sue opzioni.
 async function chiamaOllama(s, messages, opzioni = {}, { filtro = false } = {}) {
   if (filtro) {
-    const r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, { model: OLLAMA_PM_FILTRO_MODEL, messages, stream: false, keep_alive: OLLAMA_PM_KEEP_ALIVE, options: OLLAMA_PM_FILTRO_OPZIONI }, OLLAMA_PM_TIMEOUT_MS, { signal: s.annulla && s.annulla.signal });
+    const r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, { model: s.filtroModello, messages, stream: false, think: false, keep_alive: OLLAMA_PM_KEEP_ALIVE, options: OLLAMA_PM_FILTRO_OPZIONI }, OLLAMA_PM_TIMEOUT_MS, { signal: s.annulla && s.annulla.signal });
     if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
     const d = r.data || {};
-    return { testo: String((d.message && d.message.content) || '').trim(), letti: Number(d.prompt_eval_count) || 0, secondi: Math.round((Number(d.total_duration) || 0) / 1e9) };
+    return { testo: senzaRagionamento(d.message && d.message.content), letti: Number(d.prompt_eval_count) || 0, secondi: Math.round((Number(d.total_duration) || 0) / 1e9) };
   }
   const corpo = () => ({ model: s.modelloOllama, messages, stream: false, think: false, keep_alive: OLLAMA_PM_KEEP_ALIVE, options: { ...OLLAMA_PM_OPZIONI, ...opzioni } });
   let r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, corpo(), OLLAMA_PM_TIMEOUT_MS, { signal: s.annulla && s.annulla.signal });
@@ -755,17 +764,17 @@ function preriscaldaOllama(s) {
     try {
       // Istruzioni (di solito già in cache da una call precedente) + contesto della riunione.
       const r = await chiamaOllama(s, [{ role: 'system', content: s.istruzioni }, s.storia[0]], { num_predict: 8 });
-      console.log(`[ASSISTENTE PM] ${s.idCalendar}: Pm projexa pronto (${s.modelloOllama}, ${r.letti} token di istruzioni letti in ${r.secondi} s)`);
+      console.log(`[ASSISTENTE PM] ${s.idCalendar}: Pm projexa pronto (${s.modelloOllama}${s.filtroModello ? ` + filtro ${s.filtroModello}` : ""}, ${r.letti} token di istruzioni letti in ${r.secondi} s)`);
       // Anche il filtro legge subito le sue istruzioni (brevi).
-      if (OLLAMA_PM_FILTRO_MODEL && s.istruzioniFiltro && !s.chiusa) {
+      if (s.filtroModello && s.istruzioniFiltro && !s.chiusa) {
         try {
           const f = await chiamaOllama(s, [{ role: 'system', content: s.istruzioniFiltro }, { role: 'user', content: 'PEZZO PRECEDENTE (solo contesto):\n(inizio riunione)\n\nPEZZO NUOVO:\nBuongiorno a tutti.' }], {}, { filtro: true });
-          console.log(`[ASSISTENTE PM] ${s.idCalendar}: filtro ${OLLAMA_PM_FILTRO_MODEL} pronto (${f.letti} token in ${f.secondi} s)`);
+          console.log(`[ASSISTENTE PM] ${s.idCalendar}: filtro ${s.filtroModello} pronto (${f.letti} token in ${f.secondi} s)`);
         } catch (e) {
-          console.warn(`[ASSISTENTE PM] ${s.idCalendar}: filtro ${OLLAMA_PM_FILTRO_MODEL} non disponibile (${e.message}): lavorerà solo il modello grande`);
+          console.warn(`[ASSISTENTE PM] ${s.idCalendar}: filtro ${s.filtroModello} non disponibile (${e.message}): lavorerà solo il modello grande`);
         }
       }
-      if (!s.chiusa) aggiungi(s, 'info', `Pm projexa pronto (istruzioni lette in ${Math.round((Date.now() - inizio) / 1000)} s): ti suggerirà domande e punti da chiarire man mano che Projexa trascrive la riunione.`);
+      if (!s.chiusa) aggiungi(s, 'info', `Pm projexa pronto (${s.filtroModello ? `filtro ${s.filtroModello} + ` : ''}${s.modelloOllama}, istruzioni lette in ${Math.round((Date.now() - inizio) / 1000)} s): ti suggerirà domande e punti da chiarire man mano che Projexa trascrive la riunione.`);
     } catch (e) {
       console.warn(`[ASSISTENTE PM] ${s.idCalendar}: preriscaldamento Pm projexa fallito (${e.message})`);
       if (!s.chiusa) aggiungi(s, 'avviso', `${erroreOllama(e)}. Riprovo al primo tratto di riunione.`);
@@ -880,7 +889,7 @@ function prossimoOllama(s) {
       // grande non lavora; il pezzo resta comunque nella conversazione come contesto. Filtro in
       // errore o risposta incomprensibile = si passa al modello grande (meglio lento che cieco).
       // Tratto che parla di una voce aperta del progetto: va direttamente al modello grande.
-      if (OLLAMA_PM_FILTRO_MODEL && s.istruzioniFiltro && trascr && !domande && !collegate.length) {
+      if (s.filtroModello && s.istruzioniFiltro && trascr && !domande && !collegate.length) {
         let esito = null;
         try {
           const f = await chiamaOllama(s, [{ role: 'system', content: s.istruzioniFiltro },
@@ -889,7 +898,7 @@ function prossimoOllama(s) {
           esito = m ? { si: !/^no$/i.test(m[1]), n: Number(m[2]) || 0, secondi: f.secondi } : null;
           if (!m) console.log(`[ASSISTENTE PM] ${s.idCalendar}: filtro, risposta non riconosciuta «${f.testo.slice(0, 40)}»: passo al modello grande`);
         } catch (e) {
-          console.warn(`[ASSISTENTE PM] ${s.idCalendar}: filtro ${OLLAMA_PM_FILTRO_MODEL} non disponibile (${e.message}): passo al modello grande`);
+          console.warn(`[ASSISTENTE PM] ${s.idCalendar}: filtro ${s.filtroModello} non disponibile (${e.message}): passo al modello grande`);
         }
         s.trattoPrec = trascr.slice(-1500);
         if (s.chiusa) return;
@@ -966,7 +975,7 @@ function chiudi(s, rimuovi = true) {
 // chiusura normale restano caricati 4 ore (OLLAMA_PM_KEEP_ALIVE) per la call successiva.
 async function scaricaModelliPm(s) {
   if ([...sessioni.values()].some((x) => x !== s && !x.chiusa && x.motore === 'projexa')) return;
-  for (const model of [s.modelloOllama, OLLAMA_PM_FILTRO_MODEL].filter(Boolean)) {
+  for (const model of [s.modelloOllama, s.filtroModello].filter(Boolean)) {
     try {
       await ollamaPost(`${OLLAMA_PM_URL}/api/generate`, { model, keep_alive: 0 }, 30000);
     } catch (e) {
@@ -998,7 +1007,7 @@ const idDa = (v) => String(v || '').trim().slice(0, 300);
 async function aiUtente(user) {
   const conf = await leggiImpostazione(user);
   if (!conf.attiva) return null;
-  const ai = AI_SUPPORTATE[conf.ai.toLowerCase()];
+  const ai = AI_SUPPORTATE[chiaveAi(conf.ai)];
   if (!ai) throw errore(400, `Assistente PM: «${conf.ai}» non è ancora supportata (per ora Gemini e Projexa)`);
   if (ai.locale) return { ai, apiKey: null }; // Ollama della VM: nessuna chiave
   const el = await getIntegration(user.user_id, ai.provider);
@@ -1062,7 +1071,7 @@ router.post('/avvia', requireAuth, async (req, res) => {
     const testoIstruzioni = await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita, ai);
     // Pm projexa: istruzioni del filtro veloce (vuote = lavora solo il modello grande).
     let istruzioniFiltro = '';
-    if (ai.locale && OLLAMA_PM_FILTRO_MODEL) {
+    if (filtroDi(ai)) {
       try { istruzioniFiltro = (await getPromptFor('PM_PROJEXA_FILTRO', req.user)).testo; } catch (e) { console.warn(`[ASSISTENTE PM] ${idCalendar}: prompt del filtro non letto (${e.message}): lavorerà solo il modello grande`); }
     }
     const vecchia = sessioni.get(k);
@@ -1088,7 +1097,7 @@ router.post('/avvia', requireAuth, async (req, res) => {
       // Pm projexa: la conversazione parte dal contesto della riunione (dopo le istruzioni fisse).
       storia: ai.locale ? [{ role: 'user', content: testoIstruzioni.contesto }, { role: 'assistant', content: 'Nessun suggerimento.' }] : [],
       giaDetti: [], timerTratto: null, errori: 0,
-      istruzioniFiltro, trattoPrec: '', filtrati: 0,
+      istruzioniFiltro, trattoPrec: '', filtrati: 0, filtroModello: filtroDi(ai),
       // Voci aperte del progetto da collegare ai tratti (solo Pm projexa) e già proposte.
       vociProgetto: ai.locale ? (testoIstruzioni.voci || []) : [], vociCitate: new Set(),
       // Voti 👍/👎: pezzo di riunione di ogni suggerimento (n -> { tratto, completo, domanda }) e voto dato.
@@ -1304,7 +1313,7 @@ router.get('/export', requireAuth, async (req, res) => {
     const children = [
       new Paragraph({ text: `Assistente PM – ${s.titolo}`, heading: HeadingLevel.TITLE }),
       new Paragraph({ spacing: { after: 240 }, children: [new TextRun({
-        text: `Riunione del ${giorno} · ${s.modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.motore === 'projexa' ? `Pm projexa (${s.modelloOllama})` : MODELLI[s.modelloIdx]}`, color: '6B7280' })] }),
+        text: `Riunione del ${giorno} · ${s.modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.motore === 'projexa' ? `Pm projexa (${s.modelloOllama}${s.filtroModello ? ` + filtro ${s.filtroModello}` : ''})` : MODELLI[s.modelloIdx]}`, color: '6B7280' })] }),
       new Paragraph({ text: 'Suggerimenti dell\'assistente', heading: HeadingLevel.HEADING_1 }),
       ...(suggerimenti.length ? suggerimenti.map((m) => riga(m, m.tipo === 'utente' ? 'Tu' : 'Assistente')) : [vuoto('Nessun suggerimento.')]),
       new Paragraph({ text: 'Trascrizione live', heading: HeadingLevel.HEADING_1, spacing: { before: 360 } }),

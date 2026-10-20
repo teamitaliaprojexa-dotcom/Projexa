@@ -289,7 +289,8 @@ const USO_MODELLO = [
   [/^recap-projexa/, 'Recap con «Projexa» (8B)'],
   [/^pm-projexa-bk-/, 'backup dell\'Assistente PM'],
   [/^pm-projexa/, 'Assistente PM (Pm projexa, 8B)'],
-  [/^qwen2\.5:3b/, 'filtro veloce dell\'Assistente PM'],
+  [/^qwen2\.5:3b/, 'filtro veloce dell\'Assistente PM («Projexa 3B + 8B»)'],
+  [/^qwen3:4b-instruct/, 'filtro veloce dell\'Assistente PM («Projexa 4B + 8B»)'],
   [/^qwen3:14b/, 'base del 14B: «Projexa 14B» di Dossier, funzioni PM, email; associazioni'],
   [/^qwen3:8b/, 'base dell\'8B: recap, Assistente PM; «Projexa» di Dossier, funzioni PM, email'],
   [/^qwen2\.5:7b/, 'vecchia base 7B: la usano i backup *-bk-20261020-2300 (eliminarla solo dopo averli tolti)']
