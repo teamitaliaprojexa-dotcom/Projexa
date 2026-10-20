@@ -1427,7 +1427,8 @@ router.get('/meetings/managed/recap-opzioni', requireAuth, async (req, res) => {
       ai, chiediAi, esecuzione, chiediEsecuzione: esecuzione === 'chiedi',
       aiDisponibili: chiediAi
         ? [...(await aiCollegate(req.user.user_id)).map((x) => ({ nome: x.nome, label: x.label, batch: true })),
-          { nome: 'Projexa', label: 'Projexa (gratuito)', batch: false }]
+          { nome: 'Projexa', label: 'Projexa (gratuito)', batch: false },
+          { nome: 'Projexa 14B', label: 'Projexa 14B (gratuito, più preciso ma più lento)', batch: false }]
         : []
     });
   } catch (error) {

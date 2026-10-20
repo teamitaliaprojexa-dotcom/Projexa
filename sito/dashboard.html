@@ -9617,7 +9617,7 @@
                 const esRadio = () => modal.querySelector('input[name="recapChoiceEs"]:checked');
                 // Il Batch serve solo alle AI con chiave: con Projexa (gratuito) non si chiede.
                 const aggiorna = () => {
-                    const scelta = opz.chiediAi ? lista.find((a) => a.nome === aiSel.value) : { batch: !/^(projexa|recap projexa \(lento\))$/i.test(opz.ai || '') };
+                    const scelta = opz.chiediAi ? lista.find((a) => a.nome === aiSel.value) : { batch: !/^(projexa( 14b)?|recap projexa \(lento\))$/i.test(opz.ai || '') };
                     const conBatch = !!(scelta && scelta.batch);
                     esRow.style.display = opz.chiediEsecuzione && conBatch ? '' : 'none';
                     esNote.style.display = opz.chiediEsecuzione && !conBatch ? '' : 'none';

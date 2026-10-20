@@ -93,7 +93,7 @@ export async function avviaAutomazioneAi(user, idCalendar) {
     return false;
   }
   const locale = localRecapMode(ai) === 'server';
-  const labelAi = locale ? 'Projexa' : etichettaAi(ai);
+  const labelAi = locale ? (/14\s*b/i.test(ai) ? 'Projexa 14B' : 'Projexa') : etichettaAi(ai);
   console.log(`[AI AUTOMATIZZA] ${idCalendar}: ${[...f].map((k) => ETICHETTE[k]).join(', ')} con ${labelAi}`);
 
   // 1) Recap per il cliente

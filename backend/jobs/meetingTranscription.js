@@ -31,6 +31,11 @@ import { contestoAudit } from '../config/auditContext.js';
 import { notificaRiunione } from './notifiche.js';
 import { getIntegration } from '../config/integrations.js';
 import { transcribeAudio, transcribeAudioCpp, transcribeAudioGemini, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate } from '../routes/ai.js';
+import { segnaRegistrazione, segnaTrascrizione } from '../config/ollamaPrecedenza.js';
+
+// Registrazione considerata in corso fino a questo tempo dall'ultimo pezzo audio arrivato (se la
+// fine non arriva, es. pagina chiusa): intanto i recap con «Projexa» aspettano (precedenza).
+const REGISTRAZIONE_TTL_MS = 10 * 60000;
 
 export const NOME_PROGRAMMA = 'meetingTranscription';
 
@@ -661,7 +666,7 @@ export async function generateRecap(user, idCalendar, { origine = null, ai = nul
   try {
     result = local === 'server'
       ? await askOllamaRecap((text) => buildRecapPrompt(user, { ...vars, TRASCRIZIONE: text }), transcript,
-        { meeting: true, contesto: vars.OGGETTO })
+        { meeting: true, contesto: vars.OGGETTO, ai: providerName })
       : await askAiProvider(user.user_id, providerName, await buildRecapPrompt(user, { ...vars, TRASCRIZIONE: transcript }));
   } finally {
     recapRunning.delete(key);
@@ -734,6 +739,8 @@ export async function enqueueChunk(user, idCalendar, { mixB64, energy, micB64, s
       mixB64 ? encRec(mixB64) : null, energy ? JSON.stringify(energy) : null,
       micB64 ? encRec(micB64) : null, sysB64 ? encRec(sysB64) : null]
   );
+  // Registrazione in corso: la trascrizione ha la precedenza sui recap con «Projexa».
+  segnaRegistrazione(recapKey(user, idCalendar), true, REGISTRAZIONE_TTL_MS);
   kickTranscriptionWorker();
   return r.rows[0].id;
 }
@@ -766,6 +773,8 @@ export async function enqueueFinalize(user, idCalendar, { ai = null } = {}) {
      VALUES ($1, $2, $3, $4, 'finalize'${ai ? ', $5' : ''})`,
     params
   );
+  // Fine della registrazione: restano solo i pezzi ancora da trascrivere (segnati dal worker).
+  segnaRegistrazione(recapKey(user, idCalendar), false);
   kickTranscriptionWorker();
 }
 
@@ -1224,7 +1233,9 @@ async function runWorker() {
         const start = (jobs, free) => jobs.forEach((job, i) => {
           const url = free[i];
           busyUrls.add(url);
-          const p = processAudioJob(job, url).finally(() => { busyUrls.delete(url); inflight.delete(job.id); });
+          // Whisper sulla CPU della VM: precedenza sui recap con «Projexa» (la corsia Gemini no).
+          segnaTrascrizione(job.id, true);
+          const p = processAudioJob(job, url).finally(() => { busyUrls.delete(url); inflight.delete(job.id); segnaTrascrizione(job.id, false); });
           inflight.set(job.id, p);
         });
         // Background-Veloce: i blocchi di chi l'ha scelto vanno a whisper.cpp. Se whisper.cpp

@@ -1,0 +1,22 @@
+# Modello «recap-projexa-14b» (2026-10-20): voce «Projexa 14B» del campo "AI generazione
+# e-mail recap", per confrontarlo con recap-projexa (7B) su riunioni vere e poi scegliere.
+# Stesse istruzioni (prompt RECAP_PROJEXA, mandato dal server) e stesso contesto fisso di 16384
+# token. Circa il doppio del tempo del 7B e ~9 GB di RAM (più ~3 GB per il contesto) mentre
+# lavora: parte solo quando la VM è libera (niente Assistente PM, registrazioni o trascrizioni,
+# config/ollamaPrecedenza.js) e con OLLAMA_MAX_LOADED_MODELS=2 prende il posto degli altri.
+# L'addestramento su Colab gratuito NON è previsto per il 14B (la GPU T4 non basta con testi
+# lunghi): se vince il 14B, si usa senza addestramento.
+#
+# Creazione sulla VM (una volta):
+#   ollama pull qwen2.5:14b
+#   ollama create recap-projexa-14b -f /tmp/recap-projexa-14b.Modelfile
+# Per toglierlo dopo le prove:
+#   ollama rm recap-projexa-14b && ollama rm qwen2.5:14b
+FROM qwen2.5:14b
+
+PARAMETER num_ctx 16384
+PARAMETER temperature 0.3
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
+
+SYSTEM """Sei «Recap projexa», l'assistente che scrive gli appunti e i recap delle riunioni di progetti HR TeamSystem. Scrivi in italiano, in testo semplice, usando solo ciò che è detto nella riunione."""

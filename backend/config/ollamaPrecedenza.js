@@ -1,41 +1,66 @@
 // ============================================================================
-// PRECEDENZA DELL'ASSISTENTE PM SU OLLAMA DELLA VM (2026-10-20)
+// PRECEDENZE SULLA CPU DELLA VM (2026-10-20)
 // ----------------------------------------------------------------------------
-// Sulla VM Ollama tiene in memoria al massimo 2 modelli (OLLAMA_MAX_LOADED_MODELS=2: pm-projexa
-// e il filtro 3B dell'Assistente PM) e lavora una richiesta alla volta. I recap con «Projexa»
-// (recap-projexa) possono aspettare qualche minuto, l'Assistente PM durante una call no:
-//   - un recap non parte finché c'è una sessione Pm projexa aperta (attendiPmLibero);
-//   - se una sessione si apre mentre un recap è in corso, la richiesta del recap si interrompe
-//     (suAvvioPm) e il recap riprende dallo stesso pezzo a call finita.
-// Modulo senza dipendenze: lo usano routes/assistentePm.js (segna) e routes/ai.js (aspetta).
+// La VM ha pochi core: meglio una cosa alla volta a piena potenza che tre insieme a rilento.
+// Ordine (scelta dell'utente): Assistente PM (Pm projexa) > trascrizione delle riunioni > recap
+// con «Projexa» (recap-projexa): il recap può aspettare qualche minuto, le altre due no.
+//   - un recap non parte finché c'è una sessione Pm projexa aperta, una registrazione in corso
+//     o un pezzo audio in trascrizione con Whisper (attendiVmLibera);
+//   - se una di queste parte mentre un recap lavora, la richiesta del recap si interrompe
+//     (suPrecedenza) e il recap riprende dallo stesso pezzo appena la VM è libera.
+// Modulo senza dipendenze: lo usano routes/assistentePm.js e jobs/meetingTranscription.js
+// (segnano le attività) e routes/ai.js (aspetta).
 // ============================================================================
 
-const attive = new Set();      // chiavi delle sessioni Pm projexa aperte
-const ascoltatori = new Set(); // funzioni chiamate all'apertura di una sessione
+const attive = new Map();      // chiave -> scadenza (ms; Infinity = finché non si toglie)
+const ascoltatori = new Set(); // funzioni chiamate quando parte un'attività con precedenza
 
-export function segnaPmProjexa(chiave, aperta) {
-  if (!aperta) { attive.delete(chiave); return; }
-  if (attive.has(chiave)) return;
-  attive.add(chiave);
+function pulisci() {
+  const ora = Date.now();
+  for (const [k, fino] of attive) if (fino <= ora) attive.delete(k);
+}
+
+// Attività con precedenza sul recap. ttlMs: si considera finita da sola dopo questo tempo senza
+// rinnovi (es. registrazione chiusa male). Avvisa gli ascoltatori solo quando è NUOVA.
+function segna(chiave, attiva, ttlMs = Infinity) {
+  pulisci();
+  if (!attiva) { attive.delete(chiave); return; }
+  const nuova = !attive.has(chiave);
+  attive.set(chiave, ttlMs === Infinity ? Infinity : Date.now() + ttlMs);
+  if (!nuova) return;
   for (const fn of ascoltatori) {
-    try { fn(); } catch { /* l'ascoltatore gestisce da sé i suoi errori */ }
+    try { fn(chiave); } catch { /* l'ascoltatore gestisce da sé i suoi errori */ }
   }
 }
 
-export const pmProjexaInCorso = () => attive.size > 0;
+// Sessione dell'Assistente PM con Pm projexa (routes/assistentePm.js).
+export const segnaPmProjexa = (chiave, aperta) => segna(`pm:${chiave}`, aperta);
+export const pmProjexaInCorso = () => { pulisci(); return [...attive.keys()].some((k) => k.startsWith('pm:')); };
 
-// Registra fn, chiamata quando si apre una sessione Pm projexa. Restituisce la funzione per toglierla.
-export function suAvvioPm(fn) {
+// Registrazione in corso (un pezzo audio arrivato da poco, finché non arriva la fine) e pezzi in
+// trascrizione con Whisper (jobs/meetingTranscription.js).
+export const segnaRegistrazione = (chiave, attiva, ttlMs) => segna(`reg:${chiave}`, attiva, ttlMs);
+export const segnaTrascrizione = (chiave, attiva) => segna(`whisper:${chiave}`, attiva, 30 * 60000);
+
+export const vmOccupata = () => { pulisci(); return attive.size > 0; };
+const descrizione = () => {
+  const k = [...attive.keys()];
+  return [k.some((x) => x.startsWith('pm:')) && 'Assistente PM', k.some((x) => x.startsWith('reg:')) && 'registrazione in corso',
+    k.some((x) => x.startsWith('whisper:')) && 'trascrizione'].filter(Boolean).join(', ');
+};
+
+// Registra fn, chiamata quando parte un'attività con precedenza. Restituisce la funzione per toglierla.
+export function suPrecedenza(fn) {
   ascoltatori.add(fn);
   return () => ascoltatori.delete(fn);
 }
 
-// Aspetta che non ci siano sessioni Pm projexa aperte (al massimo maxMs: una sessione
-// dimenticata aperta si chiude da sola dopo 4 ore di inattività). true = VM libera.
-export async function attendiPmLibero({ maxMs = 5 * 3600000, ogniMs = 30000, avviso = null } = {}) {
-  if (!attive.size) return true;
-  if (avviso) avviso();
+// Aspetta che la VM sia libera (al massimo maxMs: le attività dimenticate scadono da sole).
+// avviso(motivo) si chiama una volta, se c'è da aspettare. true = VM libera.
+export async function attendiVmLibera({ maxMs = 6 * 3600000, ogniMs = 15000, avviso = null } = {}) {
+  if (!vmOccupata()) return true;
+  if (avviso) avviso(descrizione());
   const fine = Date.now() + maxMs;
-  while (attive.size && Date.now() < fine) await new Promise((r) => setTimeout(r, ogniMs));
-  return !attive.size;
+  while (vmOccupata() && Date.now() < fine) await new Promise((r) => setTimeout(r, ogniMs));
+  return !vmOccupata();
 }

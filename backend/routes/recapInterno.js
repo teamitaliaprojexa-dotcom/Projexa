@@ -176,7 +176,7 @@ export async function prepara(user, idCalendar) {
 async function genera(user, idCalendar, providerName) {
   const p = await prepara(user, idCalendar);
   const r = localRecapMode(providerName) === 'server'
-    ? await askOllamaRecap(async (t) => p.build(t), p.transcript, { meeting: true, contesto: p.vars.OGGETTO })
+    ? await askOllamaRecap(async (t) => p.build(t), p.transcript, { meeting: true, contesto: p.vars.OGGETTO, ai: providerName })
     : await askAiProvider(user.user_id, providerName, p.build(p.transcript));
   await salvaInterno(user, idCalendar, p, r.text, r.label);
 }
