@@ -358,7 +358,7 @@
                     <div class="card">
                         <h2 style="margin-bottom: 0.5rem;">Processi (per RAM)</h2>
                         <table><thead><tr><th>Processo</th><th class="num">RAM</th><th class="num">CPU</th></tr></thead><tbody id="vm-procBody"></tbody></table>
-                        <div class="chart-sub" style="margin-top: 0.5rem;">CPU degli ultimi 15 s, su un core (100% = un core pieno, la VM ne ha <span id="vmCoresNota">4</span>).</div>
+                        <div class="chart-sub" style="margin-top: 0.5rem;">CPU degli ultimi 15 s, su un core (100% = un core pieno, la VM ne ha <span id="vm-coresNota">4</span>).</div>
                     </div>
                     <div class="card">
                         <h2 style="margin-bottom: 0.5rem;">Servizi</h2>
@@ -763,7 +763,7 @@
 
             function render(d) {
                 $('hostInfo').textContent = `${d.host} · ${d.cpus} core · acceso da ${duration(d.uptime)}`;
-                if (d.cpus) $('vmCoresNota').textContent = d.cpus;
+                if (d.cpus && $('coresNota')) $('coresNota').textContent = d.cpus;
                 const m = d.memory; const used = m.total - m.available;
                 const disk = d.disk;
                 $('tiles').innerHTML = [
