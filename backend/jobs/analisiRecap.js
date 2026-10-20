@@ -13,7 +13,8 @@
 // il file di addestramento di recap-projexa (Colab, poi installazione sulla VM).
 //   - Gemini: richieste immediate, al massimo RICHIESTE_GIRO per giro (piano gratuito);
 //   - ChatGPT: solo Batch (metà prezzo), una richiesta per fase, raccolta ai giri successivi.
-// Finita l'analisi il segno sulla riunione si toglie.
+// Finita l'analisi il segno sulla riunione si toglie. A fine giro, dai testi corretti nella
+// pagina, l'AI può proporre una revisione dei prompt RECAP_EMAIL/RECAP_INTERNO (revisionePrompt.js).
 // ============================================================================
 import db from '../config/database.js';
 import { encryptRowForWrite } from '../config/crypto.js';
@@ -232,6 +233,12 @@ export async function eseguiAnalisiRecap() {
     }
   }
 
-  const riepilogo = `nuove ${report.nuove}, richieste Gemini ${report.gemini}, Batch inviati ${report.batchInviati}, raccolti ${report.batchRaccolti}, completate ${report.completate}${report.errori.length ? `, errori ${report.errori.length}` : ''}`;
+  // Proposte di revisione dei prompt dai recap corretti nella pagina (jobs/revisionePrompt.js).
+  const { eseguiRevisioni } = await import('./revisionePrompt.js');
+  const rev = await eseguiRevisioni();
+  report.proposte = rev.proposte;
+  report.errori.push(...rev.errori.map((x) => `revisione prompt: ${x}`));
+
+  const riepilogo = `nuove ${report.nuove}, richieste Gemini ${report.gemini}, Batch inviati ${report.batchInviati}, raccolti ${report.batchRaccolti}, completate ${report.completate}, proposte prompt ${report.proposte}${report.errori.length ? `, errori ${report.errori.length}` : ''}`;
   return { ok: !report.errori.length, riepilogo, ...report };
 }

@@ -291,7 +291,10 @@ const TABLE_COLUMN_ALLOWLIST = {
   pm_analisi: new Set(['tratto', 'suggerimento', 'testo_corretto']),
   // Analisi Recap notturna (analisi_recap.sql): compito dato al modello, risposta dell'AI
   // insegnante e testo corretto; tipo, pezzo, esito in chiaro.
-  recap_analisi: new Set(['ingresso', 'risposta', 'testo_corretto'])
+  recap_analisi: new Set(['ingresso', 'risposta', 'testo_corretto']),
+  // Proposte di revisione dei prompt del recap (revisione_prompt.sql): motivo e modifiche
+  // possono citare le riunioni; i testi dei prompt restano in chiaro come in app_prompts.
+  prompt_proposte: new Set(['motivazione', 'modifiche'])
 };
 
 // ----------------------------------------------------------------------------

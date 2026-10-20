@@ -19,6 +19,8 @@ export const RECAP_TASK_OWNER_LABELS = [
 
 const MONTHS = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio',
   'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+// Inizio dei nomi dei giorni, nell'ordine di getUTCDay() (0 = domenica).
+const WEEKDAYS = ['domenica', 'luned', 'marted', 'mercoled', 'gioved', 'venerd', 'sabato'];
 
 const norm = (s) => String(s || '')
   .toLowerCase()
@@ -58,11 +60,19 @@ const CLOSING = /^(resto a disposizione|un saluto|cordiali saluti|saluti|grazie|
 // Intestazione "breve" scritta come voce d'elenco ("- Yanko Dacco'"): poche parole, niente
 // punto finale, niente date/cifre.
 const looksLikeHeader = (t) => t.split(/\s+/).length <= 6 && !/[.;]\s*$/.test(t) && !/\d/.test(t);
+// Sezione delle azioni del CLIENTE (recap cliente dal 2026-10-09).
+const SEZIONE_CLIENTE = /^\s*(?:\d+[.)]\s*)?azioni\s+(?:in|a)\s+carico\s+(?:al|del|dei)\s+client[ei]\b/i;
+// Altre parti del recap cliente (prompt RECAP_EMAIL dal 2026-10-20): non sono azioni da leggere.
+// «PROSSIMI PASSI TEAMSYSTEM» contiene «teamsystem» e sembrerebbe un blocco dell'utente.
+const ALTRE_SEZIONI = /^\s*(?:\d+[.)]\s*)?(?:punti\s+aperti|prossimi\s+passi|prossimo\s+incontro)\b/i;
 
 // Righe d'azione dell'utente: [{ description }] nell'ordine del recap.
+// Si leggono solo le sezioni «AZIONI IN CARICO» che NON sono del cliente (recap di prima del
+// 2026-10-09, con i compiti del team): dal recap cliente attuale non esce nessun task del team,
+// le azioni del cliente le legge parseAzioniCliente.
 export function parseRecapActions(recap, variants) {
   const lines = String(recap || '').replace(/\r\n?/g, '\n').split('\n');
-  const start = lines.findIndex((l) => /^\s*(?:\d+[.)]\s*)?azioni\s+in\s+carico\b/i.test(norm(l)));
+  const start = lines.findIndex((l) => /^\s*(?:\d+[.)]\s*)?azioni\s+in\s+carico\b/i.test(norm(l)) && !SEZIONE_CLIENTE.test(norm(l)));
   if (start < 0) return [];
   const items = [];
   let mine = false;
@@ -73,6 +83,8 @@ export function parseRecapActions(recap, variants) {
     const text = raw.trim();
     if (!text || /^[—–\-_=]{3,}$/.test(text)) { prevBlank = true; continue; }
     if (CLOSING.test(text)) break;
+    // Azioni del cliente o un'altra parte del recap: le azioni del team sono finite.
+    if (SEZIONE_CLIENTE.test(norm(text)) || ALTRE_SEZIONI.test(norm(text))) break;
     const b = BULLET.exec(raw);
     if (!b) {
       // Riga normale: intestazione di un nuovo blocco (di qualcuno).
@@ -109,7 +121,6 @@ export function parseRecapActions(recap, variants) {
 // blocco è del cliente: l'intestazione è il referente. Le sezioni «AZIONI IN CARICO» senza
 // «cliente» non si leggono (possono contenere i compiti del team).
 //   -> [{ referente, description }] nell'ordine del recap.
-const SEZIONE_CLIENTE = /^\s*(?:\d+[.)]\s*)?azioni\s+(?:in|a)\s+carico\s+(?:al|del|dei)\s+client[ei]\b/i;
 export function parseAzioniCliente(recap) {
   const lines = String(recap || '').replace(/\r\n?/g, '\n').split('\n');
   const start = lines.findIndex((l) => SEZIONE_CLIENTE.test(norm(l)));
@@ -123,8 +134,9 @@ export function parseAzioniCliente(recap) {
     const text = raw.trim();
     if (!text || /^[—–\-_=]{3,}$/.test(text)) { prevBlank = true; continue; }
     if (CLOSING.test(text)) break;
-    // Un'altra sezione «AZIONI IN CARICO …» (es. del team) dopo quella del cliente: fine.
-    if (/^\s*(?:\d+[.)]\s*)?azioni\s+(?:in|a)\s+carico\b/i.test(norm(text))) break;
+    // Un'altra sezione «AZIONI IN CARICO …» (es. del team) dopo quella del cliente, o punti
+    // aperti / prossimi passi TeamSystem / prossimo incontro scritti dopo dall'AI: fine.
+    if (/^\s*(?:\d+[.)]\s*)?azioni\s+(?:in|a)\s+carico\b/i.test(norm(text)) || ALTRE_SEZIONI.test(norm(text))) break;
     const b = BULLET.exec(raw);
     if (!b) {
       referente = text.replace(/[\[\]*_]/g, '').replace(/\s*:\s*$/, '').trim() || null;
@@ -183,9 +195,21 @@ export function parseDueDate(text, callDate) {
   }
   const yearEnd = /(fine\s+(?:dell['’]\s*)?anno|entro\s+l['’]\s*anno|entro\s+fine\s+anno)/gi;
   for (let m = yearEnd.exec(s); m; m = yearEnd.exec(s)) found.push({ at: m.index, d: 31, mo: 12, y: null });
+  // Giorno della settimana ("entro venerdì") = il primo successivo alla call; "domani",
+  // "dopodomani" dalla data della call (2026-10-20: prima si perdevano).
+  const giorno = (n) => { const d = new Date(`${call}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const weekday = /(?<!\p{L})(domenica|luned[iìí]|marted[iìí]|mercoled[iìí]|gioved[iìí]|venerd[iìí]|sabato)(?!\p{L})/giu;
+  for (let m = weekday.exec(s); m; m = weekday.exec(s)) {
+    const wd = WEEKDAYS.findIndex((w) => m[1].toLowerCase().startsWith(w));
+    const diff = ((wd - new Date(`${call}T12:00:00Z`).getUTCDay()) + 7) % 7 || 7;
+    found.push({ at: m.index, fisso: giorno(diff) });
+  }
+  const tomorrow = /(?<!\p{L})(dopo)?domani(?!\p{L})/giu;
+  for (let m = tomorrow.exec(s); m; m = tomorrow.exec(s)) found.push({ at: m.index, fisso: giorno(m[1] ? 2 : 1) });
   if (!found.length) return null;
 
   const last = found.sort((a, b) => a.at - b.at)[found.length - 1];
+  if (last.fisso) return last.fisso;
   const resolve = (y) => {
     const day = last.d === 0 ? new Date(Date.UTC(y, last.mo, 0)).getUTCDate() : last.d;
     return validDay(y, last.mo, day) ? iso(y, last.mo, day) : null;

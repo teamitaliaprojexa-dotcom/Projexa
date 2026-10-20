@@ -22,6 +22,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { encryptRowForWrite } from '../config/crypto.js';
 import { analisiPmAbilitata, pezzi, aiScelta, AI_AMMESSE, FORMATO_RE } from '../jobs/analisiPm.js';
 import { TIPI as TIPI_RECAP } from '../jobs/analisiRecap.js';
+import { proponiRevisione, applicaProposta } from '../jobs/revisionePrompt.js';
 import { istruzioniRecapProjexa } from './ai.js';
 import { pmProjexaInCorso } from '../config/ollamaPrecedenza.js';
 
@@ -352,6 +353,49 @@ router.get('/recap/notebook', (req, res) => {
   res.setHeader('Content-Type', 'application/x-ipynb+json; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="addestra_recap_projexa.ipynb"');
   fs.createReadStream(NOTEBOOK_RECAP).on('error', (e) => rispondiErrore(res, e, 'notebook')).pipe(res);
+});
+
+// --- Proposte di revisione dei prompt del recap (jobs/revisionePrompt.js) --------------------
+// Nate di notte (o con «Proponi ora») dai recap corretti qui; si applicano o si scartano.
+router.get('/recap/proposte', async (req, res) => {
+  try {
+    const r = await db.query(
+      `SELECT id, funzione, testo_attuale, testo_proposto, motivazione, modifiche, esempi, ai, stato, created_at, decisa_il
+         FROM prompt_proposte WHERE tenant_id = $1 AND user_id = $2
+        ORDER BY (stato = 'proposta') DESC, created_at DESC LIMIT 20`, chi(req));
+    const disponibili = (await db.query(
+      `SELECT tipo, count(*)::int AS n FROM recap_analisi
+        WHERE tenant_id = $1 AND user_id = $2 AND tipo IN ('recap', 'interno') AND usata_revisione IS NULL
+          AND (esito = 'errata' OR (esito = 'corretta' AND testo_corretto IS NOT NULL)) GROUP BY tipo`, chi(req))).rows;
+    res.json({ proposte: r.rows, disponibili: Object.fromEntries(disponibili.map((x) => [x.tipo, x.n])) });
+  } catch (e) { rispondiErroreRecap(res, e, 'proposte'); }
+});
+
+// Proposta subito, senza aspettare la notte (anche con meno di 3 testi rivisti). Body: { tipo }.
+router.post('/recap/proposte/genera', async (req, res) => {
+  try {
+    const r = await proponiRevisione(req.user, String((req.body || {}).tipo || ''), { forza: true });
+    res.json(r);
+  } catch (e) { rispondiErroreRecap(res, e, 'proposta'); }
+});
+
+// Applica: body { testo } (vuoto = testo proposto). Copia del prompt in uso, poi salvataggio.
+router.post('/recap/proposte/:id/applica', async (req, res) => {
+  try {
+    if (!UUID.test(req.params.id)) throw errore(400, 'Id non valido');
+    res.json({ ok: true, ...(await applicaProposta(req.user, req.params.id, String((req.body || {}).testo || ''), req.user.email)) });
+  } catch (e) { rispondiErroreRecap(res, e, 'applica proposta'); }
+});
+
+router.post('/recap/proposte/:id/scarta', async (req, res) => {
+  try {
+    if (!UUID.test(req.params.id)) throw errore(400, 'Id non valido');
+    const r = await db.query(
+      `UPDATE prompt_proposte SET stato = 'scartata', decisa_il = now() WHERE id = $3 AND tenant_id = $1 AND user_id = $2 AND stato = 'proposta'`,
+      [...chi(req), req.params.id]);
+    if (!r.rowCount) throw errore(404, 'Proposta non trovata o già decisa');
+    res.json({ ok: true });
+  } catch (e) { rispondiErroreRecap(res, e, 'scarta proposta'); }
 });
 
 // --- Modelli su Ollama della VM -------------------------------------------------------------

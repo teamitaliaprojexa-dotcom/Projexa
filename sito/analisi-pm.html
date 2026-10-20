@@ -49,6 +49,11 @@
         .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 0.5rem; } .bar > div { height: 100%; background: var(--primary); width: 0; }
         .hidden { display: none !important; }
         .rc textarea { width: 100%; min-height: 160px; font: inherit; font-size: 0.85rem; padding: 0.6rem; border: 1px solid var(--line); border-radius: 8px; margin-top: 0.4rem; }
+        .prop .colonne { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-top: 0.5rem; }
+        .prop textarea { width: 100%; min-height: 320px; font: inherit; font-size: 0.8rem; padding: 0.6rem; border: 1px solid var(--line); border-radius: 8px; }
+        .prop textarea[readonly] { background: #F9FAFB; color: #4B5563; }
+        .prop ul { margin: 0.4rem 0 0 1.2rem; font-size: 0.86rem; }
+        @media (max-width: 760px) { .prop .colonne { grid-template-columns: 1fr; } }
         .rc details summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; margin-top: 0.4rem; }
         @media (max-width: 760px) { .editor.open { grid-template-columns: 1fr; } }
     </style>
@@ -180,6 +185,16 @@
             <p class="muted" style="margin-top:0.6rem">Correggi il testo direttamente nel riquadro e premi <b>Corretta</b>: si salva la tua versione. Sul recap per il cliente puoi usare <b>Usa il recap salvato</b> per partire da quello che hai davvero inviato. Gli appunti contano quanto i recap: se mancano argomenti o le azioni hanno la persona sbagliata, correggili.</p>
         </div>
         <div id="rRisposte"></div>
+        <div class="card">
+            <h2>Proposte di modifica dei prompt</h2>
+            <p class="muted">Dai recap che correggi (o segni come errati) l'AI capisce dove il prompt guida male e, a fine giro notturno, propone un testo nuovo per il <b>Recap per il cliente</b> o il <b>Recap interno</b> (servono almeno 3 testi rivisti non ancora usati). Niente cambia da solo: confronta, ritocca se vuoi e premi <b>Applica</b>; il testo in uso viene prima salvato in una copia. Per i recap con il testo uguale a quello dell'AI non c'è nulla da imparare: contano quelli corretti o errati.</p>
+            <div class="riga" style="margin-top:0.6rem">
+                <button class="btn" data-genera="recap"><i class="fas fa-wand-magic-sparkles"></i> Proponi ora: recap cliente</button>
+                <button class="btn" data-genera="interno"><i class="fas fa-wand-magic-sparkles"></i> Proponi ora: recap interno</button>
+                <span id="pDisponibili" class="muted"></span>
+            </div>
+            <div id="proposte" style="margin-top:0.8rem"></div>
+        </div>
         <div class="card">
             <h2>Addestramento con Google Colab (gratuito)</h2>
             <p class="muted">Consigliato con almeno 30-50 risposte corrette, tra appunti e recap. Stessa procedura dell'Assistente PM: scarica i due file, in Colab scegli <b>GPU T4</b>, carica il notebook, <b>Esegui tutto</b> e carica il .jsonl quando lo chiede. Alla fine si scarica <code>recap-projexa-adapter.gguf</code>: caricalo nella scheda <b>Modello sulla VM</b> scegliendo <b>recap-projexa</b>.</p>
@@ -435,6 +450,7 @@
             $('rRiunione').innerHTML = '<option value="">Tutte le riunioni</option>' + d.riunioni.filter((r) => r.risposte).map((r) => `<option value="${esc(r.id_calendar)}">${dataIt(r.data)} · ${esc(r.oggetto || '')} (${r.da_valutare} da valutare)</option>`).join('');
             $('rRiunione').value = prima;
             caricaRisposte();
+            caricaProposte();
         } catch (e) { errore(e); }
     }
     async function caricaRisposte() {
@@ -488,6 +504,62 @@
             disegnaRisposte();
         } catch (err) { errore(err); }
     };
+    // --- Proposte di modifica dei prompt (jobs/revisionePrompt.js) ---
+    let proposte = [];
+    const NOME_PROMPT = { RECAP_EMAIL: 'Recap per il cliente', RECAP_INTERNO: 'Recap interno' };
+    async function caricaProposte() {
+        try {
+            const d = await api('GET', '/recap/proposte');
+            proposte = d.proposte;
+            const n = d.disponibili || {};
+            $('pDisponibili').textContent = `Testi rivisti non ancora usati: recap cliente ${n.recap || 0}, recap interno ${n.interno || 0}`;
+            $('proposte').innerHTML = proposte.map((p) => `<div class="dom prop ${p.stato === 'applicata' ? 'corretta' : p.stato === 'scartata' ? 'errata' : ''}" data-id="${p.id}">
+                <div class="riga" style="justify-content:space-between">
+                    <b>${NOME_PROMPT[p.funzione] || esc(p.funzione)}</b>
+                    <span class="muted">${dataOra(p.created_at)} · ${esc(p.ai || '')} · ${p.esempi} testi rivisti
+                    ${p.stato === 'proposta' ? '<span class="badge b-run">da valutare</span>' : p.stato === 'applicata' ? `<span class="badge b-ok">applicata ${dataIt(p.decisa_il)}</span>` : '<span class="badge b-bad">scartata</span>'}</span>
+                </div>
+                ${p.motivazione ? `<p style="margin-top:0.5rem">${esc(p.motivazione)}</p>` : ''}
+                ${p.modifiche ? `<ul>${String(p.modifiche).split('\n').filter(Boolean).map((m) => `<li>${esc(m)}</li>`).join('')}</ul>` : ''}
+                ${p.stato === 'proposta' ? `<div class="colonne">
+                    <div><div class="muted">Testo in uso</div><textarea readonly>${esc(p.testo_attuale)}</textarea></div>
+                    <div><div class="muted">Testo proposto (puoi modificarlo prima di applicarlo)</div><textarea data-proposto>${esc(p.testo_proposto)}</textarea></div>
+                </div>
+                <div class="riga" style="margin-top:0.6rem">
+                    <button class="btn pri" data-pz="applica"><i class="fas fa-check"></i> Applica</button>
+                    <button class="btn ko" data-pz="scarta"><i class="fas fa-xmark"></i> Scarta</button>
+                </div>` : ''}
+            </div>`).join('') || '<div class="muted">Nessuna proposta per ora.</div>';
+        } catch (e) { $('proposte').innerHTML = `<div class="muted">${esc(e.message)}</div>`; }
+    }
+    document.querySelectorAll('[data-genera]').forEach((b) => {
+        b.onclick = async () => {
+            b.disabled = true;
+            avviso('Sto chiedendo la proposta all\'AI (può richiedere un minuto)…');
+            try { const r = await api('POST', '/recap/proposte/genera', { tipo: b.dataset.genera }); avviso(r.creata ? 'Proposta pronta: la trovi qui sotto.' : `Nessuna proposta: ${r.motivo}.`, r.creata ? 'info' : 'err'); caricaProposte(); }
+            catch (e) { errore(e); }
+            b.disabled = false;
+        };
+    });
+    $('proposte').onclick = async (e) => {
+        const b = e.target.closest('[data-pz]');
+        const box = e.target.closest('.prop');
+        if (!b || !box) return;
+        const p = proposte.find((x) => x.id === box.dataset.id);
+        try {
+            if (b.dataset.pz === 'scarta') {
+                if (!confirm('Scartare questa proposta?')) return;
+                await api('POST', `/recap/proposte/${p.id}/scarta`, {});
+                avviso('Proposta scartata.');
+            } else {
+                if (!confirm(`Applicare il nuovo testo al prompt «${NOME_PROMPT[p.funzione] || p.funzione}»? Il testo in uso viene salvato in una copia. Vale dai prossimi recap.`)) return;
+                const r = await api('POST', `/recap/proposte/${p.id}/applica`, { testo: box.querySelector('[data-proposto]').value });
+                avviso(`Prompt aggiornato (${r.ambito === 'personale' ? 'il tuo prompt personale' : 'prompt standard'}). Gli esempi raccolti prima restano validi; dai prossimi la notte usa il testo nuovo.`);
+            }
+            caricaProposte();
+        } catch (err) { errore(err); }
+    };
+
     $('rScarica').onclick = () => scaricaFile('/recap/scarica', 'recap_projexa_addestramento.jsonl').catch(errore);
     $('rNotebook').onclick = () => scaricaFile('/recap/notebook', 'addestra_recap_projexa.ipynb').catch(errore);
 
