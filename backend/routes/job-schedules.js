@@ -13,8 +13,9 @@ import { requireAuth } from '../middleware/auth.js';
 import { requireMonitorAccess, vmCarico } from './vm-monitor.js';
 import { calcolaProssima, NOMI_JOB, INFO_JOB, schedulerAttivo, schedulerSospeso } from '../jobs/scheduler.js';
 import { execFile } from 'child_process';
+import fs from 'fs';
 import { statoWorker, kickTranscriptionWorker, enqueueFinalize } from '../jobs/meetingTranscription.js';
-import { whisperUrls, whisperCppUrls } from './ai.js';
+import { whisperUrls, whisperCppUrls, whisperAssistentePorta } from './ai.js';
 
 const router = express.Router();
 router.use(requireAuth, requireMonitorAccess);
@@ -323,8 +324,37 @@ function unitaServizi() {
     if (port && /127\.0\.0\.1|localhost/.test(u)) units.push({ unit: `projexa-whisper@${port[1]}`, label: `Whisper Background (${port[1]})` });
   }
   if (whisperCppUrls().length) units.push({ unit: 'projexa-whisper-cpp', label: 'Whisper.cpp (Background-Veloce)' });
-  units.push({ unit: 'ollama', label: 'Ollama (Recap Projexa lento)' });
+  const assistente = whisperAssistentePorta();
+  if (assistente) units.push({ unit: 'projexa-whisper-assistente', label: `Whisper.cpp (Assistente PM, ${assistente})` });
+  units.push({ unit: 'ollama', label: 'Ollama (Recap lento, Assistente PM, associazioni)' });
   return units;
+}
+
+// Modelli che Ollama tiene in memoria adesso (GET /api/ps): nome, RAM e fino a quando restano
+// caricati (keep_alive). Se Ollama non risponde: null.
+const OLLAMA_URL = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+async function modelliOllama() {
+  try {
+    const r = await fetch(`${OLLAMA_URL}/api/ps`, { signal: AbortSignal.timeout(3000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return (j.models || []).map((m) => ({ nome: m.name || m.model, ram: Number(m.size) || null, scade: m.expires_at || null }));
+  } catch {
+    return null;
+  }
+}
+
+// Cache dei file letti dal servizio e non più usati (per Ollama: modelli scaricati o letti
+// una volta), da togliere dalla RAM: systemd la conta in MemoryCurrent ma il sistema la
+// libera quando serve. La cache "attiva" (i modelli caricati, mappati in memoria) resta.
+function cacheFileUnita(unit) {
+  try {
+    const stat = fs.readFileSync(`/sys/fs/cgroup/system.slice/${unit}.service/memory.stat`, 'utf8');
+    const m = /^inactive_file (\d+)$/m.exec(stat);
+    return m ? Number(m[1]) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 // CPU e memoria di ogni servizio da systemd (cgroup: comprende i processi figli).
@@ -343,7 +373,7 @@ function consumiUnita(units, cores) {
           const v = Object.fromEntries(blocco.split('\n').map((l) => l.split('=')).filter((x) => x.length >= 2).map(([k, ...r]) => [k.trim(), r.join('=').trim()]));
           if (!v.Id) continue;
           const unit = v.Id.replace(/\.service$/, '');
-          const mem = /^\d+$/.test(v.MemoryCurrent || '') ? Number(v.MemoryCurrent) : null;
+          const mem = /^\d+$/.test(v.MemoryCurrent || '') ? Math.max(0, Number(v.MemoryCurrent) - cacheFileUnita(unit)) : null;
           const ns = /^\d+$/.test(v.CPUUsageNSec || '') ? Number(v.CPUUsageNSec) : null;
           let cpu = null;
           const prima = cpuPrecedente.get(unit);
@@ -372,8 +402,14 @@ router.get('/servizi', async (req, res) => {
   try {
     const carico = vmCarico();
     const unita = unitaServizi();
-    const [statiServizi, consumi] = await Promise.all([statoUnita(unita), consumiUnita(unita, carico && carico.cores)]);
-    const servizi = statiServizi.map((x) => ({ ...x, ...(consumi.get(x.unit) || {}) }));
+    const [statiServizi, consumi, modelli] = await Promise.all([
+      statoUnita(unita), consumiUnita(unita, carico && carico.cores),
+      process.platform === 'linux' ? modelliOllama() : null
+    ]);
+    const servizi = statiServizi.map((x) => ({
+      ...x, ...(consumi.get(x.unit) || {}),
+      ...(x.unit === 'ollama' && modelli ? { modelli } : {})
+    }));
     const { inLavorazione, recap } = statoWorker();
     let righe = [];
     try {
@@ -481,6 +517,53 @@ router.post('/servizi/sessione/:azione', async (req, res) => {
     res.json({ ok: true, righe: n });
   } catch (e) {
     res.status(e.statusCode || 500).json({ error: e.message });
+  }
+});
+
+// Scarica dalla RAM un modello di Ollama (come «ollama stop»: keep_alive 0). Si ricarica da
+// solo al prossimo uso (Assistente PM, recap lento, associazioni), con l'attesa del caricamento.
+router.post('/servizi/ollama-scarica', async (req, res) => {
+  try {
+    const nome = String((req.body && req.body.modello) || '');
+    const caricati = (await modelliOllama()) || [];
+    if (!caricati.some((m) => m.nome === nome)) return res.status(400).json({ error: 'Modello non caricato' });
+    const r = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: nome, keep_alive: 0 }), signal: AbortSignal.timeout(30000)
+    });
+    if (!r.ok) throw new Error(`Ollama: errore ${r.status}`);
+    console.log(`[SERVIZI] modello Ollama ${nome} scaricato da ${req.user.user_id}`);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Svuota lo swap (swapoff + swapon): la memoria spostata su disco torna in RAM. Solo se la
+// RAM disponibile basta con margine (1 GB), altrimenti il sistema andrebbe in crisi.
+router.post('/servizi/svuota-swap', async (req, res) => {
+  try {
+    const c = vmCarico();
+    if (!c) return res.status(400).json({ error: 'Disponibile solo sulla VM' });
+    if (!c.swapUsed) return res.json({ ok: true, vuoto: true });
+    if (c.memAvailable < c.swapUsed + 1073741824) {
+      return res.status(409).json({ error: 'RAM disponibile insufficiente per riportare lo swap in memoria: libera prima memoria (es. scarica un modello Ollama).' });
+    }
+    const esegui = (args) => new Promise((resolve, reject) => {
+      execFile('sudo', ['-n', ...args], { timeout: 300000 }, (err, stdout, stderr) => {
+        if (err) reject(new Error(String(stderr || err.message).trim() || 'comando non riuscito'));
+        else resolve();
+      });
+    });
+    try {
+      await esegui(['swapoff', '-a']);
+    } finally {
+      await esegui(['swapon', '-a']); // lo swap si riattiva comunque
+    }
+    console.log(`[SERVIZI] swap svuotato da ${req.user.user_id}`);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

@@ -12,7 +12,7 @@ import os from 'os';
 import { execFile } from 'child_process';
 import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
-import { whisperUrls, whisperCppUrls } from './ai.js';
+import { whisperUrls, whisperCppUrls, whisperAssistentePorta } from './ai.js';
 import { registraAccesso } from '../config/audit.js';
 
 const router = express.Router();
@@ -111,10 +111,15 @@ function diskInfo() {
 
 // Nome leggibile del processo (mai la riga di comando completa: potrebbe contenere dati).
 function processLabel(comm, cmdline) {
-  if (comm === 'whisper-server') return 'Whisper.cpp (Background-Veloce)';
+  if (comm === 'whisper-server') {
+    const porta = whisperAssistentePorta();
+    return porta && cmdline.includes(`--port ${porta}`) ? 'Whisper.cpp (Assistente PM)' : 'Whisper.cpp (Background-Veloce)';
+  }
   if (/uvicorn/.test(cmdline) && /whisper/.test(cmdline)) return 'Whisper (Background)';
   if (comm === 'uvicorn') return 'Whisper (Background)';
-  if (comm.startsWith('ollama')) return 'Ollama (Recap lento)';
+  if (comm.startsWith('ollama')) return 'Ollama (servizio)';
+  // Processi di Ollama che tengono in RAM i modelli caricati (uno per modello).
+  if (comm === 'llama-server' || /ollama.*runner/.test(cmdline)) return 'Ollama (modelli caricati)';
   if (comm === 'postgres' || comm === 'postmaster') return 'PostgreSQL';
   if (comm === 'caddy') return 'Caddy (HTTPS)';
   if (comm === 'node' || /node/.test(comm)) return /server\.js|projexa/.test(cmdline) ? 'Projexa (Node)' : 'Node';
@@ -198,7 +203,10 @@ export function vmCarico() {
   startVmSampler();
   const last = history[history.length - 1] || null;
   const m = memInfo();
-  return { cpu: last ? last.cpu : null, memUsed: m.total - m.available, memTotal: m.total, cores: os.cpus().length };
+  return {
+    cpu: last ? last.cpu : null, memUsed: m.total - m.available, memTotal: m.total, memAvailable: m.available,
+    swapUsed: m.swapUsed, swapTotal: m.swapTotal, cores: os.cpus().length
+  };
 }
 
 // Riduce lo storico a max n punti (media per gruppo), per grafici leggeri.
@@ -228,7 +236,9 @@ function serviceUnits() {
     if (port && /127\.0\.0\.1|localhost/.test(u)) units.push({ unit: `projexa-whisper@${port[1]}`, label: `Whisper Background (${port[1]})` });
   }
   if (whisperCppUrls().length) units.push({ unit: 'projexa-whisper-cpp', label: 'Whisper.cpp (Background-Veloce)' });
-  units.push({ unit: 'ollama', label: 'Ollama (Recap lento)' });
+  const assistente = whisperAssistentePorta();
+  if (assistente) units.push({ unit: 'projexa-whisper-assistente', label: `Whisper.cpp (Assistente PM, ${assistente})` });
+  units.push({ unit: 'ollama', label: 'Ollama (Recap lento, Assistente PM)' });
   // Backup notturno: dal 2026-10-01 è un job dello schedulatore (pagina Schedulazioni), non più un timer.
   units.push({ unit: 'projexa-monitor.timer', label: 'Controlli di salute' });
   return units;
