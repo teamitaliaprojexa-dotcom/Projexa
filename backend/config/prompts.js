@@ -101,7 +101,17 @@ export const PROMPT_FUNCTIONS = {
   // della VM, istruito sul modo di condurre le call dell'utente. Stessi segnaposto.
   PM_PROJEXA: {
     titolo: 'Assistente PM durante la riunione (Pm projexa, Ollama)',
-    segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE', 'INGRESSO']
+    segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE', 'INGRESSO'],
+    // Agente in fase di test: la riga standard segue il file finché nessuno la modifica
+    // dall'editor (updated_by resta 'file').
+    sincronizzaFile: true
+  },
+  // Filtro veloce di Pm projexa (modello piccolo, 2026-10-20): per ogni pezzo di riunione dice
+  // solo «SI n» (c'è il segnale n) o «NO»; il modello grande scrive il suggerimento solo dopo un SI.
+  PM_PROJEXA_FILTRO: {
+    titolo: 'Filtro veloce dell\'Assistente PM (Pm projexa, modello piccolo)',
+    segnaposto: [],
+    sincronizzaFile: true
   }
 };
 
@@ -138,6 +148,14 @@ function ensureTable() {
            ON CONFLICT ON CONSTRAINT app_prompts_chiave DO NOTHING`,
           [funzione, testo]
         );
+        if (PROMPT_FUNCTIONS[funzione].sincronizzaFile) {
+          await db.query(
+            `UPDATE app_prompts SET testo = $2, updated_at = NOW()
+              WHERE funzione = $1 AND tenant_id IS NULL AND user_id IS NULL
+                AND updated_by = 'file' AND testo IS DISTINCT FROM $2`,
+            [funzione, testo]
+          );
+        }
       }
     })().catch((e) => { tableReady = null; throw e; });
   }

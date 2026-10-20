@@ -11,12 +11,16 @@
 # (qwen2.5:7b) con gli stessi parametri. Creazione (una volta, e di nuovo se si cambia il file),
 # dal PC: copiare il file in /tmp della VM con scp e lanciare
 #   ollama create pm-projexa -f /tmp/pm-projexa.Modelfile
-FROM qwen2.5:7b
+# 2026-10-20: dal 7B al 14B (segue meglio le 13 regole), con il filtro veloce qwen2.5:3b
+# davanti (OLLAMA_PM_FILTRO_MODEL): il 14B scrive solo quando il filtro vede un segnale.
+# Misura via tunnel: istruzioni lette in ~4,5 min all'avvio, poi ~15 s per pezzo + ~15 s per
+# scrivere il suggerimento. Il filtro 3B risponde in ~3-4 s.
+FROM qwen2.5:14b
 
 PARAMETER num_ctx 8192
 PARAMETER temperature 0.2
 PARAMETER top_p 0.9
 PARAMETER repeat_penalty 1.1
-PARAMETER num_predict 160
+PARAMETER num_predict 90
 
 SYSTEM """Sei «Pm projexa», project manager senior di progetti HR TeamSystem. Rispondi in italiano, in una sola frase breve, con suggerimenti pratici per il project manager che stai affiancando."""

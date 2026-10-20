@@ -12238,7 +12238,9 @@
             window.AssistentePm.inviaAudio(rec.eventId, out);
         }
         function flushAssistBuffer(rec) {
-            const minLen = REC_SAMPLE_RATE * AP_MIN_SECONDS, maxLen = REC_SAMPLE_RATE * AP_MAX_SECONDS;
+            // Pm projexa (Ollama sulla VM): blocchi più lunghi, vedi AssistentePm.durataBlocchi.
+            const dur = (window.AssistentePm && window.AssistentePm.durataBlocchi && window.AssistentePm.durataBlocchi()) || { min: AP_MIN_SECONDS, max: AP_MAX_SECONDS };
+            const minLen = REC_SAMPLE_RATE * dur.min, maxLen = REC_SAMPLE_RATE * dur.max;
             if (rec.apLen < minLen) return;
             // Soglia di pausa dal livello della voce della registrazione (sola lettura).
             const lvl = (track) => Math.max(REC_SILENCE_RMS, REC_PAUSE_RATIO * recVoiceLevel(rec, track, null));

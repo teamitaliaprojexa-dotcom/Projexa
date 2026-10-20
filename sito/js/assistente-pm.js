@@ -572,5 +572,12 @@
         return null;
     }
 
-    window.AssistentePm = { avvia, ferma, attivo, inviaBlocco, inviaAudio, riapri };
+    // Durata dei blocchi brevi (secondi) per la dashboard. Pm projexa: ~25 s, perché Whisper
+    // sulla VM elabora comunque finestre da 30 s (blocchi da 10 s costavano uguale e con Ollama
+    // in parallelo arrivavano uno al minuto, prova 2026-10-20). null = valori della dashboard.
+    function durataBlocchi() {
+        return stato && stato.ai === 'Projexa' ? { min: 20, max: 28 } : null;
+    }
+
+    window.AssistentePm = { avvia, ferma, attivo, inviaBlocco, inviaAudio, riapri, durataBlocchi };
 })();

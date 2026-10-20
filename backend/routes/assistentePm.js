@@ -83,10 +83,14 @@ const OLLAMA_PM_RISERVA = process.env.OLLAMA_RECAP_MODEL || 'qwen2.5:7b';
 // Contesto FISSO: cambiarlo tra una richiesta e l'altra fa ricaricare il modello e perdere la
 // cache delle istruzioni già lette.
 const OLLAMA_PM_CTX = 8192;
-const OLLAMA_PM_OPZIONI = { num_ctx: OLLAMA_PM_CTX, temperature: 0.2, top_p: 0.9, repeat_penalty: 1.1, num_predict: 160 };
-// Blocchi da ~10 s per valutazione: 6 = un minuto di parlato. Sulla VM (CPU) un turno dura
-// ~30-60 s: valutare ogni blocco accumulerebbe ritardo.
-const OLLAMA_PM_BLOCCHI = Math.max(1, Number(process.env.OLLAMA_PM_BLOCCHI) || 6);
+const OLLAMA_PM_OPZIONI = { num_ctx: OLLAMA_PM_CTX, temperature: 0.2, top_p: 0.9, repeat_penalty: 1.1, num_predict: 90 };
+// num_predict 90: si tiene un solo suggerimento (~40 token); il secondo che il modello scrive
+// comunque costava ~7 s di scrittura sulla VM (~5 token/s).
+// Blocchi minimi per valutazione. Con Projexa la finestra manda blocchi da ~25 s (Whisper
+// elabora comunque finestre da 30 s: blocchi da 10 s costavano lo stesso e sulla VM
+// arrivavano uno al minuto). Misura 2026-10-20: un turno ~20 s grazie alla cache, quindi si
+// valuta ogni blocco; se Ollama è occupato i blocchi arrivati intanto si uniscono.
+const OLLAMA_PM_BLOCCHI = Math.max(1, Number(process.env.OLLAMA_PM_BLOCCHI) || 1);
 const OLLAMA_PM_PAUSA_MS = 90000;        // tratto incompleto ma fermo da tanto: si valuta lo stesso
 const OLLAMA_PM_TIMEOUT_MS = 10 * 60000; // una risposta (la prima legge anche le istruzioni)
 // Dati del progetto nelle istruzioni: su CPU ogni carattere va letto (~2,5 caratteri/token,
@@ -99,6 +103,18 @@ const OLLAMA_PM_STORIA_CHARS = 6000;
 // Tratto nuovo al massimo (caratteri, si tiene la parte più recente): dopo il preriscaldamento
 // o una pausa di Ollama possono essersi accumulati molti blocchi.
 const OLLAMA_PM_TRATTO_CHARS = 3000;
+// Filtro a due stadi (2026-10-20): un modello piccolo e veloce legge ogni pezzo e risponde solo
+// «SI n» / «NO» (prompt PM_PROJEXA_FILTRO); il modello grande (pm-projexa, da 14B) scrive il
+// suggerimento solo dopo un SI, così la VM lavora molto meno. Vuota/«nessuno» = niente filtro.
+// Sulla VM i due modelli devono restare caricati insieme: OLLAMA_MAX_LOADED_MODELS=2.
+const OLLAMA_PM_FILTRO_MODEL = (() => {
+  const v = String(process.env.OLLAMA_PM_FILTRO_MODEL ?? 'qwen2.5:3b').trim();
+  return /^(|nessuno|none|off)$/i.test(v) ? '' : v;
+})();
+// Contesto fisso anche qui (cache del prompt): istruzioni brevi + pezzo precedente + nuovo.
+const OLLAMA_PM_FILTRO_OPZIONI = { num_ctx: 4096, temperature: 0, num_predict: 6 };
+// «SI n», «NO» oppure solo «n» (il 3B a volte scrive solo il numero del segnale = SI).
+const FILTRO_RE = /^\W*(SI|SÌ|NO|(?=\d))(?![a-zà-ú])\s*\[?\s*(\d{1,2})?/i;
 // Una richiesta alla volta verso Ollama (sulla VM gira 1 richiesta per volta comunque).
 let codaOllama = Promise.resolve();
 // Dati del progetto nelle istruzioni: restano nel contesto e si pagano a OGNI turno (Gemini Live
@@ -522,7 +538,14 @@ function prossimo(s) {
 // volta all'avvio (preriscaldamento), mentre la riunione comincia.
 
 // POST /api/chat; se il modello pm-projexa non esiste sulla VM si passa a quello di riserva.
-async function chiamaOllama(s, messages, opzioni = {}) {
+// filtro = chiamata al modello piccolo (OLLAMA_PM_FILTRO_MODEL), con le sue opzioni.
+async function chiamaOllama(s, messages, opzioni = {}, { filtro = false } = {}) {
+  if (filtro) {
+    const r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, { model: OLLAMA_PM_FILTRO_MODEL, messages, stream: false, keep_alive: '30m', options: OLLAMA_PM_FILTRO_OPZIONI }, OLLAMA_PM_TIMEOUT_MS);
+    if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
+    const d = r.data || {};
+    return { testo: String((d.message && d.message.content) || '').trim(), letti: Number(d.prompt_eval_count) || 0, secondi: Math.round((Number(d.total_duration) || 0) / 1e9) };
+  }
   const corpo = () => ({ model: s.modelloOllama, messages, stream: false, keep_alive: '30m', options: { ...OLLAMA_PM_OPZIONI, ...opzioni } });
   let r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, corpo(), OLLAMA_PM_TIMEOUT_MS);
   if (r.status === 404 && /not found|pull/i.test(String((r.data && r.data.error) || '')) && s.modelloOllama !== OLLAMA_PM_RISERVA) {
@@ -557,6 +580,15 @@ function preriscaldaOllama(s) {
       const r = await chiamaOllama(s, [{ role: 'system', content: s.istruzioni },
         { role: 'user', content: 'La riunione sta per iniziare. Rispondi soltanto: Nessun suggerimento.' }], { num_predict: 8 });
       console.log(`[ASSISTENTE PM] ${s.idCalendar}: Pm projexa pronto (${s.modelloOllama}, ${r.letti} token di istruzioni letti in ${r.secondi} s)`);
+      // Anche il filtro legge subito le sue istruzioni (brevi).
+      if (OLLAMA_PM_FILTRO_MODEL && s.istruzioniFiltro && !s.chiusa) {
+        try {
+          const f = await chiamaOllama(s, [{ role: 'system', content: s.istruzioniFiltro }, { role: 'user', content: 'PEZZO PRECEDENTE (solo contesto):\n(inizio riunione)\n\nPEZZO NUOVO:\nBuongiorno a tutti.' }], {}, { filtro: true });
+          console.log(`[ASSISTENTE PM] ${s.idCalendar}: filtro ${OLLAMA_PM_FILTRO_MODEL} pronto (${f.letti} token in ${f.secondi} s)`);
+        } catch (e) {
+          console.warn(`[ASSISTENTE PM] ${s.idCalendar}: filtro ${OLLAMA_PM_FILTRO_MODEL} non disponibile (${e.message}): lavorerà solo il modello grande`);
+        }
+      }
       if (!s.chiusa) aggiungi(s, 'info', `Pm projexa pronto (istruzioni lette in ${Math.round((Date.now() - inizio) / 1000)} s): ti suggerirà domande e punti da chiarire man mano che Projexa trascrive la riunione.`);
     } catch (e) {
       console.warn(`[ASSISTENTE PM] ${s.idCalendar}: preriscaldamento Pm projexa fallito (${e.message})`);
@@ -568,10 +600,19 @@ function preriscaldaOllama(s) {
   });
 }
 
-// Suggerimenti tenuti: le righe che iniziano con una parola chiave (al massimo 2), senza
-// ripetere quelli già dati (il 7B tende a ripetersi). Le risposte alle domande scritte si
+// Suggerimento tenuto (al massimo uno per tratto, prova del 2026-10-20: il 7B ne scriveva due
+// generici per ogni pezzo): deve iniziare con parola chiave + numero del segnale del prompt
+// («DOMANDA [4]: ...»), citare qualcosa del tratto appena detto (ancoraggio: almeno una parola
+// significativa in comune) e non ripetere quelli già dati. Le risposte alle domande scritte si
 // mostrano intere.
+const SEGNALE_RE = /^(DOMANDA|RISCHIO|CR|ATTENZIONE|AGENDA)\s*\[\s*(\d{1,2})\s*\]\s*:\s*(.{10,})$/i;
+const VUOTE = new Set(['della', 'delle', 'dello', 'degli', 'nella', 'nelle', 'sulla', 'sulle', 'questo', 'questa', 'quello', 'quella', 'sono', 'anche', 'perché', 'quindi', 'allora', 'chiedi', 'fatti', 'conferma', 'confermare', 'proponi', 'partecipanti', 'entro', 'quando', 'tutti', 'sempre', 'ancora', 'fare', 'essere']);
 const parole = (t) => new Set(String(t).toLowerCase().replace(/[^a-zà-ú0-9 ]+/gi, ' ').split(/\s+/).filter((w) => w.length > 3));
+function ancorato(sugg, tratto) {
+  const T = parole(tratto);
+  for (const w of parole(sugg)) if (w.length >= 5 && !VUOTE.has(w) && T.has(w)) return true;
+  return false;
+}
 function simile(a, b) {
   const A = parole(a), B = parole(b);
   if (!A.size || !B.size) return false;
@@ -579,16 +620,39 @@ function simile(a, b) {
   for (const w of A) if (B.has(w)) comuni++;
   return comuni / Math.min(A.size, B.size) >= 0.7;
 }
-function suggerimentiDa(s, testo) {
-  const righe = String(testo).split('\n').map((r) => r.replace(/^[\s\-*•\d.)]+/, '').replace(/\*\*/g, '').trim()).filter(Boolean);
-  const tenute = [];
-  for (const r of righe) {
-    if (!SUGGERIMENTO_RE.test(r)) continue;
-    if (s.giaDetti.some((g) => simile(g, r)) || tenute.some((g) => simile(g, r))) continue;
-    tenute.push(r);
-    if (tenute.length >= 2) break;
+function suggerimentiDa(s, testo, tratto) {
+  // Più suggerimenti sulla stessa riga: si spezza davanti a ogni parola chiave.
+  const pezzi = String(testo).replace(/\*\*/g, '')
+    .split(/\n|(?=\b(?:DOMANDA|RISCHIO|CR|ATTENZIONE|AGENDA)\s*(?:\[\s*\d{1,2}\s*\])?\s*:)/)
+    .map((r) => r.replace(/^[\s\-*•\d.)]+(?=[A-Z])/, '').trim()).filter(Boolean);
+  for (const p of pezzi) {
+    const m = p.match(SEGNALE_RE);
+    if (!m || Number(m[2]) < 1 || Number(m[2]) > 13) continue;
+    const r = `${m[1].toUpperCase()}: ${m[3].trim()}`;
+    if (!ancorato(r, tratto)) { console.log(`[ASSISTENTE PM] ${s.idCalendar}: Pm projexa, suggerimento non legato al tratto scartato: ${r.slice(0, 120)}`); continue; }
+    if (s.giaDetti.some((g) => simile(g, r))) continue;
+    // Nella conversazione resta col numero del segnale, così il modello mantiene il formato.
+    s.ultimaRisposta = `${m[1].toUpperCase()} [${Number(m[2])}]: ${m[3].trim()}`;
+    return [r];
   }
-  return tenute;
+  return [];
+}
+
+// Tratto e risposta in coda alla conversazione del modello grande. Conversazione troppo lunga:
+// si riparte da un riepilogo breve + l'ultimo tratto. Togliere solo i tratti più vecchi
+// cambierebbe tutto ciò che segue le istruzioni e Ollama dovrebbe rileggerlo (minuti sulla VM);
+// così resta in cache il prefisso delle istruzioni e si legge solo il riepilogo.
+function ricorda(s, testo, risposta) {
+  s.storia.push({ role: 'user', content: testo }, { role: 'assistant', content: risposta });
+  if (s.storia.reduce((n, m) => n + m.content.length, 0) > OLLAMA_PM_STORIA_CHARS) {
+    const ultimi = s.storia.slice(-2);
+    const detti = s.giaDetti.slice(-10);
+    s.storia = [
+      { role: 'user', content: `RIEPILOGO: la prima parte della riunione è già stata valutata.${detti.length ? `\nSuggerimenti già dati (non ripeterli):\n${detti.join('\n')}` : ''}` },
+      { role: 'assistant', content: 'Nessun suggerimento.' },
+      ...ultimi
+    ];
+  }
 }
 
 function prossimoOllama(s) {
@@ -615,30 +679,47 @@ function prossimoOllama(s) {
   codaOllama = codaOllama.then(async () => {
     if (s.chiusa) return;
     try {
+      // Primo stadio: il modello piccolo dice se nel pezzo c'è un segnale. NO = il modello
+      // grande non lavora; il pezzo resta comunque nella conversazione come contesto. Filtro in
+      // errore o risposta incomprensibile = si passa al modello grande (meglio lento che cieco).
+      if (OLLAMA_PM_FILTRO_MODEL && s.istruzioniFiltro && trascr && !domande) {
+        let esito = null;
+        try {
+          const f = await chiamaOllama(s, [{ role: 'system', content: s.istruzioniFiltro },
+            { role: 'user', content: `PEZZO PRECEDENTE (solo contesto):\n${s.trattoPrec || '(inizio riunione)'}\n\nPEZZO NUOVO:\n${trascr}` }], {}, { filtro: true });
+          const m = f.testo.match(FILTRO_RE);
+          esito = m ? { si: !/^no$/i.test(m[1]), n: Number(m[2]) || 0, secondi: f.secondi } : null;
+          if (!m) console.log(`[ASSISTENTE PM] ${s.idCalendar}: filtro, risposta non riconosciuta «${f.testo.slice(0, 40)}»: passo al modello grande`);
+        } catch (e) {
+          console.warn(`[ASSISTENTE PM] ${s.idCalendar}: filtro ${OLLAMA_PM_FILTRO_MODEL} non disponibile (${e.message}): passo al modello grande`);
+        }
+        s.trattoPrec = trascr.slice(-1500);
+        if (s.chiusa) return;
+        if (esito && !esito.si) {
+          s.valutazioni++;
+          s.silenzi++;
+          s.filtrati++;
+          s.errori = 0;
+          ricorda(s, testo, 'Nessun suggerimento.');
+          console.log(`[ASSISTENTE PM] ${s.idCalendar}: Pm projexa valutazione ${s.valutazioni} · filtro: nessun segnale (${esito.secondi} s)`);
+          return;
+        }
+        if (esito) console.log(`[ASSISTENTE PM] ${s.idCalendar}: filtro: possibile segnale ${esito.n || '?'} (${esito.secondi} s), scrive ${s.modelloOllama}`);
+      }
       const messages = [{ role: 'system', content: s.istruzioni }, ...s.storia, { role: 'user', content: testo }];
-      const r = await chiamaOllama(s, messages);
+      // Si tiene un solo suggerimento: ci si ferma a fine riga (il 14B scrive ~2,3 token/s, il
+      // secondo suggerimento costava ~15 s). Le risposte alle domande scritte restano intere.
+      const r = await chiamaOllama(s, messages, domande ? {} : { stop: ['\n'] });
       if (s.chiusa) return;
       s.valutazioni++;
       s.errori = 0;
-      const tenute = domande ? (r.testo && !SILENZIO_RE.test(r.testo) ? [r.testo.replace(/\*\*/g, '')] : []) : suggerimentiDa(s, r.testo);
+      s.ultimaRisposta = '';
+      const tenute = domande ? (r.testo && !SILENZIO_RE.test(r.testo) ? [r.testo.replace(/\*\*/g, '')] : []) : suggerimentiDa(s, r.testo, trascr);
       if (tenute.length) for (const t of tenute) { aggiungi(s, 'ai', t); if (!domande) s.giaDetti.push(t); }
       else s.silenzi++;
       if (s.giaDetti.length > 30) s.giaDetti.splice(0, s.giaDetti.length - 30);
       // Nella conversazione resta la risposta pulita: il modello vede cosa ha già suggerito.
-      s.storia.push({ role: 'user', content: testo }, { role: 'assistant', content: tenute.join('\n') || 'Nessun suggerimento.' });
-      // Conversazione troppo lunga: si riparte da un riepilogo breve + l'ultimo tratto. Togliere
-      // solo i tratti più vecchi cambierebbe tutto ciò che segue le istruzioni e Ollama dovrebbe
-      // rileggerlo (minuti sulla VM); così resta in cache il prefisso delle istruzioni e si
-      // legge solo il riepilogo.
-      if (s.storia.reduce((n, m) => n + m.content.length, 0) > OLLAMA_PM_STORIA_CHARS) {
-        const ultimi = s.storia.slice(-2);
-        const detti = s.giaDetti.slice(-10);
-        s.storia = [
-          { role: 'user', content: `RIEPILOGO: la prima parte della riunione è già stata valutata.${detti.length ? `\nSuggerimenti già dati (non ripeterli):\n${detti.join('\n')}` : ''}` },
-          { role: 'assistant', content: 'Nessun suggerimento.' },
-          ...ultimi
-        ];
-      }
+      ricorda(s, testo, (domande ? tenute.join('\n') : s.ultimaRisposta) || 'Nessun suggerimento.');
       console.log(`[ASSISTENTE PM] ${s.idCalendar}: Pm projexa valutazione ${s.valutazioni} · ${r.letti} token letti, ${r.scritti} scritti in ${r.secondi} s · ${tenute.length ? `${tenute.length} suggerimenti` : 'nessun suggerimento'}`);
     } catch (e) {
       s.senzaRisposta++;
@@ -759,6 +840,11 @@ router.post('/avvia', requireAuth, async (req, res) => {
     // ci sono più attese, quindi due /avvia insieme non lasciano una sessione orfana aperta
     // verso Gemini (la seconda chiude sempre la prima). 2026-10-17
     const testoIstruzioni = await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita, ai);
+    // Pm projexa: istruzioni del filtro veloce (vuote = lavora solo il modello grande).
+    let istruzioniFiltro = '';
+    if (ai.locale && OLLAMA_PM_FILTRO_MODEL) {
+      try { istruzioniFiltro = (await getPromptFor('PM_PROJEXA_FILTRO', req.user)).testo; } catch (e) { console.warn(`[ASSISTENTE PM] ${idCalendar}: prompt del filtro non letto (${e.message}): lavorerà solo il modello grande`); }
+    }
     const vecchia = sessioni.get(k);
     if (vecchia) chiudi(vecchia); // registrazione ripresa: sessione nuova
     // Al massimo MAX_SESSIONI_UTENTE sessioni aperte per utente (ognuna è un WebSocket Gemini
@@ -779,7 +865,8 @@ router.post('/avvia', requireAuth, async (req, res) => {
       messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve(),
       // Pm projexa (Ollama): conversazione, suggerimenti già dati, attesa del tratto completo.
       motore: ai.locale ? 'projexa' : 'gemini', aiNome: ai.provider, modelloOllama: OLLAMA_PM_MODEL,
-      storia: [], giaDetti: [], timerTratto: null, errori: 0
+      storia: [], giaDetti: [], timerTratto: null, errori: 0,
+      istruzioniFiltro, trattoPrec: '', filtrati: 0
     };
     sessioni.set(k, s);
     if (s.motore === 'projexa') {
