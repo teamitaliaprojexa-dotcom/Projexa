@@ -55,6 +55,11 @@
     .apm-msg { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; word-wrap: break-word; }
     .apm-msg small { display: block; font-size: 11px; color: #94A3B8; margin-bottom: 2px; }
     .apm-msg.ai { background: #EEF2FF; border-left: 3px solid #6366F1; }
+    .apm-voto { display: flex; gap: 4px; justify-content: flex-end; margin-top: 4px; }
+    .apm-voto button { border: 1px solid transparent; background: transparent; border-radius: 6px; padding: 1px 6px; cursor: pointer; color: #94A3B8; font-size: 0.85em; }
+    .apm-voto button:hover { background: #E0E7FF; color: #4F46E5; }
+    .apm-voto button.on.su { color: #059669; border-color: #A7F3D0; background: #ECFDF5; }
+    .apm-voto button.on.giu { color: #DC2626; border-color: #FECACA; background: #FEF2F2; }
     .apm-msg.utente { background: #F1F5F9; margin-left: 24px; }
     .apm-msg.info { color: #64748B; font-size: 12.5px; background: none; padding: 2px 0; }
     .apm-msg.avviso { background: #FFFBEB; color: #92400E; font-size: 12.5px; }
@@ -152,6 +157,10 @@
         inputEl.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chiedi(inputEl.value); }
         });
+        bodyEl.addEventListener('click', (e) => {
+            const b = e.target.closest('.apm-voto button');
+            if (b) vota(Number(b.closest('.apm-voto').dataset.n), Number(b.dataset.voto));
+        });
         spostaRidimensiona();
     }
 
@@ -224,7 +233,11 @@
         let html = voci.map((m) => {
             if (m.tipo === 'info') return `<div class="apm-msg info">${esc(m.testo)}</div>`;
             const chi = m.tipo === 'ai' ? 'Assistente' : m.tipo === 'utente' ? 'Tu' : '';
-            return `<div class="apm-msg ${m.tipo}"><small>${chi ? `${chi} · ` : ''}${ora(m.ora)}</small>${esc(m.testo)}</div>`;
+            // 👍/👎: dal giorno dopo i suggerimenti votati diventano esempi per l'assistente.
+            const voto = m.votabile ? `<div class="apm-voto" data-n="${m.n}">
+                <button type="button" class="su${m.voto === 1 ? ' on' : ''}" data-voto="1" title="Utile: suggerimenti così vanno bene"><i class="fas fa-thumbs-up"></i></button>
+                <button type="button" class="giu${m.voto === -1 ? ' on' : ''}" data-voto="-1" title="Inutile: suggerimenti così sono da evitare"><i class="fas fa-thumbs-down"></i></button></div>` : '';
+            return `<div class="apm-msg ${m.tipo}"><small>${chi ? `${chi} · ` : ''}${ora(m.ora)}</small>${esc(m.testo)}${voto}</div>`;
         }).join('');
         if (!voci.length) {
             html = stato.tab === 'trascrizione'
@@ -276,6 +289,31 @@
                 if (!s.attiva) { clearInterval(s.timer); s.timer = null; s.terminata = true; }
             }
         } catch (e) { /* rete momentaneamente assente: si riprova al prossimo giro */ }
+    }
+
+    // Voto a un suggerimento: stesso pulsante di nuovo = voto tolto. Funziona anche dopo «Ferma»
+    // finché il server conserva i messaggi (2 ore).
+    async function vota(n, voto) {
+        if (!stato || !n) return;
+        const s = stato;
+        const m = s.messaggi.find((x) => x.n === n && x.votabile);
+        if (!m) return;
+        const prima = m.voto || 0;
+        m.voto = prima === voto ? 0 : voto;
+        disegna(false);
+        try {
+            const r = await fetch(`${API_URL}/assistente-pm/voto`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...auth() },
+                body: JSON.stringify({ id_calendar: s.eventId, n, voto: m.voto })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+        } catch (e) {
+            m.voto = prima;
+            s.messaggi.push({ n: 0, tipo: 'errore', testo: `Voto non salvato: ${e.message}`, ora: new Date().toISOString() });
+            disegna(true);
+        }
     }
 
     async function chiedi(testo, mostra) {

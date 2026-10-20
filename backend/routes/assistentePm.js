@@ -48,6 +48,7 @@ import { getPromptFor } from '../config/prompts.js';
 import { speakerName, trascriviBloccoBreve } from '../jobs/meetingTranscription.js';
 import { contestoProgetto, dataIt, oggiIso } from '../config/pmCore.js';
 import { ollamaPost } from './ai.js';
+import { encryptRowForWrite } from '../config/crypto.js';
 
 const router = express.Router();
 
@@ -158,6 +159,13 @@ const SILENZIO_RE = /^[\s.…\-–—]*(ok|nessun suggerimento)?[\s.…\-–—]
 // Le risposte alle domande scritte dall'utente si mostrano sempre.
 const SUGGERIMENTO_RE = /^\W*(DOMANDA|RISCHIO|CR|ATTENZIONE|AGENDA)\s*:/i;
 
+// Voti 👍/👎 (tabella pm_assistente_voti, Supporto/CreaDB/assistente_pm_voti.sql).
+const VOTO_TRATTO_CHARS = 1200;  // pezzo di riunione salvato col voto
+const ESEMPI_UTILI = 6;          // suggerimenti 👍 messi nelle istruzioni come esempi
+const ESEMPI_INUTILI = 4;        // suggerimenti 👎 messi nelle istruzioni come da evitare
+// Pm projexa: voci del progetto (RAID, To-Do, CR aperte) aggiunte a un tratto che ne parla.
+const VOCI_PER_TRATTO = 3;
+
 // "tenant|utente|id_calendar" -> sessione
 const sessioni = new Map();
 const MAX_SESSIONI_UTENTE = 2;   // sessioni Gemini Live aperte contemporaneamente per utente
@@ -181,7 +189,10 @@ async function leggiImpostazione(user) {
 // Dati della riunione per le istruzioni: oggetto, data, cliente/progetto e, se la riunione è
 // collegata a un progetto dell'utente, il contesto del progetto (scheda, salute, RAID, azioni,
 // recap delle ultime riunioni).
-async function datiRiunione(user, idCalendar, titolo, maxDati = MAX_DATI) {
+// compatto = Pm projexa (Ollama, contesto piccolo): al posto del testo completo del progetto
+// (che nei primi 3000 caratteri conteneva solo scheda, salute e Gantt) un riassunto con le voci
+// aperte, più l'elenco delle voci per collegarle ai tratti che ne parlano (vociDelTratto).
+async function datiRiunione(user, idCalendar, titolo, maxDati = MAX_DATI, compatto = false) {
   const m = (await db.query(
     `SELECT oggetto, data_calendar::text AS d, orario_calendar::text AS o, project_id::text AS p
        FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
@@ -190,17 +201,115 @@ async function datiRiunione(user, idCalendar, titolo, maxDati = MAX_DATI) {
   let riunione = ` «${oggetto}»`;
   if (m && m.d) riunione += ` del ${dataIt(m.d)}${m.o ? ` alle ${String(m.o).slice(0, 5)}` : ''}`;
   let dati = 'Nessun progetto collegato alla riunione: basati solo sulla trascrizione.';
+  let voci = [];
   if (m && m.p) {
     try {
       const ctx = await contestoProgetto(user, m.p, { riunioni: 3, maxRecap: 4000 });
       riunione += ` sul progetto «${ctx.prog.nome}»${ctx.prog.cliente ? ` del cliente ${ctx.prog.cliente}` : ''}`;
-      dati = ctx.testo.slice(0, maxDati);
+      if (compatto) {
+        voci = vociAperte(ctx);
+        dati = testoCompatto(ctx, voci, maxDati);
+      } else {
+        dati = ctx.testo.slice(0, maxDati);
+      }
     } catch (e) {
       // Progetto di un altro utente o non più disponibile: si prosegue senza dati.
       console.warn(`[ASSISTENTE PM] ${idCalendar}: dati del progetto non letti (${e.message})`);
     }
   }
-  return { riunione, dati };
+  return { riunione, dati, voci };
+}
+
+// Voci aperte del progetto, in una riga ciascuna: «Rischio: titolo (owner X, stato Y)».
+const CHIUSA_RE = /chius|risolt|annullat|complet|respint|rifiutat|superat/i;
+const NOME_RAID = { rischio: 'Rischio', decisione: 'Decisione', dipendenza: 'Dipendenza', assunzione: 'Assunzione', issue: 'Issue' };
+function vociAperte(ctx) {
+  const out = [];
+  for (const x of ctx.raid || []) {
+    if (CHIUSA_RE.test(String(x.stato || '')) || !x.titolo) continue;
+    const dettagli = [x.owner && `owner ${x.owner}`, x.stato && `stato ${x.stato}`, x.decisa_da && `decisa da ${x.decisa_da}`].filter(Boolean).join(', ');
+    out.push({ tipo: x.tipo, riga: `${NOME_RAID[x.tipo] || x.tipo}: ${x.titolo}${dettagli ? ` (${dettagli})` : ''}`, testo: `${x.titolo} ${x.descrizione || ''}` });
+  }
+  for (const t of ctx.task || []) {
+    if (!t.titolo) continue;
+    const dettagli = [t.assegnato && `a ${t.assegnato}`, t.scadenza && `scadenza ${dataIt(t.scadenza)}${t.scaduta ? ' SCADUTA' : ''}`].filter(Boolean).join(', ');
+    out.push({ tipo: 'todo', riga: `To-Do: ${t.titolo}${dettagli ? ` (${dettagli})` : ''}`, testo: `${t.titolo} ${t.descrizione || ''}` });
+  }
+  for (const c of ctx.cr || []) {
+    if (CHIUSA_RE.test(String(c.stato || '')) || !c.titolo) continue;
+    out.push({ tipo: 'cr', riga: `CR ${c.codice || ''}: ${c.titolo} (stato ${c.stato || '-'})`.replace(/\s+:/, ':'), testo: `${c.titolo} ${c.motivo || ''}` });
+  }
+  return out;
+}
+
+// Riassunto per il modello piccolo: progetto, voci aperte (prima rischi, dipendenze e To-Do
+// scadute), inizio dell'ultimo recap. Tagliato a riga intera entro maxDati caratteri.
+function testoCompatto(ctx, voci, maxDati) {
+  const s = ctx.scheda || {};
+  const L = [`PROGETTO: ${ctx.prog.nome} | CLIENTE: ${ctx.prog.cliente || '-'} | Stato: ${s.stato || '-'} | Periodo: ${dataIt(s.start) || '-'} -> ${dataIt(s.end) || '-'}`];
+  if (ctx.salute && ctx.salute.semaforo) L.push(`Salute del progetto: ${String(ctx.salute.semaforo).toUpperCase()}`);
+  const peso = (v) => (v.tipo === 'rischio' || v.tipo === 'dipendenza' ? 0 : /SCADUTA/.test(v.riga) ? 1 : v.tipo === 'decisione' ? 2 : v.tipo === 'cr' ? 3 : 4);
+  const ordinate = [...voci].sort((a, b) => peso(a) - peso(b));
+  if (ordinate.length) L.push('', 'VOCI APERTE DEL PROGETTO', ...ordinate.map((v) => `- ${v.riga}`));
+  const ultima = (ctx.riunioni || [])[0];
+  if (ultima && ultima.recap) L.push('', `ULTIMA RIUNIONE (${dataIt(ultima.data)} ${ultima.oggetto || ''})`, String(ultima.recap).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 800));
+  let out = '';
+  for (const riga of L) {
+    if (out.length + riga.length + 1 > maxDati) break;
+    out += `${riga}\n`;
+  }
+  return out.trim();
+}
+
+// Voci del progetto di cui parla il tratto (almeno 2 parole significative in comune), non
+// ancora proposte in questa riunione: vanno dopo il tratto, nel messaggio nuovo (le istruzioni
+// restano identiche e in cache).
+function vociDelTratto(s, tratto) {
+  if (!s.vociProgetto || !s.vociProgetto.length) return [];
+  const T = parole(tratto);
+  const trovate = [];
+  for (const v of s.vociProgetto) {
+    if (s.vociCitate.has(v.riga)) continue;
+    let comuni = 0;
+    for (const w of parole(v.testo)) if (w.length >= 5 && !VUOTE.has(w) && T.has(w)) comuni++;
+    if (comuni >= 2) trovate.push({ v, comuni });
+  }
+  return trovate.sort((a, b) => b.comuni - a.comuni).slice(0, VOCI_PER_TRATTO).map((x) => x.v);
+}
+
+// Esempi dai voti 👍/👎 dell'utente (fino a ieri: durante la giornata le istruzioni restano
+// identiche e Pm projexa le tiene in cache). conNumero = formato di Pm projexa «DOMANDA [4]: ...»;
+// per Gemini il numero si toglie. Tabella assente o errore: nessun esempio.
+async function esempiDaiVoti(user, conNumero) {
+  let righe = [];
+  try {
+    righe = (await db.query(
+      `(SELECT voto, suggerimento, tratto FROM pm_assistente_voti
+         WHERE tenant_id = $1 AND user_id = $2 AND voto = 1 AND segnale <> 'RISPOSTA' AND updated_at < CURRENT_DATE
+         ORDER BY updated_at DESC LIMIT ${ESEMPI_UTILI * 3})
+       UNION ALL
+       (SELECT voto, suggerimento, tratto FROM pm_assistente_voti
+         WHERE tenant_id = $1 AND user_id = $2 AND voto = -1 AND segnale <> 'RISPOSTA' AND updated_at < CURRENT_DATE
+         ORDER BY updated_at DESC LIMIT ${ESEMPI_INUTILI * 3})`,
+      [user.tenant_id, user.user_id])).rows;
+  } catch (e) {
+    if (e.code !== '42P01') console.warn(`[ASSISTENTE PM] esempi dai voti non letti (${e.message})`);
+    return '';
+  }
+  const riga = (r) => {
+    let sugg = String(r.suggerimento || '').replace(/\s+/g, ' ').trim();
+    if (conNumero && !/^\w+\s*\[\s*\d{1,2}\s*\]\s*:/.test(sugg)) return null; // senza numero il 7B perderebbe il formato
+    if (!conNumero) sugg = sugg.replace(/^(\w+)\s*\[\s*\d{1,2}\s*\]\s*:/, '$1:');
+    const tratto = String(r.tratto || '').replace(/\s+/g, ' ').trim().slice(-220);
+    return tratto ? `Testo: "…${tratto}" -> ${sugg}` : `-> ${sugg}`;
+  };
+  const utili = righe.filter((r) => r.voto === 1).map(riga).filter(Boolean).slice(0, ESEMPI_UTILI);
+  const inutili = righe.filter((r) => r.voto === -1).map(riga).filter(Boolean).slice(0, ESEMPI_INUTILI);
+  if (!utili.length && !inutili.length) return '';
+  const L = ['', 'ESEMPI VALUTATI DA CHI TI USA (riunioni passate)'];
+  if (utili.length) L.push('Suggerimenti giudicati UTILI: scrivine di questo tipo quando ritrovi un segnale simile.', ...utili);
+  if (inutili.length) L.push('Suggerimenti giudicati INUTILI: in casi come questi rispondi "Nessun suggerimento." oppure scrivi qualcosa di davvero diverso.', ...inutili);
+  return L.join('\n');
 }
 
 // {{INGRESSO}} del prompt: cosa riceve Gemini, secondo la modalità scelta nella finestra.
@@ -211,11 +320,13 @@ const INGRESSO = {
 
 // ai: voce di AI_SUPPORTATE (prompt da usare; locale = meno dati del progetto).
 async function istruzioni(user, idCalendar, titolo, modalita, ai) {
-  const { riunione, dati } = await datiRiunione(user, idCalendar, titolo, ai.locale ? OLLAMA_PM_MAX_DATI : MAX_DATI);
+  const { riunione, dati, voci } = await datiRiunione(user, idCalendar, titolo, ai.locale ? OLLAMA_PM_MAX_DATI : MAX_DATI, !!ai.locale);
   const utente = String(await speakerName(user) || '').trim() || user.email || '';
   const vars = { UTENTE: utente, RIUNIONE: riunione, DATA: dataIt(oggiIso()), DATI: dati, INGRESSO: INGRESSO[modalita] };
   let tpl = (await getPromptFor(ai.prompt, user)).testo;
   if (!tpl.includes('{{INGRESSO}}')) tpl = `{{INGRESSO}}\n${tpl}`;
+  // Esempi dai voti 👍/👎 in fondo alle istruzioni (dopo i dati per Gemini).
+  const esempi = await esempiDaiVoti(user, !!ai.locale);
   if (ai.locale) {
     // Pm projexa: istruzioni IDENTICHE per tutte le riunioni (riunione, data e dati del progetto
     // tolti), così Ollama le tiene già lette da una call all'altra (cache del prompt, modello
@@ -223,12 +334,13 @@ async function istruzioni(user, idCalendar, titolo, modalita, ai) {
     // richiedevano 536 s. Riunione e dati vanno nel primo messaggio della conversazione.
     const fissi = { ...vars, RIUNIONE: '', DATA: '(vedi il primo messaggio)', DATI: '(nel primo messaggio della conversazione)' };
     return {
-      sistema: tpl.replace(/\{\{(UTENTE|RIUNIONE|DATA|DATI|INGRESSO)\}\}/g, (x, k) => fissi[k]),
-      contesto: `CONTESTO DI QUESTA RIUNIONE (solo informazioni, non rispondere a questo messaggio):\nRiunione${riunione}, oggi ${vars.DATA}.\n\nDATI DEL PROGETTO\n${dati}`
+      sistema: tpl.replace(/\{\{(UTENTE|RIUNIONE|DATA|DATI|INGRESSO)\}\}/g, (x, k) => fissi[k]) + esempi,
+      contesto: `CONTESTO DI QUESTA RIUNIONE (solo informazioni, non rispondere a questo messaggio):\nRiunione${riunione}, oggi ${vars.DATA}.\n\nDATI DEL PROGETTO\n${dati}`,
+      voci
     };
   }
   if (!tpl.includes('{{DATI}}')) tpl += '\n\nDATI\n{{DATI}}';
-  return tpl.replace(/\{\{(UTENTE|RIUNIONE|DATA|DATI|INGRESSO)\}\}/g, (x, k) => vars[k]);
+  return tpl.replace(/\{\{(UTENTE|RIUNIONE|DATA|DATI|INGRESSO)\}\}/g, (x, k) => vars[k]) + esempi;
 }
 
 // ----------------------------------------------------------------------------
@@ -239,6 +351,19 @@ function aggiungi(s, tipo, testo) {
   s.messaggi.push({ n: ++s.seq, tipo, testo: String(testo || ''), ora: new Date().toISOString() });
   if (s.messaggi.length > MAX_MESSAGGI) s.messaggi.splice(0, s.messaggi.length - MAX_MESSAGGI);
   s.ultimoUso = Date.now();
+  // Suggerimento: si ricorda il pezzo di riunione da cui è nato, per il voto 👍/👎 (POST /voto).
+  // Senza un tratto noto (audio live) si usano le ultime righe di trascrizione mostrate.
+  if (tipo === 'ai' && s.origini) {
+    const tratto = s.trattoCorrente
+      || s.messaggi.filter((m) => m.tipo === 'trascrizione').slice(-4).map((m) => m.testo).join('\n');
+    s.origini.set(s.seq, {
+      tratto: String(tratto || '').slice(-VOTO_TRATTO_CHARS),
+      domanda: !!s.rispostaDomanda,
+      // Pm projexa: anche il numero del segnale («DOMANDA [4]: ...»), per riusarlo come esempio.
+      completo: s.motore === 'projexa' && !s.rispostaDomanda ? (s.ultimaRisposta || '') : ''
+    });
+    if (s.origini.size > MAX_MESSAGGI) s.origini.delete(s.origini.keys().next().value);
+  }
 }
 
 // --- Diagnostica dei blocchi di Gemini (2026-10-15) ---
@@ -536,6 +661,9 @@ function prossimo(s) {
   s.inTurno = true;
   s.risposta = '';
   s.rispostaLibera = !!voce.domanda;
+  // Per il voto: pezzo di riunione a cui risponderà Gemini.
+  s.trattoCorrente = voce.domanda ? '' : String(voce.testo).replace(/^TRASCRIZIONE[^\n]*\n/, '');
+  s.rispostaDomanda = !!voce.domanda;
   s.timerTurno = setTimeout(() => {
     s.inTurno = false;
     // Modalità Testo: stesso controllo di Gemini «appeso» dell'audio live.
@@ -698,8 +826,13 @@ function prossimoOllama(s) {
   const domande = voci.filter((v) => v.domanda).map((v) => v.testo).join('\n');
   // Momento in cui è arrivato al server il blocco più recente del tratto (≈ quando è stato detto).
   const dettoIl = Math.max(0, ...voci.filter((v) => !v.domanda).map((v) => v.il || 0));
+  // Voci del progetto di cui parla il tratto (RAID, To-Do, CR aperte), una volta per riunione.
+  const collegate = trascr ? vociDelTratto(s, trascr) : [];
+  for (const v of collegate) s.vociCitate.add(v.riga);
   const testo = [trascr && `TRASCRIZIONE (nuovo tratto della riunione):\n${trascr}`,
+    collegate.length && `VOCI APERTE DEL PROGETTO legate a questo tratto (solo se servono):\n${collegate.map((v) => `- ${v.riga}`).join('\n')}`,
     domande && `DOMANDA SCRITTA DA CHI TI USA (rispondi in modo diretto e breve):\n${domande}`].filter(Boolean).join('\n\n');
+  if (collegate.length) console.log(`[ASSISTENTE PM] ${s.idCalendar}: tratto collegato a ${collegate.length} voci aperte del progetto`);
   s.inTurno = true;
   s.turniChiesti++;
   codaOllama = codaOllama.then(async () => {
@@ -720,7 +853,8 @@ function prossimoOllama(s) {
       // Primo stadio: il modello piccolo dice se nel pezzo c'è un segnale. NO = il modello
       // grande non lavora; il pezzo resta comunque nella conversazione come contesto. Filtro in
       // errore o risposta incomprensibile = si passa al modello grande (meglio lento che cieco).
-      if (OLLAMA_PM_FILTRO_MODEL && s.istruzioniFiltro && trascr && !domande) {
+      // Tratto che parla di una voce aperta del progetto: va direttamente al modello grande.
+      if (OLLAMA_PM_FILTRO_MODEL && s.istruzioniFiltro && trascr && !domande && !collegate.length) {
         let esito = null;
         try {
           const f = await chiamaOllama(s, [{ role: 'system', content: s.istruzioniFiltro },
@@ -753,6 +887,8 @@ function prossimoOllama(s) {
       s.errori = 0;
       s.ultimaRisposta = '';
       const tenute = domande ? (r.testo && !SILENZIO_RE.test(r.testo) ? [r.testo.replace(/\*\*/g, '')] : []) : suggerimentiDa(s, r.testo, trascr);
+      s.trattoCorrente = trascr || s.trattoPrec || '';
+      s.rispostaDomanda = !!domande;
       if (tenute.length) for (const t of tenute) { aggiungi(s, 'ai', t); if (!domande) s.giaDetti.push(t); }
       else s.silenzi++;
       if (s.giaDetti.length > 30) s.giaDetti.splice(0, s.giaDetti.length - 30);
@@ -907,7 +1043,12 @@ router.post('/avvia', requireAuth, async (req, res) => {
       // Pm projexa: la conversazione parte dal contesto della riunione (dopo le istruzioni fisse).
       storia: ai.locale ? [{ role: 'user', content: testoIstruzioni.contesto }, { role: 'assistant', content: 'Nessun suggerimento.' }] : [],
       giaDetti: [], timerTratto: null, errori: 0,
-      istruzioniFiltro, trattoPrec: '', filtrati: 0
+      istruzioniFiltro, trattoPrec: '', filtrati: 0,
+      // Voci aperte del progetto da collegare ai tratti (solo Pm projexa) e già proposte.
+      vociProgetto: ai.locale ? (testoIstruzioni.voci || []) : [], vociCitate: new Set(),
+      // Voti 👍/👎: pezzo di riunione di ogni suggerimento (n -> { tratto, completo, domanda }) e voto dato.
+      origini: new Map(), voti: new Map(), trattoCorrente: '', rispostaDomanda: false,
+      user: { tenant_id: req.user.tenant_id, user_id: req.user.user_id }
     };
     sessioni.set(k, s);
     if (s.motore === 'projexa') {
@@ -1018,8 +1159,51 @@ router.get('/messaggi', requireAuth, (req, res) => {
     silenzi: s.silenzi,
     turniChiesti: s.turniChiesti,
     senzaRisposta: s.senzaRisposta,
-    messaggi: s.messaggi.filter((m) => m.n > dopo)
+    // votabile/voto: pulsanti 👍/👎 sui suggerimenti (POST /voto).
+    messaggi: s.messaggi.filter((m) => m.n > dopo).map((m) => (m.tipo === 'ai' && s.origini && s.origini.has(m.n)
+      ? { ...m, votabile: true, voto: s.voti.get(m.n) || 0 } : m))
   });
+});
+
+// Voto a un suggerimento della finestra. Body: { id_calendar, n, voto: 1 | -1 | 0 } (0 = tolto).
+// Si salva col pezzo di riunione da cui è nato (cifrati): dal giorno dopo diventa un esempio
+// nelle istruzioni dell'Assistente di questo utente (esempiDaiVoti).
+router.post('/voto', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const s = sessioneDi(req, idDa(b.id_calendar));
+    const n = Number(b.n);
+    const voto = Number(b.voto);
+    if (!s) throw errore(404, 'Sessione dell\'assistente non più disponibile');
+    if (![1, -1, 0].includes(voto)) throw errore(400, 'Voto non valido');
+    const msg = s.messaggi.find((m) => m.n === n && m.tipo === 'ai');
+    const origine = s.origini.get(n);
+    if (!msg || !origine) throw errore(404, 'Suggerimento non trovato');
+    const chiaveVoto = [req.user.tenant_id, req.user.user_id, s.idCalendar, n];
+    if (voto === 0) {
+      await db.query('DELETE FROM pm_assistente_voti WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND n = $4', chiaveVoto);
+      s.voti.delete(n);
+      return res.json({ ok: true, voto: 0 });
+    }
+    const suggerimento = origine.completo || msg.testo;
+    const segnale = origine.domanda ? 'RISPOSTA' : ((/^\W*([A-Z]+)/.exec(suggerimento) || [])[1] || '').slice(0, 20);
+    const { data } = await encryptRowForWrite(db, 'pm_assistente_voti', {
+      suggerimento: suggerimento.slice(0, 2000), tratto: origine.tratto || null
+    });
+    await db.query(
+      `INSERT INTO pm_assistente_voti (tenant_id, user_id, id_calendar, n, ai, segnale, suggerimento, tratto, voto, crypto)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (tenant_id, user_id, id_calendar, n)
+       DO UPDATE SET voto = EXCLUDED.voto, updated_at = now()`,
+      [...chiaveVoto, s.motore, segnale, data.suggerimento, data.tratto, voto, data.crypto ?? 0]
+    );
+    s.voti.set(n, voto);
+    res.json({ ok: true, voto });
+  } catch (e) {
+    if (e.code === '42P01') return res.status(503).json({ error: 'Voti non ancora attivi: manca la tabella pm_assistente_voti (Supporto/CreaDB/assistente_pm_voti.sql)' });
+    if (!e.status) console.error('❌ [ASSISTENTE PM] voto:', e.message);
+    res.status(e.status || 500).json({ error: e.message });
+  }
 });
 
 // Fine registrazione (o chiusura della finestra). Body: { id_calendar }.

@@ -281,7 +281,10 @@ const TABLE_COLUMN_ALLOWLIST = {
   mysupport: new Set(['operatore']),
   // Rubrica (2026-10-17): nominativo, email, ruolo e nome del file della foto. foto_mime resta
   // in chiaro (tipo del file, non personale). Abbinamenti per email fatti dopo la lettura.
-  rubrica: new Set(['nominativo', 'email', 'ruolo', 'foto_nome'])
+  rubrica: new Set(['nominativo', 'email', 'ruolo', 'foto_nome']),
+  // Voti 👍/👎 ai suggerimenti dell'Assistente PM (Supporto/CreaDB/assistente_pm_voti.sql):
+  // suggerimento e pezzo di riunione cifrati; id_calendar, segnale, ai e voto in chiaro.
+  pm_assistente_voti: new Set(['suggerimento', 'tratto'])
 };
 
 // ----------------------------------------------------------------------------

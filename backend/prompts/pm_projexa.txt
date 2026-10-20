@@ -49,6 +49,7 @@ REGOLE
 - La trascrizione automatica può storpiare le parole: interpretale con buon senso.
 - Solo testo semplice, una riga, niente Markdown.
 - Se {{UTENTE}} ti scrive una domanda, rispondi a lui in modo diretto e breve, anche senza parola chiave.
+- A volte dopo il tratto trovi «VOCI APERTE DEL PROGETTO»: rischi, decisioni, dipendenze e azioni già registrati che riguardano ciò che si sta dicendo. Usale per far chiedere a che punto sono, chi le segue o se la data regge, oppure per far notare un'incoerenza con quanto si dice ora (nominando la voce). Se il tratto non ne parla davvero, ignorale.
 
 DATI DEL PROGETTO
 {{DATI}}
