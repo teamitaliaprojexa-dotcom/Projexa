@@ -21,6 +21,7 @@ import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
 import assistentePmRoutes from './routes/assistentePm.js';
+import analisiPmRoutes from './routes/analisiPm.js';
 import mysupportPushRoutes, { utenteDaTokenPush, registraInvioPush, pushLimitato } from './routes/mysupportPush.js';
 import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
 import jobSchedulesRoutes from './routes/job-schedules.js';
@@ -254,6 +255,8 @@ app.use('/api/audit', auditEventiRoutes);
 app.use('/api/chatbot', chatbotRoutes);
 // Finestra «Assistente PM» durante la registrazione (Gemini Live): routes/assistentePm.js.
 app.use('/api/assistente-pm', assistentePmRoutes);
+// Analisi PM notturna, valutazione delle domande e modello addestrato (solo ANALISI_PM_EMAILS).
+app.use('/api/analisi-pm', analisiPmRoutes);
 // Token dello script del PC che invia MySupport (interruttore «DataBricks»): routes/mysupportPush.js.
 app.use('/api/mysupport/push', mysupportPushRoutes);
 // Cruscotto PM e Portfolio (funzioni da PM senior: salute, RAID, Change Request, stakeholder,

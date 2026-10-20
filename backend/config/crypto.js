@@ -284,7 +284,11 @@ const TABLE_COLUMN_ALLOWLIST = {
   rubrica: new Set(['nominativo', 'email', 'ruolo', 'foto_nome']),
   // Voti 👍/👎 ai suggerimenti dell'Assistente PM (Supporto/CreaDB/assistente_pm_voti.sql):
   // suggerimento e pezzo di riunione cifrati; id_calendar, segnale, ai e voto in chiaro.
-  pm_assistente_voti: new Set(['suggerimento', 'tratto'])
+  pm_assistente_voti: new Set(['suggerimento', 'tratto']),
+  // Pacchetti di esempi di Pm projexa dal programma Addestramento PM (pm_projexa_esempi.sql)
+  pm_projexa_esempi: new Set(['esempi', 'note']),
+  // Analisi PM notturna (analisi_pm.sql): pezzo di riunione e domande; segnale, esito in chiaro.
+  pm_analisi: new Set(['tratto', 'suggerimento', 'testo_corretto'])
 };
 
 // ----------------------------------------------------------------------------

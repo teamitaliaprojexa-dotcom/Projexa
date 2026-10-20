@@ -277,6 +277,29 @@ function vociDelTratto(s, tratto) {
   return trovate.sort((a, b) => b.comuni - a.comuni).slice(0, VOCI_PER_TRATTO).map((x) => x.v);
 }
 
+// Esempi del pacchetto attivo del tenant, pubblicato dal programma «Addestramento PM» sul PC
+// (Yanko_e_Fede\Addestramento-PM, tabella pm_projexa_esempi). JSON [{ tratto, risposta }].
+// Cambia solo a una nuova pubblicazione: le istruzioni restano in cache tra le call.
+async function esempiAddestramento(user) {
+  let r;
+  try {
+    r = (await db.query('SELECT versione, esempi FROM pm_projexa_esempi WHERE tenant_id = $1 AND attivo LIMIT 1', [user.tenant_id])).rows[0];
+  } catch (e) {
+    if (e.code !== '42P01') console.warn(`[ASSISTENTE PM] esempi di addestramento non letti (${e.message})`);
+    return '';
+  }
+  if (!r) return '';
+  let esempi = [];
+  try { esempi = JSON.parse(r.esempi); } catch { return ''; }
+  const righe = (Array.isArray(esempi) ? esempi : []).slice(0, 40).map((x) => {
+    const tratto = String(x.tratto || '').replace(/\s+/g, ' ').trim();
+    const risposta = String(x.risposta || '').replace(/\s+/g, ' ').trim();
+    return tratto && risposta ? `Testo: "${tratto}" -> ${risposta}` : null;
+  }).filter(Boolean);
+  if (!righe.length) return '';
+  return ['', `ESEMPI DA RIUNIONI VERE, RIVISTI DA CHI TI USA (versione ${r.versione}): comportati così, anche quando la risposta giusta è "Nessun suggerimento."`, ...righe].join('\n');
+}
+
 // Esempi dai voti 👍/👎 dell'utente (fino a ieri: durante la giornata le istruzioni restano
 // identiche e Pm projexa le tiene in cache). conNumero = formato di Pm projexa «DOMANDA [4]: ...»;
 // per Gemini il numero si toglie. Tabella assente o errore: nessun esempio.
@@ -325,8 +348,9 @@ async function istruzioni(user, idCalendar, titolo, modalita, ai) {
   const vars = { UTENTE: utente, RIUNIONE: riunione, DATA: dataIt(oggiIso()), DATI: dati, INGRESSO: INGRESSO[modalita] };
   let tpl = (await getPromptFor(ai.prompt, user)).testo;
   if (!tpl.includes('{{INGRESSO}}')) tpl = `{{INGRESSO}}\n${tpl}`;
-  // Esempi dai voti 👍/👎 in fondo alle istruzioni (dopo i dati per Gemini).
-  const esempi = await esempiDaiVoti(user, !!ai.locale);
+  // Esempi in fondo alle istruzioni (dopo i dati per Gemini): per Pm projexa prima quelli rivisti
+  // col programma Addestramento PM, poi quelli dai voti 👍/👎.
+  const esempi = (ai.locale ? await esempiAddestramento(user) : '') + await esempiDaiVoti(user, !!ai.locale);
   if (ai.locale) {
     // Pm projexa: istruzioni IDENTICHE per tutte le riunioni (riunione, data e dati del progetto
     // tolti), così Ollama le tiene già lette da una call all'altra (cache del prompt, modello

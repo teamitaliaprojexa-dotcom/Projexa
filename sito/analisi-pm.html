@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analisi PM - Projexa</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Analisi PM (2026-10-20): domande da PM senior proposte di notte dall'AI sulle riunioni
+           segnate, da valutare; file per l'addestramento su Google Colab; modello su Ollama della VM.
+           Solo per gli utenti di ANALISI_PM_EMAILS (backend/routes/analisiPm.js). */
+        :root { --surface: #fff; --bg: #f5f5f5; --primary: #3B82F6; --ink: #1F2937; --muted: #6B7280; --line: #E5E7EB; --ok: #059669; --bad: #DC2626; --warn: #B45309; --soft: #EFF6FF; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; background: var(--bg); color: var(--ink); font-size: 14px; }
+        .wrap { max-width: 1180px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+        .top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+        h1 { font-size: 1.6rem; color: var(--primary); }
+        h2 { font-size: 1.05rem; margin-bottom: 0.6rem; }
+        .sub { font-size: 0.85rem; color: var(--muted); margin-top: 0.2rem; }
+        .back { padding: 0.55rem 1rem; border-radius: 8px; font-weight: 600; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; background: #e5e7eb; color: var(--ink); }
+        .tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line); margin-bottom: 1rem; flex-wrap: wrap; }
+        .tabs button { border: 0; background: none; padding: 0.7rem 1rem; font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 3px solid transparent; }
+        .tabs button.on { color: var(--primary); border-bottom-color: var(--primary); }
+        .card { background: var(--surface); border-radius: 12px; padding: 1.1rem; margin-bottom: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+        .riga { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+        select, input[type=text] { font: inherit; padding: 0.45rem 0.6rem; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+        .btn { font: inherit; font-weight: 600; font-size: 0.85rem; padding: 0.45rem 0.85rem; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 0.4rem; color: var(--ink); text-decoration: none; }
+        .btn:hover { border-color: var(--primary); color: var(--primary); }
+        .btn.pri { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .btn.ok.on { background: #ECFDF5; border-color: #6EE7B7; color: var(--ok); }
+        .btn.ko.on { background: #FEF2F2; border-color: #FCA5A5; color: var(--bad); }
+        .btn.danger { color: var(--bad); }
+        .btn:disabled { opacity: 0.5; cursor: default; }
+        .muted { color: var(--muted); font-size: 0.82rem; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 0.55rem; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 0.86rem; }
+        th { font-size: 0.72rem; text-transform: uppercase; color: var(--muted); }
+        .badge { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 999px; background: #F3F4F6; color: var(--muted); }
+        .b-ok { background: #ECFDF5; color: var(--ok); } .b-bad { background: #FEF2F2; color: var(--bad); } .b-run { background: var(--soft); color: var(--primary); } .b-warn { background: #FFFBEB; color: var(--warn); }
+        .dom { border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem; margin-bottom: 0.7rem; background: #fff; }
+        .dom.corretta { border-left: 4px solid var(--ok); } .dom.errata { border-left: 4px solid var(--bad); opacity: 0.85; }
+        .tratto { white-space: pre-wrap; font-size: 0.84rem; background: #F9FAFB; border-radius: 8px; padding: 0.6rem 0.75rem; max-height: 200px; overflow: auto; margin: 0.5rem 0; color: #374151; }
+        .domanda { font-weight: 600; font-size: 0.95rem; }
+        .editor { display: none; gap: 0.4rem; margin-top: 0.5rem; grid-template-columns: 130px 240px 1fr; }
+        .editor.open { display: grid; }
+        .msg { display: none; padding: 0.6rem 0.9rem; border-radius: 8px; margin-bottom: 1rem; }
+        .msg.info { display: block; background: #ECFDF5; color: var(--ok); } .msg.err { display: block; background: #FEF2F2; color: var(--bad); }
+        ol.guida { padding-left: 1.3rem; line-height: 1.7; } ol.guida li { margin-bottom: 0.25rem; }
+        .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 0.5rem; } .bar > div { height: 100%; background: var(--primary); width: 0; }
+        .hidden { display: none !important; }
+        @media (max-width: 760px) { .editor.open { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <div class="top">
+        <div>
+            <h1><i class="fas fa-user-tie"></i> Analisi PM</h1>
+            <div class="sub">Le domande da PM senior che avresti potuto fare, proposte di notte dall'AI sulle riunioni che hai segnato.</div>
+        </div>
+        <a class="back" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
+    </div>
+    <div id="msg" class="msg"></div>
+    <div id="negato" class="card hidden"><i class="fas fa-lock"></i> Pagina non disponibile per il tuo utente.</div>
+
+    <div id="pagina" class="hidden">
+    <div class="tabs">
+        <button data-tab="domande" class="on"><i class="fas fa-list-check"></i> Domande da valutare</button>
+        <button data-tab="riunioni"><i class="fas fa-moon"></i> Riunioni e analisi notturna</button>
+        <button data-tab="addestra"><i class="fas fa-graduation-cap"></i> Addestramento</button>
+        <button data-tab="modello"><i class="fas fa-server"></i> Modello sulla VM</button>
+    </div>
+
+    <!-- DOMANDE -->
+    <section id="t-domande">
+        <div class="card">
+            <div class="riga">
+                <select id="fEsito">
+                    <option value="da">Da valutare</option>
+                    <option value="corretta">Corrette</option>
+                    <option value="errata">Errate</option>
+                    <option value="">Tutte</option>
+                </select>
+                <select id="fRiunione"><option value="">Tutte le riunioni</option></select>
+                <label class="muted"><input type="checkbox" id="fMancate"> solo domande che non hai fatto</label>
+                <span id="conteggio" class="muted" style="margin-left:auto"></span>
+            </div>
+            <p class="muted" style="margin-top:0.6rem">Per ogni domanda vedi il pezzo di riunione su cui si basa. <b>Corretta</b> = è una domanda giusta da fare in quel momento (puoi anche correggerne il testo); <b>Errata</b> = lì non andava suggerito nulla, o non così. «L'hai chiesto tu» = nella riunione l'hai fatta davvero poco dopo; «Mancata» = non è stata fatta.</p>
+        </div>
+        <div id="domande"></div>
+    </section>
+
+    <!-- RIUNIONI -->
+    <section id="t-riunioni" class="hidden">
+        <div class="card">
+            <h2>AI dell'analisi notturna</h2>
+            <div class="riga">
+                <select id="ai">
+                    <option value="Gemini">Gemini (gratuito) — un gruppo di pezzi ogni 30 minuti</option>
+                    <option value="ChatGPT">ChatGPT (solo Batch, metà prezzo) — risultato entro la mattina</option>
+                </select>
+                <button class="btn pri" id="salvaAi"><i class="fas fa-floppy-disk"></i> Salva</button>
+                <span id="job" class="muted"></span>
+            </div>
+            <p class="muted" style="margin-top:0.6rem">Per mandare una riunione all'analisi: apri la sua <b>trascrizione</b> e premi <b>Analisi PM</b>. Di notte (00:00-06:30) il job la analizza con l'AI scelta qui; finita l'analisi il segno sulla riunione si toglie da solo. La chiave dell'AI è quella collegata in Impostazioni › AI.</p>
+        </div>
+        <div class="card">
+            <table>
+                <thead><tr><th>Riunione</th><th>Stato</th><th>AI</th><th>Domande</th><th>Da valutare</th></tr></thead>
+                <tbody id="riunioni"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- ADDESTRAMENTO -->
+    <section id="t-addestra" class="hidden">
+        <div class="card">
+            <h2>Subito, senza addestramento</h2>
+            <p class="muted">Le domande che hai segnato come corrette diventano esempi nelle istruzioni di Pm projexa (fino a 24, più 10 casi in cui stare zitto), dalla prossima call.</p>
+            <div class="riga" style="margin-top:0.6rem">
+                <button class="btn pri" id="usaEsempi"><i class="fas fa-wand-magic-sparkles"></i> Usa le corrette come esempi per Pm projexa</button>
+                <select id="versioniEsempi"></select>
+                <button class="btn" id="attivaEsempi">Attiva questa versione</button>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Addestramento vero con Google Colab (gratuito)</h2>
+            <p class="muted">Consigliato quando hai almeno 100-200 domande corrette. Serve un account Google (va bene uno personale o di lavoro).</p>
+            <div class="riga" style="margin:0.8rem 0">
+                <button class="btn pri" id="scarica"><i class="fas fa-download"></i> 1. Scarica il file degli esempi (.jsonl)</button>
+                <button class="btn" id="notebook"><i class="fas fa-book"></i> 2. Scarica il notebook (.ipynb)</button>
+                <a class="btn" href="https://colab.research.google.com/" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> 3. Apri Google Colab</a>
+            </div>
+            <ol class="guida">
+                <li>Scarica i due file con i pulsanti 1 e 2.</li>
+                <li>Apri <b>Google Colab</b> (pulsante 3) ed entra con il tuo account Google.</li>
+                <li>Nella finestra che si apre scegli <b>Carica</b> (oppure menu <b>File → Carica notebook</b>) e scegli <code>addestra_pm_projexa.ipynb</code>.</li>
+                <li>Menu <b>Runtime → Cambia tipo di runtime</b> → <b>GPU T4</b> → Salva.</li>
+                <li>Menu <b>Runtime → Esegui tutto</b>. Quando la cella 2 mostra <b>Scegli file</b>, carica il file <code>.jsonl</code>.</li>
+                <li>Aspetta (20-60 minuti, la pagina deve restare aperta). Alla fine si scarica <code>pm-projexa-adapter.gguf</code>.</li>
+                <li>Caricalo nella scheda <b>Modello sulla VM</b>.</li>
+            </ol>
+            <p class="muted" style="margin-top:0.6rem">Il file degli esempi contiene pezzi delle tue riunioni: Colab gratuito è un servizio Google, valuta tu se è compatibile con le regole aziendali. Il file puoi darlo anche a Claude o ChatGPT (account enterprise) per farti aiutare a sistemare il notebook se dà errori: il calcolo però va fatto su una GPU come quella di Colab.</p>
+        </div>
+    </section>
+
+    <!-- MODELLO -->
+    <section id="t-modello" class="hidden">
+        <div class="card">
+            <h2>Carica e installa un modello addestrato</h2>
+            <div class="riga">
+                <input type="file" id="file" accept=".gguf">
+                <input type="text" id="nota" placeholder="Nota (es. 180 domande, ottobre)" style="flex:1; min-width:200px">
+                <button class="btn pri" id="installa"><i class="fas fa-upload"></i> Carica e installa</button>
+            </div>
+            <div class="bar hidden" id="barra"><div></div></div>
+            <div id="avanz" class="muted" style="margin-top:0.4rem"></div>
+            <p class="muted" style="margin-top:0.6rem">Projexa fa il <b>backup</b> del modello attuale, crea il nuovo pm-projexa (base qwen2.5:7b + il tuo adattatore, stessi parametri) e lo prova: se qualcosa non va torna da solo al precedente. Meglio farlo quando non ci sono call in corso (la VM lavora un paio di minuti).</p>
+        </div>
+        <div class="card">
+            <h2>Modelli pm-projexa sulla VM</h2>
+            <table><thead><tr><th>Nome</th><th>Dimensione</th><th>Data</th><th></th></tr></thead><tbody id="modelli"></tbody></table>
+            <div id="notaModello" class="muted" style="margin-top:0.6rem"></div>
+        </div>
+    </section>
+    </div>
+</div>
+<script>
+    const API_URL = location.origin + '/api/analisi-pm';
+    if (!localStorage.getItem('authToken')) window.location.href = 'index.html';
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const auth = (extra) => Object.assign({ 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` }, extra || {});
+    const dataIt = (d) => d ? new Date(d).toLocaleDateString('it-IT') : '';
+    const dataOra = (d) => d ? new Date(d).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    const PAROLE = ['DOMANDA', 'RISCHIO', 'CR', 'ATTENZIONE', 'AGENDA'];
+    const SEGNALI = ['', 'Promessa senza data / data ambigua', 'Richiesta nuova: CR', 'Ordine, fattura, pagamenti', 'Si aspetta qualcosa da altri', 'Problema: ticket e fix', 'Diagnosi: caso concreto', 'Rilascio, fix, impatti', 'Attività che spettano al cliente', 'Go-live', 'Analisi, stima, risorse', 'Decisione rinviata', 'Numeri contestati', 'Fine call: azioni e SAL'];
+    const FORMATO = /^\s*(DOMANDA|RISCHIO|CR|ATTENZIONE|AGENDA)\s*\[\s*(\d{1,2})\s*\]\s*:\s*(.+)$/i;
+    let domande = [];
+
+    async function api(metodo, url, body) {
+        const r = await fetch(API_URL + url, { method: metodo, headers: auth(body ? { 'Content-Type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw Object.assign(new Error(d.error || `Errore ${r.status}`), { status: r.status });
+        return d;
+    }
+    function avviso(t, tipo = 'info') { const m = $('msg'); m.className = `msg ${tipo}`; m.textContent = t; clearTimeout(avviso.t); if (tipo === 'info') avviso.t = setTimeout(() => { m.className = 'msg'; }, 6000); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    const errore = (e) => avviso(e.message, 'err');
+    async function scaricaFile(url, nome) {
+        const r = await fetch(API_URL + url, { headers: auth() });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `Errore ${r.status}`); }
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(await r.blob());
+        a.download = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || nome;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+
+    // --- Schede ---
+    function vai(tab) {
+        document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+        ['domande', 'riunioni', 'addestra', 'modello'].forEach((t) => $(`t-${t}`).classList.toggle('hidden', t !== tab));
+        if (tab === 'domande') caricaDomande();
+        if (tab === 'riunioni') caricaRiunioni();
+        if (tab === 'addestra') caricaEsempi();
+        if (tab === 'modello') caricaModelli();
+    }
+    document.querySelectorAll('.tabs button').forEach((b) => { b.onclick = () => vai(b.dataset.tab); });
+
+    // --- Domande ---
+    async function caricaDomande() {
+        try {
+            const q = new URLSearchParams({ esito: $('fEsito').value, mancate: $('fMancate').checked ? '1' : '' });
+            if ($('fRiunione').value) q.set('id_calendar', $('fRiunione').value);
+            domande = (await api('GET', `/domande?${q}`)).domande;
+            disegnaDomande();
+        } catch (e) { errore(e); }
+    }
+    ['fEsito', 'fRiunione', 'fMancate'].forEach((id) => { $(id).onchange = caricaDomande; });
+    function parti(t) { const m = String(t || '').match(FORMATO); return m ? { parola: m[1].toUpperCase(), n: Number(m[2]), frase: m[3] } : { parola: 'DOMANDA', n: 1, frase: '' }; }
+    function disegnaDomande() {
+        $('conteggio').textContent = `${domande.length} domand${domande.length === 1 ? 'a' : 'e'}`;
+        let ultima = '';
+        $('domande').innerHTML = domande.map((d) => {
+            const testo = d.testo_corretto || d.suggerimento;
+            const p = parti(testo);
+            const titolo = d.id_calendar !== ultima ? `<h2 style="margin:1rem 0 0.5rem">${esc(d.oggetto || '(riunione)')} <span class="muted">${dataIt(d.data)}</span></h2>` : '';
+            ultima = d.id_calendar;
+            return `${titolo}<div class="dom ${d.esito || ''}" data-id="${d.id}">
+                <div class="riga" style="justify-content:space-between">
+                    <span class="muted">Pezzo ${d.pezzo + 1} · ${esc(d.ai || '')}</span>
+                    <span>${d.fatta === true ? '<span class="badge b-ok">l\'hai chiesto tu</span>' : d.fatta === false ? '<span class="badge b-warn">mancata</span>' : ''}
+                    ${d.esito ? `<span class="badge ${d.esito === 'corretta' ? 'b-ok' : 'b-bad'}">${d.esito}</span>` : ''}</span>
+                </div>
+                <div class="tratto">${esc(d.tratto)}</div>
+                <div class="domanda">${esc(testo)}${d.testo_corretto ? ' <span class="muted">(corretta da te)</span>' : ''}</div>
+                <div class="editor">
+                    <select data-parola>${PAROLE.map((x) => `<option ${x === p.parola ? 'selected' : ''}>${x}</option>`).join('')}</select>
+                    <select data-n>${SEGNALI.map((s, n) => n ? `<option value="${n}" ${n === p.n ? 'selected' : ''}>${n}. ${esc(s)}</option>` : '').join('')}</select>
+                    <input type="text" data-frase value="${esc(p.frase)}">
+                </div>
+                <div class="riga" style="margin-top:0.6rem">
+                    <button class="btn ok ${d.esito === 'corretta' ? 'on' : ''}" data-az="corretta"><i class="fas fa-check"></i> Corretta</button>
+                    <button class="btn ko ${d.esito === 'errata' ? 'on' : ''}" data-az="errata"><i class="fas fa-xmark"></i> Errata</button>
+                    <button class="btn" data-az="modifica"><i class="fas fa-pen"></i> Correggi il testo</button>
+                </div>
+            </div>`;
+        }).join('') || '<div class="card muted">Nessuna domanda in questa vista. Le nuove arrivano la mattina, dopo l\'analisi notturna.</div>';
+    }
+    $('domande').onclick = async (e) => {
+        const b = e.target.closest('[data-az]');
+        const box = e.target.closest('.dom');
+        if (!b || !box) return;
+        const d = domande.find((x) => x.id === box.dataset.id);
+        const editor = box.querySelector('.editor');
+        if (b.dataset.az === 'modifica') { editor.classList.toggle('open'); return; }
+        let testo = d.testo_corretto || '';
+        if (editor.classList.contains('open')) {
+            const frase = box.querySelector('[data-frase]').value.trim();
+            if (frase.length < 10) return avviso('Scrivi la domanda corretta (almeno qualche parola).', 'err');
+            testo = `${box.querySelector('[data-parola]').value} [${box.querySelector('[data-n]').value}]: ${frase}`;
+            if (testo === d.suggerimento) testo = '';
+        }
+        const esito = d.esito === b.dataset.az && !editor.classList.contains('open') ? null : b.dataset.az; // stesso pulsante = annulla
+        try {
+            await api('PUT', `/domande/${d.id}`, { esito, testo_corretto: testo });
+            Object.assign(d, { esito, testo_corretto: testo || null });
+            if ($('fEsito').value === 'da' && esito) { domande = domande.filter((x) => x !== d); }
+            disegnaDomande();
+        } catch (err) { errore(err); }
+    };
+
+    // --- Riunioni e AI ---
+    async function caricaRiunioni() {
+        try {
+            const d = await api('GET', '/impostazioni');
+            $('ai').value = d.ai;
+            $('job').textContent = d.job ? (d.job.attivo ? `Prossimo giro: ${dataOra(d.job.prossima_esecuzione) || '—'}` : 'Job analisi_pm disattivato (Monitor › Schedulazioni)') : 'Job analisi_pm non presente';
+            const stato = (r) => r.segnata && !r.stato ? '<span class="badge b-run">in attesa della notte</span>'
+                : r.stato === 'in_corso' ? `<span class="badge b-run">in corso</span><div class="muted">pezzi ${r.prossimo_da}/${r.pezzi_tot || '?'}</div>`
+                : r.stato === 'batch' ? '<span class="badge b-run">Batch ChatGPT inviato</span>'
+                : r.stato === 'fatta' ? `<span class="badge b-ok">fatta</span><div class="muted">${dataOra(r.completata_il)}</div>`
+                : r.stato === 'errore' ? `<span class="badge b-bad">errore</span><div class="muted">${esc(r.errore || '')}</div>` : '';
+            $('riunioni').innerHTML = d.riunioni.map((r) => `<tr><td><b>${esc(r.oggetto || '(riunione)')}</b><div class="muted">${dataIt(r.data)}</div></td>
+                <td>${stato(r)}${r.segnata && r.stato ? '<div class="muted">rimessa in coda per la notte</div>' : ''}</td><td>${esc(r.ai || '')}</td><td>${r.domande}</td><td>${r.da_valutare}</td></tr>`).join('')
+                || '<tr><td colspan="5" class="muted">Nessuna riunione segnata: apri una trascrizione e premi «Analisi PM».</td></tr>';
+            const prima = $('fRiunione').value;
+            $('fRiunione').innerHTML = '<option value="">Tutte le riunioni</option>' + d.riunioni.filter((r) => r.domande).map((r) => `<option value="${esc(r.id_calendar)}">${dataIt(r.data)} · ${esc(r.oggetto || '')} (${r.da_valutare} da valutare)</option>`).join('');
+            $('fRiunione').value = prima;
+        } catch (e) { errore(e); }
+    }
+    $('salvaAi').onclick = async () => { try { await api('PUT', '/impostazioni', { ai: $('ai').value }); avviso(`Analisi notturna con ${$('ai').value}.`); } catch (e) { errore(e); } };
+
+    // --- Addestramento ---
+    async function caricaEsempi() {
+        try {
+            const d = await api('GET', '/esempi');
+            $('versioniEsempi').innerHTML = '<option value="0">Nessuna versione attiva</option>' + d.versioni.map((v) => `<option value="${v.versione}" ${v.attivo ? 'selected' : ''}>v${v.versione} · ${v.n_esempi} esempi · ${dataIt(v.created_at)}${v.attivo ? ' (attiva)' : ''}</option>`).join('');
+        } catch (e) { errore(e); }
+    }
+    $('usaEsempi').onclick = async () => {
+        if (!confirm('Creare una nuova versione di esempi dalle domande corrette e renderla attiva per Pm projexa?')) return;
+        try { const r = await api('POST', '/esempi', {}); avviso(`Versione ${r.versione} attiva con ${r.esempi} esempi: Pm projexa la usa dalla prossima call.`); caricaEsempi(); } catch (e) { errore(e); }
+    };
+    $('attivaEsempi').onclick = async () => { try { await api('POST', '/esempi/attiva', { versione: Number($('versioniEsempi').value) }); avviso('Fatto.'); caricaEsempi(); } catch (e) { errore(e); } };
+    $('scarica').onclick = () => scaricaFile('/scarica', 'pm_projexa_addestramento.jsonl').catch(errore);
+    $('notebook').onclick = () => scaricaFile('/notebook', 'addestra_pm_projexa.ipynb').catch(errore);
+
+    // --- Modello sulla VM ---
+    async function caricaModelli() {
+        try {
+            const d = await api('GET', '/modelli');
+            $('modelli').innerHTML = d.modelli.map((m) => `<tr>
+                <td><b>${esc(m.nome)}</b> ${m.attuale ? '<span class="badge b-ok">in uso</span>' : m.backup ? '<span class="badge">backup</span>' : ''}</td>
+                <td>${(m.dimensione / 1e9).toLocaleString('it-IT', { maximumFractionDigits: 1 })} GB</td><td>${dataOra(m.modificato)}</td>
+                <td>${m.backup ? `<button class="btn" data-ripristina="${esc(m.nome)}"><i class="fas fa-rotate-left"></i> Ripristina</button> <button class="btn danger" data-elimina="${esc(m.nome)}"><i class="fas fa-trash"></i> Elimina</button>` : ''}</td></tr>`).join('')
+                || '<tr><td colspan="4" class="muted">Nessun modello pm-projexa.</td></tr>';
+            const n = d.note && d.note['pm-projexa'];
+            $('notaModello').textContent = n ? `Ultima installazione: ${dataOra(n.installato)}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : 'pm-projexa è ancora il modello di partenza (qwen2.5:7b senza addestramento). I backup occupano poco spazio: la base qwen2.5:7b è condivisa.';
+        } catch (e) { $('modelli').innerHTML = `<tr><td colspan="4" class="muted">${esc(e.message)}</td></tr>`; }
+    }
+    $('modelli').onclick = async (e) => {
+        const r = e.target.closest('[data-ripristina]'), el = e.target.closest('[data-elimina]');
+        try {
+            if (r && confirm(`Rimettere in uso ${r.dataset.ripristina}? Il modello attuale diventa a sua volta un backup.`)) { await api('POST', '/modelli/ripristina', { nome: r.dataset.ripristina }); avviso('Ripristinato.'); caricaModelli(); }
+            if (el && confirm(`Eliminare definitivamente il backup ${el.dataset.elimina}? Non si potrà più tornare a quella versione.`)) {
+                const x = await fetch(`${API_URL}/modelli/${encodeURIComponent(el.dataset.elimina)}`, { method: 'DELETE', headers: auth() });
+                const d = await x.json().catch(() => ({})); if (!x.ok) throw new Error(d.error || `Errore ${x.status}`);
+                avviso('Backup eliminato.'); caricaModelli();
+            }
+        } catch (err) { errore(err); }
+    };
+    $('installa').onclick = async () => {
+        const f = $('file').files[0];
+        if (!f) return avviso('Scegli il file .gguf scaricato da Colab.', 'err');
+        if (!/\.gguf$/i.test(f.name)) return avviso('Serve un file .gguf.', 'err');
+        if (!confirm(`Installare ${f.name} (${Math.round(f.size / 1e6)} MB) come nuovo pm-projexa? Prima viene fatto il backup di quello attuale.`)) return;
+        const PARTE = 16 * 1024 * 1024;
+        const parti = Math.ceil(f.size / PARTE);
+        const id = crypto.randomUUID();
+        $('installa').disabled = true; $('barra').classList.remove('hidden');
+        try {
+            for (let i = 0; i < parti; i++) {
+                const r = await fetch(`${API_URL}/modelli/carica`, { method: 'POST', headers: auth({ 'Content-Type': 'application/octet-stream', 'x-upload-id': id, 'x-parte': String(i), 'x-parti': String(parti) }), body: f.slice(i * PARTE, (i + 1) * PARTE) });
+                const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                $('barra').firstElementChild.style.width = `${Math.round(100 * (i + 1) / parti)}%`;
+                $('avanz').textContent = `Caricamento ${i + 1}/${parti}…`;
+            }
+            $('avanz').textContent = 'Backup, installazione e prova del modello (qualche minuto)…';
+            const r = await api('POST', '/modelli/installa', { upload_id: id, nota: $('nota').value });
+            avviso(`Nuovo pm-projexa installato${r.backup ? `, backup: ${r.backup}` : ''}. Prova: «${r.prova}»`);
+            $('avanz').textContent = ''; $('file').value = ''; $('nota').value = '';
+        } catch (e) { errore(e); $('avanz').textContent = ''; }
+        $('installa').disabled = false; $('barra').classList.add('hidden'); $('barra').firstElementChild.style.width = '0';
+        caricaModelli();
+    };
+
+    (async () => {
+        try {
+            const c = await api('GET', '/config');
+            if (!c.abilitato) { $('negato').classList.remove('hidden'); return; }
+            $('pagina').classList.remove('hidden');
+            await caricaRiunioni();
+            caricaDomande();
+        } catch (e) { errore(e); }
+    })();
+</script>
+</body>
+</html>
