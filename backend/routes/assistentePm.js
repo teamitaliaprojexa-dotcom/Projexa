@@ -88,7 +88,7 @@ const OLLAMA_PM_CTX = 8192;
 // 2 minuti e quella della riunione restava indietro).
 const OLLAMA_PM_THREADS = Math.max(1, Number(process.env.OLLAMA_PM_THREADS) || 3);
 // Modelli tenuti caricati dopo l'ultima richiesta: con le istruzioni fisse, la call successiva
-// le trova già lette (il 14B occupa ~11 GB di RAM finché resta caricato).
+// le trova già lette (pm-projexa 7B ~5,5 GB + filtro 3B ~2,4 GB di RAM finché restano caricati).
 const OLLAMA_PM_KEEP_ALIVE = process.env.OLLAMA_PM_KEEP_ALIVE || '4h';
 const OLLAMA_PM_OPZIONI = { num_thread: OLLAMA_PM_THREADS, num_ctx: OLLAMA_PM_CTX, temperature: 0.2, top_p: 0.9, repeat_penalty: 1.1, num_predict: 90 };
 // num_predict 90: si tiene un solo suggerimento (~40 token); il secondo che il modello scrive
@@ -111,7 +111,7 @@ const OLLAMA_PM_STORIA_CHARS = 6000;
 // o una pausa di Ollama possono essersi accumulati molti blocchi.
 const OLLAMA_PM_TRATTO_CHARS = 3000;
 // Filtro a due stadi (2026-10-20): un modello piccolo e veloce legge ogni pezzo e risponde solo
-// «SI n» / «NO» (prompt PM_PROJEXA_FILTRO); il modello grande (pm-projexa, da 14B) scrive il
+// «SI n» / «NO» (prompt PM_PROJEXA_FILTRO); il modello grande (pm-projexa, 7B) scrive il
 // suggerimento solo dopo un SI, così la VM lavora molto meno. Vuota/«nessuno» = niente filtro.
 // Sulla VM i due modelli devono restare caricati insieme: OLLAMA_MAX_LOADED_MODELS=2.
 const OLLAMA_PM_FILTRO_MODEL = (() => {
@@ -727,7 +727,7 @@ function prossimoOllama(s) {
         if (esito) console.log(`[ASSISTENTE PM] ${s.idCalendar}: filtro: possibile segnale ${esito.n || '?'} (${esito.secondi} s), scrive ${s.modelloOllama}`);
       }
       const messages = [{ role: 'system', content: s.istruzioni }, ...s.storia, { role: 'user', content: testo }];
-      // Si tiene un solo suggerimento: ci si ferma a fine riga (il 14B scrive ~2,3 token/s, il
+      // Si tiene un solo suggerimento: ci si ferma a fine riga (sulla VM ~5 token/s, il
       // secondo suggerimento costava ~15 s). Le risposte alle domande scritte restano intere.
       const r = await chiamaOllama(s, messages, domande ? {} : { stop: ['\n'] });
       if (s.chiusa) return;

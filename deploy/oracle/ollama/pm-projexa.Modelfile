@@ -11,11 +11,12 @@
 # (qwen2.5:7b) con gli stessi parametri. Creazione (una volta, e di nuovo se si cambia il file),
 # dal PC: copiare il file in /tmp della VM con scp e lanciare
 #   ollama create pm-projexa -f /tmp/pm-projexa.Modelfile
-# 2026-10-20: dal 7B al 14B (segue meglio le 13 regole), con il filtro veloce qwen2.5:3b
-# davanti (OLLAMA_PM_FILTRO_MODEL): il 14B scrive solo quando il filtro vede un segnale.
-# Misura via tunnel: istruzioni lette in ~4,5 min all'avvio, poi ~15 s per pezzo + ~15 s per
-# scrivere il suggerimento. Il filtro 3B risponde in ~3-4 s.
-FROM qwen2.5:14b
+# 2026-10-20: provato il 14B (FROM qwen2.5:14b): sulla VM con 4 core, durante una
+# registrazione, leggeva le istruzioni in 511-575 s e toglieva CPU a Whisper (2 pezzi in 7
+# minuti all'assistente). Tornati al 7B su scelta dell'utente, 14B eliminato. Davanti resta il
+# filtro veloce qwen2.5:3b (OLLAMA_PM_FILTRO_MODEL): il 7B scrive solo quando il filtro vede
+# un segnale. Per tornare al 14B (con più core): FROM qwen2.5:14b e ollama pull qwen2.5:14b.
+FROM qwen2.5:7b
 
 PARAMETER num_ctx 8192
 PARAMETER temperature 0.2
