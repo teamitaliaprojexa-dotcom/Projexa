@@ -83,7 +83,14 @@ const OLLAMA_PM_RISERVA = process.env.OLLAMA_RECAP_MODEL || 'qwen2.5:7b';
 // Contesto FISSO: cambiarlo tra una richiesta e l'altra fa ricaricare il modello e perdere la
 // cache delle istruzioni già lette.
 const OLLAMA_PM_CTX = 8192;
-const OLLAMA_PM_OPZIONI = { num_ctx: OLLAMA_PM_CTX, temperature: 0.2, top_p: 0.9, repeat_penalty: 1.1, num_predict: 90 };
+// Core usati da Ollama (VM con 4 core): durante una call ne resta almeno uno a Whisper (prova
+// 2026-10-20: con Ollama su tutti i core la trascrizione per l'assistente arrivava a 1 pezzo ogni
+// 2 minuti e quella della riunione restava indietro).
+const OLLAMA_PM_THREADS = Math.max(1, Number(process.env.OLLAMA_PM_THREADS) || 3);
+// Modelli tenuti caricati dopo l'ultima richiesta: con le istruzioni fisse, la call successiva
+// le trova già lette (il 14B occupa ~11 GB di RAM finché resta caricato).
+const OLLAMA_PM_KEEP_ALIVE = process.env.OLLAMA_PM_KEEP_ALIVE || '4h';
+const OLLAMA_PM_OPZIONI = { num_thread: OLLAMA_PM_THREADS, num_ctx: OLLAMA_PM_CTX, temperature: 0.2, top_p: 0.9, repeat_penalty: 1.1, num_predict: 90 };
 // num_predict 90: si tiene un solo suggerimento (~40 token); il secondo che il modello scrive
 // comunque costava ~7 s di scrittura sulla VM (~5 token/s).
 // Blocchi minimi per valutazione. Con Projexa la finestra manda blocchi da ~25 s (Whisper
@@ -112,7 +119,7 @@ const OLLAMA_PM_FILTRO_MODEL = (() => {
   return /^(|nessuno|none|off)$/i.test(v) ? '' : v;
 })();
 // Contesto fisso anche qui (cache del prompt): istruzioni brevi + pezzo precedente + nuovo.
-const OLLAMA_PM_FILTRO_OPZIONI = { num_ctx: 4096, temperature: 0, num_predict: 6 };
+const OLLAMA_PM_FILTRO_OPZIONI = { num_thread: OLLAMA_PM_THREADS, num_ctx: 4096, temperature: 0, num_predict: 6 };
 // «SI n», «NO» oppure solo «n» (il 3B a volte scrive solo il numero del segnale = SI).
 const FILTRO_RE = /^\W*(SI|SÌ|NO|(?=\d))(?![a-zà-ú])\s*\[?\s*(\d{1,2})?/i;
 // Una richiesta alla volta verso Ollama (sulla VM gira 1 richiesta per volta comunque).
@@ -205,6 +212,17 @@ async function istruzioni(user, idCalendar, titolo, modalita, ai) {
   const vars = { UTENTE: utente, RIUNIONE: riunione, DATA: dataIt(oggiIso()), DATI: dati, INGRESSO: INGRESSO[modalita] };
   let tpl = (await getPromptFor(ai.prompt, user)).testo;
   if (!tpl.includes('{{INGRESSO}}')) tpl = `{{INGRESSO}}\n${tpl}`;
+  if (ai.locale) {
+    // Pm projexa: istruzioni IDENTICHE per tutte le riunioni (riunione, data e dati del progetto
+    // tolti), così Ollama le tiene già lette da una call all'altra (cache del prompt, modello
+    // tenuto caricato). Prova reale 2026-10-20: rilette a ogni call durante la registrazione
+    // richiedevano 536 s. Riunione e dati vanno nel primo messaggio della conversazione.
+    const fissi = { ...vars, RIUNIONE: '', DATA: '(vedi il primo messaggio)', DATI: '(nel primo messaggio della conversazione)' };
+    return {
+      sistema: tpl.replace(/\{\{(UTENTE|RIUNIONE|DATA|DATI|INGRESSO)\}\}/g, (x, k) => fissi[k]),
+      contesto: `CONTESTO DI QUESTA RIUNIONE (solo informazioni, non rispondere a questo messaggio):\nRiunione${riunione}, oggi ${vars.DATA}.\n\nDATI DEL PROGETTO\n${dati}`
+    };
+  }
   if (!tpl.includes('{{DATI}}')) tpl += '\n\nDATI\n{{DATI}}';
   return tpl.replace(/\{\{(UTENTE|RIUNIONE|DATA|DATI|INGRESSO)\}\}/g, (x, k) => vars[k]);
 }
@@ -541,12 +559,12 @@ function prossimo(s) {
 // filtro = chiamata al modello piccolo (OLLAMA_PM_FILTRO_MODEL), con le sue opzioni.
 async function chiamaOllama(s, messages, opzioni = {}, { filtro = false } = {}) {
   if (filtro) {
-    const r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, { model: OLLAMA_PM_FILTRO_MODEL, messages, stream: false, keep_alive: '30m', options: OLLAMA_PM_FILTRO_OPZIONI }, OLLAMA_PM_TIMEOUT_MS);
+    const r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, { model: OLLAMA_PM_FILTRO_MODEL, messages, stream: false, keep_alive: OLLAMA_PM_KEEP_ALIVE, options: OLLAMA_PM_FILTRO_OPZIONI }, OLLAMA_PM_TIMEOUT_MS);
     if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
     const d = r.data || {};
     return { testo: String((d.message && d.message.content) || '').trim(), letti: Number(d.prompt_eval_count) || 0, secondi: Math.round((Number(d.total_duration) || 0) / 1e9) };
   }
-  const corpo = () => ({ model: s.modelloOllama, messages, stream: false, keep_alive: '30m', options: { ...OLLAMA_PM_OPZIONI, ...opzioni } });
+  const corpo = () => ({ model: s.modelloOllama, messages, stream: false, keep_alive: OLLAMA_PM_KEEP_ALIVE, options: { ...OLLAMA_PM_OPZIONI, ...opzioni } });
   let r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, corpo(), OLLAMA_PM_TIMEOUT_MS);
   if (r.status === 404 && /not found|pull/i.test(String((r.data && r.data.error) || '')) && s.modelloOllama !== OLLAMA_PM_RISERVA) {
     console.warn(`[ASSISTENTE PM] ${s.idCalendar}: modello ${s.modelloOllama} assente su Ollama, uso ${OLLAMA_PM_RISERVA}`);
@@ -577,8 +595,8 @@ function preriscaldaOllama(s) {
   codaOllama = codaOllama.then(async () => {
     if (s.chiusa) return;
     try {
-      const r = await chiamaOllama(s, [{ role: 'system', content: s.istruzioni },
-        { role: 'user', content: 'La riunione sta per iniziare. Rispondi soltanto: Nessun suggerimento.' }], { num_predict: 8 });
+      // Istruzioni (di solito già in cache da una call precedente) + contesto della riunione.
+      const r = await chiamaOllama(s, [{ role: 'system', content: s.istruzioni }, s.storia[0]], { num_predict: 8 });
       console.log(`[ASSISTENTE PM] ${s.idCalendar}: Pm projexa pronto (${s.modelloOllama}, ${r.letti} token di istruzioni letti in ${r.secondi} s)`);
       // Anche il filtro legge subito le sue istruzioni (brevi).
       if (OLLAMA_PM_FILTRO_MODEL && s.istruzioniFiltro && !s.chiusa) {
@@ -645,9 +663,11 @@ function suggerimentiDa(s, testo, tratto) {
 function ricorda(s, testo, risposta) {
   s.storia.push({ role: 'user', content: testo }, { role: 'assistant', content: risposta });
   if (s.storia.reduce((n, m) => n + m.content.length, 0) > OLLAMA_PM_STORIA_CHARS) {
+    const contesto = s.storia.slice(0, 2); // contesto della riunione: resta sempre in testa
     const ultimi = s.storia.slice(-2);
     const detti = s.giaDetti.slice(-10);
     s.storia = [
+      ...contesto,
       { role: 'user', content: `RIEPILOGO: la prima parte della riunione è già stata valutata.${detti.length ? `\nSuggerimenti già dati (non ripeterli):\n${detti.join('\n')}` : ''}` },
       { role: 'assistant', content: 'Nessun suggerimento.' },
       ...ultimi
@@ -856,7 +876,7 @@ router.post('/avvia', requireAuth, async (req, res) => {
     const s = {
       chiave: k, idCalendar, apiKey, modalita, handle: null, ws: null, pronta: false, avviata: false, chiusa: false,
       titolo: String(b.titolo || '').trim().slice(0, 200) || 'Riunione', creataIl: Date.now(), chiusaIl: 0,
-      istruzioni: testoIstruzioni, bloccoInCoda: 0,
+      istruzioni: ai.locale ? testoIstruzioni.sistema : testoIstruzioni, bloccoInCoda: 0,
       coda: [], inTurno: false, risposta: '', ascoltato: '', attesaAudio: [], timerTurno: null, riconnessioni: 0,
       timerAudio: null, attivitaAperta: false, audioNuovo: false, valutazioni: 0, silenzi: 0, rispostaLibera: false,
       attesaRisposta: false, timerRisposta: null, turniChiesti: 0, senzaRisposta: 0, senzaRispostaDiFila: 0, sblocchi: 0,
@@ -865,7 +885,9 @@ router.post('/avvia', requireAuth, async (req, res) => {
       messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve(),
       // Pm projexa (Ollama): conversazione, suggerimenti già dati, attesa del tratto completo.
       motore: ai.locale ? 'projexa' : 'gemini', aiNome: ai.provider, modelloOllama: OLLAMA_PM_MODEL,
-      storia: [], giaDetti: [], timerTratto: null, errori: 0,
+      // Pm projexa: la conversazione parte dal contesto della riunione (dopo le istruzioni fisse).
+      storia: ai.locale ? [{ role: 'user', content: testoIstruzioni.contesto }, { role: 'assistant', content: 'Nessun suggerimento.' }] : [],
+      giaDetti: [], timerTratto: null, errori: 0,
       istruzioniFiltro, trattoPrec: '', filtrati: 0
     };
     sessioni.set(k, s);
