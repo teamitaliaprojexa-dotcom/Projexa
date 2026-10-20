@@ -39,6 +39,11 @@ import {
   abbinaReferenti, rubricaUtente, contattiClienti, normNome
 } from '../config/azioniCliente.js';
 import * as Cap from '../config/capacita.js';
+import { cercaDoppione, aggiornamento } from '../config/dedupVoci.js';
+
+// Voci RAID ancora aperte del progetto nella forma del controllo doppioni (config/dedupVoci.js).
+const raidAperteDedup = (lista) => lista.filter((x) => x.stato !== 'chiuso')
+  .map((x) => ({ ...x, registro: x.tipo }));
 
 const router = express.Router();
 
@@ -293,6 +298,11 @@ router.post('/raid/estrai', ...rottaAi('pm_raid', async (req, res) => {
     const j = leggiJson(r.testo);
     if (!j) throw errore(502, `${r.label} non ha restituito un elenco leggibile: riprova`);
     const titoli = new Set([...esistenti, ...crEsistenti].map((x) => normTitolo(x.titolo)));
+    // «Già presente» anche se riscritta con parole diverse in una riunione successiva (doppione
+    // nello stesso registro, config/dedupVoci.js): al salvataggio aggiorna quella esistente.
+    const aperte = raidAperteDedup(esistenti);
+    const giaPresente = (x, tipo) => titoli.has(normTitolo(x.titolo))
+      || !!cercaDoppione({ registro: tipo, titolo: x.titolo, descrizione: x.descrizione || '', owner: x.owner || '' }, aperte);
     const mappa = (arr, tipo) => (Array.isArray(arr) ? arr : []).filter((x) => x && x.titolo).map((x) => ({
       tipo,
       titolo: String(x.titolo).slice(0, 500),
@@ -303,7 +313,7 @@ router.post('/raid/estrai', ...rottaAi('pm_raid', async (req, res) => {
       mitigazione: x.mitigazione ? String(x.mitigazione) : '',
       decisa_da: x.decisa_da ? String(x.decisa_da) : '',
       data_revisione: tipo === 'decisione' ? (dataIso(x.data) || m.data) : null,
-      esiste: titoli.has(normTitolo(x.titolo))
+      esiste: giaPresente(x, tipo)
     }));
     res.json({
       progetto: { id: prog.projectId, nome: prog.nome }, riunione: { id_calendar: m.id_calendar, oggetto: m.oggetto, data: m.data },
@@ -393,13 +403,39 @@ router.post('/raid/importa', async (req, res) => {
     if (elementi.length) await richiedeTabella('pm_raid');
     if (cr.length) await richiedeTabella('pm_change_request');
     let riunione = null;
-    if (idCal && cr.length) {
+    if (idCal) {
       riunione = (await db.query('SELECT oggetto, data_calendar::text AS data FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1',
         [req.user.tenant_id, req.user.user_id, idCal])).rows[0] || null;
     }
+    // Doppioni (2026-10-20, config/dedupVoci.js): voce già aperta nello stesso registro del
+    // progetto -> non se ne crea un'altra; descrizione arricchita con le novità («Aggiornamento
+    // del <data>») e campi vuoti completati (owner, mitigazione, decisa da, data).
+    const aperte = elementi.length ? raidAperteDedup(await raidProgetto(req.user, prog.projectId)) : [];
+    let creatiRaid = 0, aggiornati = 0, giaPresenti = 0;
     client = await db.connect();
     await client.query('BEGIN');
-    for (const el of elementi) await inserisci(client, 'pm_raid', { ...baseRiga(req, prog), ...el, origine: 'riunione', id_calendar: idCal });
+    for (const el of elementi) {
+      const doppione = cercaDoppione({ registro: el.tipo, titolo: el.titolo, descrizione: el.descrizione || '', owner: el.owner || '' }, aperte);
+      if (!doppione) {
+        const id = await inserisci(client, 'pm_raid', { ...baseRiga(req, prog), ...el, origine: 'riunione', id_calendar: idCal });
+        aperte.push({ ...el, id, registro: el.tipo });
+        creatiRaid += 1;
+        continue;
+      }
+      const set = {};
+      const desc = aggiornamento(doppione.descrizione, el.descrizione, { data: riunione ? dataIt(riunione.data) : '', fonte: riunione ? String(riunione.oggetto || '').trim() : '' });
+      if (desc) set.descrizione = desc;
+      for (const k of ['owner', 'mitigazione', 'decisa_da', 'data_revisione']) if (el[k] && !doppione[k]) set[k] = el[k];
+      if (!Object.keys(set).length) { giaPresenti += 1; continue; }
+      const { data } = await encryptRowForWrite(db, 'pm_raid', set, { id: doppione.id });
+      const cols = Object.keys(data);
+      await client.query(
+        `UPDATE pm_raid SET ${cols.map((c, i) => `"${c}" = $${i + 4}`).join(', ')}, updated_at = now()
+          WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`,
+        [doppione.id, req.user.tenant_id, req.user.user_id, ...cols.map((c) => data[c])]);
+      Object.assign(doppione, set);
+      aggiornati += 1;
+    }
     if (cr.length) {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pm_cr|${prog.projectId}`]);
       let n = (await client.query(
@@ -413,7 +449,7 @@ router.post('/raid/importa', async (req, res) => {
       }
     }
     await client.query('COMMIT');
-    res.status(201).json({ creati: elementi.length + cr.length, changeRequest: cr.length });
+    res.status(201).json({ creati: creatiRaid + cr.length, changeRequest: cr.length, aggiornati, giaPresenti });
   } catch (e) {
     if (client) await client.query('ROLLBACK').catch(() => {});
     invia(res, e, 'RAID_IMPORTA');

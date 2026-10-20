@@ -25,6 +25,7 @@ import {
 import { inviaPromptBatch, controllaRecapBatchUtente } from '../jobs/recapBatch.js';
 import { parseDueDate } from '../jobs/recapTasks.js';
 import { notificaRiunione } from '../jobs/notifiche.js';
+import { cercaDoppione, aggiornamento, todoAperte, ownerTodo, aggiornaTodo } from '../config/dedupVoci.js';
 
 const router = express.Router();
 const errore = (status, message) => Object.assign(new Error(message), { status });
@@ -456,14 +457,28 @@ router.post('/task', async (req, res) => {
         WHERE tenant_id = $1 AND user_id = $2 AND id::text = ANY($3::text[]) AND task_id IS NULL FOR UPDATE`,
       [req.user.tenant_id, req.user.user_id, righe.map((a) => a.id)]
     )).rows.map((x) => x.id));
-    let creati = 0;
+    let creati = 0, aggiornati = 0, giaPresenti = 0;
+    // Doppioni (2026-10-20): attività già presente tra le To-Do aperte del progetto (riparlata in
+    // una riunione successiva) -> niente To-Do nuova; le informazioni in più si aggiungono a
+    // quella esistente e l'attività del recap si collega a lei (config/dedupVoci.js).
+    const esistenti = await todoAperte(req.user, { projectId: m.project_id, clientId: m.client_id });
+    const dataRiu = m.data ? String(m.data).slice(0, 10).split('-').reverse().join('/') : '';
     for (const a of righe) {
       if (!libere.has(a.id)) continue;
+      const descrizioneNuova = `${a.argomento ? `${a.argomento}: ` : ''}${a.descrizione}`.slice(0, 4000);
+      const owner = await ownerTodo(req.user, a.rubrica_id, a.owner_nominativo);
+      const doppione = cercaDoppione({ registro: 'todo', titolo, descrizione: descrizioneNuova, owner }, esistenti);
+      if (doppione) {
+        const nuova = aggiornamento(doppione.descrizione, descrizioneNuova, { data: dataRiu, fonte: String(m.oggetto || '').trim() });
+        if (await aggiornaTodo(client, req.user, doppione, { descrizione: nuova, dueDate: a.scadenza || null })) aggiornati += 1; else giaPresenti += 1;
+        await client.query('UPDATE rec_meeting_attivita SET task_id = $1 WHERE id::text = $2 AND task_id IS NULL', [doppione.id, a.id]);
+        continue;
+      }
       const row = {
         tenant_id: req.user.tenant_id, user_id: req.user.user_id,
         client_id: m.client_id || null, project_id: m.project_id || null,
         tipo_task: 'Automatica', titile: titolo,
-        description: `${a.argomento ? `${a.argomento}: ` : ''}${a.descrizione}`.slice(0, 4000),
+        description: descrizioneNuova,
         status: 'in_progress', priority: 'medium',
         assigned_to: a.rubrica_id || null,
         due_date: a.scadenza || null,
@@ -480,9 +495,11 @@ router.post('/task', async (req, res) => {
       );
       await client.query('UPDATE rec_meeting_attivita SET task_id = $1 WHERE id::text = $2 AND task_id IS NULL', [t.rows[0].id, a.id]);
       creati += 1;
+      // Anche tra le attività di questo stesso «Crea task».
+      esistenti.push({ id: String(t.rows[0].id), registro: 'todo', titolo, descrizione: descrizioneNuova, owner, due_date: a.scadenza || null });
     }
     await client.query('COMMIT');
-    res.status(201).json({ creati });
+    res.status(201).json({ creati, aggiornati, giaPresenti });
   } catch (e) {
     if (client) await client.query('ROLLBACK').catch(() => {});
     invia(res, e, 'TASK');

@@ -26,6 +26,7 @@ import { inviaRecapBatch, controllaRecapBatchUtente } from '../jobs/recapBatch.j
 import { parseRecapActions, parseDueDate, ownerVariants } from '../jobs/recapTasks.js';
 import { proposteDaRecap, salvaDaRecap } from '../config/azioniCliente.js';
 import { encryptRowForWrite } from '../config/crypto.js';
+import { cercaDoppione, aggiornamento, todoAperte, ownerTodo, aggiornaTodo } from '../config/dedupVoci.js';
 import { localRecapMode, aiCollegate, PROVIDERS as AI_PROVIDERS } from './ai.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -1012,9 +1013,21 @@ router.post('/meetings/managed/recap-tasks', requireAuth, async (req, res) => {
 
     const { meeting: m, me } = await recapTaskContext(req, idCalendar);
     const role = Number.isFinite(Number(req.user.id_roles)) ? Number(req.user.id_roles) : 90;
+    // Doppioni (2026-10-20, config/dedupVoci.js): azione già presente tra le To-Do aperte del
+    // progetto -> niente To-Do nuova, le informazioni in più si aggiungono a quella esistente.
+    const esistenti = await todoAperte(req.user, { projectId: m.project_id, clientId: m.client_id });
+    const owner = me ? await ownerTodo(req.user, me.id, '') : '';
+    const dataRiu = m.data_calendar ? String(m.data_calendar).slice(0, 10).split('-').reverse().join('/') : '';
+    let created = 0, aggiornati = 0, giaPresenti = 0;
     client = await db.connect();
     await client.query('BEGIN');
     for (const it of items) {
+      const doppione = cercaDoppione({ registro: 'todo', titolo: titile, descrizione: it.description, owner }, esistenti);
+      if (doppione) {
+        const nuova = aggiornamento(doppione.descrizione, it.description, { data: dataRiu, fonte: String(m.oggetto || '').trim() });
+        if (await aggiornaTodo(client, req.user, doppione, { descrizione: nuova, dueDate: it.due_date || null })) aggiornati += 1; else giaPresenti += 1;
+        continue;
+      }
       const row = {
         tenant_id: req.user.tenant_id,
         user_id: req.user.user_id,
@@ -1036,13 +1049,15 @@ router.post('/meetings/managed/recap-tasks', requireAuth, async (req, res) => {
       };
       const { data } = await encryptRowForWrite(db, 'tasks', row);
       const cols = Object.keys(data);
-      await client.query(
-        `INSERT INTO tasks (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')})`,
+      const t = await client.query(
+        `INSERT INTO tasks (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id`,
         cols.map((c) => data[c])
       );
+      created += 1;
+      esistenti.push({ id: String(t.rows[0].id), registro: 'todo', titolo: titile, descrizione: it.description, owner, due_date: it.due_date || null });
     }
     await client.query('COMMIT');
-    res.status(201).json({ success: true, created: items.length, assigned: !!me });
+    res.status(201).json({ success: true, created, aggiornati, giaPresenti, assigned: !!me });
   } catch (error) {
     if (client) { try { await client.query('ROLLBACK'); } catch { /* già chiusa */ } }
     console.error('❌ REC_MEETING_TASKS_CREATE:', error.message);

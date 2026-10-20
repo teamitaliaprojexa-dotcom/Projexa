@@ -10484,6 +10484,9 @@
                 if (items.length) {
                     const d = await invia('/calendar/meetings/managed/recap-tasks', { id_calendar: recapTasksEventId, titile, items });
                     fatto.push(`${d.created === 1 ? 'creato 1 task' : `creati ${d.created} task`}${d.assigned ? '' : ' (senza assegnatario)'}`);
+                    // Doppioni di To-Do già aperte (config/dedupVoci.js): aggiornate o lasciate com'erano.
+                    if (d.aggiornati) fatto.push(`${d.aggiornati} già present${d.aggiornati === 1 ? 'e' : 'i'} e aggiornat${d.aggiornati === 1 ? 'o' : 'i'} con le novità`);
+                    if (d.giaPresenti) fatto.push(`${d.giaPresenti} già present${d.giaPresenti === 1 ? 'e' : 'i'} (non ricreat${d.giaPresenti === 1 ? 'o' : 'i'})`);
                     if (typeof loadTodoData === 'function') loadTodoData(); // aggiorna l'elenco dei task
                 }
                 if (azioni.length) {
@@ -10898,7 +10901,9 @@
                 });
                 const d = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
-                showNotification(`${d.creati} task creati nella To-Do List`, 'success');
+                showNotification([`${d.creati} task creati nella To-Do List`,
+                    d.aggiornati ? `${d.aggiornati} già present${d.aggiornati === 1 ? 'e' : 'i'} e aggiornat${d.aggiornati === 1 ? 'o' : 'i'}` : '',
+                    d.giaPresenti ? `${d.giaPresenti} già present${d.giaPresenti === 1 ? 'e' : 'i'}` : ''].filter(Boolean).join(', '), 'success');
                 await miCarica(mi.idCal);
                 try { if (typeof loadTodoData === 'function') loadTodoData(); } catch (e) { /* To-Do List non visibile */ }
             } catch (err) {

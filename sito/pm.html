@@ -449,7 +449,9 @@
                 const scelti = [...mm.querySelectorAll('input[type="checkbox"][data-i]:checked')].map((c) => proposte[c.dataset.i]);
                 if (!scelti.length) throw new Error('Nessun elemento selezionato');
                 const r = await api('/raid/importa', { metodo: 'POST', corpo: { projectId, id_calendar: idCal, elementi: scelti } });
-                toast(soloCr ? `${r.changeRequest} Change Request salvate in bozza` : r.changeRequest ? `${r.creati} elementi salvati, di cui ${r.changeRequest} Change Request in bozza` : `${r.creati} elementi aggiunti al registro`);
+                // Doppioni di voci già aperte: aggiornate con le novità o lasciate com'erano (config/dedupVoci.js).
+                const gia = [r.aggiornati ? `${r.aggiornati} già presenti e aggiornate` : '', r.giaPresenti ? `${r.giaPresenti} già presenti` : ''].filter(Boolean).join(', ');
+                toast((soloCr ? `${r.changeRequest} Change Request salvate in bozza` : r.changeRequest ? `${r.creati} elementi salvati, di cui ${r.changeRequest} Change Request in bozza` : `${r.creati} elementi aggiunti al registro`) + (gia ? ` (${gia})` : ''));
                 if (caricati.raid) caricaRaid();
                 caricaPanoramica();
                 if (r.changeRequest && caricati.cr) caricaCr(); // scheda Change Request già aperta: si aggiorna
