@@ -24,6 +24,8 @@
         return t ? { Authorization: `Bearer ${t}` } : {};
     };
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    // Voce «Projexa» del campo = agente Pm projexa su Ollama della VM (solo modalità testo).
+    const nomeAi = (ai) => (ai === 'Projexa' ? 'Pm projexa' : (ai || 'Gemini'));
     const zoom = () => (window.uiZoom ? window.uiZoom() : 1) || 1;
 
     const css = `
@@ -234,7 +236,7 @@
         if (stato.tab === 'ai' && stato.inAttesa && stato.attiva) html += '<div class="apm-attesa"><i class="fas fa-ellipsis fa-fade"></i> l\'assistente sta leggendo…</div>';
         // Contatore: si vede che Gemini lavora anche quando non ha nulla da suggerire.
         if (stato.tab === 'ai' && stato.attiva && (stato.valutazioni || stato.turniChiesti)) {
-            html += `<div class="apm-msg info"><i class="fas fa-chart-simple"></i> Gemini ha valutato la riunione ${stato.valutazioni} volt${stato.valutazioni === 1 ? 'a' : 'e'}${stato.silenzi ? `, ${stato.silenzi} senza suggerimenti` : ''}`
+            html += `<div class="apm-msg info"><i class="fas fa-chart-simple"></i> ${nomeAi(stato.ai)} ha valutato la riunione ${stato.valutazioni} volt${stato.valutazioni === 1 ? 'a' : 'e'}${stato.silenzi ? `, ${stato.silenzi} senza suggerimenti` : ''}`
                 + (stato.modalita === 'audio' ? ` · turni chiesti ${stato.turniChiesti}${stato.senzaRisposta ? `, ${stato.senzaRisposta} senza risposta` : ''}` : '') + '.</div>';
         }
         bodyEl.innerHTML = html;
@@ -332,7 +334,7 @@
         // Impostazioni › «Esecuzione Assistente PM»: Testo/Audio = parte subito con quella
         // modalità; "Chiedi Sempre" (o vuoto) = scelta nella finestra.
         let modalita = d.modalita === 'testo' || d.modalita === 'audio' ? d.modalita : null;
-        if (modalita) bodyEl.innerHTML = '<div class="apm-msg info">Collegamento a Gemini Live…</div>';
+        if (modalita) bodyEl.innerHTML = `<div class="apm-msg info">Collegamento a ${s.ai === 'Projexa' ? 'Pm projexa' : 'Gemini Live'}…</div>`;
         else modalita = await new Promise((resolve) => { s.scelta = resolve; disegnaScelta(); });
         if (!modalita || s !== stato) return null; // finestra chiusa o registrazione fermata
         try {
@@ -351,7 +353,7 @@
         s.modalita = modalita;
         s.attiva = true;
         win.classList.remove('apm-scegli');
-        subEl.textContent = `· ${d.ai} · ${modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.title}`;
+        subEl.textContent = `· ${nomeAi(d.ai)} · ${modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.title}`;
         s.timer = setInterval(leggi, POLL_MS);
         leggi();
         return modalita;
@@ -371,7 +373,7 @@
         bodyEl.querySelectorAll('.apm-modo').forEach((b) => b.addEventListener('click', () => {
             const m = b.dataset.modo;
             try { localStorage.setItem(MODO_KEY, m); } catch (e) { /* solo preferenza */ }
-            bodyEl.innerHTML = '<div class="apm-msg info">Collegamento a Gemini Live…</div>';
+            bodyEl.innerHTML = `<div class="apm-msg info">Collegamento a ${stato && stato.ai === 'Projexa' ? 'Pm projexa' : 'Gemini Live'}…</div>`;
             const r = stato && stato.scelta;
             if (stato) stato.scelta = null;
             if (r) r(m);
@@ -381,8 +383,8 @@
     function apri(eventId, title, ai) {
         if (stato && stato.timer) clearInterval(stato.timer);
         if (stato && stato.scelta) stato.scelta(null);
-        stato = { eventId, title: title || 'Riunione', ultimo: 0, timer: null, messaggi: [], tab: 'ai', attiva: false, inAttesa: false, scelta: null, audio: null };
-        subEl.textContent = `${ai ? `· ${ai} ` : ''}· ${stato.title}`;
+        stato = { eventId, ai: ai || '', title: title || 'Riunione', ultimo: 0, timer: null, messaggi: [], tab: 'ai', attiva: false, inAttesa: false, scelta: null, audio: null };
+        subEl.textContent = `${ai ? `· ${nomeAi(ai)} ` : ''}· ${stato.title}`;
         win.querySelectorAll('.apm-tabs button').forEach((x) => x.classList.toggle('active', x.dataset.tab === 'ai'));
         win.classList.add('open');
         win._applyGeom();
@@ -556,14 +558,14 @@
             mostraErrore('Nessuna sessione dell\'assistente per questa riunione (i messaggi restano 2 ore dopo la fine della registrazione).');
             return null;
         }
-        apri(eventId, d.titolo || title, 'Gemini');
+        apri(eventId, d.titolo || title, d.ai || 'Gemini');
         const s = stato;
         s.modalita = d.modalita;
         s.messaggi = messaggi;
         s.ultimo = messaggi.length ? messaggi[messaggi.length - 1].n : 0;
         s.attiva = !!d.attiva;
         s.terminata = !d.attiva;
-        subEl.textContent = `· Gemini · ${d.modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.title}`;
+        subEl.textContent = `· ${nomeAi(s.ai)} · ${d.modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.title}`;
         if (s.attiva) { s.timer = setInterval(leggi, POLL_MS); leggi(); }
         aggiornaStato(!!d.collegata);
         disegna(true);

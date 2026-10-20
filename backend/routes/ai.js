@@ -955,7 +955,7 @@ const OLLAMA_NOTES_TOKENS = 700;
 // (UND_ERR_HEADERS_TIMEOUT), e Ollama con stream:false risponde solo a recap finito, che su
 // CPU richiede decine di minuti. Ogni tentativo moriva a 5 minuti e il recap non finiva mai.
 // Qui l'unico limite è timeoutMs, per l'intera richiesta.
-function ollamaPost(url, body, timeoutMs) {
+export function ollamaPost(url, body, timeoutMs) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const lib = u.protocol === 'https:' ? https : http;

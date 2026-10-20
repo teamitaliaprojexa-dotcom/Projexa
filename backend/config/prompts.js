@@ -96,6 +96,12 @@ export const PROMPT_FUNCTIONS = {
     titolo: 'Assistente PM durante la riunione (Gemini Live)',
     // INGRESSO = frase su cosa riceve Gemini (trascrizione a pezzi o audio live), dalla modalità.
     segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE', 'INGRESSO']
+  },
+  // Stesso Assistente PM con la voce «Projexa» (2026-10-20): agente «Pm projexa» su Ollama
+  // della VM, istruito sul modo di condurre le call dell'utente. Stessi segnaposto.
+  PM_PROJEXA: {
+    titolo: 'Assistente PM durante la riunione (Pm projexa, Ollama)',
+    segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE', 'INGRESSO']
   }
 };
 

@@ -1,0 +1,22 @@
+# Agente «Pm projexa» (Assistente PM con la voce «Projexa», 2026-10-20).
+# Stesso modello del recap (i pesi sul disco sono condivisi, nessun download in più) con i
+# parametri adatti a un suggeritore in tempo reale: risposte brevi, poca fantasia, contesto
+# fisso a 8192 token (cambiarlo tra una richiesta e l'altra costringerebbe Ollama a ricaricare
+# il modello e a rileggere tutte le istruzioni).
+# Le istruzioni vere (come ragiona il PM, imparate dalle call) NON sono qui: sono il prompt
+# PM_PROJEXA di Projexa (backend/prompts/pm_projexa.txt, modificabile dall'editor dei prompt),
+# che il server manda a ogni richiesta. Il SYSTEM qui sotto vale solo se si usa il modello a mano.
+#
+# Facoltativo: se sulla VM il modello pm-projexa non c'è, il server usa OLLAMA_RECAP_MODEL
+# (qwen2.5:7b) con gli stessi parametri. Creazione (una volta, e di nuovo se si cambia il file),
+# dal PC: copiare il file in /tmp della VM con scp e lanciare
+#   ollama create pm-projexa -f /tmp/pm-projexa.Modelfile
+FROM qwen2.5:7b
+
+PARAMETER num_ctx 8192
+PARAMETER temperature 0.2
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
+PARAMETER num_predict 160
+
+SYSTEM """Sei «Pm projexa», project manager senior di progetti HR TeamSystem. Rispondi in italiano, in una sola frase breve, con suggerimenti pratici per il project manager che stai affiancando."""

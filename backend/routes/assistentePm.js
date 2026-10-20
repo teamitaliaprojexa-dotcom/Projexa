@@ -31,6 +31,13 @@
 // Live «native audio» rispondono solo in AUDIO: si chiede AUDIO + trascrizione della risposta
 // (outputAudioTranscription) e si usa solo il testo. GEMINI_LIVE_MODALITY=TEXT per i modelli
 // che rispondono direttamente in testo.
+//
+// VOCE «PROJEXA» (2026-10-20): al posto di Gemini l'agente «Pm projexa» su Ollama della VM
+// (gratuito, nessuna chiave). Solo modalità TESTO (Ollama non ascolta audio). Istruzioni nel
+// prompt PM_PROJEXA (backend/prompts/pm_projexa.txt), scritte sul modo di condurre le call
+// dell'utente. Su CPU il modello è lento: si valuta un tratto di riunione alla volta
+// (OLLAMA_PM_BLOCCHI blocchi da ~10 s, di norma un minuto di parlato) e la conversazione
+// cresce in coda, così Ollama rilegge solo il pezzo nuovo (cache del prompt di llama.cpp).
 // ============================================================================
 import express from 'express';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
@@ -40,6 +47,7 @@ import { getIntegration } from '../config/integrations.js';
 import { getPromptFor } from '../config/prompts.js';
 import { speakerName, trascriviBloccoBreve } from '../jobs/meetingTranscription.js';
 import { contestoProgetto, dataIt, oggiIso } from '../config/pmCore.js';
+import { ollamaPost } from './ai.js';
 
 const router = express.Router();
 
@@ -60,8 +68,39 @@ const CHIAVE_RE = /api key/i;
 const CONTESTO_PEZZI = 8; // pezzi di riunione rimandati al modello di riserva
 const MODALITA = String(process.env.GEMINI_LIVE_MODALITY || 'AUDIO').toUpperCase() === 'TEXT' ? 'TEXT' : 'AUDIO';
 const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
-// AI gestite per ora dall'Assistente PM (voci dell'elenco del campo).
-const AI_SUPPORTATE = { gemini: { provider: 'Gemini', prefix: 'gemini' } };
+// AI gestite dall'Assistente PM (voci dell'elenco del campo). locale = Ollama della VM, senza
+// chiave API e solo in modalità testo.
+const AI_SUPPORTATE = {
+  gemini: { provider: 'Gemini', prefix: 'gemini', prompt: 'ASSISTENTE_PM' },
+  projexa: { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA' }
+};
+
+// --- Pm projexa (Ollama) ---
+const OLLAMA_PM_URL = String(process.env.ASSISTENTE_PM_OLLAMA_URL || process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+const OLLAMA_PM_MODEL = process.env.OLLAMA_PM_MODEL || 'pm-projexa';
+// Modello di riserva se pm-projexa non è stato creato sulla VM (stessi pesi, stessi parametri).
+const OLLAMA_PM_RISERVA = process.env.OLLAMA_RECAP_MODEL || 'qwen2.5:7b';
+// Contesto FISSO: cambiarlo tra una richiesta e l'altra fa ricaricare il modello e perdere la
+// cache delle istruzioni già lette.
+const OLLAMA_PM_CTX = 8192;
+const OLLAMA_PM_OPZIONI = { num_ctx: OLLAMA_PM_CTX, temperature: 0.2, top_p: 0.9, repeat_penalty: 1.1, num_predict: 160 };
+// Blocchi da ~10 s per valutazione: 6 = un minuto di parlato. Sulla VM (CPU) un turno dura
+// ~30-60 s: valutare ogni blocco accumulerebbe ritardo.
+const OLLAMA_PM_BLOCCHI = Math.max(1, Number(process.env.OLLAMA_PM_BLOCCHI) || 6);
+const OLLAMA_PM_PAUSA_MS = 90000;        // tratto incompleto ma fermo da tanto: si valuta lo stesso
+const OLLAMA_PM_TIMEOUT_MS = 10 * 60000; // una risposta (la prima legge anche le istruzioni)
+// Dati del progetto nelle istruzioni: su CPU ogni carattere va letto (~2,5 caratteri/token,
+// ~10-20 token/s), quindi molti meno che per Gemini.
+const OLLAMA_PM_MAX_DATI = 3000;
+// Conversazione tenuta per il contesto (caratteri, istruzioni escluse; ~8 minuti di parlato):
+// oltre si riparte da un riepilogo (vedi prossimoOllama). Istruzioni + dati + conversazione
+// devono stare in OLLAMA_PM_CTX token (~2,5 caratteri/token).
+const OLLAMA_PM_STORIA_CHARS = 6000;
+// Tratto nuovo al massimo (caratteri, si tiene la parte più recente): dopo il preriscaldamento
+// o una pausa di Ollama possono essersi accumulati molti blocchi.
+const OLLAMA_PM_TRATTO_CHARS = 3000;
+// Una richiesta alla volta verso Ollama (sulla VM gira 1 richiesta per volta comunque).
+let codaOllama = Promise.resolve();
 // Dati del progetto nelle istruzioni: restano nel contesto e si pagano a OGNI turno (Gemini Live
 // non ha la cache del contesto), quindi ~4-5.000 token al massimo, sotto la soglia di compressione.
 const MAX_DATI = 16000;
@@ -115,7 +154,7 @@ async function leggiImpostazione(user) {
 // Dati della riunione per le istruzioni: oggetto, data, cliente/progetto e, se la riunione è
 // collegata a un progetto dell'utente, il contesto del progetto (scheda, salute, RAID, azioni,
 // recap delle ultime riunioni).
-async function datiRiunione(user, idCalendar, titolo) {
+async function datiRiunione(user, idCalendar, titolo, maxDati = MAX_DATI) {
   const m = (await db.query(
     `SELECT oggetto, data_calendar::text AS d, orario_calendar::text AS o, project_id::text AS p
        FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
@@ -128,7 +167,7 @@ async function datiRiunione(user, idCalendar, titolo) {
     try {
       const ctx = await contestoProgetto(user, m.p, { riunioni: 3, maxRecap: 4000 });
       riunione += ` sul progetto «${ctx.prog.nome}»${ctx.prog.cliente ? ` del cliente ${ctx.prog.cliente}` : ''}`;
-      dati = ctx.testo.slice(0, MAX_DATI);
+      dati = ctx.testo.slice(0, maxDati);
     } catch (e) {
       // Progetto di un altro utente o non più disponibile: si prosegue senza dati.
       console.warn(`[ASSISTENTE PM] ${idCalendar}: dati del progetto non letti (${e.message})`);
@@ -143,11 +182,12 @@ const INGRESSO = {
   audio: 'Ascolti in tempo reale l\'audio della riunione: la voce di chi ti usa (dal suo microfono) e quella degli altri partecipanti.'
 };
 
-async function istruzioni(user, idCalendar, titolo, modalita) {
-  const { riunione, dati } = await datiRiunione(user, idCalendar, titolo);
+// ai: voce di AI_SUPPORTATE (prompt da usare; locale = meno dati del progetto).
+async function istruzioni(user, idCalendar, titolo, modalita, ai) {
+  const { riunione, dati } = await datiRiunione(user, idCalendar, titolo, ai.locale ? OLLAMA_PM_MAX_DATI : MAX_DATI);
   const utente = String(await speakerName(user) || '').trim() || user.email || '';
   const vars = { UTENTE: utente, RIUNIONE: riunione, DATA: dataIt(oggiIso()), DATI: dati, INGRESSO: INGRESSO[modalita] };
-  let tpl = (await getPromptFor('ASSISTENTE_PM', user)).testo;
+  let tpl = (await getPromptFor(ai.prompt, user)).testo;
   if (!tpl.includes('{{INGRESSO}}')) tpl = `{{INGRESSO}}\n${tpl}`;
   if (!tpl.includes('{{DATI}}')) tpl += '\n\nDATI\n{{DATI}}';
   return tpl.replace(/\{\{(UTENTE|RIUNIONE|DATA|DATI|INGRESSO)\}\}/g, (x, k) => vars[k]);
@@ -452,6 +492,7 @@ function inviaAudio(s, pcmB64) {
 // Elementi della coda: { testo, domanda } (domanda = scritta dall'utente: la risposta si mostra
 // anche senza parola chiave, vedi SUGGERIMENTO_RE).
 function prossimo(s) {
+  if (s.motore === 'projexa') { prossimoOllama(s); return; }
   if (s.chiusa || !s.pronta || s.inTurno || !s.coda.length || !s.ws) return;
   const voce = s.coda.shift();
   s.inTurno = true;
@@ -472,8 +513,149 @@ function prossimo(s) {
   }
 }
 
+// ----------------------------------------------------------------------------
+// PM PROJEXA (Ollama della VM)
+// ----------------------------------------------------------------------------
+// La conversazione con Ollama è [istruzioni, tratto 1, risposta 1, tratto 2, ...]: ogni
+// richiesta ripete la precedente e aggiunge il tratto nuovo, così llama.cpp riusa la parte già
+// letta (prefisso identico) e legge solo il nuovo. Le istruzioni (~3.000 token) si leggono una
+// volta all'avvio (preriscaldamento), mentre la riunione comincia.
+
+// POST /api/chat; se il modello pm-projexa non esiste sulla VM si passa a quello di riserva.
+async function chiamaOllama(s, messages, opzioni = {}) {
+  const corpo = () => ({ model: s.modelloOllama, messages, stream: false, keep_alive: '30m', options: { ...OLLAMA_PM_OPZIONI, ...opzioni } });
+  let r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, corpo(), OLLAMA_PM_TIMEOUT_MS);
+  if (r.status === 404 && /not found|pull/i.test(String((r.data && r.data.error) || '')) && s.modelloOllama !== OLLAMA_PM_RISERVA) {
+    console.warn(`[ASSISTENTE PM] ${s.idCalendar}: modello ${s.modelloOllama} assente su Ollama, uso ${OLLAMA_PM_RISERVA}`);
+    s.modelloOllama = OLLAMA_PM_RISERVA;
+    r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, corpo(), OLLAMA_PM_TIMEOUT_MS);
+  }
+  if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
+  const d = r.data || {};
+  return {
+    testo: String((d.message && d.message.content) || '').trim(),
+    letti: Number(d.prompt_eval_count) || 0,
+    scritti: Number(d.eval_count) || 0,
+    secondi: Math.round((Number(d.total_duration) || 0) / 1e9)
+  };
+}
+
+// Messaggio di errore comprensibile (Ollama spento, tunnel chiuso in locale, timeout).
+function erroreOllama(e) {
+  if (e && e.name === 'TimeoutError') return 'Pm projexa non ha risposto in tempo (la VM è occupata?)';
+  if (e && /ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENOTFOUND/.test(String(e.code || e.message))) return 'Pm projexa non raggiungibile: Ollama spento o tunnel chiuso';
+  return `Pm projexa: ${String((e && e.message) || e).slice(0, 200)}`;
+}
+
+// Le istruzioni lette subito, prima che arrivi il primo tratto di riunione.
+function preriscaldaOllama(s) {
+  s.inTurno = true;
+  const inizio = Date.now();
+  codaOllama = codaOllama.then(async () => {
+    if (s.chiusa) return;
+    try {
+      const r = await chiamaOllama(s, [{ role: 'system', content: s.istruzioni },
+        { role: 'user', content: 'La riunione sta per iniziare. Rispondi soltanto: Nessun suggerimento.' }], { num_predict: 8 });
+      console.log(`[ASSISTENTE PM] ${s.idCalendar}: Pm projexa pronto (${s.modelloOllama}, ${r.letti} token di istruzioni letti in ${r.secondi} s)`);
+      if (!s.chiusa) aggiungi(s, 'info', `Pm projexa pronto (istruzioni lette in ${Math.round((Date.now() - inizio) / 1000)} s): ti suggerirà domande e punti da chiarire man mano che Projexa trascrive la riunione.`);
+    } catch (e) {
+      console.warn(`[ASSISTENTE PM] ${s.idCalendar}: preriscaldamento Pm projexa fallito (${e.message})`);
+      if (!s.chiusa) aggiungi(s, 'avviso', `${erroreOllama(e)}. Riprovo al primo tratto di riunione.`);
+    } finally {
+      s.inTurno = false;
+      prossimo(s);
+    }
+  });
+}
+
+// Suggerimenti tenuti: le righe che iniziano con una parola chiave (al massimo 2), senza
+// ripetere quelli già dati (il 7B tende a ripetersi). Le risposte alle domande scritte si
+// mostrano intere.
+const parole = (t) => new Set(String(t).toLowerCase().replace(/[^a-zà-ú0-9 ]+/gi, ' ').split(/\s+/).filter((w) => w.length > 3));
+function simile(a, b) {
+  const A = parole(a), B = parole(b);
+  if (!A.size || !B.size) return false;
+  let comuni = 0;
+  for (const w of A) if (B.has(w)) comuni++;
+  return comuni / Math.min(A.size, B.size) >= 0.7;
+}
+function suggerimentiDa(s, testo) {
+  const righe = String(testo).split('\n').map((r) => r.replace(/^[\s\-*•\d.)]+/, '').replace(/\*\*/g, '').trim()).filter(Boolean);
+  const tenute = [];
+  for (const r of righe) {
+    if (!SUGGERIMENTO_RE.test(r)) continue;
+    if (s.giaDetti.some((g) => simile(g, r)) || tenute.some((g) => simile(g, r))) continue;
+    tenute.push(r);
+    if (tenute.length >= 2) break;
+  }
+  return tenute;
+}
+
+function prossimoOllama(s) {
+  if (s.chiusa || s.inTurno || !s.coda.length) return;
+  const domanda = s.coda.some((v) => v.domanda);
+  const blocchi = s.coda.filter((v) => !v.domanda).length;
+  // Si valuta un tratto intero (OLLAMA_PM_BLOCCHI blocchi), oppure subito se c'è una domanda
+  // scritta, oppure se il tratto è fermo da tempo (pausa nella riunione).
+  const fermoDa = Date.now() - (s.coda[0].il || Date.now());
+  if (!domanda && blocchi < OLLAMA_PM_BLOCCHI && fermoDa < OLLAMA_PM_PAUSA_MS) {
+    clearTimeout(s.timerTratto);
+    s.timerTratto = setTimeout(() => prossimo(s), OLLAMA_PM_PAUSA_MS - fermoDa + 500);
+    return;
+  }
+  clearTimeout(s.timerTratto);
+  const voci = s.coda.splice(0);
+  let trascr = voci.filter((v) => !v.domanda).map((v) => v.testo).join('\n');
+  if (trascr.length > OLLAMA_PM_TRATTO_CHARS) trascr = `[…] ${trascr.slice(-OLLAMA_PM_TRATTO_CHARS).replace(/^[^\n]*\n/, '')}`;
+  const domande = voci.filter((v) => v.domanda).map((v) => v.testo).join('\n');
+  const testo = [trascr && `TRASCRIZIONE (nuovo tratto della riunione):\n${trascr}`,
+    domande && `DOMANDA SCRITTA DA CHI TI USA (rispondi in modo diretto e breve):\n${domande}`].filter(Boolean).join('\n\n');
+  s.inTurno = true;
+  s.turniChiesti++;
+  codaOllama = codaOllama.then(async () => {
+    if (s.chiusa) return;
+    try {
+      const messages = [{ role: 'system', content: s.istruzioni }, ...s.storia, { role: 'user', content: testo }];
+      const r = await chiamaOllama(s, messages);
+      if (s.chiusa) return;
+      s.valutazioni++;
+      s.errori = 0;
+      const tenute = domande ? (r.testo && !SILENZIO_RE.test(r.testo) ? [r.testo.replace(/\*\*/g, '')] : []) : suggerimentiDa(s, r.testo);
+      if (tenute.length) for (const t of tenute) { aggiungi(s, 'ai', t); if (!domande) s.giaDetti.push(t); }
+      else s.silenzi++;
+      if (s.giaDetti.length > 30) s.giaDetti.splice(0, s.giaDetti.length - 30);
+      // Nella conversazione resta la risposta pulita: il modello vede cosa ha già suggerito.
+      s.storia.push({ role: 'user', content: testo }, { role: 'assistant', content: tenute.join('\n') || 'Nessun suggerimento.' });
+      // Conversazione troppo lunga: si riparte da un riepilogo breve + l'ultimo tratto. Togliere
+      // solo i tratti più vecchi cambierebbe tutto ciò che segue le istruzioni e Ollama dovrebbe
+      // rileggerlo (minuti sulla VM); così resta in cache il prefisso delle istruzioni e si
+      // legge solo il riepilogo.
+      if (s.storia.reduce((n, m) => n + m.content.length, 0) > OLLAMA_PM_STORIA_CHARS) {
+        const ultimi = s.storia.slice(-2);
+        const detti = s.giaDetti.slice(-10);
+        s.storia = [
+          { role: 'user', content: `RIEPILOGO: la prima parte della riunione è già stata valutata.${detti.length ? `\nSuggerimenti già dati (non ripeterli):\n${detti.join('\n')}` : ''}` },
+          { role: 'assistant', content: 'Nessun suggerimento.' },
+          ...ultimi
+        ];
+      }
+      console.log(`[ASSISTENTE PM] ${s.idCalendar}: Pm projexa valutazione ${s.valutazioni} · ${r.letti} token letti, ${r.scritti} scritti in ${r.secondi} s · ${tenute.length ? `${tenute.length} suggerimenti` : 'nessun suggerimento'}`);
+    } catch (e) {
+      s.senzaRisposta++;
+      s.errori = (s.errori || 0) + 1;
+      console.warn(`[ASSISTENTE PM] ${s.idCalendar}: Pm projexa senza risposta (${e.message})`);
+      // Un avviso alla prima volta di fila, non a ogni tratto.
+      if (s.errori === 1 && !s.chiusa) aggiungi(s, 'avviso', `${erroreOllama(e)}: questo tratto di riunione è stato saltato, riprovo con il prossimo.`);
+    } finally {
+      s.inTurno = false;
+      if (!s.chiusa) prossimo(s);
+    }
+  });
+}
+
 function accoda(s, testo, { domanda = false } = {}) {
-  s.coda.push({ testo, domanda });
+  s.coda.push({ testo, domanda, il: Date.now() });
+  if (s.motore === 'projexa') { prossimo(s); return; }
   // Coda che cresce (Gemini lento): i blocchi di trascrizione in attesa si uniscono in uno.
   if (s.coda.length > 3) {
     s.coda.splice(0, s.coda.length, { testo: s.coda.map((v) => v.testo).join('\n\n'), domanda: s.coda.some((v) => v.domanda) });
@@ -487,6 +669,7 @@ function chiudi(s, rimuovi = true) {
   clearTimeout(s.timerTurno);
   clearInterval(s.timerAudio);
   clearTimeout(s.timerRisposta);
+  clearTimeout(s.timerTratto);
   try { if (s.ws) s.ws.close(1000, 'fine riunione'); } catch { /* già chiusa */ }
   s.ws = null;
   if (rimuovi) sessioni.delete(s.chiave);
@@ -515,7 +698,8 @@ async function aiUtente(user) {
   const conf = await leggiImpostazione(user);
   if (!conf.attiva) return null;
   const ai = AI_SUPPORTATE[conf.ai.toLowerCase()];
-  if (!ai) throw errore(400, `Assistente PM: «${conf.ai}» non è ancora supportata (per ora solo Gemini)`);
+  if (!ai) throw errore(400, `Assistente PM: «${conf.ai}» non è ancora supportata (per ora Gemini e Projexa)`);
+  if (ai.locale) return { ai, apiKey: null }; // Ollama della VM: nessuna chiave
   const el = await getIntegration(user.user_id, ai.provider);
   const apiKey = el[`${ai.prefix}_api_key`];
   if (!apiKey) throw errore(428, 'Assistente PM: collega la chiave API di Gemini in Impostazioni › AI');
@@ -546,7 +730,8 @@ async function modalitaImpostata(user) {
 router.get('/config', requireAuth, async (req, res) => {
   try {
     const x = await aiUtente(req.user);
-    res.json(x ? { attiva: true, ai: x.ai.provider, modalita: await modalitaImpostata(req.user) } : { attiva: false });
+    // Projexa (Ollama) lavora solo sul testo: la finestra non chiede la modalità.
+    res.json(x ? { attiva: true, ai: x.ai.provider, modalita: x.ai.locale ? 'testo' : await modalitaImpostata(req.user) } : { attiva: false });
   } catch (e) {
     if (!e.status) console.error('❌ [ASSISTENTE PM]', e.message);
     res.status(e.status || 500).json({ error: e.message });
@@ -563,16 +748,17 @@ router.post('/avvia', requireAuth, async (req, res) => {
     const b = req.body || {};
     const idCalendar = idDa(b.id_calendar);
     if (!idCalendar) throw errore(400, 'id_calendar richiesto');
-    const modalita = b.modalita === 'audio' ? 'audio' : 'testo';
     const x = await aiUtente(req.user);
     if (!x) return res.json({ attiva: false });
     const { ai, apiKey } = x;
+    // Projexa (Ollama) non ascolta l'audio: sempre testo.
+    const modalita = b.modalita === 'audio' && !ai.locale ? 'audio' : 'testo';
 
     const k = chiave(req.user, idCalendar);
     // Istruzioni lette PRIMA di guardare la sessione esistente: tra controllo e scrittura non
     // ci sono più attese, quindi due /avvia insieme non lasciano una sessione orfana aperta
     // verso Gemini (la seconda chiude sempre la prima). 2026-10-17
-    const testoIstruzioni = await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita);
+    const testoIstruzioni = await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita, ai);
     const vecchia = sessioni.get(k);
     if (vecchia) chiudi(vecchia); // registrazione ripresa: sessione nuova
     // Al massimo MAX_SESSIONI_UTENTE sessioni aperte per utente (ognuna è un WebSocket Gemini
@@ -590,9 +776,20 @@ router.post('/avvia', requireAuth, async (req, res) => {
       attesaRisposta: false, timerRisposta: null, turniChiesti: 0, senzaRisposta: 0, senzaRispostaDiFila: 0, sblocchi: 0,
       diag: { connessioni: 0, connessaIl: 0, ultimoMsg: 0, token: null, tipi: {} },
       modelloIdx: 0, contestoRipresa: '',
-      messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve()
+      messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve(),
+      // Pm projexa (Ollama): conversazione, suggerimenti già dati, attesa del tratto completo.
+      motore: ai.locale ? 'projexa' : 'gemini', aiNome: ai.provider, modelloOllama: OLLAMA_PM_MODEL,
+      storia: [], giaDetti: [], timerTratto: null, errori: 0
     };
     sessioni.set(k, s);
+    if (s.motore === 'projexa') {
+      // Nessuna connessione da aprire: la sessione è subito pronta, Ollama legge intanto le istruzioni.
+      s.pronta = true;
+      s.avviata = true;
+      aggiungi(s, 'info', 'Pm projexa sta leggendo le istruzioni e i dati del progetto (sulla VM può richiedere qualche minuto): intanto la riunione viene trascritta.');
+      preriscaldaOllama(s);
+      return res.json({ attiva: true, ai: ai.provider, modello: s.modelloOllama, modalita });
+    }
     aggiungi(s, 'info', 'Collegamento a Gemini Live…');
     connetti(s);
     res.json({ attiva: true, ai: ai.provider, modello: MODELLI[0], modalita });
@@ -632,7 +829,8 @@ router.post('/blocco', requireAuth, (req, res) => {
       const testo = await trascriviBloccoBreve(user, s.idCalendar, { audioB64: audio, energy, offset });
       if (!testo || s.chiusa) return;
       aggiungi(s, 'trascrizione', testo);
-      accoda(s, `TRASCRIZIONE (nuovo pezzo della riunione):\n${testo}`);
+      // Pm projexa unisce più blocchi in un tratto e mette lui l'intestazione.
+      accoda(s, s.motore === 'projexa' ? testo : `TRASCRIZIONE (nuovo pezzo della riunione):\n${testo}`);
     } catch (e) {
       console.warn(`[ASSISTENTE PM] ${s.idCalendar}: blocco non trascritto (${e.message})`);
       aggiungi(s, 'avviso', `Un pezzo di riunione non è stato trascritto per l'assistente (${e.message}).`);
@@ -667,7 +865,7 @@ router.post('/chiedi', requireAuth, (req, res) => {
   if (!testo) return res.status(400).json({ error: 'Scrivi una domanda' });
   // mostra: testo breve per la finestra (pulsante «Suggerisci»), altrimenti la domanda stessa.
   aggiungi(s, 'utente', String(b.mostra || '').trim().slice(0, 200) || testo);
-  accoda(s, `DOMANDA SCRITTA DA CHI TI USA (rispondi in modo diretto e breve):\n${testo}`, { domanda: true });
+  accoda(s, s.motore === 'projexa' ? testo : `DOMANDA SCRITTA DA CHI TI USA (rispondi in modo diretto e breve):\n${testo}`, { domanda: true });
   res.json({ ok: true });
 });
 
@@ -680,9 +878,12 @@ router.get('/messaggi', requireAuth, (req, res) => {
   res.json({
     attiva: !s.chiusa,
     modalita: s.modalita,
+    ai: s.aiNome || 'Gemini',
     titolo: s.titolo,
     collegata: s.pronta,
-    inAttesa: s.inTurno || s.coda.length > 0,
+    // Pm projexa tiene in coda i blocchi finché il tratto non è completo: «sta leggendo» solo
+    // mentre Ollama lavora davvero.
+    inAttesa: s.inTurno || (s.motore !== 'projexa' && s.coda.length > 0),
     // Quante volte Gemini ha valutato la riunione e quante senza suggerimenti (per la finestra).
     valutazioni: s.valutazioni,
     silenzi: s.silenzi,
@@ -735,7 +936,7 @@ router.get('/export', requireAuth, async (req, res) => {
     const children = [
       new Paragraph({ text: `Assistente PM – ${s.titolo}`, heading: HeadingLevel.TITLE }),
       new Paragraph({ spacing: { after: 240 }, children: [new TextRun({
-        text: `Riunione del ${giorno} · ${s.modalita === 'audio' ? 'Audio live' : 'Testo'} · ${MODELLI[s.modelloIdx]}`, color: '6B7280' })] }),
+        text: `Riunione del ${giorno} · ${s.modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.motore === 'projexa' ? `Pm projexa (${s.modelloOllama})` : MODELLI[s.modelloIdx]}`, color: '6B7280' })] }),
       new Paragraph({ text: 'Suggerimenti dell\'assistente', heading: HeadingLevel.HEADING_1 }),
       ...(suggerimenti.length ? suggerimenti.map((m) => riga(m, m.tipo === 'utente' ? 'Tu' : 'Assistente')) : [vuoto('Nessun suggerimento.')]),
       new Paragraph({ text: 'Trascrizione live', heading: HeadingLevel.HEADING_1, spacing: { before: 360 } }),
