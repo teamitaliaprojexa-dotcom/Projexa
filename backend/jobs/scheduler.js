@@ -24,6 +24,7 @@ import { eseguiNotificheProgetti, eseguiDigestSettimanale } from './pmJobs.js';
 import { eseguiRecapBatch } from './recapBatch.js';
 import { eseguiGiroLavoriAi } from './aiLavori.js';
 import { eseguiConservazioneRiunioni } from './conservazione.js';
+import { eseguiAssociaTodoRaid } from './associaTodoRaid.js';
 import { conContestoAudit } from '../config/auditContext.js';
 
 // Job schedulabili: la chiave è il valore di job_schedules.job.
@@ -55,7 +56,10 @@ const JOBS = {
   // di quelli interrotti da un riavvio e pulizia di risultati e file oltre 7 giorni.
   lavori_ai: () => eseguiGiroLavoriAi(),
   // Conservazione (jobs/conservazione.js): trascrizioni e recap oltre 24 mesi (parametri.mesi).
-  conservazione_riunioni: (riga) => eseguiConservazioneRiunioni({ mesi: riga.parametri && riga.parametri.mesi })
+  conservazione_riunioni: (riga) => eseguiConservazioneRiunioni({ mesi: riga.parametri && riga.parametri.mesi }),
+  // Associazione automatica To-Do e RAID (jobs/associaTodoRaid.js): invio all'AI la mattina
+  // (lun-ven 5:00), poi raccolta dei risultati Batch nei giri successivi. Per tutti i tenant.
+  associa_todo_raid: () => eseguiAssociaTodoRaid()
 };
 
 // Job eseguiti dal BROWSER dell'utente (utente_config) mentre Projexa è aperta, non dal
@@ -78,7 +82,8 @@ export const INFO_JOB = {
   pm_digest_settimanale: { etichetta: 'Digest settimanale via email ai PM', jira: false },
   recap_batch: { etichetta: 'Recap in modalità Batch: raccoglie quelli pronti', jira: false },
   lavori_ai: { etichetta: 'Lavori AI in Batch: ripresa e pulizia', jira: false },
-  conservazione_riunioni: { etichetta: 'Conservazione: trascrizioni e recap oltre 24 mesi', jira: false }
+  conservazione_riunioni: { etichetta: 'Conservazione: trascrizioni e recap oltre 24 mesi', jira: false },
+  associa_todo_raid: { etichetta: 'Associazione automatica To-Do e RAID (AI)', jira: false }
 };
 
 export function schedulerAttivo() {

@@ -90,7 +90,7 @@ async function notificaRaggruppata(g) {
 // Nome del cliente (clients: argument = campo = 'Cliente') e del progetto
 // (projects: argument = campo = 'Progetto'; la riga del progetto può rimandare con
 // argument = id della riga anagrafica, come in resolveProjectDescriptions di server.js).
-async function nomiClientiProgetti(clientIds, projectIds) {
+export async function nomiClientiProgetti(clientIds, projectIds) {
   const clienti = new Map();
   const progetti = new Map();
   const cid = [...new Set(clientIds.filter(Boolean).map(String))];

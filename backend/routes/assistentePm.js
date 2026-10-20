@@ -99,6 +99,10 @@ const OLLAMA_PM_OPZIONI = { num_thread: OLLAMA_PM_THREADS, num_ctx: OLLAMA_PM_CT
 // valuta ogni blocco; se Ollama è occupato i blocchi arrivati intanto si uniscono.
 const OLLAMA_PM_BLOCCHI = Math.max(1, Number(process.env.OLLAMA_PM_BLOCCHI) || 1);
 const OLLAMA_PM_PAUSA_MS = 90000;        // tratto incompleto ma fermo da tanto: si valuta lo stesso
+// Tratto detto da più di così (dall'arrivo del blocco audio al server) quando tocca a Ollama:
+// niente suggerimento, resta solo come contesto. Prova 2026-10-20 (Pre-Sal Miroglio): un
+// suggerimento sulle «quattro ore» arrivato 5 minuti dopo che se n'era parlato non serve.
+const OLLAMA_PM_MAX_RITARDO_MS = Math.max(30000, Number(process.env.OLLAMA_PM_MAX_RITARDO_MS) || 150000);
 const OLLAMA_PM_TIMEOUT_MS = 10 * 60000; // una risposta (la prima legge anche le istruzioni)
 // Dati del progetto nelle istruzioni: su CPU ogni carattere va letto (~2,5 caratteri/token,
 // ~10-20 token/s), quindi molti meno che per Gemini.
@@ -692,6 +696,8 @@ function prossimoOllama(s) {
   let trascr = voci.filter((v) => !v.domanda).map((v) => v.testo).join('\n');
   if (trascr.length > OLLAMA_PM_TRATTO_CHARS) trascr = `[…] ${trascr.slice(-OLLAMA_PM_TRATTO_CHARS).replace(/^[^\n]*\n/, '')}`;
   const domande = voci.filter((v) => v.domanda).map((v) => v.testo).join('\n');
+  // Momento in cui è arrivato al server il blocco più recente del tratto (≈ quando è stato detto).
+  const dettoIl = Math.max(0, ...voci.filter((v) => !v.domanda).map((v) => v.il || 0));
   const testo = [trascr && `TRASCRIZIONE (nuovo tratto della riunione):\n${trascr}`,
     domande && `DOMANDA SCRITTA DA CHI TI USA (rispondi in modo diretto e breve):\n${domande}`].filter(Boolean).join('\n\n');
   s.inTurno = true;
@@ -699,6 +705,18 @@ function prossimoOllama(s) {
   codaOllama = codaOllama.then(async () => {
     if (s.chiusa) return;
     try {
+      // Tratto ormai vecchio (Whisper o Ollama in ritardo): un suggerimento adesso arriverebbe
+      // fuori tempo. Resta nella conversazione come contesto, senza lavoro per l'AI.
+      if (trascr && !domande && dettoIl && Date.now() - dettoIl > OLLAMA_PM_MAX_RITARDO_MS) {
+        s.valutazioni++;
+        s.silenzi++;
+        s.inRitardo = (s.inRitardo || 0) + 1;
+        ricorda(s, testo, 'Nessun suggerimento.');
+        s.trattoPrec = trascr.slice(-1500);
+        console.log(`[ASSISTENTE PM] ${s.idCalendar}: tratto saltato, detto ${Math.round((Date.now() - dettoIl) / 1000)} s fa (oltre ${OLLAMA_PM_MAX_RITARDO_MS / 1000} s)`);
+        if (s.inRitardo === 1) aggiungi(s, 'avviso', 'La VM è indietro: i pezzi di riunione detti da più di 2 minuti e mezzo non vengono valutati (un suggerimento arriverebbe fuori tempo).');
+        return;
+      }
       // Primo stadio: il modello piccolo dice se nel pezzo c'è un segnale. NO = il modello
       // grande non lavora; il pezzo resta comunque nella conversazione come contesto. Filtro in
       // errore o risposta incomprensibile = si passa al modello grande (meglio lento che cieco).
@@ -754,8 +772,9 @@ function prossimoOllama(s) {
   });
 }
 
-function accoda(s, testo, { domanda = false } = {}) {
-  s.coda.push({ testo, domanda, il: Date.now() });
+// il = quando il blocco audio è arrivato al server (prima della trascrizione), per il ritardo.
+function accoda(s, testo, { domanda = false, il = Date.now() } = {}) {
+  s.coda.push({ testo, domanda, il });
   if (s.motore === 'projexa') { prossimo(s); return; }
   // Coda che cresce (Gemini lento): i blocchi di trascrizione in attesa si uniscono in uno.
   if (s.coda.length > 3) {
@@ -926,6 +945,7 @@ router.post('/blocco', requireAuth, (req, res) => {
     names: (Array.isArray(b.names) ? b.names : []).map((n) => String(n || '').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean).slice(0, 20)
   };
   const offset = Math.max(0, Number(b.offset_sec) || 0);
+  const arrivato = Date.now(); // ≈ fine del parlato del blocco (per OLLAMA_PM_MAX_RITARDO_MS)
   // Coda limitata: ogni blocco tiene in memoria fino a ~4 MB di audio finché non è trascritto.
   // Se la trascrizione è più lenta dell'arrivo dei blocchi, i nuovi si scartano. 2026-10-17
   if (s.bloccoInCoda >= MAX_BLOCCHI_IN_CODA) return res.status(429).json({ error: 'Assistente PM in ritardo: blocco scartato' });
@@ -939,7 +959,7 @@ router.post('/blocco', requireAuth, (req, res) => {
       if (!testo || s.chiusa) return;
       aggiungi(s, 'trascrizione', testo);
       // Pm projexa unisce più blocchi in un tratto e mette lui l'intestazione.
-      accoda(s, s.motore === 'projexa' ? testo : `TRASCRIZIONE (nuovo pezzo della riunione):\n${testo}`);
+      accoda(s, s.motore === 'projexa' ? testo : `TRASCRIZIONE (nuovo pezzo della riunione):\n${testo}`, { il: arrivato });
     } catch (e) {
       console.warn(`[ASSISTENTE PM] ${s.idCalendar}: blocco non trascritto (${e.message})`);
       aggiungi(s, 'avviso', `Un pezzo di riunione non è stato trascritto per l'assistente (${e.message}).`);

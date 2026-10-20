@@ -1410,13 +1410,23 @@ app.post('/api/dashboard/tasks/email-in-carico', requireAuth, ...rottaAi('email_
     if (!nominativo || !tasks.length) return res.status(400).json({ error: 'Nessuna attività da inviare' });
     const providerName = req.aiScelta.nome;
 
-    const elenco = tasks.map((t, i) => [
+    const voce = (t, i) => [
       `${i + 1}. ${pulito(t.titolo, 500) || '(senza titolo)'}`,
       `   Cliente: ${pulito(t.cliente, 255)}`,
       `   Progetto: ${pulito(t.progetto, 255)}`,
       `   Descrizione: ${pulito(t.descrizione, 4000).replace(/\n/g, '\n   ')}`,
       `   Scadenza: ${pulito(t.scadenza, 20)}`
-    ].join('\n')).join('\n\n');
+    ].join('\n');
+    // Più persone scelte in «Assegnato a» (2026-10-20): una sola email a tutti, attività
+    // raggruppate per persona (t.assegnato).
+    const persone = [...new Set(tasks.map((t) => pulito(t.assegnato, 255)).filter(Boolean))];
+    const multi = persone.length > 1;
+    const elenco = multi
+      ? persone.map((p) => `ATTIVITÀ DI ${p}\n\n${tasks.filter((t) => pulito(t.assegnato, 255) === p).map(voce).join('\n\n')}`).join('\n\n')
+      : tasks.map(voce).join('\n\n');
+    // Il prompt TASK_IN_CARICO è scritto per una persona: per più persone si aggiunge come
+    // adattarlo (il prompt dell'editor resta valido per entrambi i casi).
+    const PIU_PERSONE = `\n\nATTENZIONE: questa email va a PIÙ persone (${persone.join(', ')}). Adatta la struttura: oggetto «Attività a vostro carico», saluta tutti per nome di battesimo, scrivi «a vostro carico», e per ogni persona metti un titolo «Attività di <nome e cognome>» seguito dalle SUE attività numerate da 1, nell'ordine dato. Non spostare attività da una persona all'altra.`;
     const vars = {
       NOMINATIVO: nominativo,
       DATA: new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Rome' }),
@@ -1427,6 +1437,7 @@ app.post('/api/dashboard/tasks/email-in-carico', requireAuth, ...rottaAi('email_
       let tpl = template;
       // Se il prompt non prevede {{TASK}}, l'elenco si aggiunge in fondo.
       if (!tpl.includes('{{TASK}}')) tpl += '\n\nAttività:\n{{TASK}}';
+      if (multi) tpl += PIU_PERSONE;
       return tpl.replace(/\{\{(NOMINATIVO|TASK|DATA|UTENTE)\}\}/g, (m, k) => (k === 'TASK' ? task : vars[k] || ''));
     };
     const result = req.aiScelta.locale

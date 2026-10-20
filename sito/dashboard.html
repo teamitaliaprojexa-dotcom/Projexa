@@ -4967,7 +4967,7 @@
                     <button id="resetFiltersBtn" style="padding: 0.5rem 0.75rem; background: rgba(107, 114, 128, 0.1); color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; transition: all 0.3s;">
                         ⟲ Reset
                     </button>
-                    <!-- Compare scegliendo un solo nominativo in "Assegnato a": email con le sue attività -->
+                    <!-- Compare scegliendo uno o più nominativi in "Assegnato a": una email a tutti con le attività di ciascuno -->
                     <button type="button" id="todoEmailBtn" style="display: none; padding: 0.5rem 0.9rem; background: #10B981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem;" title="Prepara l'email «Attività a tuo carico» con le task filtrate">
                         <i class="fas fa-envelope"></i> Invia email
                     </button>
@@ -7129,27 +7129,39 @@
             updateTodoMultiselectLabel('assignee');
         }
 
-        // Pulsante visibile solo con un solo nominativo scelto (non "Nessuno").
+        // Pulsante visibile con uno o più nominativi scelti ("Nessuno" non conta). Con più
+        // nominativi (richiesta utente 2026-10-20) l'email è una sola, indirizzata a tutti, con le
+        // attività raggruppate per persona.
+        const todoNomiEmail = () => currentAssigneeFilter.filter(v => v !== TODO_NESSUNO);
         function updateTodoEmailButton() {
             const btn = document.getElementById('todoEmailBtn');
             if (!btn) return;
-            const one = currentAssigneeFilter.length === 1 && currentAssigneeFilter[0] !== TODO_NESSUNO;
-            btn.style.display = one ? '' : 'none';
-            if (one) btn.title = `Prepara l'email «Attività a tuo carico» per ${currentAssigneeFilter[0]} con le task filtrate`;
+            const nomi = todoNomiEmail();
+            btn.style.display = nomi.length ? '' : 'none';
+            if (nomi.length) btn.title = nomi.length === 1
+                ? `Prepara l'email «Attività a tuo carico» per ${nomi[0]} con le task filtrate`
+                : `Prepara un'email per ${nomi.join(', ')} con le attività di ciascuno (task filtrate)`;
         }
 
         async function sendTodoAssigneeEmail() {
-            const name = currentAssigneeFilter[0];
-            const tasks = getFilteredTodos();
-            if (!name || !tasks.length) { showNotification('Nessuna attività da inviare con i filtri attuali', 'info'); return; }
-            // Destinatario: l'email del contatto di rubrica (nominativo scritto a mano: da compilare).
+            const nomi = todoNomiEmail();
+            const name = nomi.join(', ');
+            const multi = nomi.length > 1;
+            // Solo le task delle persone scelte (con "Nessuno" spuntato insieme, quelle senza
+            // assegnatario restano fuori dall'email).
+            const tasks = getFilteredTodos().filter(t => nomi.includes(todoAssigneeName(t)));
+            if (!nomi.length || !tasks.length) { showNotification('Nessuna attività da inviare con i filtri attuali', 'info'); return; }
+            // Destinatari: l'email del contatto di rubrica di ciascuna persona (nominativo scritto
+            // a mano: da compilare nell'email).
             let to = [];
-            const contactId = tasks.map(t => t.__raw_assigned_to).find(Boolean);
-            if (contactId) {
-                const loaded = await loadRubrica();
-                const contact = loaded.options.find(o => String(o.value) === String(contactId));
-                if (contact && contact.email) to = [contact.email];
+            const senzaEmail = [];
+            const loaded = tasks.some(t => t.__raw_assigned_to) ? await loadRubrica() : { options: [] };
+            for (const n of nomi) {
+                const contactId = tasks.filter(t => todoAssigneeName(t) === n).map(t => t.__raw_assigned_to).find(Boolean);
+                const contact = contactId ? loaded.options.find(o => String(o.value) === String(contactId)) : null;
+                if (contact && contact.email) to.push(contact.email); else senzaEmail.push(n);
             }
+            to = [...new Set(to)];
             const fmt = (v) => {
                 if (!v) return 'nessuna';
                 const d = parseTodoDate(v);
@@ -7168,7 +7180,7 @@
 
             // Testo scritto dall'AI del recap con il prompt «Task in Carico» (TASK_IN_CARICO).
             // Se l'AI non è scelta o non risponde: il testo fisso qui sotto.
-            let subject = 'Attività a tuo carico';
+            let subject = multi ? 'Attività a vostro carico' : 'Attività a tuo carico';
             let body = '';
             const btn = document.getElementById('todoEmailBtn');
             const btnHtml = btn ? btn.innerHTML : '';
@@ -7181,6 +7193,7 @@
                         ...sc, _titolo: name, _extra: { to },
                         nominativo: name,
                         tasks: tasks.map(t => ({
+                            assegnato: todoAssigneeName(t),
                             titolo: t.titile || t.title || '',
                             cliente: t.client_id || '',
                             progetto: t.project_id || '',
@@ -7206,16 +7219,22 @@
             } finally {
                 if (btn) { btn.disabled = false; btn.innerHTML = btnHtml; }
             }
-            if (!body) body = [`Ciao ${name},`, '', 'di seguito le attività a tuo carico:', '',
-                ...tasks.map((t, i) => [
-                    `${i + 1}. ${dash(t.titile || t.title)}`,
-                    `   Cliente: ${dash(t.client_id)}`,
-                    `   Progetto: ${dash(t.project_id)}`,
-                    `   Descrizione: ${dash(t.description).replace(/\r?\n/g, '\n   ')}`,
-                    `   Scadenza: ${fmt(t.due_date)}`,
-                    ''
-                ].join('\n')),
-                'Grazie'].join('\n');
+            const voce = (t, i) => [
+                `${i + 1}. ${dash(t.titile || t.title)}`,
+                `   Cliente: ${dash(t.client_id)}`,
+                `   Progetto: ${dash(t.project_id)}`,
+                `   Descrizione: ${dash(t.description).replace(/\r?\n/g, '\n   ')}`,
+                `   Scadenza: ${fmt(t.due_date)}`,
+                ''
+            ].join('\n');
+            if (!body) body = multi
+                ? [`Ciao ${nomi.join(', ')},`, '', 'di seguito le attività a vostro carico, divise per persona.', '',
+                    ...nomi.flatMap(n => {
+                        const sue = tasks.filter(t => todoAssigneeName(t) === n);
+                        return sue.length ? [`ATTIVITÀ DI ${n.toUpperCase()}`, '', ...sue.map(voce)] : [];
+                    }),
+                    'Grazie'].join('\n')
+                : [`Ciao ${name},`, '', 'di seguito le attività a tuo carico:', '', ...tasks.map(voce), 'Grazie'].join('\n');
             const build = (b) => kind === 'google'
                 ? `https://mail.google.com/mail/?view=cm&fs=1${to.length ? `&to=${encodeURIComponent(to.join(','))}` : ''}&su=${encodeURIComponent(subject)}${b ? `&body=${encodeURIComponent(b)}` : ''}`
                 : `mailto:${to.map(encodeURIComponent).join(';')}?subject=${encodeURIComponent(subject)}${b ? `&body=${encodeURIComponent(b.replace(/\n/g, '\r\n'))}` : ''}`;
@@ -7226,7 +7245,7 @@
                 if (navigator.clipboard) navigator.clipboard.writeText(body).catch(() => {});
                 showNotification('Testo lungo: è stato copiato negli appunti, incollalo nell\'email con Ctrl+V', 'info');
             }
-            if (!to.length) showNotification(`Nessuna email in rubrica per ${name}: inserisci il destinatario nell'email`, 'info');
+            if (senzaEmail.length) showNotification(`Nessuna email in rubrica per ${senzaEmail.join(', ')}: aggiungi il destinatario nell'email`, 'info');
             // Nessuna riga nel log email: Projexa prepara solo il testo, l'email la invia l'utente.
             if (kind === 'mailto') window.location.href = url;
             else if (tab && !tab.closed) tab.location.href = url;
