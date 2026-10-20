@@ -29,7 +29,7 @@ const CAMPO = 'associazione autom. todolist e raid';
 const AI = { chatgpt: 'chatgpt', gpt: 'chatgpt', claude: 'claude', gemini: 'gemini', mistral: 'mistral' };
 const CONFIDENZA_MIN = 80;     // sotto, l'abbinamento non si scrive
 const MAX_VOCI = 60;           // voci per richiesta (un progetto)
-const ORA_ULTIMO_INVIO = 9;    // l'invio si fa nei giri fino alle 9 (recupero se la VM era ferma alle 5)
+const ORA_ULTIMO_INVIO = 9;    // dopo le 9 si invia solo a chi oggi non ha ancora avuto un invio (vedi invia)
 const SCADENZA_BATCH_ORE = 26; // i fornitori garantiscono la risposta entro 24 ore
 const OLLAMA_URL = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const OLLAMA_MODELLO = process.env.OLLAMA_RECAP_MODEL || 'qwen2.5:7b';
@@ -272,9 +272,14 @@ async function vociInviate(u, richiestaId) {
 
 // 2. Invio della mattina: un progetto alla volta per ogni utente.
 async function invia(report, esiti) {
-  if (oraRoma() >= ORA_ULTIMO_INVIO) return;
   const giorno = oggiRoma();
+  const dopoLeNove = oraRoma() >= ORA_ULTIMO_INVIO;
   for (const u of await utentiAttivi()) {
+    // Dopo le 9 si invia solo se oggi per questo utente non è ancora partito nessun invio
+    // (VM spenta alle 5, primo giorno, «Esegui ora» dalla pagina Schedulazioni): le modifiche
+    // fatte durante la giornata aspettano l'invio della mattina dopo (2026-10-20).
+    if (dopoLeNove && (await db.query('SELECT 1 FROM pm_associazioni WHERE tenant_id = $1 AND user_id = $2 AND giorno = $3 LIMIT 1',
+      [u.tenant_id, u.user_id, giorno])).rowCount) continue;
     const nome = u.ai.toLowerCase();
     const locale = nome === 'projexa';
     const ai = AI[nome];
