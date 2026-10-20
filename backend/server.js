@@ -1426,7 +1426,7 @@ app.put('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
 // To-Do List › filtro «Assegnato a» › «Invia email»: testo dell'email «Attività a tuo
 // carico» scritto dall'AI con il prompt TASK_IN_CARICO (app_prompts, editor dei prompt).
 // AI ed esecuzione = Impostazioni › AI › «AI Email attività» / «Esecuzione Email attività»
-// (config/aiFunzioni.js; anche «Recap Projexa (lento)»; in Batch: jobs/aiLavori.js).
+// (config/aiFunzioni.js; anche «Projexa»; in Batch: jobs/aiLavori.js).
 // Body: { nominativo, tasks: [{ titolo, cliente, progetto, descrizione, scadenza }] }
 // con le task filtrate nella pagina (dati dell'utente stesso, mandati alla sua AI).
 // Risposta: { testo, ai }. L'email la apre il browser, come per il recap.

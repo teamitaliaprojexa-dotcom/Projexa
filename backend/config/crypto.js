@@ -288,7 +288,10 @@ const TABLE_COLUMN_ALLOWLIST = {
   // Pacchetti di esempi di Pm projexa dal programma Addestramento PM (pm_projexa_esempi.sql)
   pm_projexa_esempi: new Set(['esempi', 'note']),
   // Analisi PM notturna (analisi_pm.sql): pezzo di riunione e domande; segnale, esito in chiaro.
-  pm_analisi: new Set(['tratto', 'suggerimento', 'testo_corretto'])
+  pm_analisi: new Set(['tratto', 'suggerimento', 'testo_corretto']),
+  // Analisi Recap notturna (analisi_recap.sql): compito dato al modello, risposta dell'AI
+  // insegnante e testo corretto; tipo, pezzo, esito in chiaro.
+  recap_analisi: new Set(['ingresso', 'risposta', 'testo_corretto'])
 };
 
 // ----------------------------------------------------------------------------

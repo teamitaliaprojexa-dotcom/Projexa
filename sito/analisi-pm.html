@@ -48,6 +48,8 @@
         ol.guida { padding-left: 1.3rem; line-height: 1.7; } ol.guida li { margin-bottom: 0.25rem; }
         .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 0.5rem; } .bar > div { height: 100%; background: var(--primary); width: 0; }
         .hidden { display: none !important; }
+        .rc textarea { width: 100%; min-height: 160px; font: inherit; font-size: 0.85rem; padding: 0.6rem; border: 1px solid var(--line); border-radius: 8px; margin-top: 0.4rem; }
+        .rc details summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; margin-top: 0.4rem; }
         @media (max-width: 760px) { .editor.open { grid-template-columns: 1fr; } }
     </style>
 </head>
@@ -68,6 +70,7 @@
         <button data-tab="domande" class="on"><i class="fas fa-list-check"></i> Domande da valutare</button>
         <button data-tab="riunioni"><i class="fas fa-moon"></i> Riunioni e analisi notturna</button>
         <button data-tab="addestra"><i class="fas fa-graduation-cap"></i> Addestramento</button>
+        <button data-tab="recap"><i class="fas fa-envelope-open-text"></i> Recap</button>
         <button data-tab="modello"><i class="fas fa-server"></i> Modello sulla VM</button>
     </div>
 
@@ -144,10 +147,60 @@
         </div>
     </section>
 
+    <!-- RECAP (2026-10-20): esempi per addestrare recap-projexa, il modello di «Projexa» per Recap cliente e Recap interno -->
+    <section id="t-recap" class="hidden">
+        <div class="card">
+            <h2>Insegnare a Projexa a scrivere i recap</h2>
+            <p class="muted">Apri la <b>trascrizione</b> di una riunione e premi <b>Analisi Recap</b>. Di notte (00:15-06:45) l'AI scelta nella scheda <i>Riunioni e analisi notturna</i> rifà il lavoro di Projexa con gli stessi compiti: gli <b>appunti</b> di ogni pezzo, il <b>recap per il cliente</b> e il <b>recap interno</b>. La mattina segna qui ogni risposta come <b>Corretta</b> (correggendo il testo se serve) o <b>Errata</b>: le corrette diventano gli esempi per addestrare il modello <b>recap-projexa</b>, separato da quello dell'Assistente PM.</p>
+            <div class="riga" style="margin-top:0.6rem"><span id="rJob" class="muted"></span><span id="rConteggi" class="muted" style="margin-left:auto"></span></div>
+        </div>
+        <div class="card">
+            <table>
+                <thead><tr><th>Riunione</th><th>Stato</th><th>AI</th><th>Risposte</th><th>Da valutare</th></tr></thead>
+                <tbody id="rRiunioni"></tbody>
+            </table>
+        </div>
+        <div class="card">
+            <div class="riga">
+                <select id="rEsito">
+                    <option value="da">Da valutare</option>
+                    <option value="corretta">Corrette</option>
+                    <option value="errata">Errate</option>
+                    <option value="">Tutte</option>
+                </select>
+                <select id="rTipo">
+                    <option value="">Tutti i compiti</option>
+                    <option value="appunti">Appunti dei pezzi</option>
+                    <option value="recap">Recap per il cliente</option>
+                    <option value="interno">Recap interno</option>
+                </select>
+                <select id="rRiunione"><option value="">Tutte le riunioni</option></select>
+                <span id="rConteggio" class="muted" style="margin-left:auto"></span>
+            </div>
+            <p class="muted" style="margin-top:0.6rem">Correggi il testo direttamente nel riquadro e premi <b>Corretta</b>: si salva la tua versione. Sul recap per il cliente puoi usare <b>Usa il recap salvato</b> per partire da quello che hai davvero inviato. Gli appunti contano quanto i recap: se mancano argomenti o le azioni hanno la persona sbagliata, correggili.</p>
+        </div>
+        <div id="rRisposte"></div>
+        <div class="card">
+            <h2>Addestramento con Google Colab (gratuito)</h2>
+            <p class="muted">Consigliato con almeno 30-50 risposte corrette, tra appunti e recap. Stessa procedura dell'Assistente PM: scarica i due file, in Colab scegli <b>GPU T4</b>, carica il notebook, <b>Esegui tutto</b> e carica il .jsonl quando lo chiede. Alla fine si scarica <code>recap-projexa-adapter.gguf</code>: caricalo nella scheda <b>Modello sulla VM</b> scegliendo <b>recap-projexa</b>.</p>
+            <div class="riga" style="margin-top:0.8rem">
+                <button class="btn pri" id="rScarica"><i class="fas fa-download"></i> 1. Scarica gli esempi del recap (.jsonl)</button>
+                <button class="btn" id="rNotebook"><i class="fas fa-book"></i> 2. Scarica il notebook (.ipynb)</button>
+                <a class="btn" href="https://colab.research.google.com/" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> 3. Apri Google Colab</a>
+            </div>
+        </div>
+    </section>
+
     <!-- MODELLO -->
     <section id="t-modello" class="hidden">
         <div class="card">
             <h2>Carica e installa un modello addestrato</h2>
+            <div class="riga" style="margin-bottom:0.6rem">
+                <select id="famiglia">
+                    <option value="pm">pm-projexa — Assistente PM</option>
+                    <option value="recap">recap-projexa — Recap cliente e Recap interno</option>
+                </select>
+            </div>
             <div class="riga">
                 <input type="file" id="file" accept=".gguf">
                 <input type="text" id="nota" placeholder="Nota (es. 180 domande, ottobre)" style="flex:1; min-width:200px">
@@ -155,10 +208,10 @@
             </div>
             <div class="bar hidden" id="barra"><div></div></div>
             <div id="avanz" class="muted" style="margin-top:0.4rem"></div>
-            <p class="muted" style="margin-top:0.6rem">Projexa fa il <b>backup</b> del modello attuale, crea il nuovo pm-projexa (base qwen2.5:7b + il tuo adattatore, stessi parametri) e lo prova: se qualcosa non va torna da solo al precedente. Meglio farlo quando non ci sono call in corso (la VM lavora un paio di minuti).</p>
+            <p class="muted" style="margin-top:0.6rem">Projexa fa il <b>backup</b> del modello attuale, crea il nuovo modello scelto sopra (base qwen2.5:7b + il tuo adattatore, stessi parametri) e lo prova: se qualcosa non va torna da solo al precedente. Non si può fare mentre l'Assistente PM con Projexa è in uso (la VM lavora un paio di minuti).</p>
         </div>
         <div class="card">
-            <h2>Modelli pm-projexa sulla VM</h2>
+            <h2>Modelli <span id="nomeFamiglia">pm-projexa</span> sulla VM</h2>
             <table><thead><tr><th>Nome</th><th>Dimensione</th><th>Data</th><th></th></tr></thead><tbody id="modelli"></tbody></table>
             <div id="notaModello" class="muted" style="margin-top:0.6rem"></div>
         </div>
@@ -199,10 +252,11 @@
     // --- Schede ---
     function vai(tab) {
         document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-        ['domande', 'riunioni', 'addestra', 'modello'].forEach((t) => $(`t-${t}`).classList.toggle('hidden', t !== tab));
+        ['domande', 'riunioni', 'addestra', 'recap', 'modello'].forEach((t) => $(`t-${t}`).classList.toggle('hidden', t !== tab));
         if (tab === 'domande') caricaDomande();
         if (tab === 'riunioni') caricaRiunioni();
         if (tab === 'addestra') caricaEsempi();
+        if (tab === 'recap') caricaRecap();
         if (tab === 'modello') caricaModelli();
     }
     document.querySelectorAll('.tabs button').forEach((b) => { b.onclick = () => vai(b.dataset.tab); });
@@ -309,22 +363,23 @@
     // --- Modello sulla VM ---
     async function caricaModelli() {
         try {
-            const d = await api('GET', '/modelli');
+            $('nomeFamiglia').textContent = fam() === 'recap' ? 'recap-projexa' : 'pm-projexa';
+            const d = await api('GET', `/modelli?famiglia=${fam()}`);
             $('modelli').innerHTML = d.modelli.map((m) => `<tr>
                 <td><b>${esc(m.nome)}</b> ${m.attuale ? '<span class="badge b-ok">in uso</span>' : m.backup ? '<span class="badge">backup</span>' : ''}</td>
                 <td>${(m.dimensione / 1e9).toLocaleString('it-IT', { maximumFractionDigits: 1 })} GB</td><td>${dataOra(m.modificato)}</td>
                 <td>${m.backup ? `<button class="btn" data-ripristina="${esc(m.nome)}"><i class="fas fa-rotate-left"></i> Ripristina</button> <button class="btn danger" data-elimina="${esc(m.nome)}"><i class="fas fa-trash"></i> Elimina</button>` : ''}</td></tr>`).join('')
-                || '<tr><td colspan="4" class="muted">Nessun modello pm-projexa.</td></tr>';
-            const n = d.note && d.note['pm-projexa'];
-            $('notaModello').textContent = n ? `Ultima installazione: ${dataOra(n.installato)}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : 'pm-projexa è ancora il modello di partenza (qwen2.5:7b senza addestramento). I backup occupano poco spazio: la base qwen2.5:7b è condivisa.';
+                || `<tr><td colspan="4" class="muted">Nessun modello ${esc(d.nome)} sulla VM${fam() === 'recap' ? ' (finché manca, il recap con Projexa usa qwen2.5:7b: crealo con deploy/oracle/ollama/recap-projexa.Modelfile)' : ''}.</td></tr>`;
+            const n = d.note && d.note[d.nome];
+            $('notaModello').textContent = n ? `Ultima installazione: ${dataOra(n.installato)}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : `${d.nome} è ancora il modello di partenza (qwen2.5:7b senza addestramento). I backup occupano poco spazio: la base qwen2.5:7b è condivisa.`;
         } catch (e) { $('modelli').innerHTML = `<tr><td colspan="4" class="muted">${esc(e.message)}</td></tr>`; }
     }
     $('modelli').onclick = async (e) => {
         const r = e.target.closest('[data-ripristina]'), el = e.target.closest('[data-elimina]');
         try {
-            if (r && confirm(`Rimettere in uso ${r.dataset.ripristina}? Il modello attuale diventa a sua volta un backup.`)) { await api('POST', '/modelli/ripristina', { nome: r.dataset.ripristina }); avviso('Ripristinato.'); caricaModelli(); }
+            if (r && confirm(`Rimettere in uso ${r.dataset.ripristina}? Il modello attuale diventa a sua volta un backup.`)) { await api('POST', '/modelli/ripristina', { nome: r.dataset.ripristina, famiglia: fam() }); avviso('Ripristinato.'); caricaModelli(); }
             if (el && confirm(`Eliminare definitivamente il backup ${el.dataset.elimina}? Non si potrà più tornare a quella versione.`)) {
-                const x = await fetch(`${API_URL}/modelli/${encodeURIComponent(el.dataset.elimina)}`, { method: 'DELETE', headers: auth() });
+                const x = await fetch(`${API_URL}/modelli/${encodeURIComponent(el.dataset.elimina)}?famiglia=${fam()}`, { method: 'DELETE', headers: auth() });
                 const d = await x.json().catch(() => ({})); if (!x.ok) throw new Error(d.error || `Errore ${x.status}`);
                 avviso('Backup eliminato.'); caricaModelli();
             }
@@ -334,7 +389,8 @@
         const f = $('file').files[0];
         if (!f) return avviso('Scegli il file .gguf scaricato da Colab.', 'err');
         if (!/\.gguf$/i.test(f.name)) return avviso('Serve un file .gguf.', 'err');
-        if (!confirm(`Installare ${f.name} (${Math.round(f.size / 1e6)} MB) come nuovo pm-projexa? Prima viene fatto il backup di quello attuale.`)) return;
+        const nomeModello = fam() === 'recap' ? 'recap-projexa' : 'pm-projexa';
+        if (!confirm(`Installare ${f.name} (${Math.round(f.size / 1e6)} MB) come nuovo ${nomeModello}? Prima viene fatto il backup di quello attuale.`)) return;
         const PARTE = 16 * 1024 * 1024;
         const parti = Math.ceil(f.size / PARTE);
         const id = crypto.randomUUID();
@@ -347,13 +403,93 @@
                 $('avanz').textContent = `Caricamento ${i + 1}/${parti}…`;
             }
             $('avanz').textContent = 'Backup, installazione e prova del modello (qualche minuto)…';
-            const r = await api('POST', '/modelli/installa', { upload_id: id, nota: $('nota').value });
-            avviso(`Nuovo pm-projexa installato${r.backup ? `, backup: ${r.backup}` : ''}. Prova: «${r.prova}»`);
+            const r = await api('POST', '/modelli/installa', { upload_id: id, nota: $('nota').value, famiglia: fam() });
+            avviso(`Nuovo ${nomeModello} installato${r.backup ? `, backup: ${r.backup}` : ''}. Prova: «${r.prova}»`);
             $('avanz').textContent = ''; $('file').value = ''; $('nota').value = '';
         } catch (e) { errore(e); $('avanz').textContent = ''; }
         $('installa').disabled = false; $('barra').classList.add('hidden'); $('barra').firstElementChild.style.width = '0';
         caricaModelli();
     };
+
+    const fam = () => $('famiglia').value;
+    $('famiglia').onchange = caricaModelli;
+
+    // --- Recap (insegnante notturno di recap-projexa, jobs/analisiRecap.js) ---
+    let risposte = [];
+    const TIPO = { appunti: 'Appunti', recap: 'Recap per il cliente', interno: 'Recap interno' };
+    async function caricaRecap() {
+        try {
+            const d = await api('GET', '/recap/riunioni');
+            $('rJob').textContent = d.job ? (d.job.attivo ? `Prossimo giro: ${dataOra(d.job.prossima_esecuzione) || '—'}` : 'Job analisi_recap disattivato (Monitor › Schedulazioni)') : 'Job analisi_recap non presente';
+            $('rConteggi').textContent = d.conteggi.length ? 'Corrette: ' + d.conteggi.map((c) => `${TIPO[c.tipo]} ${c.corrette}`).join(' · ') : '';
+            const fase = { appunti: 'appunti', recap: 'recap cliente', interno: 'recap interno' };
+            const stato = (r) => r.segnata && !r.stato ? '<span class="badge b-run">in attesa della notte</span>'
+                : r.stato === 'in_corso' ? `<span class="badge b-run">in corso</span><div class="muted">${fase[r.fase] || ''}${r.fase === 'appunti' ? ` ${r.prossimo}/${r.pezzi_tot || '?'}` : ''}</div>`
+                : r.stato === 'batch' ? `<span class="badge b-run">Batch ChatGPT inviato</span><div class="muted">${fase[r.fase] || ''}</div>`
+                : r.stato === 'fatta' ? `<span class="badge b-ok">fatta</span><div class="muted">${dataOra(r.completata_il)}</div>`
+                : r.stato === 'errore' ? `<span class="badge b-bad">errore</span><div class="muted">${esc(r.errore || '')}</div>` : '';
+            $('rRiunioni').innerHTML = d.riunioni.map((r) => `<tr><td><b>${esc(r.oggetto || '(riunione)')}</b><div class="muted">${dataIt(r.data)}</div></td>
+                <td>${stato(r)}${r.segnata && r.stato ? '<div class="muted">rimessa in coda per la notte</div>' : ''}</td><td>${esc(r.ai || '')}</td><td>${r.risposte}</td><td>${r.da_valutare}</td></tr>`).join('')
+                || '<tr><td colspan="5" class="muted">Nessuna riunione segnata: apri una trascrizione e premi «Analisi Recap».</td></tr>';
+            const prima = $('rRiunione').value;
+            $('rRiunione').innerHTML = '<option value="">Tutte le riunioni</option>' + d.riunioni.filter((r) => r.risposte).map((r) => `<option value="${esc(r.id_calendar)}">${dataIt(r.data)} · ${esc(r.oggetto || '')} (${r.da_valutare} da valutare)</option>`).join('');
+            $('rRiunione').value = prima;
+            caricaRisposte();
+        } catch (e) { errore(e); }
+    }
+    async function caricaRisposte() {
+        try {
+            const q = new URLSearchParams({ esito: $('rEsito').value, tipo: $('rTipo').value });
+            if ($('rRiunione').value) q.set('id_calendar', $('rRiunione').value);
+            risposte = (await api('GET', `/recap/risposte?${q}`)).risposte;
+            disegnaRisposte();
+        } catch (e) { errore(e); }
+    }
+    ['rEsito', 'rTipo', 'rRiunione'].forEach((id) => { $(id).onchange = caricaRisposte; });
+    function disegnaRisposte() {
+        $('rConteggio').textContent = `${risposte.length} rispost${risposte.length === 1 ? 'a' : 'e'}`;
+        let ultima = '';
+        $('rRisposte').innerHTML = risposte.map((d) => {
+            const titolo = d.id_calendar !== ultima ? `<h2 style="margin:1rem 0 0.5rem">${esc(d.oggetto || '(riunione)')} <span class="muted">${dataIt(d.data)}</span></h2>` : '';
+            ultima = d.id_calendar;
+            return `${titolo}<div class="dom rc ${d.esito || ''}" data-id="${d.id}">
+                <div class="riga" style="justify-content:space-between">
+                    <b>${TIPO[d.tipo]}${d.tipo === 'appunti' ? ` · pezzo ${d.pezzo + 1}` : ''}</b>
+                    <span><span class="muted">${esc(d.ai || '')}</span> ${d.esito ? `<span class="badge ${d.esito === 'corretta' ? 'b-ok' : 'b-bad'}">${d.esito}</span>` : ''}${d.testo_corretto ? ' <span class="badge">corretta da te</span>' : ''}</span>
+                </div>
+                <details><summary>Compito dato al modello (trascrizione o appunti)</summary><div class="tratto">${esc(d.ingresso)}</div></details>
+                <textarea data-testo>${esc(d.testo_corretto || d.risposta)}</textarea>
+                <div class="riga" style="margin-top:0.6rem">
+                    <button class="btn ok ${d.esito === 'corretta' ? 'on' : ''}" data-az="corretta"><i class="fas fa-check"></i> Corretta</button>
+                    <button class="btn ko ${d.esito === 'errata' ? 'on' : ''}" data-az="errata"><i class="fas fa-xmark"></i> Errata</button>
+                    <button class="btn" data-az="originale"><i class="fas fa-rotate-left"></i> Testo dell'AI</button>
+                    ${d.tipo === 'recap' ? '<button class="btn" data-az="salvato"><i class="fas fa-envelope"></i> Usa il recap salvato</button>' : ''}
+                </div>
+            </div>`;
+        }).join('') || '<div class="card muted">Nessuna risposta in questa vista. Le nuove arrivano la mattina, dopo l\'analisi notturna.</div>';
+    }
+    $('rRisposte').onclick = async (e) => {
+        const b = e.target.closest('[data-az]');
+        const box = e.target.closest('.dom');
+        if (!b || !box) return;
+        const d = risposte.find((x) => x.id === box.dataset.id);
+        const area = box.querySelector('[data-testo]');
+        try {
+            if (b.dataset.az === 'originale') { area.value = d.risposta; return; }
+            if (b.dataset.az === 'salvato') { area.value = (await api('GET', `/recap/salvato?id_calendar=${encodeURIComponent(d.id_calendar)}`)).testo; return; }
+            const testo = area.value.trim();
+            if (b.dataset.az === 'corretta' && testo.length < 20) return avviso('Il testo corretto è troppo corto.', 'err');
+            const corretto = testo && testo !== String(d.risposta).trim() ? testo : '';
+            // Stesso pulsante senza modifiche al testo = valutazione annullata.
+            const esito = d.esito === b.dataset.az && corretto === (d.testo_corretto || '') ? null : b.dataset.az;
+            await api('PUT', `/recap/risposte/${d.id}`, { esito, testo_corretto: corretto });
+            Object.assign(d, { esito, testo_corretto: corretto || null });
+            if ($('rEsito').value === 'da' && esito) risposte = risposte.filter((x) => x !== d);
+            disegnaRisposte();
+        } catch (err) { errore(err); }
+    };
+    $('rScarica').onclick = () => scaricaFile('/recap/scarica', 'recap_projexa_addestramento.jsonl').catch(errore);
+    $('rNotebook').onclick = () => scaricaFile('/recap/notebook', 'addestra_recap_projexa.ipynb').catch(errore);
 
     (async () => {
         try {

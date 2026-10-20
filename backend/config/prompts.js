@@ -112,6 +112,16 @@ export const PROMPT_FUNCTIONS = {
     titolo: 'Filtro veloce dell\'Assistente PM (Pm projexa, modello piccolo)',
     segnaposto: [],
     sincronizzaFile: true
+  },
+  // Recap cliente e Recap interno con la voce «Projexa» (2026-10-20, routes/ai.js
+  // askRecapProjexa): istruzioni FISSE di sistema del modello recap-projexa (chi è, glossario
+  // TeamSystem, regole). Il compito (appunti di un pezzo, RECAP_EMAIL, RECAP_INTERNO) arriva nel
+  // messaggio. È anche il «system» degli esempi di addestramento (Analisi PM › Recap): se lo si
+  // cambia molto, conviene riaddestrare. Uguale per tutti: si usa solo la riga standard.
+  RECAP_PROJEXA: {
+    titolo: 'Istruzioni fisse del recap con Projexa (modello recap-projexa, Ollama)',
+    segnaposto: [],
+    sincronizzaFile: true
   }
 };
 

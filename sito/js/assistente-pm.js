@@ -48,6 +48,9 @@
     .apm-dot.off { background: #F87171; }
     .apm-head button { background: rgba(255,255,255,.15); border: none; color: #fff; width: 28px; height: 28px; border-radius: 6px; cursor: pointer; }
     .apm-head button:hover { background: rgba(255,255,255,.3); }
+    .apm-head .apm-stop { display: none; }
+    .apm-win.apm-attiva .apm-head .apm-stop { display: inline-block; }
+    .apm-head .apm-stop:hover { background: #DC2626; }
     .apm-tabs { display: flex; border-bottom: 1px solid #E5E7EB; flex: none; background: #F8FAFC; }
     .apm-tabs button { flex: 1; border: none; background: none; padding: 7px 4px; cursor: pointer; font: inherit; font-size: 13px; color: #64748B; border-bottom: 2px solid transparent; }
     .apm-tabs button.active { color: #4338CA; border-bottom-color: #6366F1; font-weight: 600; }
@@ -110,6 +113,7 @@
                 <span class="apm-dot"></span>
                 <span class="apm-title">Assistente PM<span class="apm-sub"></span></span>
                 <button type="button" class="apm-word" title="Esporta in Word: suggerimenti e trascrizione live"><i class="fas fa-file-word"></i></button>
+                <button type="button" class="apm-stop" title="Chiudi definitivamente: ferma l'assistente anche sul server (la registrazione e la trascrizione della riunione continuano)"><i class="fas fa-power-off"></i></button>
                 <button type="button" class="apm-close" title="Chiudi l'assistente (la registrazione continua)"><i class="fas fa-xmark"></i></button>
             </div>
             <div class="apm-tabs">
@@ -145,6 +149,7 @@
             else ferma(stato.eventId);
         });
         win.querySelector('.apm-word').addEventListener('click', esporta);
+        win.querySelector('.apm-stop').addEventListener('click', chiudiDefinitivamente);
         win.querySelectorAll('.apm-tabs button').forEach((b) => b.addEventListener('click', () => {
             if (!stato) return;
             stato.tab = b.dataset.tab;
@@ -258,6 +263,7 @@
 
     function aggiornaStato(collegata) {
         dotEl.className = 'apm-dot' + (!stato || !stato.attiva ? ' off' : collegata ? ' on' : '');
+        win.classList.toggle('apm-attiva', !!(stato && stato.attiva && stato.modalita));
         sendEl.disabled = !stato || !stato.attiva;
     }
 
@@ -464,6 +470,30 @@
         disegna(true);
         // Impostazioni › «Download automatico file Ass PM AI»: export in Word senza clic.
         if (esito.scaricaWord) esporta();
+    }
+
+    // «Chiudi definitivamente» (2026-10-20): la X nasconde soltanto la finestra e l'assistente
+    // continua a lavorare; questo pulsante chiude la sessione anche sul server (con Pm projexa
+    // ferma Ollama sulla VM e ne libera la memoria). La registrazione e la trascrizione della
+    // riunione proseguono; i messaggi restano 2 ore (pulsante «Assistente PM» per rivederli).
+    async function chiudiDefinitivamente() {
+        const s = stato;
+        if (!s || !s.attiva || !s.modalita) return;
+        if (!confirm('Chiudere definitivamente l\'Assistente PM per questa riunione?\n\nLa registrazione e la trascrizione continuano; l\'assistente non si riapre fino alla prossima registrazione.')) return;
+        if (s !== stato) return;
+        if (s.timer) clearInterval(s.timer);
+        s.timer = null;
+        s.attiva = false;
+        s.terminata = true;
+        try {
+            await fetch(`${API_URL}/assistente-pm/ferma`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...auth() },
+                body: JSON.stringify({ id_calendar: s.eventId, definitiva: true }),
+                keepalive: true
+            });
+        } catch (e) { /* server non raggiungibile: la sessione si chiude comunque da sola dopo 4 ore */ }
+        if (s === stato) chiudiFinestra();
     }
 
     function chiudiFinestra() {

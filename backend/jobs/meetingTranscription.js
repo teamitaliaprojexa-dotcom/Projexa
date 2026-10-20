@@ -585,7 +585,7 @@ export async function recapSource(user, idCalendar) {
   };
 }
 
-// Recap sul server in corso (Recap Projexa lento: può durare molti minuti): la dashboard mostra
+// Recap sul server in corso (Projexa: può durare molti minuti): la dashboard mostra
 // la clessidra invece del pulsante "Recap".
 const recapRunning = new Set(); // "tenant|utente|id_calendar"
 const recapKey = (user, idCalendar) => `${user.tenant_id}|${user.user_id}|${idCalendar}`;
@@ -756,7 +756,7 @@ export async function enqueueLostNotes(user, idCalendar, notes) {
 }
 
 // Fine registrazione: quando i blocchi precedenti della riunione sono trascritti, recap.
-// ai: AI scelta a mano con il pulsante Recap (es. "Recap Projexa (lento)"): il recap parte
+// ai: AI scelta a mano con il pulsante Recap (es. "Projexa"): il recap parte
 // comunque, anche con «Chiedi sempre». Senza: recap automatico secondo le impostazioni.
 export async function enqueueFinalize(user, idCalendar, { ai = null } = {}) {
   const params = [user.tenant_id, user.user_id, user.email ? encRec(user.email) : null, idCalendar];

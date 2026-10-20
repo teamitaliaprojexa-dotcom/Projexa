@@ -10,7 +10,7 @@
 // Dalla scheda: «Crea task» (tasks assegnati agli owner) ed «Email al team» (nel browser).
 //
 // AI = quella del recap (Impostazioni › AI › «AI generazione e-mail recap»), prompt RECAP_INTERNO
-// (config/prompts.js). La generazione gira in background: con «Recap Projexa (lento)» può durare
+// (config/prompts.js). La generazione gira in background: con «Projexa» può durare
 // molti minuti; la pagina interroga lo stato e a fine lavoro arriva la notifica in campanella.
 // Tabelle: Supporto/CreaDB/recap_interno.sql.
 // ============================================================================
@@ -158,7 +158,8 @@ async function impostaStato(user, idCalendar, stato, erroreTesto = null) {
 }
 
 // Dati per il prompt: riunione, trascrizione corretta, persone del team e build(testo) -> prompt.
-async function prepara(user, idCalendar) {
+// Usata anche dall'insegnante notturno del recap (jobs/analisiRecap.js).
+export async function prepara(user, idCalendar) {
   const m = await riunione(user, idCalendar);
   const { transcript, vars, rules } = await recapSource(user, idCalendar);
   const elenco = await persone(user, m);
@@ -205,7 +206,7 @@ export async function avviaRecapInternoAutomatico(user, idCalendar, providerName
       }
     }
   });
-  if (localRecapMode(providerName) === 'server') return immediato('Recap Projexa (lento) non ha la modalità Batch');
+  if (localRecapMode(providerName) === 'server') return immediato('Projexa non ha la modalità Batch');
   const p = await prepara(user, idCalendar);
   try {
     await inviaPromptBatch(user, idCalendar, providerName, p.build(p.transcript), { tipo: 'recap_interno' });
@@ -336,7 +337,7 @@ router.post('/genera', async (req, res) => {
     const k = chiave(req.user, m.id_calendar);
     if (inCorso.has(k)) throw errore(409, 'Il recap interno di questa riunione è già in preparazione');
     const user = { tenant_id: req.user.tenant_id, user_id: req.user.user_id, email: req.user.email, id_roles: req.user.id_roles };
-    // Batch (non per Recap Projexa, già gratuito): metà prezzo, risposta entro 24 ore; la
+    // Batch (non per Projexa, già gratuito): metà prezzo, risposta entro 24 ore; la
     // raccoglie jobs/recapBatch.js (o il controllo all'apertura della scheda).
     let nota = '';
     if (esecuzione === 'batch' && !locale) {

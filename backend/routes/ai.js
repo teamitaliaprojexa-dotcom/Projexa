@@ -20,6 +20,8 @@ import { requireAuth } from '../middleware/auth.js';
 import { getIntegration, saveIntegration, deleteIntegration, updateIntegrationElements, deleteIntegrationElement } from '../config/integrations.js';
 import { contestoAi } from '../config/aiContesto.js';
 import { prepareAttachments, attachmentsText, pdfToText, EXPORT_FORMATS } from '../config/aiAttachments.js';
+import { getPromptFor } from '../config/prompts.js';
+import { attendiPmLibero, suAvvioPm, pmProjexaInCorso } from '../config/ollamaPrecedenza.js';
 
 const router = express.Router();
 
@@ -906,13 +908,14 @@ export async function askAiProvider(userId, providerName, prompt, opzioni = {}) 
 //
 // Voce del campo "AI generazione e-mail recap" (lookup_values, vedi
 // Supporto/CreaDB/recap_projexa_locale.sql):
-//   "Recap Projexa (lento)" -> Ollama sulla VM (OLLAMA_URL, OLLAMA_RECAP_MODEL): gira in
-//                              background, anche a pagina chiusa, ma è lento (2 core condivisi
-//                              con Whisper).
+//   "Projexa" -> Ollama sulla VM (OLLAMA_URL, OLLAMA_RECAP_MODEL): gira in
+//                background, anche a pagina chiusa, ma è lento (2 core condivisi
+//                con Whisper).
 // Le voci "Browser-Medio/Alto" (modello nel browser, WebLLM) sono state eliminate il
 // 2026-09-29: qualità bassa (contesto 4.096) e blocchi della scheda video sulle GPU integrate.
 const LOCAL_RECAP_MODES = {
-  'recap projexa (lento)': 'server'
+  'projexa': 'server',
+  'recap projexa (lento)': 'server' // valore precedente (2026-10-20), per le righe non ancora aggiornate
 };
 
 // 'server' | null (AI con chiave API)
@@ -955,8 +958,11 @@ const OLLAMA_NOTES_TOKENS = 700;
 // (UND_ERR_HEADERS_TIMEOUT), e Ollama con stream:false risponde solo a recap finito, che su
 // CPU richiede decine di minuti. Ogni tentativo moriva a 5 minuti e il recap non finiva mai.
 // Qui l'unico limite è timeoutMs, per l'intera richiesta.
-export function ollamaPost(url, body, timeoutMs) {
+// signal (facoltativo): AbortSignal che interrompe la richiesta; chiudendo la connessione
+// Ollama smette di elaborare (Assistente PM chiuso, recap che lascia la VM all'Assistente PM).
+export function ollamaPost(url, body, timeoutMs, { signal } = {}) {
   return new Promise((resolve, reject) => {
+    if (signal && signal.aborted) { reject(Object.assign(new Error('richiesta annullata'), { name: 'AbortError' })); return; }
     const u = new URL(url);
     const lib = u.protocol === 'https:' ? https : http;
     const payload = Buffer.from(JSON.stringify(body));
@@ -977,7 +983,11 @@ export function ollamaPost(url, body, timeoutMs) {
     const timer = setTimeout(() => {
       req.destroy(Object.assign(new Error('timeout'), { name: 'TimeoutError' }));
     }, timeoutMs);
-    req.on('error', (e) => { clearTimeout(timer); reject(e); });
+    const annulla = () => req.destroy(Object.assign(new Error('richiesta annullata'), { name: 'AbortError' }));
+    if (signal) signal.addEventListener('abort', annulla, { once: true });
+    const pulisci = () => { clearTimeout(timer); if (signal) signal.removeEventListener('abort', annulla); };
+    req.on('error', (e) => { pulisci(); reject(e); });
+    req.on('close', pulisci);
     req.end(payload);
   });
 }
@@ -993,10 +1003,10 @@ async function ollamaGenerate(prompt, numCtx, numPredict) {
       Number(process.env.OLLAMA_TIMEOUT_MS) || 2 * 60 * 60 * 1000);
   } catch (error) {
     const reason = error.name === 'TimeoutError' ? 'tempo di attesa scaduto' : (error.code || error.message);
-    throw httpError(503, `Recap Projexa: modello locale non raggiungibile (${reason})`);
+    throw httpError(503, `Projexa: modello locale non raggiungibile (${reason})`);
   }
   const data = response.data || {};
-  if (!response.ok) throw httpError(502, `Recap Projexa: ${data.error || `errore ${response.status}`}`);
+  if (!response.ok) throw httpError(502, `Projexa: ${data.error || `errore ${response.status}`}`);
   const secs = (Number(data.total_duration) || 0) / 1e9;
   const promptTokens = Number(data.prompt_eval_count) || 0;
   console.log(`[RECAP] Ollama ${model}: ${promptTokens || '?'} token letti (contesto ${numCtx}), ${data.eval_count || '?'} scritti in ${Math.round(secs)}s`);
@@ -1011,52 +1021,169 @@ async function ollamaGenerate(prompt, numCtx, numPredict) {
 const ctxFor = (chars, outTokens) =>
   Math.min(OLLAMA_MAX_CTX, Math.max(4096, Math.ceil((chars / OLLAMA_CHARS_PER_TOKEN + outTokens + 512) / 1024) * 1024));
 
+// ------------------------------------------
+// RECAP-PROJEXA: modello dedicato a Recap cliente e Recap interno (2026-10-20)
+// ------------------------------------------
+// Le trascrizioni delle riunioni (opts.meeting) vanno al modello recap-projexa
+// (deploy/oracle/ollama/recap-projexa.Modelfile, poi addestrato dalla pagina Analisi PM ›
+// Recap) con /api/chat: istruzioni FISSE di sistema (prompt RECAP_PROJEXA: chi è, glossario
+// TeamSystem, regole) + il compito nel messaggio (appunti di un pezzo, recap cliente, recap
+// interno). Istruzioni e contesto fissi = Ollama le tiene in cache tra un pezzo e l'altro e non
+// ricarica il modello. Senza recap-projexa sulla VM si usa OLLAMA_RECAP_MODEL (qwen2.5:7b).
+// Gli altri usi (Dossier, funzioni PM, email) restano su ollamaGenerate.
+// L'Assistente PM ha la precedenza (config/ollamaPrecedenza.js): il recap aspetta la fine delle
+// sessioni Pm projexa e, se ne parte una mentre lavora, si interrompe e riprende dallo stesso pezzo.
+const RECAP_PROJEXA_MODEL = process.env.OLLAMA_RECAP_PROJEXA_MODEL || 'recap-projexa';
+const RECAP_PROJEXA_CTX = Math.max(8192, Number(process.env.OLLAMA_RECAP_PROJEXA_CTX) || 16384);
+const RECAP_PROJEXA_KEEP_ALIVE = process.env.OLLAMA_RECAP_PROJEXA_KEEP_ALIVE || '10m';
+let recapProjexaAssenteFino = 0; // modello non trovato: riserva per 10 minuti, poi si riprova
+
+// Istruzioni di sistema del recap (riga standard del prompt RECAP_PROJEXA, uguale per tutti:
+// è anche il «system» degli esempi di addestramento).
+export async function istruzioniRecapProjexa() {
+  try { return (await getPromptFor('RECAP_PROJEXA', null)).testo.trim(); } catch { return ''; }
+}
+
+// Testo della riunione per il recap: gli orari "[hh:mm:ss]" a inizio riga non servono e costano
+// molti token (le cifre si spezzano): si tolgono, lasciando nome di chi parla e testo.
+export const testoPerRecap = (transcript) => String(transcript || '').replace(/^\[\d{1,3}:\d{2}(?::\d{2})?\]\s*/gm, '');
+
+// Pezzi di una riunione come li riassume il recap locale: unico = trascrizione breve, il recap
+// si scrive direttamente; altrimenti messaggi = compito «appunti» di ogni pezzo (RECAP_CHUNK_PROMPT).
+// Usata anche dall'insegnante notturno (jobs/analisiRecap.js): stessi messaggi = stessi esempi.
+export function pezziRecapRiunione(transcript, contesto = '', pieceChars = OLLAMA_MEETING_CHUNK_CHARS) {
+  const plain = testoPerRecap(transcript);
+  if (plain.length <= OLLAMA_MEETING_SINGLE_CHARS && pieceChars === OLLAMA_MEETING_CHUNK_CHARS) return { plain, unico: true, messaggi: [] };
+  const ctxText = contesto ? ` («${contesto}»)` : '';
+  const pieces = splitText(plain, pieceChars);
+  const messaggi = pieces.map((testo, i) => {
+    const vals = { N: i + 1, TOT: pieces.length, CONTESTO: ctxText, TESTO: testo };
+    return RECAP_CHUNK_PROMPT.replace(/\{\{(N|TOT|CONTESTO|TESTO)\}\}/g, (m, k) => String(vals[k]));
+  });
+  return { plain, unico: false, messaggi };
+}
+
+// Appunti dei pezzi -> testo messo al posto della trascrizione nel prompt del recap.
+// Niente intestazioni "Parte N" negli appunti: il modello le ricopiava come sezioni del recap
+// (una per pezzo, ognuna con le sue azioni) invece di raggruppare per argomento.
+export function testoDagliAppunti(notes) {
+  return '(Appunti ricavati dalla trascrizione, in ordine cronologico: uno stesso argomento può '
+    + 'comparire in più punti. Nel recap raggruppa per ARGOMENTO, unisci i punti doppi, dai a ogni '
+    + 'sezione un titolo breve con il nome dell\'argomento e metti UNA SOLA sezione AZIONI IN CARICO '
+    + 'in fondo. Ogni argomento degli appunti deve comparire nel recap; le righe "AZIONE" vanno nelle '
+    + 'azioni in carico con la persona indicata; dove è scritto "scadenza non indicata" non inventare date.)\n\n'
+    + notes.join('\n\n');
+}
+
+// Esegue fn(signal) quando l'Assistente PM non usa Ollama; se una sessione Pm projexa parte
+// mentre fn lavora, la richiesta si interrompe e fn si ripete a sessione finita.
+async function conPrecedenzaPm(fn) {
+  for (;;) {
+    await attendiPmLibero({ avviso: () => console.log('[RECAP] Projexa in attesa: l\'Assistente PM (Pm projexa) sta usando la VM') });
+    const ctrl = new AbortController();
+    const togli = suAvvioPm(() => ctrl.abort());
+    if (pmProjexaInCorso()) ctrl.abort(); // sessione partita tra l'attesa e la registrazione
+    try {
+      return await fn(ctrl.signal);
+    } catch (e) {
+      if (!ctrl.signal.aborted) throw e;
+      console.log('[RECAP] Projexa interrotto: è partito l\'Assistente PM, riprendo a call finita dallo stesso punto');
+    } finally {
+      togli();
+    }
+  }
+}
+
+// Una richiesta a recap-projexa: system = istruzioni fisse, user = compito.
+async function recapProjexaChat(sistema, compito, numPredict) {
+  const base = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+  // Contesto fisso (cache e niente ricarica del modello); più grande solo se il compito non ci sta.
+  const numCtx = Math.max(RECAP_PROJEXA_CTX, ctxFor(sistema.length + compito.length, numPredict));
+  const messages = [...(sistema ? [{ role: 'system', content: sistema }] : []), { role: 'user', content: compito }];
+  return conPrecedenzaPm(async (signal) => {
+    let model = Date.now() < recapProjexaAssenteFino ? (process.env.OLLAMA_RECAP_MODEL || 'qwen2.5:7b') : RECAP_PROJEXA_MODEL;
+    const corpo = () => ({ model, messages, stream: false, keep_alive: RECAP_PROJEXA_KEEP_ALIVE,
+      options: { num_ctx: numCtx, num_predict: numPredict, temperature: 0.3 } });
+    const timeout = Number(process.env.OLLAMA_TIMEOUT_MS) || 2 * 60 * 60 * 1000;
+    let response;
+    try {
+      response = await ollamaPost(`${base}/api/chat`, corpo(), timeout, { signal });
+      if (response.status === 404 && model === RECAP_PROJEXA_MODEL && /not found|pull/i.test(String((response.data && response.data.error) || ''))) {
+        console.warn(`[RECAP] modello ${RECAP_PROJEXA_MODEL} assente su Ollama: uso ${process.env.OLLAMA_RECAP_MODEL || 'qwen2.5:7b'}`);
+        recapProjexaAssenteFino = Date.now() + 10 * 60000;
+        model = process.env.OLLAMA_RECAP_MODEL || 'qwen2.5:7b';
+        response = await ollamaPost(`${base}/api/chat`, corpo(), timeout, { signal });
+      }
+    } catch (error) {
+      if (signal.aborted) throw error;
+      const reason = error.name === 'TimeoutError' ? 'tempo di attesa scaduto' : (error.code || error.message);
+      throw httpError(503, `Projexa: modello locale non raggiungibile (${reason})`);
+    }
+    const data = response.data || {};
+    if (!response.ok) throw httpError(502, `Projexa: ${data.error || `errore ${response.status}`}`);
+    const secs = (Number(data.total_duration) || 0) / 1e9;
+    console.log(`[RECAP] Ollama ${model}: ${data.prompt_eval_count || '?'} token letti (contesto ${numCtx}), ${data.eval_count || '?'} scritti in ${Math.round(secs)}s`);
+    // Con la cache prompt_eval_count conta solo i token nuovi: il troncamento si controlla
+    // sulla stima (il contesto è già dimensionato per starci) e sul conteggio quando c'è.
+    const promptTokens = Number(data.prompt_eval_count) || 0;
+    const truncated = promptTokens > 0 && promptTokens >= numCtx - Math.min(numPredict, 512);
+    return { text: String((data.message && data.message.content) || '').trim(), model, truncated };
+  });
+}
+
 // Recap con Ollama. buildPrompt(testo) restituisce il prompt completo (prompt RECAP_EMAIL
 // con il testo al posto di {{TRASCRIZIONE}}). Se la trascrizione non sta nel contesto, prima
 // si riassume a pezzi e il recap si scrive dagli appunti.
-// opts.meeting: trascrizione di una riunione -> oltre OLLAMA_MEETING_SINGLE_CHARS sempre a pezzi
-// piccoli; opts.contesto: titolo della riunione, passato anche ai pezzi.
+// opts.meeting: trascrizione di una riunione -> recap-projexa (vedi sopra) e, oltre
+// OLLAMA_MEETING_SINGLE_CHARS, sempre a pezzi piccoli; opts.contesto: titolo della riunione,
+// passato anche ai pezzi.
 export async function askOllamaRecap(buildPrompt, transcript, { meeting = false, contesto = '' } = {}) {
-  // Gli orari "[hh:mm:ss]" a inizio riga non servono al recap e costano molti token
-  // (le cifre si spezzano): si tolgono, lasciando nome di chi parla e testo.
-  const plain = String(transcript || '').replace(/^\[\d{1,3}:\d{2}(?::\d{2})?\]\s*/gm, '');
+  if (meeting) return askRecapProjexa(buildPrompt, transcript, contesto);
+  const plain = testoPerRecap(transcript);
   const overhead = (await buildPrompt('')).length;
-  const notesTokens = meeting ? OLLAMA_NOTES_TOKENS : 1000;
-  const ctxText = contesto ? ` («${contesto}»)` : '';
+  const notesTokens = 1000;
 
   // Riassunto a pezzi: appunti per ogni pezzo, poi il recap si scrive dagli appunti.
   const fromNotes = async (pieceChars) => {
-    const pieces = splitText(plain, pieceChars);
+    const { messaggi } = pezziRecapRiunione(plain, contesto, pieceChars);
     const notes = [];
-    for (let i = 0; i < pieces.length; i++) {
-      const vals = { N: i + 1, TOT: pieces.length, CONTESTO: ctxText, TESTO: pieces[i] };
-      const p = RECAP_CHUNK_PROMPT.replace(/\{\{(N|TOT|CONTESTO|TESTO)\}\}/g, (m, k) => String(vals[k]));
-      notes.push((await ollamaGenerate(p, ctxFor(p.length, notesTokens), notesTokens)).text);
-    }
-    // Niente intestazioni "Parte N" negli appunti: il modello le ricopiava come sezioni del
-    // recap (una per pezzo, ognuna con le sue azioni) invece di raggruppare per argomento.
-    return '(Appunti ricavati dalla trascrizione, in ordine cronologico: uno stesso argomento può '
-      + 'comparire in più punti. Nel recap raggruppa per ARGOMENTO, unisci i punti doppi, dai a ogni '
-      + 'sezione un titolo breve con il nome dell\'argomento e metti UNA SOLA sezione AZIONI IN CARICO '
-      + 'in fondo. Ogni argomento degli appunti deve comparire nel recap; le righe "AZIONE" vanno nelle '
-      + 'azioni in carico con la persona indicata; dove è scritto "scadenza non indicata" non inventare date.)\n\n'
-      + notes.join('\n\n');
+    for (const p of messaggi) notes.push((await ollamaGenerate(p, ctxFor(p.length, notesTokens), notesTokens)).text);
+    return testoDagliAppunti(notes);
   };
 
   const fits = (overhead + plain.length) / OLLAMA_CHARS_PER_TOKEN + OLLAMA_OUTPUT_TOKENS <= OLLAMA_MAX_CTX;
-  let prompt;
-  if (meeting && plain.length > OLLAMA_MEETING_SINGLE_CHARS) prompt = await buildPrompt(await fromNotes(OLLAMA_MEETING_CHUNK_CHARS));
-  else prompt = await buildPrompt(fits ? plain : await fromNotes(OLLAMA_CHUNK_CHARS));
+  let prompt = await buildPrompt(fits ? plain : await fromNotes(OLLAMA_CHUNK_CHARS));
   let result = await ollamaGenerate(prompt, ctxFor(prompt.length, OLLAMA_OUTPUT_TOKENS), OLLAMA_OUTPUT_TOKENS);
   // Prompt troncato da Ollama (stima dei token sbagliata): il recap sarebbe fatto solo sulla
-  // fine della riunione e senza istruzioni. Si rifà a pezzi più piccoli.
+  // fine del testo e senza istruzioni. Si rifà a pezzi più piccoli.
+  if (result.truncated) {
+    console.warn('⚠️ [RECAP] Ollama: nuovo tentativo riassumendo il testo a pezzi più piccoli');
+    prompt = await buildPrompt(await fromNotes(Math.floor(OLLAMA_CHUNK_CHARS / 2)));
+    result = await ollamaGenerate(prompt, ctxFor(prompt.length, OLLAMA_OUTPUT_TOKENS), OLLAMA_OUTPUT_TOKENS);
+    if (result.truncated) throw httpError(502, 'Projexa: il testo è troppo lungo per il modello locale');
+  }
+  return { text: result.text, label: 'Projexa', model: result.model };
+}
+
+// Recap cliente / Recap interno di una riunione con recap-projexa.
+async function askRecapProjexa(buildPrompt, transcript, contesto) {
+  const sistema = await istruzioniRecapProjexa();
+  const fromNotes = async (pieceChars) => {
+    const { messaggi } = pezziRecapRiunione(transcript, contesto, pieceChars);
+    const notes = [];
+    for (const p of messaggi) notes.push((await recapProjexaChat(sistema, p, OLLAMA_NOTES_TOKENS)).text);
+    return testoDagliAppunti(notes);
+  };
+  const { plain, unico } = pezziRecapRiunione(transcript, contesto);
+  let prompt = await buildPrompt(unico ? plain : await fromNotes(OLLAMA_MEETING_CHUNK_CHARS));
+  let result = await recapProjexaChat(sistema, prompt, OLLAMA_OUTPUT_TOKENS);
   if (result.truncated) {
     console.warn('⚠️ [RECAP] Ollama: nuovo tentativo riassumendo la trascrizione a pezzi più piccoli');
-    prompt = await buildPrompt(await fromNotes(Math.floor((meeting ? OLLAMA_MEETING_CHUNK_CHARS : OLLAMA_CHUNK_CHARS) / 2)));
-    result = await ollamaGenerate(prompt, ctxFor(prompt.length, OLLAMA_OUTPUT_TOKENS), OLLAMA_OUTPUT_TOKENS);
-    if (result.truncated) throw httpError(502, 'Recap Projexa: la riunione è troppo lunga per il modello locale');
+    prompt = await buildPrompt(await fromNotes(Math.floor(OLLAMA_MEETING_CHUNK_CHARS / 2)));
+    result = await recapProjexaChat(sistema, prompt, OLLAMA_OUTPUT_TOKENS);
+    if (result.truncated) throw httpError(502, 'Projexa: la riunione è troppo lunga per il modello locale');
   }
-  return { text: result.text, label: 'Recap Projexa', model: result.model };
+  return { text: result.text, label: 'Projexa', model: result.model };
 }
 
 // Divide il testo in pezzi di circa maxChars, tagliando a fine riga.

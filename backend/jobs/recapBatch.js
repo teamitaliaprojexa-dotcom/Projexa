@@ -8,7 +8,7 @@
 //   eseguiRecapBatch -> job "recap_batch" dello schedulatore (ogni 5 minuti, solo sulla VM):
 //                      chiede lo stato ai fornitori e salva i recap pronti sulla riunione
 //                      (stessa strada del recap normale: correzioni, log, campanella).
-// Tabella e job: Supporto/CreaDB/recap_batch.sql. "Recap Projexa (lento)" non ha il batch
+// Tabella e job: Supporto/CreaDB/recap_batch.sql. "Projexa" non ha il batch
 // (è già gratuito): con lui il recap parte normalmente.
 // ============================================================================
 import db from '../config/database.js';

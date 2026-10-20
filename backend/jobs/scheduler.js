@@ -26,6 +26,7 @@ import { eseguiGiroLavoriAi } from './aiLavori.js';
 import { eseguiConservazioneRiunioni } from './conservazione.js';
 import { eseguiAssociaTodoRaid } from './associaTodoRaid.js';
 import { eseguiAnalisiPm } from './analisiPm.js';
+import { eseguiAnalisiRecap } from './analisiRecap.js';
 import { conContestoAudit } from '../config/auditContext.js';
 
 // Job schedulabili: la chiave è il valore di job_schedules.job.
@@ -62,7 +63,10 @@ const JOBS = {
   // (lun-ven 5:00), poi raccolta dei risultati Batch nei giri successivi. Per tutti i tenant.
   associa_todo_raid: () => eseguiAssociaTodoRaid(),
   // Analisi PM notturna (jobs/analisiPm.js): riunioni segnate, Gemini un gruppo per giro o ChatGPT Batch.
-  analisi_pm: () => eseguiAnalisiPm()
+  analisi_pm: () => eseguiAnalisiPm(),
+  // Insegnante notturno del recap (jobs/analisiRecap.js): appunti, recap cliente e recap interno
+  // scritti da Gemini/ChatGPT sulle riunioni segnate, esempi per addestrare recap-projexa.
+  analisi_recap: () => eseguiAnalisiRecap()
 };
 
 // Job eseguiti dal BROWSER dell'utente (utente_config) mentre Projexa è aperta, non dal
@@ -87,7 +91,8 @@ export const INFO_JOB = {
   lavori_ai: { etichetta: 'Lavori AI in Batch: ripresa e pulizia', jira: false },
   conservazione_riunioni: { etichetta: 'Conservazione: trascrizioni e recap oltre 24 mesi', jira: false },
   associa_todo_raid: { etichetta: 'Associazione automatica To-Do e RAID (AI)', jira: false },
-  analisi_pm: { etichetta: 'Analisi PM notturna delle riunioni segnate (AI)', jira: false }
+  analisi_pm: { etichetta: 'Analisi PM notturna delle riunioni segnate (AI)', jira: false },
+  analisi_recap: { etichetta: 'Analisi Recap notturna: esempi per addestrare recap-projexa (AI)', jira: false }
 };
 
 export function schedulerAttivo() {

@@ -11,7 +11,7 @@
 //   analisiGantt        avanzamento ponderato, ritardi, milestone, baseline, percorso critico
 //   saluteProgetto      semaforo (5 indicatori) + previsione a finire (EAC) + andamento
 //   contestoProgetto    tutto il progetto in testo, per l'AI (Status Report, Chiedi, Briefing)
-//   aiPerPm / chiediAi  AI da usare e chiamata (AI esterna o «Recap Projexa (lento)»)
+//   aiPerPm / chiediAi  AI da usare e chiamata (AI esterna o «Projexa»)
 // Tabelle: Supporto/CreaDB/pm_senior.sql. Se non sono ancora state create, le funzioni che
 // le leggono restituiscono dati vuoti invece di fallire (tabellaPresente).
 // ============================================================================
@@ -847,7 +847,7 @@ async function settingValore(user, campo) {
 }
 
 // AI per le funzioni PM: la prima AI esterna collegata tra «AI generazione e-mail recap»,
-// «AI Slide Kick-Off» e «AI Offerta Economica»; se c'è solo «Recap Projexa (lento)» si usa
+// «AI Slide Kick-Off» e «AI Offerta Economica»; se c'è solo «Projexa» si usa
 // quello (solo per i testi, non per le risposte strutturate). null se nessuna.
 export async function aiPerPm(user, { soloEsterna = false } = {}) {
   const nomi = [];
@@ -863,7 +863,7 @@ export async function aiPerPm(user, { soloEsterna = false } = {}) {
   }
   if (!soloEsterna) {
     const locale = nomi.find((n) => localRecapMode(n) === 'server');
-    if (locale) return { nome: locale, locale: true, label: 'Recap Projexa (lento)' };
+    if (locale) return { nome: locale, locale: true, label: 'Projexa' };
   }
   return null;
 }

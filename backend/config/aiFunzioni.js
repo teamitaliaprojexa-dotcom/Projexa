@@ -2,12 +2,12 @@
 // AI ED ESECUZIONE PER FUNZIONE (Impostazioni › AI) - 2026-10-09
 // ----------------------------------------------------------------------------
 // Ogni funzione di Projexa che usa l'AI ha due campi in Impostazioni › AI (settings.valore2):
-//   «AI <funzione>»          ChatGPT / Claude / Gemini / Mistral / Recap Projexa (lento) /
+//   «AI <funzione>»          ChatGPT / Claude / Gemini / Mistral / Projexa /
 //                            "Chiedi sempre" (la sceglie l'utente a ogni uso). Vuoto = l'AI di
 //                            «AI generazione e-mail recap» (come prima).
 //   «Esecuzione <funzione>»  "Immediato" / "Batch (50% off)" / "Chiedi Sempre". Vuoto = Immediato.
 // Le OPERAZIONI sono i singoli pulsanti: più operazioni possono condividere la stessa funzione
-// (le 5 funzioni PM usano «AI Funzioni PM»). locale = ammessa "Recap Projexa (lento)", che non
+// (le 5 funzioni PM usano «AI Funzioni PM»). locale = ammessa "Projexa", che non
 // ha il Batch (è già gratuito): con lei l'esecuzione è sempre Immediata.
 // Il recap delle riunioni (cliente e interno) ha la sua logica in jobs/meetingTranscription.js.
 // ============================================================================
@@ -90,7 +90,7 @@ export async function risolviAi(user, operazione, scelte = {}) {
   if (!nome) throw errore(400, `Scegli l'AI in Impostazioni › AI › «${f.ai[0]}»`);
   let locale = localRecapMode(nome) === 'server';
   if (locale && !op.locale) {
-    // Recap Projexa (lento) non può fare questa funzione (risposte strutturate / file): si usa
+    // Projexa non può fare questa funzione (risposte strutturate / file): si usa
     // la prima AI con chiave collegata, come facevano prima le funzioni PM.
     const collegate = await aiCollegate(user.user_id);
     if (!collegate.length) throw errore(400, `«${op.etichetta}» richiede un'AI con chiave API (ChatGPT, Claude, Gemini o Mistral): collegala in Impostazioni › AI`);
@@ -105,7 +105,7 @@ export async function risolviAi(user, operazione, scelte = {}) {
     if (!['immediato', 'batch'].includes(esecuzione)) throw errore(409, 'Scegli se eseguire Immediato o in Batch', 'AI_SCELTA');
   }
   if (locale) esecuzione = 'immediato';
-  return { nome, label: locale ? 'Recap Projexa (lento)' : etichettaAi(nome), locale, esecuzione };
+  return { nome, label: locale ? 'Projexa' : etichettaAi(nome), locale, esecuzione };
 }
 
 // Per la finestra di scelta delle pagine: cosa chiedere e quali AI proporre.
@@ -114,11 +114,11 @@ export async function opzioniAi(user, operazione) {
   const chiediAi = isChiedi(ai);
   const aiDisponibili = chiediAi
     ? [...(await aiCollegate(user.user_id)).map((x) => ({ nome: x.nome, label: x.label, batch: true })),
-      ...(op.locale ? [{ nome: 'Recap Projexa (lento)', label: 'Recap Projexa (lento, gratuito)', batch: false }] : [])]
+      ...(op.locale ? [{ nome: 'Projexa', label: 'Projexa (gratuito)', batch: false }] : [])]
     : [];
   return {
     operazione, etichetta: op.etichetta, ai, chiediAi, esecuzione, chiediEsecuzione: esecuzione === 'chiedi',
-    // AI già impostata: il Batch c'è solo se non è Recap Projexa.
+    // AI già impostata: il Batch c'è solo se non è Projexa.
     batchPossibile: chiediAi ? true : localRecapMode(ai) !== 'server',
     aiDisponibili
   };
@@ -134,7 +134,7 @@ export async function infoAi(user, operazione) {
   const locale = localRecapMode(ai) === 'server';
   if (locale) {
     if (op.locale) return { nome: ai, supportata: true, connessa: true, locale: true };
-    // Funzione che Recap Projexa non sa fare: si userà la prima AI collegata (risolviAi).
+    // Funzione che Projexa non sa fare: si userà la prima AI collegata (risolviAi).
     return collegate.length ? { nome: collegate[0].nome, supportata: true, connessa: true, locale: false } : { nome: ai, supportata: false, connessa: false, locale: false };
   }
   const cfg = PROVIDERS[ai.toLowerCase()];

@@ -48,6 +48,7 @@ import { getPromptFor } from '../config/prompts.js';
 import { speakerName, trascriviBloccoBreve } from '../jobs/meetingTranscription.js';
 import { contestoProgetto, dataIt, oggiIso } from '../config/pmCore.js';
 import { ollamaPost } from './ai.js';
+import { segnaPmProjexa } from '../config/ollamaPrecedenza.js';
 import { encryptRowForWrite } from '../config/crypto.js';
 
 const router = express.Router();
@@ -715,17 +716,17 @@ function prossimo(s) {
 // filtro = chiamata al modello piccolo (OLLAMA_PM_FILTRO_MODEL), con le sue opzioni.
 async function chiamaOllama(s, messages, opzioni = {}, { filtro = false } = {}) {
   if (filtro) {
-    const r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, { model: OLLAMA_PM_FILTRO_MODEL, messages, stream: false, keep_alive: OLLAMA_PM_KEEP_ALIVE, options: OLLAMA_PM_FILTRO_OPZIONI }, OLLAMA_PM_TIMEOUT_MS);
+    const r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, { model: OLLAMA_PM_FILTRO_MODEL, messages, stream: false, keep_alive: OLLAMA_PM_KEEP_ALIVE, options: OLLAMA_PM_FILTRO_OPZIONI }, OLLAMA_PM_TIMEOUT_MS, { signal: s.annulla && s.annulla.signal });
     if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
     const d = r.data || {};
     return { testo: String((d.message && d.message.content) || '').trim(), letti: Number(d.prompt_eval_count) || 0, secondi: Math.round((Number(d.total_duration) || 0) / 1e9) };
   }
   const corpo = () => ({ model: s.modelloOllama, messages, stream: false, keep_alive: OLLAMA_PM_KEEP_ALIVE, options: { ...OLLAMA_PM_OPZIONI, ...opzioni } });
-  let r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, corpo(), OLLAMA_PM_TIMEOUT_MS);
+  let r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, corpo(), OLLAMA_PM_TIMEOUT_MS, { signal: s.annulla && s.annulla.signal });
   if (r.status === 404 && /not found|pull/i.test(String((r.data && r.data.error) || '')) && s.modelloOllama !== OLLAMA_PM_RISERVA) {
     console.warn(`[ASSISTENTE PM] ${s.idCalendar}: modello ${s.modelloOllama} assente su Ollama, uso ${OLLAMA_PM_RISERVA}`);
     s.modelloOllama = OLLAMA_PM_RISERVA;
-    r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, corpo(), OLLAMA_PM_TIMEOUT_MS);
+    r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, corpo(), OLLAMA_PM_TIMEOUT_MS, { signal: s.annulla && s.annulla.signal });
   }
   if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
   const d = r.data || {};
@@ -952,7 +953,26 @@ function chiudi(s, rimuovi = true) {
   clearTimeout(s.timerTratto);
   try { if (s.ws) s.ws.close(1000, 'fine riunione'); } catch { /* già chiusa */ }
   s.ws = null;
+  // Pm projexa: la richiesta a Ollama in corso si interrompe (la risposta verrebbe comunque
+  // scartata) e la VM torna libera per i recap (config/ollamaPrecedenza.js).
+  if (s.annulla) s.annulla.abort();
+  if (s.motore === 'projexa' && sessioni.get(s.chiave) === s) segnaPmProjexa(s.chiave, false);
   if (rimuovi) sessioni.delete(s.chiave);
+}
+
+// «Chiudi definitivamente»: oltre alla sessione, scarica dalla RAM della VM i modelli di Pm
+// projexa (come «ollama stop»), se nessun'altra sessione Pm projexa li sta usando. Con la
+// chiusura normale restano caricati 4 ore (OLLAMA_PM_KEEP_ALIVE) per la call successiva.
+async function scaricaModelliPm(s) {
+  if ([...sessioni.values()].some((x) => x !== s && !x.chiusa && x.motore === 'projexa')) return;
+  for (const model of [s.modelloOllama, OLLAMA_PM_FILTRO_MODEL].filter(Boolean)) {
+    try {
+      await ollamaPost(`${OLLAMA_PM_URL}/api/generate`, { model, keep_alive: 0 }, 30000);
+    } catch (e) {
+      console.warn(`[ASSISTENTE PM] ${s.idCalendar}: ${model} non scaricato dalla RAM (${e.message})`);
+    }
+  }
+  console.log(`[ASSISTENTE PM] ${s.idCalendar}: chiuso definitivamente, modelli di Pm projexa scaricati dalla RAM`);
 }
 
 // Sessioni dimenticate aperte (pagina chiusa senza fermare la registrazione).
@@ -1072,10 +1092,14 @@ router.post('/avvia', requireAuth, async (req, res) => {
       vociProgetto: ai.locale ? (testoIstruzioni.voci || []) : [], vociCitate: new Set(),
       // Voti 👍/👎: pezzo di riunione di ogni suggerimento (n -> { tratto, completo, domanda }) e voto dato.
       origini: new Map(), voti: new Map(), trattoCorrente: '', rispostaDomanda: false,
-      user: { tenant_id: req.user.tenant_id, user_id: req.user.user_id }
+      user: { tenant_id: req.user.tenant_id, user_id: req.user.user_id },
+      // Interrompe la richiesta a Ollama in corso quando la sessione si chiude.
+      annulla: ai.locale ? new AbortController() : null
     };
     sessioni.set(k, s);
     if (s.motore === 'projexa') {
+      // Da qui i recap con «Projexa» aspettano la fine della sessione (config/ollamaPrecedenza.js).
+      segnaPmProjexa(k, true);
       // Nessuna connessione da aprire: la sessione è subito pronta, Ollama legge intanto le istruzioni.
       s.pronta = true;
       s.avviata = true;
@@ -1235,9 +1259,15 @@ router.post('/voto', requireAuth, async (req, res) => {
 // finestra rimasta aperta dopo «Ferma»).
 // Risposta: { ok, scaricaWord } — scaricaWord = campo booleano «Download automatico file Ass PM
 // AI» acceso (valore1): la finestra avvia da sola l'export in Word a fine registrazione.
+// definitiva: true = pulsante «Chiudi definitivamente» della finestra (la registrazione e la
+// trascrizione della riunione proseguono): anche i modelli di Pm projexa lasciano la RAM.
 router.post('/ferma', requireAuth, async (req, res) => {
   const s = sessioneDi(req, idDa((req.body || {}).id_calendar));
-  if (s && !s.chiusa) chiudi(s, false);
+  const eraAperta = !!(s && !s.chiusa);
+  if (eraAperta) chiudi(s, false);
+  if (s && eraAperta && req.body.definitiva === true && s.motore === 'projexa') {
+    scaricaModelliPm(s).catch(() => {});
+  }
   let scaricaWord = false;
   try {
     const r = (await db.query(

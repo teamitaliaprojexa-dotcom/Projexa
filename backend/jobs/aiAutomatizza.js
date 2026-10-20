@@ -18,7 +18,7 @@
 //                        stessa estrazione RAID propone anche le Change Request (una sola spesa).
 // RAID e Change Request partono SOLO se la riunione ha un progetto associato (tendine della
 // riga); senza progetto non si fa nulla per loro e partono solo i recap.
-// Se l'AI non ha il Batch (Recap Projexa) o il fornitore rifiuta la richiesta Batch (es. Gemini
+// Se l'AI non ha il Batch (Projexa) o il fornitore rifiuta la richiesta Batch (es. Gemini
 // gratuito) quella funzione si esegue in Immediato, SOLO in questo caso.
 // Notifiche: un riepilogo del lancio + quelle di sempre a lavoro finito (recap pronto, recap
 // interno pronto, risultato AI pronto); in caso di errore dell'esecuzione immediata, un avviso.
@@ -93,7 +93,7 @@ export async function avviaAutomazioneAi(user, idCalendar) {
     return false;
   }
   const locale = localRecapMode(ai) === 'server';
-  const labelAi = locale ? 'Recap Projexa (lento)' : etichettaAi(ai);
+  const labelAi = locale ? 'Projexa' : etichettaAi(ai);
   console.log(`[AI AUTOMATIZZA] ${idCalendar}: ${[...f].map((k) => ETICHETTE[k]).join(', ')} con ${labelAi}`);
 
   // 1) Recap per il cliente
@@ -108,7 +108,7 @@ export async function avviaAutomazioneAi(user, idCalendar) {
         fine: () => segnaRecapAutomatico(user, idCalendar, false)
       });
     };
-    if (locale) immediato('Recap Projexa non ha la modalità Batch');
+    if (locale) immediato('Projexa non ha la modalità Batch');
     else {
       try {
         const { inviaRecapBatch } = await import('./recapBatch.js');
@@ -150,11 +150,11 @@ export async function avviaAutomazioneAi(user, idCalendar) {
   if (operazione && m && m.project_id) {
     const nome = operazione === 'pm_raid' ? (f.has('cr') ? 'RAID e Change Request' : 'RAID') : 'Change Request';
     try {
-      // Recap Projexa non sa dare risposte strutturate: si usa la prima AI con chiave collegata.
+      // Projexa non sa dare risposte strutturate: si usa la prima AI con chiave collegata.
       let aiPm = { nome: ai, label: labelAi };
       if (locale) {
         const c = (await aiCollegate(user.user_id))[0];
-        if (!c) throw new Error('serve un\'AI con chiave API (ChatGPT, Claude, Gemini o Mistral): Recap Projexa non può farlo');
+        if (!c) throw new Error('serve un\'AI con chiave API (ChatGPT, Claude, Gemini o Mistral): Projexa non può farlo');
         aiPm = { nome: c.nome, label: c.label };
       }
       const { creaLavoroAutomatico } = await import('./aiLavori.js');
