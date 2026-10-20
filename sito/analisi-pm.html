@@ -197,10 +197,11 @@
         </div>
         <div class="card">
             <h2>Addestramento con Google Colab (gratuito)</h2>
-            <p class="muted">Consigliato con almeno 30-50 risposte corrette, tra appunti e recap. Stessa procedura dell'Assistente PM: scarica i due file, in Colab scegli <b>GPU T4</b>, carica il notebook, <b>Esegui tutto</b> e carica il .jsonl quando lo chiede. Alla fine si scarica <code>recap-projexa-adapter.gguf</code>: caricalo nella scheda <b>Modello sulla VM</b> scegliendo <b>recap-projexa</b>.</p>
+            <p class="muted">Consigliato con almeno 30-50 risposte corrette, tra appunti e recap. Stessa procedura dell'Assistente PM: scarica i due file, in Colab scegli <b>GPU T4</b>, carica il notebook, <b>Esegui tutto</b> e carica il .jsonl quando lo chiede. Alla fine si scarica <code>recap-projexa-adapter.gguf</code> (o <code>recap-projexa-14b-adapter.gguf</code>): caricalo nella scheda <b>Modello sulla VM</b> scegliendo <b>recap-projexa</b> (o <b>recap-projexa-14b</b>). Il file degli esempi è lo stesso per i due modelli: il 14B, per stare nella GPU gratuita, usa solo gli esempi fino a 4.096 token (soprattutto gli appunti).</p>
             <div class="riga" style="margin-top:0.8rem">
                 <button class="btn pri" id="rScarica"><i class="fas fa-download"></i> 1. Scarica gli esempi del recap (.jsonl)</button>
-                <button class="btn" id="rNotebook"><i class="fas fa-book"></i> 2. Scarica il notebook (.ipynb)</button>
+                <button class="btn" id="rNotebook"><i class="fas fa-book"></i> 2. Notebook per l'8B (.ipynb)</button>
+                <button class="btn" id="rNotebook14"><i class="fas fa-book"></i> 2. Notebook per il 14B (.ipynb)</button>
                 <a class="btn" href="https://colab.research.google.com/" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> 3. Apri Google Colab</a>
             </div>
         </div>
@@ -213,7 +214,8 @@
             <div class="riga" style="margin-bottom:0.6rem">
                 <select id="famiglia">
                     <option value="pm">pm-projexa — Assistente PM</option>
-                    <option value="recap">recap-projexa — Recap cliente e Recap interno</option>
+                    <option value="recap">recap-projexa — Recap con «Projexa» (8B)</option>
+                    <option value="recap14">recap-projexa-14b — Recap con «Projexa 14B» (Qwen3 14B)</option>
                 </select>
             </div>
             <div class="riga">
@@ -223,7 +225,7 @@
             </div>
             <div class="bar hidden" id="barra"><div></div></div>
             <div id="avanz" class="muted" style="margin-top:0.4rem"></div>
-            <p class="muted" style="margin-top:0.6rem">Projexa fa il <b>backup</b> del modello attuale, crea il nuovo modello scelto sopra (base qwen2.5:7b + il tuo adattatore, stessi parametri) e lo prova: se qualcosa non va torna da solo al precedente. Non si può fare mentre l'Assistente PM con Projexa è in uso (la VM lavora un paio di minuti).</p>
+            <p class="muted" style="margin-top:0.6rem">Projexa fa il <b>backup</b> del modello attuale, crea il nuovo modello scelto sopra (base qwen3:8b + il tuo adattatore, stessi parametri) e lo prova: se qualcosa non va torna da solo al precedente. Non si può fare mentre l'Assistente PM con Projexa è in uso (la VM lavora un paio di minuti).</p>
         </div>
         <div class="card">
             <h2>Modelli <span id="nomeFamiglia">pm-projexa</span> sulla VM</h2>
@@ -378,15 +380,15 @@
     // --- Modello sulla VM ---
     async function caricaModelli() {
         try {
-            $('nomeFamiglia').textContent = fam() === 'recap' ? 'recap-projexa' : 'pm-projexa';
+            $('nomeFamiglia').textContent = NOMI_FAMIGLIA[fam()];
             const d = await api('GET', `/modelli?famiglia=${fam()}`);
             $('modelli').innerHTML = d.modelli.map((m) => `<tr>
                 <td><b>${esc(m.nome)}</b> ${m.attuale ? '<span class="badge b-ok">in uso</span>' : m.backup ? '<span class="badge">backup</span>' : ''}</td>
                 <td>${(m.dimensione / 1e9).toLocaleString('it-IT', { maximumFractionDigits: 1 })} GB</td><td>${dataOra(m.modificato)}</td>
                 <td>${m.backup ? `<button class="btn" data-ripristina="${esc(m.nome)}"><i class="fas fa-rotate-left"></i> Ripristina</button> <button class="btn danger" data-elimina="${esc(m.nome)}"><i class="fas fa-trash"></i> Elimina</button>` : ''}</td></tr>`).join('')
-                || `<tr><td colspan="4" class="muted">Nessun modello ${esc(d.nome)} sulla VM${fam() === 'recap' ? ' (finché manca, il recap con Projexa usa qwen2.5:7b: crealo con deploy/oracle/ollama/recap-projexa.Modelfile)' : ''}.</td></tr>`;
+                || `<tr><td colspan="4" class="muted">Nessun modello ${esc(d.nome)} sulla VM${fam() === 'recap' ? ' (finché manca, il recap con Projexa usa qwen3:8b: crealo con deploy/oracle/ollama/recap-projexa.Modelfile)' : fam() === 'recap14' ? ' (finché manca, «Projexa 14B» usa recap-projexa: crealo con deploy/oracle/ollama/recap-projexa-14b.Modelfile)' : ''}.</td></tr>`;
             const n = d.note && d.note[d.nome];
-            $('notaModello').textContent = n ? `Ultima installazione: ${dataOra(n.installato)}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : `${d.nome} è ancora il modello di partenza (qwen2.5:7b senza addestramento). I backup occupano poco spazio: la base qwen2.5:7b è condivisa.`;
+            $('notaModello').textContent = n ? `Ultima installazione: ${dataOra(n.installato)}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : `${d.nome} è ancora il modello di partenza (qwen3:8b senza addestramento). I backup occupano poco spazio: la base qwen3:8b è condivisa.`;
         } catch (e) { $('modelli').innerHTML = `<tr><td colspan="4" class="muted">${esc(e.message)}</td></tr>`; }
     }
     $('modelli').onclick = async (e) => {
@@ -404,7 +406,7 @@
         const f = $('file').files[0];
         if (!f) return avviso('Scegli il file .gguf scaricato da Colab.', 'err');
         if (!/\.gguf$/i.test(f.name)) return avviso('Serve un file .gguf.', 'err');
-        const nomeModello = fam() === 'recap' ? 'recap-projexa' : 'pm-projexa';
+        const nomeModello = NOMI_FAMIGLIA[fam()];
         if (!confirm(`Installare ${f.name} (${Math.round(f.size / 1e6)} MB) come nuovo ${nomeModello}? Prima viene fatto il backup di quello attuale.`)) return;
         const PARTE = 16 * 1024 * 1024;
         const parti = Math.ceil(f.size / PARTE);
@@ -427,6 +429,7 @@
     };
 
     const fam = () => $('famiglia').value;
+    const NOMI_FAMIGLIA = { pm: 'pm-projexa', recap: 'recap-projexa', recap14: 'recap-projexa-14b' };
     $('famiglia').onchange = caricaModelli;
 
     // --- Recap (insegnante notturno di recap-projexa, jobs/analisiRecap.js) ---
@@ -562,6 +565,7 @@
 
     $('rScarica').onclick = () => scaricaFile('/recap/scarica', 'recap_projexa_addestramento.jsonl').catch(errore);
     $('rNotebook').onclick = () => scaricaFile('/recap/notebook', 'addestra_recap_projexa.ipynb').catch(errore);
+    $('rNotebook14').onclick = () => scaricaFile('/recap/notebook?famiglia=recap14', 'addestra_recap_projexa_14b.ipynb').catch(errore);
 
     (async () => {
         try {

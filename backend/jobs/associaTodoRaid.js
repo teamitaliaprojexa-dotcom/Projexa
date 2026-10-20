@@ -23,7 +23,7 @@ import db from '../config/database.js';
 import notifDb from '../config/notifDatabase.js';
 import { encryptValue, encryptRowForWrite } from '../config/crypto.js';
 import { titoloVoce } from '../config/dedupVoci.js';
-import { inviaBatchAi, statoBatchAi, isBatchNonDisponibile, ollamaPost } from '../routes/ai.js';
+import { inviaBatchAi, statoBatchAi, isBatchNonDisponibile, ollamaPost, ollamaConPrecedenza, senzaRagionamento } from '../routes/ai.js';
 import { nomiClientiProgetti } from './notifiche.js';
 
 const CAMPO = 'associazione autom. todolist e raid';
@@ -33,7 +33,9 @@ const MAX_VOCI = 60;           // voci per richiesta (un progetto)
 const ORA_ULTIMO_INVIO = 9;    // dopo le 9 si invia solo a chi oggi non ha ancora avuto un invio (vedi invia)
 const SCADENZA_BATCH_ORE = 26; // i fornitori garantiscono la risposta entro 24 ore
 const OLLAMA_URL = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
-const OLLAMA_MODELLO = process.env.OLLAMA_RECAP_MODEL || 'qwen2.5:7b';
+// Associazioni con «Projexa»: 14B (abbinare voci e rispondere in JSON è ragionamento, dove il
+// 14B è nettamente meglio del 7B); se sulla VM non c'è, ollamaConPrecedenza ripiega sul 7B.
+const OLLAMA_MODELLO = process.env.OLLAMA_ASSOCIAZIONI_MODEL || process.env.OLLAMA_FUNZIONI_14B_MODEL || 'qwen3:14b';
 
 const oggiRoma = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
 const oraRoma = () => Number(new Date().toLocaleString('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', hour12: false }));
@@ -354,14 +356,16 @@ async function invia(report, esiti) {
       if (!rich) continue;
       try {
         if (locale) {
-          // Projexa: Ollama della VM, subito (gratuito, niente Batch).
-          const r = await ollamaPost(`${OLLAMA_URL}/api/chat`, {
-            model: OLLAMA_MODELLO, stream: false, format: 'json', keep_alive: '10m',
+          // Projexa: Ollama della VM, subito (gratuito, niente Batch). Dal 2026-10-20 con il 14B
+          // (alle 5 la VM è libera e nessuno aspetta; se il 14B manca, il 7B) e con la
+          // precedenza ad Assistente PM e trascrizione se si allunga fino all'inizio delle call.
+          const r = await ollamaConPrecedenza(OLLAMA_MODELLO, (model, signal) => ollamaPost(`${OLLAMA_URL}/api/chat`, {
+            model, stream: false, format: 'json', think: false, keep_alive: '10m',
             messages: [{ role: 'user', content: prompt(scelte) }],
             options: { num_ctx: 8192, temperature: 0, num_predict: 800 }
-          }, 20 * 60000);
+          }, 40 * 60000, { signal }));
           if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
-          report.collegate += await chiudiRichiesta(rich, u, scelte, r.data && r.data.message && r.data.message.content, esiti);
+          report.collegate += await chiudiRichiesta(rich, u, scelte, senzaRagionamento(r.data && r.data.message && r.data.message.content), esiti);
           report.locali++;
         } else {
           const b = await inviaBatchAi(u.user_id, ai, prompt(scelte), { json: true });

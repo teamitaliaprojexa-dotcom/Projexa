@@ -8,7 +8,7 @@
 # che il server manda a ogni richiesta. Il SYSTEM qui sotto vale solo se si usa il modello a mano.
 #
 # Facoltativo: se sulla VM il modello pm-projexa non c'è, il server usa OLLAMA_RECAP_MODEL
-# (qwen2.5:7b) con gli stessi parametri. Creazione (una volta, e di nuovo se si cambia il file),
+# (qwen3:8b) con gli stessi parametri. Creazione (una volta, e di nuovo se si cambia il file),
 # dal PC: copiare il file in /tmp della VM con scp e lanciare
 #   ollama create pm-projexa -f /tmp/pm-projexa.Modelfile
 # 2026-10-20: provato il 14B (FROM qwen2.5:14b): sulla VM con 4 core, durante una
@@ -16,7 +16,10 @@
 # minuti all'assistente). Tornati al 7B su scelta dell'utente, 14B eliminato. Davanti resta il
 # filtro veloce qwen2.5:3b (OLLAMA_PM_FILTRO_MODEL): il 7B scrive solo quando il filtro vede
 # un segnale. Per tornare al 14B (con più core): FROM qwen2.5:14b e ollama pull qwen2.5:14b.
-FROM qwen2.5:7b
+# 2026-10-20 (scelta dell'utente): base Qwen3 8B al posto di Qwen2.5 7B (ragiona meglio, ~10-15%
+# più lento). Il ragionamento ad alta voce dei Qwen3 è spento dal server (think:false). Il filtro
+# resta qwen2.5:3b (velocità). Per tornare indietro: FROM qwen2.5:7b e ollama create di nuovo.
+FROM qwen3:8b
 
 PARAMETER num_ctx 8192
 PARAMETER temperature 0.2

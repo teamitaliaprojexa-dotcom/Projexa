@@ -1,18 +1,22 @@
 # Modello «recap-projexa-14b» (2026-10-20): voce «Projexa 14B» del campo "AI generazione
-# e-mail recap", per confrontarlo con recap-projexa (7B) su riunioni vere e poi scegliere.
-# Stesse istruzioni (prompt RECAP_PROJEXA, mandato dal server) e stesso contesto fisso di 16384
-# token. Circa il doppio del tempo del 7B e ~9 GB di RAM (più ~3 GB per il contesto) mentre
-# lavora: parte solo quando la VM è libera (niente Assistente PM, registrazioni o trascrizioni,
-# config/ollamaPrecedenza.js) e con OLLAMA_MAX_LOADED_MODELS=2 prende il posto degli altri.
-# L'addestramento su Colab gratuito NON è previsto per il 14B (la GPU T4 non basta con testi
-# lunghi): se vince il 14B, si usa senza addestramento.
+# e-mail recap", da confrontare con recap-projexa (7B) su riunioni vere.
+# Base Qwen3 14B (scelta dell'utente, al posto di Qwen2.5 14B): stesso peso, ragiona meglio.
+# Il «ragionamento ad alta voce» dei Qwen3 è spento dal server in ogni richiesta (think:false)
+# e comunque tolto dalla risposta (routes/ai.js, senzaRagionamento).
+# Stesse istruzioni (prompt RECAP_PROJEXA, mandato dal server) e contesto fisso di 16384 token.
+# RAM: ~9 GB + ~3 GB di contesto mentre lavora (VM: 17 GB disponibili il 2026-10-20). Parte
+# solo quando la VM è libera (niente Assistente PM, registrazioni o trascrizioni).
+# Addestrabile con il notebook backend/prompts/colab_recap_projexa_14b.ipynb (esempi fino a
+# 4.096 token) e installabile da Analisi PM › Modello sulla VM › recap-projexa-14b.
+# La base qwen3:14b serve anche a Dossier, funzioni PM, Email attività («Projexa 14B») e alle
+# associazioni To-Do/RAID delle 5:00.
 #
 # Creazione sulla VM (una volta):
-#   ollama pull qwen2.5:14b
+#   ollama pull qwen3:14b
 #   ollama create recap-projexa-14b -f /tmp/recap-projexa-14b.Modelfile
-# Per toglierlo dopo le prove:
-#   ollama rm recap-projexa-14b && ollama rm qwen2.5:14b
-FROM qwen2.5:14b
+# Per toglierlo:
+#   ollama rm recap-projexa-14b && ollama rm qwen3:14b
+FROM qwen3:14b
 
 PARAMETER num_ctx 16384
 PARAMETER temperature 0.3

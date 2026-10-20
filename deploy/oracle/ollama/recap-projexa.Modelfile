@@ -1,19 +1,19 @@
 # Modello «recap-projexa» (2026-10-20): Recap cliente e Recap interno con la voce «Projexa»
 # (routes/ai.js, askRecapProjexa). Separato da pm-projexa: si addestra a parte (Analisi PM ›
 # Recap) e il suo addestramento non tocca l'Assistente PM.
-# Stessi pesi di qwen2.5:7b (nessun download in più) con un contesto FISSO di 16384 token: il
+# Stessi pesi di qwen3:8b (nessun download in più) con un contesto FISSO di 16384 token: il
 # server manda sempre lo stesso num_ctx (OLLAMA_RECAP_PROJEXA_CTX), così Ollama non ricarica il
 # modello tra un pezzo e l'altro e tiene in cache le istruzioni fisse.
 # Le istruzioni vere (glossario, regole) NON sono qui: sono il prompt RECAP_PROJEXA di Projexa
 # (backend/prompts/recap_projexa.txt), mandato dal server a ogni richiesta. Il SYSTEM qui sotto
 # vale solo se si usa il modello a mano.
 #
-# Facoltativo: se sulla VM il modello non c'è, il server usa OLLAMA_RECAP_MODEL (qwen2.5:7b).
+# Facoltativo: se sulla VM il modello non c'è, il server usa OLLAMA_RECAP_MODEL (qwen3:8b).
 # Creazione (una volta), dal PC: copiare il file in /tmp della VM con scp e lanciare
 #   ollama create recap-projexa -f /tmp/recap-projexa.Modelfile
 # Memoria: con OLLAMA_MAX_LOADED_MODELS=2 il recap parte solo quando l'Assistente PM non è
 # in uso (config/ollamaPrecedenza.js) e prende il posto dei modelli di Pm projexa.
-FROM qwen2.5:7b
+FROM qwen3:8b
 
 PARAMETER num_ctx 16384
 PARAMETER temperature 0.3

@@ -326,7 +326,7 @@ function unitaServizi() {
   if (whisperCppUrls().length) units.push({ unit: 'projexa-whisper-cpp', label: 'Whisper.cpp (Background-Veloce)' });
   const assistente = whisperAssistentePorta();
   if (assistente) units.push({ unit: 'projexa-whisper-assistente', label: `Whisper.cpp (Assistente PM, ${assistente})` });
-  units.push({ unit: 'ollama', label: 'Ollama (Projexa: recap, Assistente PM, associazioni)' });
+  units.push({ unit: 'ollama', label: 'Ollama (Projexa: recap, Assistente PM, funzioni AI, associazioni)' });
   return units;
 }
 

@@ -8,7 +8,8 @@
 //   «Esecuzione <funzione>»  "Immediato" / "Batch (50% off)" / "Chiedi Sempre". Vuoto = Immediato.
 // Le OPERAZIONI sono i singoli pulsanti: più operazioni possono condividere la stessa funzione
 // (le 5 funzioni PM usano «AI Funzioni PM»). locale = ammessa "Projexa", che non
-// ha il Batch (è già gratuito): con lei l'esecuzione è sempre Immediata.
+// ha il Batch (è già gratuito): con lei la richiesta va sempre in background (jobs/aiLavori.js).
+// «Projexa 14B» = stesso lavoro con il modello 14B (routes/ai.js, modelloFunzioni).
 // Il recap delle riunioni (cliente e interno) ha la sua logica in jobs/meetingTranscription.js.
 // ============================================================================
 import db from './database.js';
@@ -105,7 +106,7 @@ export async function risolviAi(user, operazione, scelte = {}) {
     if (!['immediato', 'batch'].includes(esecuzione)) throw errore(409, 'Scegli se eseguire Immediato o in Batch', 'AI_SCELTA');
   }
   if (locale) esecuzione = 'immediato';
-  return { nome, label: locale ? 'Projexa' : etichettaAi(nome), locale, esecuzione };
+  return { nome, label: locale ? (/14\s*b/i.test(nome) ? 'Projexa 14B' : 'Projexa') : etichettaAi(nome), locale, esecuzione };
 }
 
 // Per la finestra di scelta delle pagine: cosa chiedere e quali AI proporre.
@@ -114,7 +115,8 @@ export async function opzioniAi(user, operazione) {
   const chiediAi = isChiedi(ai);
   const aiDisponibili = chiediAi
     ? [...(await aiCollegate(user.user_id)).map((x) => ({ nome: x.nome, label: x.label, batch: true })),
-      ...(op.locale ? [{ nome: 'Projexa', label: 'Projexa (gratuito)', batch: false }] : [])]
+      ...(op.locale ? [{ nome: 'Projexa', label: 'Projexa (gratuito, in background)', batch: false },
+        { nome: 'Projexa 14B', label: 'Projexa 14B (gratuito, in background, più preciso ma più lento)', batch: false }] : [])]
     : [];
   return {
     operazione, etichetta: op.etichetta, ai, chiediAi, esecuzione, chiediEsecuzione: esecuzione === 'chiedi',

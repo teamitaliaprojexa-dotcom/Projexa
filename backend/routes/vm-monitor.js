@@ -238,7 +238,7 @@ function serviceUnits() {
   if (whisperCppUrls().length) units.push({ unit: 'projexa-whisper-cpp', label: 'Whisper.cpp (Background-Veloce)' });
   const assistente = whisperAssistentePorta();
   if (assistente) units.push({ unit: 'projexa-whisper-assistente', label: `Whisper.cpp (Assistente PM, ${assistente})` });
-  units.push({ unit: 'ollama', label: 'Ollama (Projexa: recap e Assistente PM)' });
+  units.push({ unit: 'ollama', label: 'Ollama (Projexa: recap, Assistente PM, funzioni AI, associazioni)' });
   // Backup notturno: dal 2026-10-01 è un job dello schedulatore (pagina Schedulazioni), non più un timer.
   units.push({ unit: 'projexa-monitor.timer', label: 'Controlli di salute' });
   return units;
@@ -283,14 +283,16 @@ async function transcriptionQueue() {
 // carica in RAM quando servono. Installati (/api/tags) + quelli in RAM adesso (/api/ps).
 const OLLAMA_URL = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const USO_MODELLO = [
+  [/^recap-projexa-14b-bk-/, 'backup del recap 14B'],
   [/^recap-projexa-14b/, 'Recap con «Projexa 14B»'],
   [/^recap-projexa-bk-/, 'backup del recap'],
-  [/^recap-projexa/, 'Recap con «Projexa» (7B)'],
+  [/^recap-projexa/, 'Recap con «Projexa» (8B)'],
   [/^pm-projexa-bk-/, 'backup dell\'Assistente PM'],
-  [/^pm-projexa/, 'Assistente PM (Pm projexa)'],
+  [/^pm-projexa/, 'Assistente PM (Pm projexa, 8B)'],
   [/^qwen2\.5:3b/, 'filtro veloce dell\'Assistente PM'],
-  [/^qwen2\.5:14b/, 'base del 14B, altre funzioni no'],
-  [/^qwen2\.5:7b/, 'base dei 7B; Dossier, funzioni PM, associazioni']
+  [/^qwen3:14b/, 'base del 14B: «Projexa 14B» di Dossier, funzioni PM, email; associazioni'],
+  [/^qwen3:8b/, 'base dell\'8B: recap, Assistente PM; «Projexa» di Dossier, funzioni PM, email'],
+  [/^qwen2\.5:7b/, 'vecchia base 7B: la usano i backup *-bk-20261020-2300 (eliminarla solo dopo averli tolti)']
 ];
 async function ollamaModelli() {
   try {

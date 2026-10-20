@@ -47,7 +47,7 @@ import { getIntegration } from '../config/integrations.js';
 import { getPromptFor } from '../config/prompts.js';
 import { speakerName, trascriviBloccoBreve } from '../jobs/meetingTranscription.js';
 import { contestoProgetto, dataIt, oggiIso } from '../config/pmCore.js';
-import { ollamaPost } from './ai.js';
+import { ollamaPost, senzaRagionamento } from './ai.js';
 import { segnaPmProjexa } from '../config/ollamaPrecedenza.js';
 import { encryptRowForWrite } from '../config/crypto.js';
 
@@ -81,7 +81,7 @@ const AI_SUPPORTATE = {
 const OLLAMA_PM_URL = String(process.env.ASSISTENTE_PM_OLLAMA_URL || process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const OLLAMA_PM_MODEL = process.env.OLLAMA_PM_MODEL || 'pm-projexa';
 // Modello di riserva se pm-projexa non è stato creato sulla VM (stessi pesi, stessi parametri).
-const OLLAMA_PM_RISERVA = process.env.OLLAMA_RECAP_MODEL || 'qwen2.5:7b';
+const OLLAMA_PM_RISERVA = process.env.OLLAMA_RECAP_MODEL || 'qwen3:8b';
 // Contesto FISSO: cambiarlo tra una richiesta e l'altra fa ricaricare il modello e perdere la
 // cache delle istruzioni già lette.
 const OLLAMA_PM_CTX = 8192;
@@ -721,7 +721,7 @@ async function chiamaOllama(s, messages, opzioni = {}, { filtro = false } = {}) 
     const d = r.data || {};
     return { testo: String((d.message && d.message.content) || '').trim(), letti: Number(d.prompt_eval_count) || 0, secondi: Math.round((Number(d.total_duration) || 0) / 1e9) };
   }
-  const corpo = () => ({ model: s.modelloOllama, messages, stream: false, keep_alive: OLLAMA_PM_KEEP_ALIVE, options: { ...OLLAMA_PM_OPZIONI, ...opzioni } });
+  const corpo = () => ({ model: s.modelloOllama, messages, stream: false, think: false, keep_alive: OLLAMA_PM_KEEP_ALIVE, options: { ...OLLAMA_PM_OPZIONI, ...opzioni } });
   let r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, corpo(), OLLAMA_PM_TIMEOUT_MS, { signal: s.annulla && s.annulla.signal });
   if (r.status === 404 && /not found|pull/i.test(String((r.data && r.data.error) || '')) && s.modelloOllama !== OLLAMA_PM_RISERVA) {
     console.warn(`[ASSISTENTE PM] ${s.idCalendar}: modello ${s.modelloOllama} assente su Ollama, uso ${OLLAMA_PM_RISERVA}`);
@@ -731,7 +731,8 @@ async function chiamaOllama(s, messages, opzioni = {}, { filtro = false } = {}) 
   if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
   const d = r.data || {};
   return {
-    testo: String((d.message && d.message.content) || '').trim(),
+    // Qwen3 (2026-10-20): eventuale ragionamento «<think>» tolto anche se think:false non bastasse.
+    testo: senzaRagionamento(d.message && d.message.content),
     letti: Number(d.prompt_eval_count) || 0,
     scritti: Number(d.eval_count) || 0,
     secondi: Math.round((Number(d.total_duration) || 0) / 1e9)

@@ -30,10 +30,14 @@ const router = express.Router();
 const QUI = path.dirname(fileURLToPath(import.meta.url));
 const NOTEBOOK = path.join(QUI, '..', 'prompts', 'colab_pm_projexa.ipynb');
 const NOTEBOOK_RECAP = path.join(QUI, '..', 'prompts', 'colab_recap_projexa.ipynb');
+const NOTEBOOK_RECAP_14B = path.join(QUI, '..', 'prompts', 'colab_recap_projexa_14b.ipynb');
 const OLLAMA_URL = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const MODELLO = process.env.OLLAMA_PM_MODEL || 'pm-projexa';
 const MODELLO_RECAP = process.env.OLLAMA_RECAP_PROJEXA_MODEL || 'recap-projexa';
-const BASE = process.env.OLLAMA_RECAP_MODEL || 'qwen2.5:7b';
+const BASE = process.env.OLLAMA_RECAP_MODEL || 'qwen3:8b';
+// Base del 14B (Qwen3, 2026-10-20) per recap-projexa-14b addestrato.
+const BASE_14B = process.env.OLLAMA_FUNZIONI_14B_MODEL || 'qwen3:14b';
+const MODELLO_RECAP_14B = process.env.OLLAMA_RECAP_PROJEXA_14B_MODEL || 'recap-projexa-14b';
 const CARTELLA_MODELLI = process.env.OLLAMA_MODELLI_DIR || path.join(os.homedir(), 'projexa-modelli');
 const MAX_ADATTATORE = 1.5 * 1024 * 1024 * 1024; // 1,5 GB
 const PEZZO_UPLOAD = 16 * 1024 * 1024;           // ogni parte del file caricato
@@ -349,10 +353,12 @@ router.get('/recap/scarica', async (req, res) => {
   } catch (e) { rispondiErroreRecap(res, e, 'download recap'); }
 });
 
+// Query famiglia=recap14: notebook per recap-projexa-14b (Qwen3 14B, esempi fino a 4.096 token).
 router.get('/recap/notebook', (req, res) => {
+  const da14 = req.query.famiglia === 'recap14';
   res.setHeader('Content-Type', 'application/x-ipynb+json; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="addestra_recap_projexa.ipynb"');
-  fs.createReadStream(NOTEBOOK_RECAP).on('error', (e) => rispondiErrore(res, e, 'notebook')).pipe(res);
+  res.setHeader('Content-Disposition', `attachment; filename="addestra_recap_projexa${da14 ? '_14b' : ''}.ipynb"`);
+  fs.createReadStream(da14 ? NOTEBOOK_RECAP_14B : NOTEBOOK_RECAP).on('error', (e) => rispondiErrore(res, e, 'notebook')).pipe(res);
 });
 
 // --- Proposte di revisione dei prompt del recap (jobs/revisionePrompt.js) --------------------
@@ -400,15 +406,22 @@ router.post('/recap/proposte/:id/scarta', async (req, res) => {
 
 // --- Modelli su Ollama della VM -------------------------------------------------------------
 // famiglia (query, body): 'pm' = pm-projexa (Assistente PM), 'recap' = recap-projexa (Recap
-// cliente e interno). Stessa procedura: backup, creazione da base + adattatore, prova.
+// cliente e interno, 7B), 'recap14' = recap-projexa-14b (voce «Projexa 14B», base Qwen3 14B).
+// Stessa procedura: backup, creazione da base + adattatore, prova.
+const PROVA_RECAP = [{ role: 'user', content: 'Scrivi in una riga gli appunti di questo pezzo di riunione:\nMario Rossi: il file delle causali ve lo mandiamo entro venerdì.' }];
 const FAMIGLIE = {
+  recap14: {
+    nome: MODELLO_RECAP_14B, base: BASE_14B,
+    parametri: ['PARAMETER num_ctx 16384', 'PARAMETER temperature 0.3', 'PARAMETER top_p 0.9', 'PARAMETER repeat_penalty 1.1'],
+    prova: PROVA_RECAP
+  },
   pm: {
-    nome: MODELLO,
+    nome: MODELLO, base: BASE,
     parametri: ['PARAMETER num_ctx 8192', 'PARAMETER temperature 0.2', 'PARAMETER top_p 0.9', 'PARAMETER repeat_penalty 1.1', 'PARAMETER num_predict 90'],
     prova: [{ role: 'user', content: 'TRASCRIZIONE (nuovo tratto della riunione):\nIl file delle causali ve lo mandiamo a breve.' }]
   },
   recap: {
-    nome: MODELLO_RECAP,
+    nome: MODELLO_RECAP, base: BASE,
     parametri: ['PARAMETER num_ctx 16384', 'PARAMETER temperature 0.3', 'PARAMETER top_p 0.9', 'PARAMETER repeat_penalty 1.1'],
     prova: [{ role: 'user', content: 'Scrivi in una riga gli appunti di questo pezzo di riunione:\nMario Rossi: il file delle causali ve lo mandiamo entro venerdì.' }]
   }
@@ -450,7 +463,7 @@ router.get('/modelli', async (req, res) => {
     }));
     let note = {};
     try { note = JSON.parse(fs.readFileSync(path.join(CARTELLA_MODELLI, 'versioni.json'), 'utf8')); } catch { /* nessuna installazione */ }
-    res.json({ modelli: nomi.sort((a, b) => String(b.modificato).localeCompare(String(a.modificato))), note, base: BASE, nome: f.nome });
+    res.json({ modelli: nomi.sort((a, b) => String(b.modificato).localeCompare(String(a.modificato))), note, base: f.base, nome: f.nome });
   } catch (e) { rispondiErrore(res, e, 'modelli'); }
 });
 
@@ -510,14 +523,14 @@ router.post('/modelli/installa', async (req, res) => {
       const p = mf.split('\n').filter((l) => /^PARAMETER\s+(num_ctx|temperature|top_p|repeat_penalty|num_predict)\b/.test(l));
       if (p.length) parametri = p;
     } catch { /* il modello non c'è: si crea da zero */ }
-    fs.writeFileSync(path.join(cartella, 'Modelfile'), [`FROM ${BASE}`, `ADAPTER ${adattatore}`, ...parametri].join('\n') + '\n');
+    fs.writeFileSync(path.join(cartella, 'Modelfile'), [`FROM ${f.base}`, `ADAPTER ${adattatore}`, ...parametri].join('\n') + '\n');
 
     const backup = `${f.nome}-bk-${stamp}`;
     if (haAttuale) await ollamaApi('/api/copy', { source: f.nome, destination: backup });
     try {
       await ollama(['create', f.nome, '-f', path.join(cartella, 'Modelfile')]);
       // Prova: il modello nuovo deve rispondere (poi esce subito dalla RAM).
-      const prova = await ollamaApi('/api/chat', { model: f.nome, stream: false, keep_alive: f.nome === MODELLO ? '4h' : 0,
+      const prova = await ollamaApi('/api/chat', { model: f.nome, stream: false, think: false, keep_alive: f.nome === MODELLO ? '4h' : 0,
         messages: f.prova, options: { num_predict: 60 } });
       const versioni = (() => { try { return JSON.parse(fs.readFileSync(path.join(CARTELLA_MODELLI, 'versioni.json'), 'utf8')); } catch { return {}; } })();
       versioni[f.nome] = { installato: ora.toISOString(), da: req.user.email, nota: String(req.body.nota || '').slice(0, 300), backup: haAttuale ? backup : null, cartella };

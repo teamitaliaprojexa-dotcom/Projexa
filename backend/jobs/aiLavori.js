@@ -10,6 +10,9 @@
 //     Batch API del fornitore (attendiBatch: metà prezzo, risposta entro 24 ore). Funzioni con
 //     più passaggi (Kick-off: stesura, correzione, revisione) fanno più batch in fila; i
 //     passaggi già pagati restano in ai_lavori_passi, così un riavvio del server non li ripete.
+//   - «Projexa» / «Projexa 14B» (2026-10-20): sempre come lavoro in background, anche con
+//     esecuzione Immediata: Ollama sulla VM richiede minuti e dà la precedenza ad Assistente PM
+//     e trascrizione (config/ollamaPrecedenza.js). Il modello va nel contesto (ollamaModello).
 // Risultato: file (Kick-off, Offerta, Word dei documenti PM) nella cartella temporanea
 // AI_TEMP_DIR/<tenant>/<utente>/, cancellato appena scaricato; oppure dati (JSON cifrato in
 // ai_lavori.risultato) che la finestra «Risultati AI» mostra. Al termine: notifica in campanella.
@@ -25,7 +28,8 @@ import { encryptValue, hasEncryptionKey, isEncrypted } from '../config/crypto.js
 import { contestoAi } from '../config/aiContesto.js';
 import { conContestoAudit } from '../config/auditContext.js';
 import { risolviAi, OPERAZIONI } from '../config/aiFunzioni.js';
-import { inviaBatchAi, statoBatchAi, askAiProvider, isBatchNonDisponibile } from '../routes/ai.js';
+import { inviaBatchAi, statoBatchAi, askAiProvider, isBatchNonDisponibile, modelloFunzioni } from '../routes/ai.js';
+import { vmOccupata } from '../config/ollamaPrecedenza.js';
 import { notificaLavoroAi } from './notifiche.js';
 
 const SERVER = os.hostname();
@@ -86,11 +90,17 @@ export function rottaAi(operazione, handler) {
         if (!OPERAZIONI[operazione].facoltativa || e.code === 'AI_SCELTA') throw e;
         req.aiScelta = { nome: '', label: '', locale: false, esecuzione: 'immediato', errore: e.message };
       }
-      if (req.aiScelta.esecuzione !== 'batch') return next();
+      // «Projexa» (Ollama sulla VM, 2026-10-20): sempre in background come un lavoro Batch,
+      // perché su CPU richiede minuti; stessa notifica e stessa finestra «Risultati AI».
+      const locale = !!req.aiScelta.locale;
+      if (req.aiScelta.esecuzione !== 'batch' && !locale) return next();
       const id = await creaLavoro(req, operazione, scelte);
+      const occupata = locale ? vmOccupata() : false;
       res.status(202).json({
         batch: true, lavoro: id, provider: req.aiScelta.label,
-        messaggio: `${OPERAZIONI[operazione].etichetta}: richiesta inviata a ${req.aiScelta.label} in modalità Batch (costo dimezzato). Il risultato arriva entro 24 ore, di solito in pochi minuti: riceverai la notifica in campanella e lo trovi in «Risultati AI».`
+        messaggio: locale
+          ? `${OPERAZIONI[operazione].etichetta}: in preparazione in background con ${req.aiScelta.label} (gratuito, sul server di Projexa). ${occupata ? 'Adesso il server serve prima all\'Assistente PM o alla trascrizione delle riunioni: parte appena è libero. ' : 'Può richiedere qualche minuto. '}Riceverai la notifica in campanella e lo trovi in «Risultati AI».`
+          : `${OPERAZIONI[operazione].etichetta}: richiesta inviata a ${req.aiScelta.label} in modalità Batch (costo dimezzato). Il risultato arriva entro 24 ore, di solito in pochi minuti: riceverai la notifica in campanella e lo trovi in «Risultati AI».`
       });
     } catch (e) {
       if (!e.status) console.error(`❌ AI_LAVORO ${operazione}:`, e.message);
@@ -262,8 +272,13 @@ export async function eseguiLavoro(id) {
       get: () => undefined, header: () => undefined
     };
     const res = new RispostaFinta();
+    // Con «Projexa» / «Projexa 14B» il modello Ollama da usare (routes/ai.js, ollamaGenerate).
+    const locale = p.ai && p.ai.locale;
     await conContestoAudit({ userId: l.user_id, tenantId: l.tenant_id, origine: `job:ai_batch ${l.operazione}` },
-      () => contestoAi.run({ attendiBatch: (prov, prompt, opz) => attendiBatch(l, prov, prompt, opz) }, () => handler(req, res)));
+      () => contestoAi.run({
+        attendiBatch: (prov, prompt, opz) => attendiBatch(l, prov, prompt, opz),
+        ...(locale ? { ollamaModello: modelloFunzioni(p.ai.nome), ollamaEtichetta: p.ai.label } : {})
+      }, () => handler(req, res)));
 
     if (res.statusCode >= 400) {
       const msg = (res.corpo && res.corpo.error) || `Errore ${res.statusCode}`;
