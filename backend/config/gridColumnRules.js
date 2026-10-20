@@ -99,7 +99,10 @@ const REGOLE = {
 // Etichette valide per QUALSIASI tabella che ha la colonna (le regole della singola
 // tabella in REGOLE hanno la precedenza). commessa_id: FK verso proj_commessa (2026-10-06).
 const ETICHETTE_COMUNI = {
-  commessa_id: 'Commessa'
+  commessa_id: 'Commessa',
+  // Associazione To-Do/RAID (jobs/associaTodoRaid.js)
+  collegato_a: 'Collegato a',
+  collegamento_id: 'Codice collegamento'
 };
 
 export function etichettaComune(column) {

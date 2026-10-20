@@ -21,7 +21,8 @@
 // ============================================================================
 import db from '../config/database.js';
 import notifDb from '../config/notifDatabase.js';
-import { encryptValue } from '../config/crypto.js';
+import { encryptValue, encryptRowForWrite } from '../config/crypto.js';
+import { titoloVoce } from '../config/dedupVoci.js';
 import { inviaBatchAi, statoBatchAi, isBatchNonDisponibile, ollamaPost } from '../routes/ai.js';
 import { nomiClientiProgetti } from './notifiche.js';
 
@@ -185,10 +186,47 @@ async function applica(u, voci, gruppi) {
           WHERE tenant_id = $2 AND user_id = $3 AND (id::text = ANY($4) OR collegamento_id::text = ANY($5))`,
         [coll, u.tenant_id, u.user_id, ids, esistenti]);
     }
+    await descriviGruppo(u, coll);
     collegate += valide.length;
-    righe.push(`${valide.map((v) => `${REGISTRI[v.registro] || v.registro} «${corto(v.titolo, 60)}»`).join(' ↔ ')}`);
+    righe.push(`${valide.map((v) => `${REGISTRI[v.registro] || v.registro} «${corto(titoloVoce(v), 60)}»`).join(' ↔ ')}`);
   }
   return { collegate, righe };
+}
+
+// «Collegato a» (colonna collegato_a, 2026-10-20): su ogni voce del gruppo le ALTRE voci, in
+// chiaro («Decisione: … | Rischio: …»), da mostrare al posto del codice collegamento_id nella
+// To-Do List, nel RAID e nei report. Gruppo rimasto con una sola voce = collegamento tolto.
+async function descriviGruppo(u, coll) {
+  const voci = [
+    ...(await db.query(`SELECT id::text AS id, titile AS titolo, description AS descrizione FROM tasks
+        WHERE tenant_id = $1 AND user_id = $2 AND collegamento_id::text = $3`, [u.tenant_id, u.user_id, coll])).rows
+      .map((x) => ({ ...x, tabella: 'tasks', registro: 'todo' })),
+    ...(await db.query(`SELECT id::text AS id, titolo, descrizione, tipo FROM pm_raid
+        WHERE tenant_id = $1 AND user_id = $2 AND collegamento_id::text = $3`, [u.tenant_id, u.user_id, coll])).rows
+      .map((x) => ({ ...x, tabella: 'pm_raid', registro: x.tipo }))
+  ];
+  for (const v of voci) {
+    const altre = voci.filter((x) => x !== v).map((x) => `${REGISTRI[x.registro] || x.registro}: ${corto(titoloVoce(x), 90)}`);
+    const set = altre.length ? { collegato_a: altre.join(' | ').slice(0, 2000) } : { collegato_a: null, collegamento_id: null };
+    const { data } = await encryptRowForWrite(db, v.tabella, set, { id: v.id });
+    const cols = Object.keys(data);
+    await db.query(`UPDATE ${v.tabella} SET ${cols.map((c, i) => `"${c}" = $${i + 4}`).join(', ')}
+                     WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`,
+    [v.id, u.tenant_id, u.user_id, ...cols.map((c) => data[c])]);
+  }
+}
+
+// Collegamenti senza «Collegato a» (creati prima della colonna, o voce scollegata dalla scheda):
+// si ricompone la descrizione di quei gruppi. Ogni giro del job, costa solo qualche query.
+async function completaDescrizioni(report) {
+  const g = (await db.query(
+    `SELECT DISTINCT tenant_id::text AS tenant_id, user_id::text AS user_id, collegamento_id::text AS coll FROM (
+       SELECT tenant_id, user_id, collegamento_id FROM tasks WHERE collegamento_id IS NOT NULL AND collegato_a IS NULL
+       UNION ALL
+       SELECT tenant_id, user_id, collegamento_id FROM pm_raid WHERE collegamento_id IS NOT NULL AND collegato_a IS NULL) x
+     LIMIT 500`)).rows;
+  for (const x of g) await descriviGruppo({ tenant_id: x.tenant_id, user_id: x.user_id }, x.coll);
+  report.descritti = g.length;
 }
 
 // Esito di un progetto: riga salvata + elenco per la notifica dell'utente.
@@ -355,6 +393,7 @@ export async function eseguiAssociaTodoRaid() {
   const esiti = [];
   await raccogli(report, esiti);
   await invia(report, esiti);
+  try { await completaDescrizioni(report); } catch (e) { report.errori.push(`descrizioni «Collegato a»: ${e.message}`); }
   await notificaEsiti(esiti);
   const testo = `Batch inviati ${report.inviati}, Projexa ${report.locali}, risultati raccolti ${report.raccolti}, in attesa ${report.inAttesa}, voci collegate ${report.collegate}${report.saltati ? `, utenti con AI non utilizzabile ${report.saltati}` : ''}${report.errori.length ? ` · errori: ${report.errori.slice(0, 5).join(' | ')}` : ''}`;
   console.log(`[ASSOCIAZIONE] ${testo}`);

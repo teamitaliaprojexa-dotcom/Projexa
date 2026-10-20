@@ -852,7 +852,10 @@ const DASHBOARD_TASK_HIDDEN_COLUMNS = new Set([
   'appo_task_2', 'appo_task_3', 'appo_task_4',
   // Assegnatario scritto a mano (non in rubrica): non è una colonna a sé in griglia/form, si
   // mostra in "Assegnato a" quando assigned_to è vuoto (Supporto/CreaDB/tasks_assegnato_libero.sql).
-  'assigned_to_text'
+  'assigned_to_text',
+  // Codice del gruppo To-Do/RAID (jobs/associaTodoRaid.js): al suo posto si mostra
+  // «Collegato a» (collegato_a), la descrizione leggibile delle altre voci del gruppo.
+  'collegamento_id'
 ]);
 const DASHBOARD_TASK_READONLY_COLUMNS = new Set(['updated_at']);
 
@@ -887,6 +890,15 @@ function dashboardTaskInput(body, metadata) {
       && metadata.some(column => column.column_name === 'assigned_to_text')) {
     const text = String(source.assigned_to_text ?? '').replace(/\s+/g, ' ').trim().slice(0, 255);
     clean.assigned_to_text = clean.assigned_to ? null : (text || null);
+  }
+  // «Collegato a» lo scrive solo il job di associazione: a mano si può solo svuotarlo,
+  // e svuotarlo vuol dire scollegare la To-Do dal suo gruppo.
+  if (Object.prototype.hasOwnProperty.call(clean, 'collegato_a')) {
+    if (clean.collegato_a == null && metadata.some(column => column.column_name === 'collegamento_id')) {
+      clean.collegamento_id = null;
+    } else {
+      delete clean.collegato_a;
+    }
   }
   return clean;
 }
@@ -1368,6 +1380,13 @@ app.put('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
     await validateDashboardTaskRelations(data, req);
     stripRoleWrite(req, data);
     await assertRowsWritable(req, db, 'tasks', [taskId]);
+    // Scollegamento: si ricorda il gruppo per far ricalcolare «Collegato a» alle altre voci.
+    let vecchioGruppo = null;
+    if (Object.prototype.hasOwnProperty.call(data, 'collegamento_id') && data.collegamento_id == null) {
+      const g = await db.query('SELECT collegamento_id FROM tasks WHERE id = $1 AND tenant_id = $2',
+        [taskId, req.user.tenant_id]);
+      vecchioGruppo = g.rows[0]?.collegamento_id || null;
+    }
     const encrypted = await cryptoWrite(db, 'main', 'tasks', data, taskId);
     const columns = Object.keys(encrypted);
     if (columns.length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
@@ -1387,6 +1406,13 @@ app.put('/api/dashboard/tasks/:id', requireAuth, async (req, res) => {
       values
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Task non trovata' });
+    if (vecchioGruppo) {
+      // Il job (completaDescrizioni) riscrive «Collegato a» delle voci rimaste nel gruppo.
+      for (const tabella of ['tasks', 'pm_raid']) {
+        await db.query(`UPDATE ${tabella} SET collegato_a = NULL WHERE collegamento_id = $1 AND tenant_id = $2`,
+          [vecchioGruppo, req.user.tenant_id]);
+      }
+    }
     res.json({ id: result.rows[0].id });
   } catch (error) {
     console.error('[DASHBOARD TASK UPDATE]', error);
