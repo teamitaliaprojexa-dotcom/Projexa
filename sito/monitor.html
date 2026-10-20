@@ -782,7 +782,12 @@
 
                 $('procBody').innerHTML = d.processes.map((p) => `<tr><td>${esc(p.name)}${p.count > 1 ? ` <span style="color:var(--muted)">×${p.count}</span>` : ''}</td><td class="num">${bytes(p.rss)}</td><td class="num">${pct(p.cpu)}</td></tr>`).join('')
                     || '<tr><td colspan="3" style="color:var(--muted)">Dati in raccolta…</td></tr>';
-                $('svcBody').innerHTML = d.services.map((s) => `<tr><td>${esc(s.label)}</td><td class="num">${stateBadge(s.state)}</td></tr>`).join('');
+                // Sotto Ollama i suoi modelli (2026-10-20): non sono servizi a parte, il servizio li
+                // carica in RAM quando servono. «in RAM» = caricato adesso, «pronto» = installato.
+                const oraIt = (iso) => { const x = new Date(iso); return isNaN(x) || x.getFullYear() > 2100 ? '' : x.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }); };
+                const modelliOllama = (d.ollama || []).map((m) => `<tr><td style="padding-left:1.6rem"><span style="color:var(--muted)">↳</span> ${esc(m.nome)}${m.uso ? `<div style="color:var(--muted);font-size:0.8rem">${esc(m.uso)}</div>` : ''}</td>
+                    <td class="num">${m.ram ? `<span title="${oraIt(m.scade) ? `Resta caricato fino alle ${oraIt(m.scade)} se non viene usato` : ''}">in RAM ${bytes(m.ram)}</span>` : `<span style="color:var(--muted)">pronto · ${bytes(m.disco)}</span>`}</td></tr>`).join('');
+                $('svcBody').innerHTML = d.services.map((s) => `<tr><td>${esc(s.label)}</td><td class="num">${stateBadge(s.state)}</td></tr>${s.unit === 'ollama' ? modelliOllama : ''}`).join('');
                 $('dbBody').innerHTML = d.databases.map((x) => `<tr><td>${esc(x.name)}</td><td class="num">${bytes(x.bytes)}</td></tr>`).join('')
                     || '<tr><td colspan="2" style="color:var(--muted)">Non disponibile</td></tr>';
                 const q = d.queue;
@@ -1329,7 +1334,7 @@
                 if (!b) return;
                 const modello = b.dataset.ollamaScarica;
                 const msg = modello != null
-                    ? `Scaricare «${modello}» dalla RAM?\nAl prossimo uso (Assistente PM, recap lento, associazioni) si ricarica da solo, ma la prima risposta sarà lenta.`
+                    ? `Scaricare «${modello}» dalla RAM?\nAl prossimo uso (Assistente PM, recap con Projexa, associazioni) si ricarica da solo, ma la prima risposta sarà lenta.`
                     : 'Svuotare lo swap?\nLa memoria spostata su disco torna in RAM: può richiedere qualche minuto.';
                 if (!confirm(msg)) return;
                 b.disabled = true;

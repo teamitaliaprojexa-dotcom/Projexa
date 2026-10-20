@@ -279,6 +279,35 @@ async function transcriptionQueue() {
   }
 }
 
+// Modelli di Ollama (2026-10-20): non sono servizi a parte ma file che l'unico servizio Ollama
+// carica in RAM quando servono. Installati (/api/tags) + quelli in RAM adesso (/api/ps).
+const OLLAMA_URL = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+const USO_MODELLO = [
+  [/^recap-projexa-14b/, 'Recap con «Projexa 14B»'],
+  [/^recap-projexa-bk-/, 'backup del recap'],
+  [/^recap-projexa/, 'Recap con «Projexa» (7B)'],
+  [/^pm-projexa-bk-/, 'backup dell\'Assistente PM'],
+  [/^pm-projexa/, 'Assistente PM (Pm projexa)'],
+  [/^qwen2\.5:3b/, 'filtro veloce dell\'Assistente PM'],
+  [/^qwen2\.5:14b/, 'base del 14B, altre funzioni no'],
+  [/^qwen2\.5:7b/, 'base dei 7B; Dossier, funzioni PM, associazioni']
+];
+async function ollamaModelli() {
+  try {
+    const get = async (p) => (await fetch(`${OLLAMA_URL}${p}`, { signal: AbortSignal.timeout(3000) })).json();
+    const [tags, ps] = await Promise.all([get('/api/tags'), get('/api/ps')]);
+    const pulito = (n) => String(n || '').replace(/:latest$/, '');
+    const inRam = new Map((ps.models || []).map((m) => [pulito(m.name || m.model), m]));
+    return (tags.models || []).map((m) => {
+      const nome = pulito(m.name);
+      const r = inRam.get(nome);
+      return { nome, uso: (USO_MODELLO.find(([re]) => re.test(nome)) || [null, ''])[1], disco: m.size, ram: r ? Number(r.size) || null : null, scade: r ? r.expires_at : null };
+    }).sort((a, b) => (b.ram || 0) - (a.ram || 0) || a.nome.localeCompare(b.nome));
+  } catch {
+    return null;
+  }
+}
+
 // ----------------------------------------------------------------------------
 // ENDPOINT
 // ----------------------------------------------------------------------------
@@ -304,7 +333,7 @@ router.get('/status', requireAuth, requireMonitorAccess, async (req, res) => {
     const points = history.filter((p) => p.t >= since);
     const last = history[history.length - 1] || null;
     const mem = memInfo();
-    const [services, databases, queue] = await Promise.all([serviceStates(serviceUnits()), databaseSizes(), transcriptionQueue()]);
+    const [services, databases, queue, ollama] = await Promise.all([serviceStates(serviceUnits()), databaseSizes(), transcriptionQueue(), ollamaModelli()]);
     res.json({
       host: os.hostname(),
       cpus: os.cpus().length,
@@ -324,6 +353,7 @@ router.get('/status', requireAuth, requireMonitorAccess, async (req, res) => {
         return [...primi, ...ordinati.slice(10).filter((p) => p.name.startsWith('Ollama'))];
       })(),
       services,
+      ollama,
       databases,
       queue
     });
