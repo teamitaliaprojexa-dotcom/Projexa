@@ -9881,6 +9881,31 @@
         }
         setInterval(updateImminentMeetings, 10000);
 
+        // === ASSISTENTE PM PREPARATO PRIMA DELLA CALL (2026-10-21) ===
+        // Da 10 minuti prima dell'inizio di una riunione online (riga con Registra), la VM carica
+        // i modelli di Pm projexa e legge le istruzioni, così a riunione iniziata l'assistente è
+        // subito pronto. Il server non fa nulla se l'assistente è spento o non usa Projexa.
+        const AP_PREPARA_PRIMA_MS = 10 * 60 * 1000;
+        const AP_PREPARA_DOPO_MS = 5 * 60 * 1000;
+        const apPreparate = new Set();
+        function preparaAssistentePm() {
+            const now = Date.now();
+            document.querySelectorAll('#meetingsContainer .meeting-card[data-start]').forEach((row) => {
+                const start = Date.parse(row.dataset.start);
+                const id = row.dataset.eventId;
+                if (!id || apPreparate.has(id) || !row.querySelector('.meeting-rec-btn') || !Number.isFinite(start)) return;
+                const diff = start - now;
+                if (diff > AP_PREPARA_PRIMA_MS || diff < -AP_PREPARA_DOPO_MS) return;
+                apPreparate.add(id);
+                fetch(`${API_URL}/assistente-pm/prepara`, {
+                    method: 'POST',
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_calendar: id, titolo: row.dataset.title || '' })
+                }).catch(() => apPreparate.delete(id));
+            });
+        }
+        setInterval(preparaAssistentePm, 60000);
+
         // === AGGIORNAMENTO DELLA GRIGLIA RIUNIONI (senza rileggere il calendario) ===
         // Rilegge da rec_meeting solo lo stato delle riunioni a video (trascrizione, recap,
         // inviata, gestita) e aggiorna le celle al loro posto: ogni 15 s a pagina visibile,

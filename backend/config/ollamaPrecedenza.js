@@ -10,6 +10,10 @@
 //     (suPrecedenza) e il recap riprende dallo stesso pezzo appena la VM è libera.
 // Modulo senza dipendenze: lo usano routes/assistentePm.js e jobs/meetingTranscription.js
 // (segnano le attività) e routes/ai.js (aspetta).
+// 2026-10-21 (scelta utente, dopo la call Miroglio): l'Assistente PM in modalità Testo ha la
+// precedenza anche sulla trascrizione delle riunioni con Whisper. Finché è aperto, i blocchi
+// della riunione restano in coda (jobs/meetingTranscription.js, assistenteInCorso) e ripartono
+// a piena potenza quando l'assistente si chiude.
 // ============================================================================
 
 const attive = new Map();      // chiave -> scadenza (ms; Infinity = finché non si toglie)
@@ -37,6 +41,11 @@ function segna(chiave, attiva, ttlMs = Infinity) {
 export const segnaPmProjexa = (chiave, aperta) => segna(`pm:${chiave}`, aperta);
 export const pmProjexaInCorso = () => { pulisci(); return [...attive.keys()].some((k) => k.startsWith('pm:')); };
 
+// Assistente PM in modalità Testo, con qualsiasi AI: trascrive i suoi blocchi con il Whisper
+// dedicato della VM (routes/assistentePm.js).
+export const segnaAssistente = (chiave, aperto) => segna(`ass:${chiave}`, aperto);
+export const assistenteInCorso = () => { pulisci(); return [...attive.keys()].some((k) => k.startsWith('ass:')); };
+
 // Registrazione in corso (un pezzo audio arrivato da poco, finché non arriva la fine) e pezzi in
 // trascrizione con Whisper (jobs/meetingTranscription.js).
 export const segnaRegistrazione = (chiave, attiva, ttlMs) => segna(`reg:${chiave}`, attiva, ttlMs);
@@ -45,7 +54,7 @@ export const segnaTrascrizione = (chiave, attiva) => segna(`whisper:${chiave}`, 
 export const vmOccupata = () => { pulisci(); return attive.size > 0; };
 const descrizione = () => {
   const k = [...attive.keys()];
-  return [k.some((x) => x.startsWith('pm:')) && 'Assistente PM', k.some((x) => x.startsWith('reg:')) && 'registrazione in corso',
+  return [k.some((x) => x.startsWith('pm:') || x.startsWith('ass:')) && 'Assistente PM', k.some((x) => x.startsWith('reg:')) && 'registrazione in corso',
     k.some((x) => x.startsWith('whisper:')) && 'trascrizione'].filter(Boolean).join(', ');
 };
 

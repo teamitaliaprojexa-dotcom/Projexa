@@ -31,7 +31,7 @@ import { contestoAudit } from '../config/auditContext.js';
 import { notificaRiunione } from './notifiche.js';
 import { getIntegration } from '../config/integrations.js';
 import { transcribeAudio, transcribeAudioCpp, transcribeAudioGemini, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate } from '../routes/ai.js';
-import { segnaRegistrazione, segnaTrascrizione } from '../config/ollamaPrecedenza.js';
+import { segnaRegistrazione, segnaTrascrizione, assistenteInCorso } from '../config/ollamaPrecedenza.js';
 
 // Registrazione considerata in corso fino a questo tempo dall'ultimo pezzo audio arrivato (se la
 // fine non arriva, es. pagina chiusa): intanto i recap con «Projexa» aspettano (precedenza).
@@ -1166,6 +1166,7 @@ async function checkUrlHealth(url) {
 // ----------------------------------------------------------------------------
 
 let workerRunning = false;
+let whisperInPausa = false; // Assistente PM aperto: niente blocchi nuovi a Whisper (runWorker)
 const busyUrls = new Set();   // servizi Whisper occupati
 const inflight = new Map();   // id blocco -> promise della trascrizione
 
@@ -1229,7 +1230,17 @@ async function runWorker() {
           inflight.set(job.id, p);
         }
       }
-      if (urls.length || cppUrls.length) {
+      // Assistente PM in modalità Testo aperto: la CPU va al suo Whisper (scelta utente
+      // 2026-10-21). I blocchi della riunione restano in coda e ripartono appena l'assistente
+      // si chiude; quelli già in trascrizione finiscono. La corsia Gemini non usa la VM: continua.
+      const cpuAlAssistente = assistenteInCorso();
+      if (cpuAlAssistente !== whisperInPausa) {
+        whisperInPausa = cpuAlAssistente;
+        console.log(cpuAlAssistente
+          ? '[TRASCRIZIONE] Assistente PM aperto: trascrizione con Whisper in pausa, i blocchi restano in coda'
+          : '[TRASCRIZIONE] Assistente PM chiuso: trascrizione con Whisper ripresa');
+      }
+      if ((urls.length || cppUrls.length) && !cpuAlAssistente) {
         const start = (jobs, free) => jobs.forEach((job, i) => {
           const url = free[i];
           busyUrls.add(url);
