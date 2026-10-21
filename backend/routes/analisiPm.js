@@ -7,6 +7,8 @@
 //   - download del file per l'addestramento (JSONL) e del notebook di Google Colab;
 //   - domande corrette subito come esempi di Pm projexa (pm_projexa_esempi): POST /esempi;
 //   - Analisi Recap (insegnante notturno di recap-projexa, jobs/analisiRecap.js): /recap/...;
+//   - Analisi Associazioni (insegnante dell'associazione To-Do e RAID, jobs/associaTodoRaid.js):
+//     confronto Projexa / AI insegnante, gruppi giusti e sbagliati, file per assoc-projexa-14b;
 //   - modello addestrato (adattatore LoRA .gguf) caricato su Ollama della VM con backup del
 //     precedente, ripristino ed eliminazione dei backup: /modelli...
 // ============================================================================
@@ -19,8 +21,10 @@ import { execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
-import { encryptRowForWrite } from '../config/crypto.js';
+import { encryptRowForWrite, encryptValue } from '../config/crypto.js';
 import { analisiPmAbilitata, pezzi, aiScelta, AI_AMMESSE, FORMATO_RE } from '../jobs/analisiPm.js';
+import { prompt as promptAssoc, gruppiDa, vociDaChiavi, collegaVoci, scollegaVoci, REGISTRI, OLLAMA_ADDESTRATO } from '../jobs/associaTodoRaid.js';
+import { nomiClientiProgetti } from '../jobs/notifiche.js';
 import { TIPI as TIPI_RECAP } from '../jobs/analisiRecap.js';
 import { proponiRevisione, applicaProposta } from '../jobs/revisionePrompt.js';
 import { istruzioniRecapProjexa } from './ai.js';
@@ -33,6 +37,7 @@ const NOTEBOOK = path.join(QUI, '..', 'prompts', 'colab_pm_projexa.ipynb');
 const NOTEBOOK_FILTRO = path.join(QUI, '..', 'prompts', 'colab_pm_projexa_filtro.ipynb');
 const NOTEBOOK_RECAP = path.join(QUI, '..', 'prompts', 'colab_recap_projexa.ipynb');
 const NOTEBOOK_RECAP_14B = path.join(QUI, '..', 'prompts', 'colab_recap_projexa_14b.ipynb');
+const NOTEBOOK_ASSOC = path.join(QUI, '..', 'prompts', 'colab_assoc_projexa_14b.ipynb');
 const OLLAMA_URL = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const MODELLO = process.env.OLLAMA_PM_MODEL || 'pm-projexa';
 const MODELLO_RECAP = process.env.OLLAMA_RECAP_PROJEXA_MODEL || 'recap-projexa';
@@ -479,13 +484,187 @@ router.post('/recap/proposte/:id/scarta', async (req, res) => {
   } catch (e) { rispondiErroreRecap(res, e, 'scarta proposta'); }
 });
 
+// --- Analisi Associazioni: insegnante dell'associazione To-Do e RAID (2026-10-21) -------------
+// Ogni riga di pm_associazioni fatta da Projexa con l'insegnante attivo: le voci inviate
+// (fotografia), i gruppi di Projexa e quelli dell'AI insegnante uniti per insieme di voci, e la
+// valutazione dell'utente (JSON { gruppi: [{ voci, esito, tu }] }, cifrato). Giusto = le voci si
+// collegano; Sbagliato = se sono collegate tra loro si scollegano. Valutazione completa = esempio
+// per addestrare assoc-projexa-14b.
+const rispondiErroreAssoc = (res, e, cosa) => {
+  if (e.code === '42P01' || e.code === '42703') return res.status(503).json({ error: 'Analisi Associazioni non attiva: manca Supporto/CreaDB/analisi_associazioni.sql' });
+  return rispondiErrore(res, e, cosa);
+};
+const json = (t, vuoto = null) => { try { return t ? JSON.parse(t) : vuoto; } catch { return vuoto; } };
+const chiaveGruppo = (voci) => voci.join(',');
+
+async function rigaAssoc(req) {
+  if (!UUID.test(req.params.id)) throw errore(400, 'Id non valido');
+  const r = (await db.query(
+    `SELECT id, risposta, elenco, insegnante_ai, insegnante_stato, insegnante_risposta, valutazione, valutata_il
+       FROM pm_associazioni WHERE id = $3 AND tenant_id = $1 AND user_id = $2 AND elenco IS NOT NULL`, [...chi(req), req.params.id])).rows[0];
+  if (!r) throw errore(404, 'Associazione non trovata');
+  return r;
+}
+
+// Gruppi di Projexa e dell'insegnante (stesso insieme di voci = un solo gruppo con più fonti),
+// più quelli aggiunti a mano, con l'esito della valutazione.
+function gruppiAssoc(r) {
+  const n = (json(r.elenco, []) || []).length;
+  const val = json(r.valutazione, { gruppi: [] });
+  const gruppi = new Map();
+  const prendi = (voci) => {
+    const k = chiaveGruppo(voci);
+    if (!gruppi.has(k)) gruppi.set(k, { voci, fonti: [], esito: null });
+    return gruppi.get(k);
+  };
+  for (const g of gruppiDa(r.risposta, n) || []) prendi(g.voci).fonti.push({ ai: 'Projexa', confidenza: g.confidenza, motivo: g.motivo });
+  if (r.insegnante_stato === 'pronto') {
+    for (const g of gruppiDa(r.insegnante_risposta, n) || []) prendi(g.voci).fonti.push({ ai: r.insegnante_ai || 'Insegnante', confidenza: g.confidenza, motivo: g.motivo });
+  }
+  for (const g of (val && Array.isArray(val.gruppi) ? val.gruppi : [])) {
+    const x = prendi(g.voci);
+    x.esito = g.esito || null;
+    if (!x.fonti.length) x.fonti.push({ ai: 'Tu' });
+  }
+  return [...gruppi.values()];
+}
+
+router.get('/associazioni', async (req, res) => {
+  try {
+    const esito = String(req.query.esito || 'da');
+    const filtro = esito === 'da' ? ' AND valutata_il IS NULL' : esito === 'fatte' ? ' AND valutata_il IS NOT NULL' : '';
+    const righe = (await db.query(
+      `SELECT id, client_id::text AS client_id, project_id::text AS project_id, giorno::text AS giorno, risposta, elenco,
+              insegnante_ai, insegnante_stato, insegnante_risposta, insegnante_errore, valutazione, valutata_il
+         FROM pm_associazioni
+        WHERE tenant_id = $1 AND user_id = $2 AND ai = 'Projexa' AND stato = 'applicato'
+          AND elenco IS NOT NULL AND insegnante_stato IS NOT NULL ${filtro}
+        ORDER BY giorno DESC, created_at DESC LIMIT 60`, chi(req))).rows;
+    const { clienti, progetti } = await nomiClientiProgetti(righe.map((r) => r.client_id), righe.map((r) => r.project_id));
+    const elenchi = new Map(righe.map((r) => [r.id, json(r.elenco, []) || []]));
+    const ora = new Map((await vociDaChiavi(req.user, [...new Set([...elenchi.values()].flat().map((v) => v.k))])).map((v) => [v.k, v]));
+    const associazioni = righe.map((r) => {
+      const elenco = elenchi.get(r.id);
+      const gruppi = gruppiAssoc(r).map((g) => {
+        const colls = g.voci.map((n) => (ora.get((elenco[n - 1] || {}).k) || {}).coll);
+        return { ...g, collegate: !!colls[0] && colls.every((c) => c === colls[0]) };
+      });
+      return {
+        id: r.id, giorno: r.giorno, cliente: clienti.get(String(r.client_id || '')) || '', progetto: progetti.get(String(r.project_id || '')) || '',
+        voci: elenco.map((v, i) => ({ n: i + 1, registro: REGISTRI[v.registro] || v.registro, titolo: v.titolo, descrizione: v.descrizione, owner: v.owner,
+          stato: !ora.has(v.k) ? 'eliminata' : ora.get(v.k).aperta ? 'aperta' : 'chiusa' })),
+        gruppi, insegnante: { ai: r.insegnante_ai, stato: r.insegnante_stato, errore: r.insegnante_errore }, completa: !!r.valutata_il
+      };
+    });
+    const conteggi = (await db.query(
+      `SELECT count(*) FILTER (WHERE valutata_il IS NULL)::int AS da_valutare, count(valutata_il)::int AS valutate
+         FROM pm_associazioni WHERE tenant_id = $1 AND user_id = $2 AND ai = 'Projexa' AND stato = 'applicato'
+          AND elenco IS NOT NULL AND insegnante_stato IS NOT NULL`, chi(req))).rows[0];
+    const job = (await db.query(`SELECT attivo, prossima_esecuzione FROM job_schedules WHERE job = 'associa_todo_raid' LIMIT 1`)).rows[0] || null;
+    res.json({ associazioni, conteggi, job, ai: await aiScelta(req.user) });
+  } catch (e) { rispondiErroreAssoc(res, e, 'associazioni'); }
+});
+
+// Esito di un gruppo. Body: { voci: [n, ...], esito: 'giusto' | 'sbagliato' | null }.
+// Un gruppo nuovo (voci scelte a mano) entra come «Tu». Risposta: { azione } con quanto fatto
+// sulle voci vere: 'collegate', 'scollegate' o null.
+router.put('/associazioni/:id/gruppo', async (req, res) => {
+  try {
+    const r = await rigaAssoc(req);
+    const elenco = json(r.elenco, []) || [];
+    const b = req.body || {};
+    const voci = [...new Set((Array.isArray(b.voci) ? b.voci : []).map(Number))].filter((x) => Number.isInteger(x) && x >= 1 && x <= elenco.length).sort((a, c) => a - c);
+    if (voci.length < 2) throw errore(400, 'Un gruppo ha almeno 2 voci');
+    const esito = b.esito === 'giusto' || b.esito === 'sbagliato' ? b.esito : null;
+    const val = json(r.valutazione, { gruppi: [] });
+    val.gruppi = (Array.isArray(val.gruppi) ? val.gruppi : []).filter((g) => chiaveGruppo(g.voci) !== chiaveGruppo(voci));
+    if (esito) val.gruppi.push({ voci, esito });
+    // Un gruppo di Projexa o dell'insegnante tornato senza esito: la valutazione non è più completa.
+    const completa = !!r.valutata_il && gruppiAssoc({ ...r, valutazione: JSON.stringify(val) }).every((g) => g.esito);
+    await db.query('UPDATE pm_associazioni SET valutazione = $2, valutata_il = CASE WHEN $3 THEN valutata_il END WHERE id = $1',
+      [r.id, encryptValue(JSON.stringify(val)), completa]);
+
+    const chiavi = voci.map((n) => elenco[n - 1].k);
+    let azione = null;
+    if (esito === 'giusto') {
+      const ora = await vociDaChiavi(req.user, chiavi);
+      if (!(ora.length === chiavi.length && ora[0].coll && ora.every((v) => v.coll === ora[0].coll))) {
+        await collegaVoci(req.user, chiavi);
+        azione = 'collegate';
+      }
+    } else if (esito === 'sbagliato') {
+      const ora = await vociDaChiavi(req.user, chiavi);
+      if (ora.length >= 2 && ora[0].coll && ora.every((v) => v.coll === ora[0].coll)) {
+        await scollegaVoci(req.user, chiavi);
+        azione = 'scollegate';
+      }
+    }
+    res.json({ ok: true, azione });
+  } catch (e) { rispondiErroreAssoc(res, e, 'gruppo associazione'); }
+});
+
+// Valutazione completa (o riaperta). Body: { completa: true | false }. Completa solo con tutti i
+// gruppi valutati e l'insegnante arrivato (o in errore).
+router.post('/associazioni/:id/completa', async (req, res) => {
+  try {
+    const r = await rigaAssoc(req);
+    const completa = !!(req.body || {}).completa;
+    if (completa) {
+      if (['da_inviare', 'inviato'].includes(r.insegnante_stato)) throw errore(409, 'Aspetta la risposta dell\'AI insegnante');
+      if (gruppiAssoc(r).some((g) => !g.esito)) throw errore(409, 'Segna prima ogni gruppo come giusto o sbagliato');
+    }
+    // Nessun gruppo: «niente da collegare» è un esempio valido, la valutazione resta {gruppi: []}.
+    const val = encryptValue(r.valutazione || JSON.stringify({ gruppi: [] })); // letta già in chiaro dal pool
+    await db.query(`UPDATE pm_associazioni SET valutazione = $2, valutata_il = ${completa ? 'now()' : 'NULL'} WHERE id = $1`, [r.id, val]);
+    res.json({ ok: true });
+  } catch (e) { rispondiErroreAssoc(res, e, 'completa associazione'); }
+});
+
+// File per l'addestramento: per ogni valutazione completa il compito ESATTO (senza i casi
+// d'esempio) e come risposta i soli gruppi giusti, nello stesso JSON che il job legge.
+router.get('/associazioni/scarica', async (req, res) => {
+  try {
+    const righe = (await db.query(
+      `SELECT risposta, elenco, insegnante_ai, insegnante_stato, insegnante_risposta, valutazione, valutata_il
+         FROM pm_associazioni WHERE tenant_id = $1 AND user_id = $2 AND valutata_il IS NOT NULL AND elenco IS NOT NULL
+        ORDER BY giorno, created_at`, chi(req))).rows;
+    if (!righe.length) throw errore(400, 'Nessuna valutazione completa: segna i gruppi e premi «Valutazione completa»');
+    const jsonl = righe.map((r) => {
+      const giusti = gruppiAssoc(r).filter((g) => g.esito === 'giusto').map((g) => ({
+        voci: g.voci, confidenza: 95,
+        motivo: (g.fonti.find((f) => f.ai !== 'Projexa' && f.motivo) || g.fonti.find((f) => f.motivo) || {}).motivo || 'stesso impegno concreto'
+      }));
+      return JSON.stringify({ messages: [
+        { role: 'user', content: promptAssoc(json(r.elenco, [])) }, { role: 'assistant', content: JSON.stringify({ gruppi: giusti }) }] });
+    });
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="assoc_projexa_addestramento_${new Date().toISOString().slice(0, 10)}.jsonl"`);
+    res.send(jsonl.join('\n') + '\n');
+  } catch (e) { rispondiErroreAssoc(res, e, 'download associazioni'); }
+});
+
+router.get('/associazioni/notebook', (req, res) => {
+  res.setHeader('Content-Type', 'application/x-ipynb+json; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="addestra_assoc_projexa_14b.ipynb"');
+  fs.createReadStream(NOTEBOOK_ASSOC).on('error', (e) => rispondiErrore(res, e, 'notebook')).pipe(res);
+});
+
 // --- Modelli su Ollama della VM -------------------------------------------------------------
 // famiglia (query, body): 'pm' = pm-projexa (Assistente PM), 'filtro' = pm-projexa-filtro (filtro
 // 4B dell'Assistente, base qwen3:4b-instruct), 'recap' = recap-projexa (Recap
-// cliente e interno, 7B), 'recap14' = recap-projexa-14b (voce «Projexa 14B», base Qwen3 14B).
+// cliente e interno, 7B), 'recap14' = recap-projexa-14b (voce «Projexa 14B», base Qwen3 14B),
+// 'assoc' = assoc-projexa-14b (associazione To-Do e RAID con «Projexa», base Qwen3 14B).
 // Stessa procedura: backup, creazione da base + adattatore, prova.
 const PROVA_RECAP = [{ role: 'user', content: 'Scrivi in una riga gli appunti di questo pezzo di riunione:\nMario Rossi: il file delle causali ve lo mandiamo entro venerdì.' }];
 const FAMIGLIE = {
+  // Stessi parametri delle chiamate di jobs/associaTodoRaid.js (risposta JSON, temperatura 0).
+  assoc: {
+    nome: OLLAMA_ADDESTRATO, base: BASE_14B,
+    parametri: ['PARAMETER num_ctx 8192', 'PARAMETER temperature 0', 'PARAMETER num_predict 800'],
+    prova: [{ role: 'user', content: promptAssoc([
+      { registro: 'decisione', titolo: 'Sessioni di formazione presenze il 16 e 26 novembre', descrizione: '', owner: 'Mario Rossi' },
+      { registro: 'todo', titolo: 'Organizzare le sessioni di formazione presenze', descrizione: '', owner: 'Mario Rossi' }]) }]
+  },
   recap14: {
     nome: MODELLO_RECAP_14B, base: BASE_14B,
     parametri: ['PARAMETER num_ctx 16384', 'PARAMETER temperature 0.3', 'PARAMETER top_p 0.9', 'PARAMETER repeat_penalty 1.1'],

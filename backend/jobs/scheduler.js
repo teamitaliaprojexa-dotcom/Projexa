@@ -78,7 +78,9 @@ export const JOBS_BROWSER = [];
 // Nomi dei job schedulabili (usati dalla pagina di gestione per l'elenco a discesa).
 export const NOMI_JOB = [...Object.keys(JOBS), ...JOBS_BROWSER];
 
-// Descrizione dei job per la pagina; jira = utente_config è la configurazione Jira da usare.
+// Descrizione dei job per la pagina; jira = utente_config è la configurazione Jira da usare;
+// perUtente = il job lavora per OGNI utente con le sue impostazioni (utente_config è solo il
+// proprietario della schedulazione, non l'utente con cui gira).
 export const INFO_JOB = {
   aggiorna_integrazioni: { etichetta: 'Aggiorna Integrazioni (Jira)', jira: true },
   backup_db: { etichetta: 'Backup database VM su Object Storage', jira: false },
@@ -87,12 +89,12 @@ export const INFO_JOB = {
   notifiche_scadenze: { etichetta: 'Notifiche delle scadenze (To-Do)', jira: false },
   pm_notifiche_progetti: { etichetta: 'Salute progetti: notifiche e fotografia giornaliera', jira: false },
   pm_digest_settimanale: { etichetta: 'Digest settimanale via email ai PM', jira: false },
-  recap_batch: { etichetta: 'Recap in modalità Batch: raccoglie quelli pronti', jira: false },
-  lavori_ai: { etichetta: 'Lavori AI in Batch: ripresa e pulizia', jira: false },
+  recap_batch: { etichetta: 'Recap in modalità Batch: raccoglie quelli pronti', jira: false, perUtente: true },
+  lavori_ai: { etichetta: 'Lavori AI in Batch: ripresa e pulizia', jira: false, perUtente: true },
   conservazione_riunioni: { etichetta: 'Conservazione: trascrizioni e recap oltre 24 mesi', jira: false },
-  associa_todo_raid: { etichetta: 'Associazione automatica To-Do e RAID (AI)', jira: false },
-  analisi_pm: { etichetta: 'Analisi PM notturna delle riunioni segnate (AI)', jira: false },
-  analisi_recap: { etichetta: 'Analisi Recap notturna: esempi per addestrare recap-projexa (AI)', jira: false }
+  associa_todo_raid: { etichetta: 'Associazione automatica To-Do e RAID (AI)', jira: false, perUtente: true },
+  analisi_pm: { etichetta: 'Analisi PM notturna delle riunioni segnate (AI)', jira: false, perUtente: true },
+  analisi_recap: { etichetta: 'Analisi Recap notturna: esempi per addestrare recap-projexa (AI)', jira: false, perUtente: true }
 };
 
 export function schedulerAttivo() {

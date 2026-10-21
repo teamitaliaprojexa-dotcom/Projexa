@@ -1026,8 +1026,9 @@ export const modelloFunzioni = (ai) => (/14\s*b/i.test(String(ai || '')) ? (proc
 // Chiamata a Ollama per i lavori in background (Dossier, funzioni PM, email, associazioni):
 // precedenza ad Assistente PM e trascrizione (aspetta, si interrompe e si ripete) e, se il
 // modello scelto non c'è sulla VM, ripiego sull'8B. fn(model, signal) -> risposta di ollamaPost.
+// modelloScelto può essere un elenco in ordine di preferenza (es. modello addestrato, poi base).
 export async function ollamaConPrecedenza(modelloScelto, fn) {
-  const catena = [...new Set([modelloScelto || OLLAMA_7B(), OLLAMA_7B()])];
+  const catena = [...new Set([...[].concat(modelloScelto || []).filter(Boolean), OLLAMA_7B()])];
   return conPrecedenza(async (signal) => {
     let i = 0;
     let r = await fn(catena[0], signal);

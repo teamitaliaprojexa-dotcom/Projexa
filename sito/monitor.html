@@ -978,6 +978,7 @@
             }
             // Job di sistema (backup, copia staging): l'utente è solo il "proprietario" della riga.
             const isJira = (job) => { const i = ((dati && dati.infoJob) || {})[job]; return !i || i.jira !== false; };
+            const perUtente = (job) => !!(((dati && dati.infoJob) || {})[job] || {}).perUtente;
             const etichettaJob = (job) => (((dati && dati.infoJob) || {})[job] || {}).etichetta || job;
             const HINT_JIRA = $('fUtenteHint').innerHTML;
 
@@ -1068,6 +1069,8 @@
                             <td><div class="strong">${esc(s.descrizione || s.job)}</div><div class="small">${esc(s.job)} · ${esc(s.tenant_name || s.tenant_id)}</div>
                                 <div class="small"><i class="fas fa-user-gear"></i> ${isJira(s.job)
                                     ? `Configurazione Jira: ${s.utente_config ? esc([s.config_name, s.config_cognome].filter(Boolean).join(' ') || s.utente_config) : 'automatica (primo utente configurato)'}`
+                                    : perUtente(s.job)
+                                    ? `Gira per ogni utente con le sue impostazioni · proprietario: ${s.utente_config ? esc([s.config_name, s.config_cognome].filter(Boolean).join(' ') || s.utente_config) : 'nessuno'}`
                                     : `Utente: ${s.utente_config ? esc([s.config_name, s.config_cognome].filter(Boolean).join(' ') || s.utente_config) : 'nessuno'} · job di sistema`}</div></td>
                             <td><div>${esc(giorniTesto(s.giorni_settimana))}</div><div class="small">${esc(hhmm(s.ora_inizio))}–${esc(hhmm(s.ora_fine))} · ${esc(intervalloTesto(s.intervallo_minuti))}</div><div class="small">${esc(s.fuso_orario)}</div></td>
                             <td>${prossima}</td>

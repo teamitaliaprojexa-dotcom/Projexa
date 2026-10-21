@@ -56,6 +56,12 @@
         @media (max-width: 760px) { .prop .colonne { grid-template-columns: 1fr; } }
         .rc details summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; margin-top: 0.4rem; }
         @media (max-width: 760px) { .editor.open { grid-template-columns: 1fr; } }
+        /* Associazioni (2026-10-21) */
+        .gr { border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.75rem; margin-top: 0.6rem; background: #FCFCFD; }
+        .gr.giusto { border-left: 4px solid var(--ok); } .gr.sbagliato { border-left: 4px solid var(--bad); opacity: 0.8; }
+        .voce { display: block; font-size: 0.86rem; margin-top: 0.3rem; }
+        .voce .reg { display: inline-block; min-width: 82px; font-size: 0.72rem; font-weight: 700; color: var(--primary); text-transform: uppercase; }
+        .tutte { max-height: 260px; overflow: auto; margin-top: 0.4rem; } .dom details summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; margin-top: 0.6rem; }
     </style>
 </head>
 <body>
@@ -76,6 +82,7 @@
         <button data-tab="riunioni"><i class="fas fa-moon"></i> Riunioni e analisi notturna</button>
         <button data-tab="addestra"><i class="fas fa-graduation-cap"></i> Addestramento</button>
         <button data-tab="recap"><i class="fas fa-envelope-open-text"></i> Recap</button>
+        <button data-tab="assoc"><i class="fas fa-link"></i> Associazioni</button>
         <button data-tab="modello"><i class="fas fa-server"></i> Modello sulla VM</button>
     </div>
 
@@ -216,6 +223,35 @@
         </div>
     </section>
 
+    <!-- ASSOCIAZIONI (2026-10-21): insegnante dell'associazione To-Do e RAID, esempi per assoc-projexa-14b -->
+    <section id="t-assoc" class="hidden">
+        <div class="card">
+            <h2>Insegnare a Projexa ad associare To-Do e RAID</h2>
+            <p class="muted">Con <b>Projexa</b> nel campo <i>Impostazioni › AI › «Associazione Autom. ToDoList e RAID»</i>, ogni mattina (lun-ven alle 5:00) Projexa collega le voci che parlano della stessa cosa. Lo <b>stesso elenco</b> va anche all'AI scelta nella scheda <i>Riunioni e analisi notturna</i> (Gemini subito, ChatGPT in Batch), che risponde solo per confronto e non collega niente. Qui vedi i gruppi trovati dai due: segna ogni gruppo <b>Giusto</b> (le voci si collegano davvero) o <b>Sbagliato</b> (se erano collegate si scollegano). Se manca un gruppo aggiungilo dall'elenco delle voci inviate. Poi premi <b>Valutazione completa</b>: diventa un esempio per addestrare <b>assoc-projexa-14b</b>. Gli ultimi gruppi valutati (8 giusti e 8 sbagliati) entrano già dal giorno dopo come esempi nelle istruzioni di Projexa.</p>
+            <div class="riga" style="margin-top:0.6rem"><span id="aJob" class="muted"></span><span id="aConteggi" class="muted" style="margin-left:auto"></span></div>
+        </div>
+        <div class="card">
+            <div class="riga">
+                <select id="aEsito">
+                    <option value="da">Da valutare</option>
+                    <option value="fatte">Valutate</option>
+                    <option value="">Tutte</option>
+                </select>
+                <span id="aConteggio" class="muted" style="margin-left:auto"></span>
+            </div>
+        </div>
+        <div id="aLista"></div>
+        <div class="card">
+            <h2>Addestramento con Google Colab (gratuito)</h2>
+            <p class="muted">Consigliato con almeno 50-100 valutazioni complete (contano anche i giorni in cui la risposta giusta è «nessun gruppo»). Stessa procedura degli altri modelli: scarica i due file, in Colab scegli <b>GPU T4</b>, carica il notebook, <b>Esegui tutto</b> e carica il .jsonl quando lo chiede. Alla fine si scarica <code>assoc-projexa-14b-adapter.gguf</code>: caricalo nella scheda <b>Modello sulla VM</b> scegliendo <b>assoc-projexa-14b</b>. Da quel momento l'associazione delle 5:00 usa il modello addestrato (se manca, la base qwen3:14b).</p>
+            <div class="riga" style="margin-top:0.8rem">
+                <button class="btn pri" id="aScarica"><i class="fas fa-download"></i> 1. Scarica gli esempi delle associazioni (.jsonl)</button>
+                <button class="btn" id="aNotebook"><i class="fas fa-book"></i> 2. Notebook per il 14B (.ipynb)</button>
+                <a class="btn" href="https://colab.research.google.com/" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> 3. Apri Google Colab</a>
+            </div>
+        </div>
+    </section>
+
     <!-- MODELLO -->
     <section id="t-modello" class="hidden">
         <div class="card">
@@ -226,6 +262,7 @@
                     <option value="filtro">pm-projexa-filtro — Filtro 4B dell'Assistente PM (Qwen3 4B)</option>
                     <option value="recap">recap-projexa — Recap con «Projexa» (8B)</option>
                     <option value="recap14">recap-projexa-14b — Recap con «Projexa 14B» (Qwen3 14B)</option>
+                    <option value="assoc">assoc-projexa-14b — Associazione To-Do e RAID (Qwen3 14B)</option>
                 </select>
             </div>
             <div class="riga">
@@ -279,11 +316,12 @@
     // --- Schede ---
     function vai(tab) {
         document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-        ['domande', 'riunioni', 'addestra', 'recap', 'modello'].forEach((t) => $(`t-${t}`).classList.toggle('hidden', t !== tab));
+        ['domande', 'riunioni', 'addestra', 'recap', 'assoc', 'modello'].forEach((t) => $(`t-${t}`).classList.toggle('hidden', t !== tab));
         if (tab === 'domande') caricaDomande();
         if (tab === 'riunioni') caricaRiunioni();
         if (tab === 'addestra') caricaEsempi();
         if (tab === 'recap') caricaRecap();
+        if (tab === 'assoc') caricaAssoc();
         if (tab === 'modello') caricaModelli();
     }
     document.querySelectorAll('.tabs button').forEach((b) => { b.onclick = () => vai(b.dataset.tab); });
@@ -398,7 +436,7 @@
                 <td><b>${esc(m.nome)}</b> ${m.attuale ? '<span class="badge b-ok">in uso</span>' : m.backup ? '<span class="badge">backup</span>' : ''}</td>
                 <td>${(m.dimensione / 1e9).toLocaleString('it-IT', { maximumFractionDigits: 1 })} GB</td><td>${dataOra(m.modificato)}</td>
                 <td>${m.backup ? `<button class="btn" data-ripristina="${esc(m.nome)}"><i class="fas fa-rotate-left"></i> Ripristina</button> <button class="btn danger" data-elimina="${esc(m.nome)}"><i class="fas fa-trash"></i> Elimina</button>` : ''}</td></tr>`).join('')
-                || `<tr><td colspan="4" class="muted">Nessun modello ${esc(d.nome)} sulla VM${fam() === 'recap' ? ' (finché manca, il recap con Projexa usa qwen3:8b: crealo con deploy/oracle/ollama/recap-projexa.Modelfile)' : fam() === 'recap14' ? ' (finché manca, «Projexa 14B» usa recap-projexa: crealo con deploy/oracle/ollama/recap-projexa-14b.Modelfile)' : fam() === 'filtro' ? ' (finché manca, «Projexa 4B + 8B» usa qwen3:4b-instruct con gli esempi: nasce col primo adattatore caricato qui)' : ''}.</td></tr>`;
+                || `<tr><td colspan="4" class="muted">Nessun modello ${esc(d.nome)} sulla VM${fam() === 'recap' ? ' (finché manca, il recap con Projexa usa qwen3:8b: crealo con deploy/oracle/ollama/recap-projexa.Modelfile)' : fam() === 'recap14' ? ' (finché manca, «Projexa 14B» usa recap-projexa: crealo con deploy/oracle/ollama/recap-projexa-14b.Modelfile)' : fam() === 'filtro' ? ' (finché manca, «Projexa 4B + 8B» usa qwen3:4b-instruct con gli esempi: nasce col primo adattatore caricato qui)' : fam() === 'assoc' ? ' (finché manca, l’associazione con Projexa usa qwen3:14b con i casi valutati: nasce col primo adattatore caricato qui)' : ''}.</td></tr>`;
             const n = d.note && d.note[d.nome];
             $('notaModello').textContent = n ? `Ultima installazione: ${dataOra(n.installato)}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : `${d.nome} è ancora il modello di partenza (${d.base} senza addestramento). I backup occupano poco spazio: la base ${d.base} è condivisa.`;
         } catch (e) { $('modelli').innerHTML = `<tr><td colspan="4" class="muted">${esc(e.message)}</td></tr>`; }
@@ -441,7 +479,7 @@
     };
 
     const fam = () => $('famiglia').value;
-    const NOMI_FAMIGLIA = { pm: 'pm-projexa', filtro: 'pm-projexa-filtro', recap: 'recap-projexa', recap14: 'recap-projexa-14b' };
+    const NOMI_FAMIGLIA = { pm: 'pm-projexa', filtro: 'pm-projexa-filtro', recap: 'recap-projexa', recap14: 'recap-projexa-14b', assoc: 'assoc-projexa-14b' };
     $('famiglia').onchange = caricaModelli;
 
     // --- Recap (insegnante notturno di recap-projexa, jobs/analisiRecap.js) ---
@@ -574,6 +612,89 @@
             caricaProposte();
         } catch (err) { errore(err); }
     };
+
+    // --- Associazioni (insegnante dell'associazione To-Do e RAID, jobs/associaTodoRaid.js) ---
+    let assoc = [];
+    async function caricaAssoc() {
+        try {
+            const d = await api('GET', `/associazioni?esito=${encodeURIComponent($('aEsito').value)}`);
+            assoc = d.associazioni;
+            $('aJob').textContent = d.job ? (d.job.attivo ? `Prossimo giro: ${dataOra(d.job.prossima_esecuzione) || '—'} · insegnante: ${d.ai}` : 'Job associa_todo_raid disattivato (Monitor › Schedulazioni)') : 'Job associa_todo_raid non presente';
+            $('aConteggi').textContent = `Da valutare ${d.conteggi.da_valutare} · valutate ${d.conteggi.valutate}`;
+            disegnaAssoc();
+        } catch (e) { errore(e); }
+    }
+    $('aEsito').onchange = caricaAssoc;
+    function disegnaAssoc() {
+        $('aConteggio').textContent = `${assoc.length} associazion${assoc.length === 1 ? 'e' : 'i'}`;
+        const STATO_VOCE = { chiusa: 'chiusa', eliminata: 'eliminata' };
+        const voce = (v) => `<span class="reg">${esc(v.registro)}</span> ${esc(v.titolo)}${v.owner ? ` <span class="muted">· ${esc(v.owner)}</span>` : ''}${STATO_VOCE[v.stato] ? ` <span class="badge">${STATO_VOCE[v.stato]}</span>` : ''}`;
+        $('aLista').innerHTML = assoc.map((a) => {
+            const ins = a.insegnante;
+            const statoIns = ins.stato === 'pronto' ? `<span class="badge b-ok">${esc(ins.ai)} ha risposto</span>`
+                : ins.stato === 'errore' ? `<span class="badge b-bad" title="${esc(ins.errore || '')}">${esc(ins.ai || 'insegnante')}: errore</span>`
+                : `<span class="badge b-run">in attesa di ${esc(ins.ai || 'insegnante')}</span>`;
+            const gruppi = a.gruppi.map((g) => `<div class="gr ${g.esito || ''}" data-voci="${g.voci.join(',')}">
+                    <div class="riga" style="justify-content:space-between">
+                        <span>${g.fonti.map((f) => `<span class="badge ${f.ai === 'Projexa' ? 'b-run' : f.ai === 'Tu' ? '' : 'b-warn'}">${esc(f.ai)}${f.confidenza ? ` ${f.confidenza}%` : ''}</span>`).join(' ')}</span>
+                        ${g.collegate ? '<span class="badge b-ok"><i class="fas fa-link"></i> collegate ora</span>' : '<span class="muted">non collegate</span>'}
+                    </div>
+                    ${g.voci.map((n) => `<div class="voce">${voce(a.voci[n - 1])}</div>`).join('')}
+                    ${g.fonti.filter((f) => f.motivo).map((f) => `<div class="muted" style="margin-top:0.3rem">${esc(f.ai)}: ${esc(f.motivo)}</div>`).join('')}
+                    <div class="riga" style="margin-top:0.5rem">
+                        <button class="btn ok ${g.esito === 'giusto' ? 'on' : ''}" data-g="giusto"><i class="fas fa-check"></i> Giusto</button>
+                        <button class="btn ko ${g.esito === 'sbagliato' ? 'on' : ''}" data-g="sbagliato"><i class="fas fa-xmark"></i> Sbagliato</button>
+                    </div>
+                </div>`).join('') || '<div class="muted" style="margin-top:0.5rem">Né Projexa né l\'insegnante hanno trovato gruppi. Se va bene così premi «Valutazione completa»; se manca un gruppo aggiungilo qui sotto.</div>';
+            const mancano = a.gruppi.filter((g) => !g.esito).length;
+            const attesa = ['da_inviare', 'inviato'].includes(ins.stato);
+            return `<div class="dom ${a.completa ? 'corretta' : ''}" data-id="${a.id}">
+                <div class="riga" style="justify-content:space-between">
+                    <b>${esc([a.cliente, a.progetto].filter(Boolean).join(' · ') || 'Progetto')}</b>
+                    <span><span class="muted">${dataIt(a.giorno)} · ${a.voci.length} voci inviate</span> ${statoIns} ${a.completa ? '<span class="badge b-ok">valutata</span>' : ''}</span>
+                </div>
+                ${gruppi}
+                <details><summary>Aggiungi un gruppo che manca</summary>
+                    <div class="tutte">${a.voci.map((v) => `<label class="voce"><input type="checkbox" value="${v.n}"> ${voce(v)}</label>`).join('')}</div>
+                    <button class="btn" data-g="aggiungi" style="margin-top:0.5rem"><i class="fas fa-link"></i> Collega le voci scelte come gruppo giusto</button>
+                </details>
+                <div class="riga" style="margin-top:0.7rem">${a.completa
+                    ? '<button class="btn" data-c="riapri"><i class="fas fa-rotate-left"></i> Riapri la valutazione</button>'
+                    : `<button class="btn pri" data-c="completa" ${mancano || attesa ? 'disabled' : ''}><i class="fas fa-flag-checkered"></i> Valutazione completa</button>
+                       ${mancano ? `<span class="muted">${mancano} grupp${mancano === 1 ? 'o' : 'i'} da valutare</span>` : attesa ? '<span class="muted">aspetta la risposta dell\'insegnante</span>' : ''}`}</div>
+            </div>`;
+        }).join('') || '<div class="card muted">Nessuna associazione in questa vista. Arrivano dopo il giro delle 5:00 (lun-ven) se nel campo «Associazione Autom. ToDoList e RAID» hai Projexa e c\'erano voci nuove o modificate.</div>';
+    }
+    $('aLista').onclick = async (e) => {
+        const box = e.target.closest('.dom');
+        const g = e.target.closest('[data-g]');
+        const c = e.target.closest('[data-c]');
+        if (!box || (!g && !c)) return;
+        const a = assoc.find((x) => x.id === box.dataset.id);
+        try {
+            if (g) {
+                let voci, esito;
+                if (g.dataset.g === 'aggiungi') {
+                    voci = [...box.querySelectorAll('.tutte input:checked')].map((x) => Number(x.value));
+                    if (voci.length < 2) return avviso('Scegli almeno 2 voci.', 'err');
+                    esito = 'giusto';
+                } else {
+                    const gr = g.closest('.gr');
+                    voci = gr.dataset.voci.split(',').map(Number);
+                    const prima = a.gruppi.find((x) => x.voci.join(',') === gr.dataset.voci);
+                    esito = prima && prima.esito === g.dataset.g ? null : g.dataset.g; // stesso pulsante = annulla
+                }
+                const r = await api('PUT', `/associazioni/${a.id}/gruppo`, { voci, esito });
+                if (r.azione) avviso(r.azione === 'collegate' ? 'Voci collegate: chiudendone una si chiudono anche le altre.' : 'Voci scollegate.');
+            } else {
+                await api('POST', `/associazioni/${a.id}/completa`, { completa: c.dataset.c === 'completa' });
+                if (c.dataset.c === 'completa') avviso('Valutazione completa: è un esempio per l\'addestramento.');
+            }
+            caricaAssoc();
+        } catch (err) { errore(err); }
+    };
+    $('aScarica').onclick = () => scaricaFile('/associazioni/scarica', 'assoc_projexa_addestramento.jsonl').catch(errore);
+    $('aNotebook').onclick = () => scaricaFile('/associazioni/notebook', 'addestra_assoc_projexa_14b.ipynb').catch(errore);
 
     $('rScarica').onclick = () => scaricaFile('/recap/scarica', 'recap_projexa_addestramento.jsonl').catch(errore);
     $('rNotebook').onclick = () => scaricaFile('/recap/notebook', 'addestra_recap_projexa.ipynb').catch(errore);

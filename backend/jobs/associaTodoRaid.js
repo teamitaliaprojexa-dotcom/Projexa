@@ -18,13 +18,22 @@
 // Per non mandare tutto all'AI: solo progetti con voci nuove o modificate dall'ultimo invio, e
 // solo le voci che hanno qualcosa in comune con almeno una voce di un altro registro (parole
 // del titolo/descrizione o stesso owner). Si collegano solo gli abbinamenti con confidenza alta.
+//
+// INSEGNANTE (2026-10-21, analisi_associazioni.sql): con «Projexa» (anche «Projexa 14B») e utente
+// di ANALISI_PM_EMAILS, lo STESSO elenco di voci va anche all'AI della pagina Analisi PM (Gemini
+// subito o ChatGPT in Batch), che risponde solo per confronto: non collega niente. In Analisi PM ›
+// Associazioni si segnano i gruppi giusti e sbagliati (collegando o scollegando davvero le voci);
+// le valutazioni diventano esempi nel prompt di Projexa e il file per addestrare
+// assoc-projexa-14b, il modello usato qui quando c'è sulla VM.
 // ============================================================================
 import db from '../config/database.js';
 import notifDb from '../config/notifDatabase.js';
+import authDb from '../config/authDatabase.js';
 import { encryptValue, encryptRowForWrite } from '../config/crypto.js';
 import { titoloVoce } from '../config/dedupVoci.js';
-import { inviaBatchAi, statoBatchAi, isBatchNonDisponibile, ollamaPost, ollamaConPrecedenza, senzaRagionamento } from '../routes/ai.js';
+import { askAiProvider, inviaBatchAi, statoBatchAi, isBatchNonDisponibile, ollamaPost, ollamaConPrecedenza, senzaRagionamento } from '../routes/ai.js';
 import { nomiClientiProgetti } from './notifiche.js';
+import { analisiPmAbilitata, aiScelta } from './analisiPm.js';
 
 const CAMPO = 'associazione autom. todolist e raid';
 const AI = { chatgpt: 'chatgpt', gpt: 'chatgpt', claude: 'claude', gemini: 'gemini', mistral: 'mistral' };
@@ -36,11 +45,15 @@ const OLLAMA_URL = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').re
 // Associazioni con «Projexa»: 14B (abbinare voci e rispondere in JSON è ragionamento, dove il
 // 14B è nettamente meglio del 7B); se sulla VM non c'è, ollamaConPrecedenza ripiega sul 7B.
 const OLLAMA_MODELLO = process.env.OLLAMA_ASSOCIAZIONI_MODEL || process.env.OLLAMA_FUNZIONI_14B_MODEL || 'qwen3:14b';
+// Modello addestrato sulle valutazioni (Analisi PM › Modello sulla VM, famiglia «assoc»): se sulla
+// VM non c'è ancora si usa OLLAMA_MODELLO.
+export const OLLAMA_ADDESTRATO = process.env.OLLAMA_ASSOC_PROJEXA_MODEL || 'assoc-projexa-14b';
+const MAX_ESEMPI = 8;          // per tipo (stesso impegno / da non collegare) nel prompt di Projexa
 
 const oggiRoma = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
 const oraRoma = () => Number(new Date().toLocaleString('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', hour12: false }));
 const corto = (t, n) => { const s = String(t || '').replace(/\s+/g, ' ').trim(); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
-const REGISTRI = { todo: 'To-Do', rischio: 'Rischio', decisione: 'Decisione', dipendenza: 'Dipendenza', assunzione: 'Assunzione' };
+export const REGISTRI = { todo: 'To-Do', rischio: 'Rischio', decisione: 'Decisione', dipendenza: 'Dipendenza', assunzione: 'Assunzione' };
 // Dipendenze e assunzioni sono un registro solo nella pagina (stessa sezione).
 const famiglia = (v) => (v.registro === 'assunzione' ? 'dipendenza' : v.registro);
 
@@ -125,7 +138,9 @@ export function coerente(voci) {
   }));
 }
 
-export function prompt(voci) {
+// esempi: casi valutati in Analisi PM (esempiValutati), solo per Projexa. Senza esempi è il
+// compito esatto dell'insegnante e degli esempi di addestramento.
+export function prompt(voci, esempi = '') {
   const elenco = voci.map((v, i) => ({
     n: i + 1, registro: REGISTRI[v.registro] || v.registro, titolo: corto(v.titolo, 200),
     descrizione: corto(v.descrizione, 400), owner: corto(v.owner, 80) || null
@@ -140,18 +155,122 @@ Usa titolo, descrizione e owner. Ogni voce può stare in un solo gruppo. Un grup
 Rispondi SOLO con JSON in questa forma:
 {"gruppi":[{"voci":[1,4],"confidenza":90,"motivo":"breve spiegazione"}]}
 confidenza da 0 a 100 (100 = certamente la stessa cosa). Se non ci sono gruppi: {"gruppi":[]}
-
+${esempi}
 VOCI:
 ${JSON.stringify(elenco, null, 0)}`;
 }
 
 // JSON della risposta (anche se l'AI aggiunge testo o ```json intorno).
-function leggiGruppi(testo) {
+export function leggiGruppi(testo) {
   const t = String(testo || '');
   const m = t.match(/\{[\s\S]*\}/);
   if (!m) throw new Error('risposta dell\'AI senza JSON');
   const j = JSON.parse(m[0]);
   return Array.isArray(j.gruppi) ? j.gruppi : [];
+}
+
+// Gruppi di una risposta, ripuliti (voci 1..n senza doppioni, in ordine); null = risposta illeggibile.
+export function gruppiDa(testo, n) {
+  try {
+    return leggiGruppi(testo).map((g) => ({
+      voci: [...new Set((Array.isArray(g && g.voci) ? g.voci : []).map(Number))].filter((x) => Number.isInteger(x) && x >= 1 && x <= n).sort((a, b) => a - b),
+      confidenza: Number(g && g.confidenza) || 0,
+      motivo: String((g && g.motivo) || '').slice(0, 500)
+    })).filter((g) => g.voci.length >= 2);
+  } catch {
+    return null;
+  }
+}
+
+// Fotografia delle voci inviate (pm_associazioni.elenco): serve a mostrarle e a ricostruire il
+// compito anche dopo che le voci sono state chiuse o modificate.
+const fotografia = (voci) => voci.map((v) => ({
+  k: `${v.tabella}|${v.id}`, registro: v.registro, titolo: v.titolo, descrizione: v.descrizione || null, owner: v.owner || null
+}));
+
+// Casi valutati dall'utente in Analisi PM › Associazioni (i più recenti), come metro di giudizio
+// per Projexa. '' = nessuno (o tabelle non ancora aggiornate).
+export async function esempiValutati(u) {
+  let righe;
+  try {
+    righe = (await db.query(
+      `SELECT elenco, valutazione FROM pm_associazioni
+        WHERE tenant_id = $1 AND user_id = $2 AND valutazione IS NOT NULL AND elenco IS NOT NULL
+        ORDER BY valutata_il DESC NULLS LAST, created_at DESC LIMIT 40`, [u.tenant_id, u.user_id])).rows;
+  } catch (e) {
+    if (e.code === '42703') return '';
+    throw e;
+  }
+  const si = [];
+  const no = [];
+  for (const r of righe) {
+    let el, va;
+    try { el = JSON.parse(r.elenco); va = JSON.parse(r.valutazione); } catch { continue; }
+    for (const g of (va && Array.isArray(va.gruppi) ? va.gruppi : [])) {
+      const voci = (g.voci || []).map((n) => el[n - 1]).filter(Boolean);
+      if (voci.length < 2) continue;
+      const riga = voci.map((v) => `${REGISTRI[v.registro] || v.registro} «${corto(v.titolo, 90)}»`).join(' + ');
+      if (g.esito === 'giusto') si.push(riga);
+      else if (g.esito === 'sbagliato') no.push(riga);
+    }
+  }
+  if (!si.length && !no.length) return '';
+  return `
+CASI GIÀ VALUTATI DAL PROJECT MANAGER (di altri giorni o progetti: servono solo come metro di giudizio, NON sono voci di questo elenco):
+${[...si.slice(0, MAX_ESEMPI).map((x) => `- STESSO IMPEGNO: ${x}`), ...no.slice(0, MAX_ESEMPI).map((x) => `- DA NON COLLEGARE: ${x}`)].join('\n')}
+`;
+}
+
+// Stato attuale delle voci (chiavi «tabella|id»): collegamento e apertura.
+export async function vociDaChiavi(u, chiavi) {
+  const out = [];
+  for (const [tab, stato] of [['tasks', `status IS DISTINCT FROM 'completed'`], ['pm_raid', `stato <> 'chiuso'`]]) {
+    const ids = chiavi.filter((k) => k.startsWith(`${tab}|`)).map((k) => k.slice(tab.length + 1));
+    if (!ids.length) continue;
+    const r = await db.query(
+      `SELECT id::text AS id, collegamento_id::text AS coll, (${stato}) AS aperta FROM ${tab}
+        WHERE tenant_id = $1 AND user_id = $2 AND id::text = ANY($3)`, [u.tenant_id, u.user_id, ids]);
+    out.push(...r.rows.map((x) => ({ ...x, tabella: tab, k: `${tab}|${x.id}` })));
+  }
+  return out;
+}
+
+// Collega a mano (gruppo segnato come giusto): stesso collegamento_id, unificando quelli che le
+// voci avevano già, come applica(). Non tocca updated_at.
+export async function collegaVoci(u, chiavi) {
+  const voci = await vociDaChiavi(u, chiavi);
+  if (voci.length < 2) throw Object.assign(new Error('Servono almeno 2 voci ancora presenti'), { status: 400 });
+  const esistenti = [...new Set(voci.map((v) => v.coll).filter(Boolean))];
+  const coll = esistenti[0] || (await db.query('SELECT gen_random_uuid()::text AS id')).rows[0].id;
+  for (const tab of ['tasks', 'pm_raid']) {
+    await db.query(
+      `UPDATE ${tab} SET collegamento_id = $1::uuid
+        WHERE tenant_id = $2 AND user_id = $3 AND (id::text = ANY($4) OR collegamento_id::text = ANY($5))`,
+      [coll, u.tenant_id, u.user_id, voci.filter((v) => v.tabella === tab).map((v) => v.id), esistenti]);
+  }
+  await descriviGruppo(u, coll);
+}
+
+// Scollega (gruppo segnato come sbagliato): le voci escono dal loro collegamento; chi resta da
+// solo nel gruppo viene scollegato da descriviGruppo.
+export async function scollegaVoci(u, chiavi) {
+  const voci = await vociDaChiavi(u, chiavi);
+  const colls = [...new Set(voci.map((v) => v.coll).filter(Boolean))];
+  for (const tab of ['tasks', 'pm_raid']) {
+    const ids = voci.filter((v) => v.tabella === tab).map((v) => v.id);
+    if (ids.length) {
+      await db.query(`UPDATE ${tab} SET collegamento_id = NULL, collegato_a = NULL WHERE tenant_id = $1 AND user_id = $2 AND id::text = ANY($3)`,
+        [u.tenant_id, u.user_id, ids]);
+    }
+  }
+  for (const c of colls) await descriviGruppo(u, c);
+}
+
+// Insegnante attivo per l'utente: pagina Analisi PM abilitata (ANALISI_PM_EMAILS).
+async function insegnanteAttivo(u) {
+  if (!String(process.env.ANALISI_PM_EMAILS || '').trim()) return false;
+  const r = (await authDb.query('SELECT email FROM users WHERE id = $1', [u.user_id])).rows[0];
+  return analisiPmAbilitata(r && r.email);
 }
 
 // --------------------------------------------------------------------------
@@ -321,8 +440,15 @@ async function invia(report, esiti) {
     if (dopoLeNove && (await db.query('SELECT 1 FROM pm_associazioni WHERE tenant_id = $1 AND user_id = $2 AND giorno = $3 LIMIT 1',
       [u.tenant_id, u.user_id, giorno])).rowCount) continue;
     const nome = u.ai.toLowerCase();
-    const locale = nome === 'projexa';
+    // «Projexa» e «Projexa 14B» sono la stessa cosa qui: le associazioni usano già il 14B.
+    const locale = /^projexa\b/.test(nome);
     const ai = AI[nome];
+    let esempi = '';
+    let insegnante = false;
+    if (locale) {
+      esempi = await esempiValutati(u).catch(() => '');
+      insegnante = await insegnanteAttivo(u).catch(() => false);
+    }
     if (!locale && !ai) {
       await notifica(u, 'ai', 'Associazione To-Do e RAID non eseguita',
         `«${u.ai}» non è utilizzabile per l'associazione automatica: scegli ChatGPT, Claude, Gemini (a pagamento), Mistral o Projexa in Impostazioni › AI › «Associazione Autom. ToDoList e RAID».`);
@@ -347,26 +473,41 @@ async function invia(report, esiti) {
       if (da && !voci.some((v) => new Date(v.mod).getTime() > da)) continue;
       const scelte = candidate(voci).slice(0, MAX_VOCI);
       if (scelte.length < 2) continue;
-      const rich = (await db.query(
-        `INSERT INTO pm_associazioni (tenant_id, user_id, client_id, project_id, giorno, ai, voci, ordine)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (tenant_id, user_id, project_id, giorno) DO NOTHING
-         RETURNING id, project_id::text AS project_id, client_id::text AS client_id`,
-        [u.tenant_id, u.user_id, scelte.find((v) => v.client_id)?.client_id || null, projectId, giorno, locale ? 'Projexa' : ai, scelte.length,
-         scelte.map((v) => `${v.tabella}|${v.id}`)])).rows[0];
+      const valori = [u.tenant_id, u.user_id, scelte.find((v) => v.client_id)?.client_id || null, projectId, giorno, locale ? 'Projexa' : ai, scelte.length,
+        scelte.map((v) => `${v.tabella}|${v.id}`)];
+      let rich;
+      try {
+        rich = (await db.query(
+          `INSERT INTO pm_associazioni (tenant_id, user_id, client_id, project_id, giorno, ai, voci, ordine, elenco)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (tenant_id, user_id, project_id, giorno) DO NOTHING
+           RETURNING id, project_id::text AS project_id, client_id::text AS client_id`,
+          [...valori, encryptValue(JSON.stringify(fotografia(scelte)))])).rows[0];
+      } catch (e) {
+        if (e.code !== '42703') throw e;
+        // analisi_associazioni.sql non ancora eseguito: come prima, senza fotografia.
+        rich = (await db.query(
+          `INSERT INTO pm_associazioni (tenant_id, user_id, client_id, project_id, giorno, ai, voci, ordine)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (tenant_id, user_id, project_id, giorno) DO NOTHING
+           RETURNING id, project_id::text AS project_id, client_id::text AS client_id`, valori)).rows[0];
+        insegnante = false;
+      }
       if (!rich) continue;
       try {
         if (locale) {
           // Projexa: Ollama della VM, subito (gratuito, niente Batch). Dal 2026-10-20 con il 14B
           // (alle 5 la VM è libera e nessuno aspetta; se il 14B manca, il 7B) e con la
           // precedenza ad Assistente PM e trascrizione se si allunga fino all'inizio delle call.
-          const r = await ollamaConPrecedenza(OLLAMA_MODELLO, (model, signal) => ollamaPost(`${OLLAMA_URL}/api/chat`, {
+          // Dal 2026-10-21 prima il modello addestrato (assoc-projexa-14b) se c'è, e i casi già valutati.
+          const r = await ollamaConPrecedenza([OLLAMA_ADDESTRATO, OLLAMA_MODELLO], (model, signal) => ollamaPost(`${OLLAMA_URL}/api/chat`, {
             model, stream: false, format: 'json', think: false, keep_alive: '10m',
-            messages: [{ role: 'user', content: prompt(scelte) }],
+            messages: [{ role: 'user', content: prompt(scelte, esempi) }],
             options: { num_ctx: 8192, temperature: 0, num_predict: 800 }
           }, 40 * 60000, { signal }));
           if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
           report.collegate += await chiudiRichiesta(rich, u, scelte, senzaRagionamento(r.data && r.data.message && r.data.message.content), esiti);
           report.locali++;
+          // Stesso elenco all'AI insegnante (giro successivo del job, funzione insegnante()).
+          if (insegnante) await db.query(`UPDATE pm_associazioni SET insegnante_stato = 'da_inviare' WHERE id = $1`, [rich.id]);
         } else {
           const b = await inviaBatchAi(u.user_id, ai, prompt(scelte), { json: true });
           await db.query('UPDATE pm_associazioni SET batch_id = $2 WHERE id = $1', [rich.id, b.batchId]);
@@ -392,14 +533,62 @@ async function invia(report, esiti) {
   }
 }
 
+// 3. Insegnante (Analisi PM › Associazioni): lo stesso compito, senza i casi d'esempio, all'AI
+//    della pagina Analisi PM. Gemini subito, ChatGPT in Batch raccolto ai giri successivi. La
+//    risposta serve solo al confronto: non collega niente.
+async function insegnante(report) {
+  let righe;
+  try {
+    righe = (await db.query(
+      `SELECT id, tenant_id::text AS tenant_id, user_id::text AS user_id, elenco, insegnante_ai, insegnante_stato,
+              insegnante_batch_id, created_at
+         FROM pm_associazioni WHERE insegnante_stato IN ('da_inviare', 'inviato') ORDER BY created_at`)).rows;
+  } catch (e) {
+    if (e.code === '42703') return; // analisi_associazioni.sql non eseguito
+    throw e;
+  }
+  const salva = async (id, ai, testo) => {
+    leggiGruppi(testo); // risposta senza JSON = errore
+    await db.query(`UPDATE pm_associazioni SET insegnante_ai = $2, insegnante_stato = 'pronto', insegnante_risposta = $3, insegnante_errore = NULL WHERE id = $1`,
+      [id, ai, encryptValue(String(testo).slice(0, 20000))]);
+    report.insegnante++;
+  };
+  for (const a of righe) {
+    try {
+      if (a.insegnante_stato === 'da_inviare') {
+        const ai = await aiScelta(a);
+        const compito = prompt(JSON.parse(a.elenco));
+        if (ai === 'ChatGPT') {
+          const b = await inviaBatchAi(a.user_id, 'ChatGPT', compito, { json: true });
+          await db.query(`UPDATE pm_associazioni SET insegnante_ai = $2, insegnante_stato = 'inviato', insegnante_batch_id = $3 WHERE id = $1`, [a.id, ai, b.batchId]);
+        } else {
+          await salva(a.id, ai, (await askAiProvider(a.user_id, 'Gemini', compito, { json: true })).text);
+        }
+        continue;
+      }
+      const s = await statoBatchAi(a.user_id, a.insegnante_ai || 'ChatGPT', a.insegnante_batch_id);
+      if (s.stato === 'in_corso') {
+        if (Date.now() - new Date(a.created_at).getTime() > SCADENZA_BATCH_ORE * 3600000) throw new Error('nessuna risposta del Batch entro 26 ore');
+        continue;
+      }
+      if (s.stato !== 'pronto') throw new Error(s.errore || 'Batch non riuscito');
+      await salva(a.id, a.insegnante_ai || 'ChatGPT', s.text);
+    } catch (e) {
+      report.errori.push(`insegnante ${a.id}: ${e.message}`);
+      await db.query(`UPDATE pm_associazioni SET insegnante_stato = 'errore', insegnante_errore = $2 WHERE id = $1`, [a.id, String(e.message).slice(0, 1000)]);
+    }
+  }
+}
+
 export async function eseguiAssociaTodoRaid() {
-  const report = { inviati: 0, locali: 0, raccolti: 0, inAttesa: 0, collegate: 0, saltati: 0, errori: [] };
+  const report = { inviati: 0, locali: 0, raccolti: 0, inAttesa: 0, collegate: 0, saltati: 0, insegnante: 0, errori: [] };
   const esiti = [];
   await raccogli(report, esiti);
   await invia(report, esiti);
+  try { await insegnante(report); } catch (e) { report.errori.push(`insegnante: ${e.message}`); }
   try { await completaDescrizioni(report); } catch (e) { report.errori.push(`descrizioni «Collegato a»: ${e.message}`); }
   await notificaEsiti(esiti);
-  const testo = `Batch inviati ${report.inviati}, Projexa ${report.locali}, risultati raccolti ${report.raccolti}, in attesa ${report.inAttesa}, voci collegate ${report.collegate}${report.saltati ? `, utenti con AI non utilizzabile ${report.saltati}` : ''}${report.errori.length ? ` · errori: ${report.errori.slice(0, 5).join(' | ')}` : ''}`;
+  const testo = `Batch inviati ${report.inviati}, Projexa ${report.locali}, risultati raccolti ${report.raccolti}, in attesa ${report.inAttesa}, voci collegate ${report.collegate}${report.insegnante ? `, risposte dell'insegnante ${report.insegnante}` : ''}${report.saltati ? `, utenti con AI non utilizzabile ${report.saltati}` : ''}${report.errori.length ? ` · errori: ${report.errori.slice(0, 5).join(' | ')}` : ''}`;
   console.log(`[ASSOCIAZIONE] ${testo}`);
   // ok:false = esito «errori» nella pagina Schedulazioni (dettaglio in ultimo_report).
   return { ok: report.errori.length === 0, riepilogo: testo, ...report };
