@@ -1362,6 +1362,43 @@ export function whisperCppUrls() {
   return [...new Set(list)];
 }
 
+// Modalità "Parakeet" (2026-10-21): NVIDIA Parakeet TDT 0.6B v3 via sherpa-onnx sulla VM
+// (systemd projexa-parakeet, deploy/oracle/setup-parakeet.sh, parakeet-service/app.py).
+// Indirizzo: PARAKEET_URL (sulla VM 127.0.0.1:8103, senza chiave). Vuoto = non configurato.
+export function parakeetUrl() {
+  return String(process.env.PARAKEET_URL || '').trim().replace(/\/+$/, '');
+}
+
+// Blocco WAV su Parakeet (POST /inference, corpo = WAV): risposta { segments: [{ start, end, text }] }
+// con una frase per pezzo di parlato trovato dal VAD. Parakeet non accetta un prompt: il
+// glossario lo applicano le correzioni automatiche del backend come per gli altri motori.
+export async function transcribeAudioParakeet(base, audioBuffer, mime) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const data = await readJson(await callApi(`${base}/inference`, {
+        method: 'POST',
+        headers: { 'Content-Type': mime || 'audio/wav' },
+        body: audioBuffer,
+        timeoutMs: 600000
+      }, 'Parakeet'), 'Parakeet');
+      if (data.error) {
+        const err = httpError(502, `Parakeet: ${String(data.error).slice(0, 200)}`);
+        err.upstreamStatus = 500;
+        throw err;
+      }
+      const segments = (Array.isArray(data.segments) ? data.segments : [])
+        .map((x) => ({ start: Number(x.start) || 0, end: Number(x.end) || Number(x.start) || 0, text: String(x.text || '').trim() }))
+        .filter((x) => x.text);
+      return { segments, provider: 'Parakeet TDT 0.6B v3' };
+    } catch (error) {
+      const temporary = [429, 500, 502, 503, 504].includes(error.upstreamStatus) || (error.status === 502 && !error.upstreamStatus);
+      if (!temporary || attempt >= 3) throw error;
+      console.warn(`[AI] Trascrizione Parakeet (${base}): errore temporaneo (${error.upstreamStatus || error.message}), nuovo tentativo ${attempt + 1}/3`);
+      await new Promise((r) => setTimeout(r, attempt === 1 ? 5000 : 15000));
+    }
+  }
+}
+
 // Whisper dedicato all'Assistente PM (deploy/oracle/setup-whisper-assistente.sh): porta, solo se
 // ASSISTENTE_PM_WHISPER_CPP_URL punta a questa macchina (sulla VM: 127.0.0.1:8102; in locale
 // è il tunnel 18101, che non è un servizio di questo PC: lì non vale).
@@ -1495,6 +1532,7 @@ export async function transcribeAudioCpp(base, audioBuffer, mime, prompt = '') {
 export async function transcribeAudio(userId, audioBuffer, mime, baseUrl = null, prompt = '') {
   const base = String(baseUrl || whisperUrls()[0] || '').replace(/\/+$/, '');
   if (base && whisperCppUrls().includes(base)) return transcribeAudioCpp(base, audioBuffer, mime, prompt);
+  if (base && base === parakeetUrl()) return transcribeAudioParakeet(base, audioBuffer, mime);
   if (!base || !process.env.WHISPER_API_KEY) {
     // 428: il browser ferma subito la registrazione invece di riprovare.
     throw httpError(428, 'Servizio di trascrizione non configurato sul server (WHISPER_URLS / WHISPER_URL / WHISPER_API_KEY)');

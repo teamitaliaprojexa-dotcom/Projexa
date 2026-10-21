@@ -10,7 +10,7 @@
 //   1. trascrizione con Whisper: più servizi (WHISPER_URLS) lavorano IN PARALLELO, un
 //      blocco ciascuno; chi ha "modalità Trascrizione" = Background-Veloce usa whisper.cpp
 //      (WHISPER_CPP_URL), chi ha "Gemini" usa Gemini con la sua chiave (corsia a parte,
-//      Whisper di riserva);
+//      Whisper di riserva), chi ha "Parakeet" usa Parakeet TDT 0.6B v3 (PARAKEET_URL);
 //   2. il testo del blocco (già formattato, cifrato) resta in coda finché i blocchi
 //      precedenti della stessa riunione non sono pronti: viene aggiunto a
 //      rec_meeting.trascrizione sempre nell'ordine giusto;
@@ -30,7 +30,7 @@ import { SALTA_LOG_ON, SALTA_LOG_OFF, registraTestoRiunione } from '../config/au
 import { contestoAudit } from '../config/auditContext.js';
 import { notificaRiunione } from './notifiche.js';
 import { getIntegration } from '../config/integrations.js';
-import { transcribeAudio, transcribeAudioCpp, transcribeAudioGemini, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate } from '../routes/ai.js';
+import { transcribeAudio, transcribeAudioCpp, transcribeAudioGemini, transcribeAudioParakeet, parakeetUrl, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate } from '../routes/ai.js';
 import { segnaRegistrazione, segnaTrascrizione, assistenteInCorso } from '../config/ollamaPrecedenza.js';
 
 // Registrazione considerata in corso fino a questo tempo dall'ultimo pezzo audio arrivato (se la
@@ -354,7 +354,10 @@ async function transcribeJob(job, baseUrl) {
 // Gemini (stessa corsia della «Modalità Trascrizione» Gemini), così la CPU della VM resta tutta
 // ai modelli dell'assistente; se Gemini non risponde si usa il Whisper dell'assistente (non
 // quello della coda, che con large-v3-turbo sarebbe troppo lento).
-export async function trascriviBloccoBreve(user, idCalendar, { audioB64, energy, offset, gemini = false }) {
+// parakeet = true (voce «Projexa 4B + 8B (Parakeet trascrive)», 2026-10-21): il blocco lo
+// trascrive Parakeet TDT 0.6B v3 sulla VM (PARAKEET_URL; in locale ASSISTENTE_PM_PARAKEET_URL =
+// tunnel 18103), con lo stesso ripiego sul Whisper dell'assistente se non risponde.
+export async function trascriviBloccoBreve(user, idCalendar, { audioB64, energy, offset, gemini = false, parakeet = false }) {
   const dedicato = String(process.env.ASSISTENTE_PM_WHISPER_CPP_URL || '').trim().replace(/\/+$/, '');
   const base = whisperCppUrls()[0] || whisperUrls()[0] || null;
   const e = energy || {};
@@ -369,6 +372,15 @@ export async function trascriviBloccoBreve(user, idCalendar, { audioB64, energy,
       r = await transcribeAudioGemini(el.gemini_api_key, audio, 'audio/wav', String(prompt || '').replace(PROMPT_STYLE, '').trim());
     } catch (err) {
       console.warn(`[ASSISTENTE PM] ${idCalendar}: Gemini non ha trascritto il blocco (${err.message}): uso Whisper`);
+    }
+  }
+  if (parakeet && !r) {
+    const pk = String(process.env.ASSISTENTE_PM_PARAKEET_URL || '').trim().replace(/\/+$/, '') || parakeetUrl();
+    try {
+      if (!pk) throw new Error('PARAKEET_URL non configurato');
+      r = await transcribeAudioParakeet(pk, audio, 'audio/wav');
+    } catch (err) {
+      console.warn(`[ASSISTENTE PM] ${idCalendar}: Parakeet non ha trascritto il blocco (${err.message}): uso Whisper`);
     }
   }
   if (!r) r = dedicato
@@ -1194,7 +1206,7 @@ export function statoWorker() {
 // arriva il primo blocco. Usa lo stesso controllo della coda (urlReady), quindi non ripete
 // la richiesta se un servizio risulta già pronto o è in corso di verifica.
 export function warmWhisperServices() {
-  for (const url of [...whisperUrls(), ...whisperCppUrls()]) urlReady(url);
+  for (const url of [...whisperUrls(), ...whisperCppUrls(), parakeetUrl()].filter(Boolean)) urlReady(url);
 }
 
 // Rete di sicurezza: blocchi rimasti 'transcribing' orfani (processo riavviato/morto a
@@ -1234,6 +1246,7 @@ async function runWorker() {
 
       const urls = whisperUrls();
       const cppUrls = whisperCppUrls();
+      const pkUrls = parakeetUrl() ? [parakeetUrl()] : [];
       // «Modalità Trascrizione» = Gemini: corsia a parte (non usa i servizi Whisper), fino a
       // GEMINI_PARALLELO blocchi insieme. Se Gemini non risponde il blocco va subito a Whisper.
       const geminiKeys = await modeOwnerKeys('gemini');
@@ -1254,7 +1267,7 @@ async function runWorker() {
           ? '[TRASCRIZIONE] Assistente PM aperto: trascrizione con Whisper in pausa, i blocchi restano in coda'
           : '[TRASCRIZIONE] Assistente PM chiuso: trascrizione con Whisper ripresa');
       }
-      if ((urls.length || cppUrls.length) && !cpuAlAssistente) {
+      if ((urls.length || cppUrls.length || pkUrls.length) && !cpuAlAssistente) {
         const start = (jobs, free) => jobs.forEach((job, i) => {
           const url = free[i];
           busyUrls.add(url);
@@ -1271,10 +1284,18 @@ async function runWorker() {
           const freeCpp = cppUrls.filter((u) => !busyUrls.has(u) && urlReady(u));
           start(await claimAudioJobs(freeCpp.length, { keys: fastKeys, include: true }), freeCpp);
         }
+        // Parakeet (2026-10-21): stessa logica, servizio projexa-parakeet. Se non risponde i
+        // blocchi di chi l'ha scelto vanno ai servizi standard.
+        const pkOn = pkUrls.some((u) => busyUrls.has(u) || urlReady(u));
+        const pkKeys = pkOn ? await modeOwnerKeys('parakeet') : [];
+        if (pkKeys.length) {
+          const freePk = pkUrls.filter((u) => !busyUrls.has(u) && urlReady(u));
+          start(await claimAudioJobs(freePk.length, { keys: pkKeys, include: true }), freePk);
+        }
         // Un blocco per ogni servizio Whisper libero e raggiungibile: lavorano in parallelo.
-        // (esclusi i blocchi Background-Veloce e quelli della corsia Gemini)
+        // (esclusi i blocchi Background-Veloce, Parakeet e quelli della corsia Gemini)
         const free = urls.filter((u) => !busyUrls.has(u) && urlReady(u));
-        start(await claimAudioJobs(free.length, { keys: [...fastKeys, ...geminiKeys], include: false }), free);
+        start(await claimAudioJobs(free.length, { keys: [...fastKeys, ...pkKeys, ...geminiKeys], include: false }), free);
       }
       // Nessun servizio Whisper configurato: i blocchi restano in coda (prima venivano chiusi con
       // una nota e l'audio cancellato: un processo senza Whisper distruggeva l'audio degli altri).
@@ -1283,7 +1304,7 @@ async function runWorker() {
       if (!inflight.size && !finalizing.size && !(await hasPendingJobs())) break; // coda vuota: fine
       // Senza Whisper (e senza Gemini o finalizzazioni in corso) i blocchi restano in coda: si
       // esce, si riparte al prossimo blocco caricato o al prossimo avvio.
-      if (!urls.length && !cppUrls.length && !inflight.size && !finalizing.size && !geminiOccupati) break;
+      if (!urls.length && !cppUrls.length && !pkUrls.length && !inflight.size && !finalizing.size && !geminiOccupati) break;
       // Si riparte appena finisce una trascrizione o un recap, o dopo qualche secondo (blocchi
       // in attesa di un nuovo tentativo o servizi che si stanno svegliando).
       await Promise.race([

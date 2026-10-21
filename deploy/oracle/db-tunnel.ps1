@@ -5,18 +5,23 @@
 # setup-whisper-assistente.sh): lo usa solo l'Assistente PM in locale (ASSISTENTE_PM_WHISPER_CPP_URL=http://127.0.0.1:18101).
 # La porta locale 11435 va a Ollama della VM (127.0.0.1:11434): la usa solo l'Assistente PM
 # con la voce «Projexa» (agente Pm projexa) in locale (ASSISTENTE_PM_OLLAMA_URL=http://127.0.0.1:11435).
+# La porta locale 18103 va a Parakeet della VM (127.0.0.1:8103, setup-parakeet.sh): la usa solo l'Assistente PM
+# con la voce «Projexa 4B + 8B (Parakeet trascrive)» in locale (ASSISTENTE_PM_PARAKEET_URL=http://127.0.0.1:18103).
 # Uso: lasciare aperta questa finestra mentre si usa il backend in locale (Ctrl+C per chiudere).
 param(
   [string]$Key = "$env:USERPROFILE\.ssh\ssh-key-2026-09-25.key",
   [string]$VmHost = "129.152.0.49",
   [int]$LocalPort = 15432,
   [int]$WhisperCppPort = 18101,
-  [int]$OllamaPort = 11435
+  [int]$OllamaPort = 11435,
+  [int]$ParakeetPort = 18103
 )
 Write-Host "Tunnel Postgres: 127.0.0.1:$LocalPort -> $VmHost (Ctrl+C per chiudere)"
 Write-Host "Tunnel whisper.cpp (Assistente PM): 127.0.0.1:$WhisperCppPort -> $VmHost"
 Write-Host "Tunnel Ollama (Pm projexa): 127.0.0.1:$OllamaPort -> $VmHost"
+Write-Host "Tunnel Parakeet (Assistente PM): 127.0.0.1:$ParakeetPort -> $VmHost"
 ssh -i $Key -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 `
   -L "127.0.0.1:${LocalPort}:127.0.0.1:5432" `
   -L "127.0.0.1:${WhisperCppPort}:127.0.0.1:8102" `
-  -L "127.0.0.1:${OllamaPort}:127.0.0.1:11434" "opc@$VmHost"
+  -L "127.0.0.1:${OllamaPort}:127.0.0.1:11434" `
+  -L "127.0.0.1:${ParakeetPort}:127.0.0.1:8103" "opc@$VmHost"

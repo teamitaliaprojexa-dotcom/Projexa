@@ -84,7 +84,11 @@ const AI_SUPPORTATE = {
   // Stessa voce, ma i blocchi li trascrive Gemini (2026-10-21): alla call Miroglio il Whisper
   // della VM andava a metà della velocità del parlato e la CPU serve tutta a 4B e 8B. Richiede
   // la chiave di Gemini; se Gemini non risponde il blocco va al Whisper dell'assistente.
-  'projexa 4b + 8b (gemini trascrive)': { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA', filtro: process.env.OLLAMA_PM_FILTRO_4B_MODEL || 'pm-projexa-filtro', filtroRiserva: process.env.OLLAMA_PM_FILTRO_4B_BASE || 'qwen3:4b-instruct', esempiFiltro: true, trascriveGemini: true }
+  'projexa 4b + 8b (gemini trascrive)': { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA', filtro: process.env.OLLAMA_PM_FILTRO_4B_MODEL || 'pm-projexa-filtro', filtroRiserva: process.env.OLLAMA_PM_FILTRO_4B_BASE || 'qwen3:4b-instruct', esempiFiltro: true, trascriveGemini: true },
+  // Stessa voce, ma i blocchi li trascrive Parakeet TDT 0.6B v3 (sherpa-onnx sulla VM, 2026-10-21):
+  // molto più veloce del Whisper small dell'assistente, nessuna chiave. Se Parakeet non
+  // risponde il blocco va al Whisper dell'assistente.
+  'projexa 4b + 8b (parakeet trascrive)': { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA', filtro: process.env.OLLAMA_PM_FILTRO_4B_MODEL || 'pm-projexa-filtro', filtroRiserva: process.env.OLLAMA_PM_FILTRO_4B_BASE || 'qwen3:4b-instruct', esempiFiltro: true, trascriveParakeet: true }
 };
 // Voce del campo -> chiave di AI_SUPPORTATE («Projexa 4B+8B», «projexa  4b + 8B» -> 'projexa 4b + 8b').
 const chiaveAi = (v) => String(v || '').toLowerCase().replace(/\s*\+\s*/g, ' + ').replace(/\s+/g, ' ').trim();
@@ -1154,6 +1158,7 @@ router.post('/avvia', requireAuth, async (req, res) => {
       // Pm projexa (Ollama): conversazione, suggerimenti già dati, attesa del tratto completo.
       motore: ai.locale ? 'projexa' : 'gemini', aiNome: ai.provider, modelloOllama: OLLAMA_PM_MODEL,
       trascriveGemini: !!ai.trascriveGemini, // blocchi trascritti da Gemini invece che da Whisper
+      trascriveParakeet: !!ai.trascriveParakeet, // blocchi trascritti da Parakeet invece che da Whisper
       // Pm projexa: la conversazione parte dal contesto della riunione (dopo le istruzioni fisse).
       storia: ai.locale ? [{ role: 'user', content: testoIstruzioni.contesto }, { role: 'assistant', content: 'Nessun suggerimento.' }] : [],
       giaDetti: [], timerTratto: null, errori: 0,
@@ -1278,7 +1283,7 @@ router.post('/blocco', requireAuth, (req, res) => {
   s.blocchi = s.blocchi.then(async () => {
     if (s.chiusa) { s.bloccoInCoda -= 1; return; }
     try {
-      const testo = await trascriviBloccoBreve(user, s.idCalendar, { audioB64: audio, energy, offset, gemini: s.trascriveGemini });
+      const testo = await trascriviBloccoBreve(user, s.idCalendar, { audioB64: audio, energy, offset, gemini: s.trascriveGemini, parakeet: s.trascriveParakeet });
       if (!testo || s.chiusa) return;
       aggiungi(s, 'trascrizione', testo);
       // Pm projexa unisce più blocchi in un tratto e mette lui l'intestazione.
@@ -1454,7 +1459,7 @@ router.get('/export', requireAuth, async (req, res) => {
     const children = [
       new Paragraph({ text: `Assistente PM – ${s.titolo}`, heading: HeadingLevel.TITLE }),
       new Paragraph({ spacing: { after: 240 }, children: [new TextRun({
-        text: `Riunione del ${giorno} · ${s.modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.motore === 'projexa' ? `Pm projexa (${s.modelloOllama}${s.filtroModello ? ` + filtro ${s.filtroModello}` : ''}${s.trascriveGemini ? ', trascrizione Gemini' : ''})` : MODELLI[s.modelloIdx]}`, color: '6B7280' })] }),
+        text: `Riunione del ${giorno} · ${s.modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.motore === 'projexa' ? `Pm projexa (${s.modelloOllama}${s.filtroModello ? ` + filtro ${s.filtroModello}` : ''}${s.trascriveGemini ? ', trascrizione Gemini' : ''}${s.trascriveParakeet ? ', trascrizione Parakeet' : ''})` : MODELLI[s.modelloIdx]}`, color: '6B7280' })] }),
       new Paragraph({ spacing: { after: 240 }, children: [new TextRun({ text: numeri.join(' · '), color: '6B7280' })] }),
       new Paragraph({ text: 'Suggerimenti dell\'assistente', heading: HeadingLevel.HEADING_1 }),
       ...(suggerimenti.length ? suggerimenti.map((m) => riga(m, m.tipo === 'utente' ? 'Tu' : 'Assistente')) : [vuoto(nessuno)]),

@@ -31,6 +31,8 @@ jobs:
           rsync -az --delete -e "$RSYNC_SSH" --exclude node_modules --exclude .env ./backend/ "$TARGET/backend/"
           rsync -az --delete -e "$RSYNC_SSH" ./sito/ "$TARGET/sito/"
           rsync -az --delete -e "$RSYNC_SSH" --exclude .venv --exclude __pycache__ ./whisper-service/ "$TARGET/whisper-service/"
+          # Parakeet TDT 0.6B v3 (sherpa-onnx): servizio projexa-parakeet, deploy/oracle/setup-parakeet.sh
+          rsync -az --delete -e "$RSYNC_SSH" --exclude __pycache__ ./parakeet-service/ "$TARGET/parakeet-service/"
           # Manuale Utente: lo legge l'assistente AI della dashboard (backend/routes/chatbot.js)
           rsync -az --delete -e "$RSYNC_SSH" ./Documentazione/ "$TARGET/Documentazione/"
 
@@ -44,6 +46,7 @@ jobs:
             pm2 save
             /opt/projexa/whisper-venv/bin/pip install -q -r /opt/projexa/whisper-service/requirements.txt
             for u in $(systemctl list-units --plain --no-legend 'projexa-whisper@*' | awk '{print $1}'); do sudo systemctl restart "$u"; done
+            if systemctl is-enabled projexa-parakeet >/dev/null 2>&1; then sudo systemctl restart projexa-parakeet; fi
             sleep 3
             curl -fsS http://localhost:3001/api/health
           '
