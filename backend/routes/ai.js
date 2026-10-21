@@ -1018,14 +1018,14 @@ function ollamaPostUnaVolta(url, body, timeoutMs, { signal } = {}) {
 }
 
 // Modello per le funzioni con «Projexa» diverse dal recap (Dossier, funzioni PM, Email attività,
-// 2026-10-20): voce «Projexa 14B» -> base 14B (OLLAMA_FUNZIONI_14B_MODEL), altrimenti il 7B.
+// 2026-10-20): voce «Projexa 14B» -> base 14B (OLLAMA_FUNZIONI_14B_MODEL), altrimenti l'8B.
 // Si usa la base e non recap-projexa-14b: le istruzioni di sistema di quello parlano di recap.
 const OLLAMA_7B = () => process.env.OLLAMA_RECAP_MODEL || 'qwen3:8b';
 export const modelloFunzioni = (ai) => (/14\s*b/i.test(String(ai || '')) ? (process.env.OLLAMA_FUNZIONI_14B_MODEL || 'qwen3:14b') : OLLAMA_7B());
 
 // Chiamata a Ollama per i lavori in background (Dossier, funzioni PM, email, associazioni):
 // precedenza ad Assistente PM e trascrizione (aspetta, si interrompe e si ripete) e, se il
-// modello scelto non c'è sulla VM, ripiego sul 7B. fn(model, signal) -> risposta di ollamaPost.
+// modello scelto non c'è sulla VM, ripiego sull'8B. fn(model, signal) -> risposta di ollamaPost.
 export async function ollamaConPrecedenza(modelloScelto, fn) {
   const catena = [...new Set([modelloScelto || OLLAMA_7B(), OLLAMA_7B()])];
   return conPrecedenza(async (signal) => {

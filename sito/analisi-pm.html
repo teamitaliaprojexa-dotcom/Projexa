@@ -567,6 +567,7 @@
     $('rNotebook').onclick = () => scaricaFile('/recap/notebook', 'addestra_recap_projexa.ipynb').catch(errore);
     $('rNotebook14').onclick = () => scaricaFile('/recap/notebook?famiglia=recap14', 'addestra_recap_projexa_14b.ipynb').catch(errore);
 
+
     (async () => {
         try {
             const c = await api('GET', '/config');

@@ -6,7 +6,7 @@
     <title>Projexa - Monitor</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Pagina Monitor a schede: Monitor VM, Schedulazioni (job_schedules), Log (Oracle) e
-         Storage (Object Storage dei backup).
+         Storage (Object Storage dei backup) e Aggiornamenti (dnf di Oracle Linux).
          Accesso completo all'admin del tenant PROJEXA; sola lettura (solo «Aggiorna») agli
          utenti di MONITOR_LETTURA_EMAILS. Il server ricontrolla tutto: backend/routes/vm-monitor.js
          (requireMonitorAccess), job-schedules.js e audit-log.js.
@@ -204,6 +204,36 @@
         #tab-st .denied { text-align: center; padding: 3rem 1rem; color: var(--muted); }
         #tab-st .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; display: block; }
 
+        /* ---------------- Scheda Aggiornamenti ---------------- */
+        #tab-ag .btn { padding: 0.55rem 1rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; background: #e5e7eb; color: var(--ink); font-family: inherit; }
+        #tab-ag .btn:hover { background: #d1d5db; }
+        #tab-ag .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        #tab-ag .btn.primary { background: var(--accent); color: #fff; }
+        #tab-ag .btn.primary:hover:not(:disabled) { background: #1d4ed8; }
+        #tab-ag .toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+        #tab-ag .updated, #tab-ag .small { font-size: 0.8rem; color: var(--muted); }
+        #tab-ag .card { background: var(--surface); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 1rem 1.1rem; margin-bottom: 0.75rem; }
+        #tab-ag .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.75rem; margin-bottom: 0.75rem; }
+        #tab-ag .tile .label { font-size: 0.78rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+        #tab-ag .tile .value { font-size: 1.7rem; font-weight: 700; margin-top: 0.2rem; font-variant-numeric: tabular-nums; }
+        #tab-ag .tile .detail { font-size: 0.8rem; color: var(--ink2); margin-top: 0.15rem; }
+        #tab-ag .tile .value.good { color: var(--good); }
+        #tab-ag .tile .value.warn { color: var(--warn); }
+        #tab-ag .tile .value.bad { color: var(--bad); }
+        #tab-ag h2 { font-size: 0.95rem; color: var(--ink); margin-bottom: 0.5rem; }
+        #tab-ag .table-wrap { overflow-x: auto; }
+        #tab-ag table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        #tab-ag th { text-align: left; font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+        #tab-ag td { padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+        #tab-ag .badge { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 0.72rem; font-weight: 700; }
+        #tab-ag .b-sic { background: var(--bad-bg); color: var(--bad); }
+        #tab-ag .b-ker { background: var(--warn-bg); color: var(--warn); }
+        #tab-ag .avviso { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 0.6rem 0.8rem; font-size: 0.85rem; margin-bottom: 0.75rem; }
+        #tab-ag .avviso code, #tab-ag .small code { background: rgba(0,0,0,0.06); padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.8rem; word-break: break-all; }
+        #tab-ag pre { background: #111827; color: #E5E7EB; border-radius: 8px; padding: 0.75rem; font-size: 0.75rem; max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+        #tab-ag .denied { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+        #tab-ag .denied i { font-size: 2rem; color: #9CA3AF; margin-bottom: 0.75rem; display: block; }
+
         /* ---------------- Scheda Log ---------------- */
         #tab-log .btn { padding: 0.55rem 1rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.88rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; background: #e5e7eb; color: var(--ink); }
         #tab-log .btn:hover { background: #d1d5db; }
@@ -312,6 +342,7 @@
                 <button type="button" class="mtab" role="tab" data-tab="sched"><i class="fas fa-clock-rotate-left"></i> Schedulazioni</button>
                 <button type="button" class="mtab" role="tab" data-tab="log"><i class="fas fa-clipboard-list"></i> Log</button>
                 <button type="button" class="mtab" role="tab" data-tab="st"><i class="fas fa-box-archive"></i> Storage</button>
+                <button type="button" class="mtab" role="tab" data-tab="ag"><i class="fas fa-shield-halved"></i> Aggiornamenti</button>
             </nav>
 
             <section class="mpanel" id="tab-vm" role="tabpanel" hidden>
@@ -508,6 +539,37 @@
                 <div id="st-deniedCard" class="card denied" style="display: none;">
                     <i class="fas fa-circle-exclamation"></i>
                     <div id="st-deniedMsg">Storage non disponibile.</div>
+                </div>
+            </section>
+
+            <section class="mpanel" id="tab-ag" role="tabpanel" hidden>
+                <div id="ag-content" style="display: none;">
+                    <div class="toolbar">
+                        <div class="sub">Aggiornamenti di Oracle Linux sulla VM (dnf). Quelli di sicurezza sono segnati in rosso.</div>
+                        <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                            <span class="updated" id="ag-updated"></span>
+                            <button type="button" class="btn" id="ag-verificaBtn" title="Controlla gli aggiornamenti disponibili (non installa niente)"><i class="fas fa-magnifying-glass"></i> Verifica</button>
+                            <button type="button" class="btn primary" id="ag-applicaBtn" data-write title="Installa solo gli aggiornamenti di sicurezza"><i class="fas fa-shield-halved"></i> Installa aggiornamenti di sicurezza</button>
+                        </div>
+                    </div>
+                    <div class="tiles" id="ag-tiles"></div>
+                    <div id="ag-avvisi"></div>
+                    <div class="card" id="ag-instCard" style="display: none;">
+                        <h2><i class="fas fa-terminal" style="color: var(--muted);"></i> Ultima installazione</h2>
+                        <div class="small" id="ag-instInfo" style="margin-bottom: 0.6rem;"></div>
+                        <pre id="ag-instOut"></pre>
+                    </div>
+                    <div class="card">
+                        <h2><i class="fas fa-box" style="color: var(--muted);"></i> Pacchetti da aggiornare</h2>
+                        <div class="table-wrap"><table>
+                            <thead><tr><th>Pacchetto</th><th>Nuova versione</th><th>Repository</th><th></th></tr></thead>
+                            <tbody id="ag-righe"></tbody>
+                        </table></div>
+                    </div>
+                </div>
+                <div id="ag-deniedCard" class="card denied" style="display: none;">
+                    <i class="fas fa-circle-exclamation"></i>
+                    <div id="ag-deniedMsg">Aggiornamenti non disponibili.</div>
                 </div>
             </section>
 
@@ -2079,11 +2141,113 @@
         })();
 
         // =====================================================================
+        // SCHEDA AGGIORNAMENTI (dnf su Oracle Linux)
+        // =====================================================================
+        const schedaAg = (() => {
+            const $ = (id) => document.getElementById('ag-' + id);
+            const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+            const quando = (t) => t ? new Date(t).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '–';
+            const tile = (l, v, d, cls) => `<div class="card tile" style="margin-bottom:0"><div class="label">${esc(l)}</div><div class="value ${cls || ''}">${esc(v)}</div><div class="detail">${esc(d || '')}</div></div>`;
+            const headers = (extra) => Object.assign({ 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` }, extra || {});
+            const SSH = 'ssh -i C:\\Users\\y.dacco\\.ssh\\ssh-key-2026-09-25.key opc@129.152.0.49 "sudo reboot"';
+            let dati = null;
+            let timer = null;
+
+            function render() {
+                const v = dati.verifica;
+                const inst = dati.installazione;
+                const inCorso = !!inst?.inCorso;
+                const pacchetti = v?.pacchetti || [];
+                const sic = pacchetti.filter((p) => p.sicurezza);
+                const kernel = pacchetti.some((p) => /^kernel/.test(p.nome));
+                $('tiles').innerHTML = !v ? tile('Ultima verifica', '–', 'premi «Verifica» per controllare') : v.errore ? tile('Verifica', 'Errore', v.errore, 'bad') : [
+                    tile('Di sicurezza', String(sic.length), sic.length ? 'da installare' : 'nessuno in sospeso', sic.length ? 'bad' : 'good'),
+                    tile('Totale aggiornamenti', String(pacchetti.length), kernel ? 'compreso il kernel' : 'pacchetti'),
+                    tile('Riavvio VM', v.riavvio == null ? '?' : v.riavvio.necessario ? 'Necessario' : 'No', v.riavvio?.necessario ? 'kernel o librerie aggiornati' : '', v.riavvio?.necessario ? 'warn' : 'good'),
+                    tile('Ultima verifica', quando(v.letto).split(' ')[1] || '–', quando(v.letto).split(' ')[0])
+                ].join('');
+                const avvisi = [];
+                if (inCorso) avvisi.push('<div class="avviso"><i class="fas fa-spinner fa-spin"></i> Installazione in corso: la pagina si aggiorna da sola.</div>');
+                if (v?.riavvio?.necessario) avvisi.push(`<div class="avviso"><i class="fas fa-power-off"></i> Serve un riavvio della VM perché gli aggiornamenti installati (kernel o librerie di sistema) diventino attivi. Fallo quando nessuno sta registrando, da PowerShell: <code>${esc(SSH)}</code></div>`);
+                $('avvisi').innerHTML = avvisi.join('');
+                $('righe').innerHTML = !v ? '<tr><td colspan="4" class="small" style="text-align:center;padding:2rem">Nessuna verifica fatta da quando il server è ripartito: premi «Verifica».</td></tr>'
+                    : !pacchetti.length ? `<tr><td colspan="4" class="small" style="text-align:center;padding:2rem">${v.errore ? esc(v.errore) : 'Il sistema è aggiornato.'}</td></tr>`
+                    : pacchetti.slice().sort((a, b) => (b.sicurezza - a.sicurezza) || (a.nome < b.nome ? -1 : 1)).map((p) =>
+                        `<tr><td>${esc(p.nome)}<span class="small">.${esc(p.arch)}</span></td><td>${esc(p.versione)}</td><td class="small">${esc(p.repo)}</td>` +
+                        `<td>${p.sicurezza ? '<span class="badge b-sic">Sicurezza</span>' : ''} ${/^kernel/.test(p.nome) ? '<span class="badge b-ker">Kernel</span>' : ''}</td></tr>`).join('');
+                $('applicaBtn').disabled = inCorso || !v || !!v.errore || !sic.length;
+                $('verificaBtn').disabled = inCorso;
+                if (inst) {
+                    $('instCard').style.display = '';
+                    $('instInfo').textContent = inCorso
+                        ? `Avviata il ${quando(inst.avviato)}${inst.email ? ` da ${inst.email}` : ''}: in corso…`
+                        : `Avviata il ${quando(inst.avviato)}${inst.email ? ` da ${inst.email}` : ''}, terminata il ${quando(inst.finito)}: ${inst.esito === 0 ? 'completata' : inst.esito == null ? 'interrotta' : `errore (codice ${inst.esito})`}.`;
+                    $('instOut').textContent = inst.output || '(nessun output)';
+                } else {
+                    $('instCard').style.display = 'none';
+                }
+                $('updated').textContent = v ? `Verificato alle ${new Date(v.letto).toLocaleTimeString('it-IT')}` : '';
+            }
+
+            async function carica(verifica) {
+                const b = $('verificaBtn');
+                if (verifica) { b.disabled = true; b.querySelector('i').className = 'fas fa-spinner fa-spin'; }
+                try {
+                    const r = await fetch(`${API_URL}/vm-monitor/aggiornamenti${verifica ? '?verifica=1' : ''}`, { headers: headers() });
+                    if (r.status === 401) { window.location.href = 'index.html'; return; }
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                    const eraInCorso = !!dati?.installazione?.inCorso;
+                    dati = d;
+                    $('deniedCard').style.display = 'none';
+                    $('content').style.display = '';
+                    render();
+                    clearTimeout(timer);
+                    if (d.installazione?.inCorso) timer = setTimeout(() => carica(false), 5000);
+                    else if (eraInCorso) carica(true); // finita: si ricontrolla subito cosa resta
+                } catch (e) {
+                    $('content').style.display = 'none';
+                    $('deniedCard').style.display = '';
+                    $('deniedMsg').textContent = e.message;
+                } finally {
+                    b.querySelector('i').className = 'fas fa-magnifying-glass';
+                    if (dati) b.disabled = !!dati.installazione?.inCorso;
+                }
+            }
+
+            $('verificaBtn').addEventListener('click', () => carica(true));
+            $('applicaBtn').addEventListener('click', async () => {
+                const n = (dati?.verifica?.pacchetti || []).filter((p) => p.sicurezza).length;
+                if (!confirm(`Installare ${n} aggiornamenti di sicurezza sulla VM?\n\nFallo quando nessuno sta registrando: alcuni servizi (es. il database) potrebbero riavviarsi per qualche secondo.\nL'installazione richiede qualche minuto e prosegue anche se chiudi la pagina.`)) return;
+                $('applicaBtn').disabled = true;
+                try {
+                    const r = await fetch(`${API_URL}/vm-monitor/aggiornamenti/applica`, { method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: '{}' });
+                    if (r.status === 401) { window.location.href = 'index.html'; return; }
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                } catch (e) {
+                    alert(e.message);
+                }
+                carica(false);
+            });
+
+            let avviata = false;
+            return {
+                mostra() {
+                    if (avviata) return;
+                    avviata = true;
+                    $('content').style.display = '';
+                    carica(false);
+                }
+            };
+        })();
+
+        // =====================================================================
         // SCHEDE E ACCESSO
         // =====================================================================
-        const SCHEDE = { vm: schedaVm, sched: schedaSched, log: schedaLog, st: schedaSt };
-        const DA_HASH = { vm: 'vm', schedulazioni: 'sched', log: 'log', storage: 'st' };
-        const A_HASH = { vm: 'vm', sched: 'schedulazioni', log: 'log', st: 'storage' };
+        const SCHEDE = { vm: schedaVm, sched: schedaSched, log: schedaLog, st: schedaSt, ag: schedaAg };
+        const DA_HASH = { vm: 'vm', schedulazioni: 'sched', log: 'log', storage: 'st', aggiornamenti: 'ag' };
+        const A_HASH = { vm: 'vm', sched: 'schedulazioni', log: 'log', st: 'storage', ag: 'aggiornamenti' };
 
         function apriScheda(nome) {
             if (!SCHEDE[nome]) nome = 'vm';

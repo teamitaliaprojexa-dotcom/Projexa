@@ -9,7 +9,7 @@
 import express from 'express';
 import fs from 'fs';
 import os from 'os';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { whisperUrls, whisperCppUrls, whisperAssistentePorta } from './ai.js';
@@ -487,6 +487,120 @@ router.post('/storage/elimina', requireAuth, requireMonitorAccess, express.json(
   } catch (error) {
     traccia('ko', `${cartella}: ${error.message}`.slice(0, 1000));
     res.status(502).json({ error: `Eliminazione non riuscita: ${error.message}` });
+  }
+});
+
+// ----------------------------------------------------------------------------
+// SCHEDA AGGIORNAMENTI: aggiornamenti di sicurezza di Oracle Linux (dnf)
+// ----------------------------------------------------------------------------
+// «Verifica» = sudo dnf check-update --security (anche in sola lettura: non modifica nulla).
+// «Applica» = sudo dnf upgrade --security -y, solo admin. L'installazione gira staccata dal
+// backend (detached, output su file) così un riavvio di PM2 o un deploy non la interrompono;
+// lo stato si ricava dal file (riga finale __ESITO__ <codice>) e dal pid ancora vivo.
+// Il riavvio della VM (kernel) non si fa da qui: resta da SSH.
+const AGG_LOG = '/var/tmp/projexa-aggiornamenti.log';
+const AGG_STATO = '/var/tmp/projexa-aggiornamenti.json'; // { pid, avviato, email }
+let ultimaVerifica = null; // { letto, pacchetti, riavvio, errore }
+
+function sudoDnf(args, timeout) {
+  return new Promise((resolve) => {
+    execFile('sudo', ['-n', 'dnf', ...args], { timeout, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      resolve({ codice: err ? (typeof err.code === 'number' ? err.code : -1) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') });
+    });
+  });
+}
+
+// Righe di check-update: «nome.arch  versione  repository» (le altre righe sono intestazioni).
+function pacchettiDa(stdout) {
+  const out = [];
+  for (const riga of stdout.split('\n')) {
+    const m = riga.trim().match(/^(\S+)\.(\S+)\s+(\S+)\s+(\S+)$/);
+    if (m && !/^Obsoleting/i.test(riga)) out.push({ nome: m[1], arch: m[2], versione: m[3], repo: m[4] });
+  }
+  return out;
+}
+
+// dnf needs-restarting -r: codice 1 = serve il riavvio della VM, 0 = no.
+async function riavvioNecessario() {
+  const r = await sudoDnf(['needs-restarting', '-r'], 60000);
+  if (r.codice === 0) return { necessario: false };
+  if (r.codice === 1) return { necessario: true, motivo: r.stdout.trim().split('\n').slice(0, 8).join('\n') };
+  return null; // plugin assente o errore: non si sa
+}
+
+// Tutti gli aggiornamenti disponibili, con «sicurezza: true» su quelli coperti da un avviso di
+// sicurezza (ELSA). Codici di check-update: 0 = niente, 100 = aggiornamenti disponibili, altro = errore.
+async function verificaAggiornamenti() {
+  const tutti = await sudoDnf(['-q', 'check-update'], 180000);
+  const sic = tutti.codice === 100 ? await sudoDnf(['-q', 'check-update', '--security'], 180000) : { codice: 0, stdout: '' };
+  const ko = [tutti, sic].find((r) => r.codice !== 0 && r.codice !== 100);
+  if (ko) {
+    const msg = (ko.stderr.trim().split('\n').filter(Boolean).pop() || `dnf ha risposto con codice ${ko.codice}`).slice(0, 300);
+    ultimaVerifica = { letto: new Date().toISOString(), pacchetti: [], riavvio: null, errore: msg };
+    return ultimaVerifica;
+  }
+  const diSicurezza = new Set(pacchettiDa(sic.stdout).map((p) => `${p.nome}.${p.arch}`));
+  const pacchetti = pacchettiDa(tutti.stdout).map((p) => ({ ...p, sicurezza: diSicurezza.has(`${p.nome}.${p.arch}`) }));
+  ultimaVerifica = { letto: new Date().toISOString(), pacchetti, riavvio: await riavvioNecessario(), errore: null };
+  return ultimaVerifica;
+}
+
+function pidVivo(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+
+function statoInstallazione() {
+  let info = null;
+  try { info = JSON.parse(fs.readFileSync(AGG_STATO, 'utf8')); } catch { return null; }
+  const testo = read(AGG_LOG);
+  const m = testo.match(/__ESITO__ (\d+)\s*$/);
+  const righe = testo.replace(/__ESITO__ \d+\s*$/, '').split('\n');
+  return {
+    avviato: info.avviato,
+    email: info.email || null,
+    inCorso: !m && pidVivo(info.pid),
+    esito: m ? Number(m[1]) : null,
+    finito: m ? (fs.statSync(AGG_LOG).mtime.toISOString()) : null,
+    output: righe.slice(-200).join('\n').trim()
+  };
+}
+
+router.get('/aggiornamenti', requireAuth, requireMonitorAccess, async (req, res) => {
+  try {
+    if (!IS_LINUX) return res.status(501).json({ error: 'Aggiornamenti verificabili solo sulla VM (Oracle Linux).' });
+    const installazione = statoInstallazione();
+    const verifica = req.query.verifica === '1' && !installazione?.inCorso
+      ? await verificaAggiornamenti()
+      : ultimaVerifica;
+    res.json({ verifica, installazione });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Avvia l'installazione degli aggiornamenti di sicurezza (POST: solo admin PROJEXA).
+router.post('/aggiornamenti/applica', requireAuth, requireMonitorAccess, async (req, res) => {
+  const traccia = (esito, dettaglio) => registraAccesso(req, {
+    evento: 'aggiornamento_sistema', esito, userId: req.user.user_id, email: req.user.email,
+    tenantId: req.user.tenant_id, dettaglio
+  });
+  try {
+    if (!IS_LINUX) return res.status(501).json({ error: 'Disponibile solo sulla VM.' });
+    if (statoInstallazione()?.inCorso) return res.status(409).json({ error: 'Un\'installazione è già in corso.' });
+    const fd = fs.openSync(AGG_LOG, 'w');
+    const figlio = spawn('sh', ['-c', 'sudo -n dnf upgrade --security -y 2>&1; echo "__ESITO__ $?"'],
+      { detached: true, stdio: ['ignore', fd, fd] });
+    fs.closeSync(fd);
+    figlio.unref();
+    const avviato = new Date().toISOString();
+    fs.writeFileSync(AGG_STATO, JSON.stringify({ pid: figlio.pid, avviato, email: req.user.email }));
+    ultimaVerifica = null; // da rifare a fine installazione
+    console.log(`[AGGIORNAMENTI] dnf upgrade --security avviato da ${req.user.email} (pid ${figlio.pid})`);
+    traccia('ok', 'dnf upgrade --security avviato');
+    res.json({ ok: true, avviato });
+  } catch (error) {
+    traccia('ko', String(error.message).slice(0, 1000));
+    res.status(500).json({ error: `Avvio non riuscito: ${error.message}` });
   }
 });
 
