@@ -124,35 +124,43 @@ function parseEnergy(raw) {
 const PROMPT_MAX_CHARS = 700;
 const PROMPT_STYLE = 'Buongiorno a tutti, possiamo iniziare. Allora, come dicevamo, facciamo il punto della situazione: mi sentite? Sì, perfetto.';
 
+// Glossario della riunione: titolo, partecipanti, cliente, termini corretti (prima quelli del
+// cliente). Lo usano il prompt di Whisper, le hotwords di Parakeet e le correzioni proposte.
+export async function glossarioRiunione(user, idCalendar, names) {
+  const m = (await db.query(
+    `SELECT oggetto, client_id FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+    [user.tenant_id, user.user_id, idCalendar]
+  )).rows[0] || {};
+  let cliente = '';
+  if (m.client_id) {
+    const c = await db.query(
+      `SELECT valore2 FROM clients WHERE id = $1 AND tenant_id = $2 AND argument = 'Cliente' AND campo = 'Cliente' LIMIT 1`,
+      [m.client_id, user.tenant_id]
+    );
+    cliente = String((c.rows[0] && c.rows[0].valore2) || '').trim();
+  }
+  let termini = [];
+  try {
+    const t = await db.query(
+      `SELECT corretto, client_id FROM rec_correzioni
+        WHERE tenant_id = $1 AND user_id = $2
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+          AND (client_id IS NULL OR client_id = $3)
+        ORDER BY (client_id IS NULL), corretto`,
+      [user.tenant_id, user.user_id, m.client_id || null]
+    );
+    termini = [...new Set(t.rows.map((r) => String(r.corretto || '').trim()).filter(Boolean))];
+  } catch (e) { /* tabella assente: nessun termine */ }
+
+  const me = await speakerName(user);
+  const persone = [...new Set([me, ...(names || [])].filter(Boolean))];
+  return { oggetto: String(m.oggetto || '').trim(), clientId: m.client_id || null, cliente, persone, termini };
+}
+
 async function buildWhisperPrompt(user, idCalendar, names) {
   try {
-    const m = (await db.query(
-      `SELECT oggetto, client_id FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
-      [user.tenant_id, user.user_id, idCalendar]
-    )).rows[0] || {};
-    let cliente = '';
-    if (m.client_id) {
-      const c = await db.query(
-        `SELECT valore2 FROM clients WHERE id = $1 AND tenant_id = $2 AND argument = 'Cliente' AND campo = 'Cliente' LIMIT 1`,
-        [m.client_id, user.tenant_id]
-      );
-      cliente = String((c.rows[0] && c.rows[0].valore2) || '').trim();
-    }
-    let termini = [];
-    try {
-      const t = await db.query(
-        `SELECT corretto, client_id FROM rec_correzioni
-          WHERE tenant_id = $1 AND user_id = $2
-            AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
-            AND (client_id IS NULL OR client_id = $3)
-          ORDER BY (client_id IS NULL), corretto`,
-        [user.tenant_id, user.user_id, m.client_id || null]
-      );
-      termini = [...new Set(t.rows.map((r) => String(r.corretto || '').trim()).filter(Boolean))];
-    } catch (e) { /* tabella assente: nessun termine */ }
-
-    const me = await speakerName(user);
-    const persone = [...new Set([me, ...(names || [])].filter(Boolean))];
+    const { oggetto, cliente, persone, termini } = await glossarioRiunione(user, idCalendar, names);
+    const m = { oggetto };
     const head = [
       m.oggetto ? `Riunione ${String(m.oggetto).trim()}.` : '',
       persone.length ? `Partecipano ${persone.join(', ')}.` : '',
@@ -171,6 +179,29 @@ async function buildWhisperPrompt(user, idCalendar, names) {
   } catch (e) {
     console.warn('⚠️ PROMPT WHISPER:', e.message);
     return PROMPT_STYLE;
+  }
+}
+
+// HOTWORDS DI PARAKEET (2026-10-21): Parakeet non legge un prompt, ma sherpa-onnx accetta
+// un elenco di parole/frasi da preferire quando l'audio è simile. Stesso glossario di Whisper
+// (persone intere e cognomi, cliente, termini corretti), senza il titolo (parole generiche).
+// Al massimo HOTWORDS_MAX voci; '/' separa le voci e quindi si toglie dai nomi.
+const HOTWORDS_MAX = 120;
+export async function buildHotwords(user, idCalendar, names) {
+  try {
+    const { cliente, persone, termini } = await glossarioRiunione(user, idCalendar, names);
+    const voci = [];
+    const add = (v) => {
+      const t = String(v || '').replace(/[/\n\r\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+      if (t.length >= 3 && !voci.some((x) => x.toLowerCase() === t.toLowerCase())) voci.push(t);
+    };
+    for (const p of persone) { add(p); String(p).split(/\s+/).filter((w) => w.length >= 4).forEach(add); }
+    if (cliente) add(cliente);
+    termini.forEach(add);
+    return voci.slice(0, HOTWORDS_MAX);
+  } catch (e) {
+    console.warn('⚠️ HOTWORDS PARAKEET:', e.message);
+    return [];
   }
 }
 
@@ -285,7 +316,8 @@ let geminiOccupati = 0;
 // Avviso nel log una volta ogni 10 minuti per utente (es. piano gratuito esaurito).
 const avvisiGemini = new Map();
 
-async function trascriviAudio(user, audio, mime, baseUrl, prompt = '') {
+async function trascriviAudio(user, audio, mime, baseUrl, prompt = '', hotwords = []) {
+  if (baseUrl && baseUrl === parakeetUrl()) return transcribeAudioParakeet(baseUrl, audio, mime, hotwords);
   if (baseUrl !== CORSIA_GEMINI) return transcribeAudio(user.user_id, audio, mime, baseUrl, prompt);
   try {
     const el = await getIntegration(user.user_id, 'Gemini');
@@ -318,7 +350,8 @@ async function transcribeJob(job, baseUrl) {
     const energy = parseEnergy(job.energy);
     const me = energy.mic ? await speakerName(user) : '';
     const prompt = await buildWhisperPrompt(user, job.id_calendar, energy.names);
-    const r = await trascriviAudio(user, Buffer.from(job.audio_mix, 'base64'), mime, baseUrl, prompt);
+    const hotwords = baseUrl && baseUrl === parakeetUrl() ? await buildHotwords(user, job.id_calendar, energy.names) : [];
+    const r = await trascriviAudio(user, Buffer.from(job.audio_mix, 'base64'), mime, baseUrl, prompt, hotwords);
     for (const seg of r.segments) {
       let who = '';
       if (energy.mic && energy.system) {
@@ -378,7 +411,7 @@ export async function trascriviBloccoBreve(user, idCalendar, { audioB64, energy,
     const pk = String(process.env.ASSISTENTE_PM_PARAKEET_URL || '').trim().replace(/\/+$/, '') || parakeetUrl();
     try {
       if (!pk) throw new Error('PARAKEET_URL non configurato');
-      r = await transcribeAudioParakeet(pk, audio, 'audio/wav');
+      r = await transcribeAudioParakeet(pk, audio, 'audio/wav', await buildHotwords(user, idCalendar, e.names || []));
     } catch (err) {
       console.warn(`[ASSISTENTE PM] ${idCalendar}: Parakeet non ha trascritto il blocco (${err.message}): uso Whisper`);
     }

@@ -1370,14 +1370,15 @@ export function parakeetUrl() {
 }
 
 // Blocco WAV su Parakeet (POST /inference, corpo = WAV): risposta { segments: [{ start, end, text }] }
-// con una frase per pezzo di parlato trovato dal VAD. Parakeet non accetta un prompt: il
-// glossario lo applicano le correzioni automatiche del backend come per gli altri motori.
-export async function transcribeAudioParakeet(base, audioBuffer, mime) {
+// con una frase per pezzo di parlato trovato dal VAD. Parakeet non accetta un prompt: al suo
+// posto le hotwords (buildHotwords in jobs/meetingTranscription.js), nell'header X-Hotwords
+// separate da '/' e codificate (gli header ammettono solo ASCII).
+export async function transcribeAudioParakeet(base, audioBuffer, mime, hotwords = []) {
   for (let attempt = 1; ; attempt++) {
     try {
       const data = await readJson(await callApi(`${base}/inference`, {
         method: 'POST',
-        headers: { 'Content-Type': mime || 'audio/wav' },
+        headers: { 'Content-Type': mime || 'audio/wav', ...(hotwords.length ? { 'X-Hotwords': encodeURIComponent(hotwords.join('/')) } : {}) },
         body: audioBuffer,
         timeoutMs: 600000
       }, 'Parakeet'), 'Parakeet');

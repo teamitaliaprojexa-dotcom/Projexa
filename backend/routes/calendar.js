@@ -20,8 +20,9 @@ import db from '../config/database.js';
 import {
   encRec, enqueueChunk, enqueueLostNotes, enqueueFinalize, generateRecap, pendingChunks, queuedEndOffset, warmWhisperServices,
   recapInProgress, recapBatchInCorso, recapAutomaticoInCorso, loadCorrections, applyCorrections, applyCorrectionsHtml, stripMarkdown, speakerName,
-  copiaTrascrizioneCondivisa, recapAiImpostata, recapEsecuzione, isChiediSempre, annullaRecapBatchInAttesa
+  copiaTrascrizioneCondivisa, recapAiImpostata, recapEsecuzione, isChiediSempre, annullaRecapBatchInAttesa, glossarioRiunione
 } from '../jobs/meetingTranscription.js';
+import { proponiCorrezioni } from '../config/proposteCorrezioni.js';
 import { inviaRecapBatch, controllaRecapBatchUtente } from '../jobs/recapBatch.js';
 import { parseRecapActions, parseDueDate, ownerVariants } from '../jobs/recapTasks.js';
 import { proposteDaRecap, salvaDaRecap } from '../config/azioniCliente.js';
@@ -914,6 +915,102 @@ router.post('/meetings/managed/apply-corrections', requireAuth, async (req, res)
     res.json({ success: true, count: counts.trascrizione + counts.recap, counts, rules: rules.length, markdown });
   } catch (error) {
     console.error('❌ REC_MEETING_CORRECTIONS:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// "Proponi correzioni" (finestra della trascrizione, 2026-10-21): coppie errato → corretto
+// trovate confrontando il testo con i nomi della riunione (config/proposteCorrezioni.js).
+// Nomi: chi parla nella trascrizione, utente, cliente, termini già corretti, team del progetto
+// o del cliente (proj_componenti) e rubrica. GET propone, POST salva le scelte in rec_correzioni.
+router.get('/meetings/managed/proposte-correzioni', requireAuth, async (req, res) => {
+  try {
+    const idCalendar = String(req.query.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    const cur = await db.query(
+      `SELECT trascrizione, client_id, project_id FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, idCalendar]
+    );
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    const m = cur.rows[0];
+    const testo = String(m.trascrizione || '');
+    if (!testo.trim()) return res.json({ proposte: [], cliente: null });
+    // Chi parla: «[00:01:02] Nome: ...» (esclusa l'etichetta degli altri partecipanti).
+    const parlanti = [...new Set([...testo.matchAll(/^\s*\[[\d:]+\]\s*([^:\n]{2,40}):/gm)].map((x) => x[1].trim()))]
+      .filter((n) => !/^partecipanti$/i.test(n));
+    const g = await glossarioRiunione(req.user, idCalendar, parlanti);
+    const nomi = [...g.persone, g.cliente, ...g.termini];
+    try {
+      const team = await db.query(
+        `SELECT nominativo FROM proj_componenti
+          WHERE tenant_id = $1 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+            AND ((project_id IS NOT NULL AND project_id = $2) OR (client_id IS NOT NULL AND client_id = $3))`,
+        [req.user.tenant_id, m.project_id || null, m.client_id || null]
+      );
+      team.rows.forEach((r) => nomi.push(r.nominativo));
+    } catch (e) { /* tabella assente: niente team */ }
+    try {
+      const rb = await db.query(
+        `SELECT nominativo FROM rubrica WHERE tenant_id = $1 AND user_id = $2 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+        [req.user.tenant_id, req.user.user_id]
+      );
+      rb.rows.forEach((r) => nomi.push(r.nominativo));
+    } catch (e) { /* rubrica non leggibile: si va avanti senza */ }
+    const proposte = proponiCorrezioni(testo, nomi.filter(Boolean), await loadCorrections(req.user, idCalendar));
+    res.json({ proposte, cliente: m.client_id ? { id: m.client_id, nome: g.cliente || 'cliente della riunione' } : null });
+  } catch (error) {
+    console.error('❌ REC_PROPOSTE_CORREZIONI:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Salva le correzioni scelte: { id_calendar, voci: [{ errato, corretto }], solo_cliente }.
+// Se esiste già una correzione con lo stesso «corretto» (e lo stesso cliente) si aggiungono le
+// nuove varianti al suo «errato» (separate da |) invece di creare un doppione.
+router.post('/meetings/managed/proposte-correzioni', requireAuth, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const idCalendar = String(b.id_calendar || '').trim();
+    if (!idCalendar) return res.status(400).json({ error: 'id_calendar richiesto' });
+    const voci = (Array.isArray(b.voci) ? b.voci : [])
+      .map((v) => ({ errato: String(v && v.errato || '').replace(/\s+/g, ' ').trim().slice(0, 200), corretto: String(v && v.corretto || '').replace(/\s+/g, ' ').trim().slice(0, 200) }))
+      .filter((v) => v.errato && v.corretto && v.errato.toLowerCase() !== v.corretto.toLowerCase())
+      .slice(0, 50);
+    if (!voci.length) return res.status(400).json({ error: 'Nessuna correzione da salvare' });
+    const m = (await db.query(
+      `SELECT client_id FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [req.user.tenant_id, req.user.user_id, idCalendar]
+    )).rows[0];
+    if (!m) return res.status(404).json({ error: 'Riunione non gestita con Projexa' });
+    const clientId = b.solo_cliente && m.client_id ? m.client_id : null;
+    let nuove = 0;
+    let aggiornate = 0;
+    for (const v of voci) {
+      const esiste = (await db.query(
+        `SELECT id, errato FROM rec_correzioni
+          WHERE tenant_id = $1 AND user_id = $2 AND client_id IS NOT DISTINCT FROM $3
+            AND lower(btrim(corretto)) = lower($4) AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+          LIMIT 1`,
+        [req.user.tenant_id, req.user.user_id, clientId, v.corretto]
+      )).rows[0];
+      const varianti = v.errato.split('|').map((x) => x.trim()).filter(Boolean);
+      if (esiste) {
+        const attuali = String(esiste.errato || '').split('|').map((x) => x.trim()).filter(Boolean);
+        const tutte = [...attuali, ...varianti.filter((x) => !attuali.some((a) => a.toLowerCase() === x.toLowerCase()))];
+        if (tutte.length === attuali.length) continue;
+        await db.query(`UPDATE rec_correzioni SET errato = $1 WHERE id = $2`, [tutte.join('|'), esiste.id]);
+        aggiornate++;
+      } else {
+        await db.query(
+          `INSERT INTO rec_correzioni (tenant_id, user_id, client_id, errato, corretto) VALUES ($1, $2, $3, $4, $5)`,
+          [req.user.tenant_id, req.user.user_id, clientId, varianti.join('|'), v.corretto]
+        );
+        nuove++;
+      }
+    }
+    res.json({ success: true, nuove, aggiornate });
+  } catch (error) {
+    console.error('❌ REC_PROPOSTE_CORREZIONI (salva):', error.message);
     res.status(500).json({ error: error.message });
   }
 });

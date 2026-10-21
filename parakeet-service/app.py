@@ -17,10 +17,13 @@
 import io
 import json
 import os
+import subprocess
+import sys
 import threading
 import time
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote
 
 import numpy as np
 import sherpa_onnx
@@ -32,17 +35,68 @@ PORT = int(os.environ.get('PARAKEET_PORT', '8103'))
 SR = 16000
 MAX_BODY = 64 * 1024 * 1024  # blocchi da ~2 minuti in WAV 16 kHz = ~4 MB: margine ampio
 
-recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
-    encoder=os.path.join(MODEL_DIR, 'encoder.int8.onnx'),
-    decoder=os.path.join(MODEL_DIR, 'decoder.int8.onnx'),
-    joiner=os.path.join(MODEL_DIR, 'joiner.int8.onnx'),
-    tokens=os.path.join(MODEL_DIR, 'tokens.txt'),
-    num_threads=THREADS,
-    sample_rate=SR,
-    feature_dim=80,
-    decoding_method='greedy_search',
-    model_type='nemo_transducer',
-)
+HOTWORDS_SCORE = float(os.environ.get('PARAKEET_HOTWORDS_SCORE', '1.5'))
+BPE_VOCAB = os.path.join(MODEL_DIR, 'bpe.vocab')
+
+# HOTWORDS (2026-10-21): l'equivalente del glossario di Whisper. Il backend manda per ogni
+# blocco le parole della riunione (partecipanti, cliente, termini delle Correzioni) nell'header
+# X-Hotwords; il modello le preferisce quando l'audio è simile. In sherpa-onnx funzionano solo
+# con modified_beam_search e servono un vocabolario BPE ("pezzo<TAB>punteggio"): il pacchetto
+# del modello non lo ha, si ricava da tokens.txt (punteggio = -id, come nei vocabolari BPE di
+# SentencePiece). PARAKEET_HOTWORDS=0 le spegne (ricerca greedy, come prima).
+def prepara_vocab():
+    if os.path.exists(BPE_VOCAB):
+        return
+    righe = []
+    with open(os.path.join(MODEL_DIR, 'tokens.txt'), encoding='utf-8') as f:
+        for r in f:
+            parti = r.rstrip('\n').rsplit(' ', 1)
+            if len(parti) == 2 and parti[0] and not parti[0].startswith('<'):
+                righe.append(f'{parti[0]}\t{-int(parti[1])}')
+    with open(BPE_VOCAB, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(righe) + '\n')
+
+
+def crea(hotwords):
+    extra = dict(decoding_method='modified_beam_search', max_active_paths=4, hotwords_score=HOTWORDS_SCORE,
+                 modeling_unit='bpe', bpe_vocab=BPE_VOCAB) if hotwords else dict(decoding_method='greedy_search')
+    return sherpa_onnx.OfflineRecognizer.from_transducer(
+        encoder=os.path.join(MODEL_DIR, 'encoder.int8.onnx'),
+        decoder=os.path.join(MODEL_DIR, 'decoder.int8.onnx'),
+        joiner=os.path.join(MODEL_DIR, 'joiner.int8.onnx'),
+        tokens=os.path.join(MODEL_DIR, 'tokens.txt'),
+        num_threads=THREADS,
+        sample_rate=SR,
+        feature_dim=80,
+        model_type='nemo_transducer',
+        **extra,
+    )
+
+
+def hotwords_funzionano():
+    """Prova in un processo a parte: se la codifica delle hotwords facesse cadere sherpa-onnx
+    (errore in C++, non intercettabile) cadrebbe solo la prova e il servizio resterebbe su greedy."""
+    if os.environ.get('PARAKEET_HOTWORDS', '1') == '0':
+        return False
+    try:
+        prepara_vocab()
+        prova = ('import sys, numpy as np; sys.argv = ["x"]; import app; r = app.crea(True); '
+                 's = r.create_stream(hotwords="Projexa/TeamSystem Miroglio"); '
+                 's.accept_waveform(16000, np.zeros(16000, dtype=np.float32)); r.decode_streams([s]); print("ok")')
+        env = dict(os.environ, PARAKEET_PROVA='1')
+        out = subprocess.run([sys.executable, '-c', prova], cwd=os.path.dirname(os.path.abspath(__file__)),
+                             env=env, capture_output=True, text=True, timeout=300)
+        if out.returncode == 0 and 'ok' in out.stdout:
+            return True
+        print(f'[PARAKEET] hotwords non disponibili (codice {out.returncode}): {(out.stderr or "")[-300:]}', flush=True)
+    except Exception as e:
+        print(f'[PARAKEET] hotwords non disponibili: {e}', flush=True)
+    return False
+
+
+# Nel processo di prova (PARAKEET_PROVA) il modello non si carica qui: lo fa la prova con crea().
+HOTWORDS = False if os.environ.get('PARAKEET_PROVA') else hotwords_funzionano()
+recognizer = None if os.environ.get('PARAKEET_PROVA') else crea(HOTWORDS)
 # Una trascrizione alla volta: tutte usano gli stessi core, in parallelo sarebbero solo più lente.
 lock = threading.Lock()
 
@@ -90,13 +144,13 @@ def frasi(x):
     return pezzi
 
 
-def trascrivi(x):
+def trascrivi(x, hotwords=''):
     pezzi = frasi(x)
     if not pezzi:
         return []
     streams = []
     for _, campioni in pezzi:
-        s = recognizer.create_stream()
+        s = recognizer.create_stream(hotwords=hotwords) if (HOTWORDS and hotwords) else recognizer.create_stream()
         s.accept_waveform(SR, campioni)
         streams.append(s)
     recognizer.decode_streams(streams)
@@ -119,7 +173,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.rstrip('/') in ('', '/health'):
-            return self._json(200, {'ready': True, 'model': 'parakeet-tdt-0.6b-v3-int8', 'threads': THREADS})
+            return self._json(200, {'ready': True, 'model': 'parakeet-tdt-0.6b-v3-int8', 'threads': THREADS, 'hotwords': HOTWORDS})
         self._json(404, {'error': 'non trovato'})
 
     def do_POST(self):
@@ -132,12 +186,15 @@ class Handler(BaseHTTPRequestHandler):
             x = leggi_wav(self.rfile.read(n))
         except Exception as e:  # file non WAV o rovinato: errore del chiamante, non del servizio
             return self._json(400, {'error': f'audio non leggibile: {e}'})
+        # Hotwords: "parola/frase due/..." codificate con encodeURIComponent (header solo ASCII).
+        hw = unquote(self.headers.get('X-Hotwords') or '').strip()
         try:
             t0 = time.time()
             with lock:
-                segmenti = trascrivi(x)
+                segmenti = trascrivi(x, hw)
             durata = len(x) / SR
-            print(f'[PARAKEET] {durata:.1f} s di audio in {time.time() - t0:.1f} s, {len(segmenti)} frasi', flush=True)
+            n_hw = len([h for h in hw.split('/') if h.strip()]) if (HOTWORDS and hw) else 0
+            print(f'[PARAKEET] {durata:.1f} s di audio in {time.time() - t0:.1f} s, {len(segmenti)} frasi, {n_hw} hotwords', flush=True)
             self._json(200, {'segments': segmenti, 'duration': round(durata, 2)})
         except Exception as e:
             self._json(500, {'error': str(e)[:300]})
@@ -147,5 +204,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    print(f'[PARAKEET] pronto su 127.0.0.1:{PORT} ({THREADS} core)', flush=True)
+    print(f'[PARAKEET] pronto su 127.0.0.1:{PORT} ({THREADS} core, hotwords {"attive" if HOTWORDS else "spente"})', flush=True)
     ThreadingHTTPServer(('127.0.0.1', PORT), Handler).serve_forever()
