@@ -25,10 +25,12 @@ import { TIPI as TIPI_RECAP } from '../jobs/analisiRecap.js';
 import { proponiRevisione, applicaProposta } from '../jobs/revisionePrompt.js';
 import { istruzioniRecapProjexa } from './ai.js';
 import { pmProjexaInCorso } from '../config/ollamaPrecedenza.js';
+import { getPromptFor } from '../config/prompts.js';
 
 const router = express.Router();
 const QUI = path.dirname(fileURLToPath(import.meta.url));
 const NOTEBOOK = path.join(QUI, '..', 'prompts', 'colab_pm_projexa.ipynb');
+const NOTEBOOK_FILTRO = path.join(QUI, '..', 'prompts', 'colab_pm_projexa_filtro.ipynb');
 const NOTEBOOK_RECAP = path.join(QUI, '..', 'prompts', 'colab_recap_projexa.ipynb');
 const NOTEBOOK_RECAP_14B = path.join(QUI, '..', 'prompts', 'colab_recap_projexa_14b.ipynb');
 const OLLAMA_URL = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
@@ -38,6 +40,9 @@ const BASE = process.env.OLLAMA_RECAP_MODEL || 'qwen3:8b';
 // Base del 14B (Qwen3, 2026-10-20) per recap-projexa-14b addestrato.
 const BASE_14B = process.env.OLLAMA_FUNZIONI_14B_MODEL || 'qwen3:14b';
 const MODELLO_RECAP_14B = process.env.OLLAMA_RECAP_PROJEXA_14B_MODEL || 'recap-projexa-14b';
+// Filtro veloce addestrato dell'Assistente PM (voce «Projexa 4B + 8B», 2026-10-21).
+const MODELLO_FILTRO = process.env.OLLAMA_PM_FILTRO_4B_MODEL || 'pm-projexa-filtro';
+const BASE_FILTRO = process.env.OLLAMA_PM_FILTRO_4B_BASE || 'qwen3:4b-instruct';
 const CARTELLA_MODELLI = process.env.OLLAMA_MODELLI_DIR || path.join(os.homedir(), 'projexa-modelli');
 const MAX_ADATTATORE = 1.5 * 1024 * 1024 * 1024; // 1,5 GB
 const PEZZO_UPLOAD = 16 * 1024 * 1024;           // ogni parte del file caricato
@@ -173,8 +178,73 @@ async function esempiAddestramento(req) {
   return { esempi: out, corrette: corrette.length, riunioni: riunioni.length };
 }
 
+// --- Filtro veloce 4B (2026-10-21) ------------------------------------------------------------
+// Il filtro dell'Assistente («Projexa 4B + 8B») legge ogni pezzo e dice solo «SI n» / «NO»: le
+// etichette vengono dalle stesse valutazioni. Pezzo con domanda Corretta = «SI n» (n = segnale);
+// solo domande Errate o nessuna domanda = «NO»; domande ancora da valutare = pezzo escluso.
+// Stesso messaggio che il filtro riceve durante la call (routes/assistentePm.js).
+const FILTRO_PREC_CHARS = 500;
+const msgFiltro = (prec, nuovo) => `PEZZO PRECEDENTE (solo contesto):\n${prec || '(inizio riunione)'}\n\nPEZZO NUOVO:\n${nuovo}`;
+const chiavePezzo = (x) => `${x.id_calendar}|${x.pezzo}`;
+const md5 = (t) => crypto.createHash('md5').update(String(t)).digest('hex');
+
+async function esempiFiltro(req) {
+  const valutate = (await db.query(
+    `SELECT id_calendar, pezzo, segnale, suggerimento, testo_corretto, esito FROM pm_analisi
+      WHERE tenant_id = $1 AND user_id = $2 AND esito IS NOT NULL`, chi(req))).rows;
+  const tutte = new Set((await db.query('SELECT id_calendar, pezzo FROM pm_analisi WHERE tenant_id = $1 AND user_id = $2', chi(req))).rows.map(chiavePezzo));
+  const etichette = new Map(); // pezzo -> 'SI n' | 'NO' (una Corretta vale più di un'Errata)
+  for (const x of valutate) {
+    if (x.esito === 'corretta') {
+      const m = String(x.testo_corretto || x.suggerimento || '').match(FORMATO_RE);
+      const n = m ? Number(m[2]) : Number(x.segnale) || 0;
+      etichette.set(chiavePezzo(x), n ? `SI ${n}` : 'SI');
+    } else if (!etichette.has(chiavePezzo(x))) etichette.set(chiavePezzo(x), 'NO');
+  }
+  const si = [];
+  const no = [];
+  const riunioni = [...new Set(valutate.map((x) => x.id_calendar))];
+  for (const id of riunioni) {
+    const m = (await db.query('SELECT trascrizione FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3', [...chi(req), id])).rows[0];
+    const lista = pezzi(m && m.trascrizione);
+    lista.forEach((t, i) => {
+      const k = `${id}|${i}`;
+      const risposta = etichette.get(k) || (tutte.has(k) ? null : 'NO');
+      if (!risposta) return;
+      (risposta === 'NO' ? no : si).push({ precedente: i ? lista[i - 1].slice(-FILTRO_PREC_CHARS) : '', nuovo: t, risposta });
+    });
+  }
+  // NO in ordine casuale ma ripetibile; al massimo il doppio dei SI (il filtro deve imparare a
+  // NON perdere i segnali: troppi NO lo renderebbero muto).
+  const ordinati = no.sort((a, b) => md5(a.nuovo).localeCompare(md5(b.nuovo)));
+  return { si, no: ordinati.slice(0, Math.max(si.length * 2, 20)), riunioni: riunioni.length };
+}
+
+// Pochi esempi brevi per le istruzioni del filtro (pm_projexa_esempi, campo «filtro»): segnali
+// diversi a rotazione + qualche NO. Stanno nel contesto del 4B (num_ctx 6144).
+function esempiFiltroBrevi({ si, no }) {
+  const corto = (t) => { const s = String(t || '').replace(/\s+/g, ' ').trim(); return s.length > 500 ? `…${s.slice(-500)}` : s; };
+  const perSegnale = new Map();
+  for (const x of si) { const n = x.risposta; if (!perSegnale.has(n)) perSegnale.set(n, []); perSegnale.get(n).push(x); }
+  const scelti = [];
+  for (let giro = 0; scelti.length < 6 && [...perSegnale.values()].some((l) => l.length > giro); giro++) {
+    for (const l of perSegnale.values()) if (l[giro] && scelti.length < 6) scelti.push(l[giro]);
+  }
+  return [...scelti, ...no.slice(0, 5)].map((x) => ({ pezzo: corto(x.nuovo), risposta: x.risposta }));
+}
+
 router.get('/scarica', async (req, res) => {
   try {
+    if (req.query.famiglia === 'filtro') {
+      const { si, no } = await esempiFiltro(req);
+      if (!si.length) throw errore(400, 'Nessuna domanda segnata come corretta: il filtro non ha esempi di SI');
+      const sistema = (await getPromptFor('PM_PROJEXA_FILTRO', req.user)).testo;
+      const righe = [...si, ...no].map((x) => JSON.stringify({ messages: [
+        { role: 'system', content: sistema }, { role: 'user', content: msgFiltro(x.precedente, x.nuovo) }, { role: 'assistant', content: x.risposta }] }));
+      res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="pm_projexa_filtro_addestramento_${new Date().toISOString().slice(0, 10)}.jsonl"`);
+      return res.send(righe.join('\n') + '\n');
+    }
     const { esempi } = await esempiAddestramento(req);
     if (!esempi.length) throw errore(400, 'Nessuna domanda valutata: segna prima le domande corrette ed errate');
     const righe = esempi.map((x) => JSON.stringify({ messages: [
@@ -185,14 +255,18 @@ router.get('/scarica', async (req, res) => {
   } catch (e) { rispondiErrore(res, e, 'download'); }
 });
 
+// Query famiglia=filtro: notebook del filtro 4B (pm-projexa-filtro, Qwen3 4B Instruct).
 router.get('/notebook', (req, res) => {
+  const filtro = req.query.famiglia === 'filtro';
   res.setHeader('Content-Type', 'application/x-ipynb+json; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="addestra_pm_projexa.ipynb"');
-  fs.createReadStream(NOTEBOOK).on('error', (e) => rispondiErrore(res, e, 'notebook')).pipe(res);
+  res.setHeader('Content-Disposition', `attachment; filename="addestra_pm_projexa${filtro ? '_filtro' : ''}.ipynb"`);
+  fs.createReadStream(filtro ? NOTEBOOK_FILTRO : NOTEBOOK).on('error', (e) => rispondiErrore(res, e, 'notebook')).pipe(res);
 });
 
 // Domande corrette subito come esempi di Pm projexa (senza addestramento): nuova versione attiva
 // in pm_projexa_esempi (letta da routes/assistentePm.js, esempiAddestramento). Max 24 + 10 silenzi.
+// Nella stessa versione gli esempi «SI n» / «NO» del filtro 4B (esempiFiltroBrevi): il campo
+// esempi diventa { pm: [...], filtro: [...] } (le versioni vecchie restano un elenco = solo pm).
 router.post('/esempi', async (req, res) => {
   try {
     const { esempi, riunioni } = await esempiAddestramento(req);
@@ -201,7 +275,8 @@ router.post('/esempi', async (req, res) => {
     const silenzi = esempi.filter((x) => !FORMATO_RE.test(x.risposta)).slice(0, 10);
     const pacchetto = [...utili, ...silenzi].map((x) => ({ tratto: corti(x.tratto), risposta: x.risposta }));
     if (!utili.length) throw errore(400, 'Nessuna domanda segnata come corretta');
-    const { data } = await encryptRowForWrite(db, 'pm_projexa_esempi', { esempi: JSON.stringify(pacchetto), note: 'Da Analisi PM' });
+    const filtro = esempiFiltroBrevi(await esempiFiltro(req));
+    const { data } = await encryptRowForWrite(db, 'pm_projexa_esempi', { esempi: JSON.stringify({ pm: pacchetto, filtro }), note: 'Da Analisi PM' });
     const client = await db.connect();
     try {
       await client.query('BEGIN');
@@ -212,7 +287,7 @@ router.post('/esempi', async (req, res) => {
          VALUES ($1, $2, true, $3, $4, $5, $6, $7, $8)`,
         [req.user.tenant_id, v, pacchetto.length, riunioni, data.note, data.esempi, req.user.email, data.crypto ?? 0]);
       await client.query('COMMIT');
-      res.json({ ok: true, versione: v, esempi: pacchetto.length });
+      res.json({ ok: true, versione: v, esempi: pacchetto.length, esempiFiltro: filtro.length });
     } catch (e) {
       await client.query('ROLLBACK').catch(() => {});
       throw e;
@@ -405,7 +480,8 @@ router.post('/recap/proposte/:id/scarta', async (req, res) => {
 });
 
 // --- Modelli su Ollama della VM -------------------------------------------------------------
-// famiglia (query, body): 'pm' = pm-projexa (Assistente PM), 'recap' = recap-projexa (Recap
+// famiglia (query, body): 'pm' = pm-projexa (Assistente PM), 'filtro' = pm-projexa-filtro (filtro
+// 4B dell'Assistente, base qwen3:4b-instruct), 'recap' = recap-projexa (Recap
 // cliente e interno, 7B), 'recap14' = recap-projexa-14b (voce «Projexa 14B», base Qwen3 14B).
 // Stessa procedura: backup, creazione da base + adattatore, prova.
 const PROVA_RECAP = [{ role: 'user', content: 'Scrivi in una riga gli appunti di questo pezzo di riunione:\nMario Rossi: il file delle causali ve lo mandiamo entro venerdì.' }];
@@ -419,6 +495,13 @@ const FAMIGLIE = {
     nome: MODELLO, base: BASE,
     parametri: ['PARAMETER num_ctx 8192', 'PARAMETER temperature 0.2', 'PARAMETER top_p 0.9', 'PARAMETER repeat_penalty 1.1', 'PARAMETER num_predict 90'],
     prova: [{ role: 'user', content: 'TRASCRIZIONE (nuovo tratto della riunione):\nIl file delle causali ve lo mandiamo a breve.' }]
+  },
+  // Filtro 4B: stessi parametri delle chiamate di routes/assistentePm.js (contesto fisso 6144,
+  // risposta di pochi token). La prova è un pezzo con un segnale evidente.
+  filtro: {
+    nome: MODELLO_FILTRO, base: BASE_FILTRO,
+    parametri: ['PARAMETER num_ctx 6144', 'PARAMETER temperature 0', 'PARAMETER num_predict 6'],
+    prova: [{ role: 'user', content: msgFiltro('', 'Cliente: il file delle causali ve lo mandiamo a breve.') }]
   },
   recap: {
     nome: MODELLO_RECAP, base: BASE,

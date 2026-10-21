@@ -287,6 +287,8 @@ const USO_MODELLO = [
   [/^recap-projexa-14b/, 'Recap con «Projexa 14B»'],
   [/^recap-projexa-bk-/, 'backup del recap'],
   [/^recap-projexa/, 'Recap con «Projexa» (8B)'],
+  [/^pm-projexa-filtro-bk-/, 'backup del filtro 4B dell\'Assistente PM'],
+  [/^pm-projexa-filtro/, 'filtro 4B addestrato dell\'Assistente PM («Projexa 4B + 8B»)'],
   [/^pm-projexa-bk-/, 'backup dell\'Assistente PM'],
   [/^pm-projexa/, 'Assistente PM (Pm projexa, 8B)'],
   [/^qwen2\.5:3b/, 'filtro veloce dell\'Assistente PM («Projexa 3B + 8B»)'],

@@ -78,7 +78,9 @@ const AI_SUPPORTATE = {
   // Voci con il filtro scelto dall'utente (2026-10-20, per le prove): il modello che scrive è
   // sempre pm-projexa (Qwen3 8B); cambia il filtro veloce davanti. «Projexa» = filtro del .env.
   'projexa 3b + 8b': { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA', filtro: 'qwen2.5:3b' },
-  'projexa 4b + 8b': { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA', filtro: 'qwen3:4b-instruct' }
+  // 4B (2026-10-21): l'unico filtro che impara. Usa pm-projexa-filtro (addestrato da Analisi PM)
+  // e, finché non c'è sulla VM, la base qwen3:4b-instruct; riceve gli esempi «SI n» / «NO».
+  'projexa 4b + 8b': { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA', filtro: process.env.OLLAMA_PM_FILTRO_4B_MODEL || 'pm-projexa-filtro', filtroRiserva: process.env.OLLAMA_PM_FILTRO_4B_BASE || 'qwen3:4b-instruct', esempiFiltro: true }
 };
 // Voce del campo -> chiave di AI_SUPPORTATE («Projexa 4B+8B», «projexa  4b + 8B» -> 'projexa 4b + 8b').
 const chiaveAi = (v) => String(v || '').toLowerCase().replace(/\s*\+\s*/g, ' + ').replace(/\s+/g, ' ').trim();
@@ -134,6 +136,9 @@ const OLLAMA_PM_FILTRO_MODEL = (() => {
 })();
 // Contesto fisso anche qui (cache del prompt): istruzioni brevi + pezzo precedente + nuovo.
 const OLLAMA_PM_FILTRO_OPZIONI = { num_thread: OLLAMA_PM_THREADS, num_ctx: 4096, temperature: 0, num_predict: 6 };
+// Filtro 4B con gli esempi di Analisi PM nelle istruzioni (~2.000 token in più): stesso valore
+// di PARAMETER num_ctx del modello pm-projexa-filtro (routes/analisiPm.js, FAMIGLIE.filtro).
+const OLLAMA_PM_FILTRO_CTX_ESEMPI = 6144;
 // «SI n», «NO» oppure solo «n» (il 3B a volte scrive solo il numero del segnale = SI).
 const FILTRO_RE = /^\W*(SI|SÌ|NO|(?=\d))(?![a-zà-ú])\s*\[?\s*(\d{1,2})?/i;
 // Una richiesta alla volta verso Ollama (sulla VM gira 1 richiesta per volta comunque).
@@ -300,6 +305,8 @@ async function esempiAddestramento(user) {
   if (!r) return '';
   let esempi = [];
   try { esempi = JSON.parse(r.esempi); } catch { return ''; }
+  // Dal 2026-10-21 { pm: [...], filtro: [...] }; le versioni precedenti sono solo l'elenco pm.
+  if (esempi && !Array.isArray(esempi)) esempi = esempi.pm;
   const righe = (Array.isArray(esempi) ? esempi : []).slice(0, 40).map((x) => {
     const tratto = String(x.tratto || '').replace(/\s+/g, ' ').trim();
     const risposta = String(x.risposta || '').replace(/\s+/g, ' ').trim();
@@ -307,6 +314,28 @@ async function esempiAddestramento(user) {
   }).filter(Boolean);
   if (!righe.length) return '';
   return ['', `ESEMPI DA RIUNIONI VERE, RIVISTI DA CHI TI USA (versione ${r.versione}): comportati così, anche quando la risposta giusta è "Nessun suggerimento."`, ...righe].join('\n');
+}
+
+// Esempi del filtro 4B dalla stessa versione attiva (campo «filtro», creato da Analisi PM › Usa
+// le corrette come esempi): pezzi brevi con la risposta giusta, «SI n» o «NO». In fondo alle
+// istruzioni del filtro: cambiano solo a una nuova versione, quindi restano in cache.
+async function esempiFiltro(user) {
+  let r;
+  try {
+    r = (await db.query('SELECT versione, esempi FROM pm_projexa_esempi WHERE tenant_id = $1 AND attivo LIMIT 1', [user.tenant_id])).rows[0];
+  } catch (e) {
+    if (e.code !== '42P01') console.warn(`[ASSISTENTE PM] esempi del filtro non letti (${e.message})`);
+    return '';
+  }
+  let esempi = null;
+  try { esempi = r && JSON.parse(r.esempi); } catch { return ''; }
+  const righe = (esempi && Array.isArray(esempi.filtro) ? esempi.filtro : []).slice(0, 12).map((x) => {
+    const pezzo = String(x.pezzo || '').replace(/\s+/g, ' ').trim();
+    const risposta = String(x.risposta || '').trim();
+    return pezzo && /^(SI|NO)\b/.test(risposta) ? `PEZZO NUOVO: "${pezzo}" -> ${risposta}` : null;
+  }).filter(Boolean);
+  if (!righe.length) return '';
+  return ['', '', `ESEMPI DA RIUNIONI VERE, RIVISTI DA CHI TI USA (versione ${r.versione}): rispondi così nei casi simili.`, ...righe].join('\n');
 }
 
 // Esempi dai voti 👍/👎 dell'utente (fino a ieri: durante la giornata le istruzioni restano
@@ -725,7 +754,14 @@ function prossimo(s) {
 // OLLAMA_PM_FILTRO_MODEL), con le sue opzioni.
 async function chiamaOllama(s, messages, opzioni = {}, { filtro = false } = {}) {
   if (filtro) {
-    const r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, { model: s.filtroModello, messages, stream: false, think: false, keep_alive: OLLAMA_PM_KEEP_ALIVE, options: OLLAMA_PM_FILTRO_OPZIONI }, OLLAMA_PM_TIMEOUT_MS, { signal: s.annulla && s.annulla.signal });
+    const corpoF = () => ({ model: s.filtroModello, messages, stream: false, think: false, keep_alive: OLLAMA_PM_KEEP_ALIVE, options: s.filtroOpzioni || OLLAMA_PM_FILTRO_OPZIONI });
+    let r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, corpoF(), OLLAMA_PM_TIMEOUT_MS, { signal: s.annulla && s.annulla.signal });
+    // Filtro addestrato non ancora installato sulla VM: si usa la sua base.
+    if (r.status === 404 && /not found|pull/i.test(String((r.data && r.data.error) || '')) && s.filtroRiserva && s.filtroModello !== s.filtroRiserva) {
+      console.warn(`[ASSISTENTE PM] ${s.idCalendar}: filtro ${s.filtroModello} assente su Ollama, uso ${s.filtroRiserva}`);
+      s.filtroModello = s.filtroRiserva;
+      r = await ollamaPost(`${OLLAMA_PM_URL}/api/chat`, corpoF(), OLLAMA_PM_TIMEOUT_MS, { signal: s.annulla && s.annulla.signal });
+    }
     if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
     const d = r.data || {};
     return { testo: senzaRagionamento(d.message && d.message.content), letti: Number(d.prompt_eval_count) || 0, secondi: Math.round((Number(d.total_duration) || 0) / 1e9) };
@@ -1073,6 +1109,7 @@ router.post('/avvia', requireAuth, async (req, res) => {
     let istruzioniFiltro = '';
     if (filtroDi(ai)) {
       try { istruzioniFiltro = (await getPromptFor('PM_PROJEXA_FILTRO', req.user)).testo; } catch (e) { console.warn(`[ASSISTENTE PM] ${idCalendar}: prompt del filtro non letto (${e.message}): lavorerà solo il modello grande`); }
+      if (istruzioniFiltro && ai.esempiFiltro) istruzioniFiltro += await esempiFiltro(req.user);
     }
     const vecchia = sessioni.get(k);
     if (vecchia) chiudi(vecchia); // registrazione ripresa: sessione nuova
@@ -1097,7 +1134,9 @@ router.post('/avvia', requireAuth, async (req, res) => {
       // Pm projexa: la conversazione parte dal contesto della riunione (dopo le istruzioni fisse).
       storia: ai.locale ? [{ role: 'user', content: testoIstruzioni.contesto }, { role: 'assistant', content: 'Nessun suggerimento.' }] : [],
       giaDetti: [], timerTratto: null, errori: 0,
-      istruzioniFiltro, trattoPrec: '', filtrati: 0, filtroModello: filtroDi(ai),
+      istruzioniFiltro, trattoPrec: '', filtrati: 0, filtroModello: filtroDi(ai), filtroRiserva: ai.filtroRiserva || '',
+      // Filtro con esempi (4B): istruzioni più lunghe, contesto più ampio (fisso per quel modello).
+      filtroOpzioni: { ...OLLAMA_PM_FILTRO_OPZIONI, num_ctx: ai.esempiFiltro ? OLLAMA_PM_FILTRO_CTX_ESEMPI : OLLAMA_PM_FILTRO_OPZIONI.num_ctx },
       // Voci aperte del progetto da collegare ai tratti (solo Pm projexa) e già proposte.
       vociProgetto: ai.locale ? (testoIstruzioni.voci || []) : [], vociCitate: new Set(),
       // Voti 👍/👎: pezzo di riunione di ogni suggerimento (n -> { tratto, completo, domanda }) e voto dato.

@@ -124,7 +124,7 @@
     <section id="t-addestra" class="hidden">
         <div class="card">
             <h2>Subito, senza addestramento</h2>
-            <p class="muted">Le domande che hai segnato come corrette diventano esempi nelle istruzioni di Pm projexa (fino a 24, più 10 casi in cui stare zitto), dalla prossima call.</p>
+            <p class="muted">Le domande che hai segnato come corrette diventano esempi nelle istruzioni di Pm projexa (fino a 24, più 10 casi in cui stare zitto), dalla prossima call. Nella stessa versione nascono anche gli esempi del <b>filtro 4B</b> (voce «Projexa 4B + 8B»): fino a 6 pezzi con «SI n», di segnali diversi, e 5 con «NO».</p>
             <div class="riga" style="margin-top:0.6rem">
                 <button class="btn pri" id="usaEsempi"><i class="fas fa-wand-magic-sparkles"></i> Usa le corrette come esempi per Pm projexa</button>
                 <select id="versioniEsempi"></select>
@@ -149,6 +149,15 @@
                 <li>Caricalo nella scheda <b>Modello sulla VM</b>.</li>
             </ol>
             <p class="muted" style="margin-top:0.6rem">Il file degli esempi contiene pezzi delle tue riunioni: Colab gratuito è un servizio Google, valuta tu se è compatibile con le regole aziendali. Il file puoi darlo anche a Claude o ChatGPT (account enterprise) per farti aiutare a sistemare il notebook se dà errori: il calcolo però va fatto su una GPU come quella di Colab.</p>
+        </div>
+        <div class="card">
+            <h2>Addestramento del filtro 4B (voce «Projexa 4B + 8B»)</h2>
+            <p class="muted">Il filtro è il modello piccolo che legge ogni pezzo di riunione e decide se passarlo a Pm projexa: se sbaglia con un «NO», il suggerimento non arriva mai. Impara dalle stesse valutazioni: pezzo con una domanda <b>Corretta</b> = «SI n»; pezzo con domande solo <b>Errate</b> o senza domande = «NO»; i pezzi con domande ancora da valutare sono esclusi. Stessa procedura di sopra (GPU T4, Esegui tutto, carichi il .jsonl del filtro); alla fine si scarica <code>pm-projexa-filtro-adapter.gguf</code>: caricalo nella scheda <b>Modello sulla VM</b> scegliendo <b>pm-projexa-filtro</b>. Il notebook stampa quanti SI e NO riconosce su esempi tenuti da parte. Consigliato con almeno 50-100 domande corrette.</p>
+            <div class="riga" style="margin-top:0.8rem">
+                <button class="btn pri" id="fScarica"><i class="fas fa-download"></i> 1. Scarica gli esempi del filtro (.jsonl)</button>
+                <button class="btn" id="fNotebook"><i class="fas fa-book"></i> 2. Notebook del filtro 4B (.ipynb)</button>
+                <a class="btn" href="https://colab.research.google.com/" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> 3. Apri Google Colab</a>
+            </div>
         </div>
     </section>
 
@@ -214,6 +223,7 @@
             <div class="riga" style="margin-bottom:0.6rem">
                 <select id="famiglia">
                     <option value="pm">pm-projexa — Assistente PM</option>
+                    <option value="filtro">pm-projexa-filtro — Filtro 4B dell'Assistente PM (Qwen3 4B)</option>
                     <option value="recap">recap-projexa — Recap con «Projexa» (8B)</option>
                     <option value="recap14">recap-projexa-14b — Recap con «Projexa 14B» (Qwen3 14B)</option>
                 </select>
@@ -225,7 +235,7 @@
             </div>
             <div class="bar hidden" id="barra"><div></div></div>
             <div id="avanz" class="muted" style="margin-top:0.4rem"></div>
-            <p class="muted" style="margin-top:0.6rem">Projexa fa il <b>backup</b> del modello attuale, crea il nuovo modello scelto sopra (base qwen3:8b + il tuo adattatore, stessi parametri) e lo prova: se qualcosa non va torna da solo al precedente. Non si può fare mentre l'Assistente PM con Projexa è in uso (la VM lavora un paio di minuti).</p>
+            <p class="muted" style="margin-top:0.6rem">Projexa fa il <b>backup</b> del modello attuale, crea il nuovo modello scelto sopra (la sua base — qwen3:8b, qwen3:14b o qwen3:4b-instruct per il filtro — + il tuo adattatore, stessi parametri) e lo prova: se qualcosa non va torna da solo al precedente. Non si può fare mentre l'Assistente PM con Projexa è in uso (la VM lavora un paio di minuti).</p>
         </div>
         <div class="card">
             <h2>Modelli <span id="nomeFamiglia">pm-projexa</span> sulla VM</h2>
@@ -371,11 +381,13 @@
     }
     $('usaEsempi').onclick = async () => {
         if (!confirm('Creare una nuova versione di esempi dalle domande corrette e renderla attiva per Pm projexa?')) return;
-        try { const r = await api('POST', '/esempi', {}); avviso(`Versione ${r.versione} attiva con ${r.esempi} esempi: Pm projexa la usa dalla prossima call.`); caricaEsempi(); } catch (e) { errore(e); }
+        try { const r = await api('POST', '/esempi', {}); avviso(`Versione ${r.versione} attiva con ${r.esempi} esempi per Pm projexa e ${r.esempiFiltro || 0} per il filtro 4B: si usano dalla prossima call.`); caricaEsempi(); } catch (e) { errore(e); }
     };
     $('attivaEsempi').onclick = async () => { try { await api('POST', '/esempi/attiva', { versione: Number($('versioniEsempi').value) }); avviso('Fatto.'); caricaEsempi(); } catch (e) { errore(e); } };
     $('scarica').onclick = () => scaricaFile('/scarica', 'pm_projexa_addestramento.jsonl').catch(errore);
     $('notebook').onclick = () => scaricaFile('/notebook', 'addestra_pm_projexa.ipynb').catch(errore);
+    $('fScarica').onclick = () => scaricaFile('/scarica?famiglia=filtro', 'pm_projexa_filtro_addestramento.jsonl').catch(errore);
+    $('fNotebook').onclick = () => scaricaFile('/notebook?famiglia=filtro', 'addestra_pm_projexa_filtro.ipynb').catch(errore);
 
     // --- Modello sulla VM ---
     async function caricaModelli() {
@@ -386,9 +398,9 @@
                 <td><b>${esc(m.nome)}</b> ${m.attuale ? '<span class="badge b-ok">in uso</span>' : m.backup ? '<span class="badge">backup</span>' : ''}</td>
                 <td>${(m.dimensione / 1e9).toLocaleString('it-IT', { maximumFractionDigits: 1 })} GB</td><td>${dataOra(m.modificato)}</td>
                 <td>${m.backup ? `<button class="btn" data-ripristina="${esc(m.nome)}"><i class="fas fa-rotate-left"></i> Ripristina</button> <button class="btn danger" data-elimina="${esc(m.nome)}"><i class="fas fa-trash"></i> Elimina</button>` : ''}</td></tr>`).join('')
-                || `<tr><td colspan="4" class="muted">Nessun modello ${esc(d.nome)} sulla VM${fam() === 'recap' ? ' (finché manca, il recap con Projexa usa qwen3:8b: crealo con deploy/oracle/ollama/recap-projexa.Modelfile)' : fam() === 'recap14' ? ' (finché manca, «Projexa 14B» usa recap-projexa: crealo con deploy/oracle/ollama/recap-projexa-14b.Modelfile)' : ''}.</td></tr>`;
+                || `<tr><td colspan="4" class="muted">Nessun modello ${esc(d.nome)} sulla VM${fam() === 'recap' ? ' (finché manca, il recap con Projexa usa qwen3:8b: crealo con deploy/oracle/ollama/recap-projexa.Modelfile)' : fam() === 'recap14' ? ' (finché manca, «Projexa 14B» usa recap-projexa: crealo con deploy/oracle/ollama/recap-projexa-14b.Modelfile)' : fam() === 'filtro' ? ' (finché manca, «Projexa 4B + 8B» usa qwen3:4b-instruct con gli esempi: nasce col primo adattatore caricato qui)' : ''}.</td></tr>`;
             const n = d.note && d.note[d.nome];
-            $('notaModello').textContent = n ? `Ultima installazione: ${dataOra(n.installato)}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : `${d.nome} è ancora il modello di partenza (qwen3:8b senza addestramento). I backup occupano poco spazio: la base qwen3:8b è condivisa.`;
+            $('notaModello').textContent = n ? `Ultima installazione: ${dataOra(n.installato)}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : `${d.nome} è ancora il modello di partenza (${d.base} senza addestramento). I backup occupano poco spazio: la base ${d.base} è condivisa.`;
         } catch (e) { $('modelli').innerHTML = `<tr><td colspan="4" class="muted">${esc(e.message)}</td></tr>`; }
     }
     $('modelli').onclick = async (e) => {
@@ -429,7 +441,7 @@
     };
 
     const fam = () => $('famiglia').value;
-    const NOMI_FAMIGLIA = { pm: 'pm-projexa', recap: 'recap-projexa', recap14: 'recap-projexa-14b' };
+    const NOMI_FAMIGLIA = { pm: 'pm-projexa', filtro: 'pm-projexa-filtro', recap: 'recap-projexa', recap14: 'recap-projexa-14b' };
     $('famiglia').onchange = caricaModelli;
 
     // --- Recap (insegnante notturno di recap-projexa, jobs/analisiRecap.js) ---
