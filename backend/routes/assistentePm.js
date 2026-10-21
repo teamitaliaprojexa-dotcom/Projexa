@@ -80,7 +80,11 @@ const AI_SUPPORTATE = {
   'projexa 3b + 8b': { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA', filtro: 'qwen2.5:3b' },
   // 4B (2026-10-21): l'unico filtro che impara. Usa pm-projexa-filtro (addestrato da Analisi PM)
   // e, finché non c'è sulla VM, la base qwen3:4b-instruct; riceve gli esempi «SI n» / «NO».
-  'projexa 4b + 8b': { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA', filtro: process.env.OLLAMA_PM_FILTRO_4B_MODEL || 'pm-projexa-filtro', filtroRiserva: process.env.OLLAMA_PM_FILTRO_4B_BASE || 'qwen3:4b-instruct', esempiFiltro: true }
+  'projexa 4b + 8b': { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA', filtro: process.env.OLLAMA_PM_FILTRO_4B_MODEL || 'pm-projexa-filtro', filtroRiserva: process.env.OLLAMA_PM_FILTRO_4B_BASE || 'qwen3:4b-instruct', esempiFiltro: true },
+  // Stessa voce, ma i blocchi li trascrive Gemini (2026-10-21): alla call Miroglio il Whisper
+  // della VM andava a metà della velocità del parlato e la CPU serve tutta a 4B e 8B. Richiede
+  // la chiave di Gemini; se Gemini non risponde il blocco va al Whisper dell'assistente.
+  'projexa 4b + 8b (gemini trascrive)': { provider: 'Projexa', locale: true, prompt: 'PM_PROJEXA', filtro: process.env.OLLAMA_PM_FILTRO_4B_MODEL || 'pm-projexa-filtro', filtroRiserva: process.env.OLLAMA_PM_FILTRO_4B_BASE || 'qwen3:4b-instruct', esempiFiltro: true, trascriveGemini: true }
 };
 // Voce del campo -> chiave di AI_SUPPORTATE («Projexa 4B+8B», «projexa  4b + 8B» -> 'projexa 4b + 8b').
 const chiaveAi = (v) => String(v || '').toLowerCase().replace(/\s*\+\s*/g, ' + ').replace(/\s+/g, ' ').trim();
@@ -1058,6 +1062,11 @@ async function aiUtente(user) {
   if (!conf.attiva) return null;
   const ai = AI_SUPPORTATE[chiaveAi(conf.ai)];
   if (!ai) throw errore(400, `Assistente PM: «${conf.ai}» non è ancora supportata (per ora Gemini e Projexa)`);
+  if (ai.trascriveGemini) {
+    // Pm projexa con la trascrizione di Gemini: serve la chiave solo per trascrivere.
+    const el = await getIntegration(user.user_id, 'Gemini');
+    if (!el.gemini_api_key) throw errore(428, 'Assistente PM: «Gemini trascrive» richiede la chiave API di Gemini (Impostazioni › AI)');
+  }
   if (ai.locale) return { ai, apiKey: null }; // Ollama della VM: nessuna chiave
   const el = await getIntegration(user.user_id, ai.provider);
   const apiKey = el[`${ai.prefix}_api_key`];
@@ -1144,6 +1153,7 @@ router.post('/avvia', requireAuth, async (req, res) => {
       messaggi: [], seq: 0, ultimoUso: Date.now(), blocchi: Promise.resolve(),
       // Pm projexa (Ollama): conversazione, suggerimenti già dati, attesa del tratto completo.
       motore: ai.locale ? 'projexa' : 'gemini', aiNome: ai.provider, modelloOllama: OLLAMA_PM_MODEL,
+      trascriveGemini: !!ai.trascriveGemini, // blocchi trascritti da Gemini invece che da Whisper
       // Pm projexa: la conversazione parte dal contesto della riunione (dopo le istruzioni fisse).
       storia: ai.locale ? [{ role: 'user', content: testoIstruzioni.contesto }, { role: 'assistant', content: 'Nessun suggerimento.' }] : [],
       giaDetti: [], timerTratto: null, errori: 0,
@@ -1268,7 +1278,7 @@ router.post('/blocco', requireAuth, (req, res) => {
   s.blocchi = s.blocchi.then(async () => {
     if (s.chiusa) { s.bloccoInCoda -= 1; return; }
     try {
-      const testo = await trascriviBloccoBreve(user, s.idCalendar, { audioB64: audio, energy, offset });
+      const testo = await trascriviBloccoBreve(user, s.idCalendar, { audioB64: audio, energy, offset, gemini: s.trascriveGemini });
       if (!testo || s.chiusa) return;
       aggiungi(s, 'trascrizione', testo);
       // Pm projexa unisce più blocchi in un tratto e mette lui l'intestazione.
@@ -1444,7 +1454,7 @@ router.get('/export', requireAuth, async (req, res) => {
     const children = [
       new Paragraph({ text: `Assistente PM – ${s.titolo}`, heading: HeadingLevel.TITLE }),
       new Paragraph({ spacing: { after: 240 }, children: [new TextRun({
-        text: `Riunione del ${giorno} · ${s.modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.motore === 'projexa' ? `Pm projexa (${s.modelloOllama}${s.filtroModello ? ` + filtro ${s.filtroModello}` : ''})` : MODELLI[s.modelloIdx]}`, color: '6B7280' })] }),
+        text: `Riunione del ${giorno} · ${s.modalita === 'audio' ? 'Audio live' : 'Testo'} · ${s.motore === 'projexa' ? `Pm projexa (${s.modelloOllama}${s.filtroModello ? ` + filtro ${s.filtroModello}` : ''}${s.trascriveGemini ? ', trascrizione Gemini' : ''})` : MODELLI[s.modelloIdx]}`, color: '6B7280' })] }),
       new Paragraph({ spacing: { after: 240 }, children: [new TextRun({ text: numeri.join(' · '), color: '6B7280' })] }),
       new Paragraph({ text: 'Suggerimenti dell\'assistente', heading: HeadingLevel.HEADING_1 }),
       ...(suggerimenti.length ? suggerimenti.map((m) => riga(m, m.tipo === 'utente' ? 'Tu' : 'Assistente')) : [vuoto(nessuno)]),

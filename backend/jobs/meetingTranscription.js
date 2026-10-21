@@ -350,14 +350,28 @@ async function transcribeJob(job, baseUrl) {
 // ASSISTENTE_PM_WHISPER_CPP_URL (solo sviluppo in locale): whisper.cpp della VM raggiunto con
 // il tunnel SSH (deploy/oracle/db-tunnel.ps1, porta 18101). Vale SOLO per l'assistente: la coda
 // della trascrizione normale continua a usare WHISPER_URL / WHISPER_CPP_URL.
-export async function trascriviBloccoBreve(user, idCalendar, { audioB64, energy, offset }) {
+// gemini = true (voce «Projexa 4B + 8B (Gemini trascrive)», 2026-10-21): il blocco lo trascrive
+// Gemini (stessa corsia della «Modalità Trascrizione» Gemini), così la CPU della VM resta tutta
+// ai modelli dell'assistente; se Gemini non risponde si usa il Whisper dell'assistente (non
+// quello della coda, che con large-v3-turbo sarebbe troppo lento).
+export async function trascriviBloccoBreve(user, idCalendar, { audioB64, energy, offset, gemini = false }) {
   const dedicato = String(process.env.ASSISTENTE_PM_WHISPER_CPP_URL || '').trim().replace(/\/+$/, '');
   const base = whisperCppUrls()[0] || whisperUrls()[0] || null;
   const e = energy || {};
   const me = e.mic ? await speakerName(user) : '';
   const prompt = await buildWhisperPrompt(user, idCalendar, e.names || []);
   const audio = Buffer.from(audioB64, 'base64');
-  const r = dedicato
+  let r = null;
+  if (gemini) {
+    try {
+      const el = await getIntegration(user.user_id, 'Gemini');
+      if (!el.gemini_api_key) throw new Error('chiave API di Gemini non collegata');
+      r = await transcribeAudioGemini(el.gemini_api_key, audio, 'audio/wav', String(prompt || '').replace(PROMPT_STYLE, '').trim());
+    } catch (err) {
+      console.warn(`[ASSISTENTE PM] ${idCalendar}: Gemini non ha trascritto il blocco (${err.message}): uso Whisper`);
+    }
+  }
+  if (!r) r = dedicato
     ? await transcribeAudioCpp(dedicato, audio, 'audio/wav', prompt)
     : await transcribeAudio(user.user_id, audio, 'audio/wav', base, prompt);
   const lines = r.segments.map((seg) => {
@@ -666,7 +680,7 @@ export async function generateRecap(user, idCalendar, { origine = null, ai = nul
   try {
     result = local === 'server'
       ? await askOllamaRecap((text) => buildRecapPrompt(user, { ...vars, TRASCRIZIONE: text }), transcript,
-        { meeting: true, contesto: vars.OGGETTO, ai: providerName })
+        { meeting: true, contesto: vars.OGGETTO, ai: providerName, cosa: 'Recap cliente', chiave: `${user.tenant_id}|${user.user_id}|${idCalendar}`, tipo: 'recap' })
       : await askAiProvider(user.user_id, providerName, await buildRecapPrompt(user, { ...vars, TRASCRIZIONE: transcript }));
   } finally {
     recapRunning.delete(key);

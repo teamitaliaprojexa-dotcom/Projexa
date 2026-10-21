@@ -30,6 +30,7 @@ import { conContestoAudit } from '../config/auditContext.js';
 import { risolviAi, OPERAZIONI } from '../config/aiFunzioni.js';
 import { inviaBatchAi, statoBatchAi, askAiProvider, isBatchNonDisponibile, modelloFunzioni } from '../routes/ai.js';
 import { vmOccupata } from '../config/ollamaPrecedenza.js';
+import { iniziaLavoro } from '../config/lavoriProjexa.js';
 import { notificaLavoroAi } from './notifiche.js';
 
 const SERVER = os.hostname();
@@ -274,11 +275,17 @@ export async function eseguiLavoro(id) {
     const res = new RispostaFinta();
     // Con «Projexa» / «Projexa 14B» il modello Ollama da usare (routes/ai.js, ollamaGenerate).
     const locale = p.ai && p.ai.locale;
-    await conContestoAudit({ userId: l.user_id, tenantId: l.tenant_id, origine: `job:ai_batch ${l.operazione}` },
-      () => contestoAi.run({
-        attendiBatch: (prov, prompt, opz) => attendiBatch(l, prov, prompt, opz),
-        ...(locale ? { ollamaModello: modelloFunzioni(p.ai.nome), ollamaEtichetta: p.ai.label } : {})
-      }, () => handler(req, res)));
+    // Pagina Monitor: «Lavori di Projexa in corso» (config/lavoriProjexa.js).
+    const lavoro = locale ? iniziaLavoro({ cosa: (OPERAZIONI[l.operazione] || {}).etichetta || l.operazione, titolo: '', modello: p.ai.label || 'Projexa' }) : null;
+    try {
+      await conContestoAudit({ userId: l.user_id, tenantId: l.tenant_id, origine: `job:ai_batch ${l.operazione}` },
+        () => contestoAi.run({
+          attendiBatch: (prov, prompt, opz) => attendiBatch(l, prov, prompt, opz),
+          ...(locale ? { ollamaModello: modelloFunzioni(p.ai.nome), ollamaEtichetta: p.ai.label } : {})
+        }, () => handler(req, res)));
+    } finally {
+      if (lavoro) lavoro.fine();
+    }
 
     if (res.statusCode >= 400) {
       const msg = (res.corpo && res.corpo.error) || `Errore ${res.statusCode}`;

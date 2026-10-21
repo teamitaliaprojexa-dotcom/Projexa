@@ -22,6 +22,7 @@ import { contestoAi } from '../config/aiContesto.js';
 import { prepareAttachments, attachmentsText, pdfToText, EXPORT_FORMATS } from '../config/aiAttachments.js';
 import { getPromptFor } from '../config/prompts.js';
 import { attendiVmLibera, suPrecedenza, vmOccupata } from '../config/ollamaPrecedenza.js';
+import { iniziaLavoro, segnaAttesaProjexa } from '../config/lavoriProjexa.js';
 
 const router = express.Router();
 
@@ -1135,7 +1136,8 @@ export function testoDagliAppunti(notes) {
 // corso); se una di queste parte mentre fn lavora, la richiesta si interrompe e fn si ripete.
 async function conPrecedenza(fn) {
   for (;;) {
-    await attendiVmLibera({ avviso: (motivo) => console.log(`[OLLAMA] Projexa in attesa: la VM serve prima a ${motivo}`) });
+    await attendiVmLibera({ avviso: (motivo) => { segnaAttesaProjexa(motivo); console.log(`[OLLAMA] Projexa in attesa: la VM serve prima a ${motivo}`); } });
+    segnaAttesaProjexa(''); // per la pagina Monitor (config/lavoriProjexa.js)
     const ctrl = new AbortController();
     let motivo = '';
     const togli = suPrecedenza((k) => { motivo = k; ctrl.abort(); });
@@ -1197,9 +1199,14 @@ async function recapProjexaChat(sistema, compito, numPredict, modello = RECAP_PR
 // si riassume a pezzi e il recap si scrive dagli appunti.
 // opts.meeting: trascrizione di una riunione -> recap-projexa (vedi sopra) e, oltre
 // OLLAMA_MEETING_SINGLE_CHARS, sempre a pezzi piccoli; opts.contesto: titolo della riunione,
-// passato anche ai pezzi; opts.ai: voce scelta («Projexa» o «Projexa 14B»).
-export async function askOllamaRecap(buildPrompt, transcript, { meeting = false, contesto = '', ai = '' } = {}) {
-  if (meeting) return askRecapProjexa(buildPrompt, transcript, contesto, ai);
+// passato anche ai pezzi; opts.ai: voce scelta («Projexa» o «Projexa 14B»); opts.cosa: nome del
+// lavoro per la pagina Monitor («Recap cliente», «Recap interno»); opts.chiave / opts.tipo:
+// riunione («tenant|utente|id_calendar») e 'recap' | 'interno', per la barra della finestra Recap.
+export async function askOllamaRecap(buildPrompt, transcript, { meeting = false, contesto = '', ai = '', cosa = 'Recap', chiave = '', tipo = '' } = {}) {
+  if (meeting) {
+    const lavoro = iniziaLavoro({ cosa, titolo: contesto, modello: etichettaRecapProjexa(ai), chiave, tipo });
+    try { return await askRecapProjexa(buildPrompt, transcript, contesto, ai, lavoro); } finally { lavoro.fine(); }
+  }
   const plain = testoPerRecap(transcript);
   const overhead = (await buildPrompt('')).length;
   const notesTokens = 1000;
@@ -1226,18 +1233,28 @@ export async function askOllamaRecap(buildPrompt, transcript, { meeting = false,
   return { text: result.text, label: (contestoAi.getStore() || {}).ollamaEtichetta || 'Projexa', model: result.model };
 }
 
+// Barra di avanzamento: il testo finale (recap dagli appunti) dura circa quanto 2,5 pezzi di
+// appunti (misura 2026-10-21, Projexa 14B: pezzi ~10 minuti, testo finale ~25).
+const PESO_TESTO_FINALE = 2.5;
+
 // Recap cliente / Recap interno di una riunione con recap-projexa.
-async function askRecapProjexa(buildPrompt, transcript, contesto, ai) {
+async function askRecapProjexa(buildPrompt, transcript, contesto, ai, lavoro = { fase: () => {} }) {
   const sistema = await istruzioniRecapProjexa();
   const modello = modelloRecapProjexa(ai);
   const fromNotes = async (pieceChars) => {
     const { messaggi } = pezziRecapRiunione(transcript, contesto, pieceChars);
     const notes = [];
-    for (const p of messaggi) notes.push((await recapProjexaChat(sistema, p, OLLAMA_NOTES_TOKENS, modello)).text);
+    for (const [i, p] of messaggi.entries()) {
+      lavoro.fase(`appunti, pezzo ${i + 1} di ${messaggi.length}`, i, messaggi.length + PESO_TESTO_FINALE);
+      notes.push((await recapProjexaChat(sistema, p, OLLAMA_NOTES_TOKENS, modello)).text);
+    }
+    pezzi = messaggi.length;
     return testoDagliAppunti(notes);
   };
+  let pezzi = 0;
   const { plain, unico } = pezziRecapRiunione(transcript, contesto);
   let prompt = await buildPrompt(unico ? plain : await fromNotes(OLLAMA_MEETING_CHUNK_CHARS));
+  lavoro.fase('testo finale', pezzi, pezzi + PESO_TESTO_FINALE);
   let result = await recapProjexaChat(sistema, prompt, OLLAMA_OUTPUT_TOKENS, modello);
   if (result.truncated) {
     console.warn('⚠️ [RECAP] Ollama: nuovo tentativo riassumendo la trascrizione a pezzi più piccoli');

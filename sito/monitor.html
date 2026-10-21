@@ -856,6 +856,15 @@
                 $('queueBody').innerHTML = q
                     ? `<tr><td>Blocchi in attesa</td><td class="num">${q.pending}</td></tr><tr><td>In trascrizione</td><td class="num">${q.transcribing}</td></tr><tr><td>Recap in coda</td><td class="num">${q.recap}</td></tr>`
                     : '<tr><td style="color:var(--muted)">Non disponibile</td></tr>';
+                // Lavori di Projexa in corso (2026-10-21): recap cliente/interno e lavori AI con il
+                // modello locale non passano dalla coda qui sopra: girano nel backend.
+                const lavori = d.projexa || [];
+                const daQuando = (iso) => { const min = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)); return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`; };
+                $('queueBody').innerHTML += `<tr><td colspan="2" style="padding-top:0.9rem"><b>Lavori di Projexa in corso</b></td></tr>`
+                    + (lavori.length ? lavori.map((l) => `<tr><td>${esc(l.cosa)}${l.titolo ? ` · ${esc(l.titolo)}` : ''}
+                        <div style="color:var(--muted);font-size:0.8rem">${esc(l.modello || 'Projexa')}${l.fase ? ` · ${esc(l.fase)}` : ''}${l.inAttesa ? ` · <span style="color:var(--warn, #B45309)">in pausa: la VM serve prima a ${esc(l.inAttesa)}</span>` : ''}</div></td>
+                        <td class="num">da ${daQuando(l.dal)}</td></tr>`).join('')
+                    : '<tr><td colspan="2" style="color:var(--muted)">Nessuno</td></tr>');
                 $('updated').textContent = `Aggiornato alle ${new Date().toLocaleTimeString('it-IT')} · ogni 15 s`;
             }
 

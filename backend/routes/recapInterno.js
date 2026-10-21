@@ -25,6 +25,7 @@ import {
 import { inviaPromptBatch, controllaRecapBatchUtente } from '../jobs/recapBatch.js';
 import { parseDueDate } from '../jobs/recapTasks.js';
 import { notificaRiunione } from '../jobs/notifiche.js';
+import { avanzamentoRiunione } from '../config/lavoriProjexa.js';
 import { cercaDoppione, aggiornamento, todoAperte, ownerTodo, aggiornaTodo } from '../config/dedupVoci.js';
 
 const router = express.Router();
@@ -176,7 +177,7 @@ export async function prepara(user, idCalendar) {
 async function genera(user, idCalendar, providerName) {
   const p = await prepara(user, idCalendar);
   const r = localRecapMode(providerName) === 'server'
-    ? await askOllamaRecap(async (t) => p.build(t), p.transcript, { meeting: true, contesto: p.vars.OGGETTO, ai: providerName })
+    ? await askOllamaRecap(async (t) => p.build(t), p.transcript, { meeting: true, contesto: p.vars.OGGETTO, ai: providerName, cosa: 'Recap interno', chiave: `${user.tenant_id}|${user.user_id}|${idCalendar}`, tipo: 'interno' })
     : await askAiProvider(user.user_id, providerName, p.build(p.transcript));
   await salvaInterno(user, idCalendar, p, r.text, r.label);
 }
@@ -303,6 +304,14 @@ router.get('/', async (req, res) => {
       sintesi: r.recap_interno || '', attivita: att, ai: { nome: ai, locale: localRecapMode(ai) === 'server' }
     });
   } catch (e) { invia(res, e, 'LEGGI'); }
+});
+
+// Avanzamento di recap cliente e recap interno con Projexa (barra della finestra Recap,
+// 2026-10-21): solo memoria del backend (config/lavoriProjexa.js), nessuna query né carico per
+// la VM. Query: id_calendar. Risposta: { lavori: [{ tipo, modello, fase, percento, dal, inAttesa }] }.
+router.get('/avanzamento', (req, res) => {
+  const id = String(req.query.id_calendar || '').trim().slice(0, 300);
+  res.json({ lavori: id ? avanzamentoRiunione(`${req.user.tenant_id}|${req.user.user_id}|${id}`) : [] });
 });
 
 router.get('/persone', async (req, res) => {

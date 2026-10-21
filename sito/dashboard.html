@@ -11254,6 +11254,41 @@
             }
         });
 
+        // === AVANZAMENTO DEL RECAP CON PROJEXA (2026-10-21) ===
+        // Barra sotto il titolo della finestra Recap: a che punto sono recap cliente e recap
+        // interno con il modello locale (appunti pezzo n di N, testo finale, pausa per la VM).
+        // Il server risponde dalla memoria (nessun carico per la VM); si legge ogni 10 s finché la
+        // finestra è aperta su quella riunione.
+        let mtAvanzTimer = null;
+        async function mtAvanzamento(idCal) {
+            clearTimeout(mtAvanzTimer);
+            const box = document.getElementById('mtAvanz');
+            const modal = document.getElementById('meetingTextModal');
+            if (!box) return;
+            if (!idCal || !modal.classList.contains('open') || modal.dataset.eventId !== idCal || modal.dataset.field !== 'recap') { box.style.display = 'none'; return; }
+            let lavori = [];
+            try {
+                const r = await fetch(`${API_URL}/recap-interno/avanzamento?id_calendar=${encodeURIComponent(idCal)}`, { headers: getAuthHeaders() });
+                if (r.ok) lavori = (await r.json()).lavori || [];
+            } catch (e) { /* si riprova al giro dopo */ }
+            const NOMI = { recap: 'Recap cliente', interno: 'Recap interno' };
+            const minuti = (iso) => Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+            box.innerHTML = lavori.map((l) => {
+                const p = l.percento == null ? 0 : l.percento;
+                return `<div style="margin-top:0.35rem">
+                    <div style="display:flex; justify-content:space-between; gap:0.5rem; font-size:0.78rem; color:var(--text-muted)">
+                        <span><b style="color:var(--dark)">${escapeHtml(NOMI[l.tipo] || l.cosa || 'Recap')}</b> con ${escapeHtml(l.modello || 'Projexa')}${l.fase ? ` · ${escapeHtml(l.fase)}` : ''}${l.inAttesa ? ` · <span style="color:#B45309">in pausa: la VM serve prima a ${escapeHtml(l.inAttesa)}</span>` : ''}</span>
+                        <span>${l.percento == null ? '' : `${p}% · `}da ${minuti(l.dal)} min</span>
+                    </div>
+                    <div style="height:6px; background:#E5E7EB; border-radius:3px; overflow:hidden; margin-top:0.2rem">
+                        <div style="height:100%; width:${Math.max(3, p)}%; background:${l.inAttesa ? '#F59E0B' : '#10B981'}; transition:width 0.6s"></div>
+                    </div>
+                </div>`;
+            }).join('');
+            box.style.display = lavori.length ? '' : 'none';
+            mtAvanzTimer = setTimeout(() => mtAvanzamento(idCal), 10000);
+        }
+
         async function openMeetingText(btn) {
             const modal = document.getElementById('meetingTextModal');
             const body = document.getElementById('meetingTextBody');
@@ -11283,6 +11318,7 @@
             body.innerHTML = '<p class="meeting-text-empty"><i class="fas fa-spinner fa-spin"></i> Caricamento…</p>';
             body.dataset.raw = '';
             modal.classList.add('open');
+            mtAvanzamento(isRecap ? modal.dataset.eventId : '');
             try {
                 const res = await fetch(`${API_URL}/calendar/meetings/managed/text?id_calendar=${encodeURIComponent(btn.dataset.eventId)}&field=${field}`, { headers: calendarAuthHeaders() });
                 const data = await res.json().catch(() => ({}));
@@ -23005,6 +23041,8 @@
                 <span id="meetingTextDirty" class="mt-dirty" style="display: none;"><i class="fas fa-circle"></i> Modifiche non salvate</span>
                 <button id="meetingTextClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
             </div>
+            <!-- Avanzamento del recap con Projexa (cliente e interno), sotto il titolo -->
+            <div id="mtAvanz" style="display: none; padding: 0 1.25rem 0.6rem;"></div>
             <div class="mt-layout">
                 <!-- Barra dei comandi, a sinistra -->
                 <div class="mt-side" role="toolbar" aria-label="Comandi">

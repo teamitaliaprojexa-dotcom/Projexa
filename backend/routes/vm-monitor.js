@@ -14,6 +14,7 @@ import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { whisperUrls, whisperCppUrls, whisperAssistentePorta } from './ai.js';
 import { registraAccesso } from '../config/audit.js';
+import { lavoriProjexaInCorso } from '../config/lavoriProjexa.js';
 
 const router = express.Router();
 
@@ -350,6 +351,8 @@ router.get('/status', requireAuth, requireMonitorAccess, async (req, res) => {
       range,
       sampleSeconds: SAMPLE_MS / 1000,
       historyFrom: history.length ? history[0].t : null,
+      // Recap e lavori AI con il modello locale che stanno girando adesso (config/lavoriProjexa.js).
+      projexa: lavoriProjexaInCorso(),
       series: downsample(points, 240),
       // I 10 più grandi per RAM, più Ollama sempre (a riposo occupa poco e restava fuori elenco).
       processes: (() => {
