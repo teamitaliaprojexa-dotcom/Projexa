@@ -23,22 +23,41 @@
         return d;
     }
 
+    // Procedura verificata il 22/10/2026 su Microsoft 365 aziendale (nuovo Outlook per Windows:
+    // in «Altre app › Gestisci le tue app» il caricamento non compare, dal browser sì).
     const ISTRUZIONI = `
         <div style="font-weight:700; margin-bottom:6px;">Come installare l'add-in in Outlook</div>
-        <ol style="margin:0 0 8px 18px; padding:0; line-height:1.45;">
+        <div style="font-weight:600; margin:4px 0 2px;">1. Installazione (una volta sola)</div>
+        <ol style="margin:0 0 6px 18px; padding:0; line-height:1.45;">
             <li>Premi <b>Scarica add-in</b>: salvi il file <i>projexa-outlook-manifest.xml</i>.</li>
-            <li>Apri la pagina dei componenti aggiuntivi di Outlook:
-                <b>aka.ms/olksideload</b> nel browser (Outlook sul web e nuovo Outlook)
-                oppure, nell'Outlook classico, <b>Home › Ottieni componenti aggiuntivi</b>.</li>
-            <li>Vai su <b>Componenti aggiuntivi personali</b> › <b>Aggiungi un componente aggiuntivo personalizzato</b> › <b>Aggiungi da file…</b>, scegli il file scaricato e conferma con <b>Installa</b>.</li>
-            <li>Apri un'email ricevuta: nella barra compare <b>Analizza con Projexa</b> (nell'Outlook sul web anche nel menu <b>…</b> › <b>App</b>).</li>
-            <li>Al primo uso premi qui <b>Collega Outlook</b> e scrivi il codice nel pannello dell'add-in (vale 10 minuti, una volta sola).</li>
+            <li>Apri nel browser (Edge o Chrome, con l'account di Outlook aziendale) l'indirizzo
+                <b>https://aka.ms/olksideload</b>: si apre Outlook sul web con la finestra
+                «Componenti aggiuntivi per Outlook».</li>
+            <li>A sinistra <b>I miei componenti aggiuntivi</b> › in fondo, sezione
+                <b>Componenti aggiuntivi personalizzati</b> › <b>+ Aggiungi un componente aggiuntivo personalizzato</b> ›
+                <b>Aggiungi da file…</b> › scegli il file scaricato › <b>Installa</b>.</li>
+            <li>L'add-in vale per tutta la casella: compare in Outlook sul web, nel nuovo Outlook e
+                nell'Outlook classico. Se non lo vedi subito, ricarica Outlook (<b>F5</b>) o riavvialo.</li>
+        </ol>
+        <div style="font-weight:600; margin:4px 0 2px;">2. Dove si trova</div>
+        <ul style="margin:0 0 6px 18px; padding:0; line-height:1.45;">
+            <li>Apri un'email ricevuta e, nella riga delle azioni dell'email (rispondi, inoltra…),
+                clicca l'icona <b>App</b> (quattro quadratini) › <b>Projexa</b> › <b>Analizza con Projexa</b>.</li>
+            <li>Oppure nella barra in alto: <b>Home</b> › gruppo «Componenti aggiuntivi» › <b>Altre app</b> › <b>Projexa</b>.</li>
+            <li>Per averlo sempre in vista: <b>Impostazioni</b> (rotellina) › <b>Posta</b> › <b>Personalizza azioni</b> ›
+                spunta <b>Analizza con Projexa</b> nella barra degli strumenti.</li>
+        </ul>
+        <div style="font-weight:600; margin:4px 0 2px;">3. Collegamento (al primo uso)</div>
+        <ol style="margin:0 0 8px 18px; padding:0; line-height:1.45;">
+            <li>Qui premi <b>Collega Outlook</b>: compare un codice valido 10 minuti, usabile una volta sola.</li>
+            <li>Nel pannello dell'add-in in Outlook scrivi il codice e premi <b>Collega</b>, poi <b>Analizza con Projexa</b>.</li>
         </ol>
         <div style="color:#6B7280;">Serve «AI Add-in Outlook» acceso in Impostazioni › AI con l'AI da usare.
         L'add-in legge solo l'email che apri e solo quando premi il pulsante: non chiede permessi
-        sulla casella né l'approvazione dell'IT. Se non trovi «Aggiungi un componente aggiuntivo
-        personalizzato», la tua azienda ha disattivato gli add-in personali: chiedi all'IT di
-        distribuire il file manifest a te.</div>`;
+        sulla casella né l'approvazione dell'IT. Nel nuovo Outlook, in «Altre app › Gestisci le tue app»,
+        il caricamento da file può non comparire: usa l'indirizzo del punto 1. Se anche lì manca
+        «Aggiungi un componente aggiuntivo personalizzato», la tua azienda ha disattivato gli add-in
+        personali: chiedi all'IT di distribuirti il file manifest.</div>`;
 
     function stile(el, css) { el.style.cssText = css; return el; }
 
@@ -149,7 +168,7 @@
             </div>
             <div data-ol-pulsanti style="display:flex; gap:0.4rem; flex-wrap:wrap;"></div>
             <div data-ol-tooltip role="tooltip" hidden
-                style="position:absolute; z-index:50; top:2.6rem; left:0.9rem; width:min(460px, 92vw); background:#fff; color:#1F2937; border:1px solid #D1D5DB; border-radius:8px; padding:0.8rem 0.9rem; font-size:0.82rem; box-shadow:0 10px 25px rgba(0,0,0,0.15);">${ISTRUZIONI}</div>`;
+                style="position:absolute; z-index:50; top:2.6rem; left:0.9rem; width:min(520px, 92vw); max-height:70vh; overflow:auto; background:#fff; color:#1F2937; border:1px solid #D1D5DB; border-radius:8px; padding:0.8rem 0.9rem; font-size:0.82rem; box-shadow:0 10px 25px rgba(0,0,0,0.15);">${ISTRUZIONI}</div>`;
         const info = box.querySelector('[data-ol-info]');
         const tip = box.querySelector('[data-ol-tooltip]');
         let fisso = false;

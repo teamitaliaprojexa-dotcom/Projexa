@@ -297,29 +297,45 @@
       });
     }
 
+    if (r.riunioni || (r.riunioniCorrelate && r.riunioniCorrelate.length)) {
+      box.appendChild(el('h3', 'Già discusso in riunione'));
+      if (r.riunioni) box.appendChild(el('p', r.riunioni));
+      (r.riunioniCorrelate || []).forEach(function (x) {
+        var k = el('div', null, 'px-card');
+        var riga = el('div');
+        riga.appendChild(el('span', x.tipo, 'px-tag'));
+        riga.appendChild(el('span', (x.data || '') + ' · ' + (x.oggetto || ''), 'px-muted'));
+        k.appendChild(riga);
+        k.appendChild(el('div', x.estratto));
+        box.appendChild(k);
+      });
+    }
+
     if (r.ticket && r.ticket.length) {
-      box.appendChild(el('h3', 'Ticket citati'));
+      box.appendChild(el('h3', 'Ticket collegati'));
       r.ticket.forEach(function (x) {
         var k = el('div', null, 'px-card');
-        k.appendChild(el('div', x.codice + ' · ' + x.sistema, 'px-oggetto'));
+        var testa = el('div');
+        testa.appendChild(el('span', x.origine === 'citato' ? 'citato nell\'email' : 'stesso argomento', 'px-tag' + (x.origine === 'citato' ? '' : ' px-arancio')));
+        testa.appendChild(el('span', x.codice + ' · ' + x.sistema, 'px-oggetto'));
+        k.appendChild(testa);
         if (x.nonTrovato) k.appendChild(el('div', 'Non presente tra i ticket di questo cliente in Projexa', 'px-muted'));
         else {
           k.appendChild(el('div', 'Stato: ' + (x.stato || '-') + ' · In carico: ' + (x.inCarico || '-')));
-          k.appendChild(el('div', 'Release/versione: ' + (x.release || 'non indicata') + ' · Aperto ' + (x.apertura || '-') + (x.chiusura ? ' · Chiuso ' + x.chiusura : ''), 'px-muted'));
+          if (x.versione || x.release) {
+            k.appendChild(el('div', 'Versione: ' + (x.versione || '-') + (x.release ? ' → release ' + x.release + ' del ' + x.releaseData : ' (data di rilascio non trovata nelle release)'), x.release ? '' : 'px-muted'));
+          }
+          k.appendChild(el('div', 'Aperto ' + (x.apertura || '-') + (x.chiusura ? ' · Chiuso ' + x.chiusura : '') + (x.descrizione ? ' · ' + x.descrizione : ''), 'px-muted'));
         }
         if (x.risposta) k.appendChild(el('div', x.risposta));
         box.appendChild(k);
       });
     }
 
-    if (r.release || (r.releasePianificate && r.releasePianificate.length)) {
+    // Release solo se ricavata da un ticket collegato (niente calendario generico).
+    if (r.release) {
       box.appendChild(el('h3', 'Release'));
-      if (r.release) box.appendChild(el('p', r.release));
-      if (r.releasePianificate && r.releasePianificate.length) {
-        var ul = el('ul', null, 'px-lista');
-        r.releasePianificate.forEach(function (x) { ul.appendChild(el('li', x.release + ': ' + x.data)); });
-        box.appendChild(ul);
-      }
+      box.appendChild(el('p', r.release));
     }
 
     if (r.puntiAttenzione && r.puntiAttenzione.length) {

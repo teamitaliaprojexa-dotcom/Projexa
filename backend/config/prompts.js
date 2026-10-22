@@ -125,12 +125,15 @@ export const PROMPT_FUNCTIONS = {
   },
   // Add-in di Outlook (routes/outlookAddin.js): analisi dell'email aperta dal PM con i dati di
   // QUEL cliente e progetto. EMAIL = mittente, destinatari, oggetto e testo (dati non fidati);
-  // DATI = progetto, issue, ticket MySupport/Jira, quotazioni; TICKET = ticket citati
-  // nell'email trovati da Projexa; RELEASE = prossime release. Il formato della risposta (JSON)
-  // lo aggiunge sempre il server.
+  // DATI = progetto, issue, ticket MySupport/Jira, quotazioni; TICKET = ticket citati o sullo
+  // stesso argomento (catena MySupport -> Jira -> versione -> release); RELEASE = release dei
+  // ticket collegati; CORRELATI = passaggi sullo stesso argomento (recap, recap interno,
+  // trascrizioni, altri progetti, Issue simili). Il formato della risposta (JSON) lo aggiunge
+  // sempre il server. In evoluzione: la riga standard segue il file finché nessuno la modifica.
   OUTLOOK_ANALISI: {
     titolo: 'Add-in Outlook: analisi dell\'email',
-    segnaposto: ['EMAIL', 'CLIENTE', 'PROGETTO', 'DATI', 'TICKET', 'RELEASE', 'DATA', 'UTENTE']
+    segnaposto: ['EMAIL', 'CLIENTE', 'PROGETTO', 'DATI', 'TICKET', 'RELEASE', 'CORRELATI', 'DATA', 'UTENTE'],
+    sincronizzaFile: true
   }
 };
 

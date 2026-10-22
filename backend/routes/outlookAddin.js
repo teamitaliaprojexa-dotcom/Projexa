@@ -513,8 +513,9 @@ async function trovaCliente(user, email) {
 }
 
 // Progetto: quello scelto nel pannello, quello dello stakeholder, quello con più parole del
-// nome nell'oggetto/testo, altrimenti il più recente.
-function scegliProgetto(progetti, email, trovato) {
+// nome nell'oggetto/testo, quello delle riunioni dove si è parlato dello stesso argomento
+// (voti: project_id -> punti), altrimenti il primo.
+function scegliProgetto(progetti, email, trovato, voti = new Map()) {
   if (!progetti.length) return null;
   const perId = (id) => progetti.find((p) => p.id === id);
   if (email.projectId && perId(email.projectId)) return perId(email.projectId);
@@ -527,7 +528,9 @@ function scegliProgetto(progetti, email, trovato) {
     const n = parole.filter((w) => testo.includes(w)).length;
     if (n > punti) { punti = n; migliore = p; }
   }
-  return migliore || progetti[0];
+  if (migliore) return migliore;
+  const votato = progetti.filter((p) => voti.get(p.id) > 0).sort((a, b) => voti.get(b.id) - voti.get(a.id))[0];
+  return votato || progetti[0];
 }
 
 const corto = (s, n) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
@@ -584,41 +587,217 @@ function testoDatiCliente(d) {
   return L.join('\n');
 }
 
-// Ticket citati nell'email cercati SOLO tra quelli del cliente: chiavi Jira (ABC-123) e numeri
-// MySupport. Fatti di Projexa, non dell'AI.
-function ticketCitati(testo, d) {
-  const chiavi = [...new Set((testo.match(/\b[A-Z][A-Z0-9]{1,9}-\d{1,7}\b/g) || []))].slice(0, 30);
-  const numeri = [...new Set((testo.match(/\b\d{5,10}\b/g) || []))].slice(0, 60);
-  const parole = (s) => String(s || '').toUpperCase().split(/[^A-Z0-9-]+/);
-  const out = [];
-  const visti = new Set();
-  const add = (t) => { if (!visti.has(`${t.sistema}|${t.codice}`)) { visti.add(`${t.sistema}|${t.codice}`); out.push(t); } };
-  for (const k of chiavi) {
-    const j = d.jira.find((x) => String(x.cod_task || '').toUpperCase() === k);
-    if (j) add({ codice: k, sistema: 'Jira', stato: j.stato || '', inCarico: j.assegnatario || '', release: j.versione || '', apertura: giorno(j.data_apertura), chiusura: giorno(j.data_chiusura), descrizione: corto(j.descrizione, 200) });
-    const q = d.quotazioni.find((x) => String(x.codice || '').toUpperCase() === k);
-    if (q) add({ codice: k, sistema: 'Quotazione Jira', stato: q.stato || '', inCarico: q.assegnatario || '', release: q.versione_proposta || '', apertura: giorno(q.data_richiesta), chiusura: '', descrizione: corto(q.descrizione, 200) });
-    if (!j && !q) add({ codice: k, sistema: 'Jira', nonTrovato: true });
-  }
-  for (const n of numeri) {
-    const m = d.mysupport.find((x) => String(x.codice_quesito || '').trim() === n);
-    if (m) {
-      add({ codice: n, sistema: 'MySupport', stato: m.stato_finale || '', inCarico: m.operatore || '', release: '', apertura: giorno(m.data_apertura), chiusura: giorno(m.data_chiusura), descrizione: corto(m.procedura || m.modulo, 160) });
-      // Ticket Jira collegati al MySupport (stesso legame di jobs/issueTicketJira.js).
-      for (const j of d.jira.filter((x) => parole(x.ticket_correlati).includes(n))) {
-        add({ codice: j.cod_task, sistema: 'Jira', stato: j.stato || '', inCarico: j.assegnatario || '', release: j.versione || '', apertura: giorno(j.data_apertura), chiusura: giorno(j.data_chiusura), descrizione: `collegato al MySupport ${n}: ${corto(j.descrizione, 160)}` });
-      }
-    }
-  }
-  return out;
-}
-
+// ----------------------------------------------------------------------------
+// RELEASE: la «Versione» di un task Jira (o la versione proposta di una quotazione) si cerca
+// nella tabella delle release del tenant per avere la data. Le release si mostrano SOLO
+// collegate a un ticket: senza ticket sullo stesso problema il calendario non serve.
+// ----------------------------------------------------------------------------
 async function releaseTenant(tenantId) {
   const r = await righe(
     `SELECT release, data_release FROM release_prodotto
-      WHERE tenant_id = $1 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE) AND data_release >= CURRENT_DATE - 90
-      ORDER BY data_release LIMIT 15`, [tenantId]);
-  return r.filter((x) => String(x.release || '').trim()).map((x) => ({ release: String(x.release).trim(), data: giorno(x.data_release), futura: String(x.data_release instanceof Date ? x.data_release.toISOString() : x.data_release).slice(0, 10) >= oggiIso() }));
+      WHERE tenant_id = $1 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE) AND NULLIF(btrim(release), '') IS NOT NULL
+      ORDER BY data_release LIMIT 500`, [tenantId]);
+  return r.map((x) => {
+    const iso = String(x.data_release instanceof Date ? x.data_release.toISOString() : (x.data_release || '')).slice(0, 10);
+    return { release: String(x.release).trim(), data: giorno(iso), futura: !!iso && iso >= oggiIso() };
+  });
+}
+const normVersione = (v) => minuscola(v).replace(/^(release|rel\.?|versione|ver\.?|v)\s*/, '').replace(/[\s_]+/g, '');
+// Numero di versione («5.26 Hotfix» -> 5.26): confronto esatto, così 5.2 non va con 5.27.
+const numeroVersione = (v) => (String(v || '').match(/\d+(?:\.\d+)+/) || [''])[0];
+function releaseDi(versione, release) {
+  const v = normVersione(versione);
+  if (v.length < 2) return null;
+  const num = numeroVersione(versione);
+  return release.find((r) => normVersione(r.release) === v)
+    || (num ? release.find((r) => numeroVersione(r.release) === num) : null)
+    || null;
+}
+
+// ----------------------------------------------------------------------------
+// TICKET: fatti di Projexa, non dell'AI. Catena MySupport -> task Jira che lo citano nei
+// «Ticket correlati» (come jobs/issueTicketJira.js) -> «Versione» -> data della release.
+// origine: 'citato' (codice scritto nell'email), 'argomento' (task o issue sullo stesso
+// problema trovati dalla ricerca per argomento).
+// ----------------------------------------------------------------------------
+const codiciIn = (s) => String(s || '').toUpperCase().split(/[^A-Z0-9-]+/).filter(Boolean);
+function fattoJira(j, rel, origine, nota = '') {
+  const r = releaseDi(j.versione, rel);
+  return { codice: String(j.cod_task || '').trim(), sistema: 'Jira', origine, stato: j.stato || '', inCarico: j.assegnatario || '',
+    versione: j.versione || '', release: r ? r.release : '', releaseData: r ? r.data : '',
+    apertura: giorno(j.data_apertura), chiusura: giorno(j.data_chiusura), descrizione: (nota ? `${nota}: ` : '') + corto(j.descrizione, 200) };
+}
+function fattoMySupport(m, origine, nota = '') {
+  return { codice: String(m.codice_quesito || '').trim(), sistema: 'MySupport', origine, stato: m.stato_finale || '', inCarico: m.operatore || '',
+    versione: '', release: '', releaseData: '', apertura: giorno(m.data_apertura), chiusura: giorno(m.data_chiusura),
+    descrizione: (nota ? `${nota}: ` : '') + corto([m.procedura, m.modulo].filter(Boolean).join(' · '), 160) };
+}
+function fattoQuotazione(q, rel, origine) {
+  const r = releaseDi(q.versione_proposta, rel);
+  return { codice: String(q.codice || '').trim(), sistema: 'Quotazione Jira', origine, stato: q.stato || '', inCarico: q.assegnatario || '',
+    versione: q.versione_proposta || '', release: r ? r.release : '', releaseData: r ? r.data : '',
+    apertura: giorno(q.data_richiesta), chiusura: '', descrizione: corto(q.descrizione, 200) };
+}
+
+function raccoltaTicket(d, rel) {
+  const out = [];
+  const visti = new Set();
+  const add = (t) => { const k = `${t.sistema}|${t.codice}`; if (t.codice && !visti.has(k)) { visti.add(k); out.push(t); } };
+  const mysupportDi = (codice) => d.mysupport.find((x) => String(x.codice_quesito || '').trim().toUpperCase() === String(codice).toUpperCase());
+  const daMySupport = (m, origine, nota) => {
+    add(fattoMySupport(m, origine, nota));
+    for (const j of d.jira.filter((x) => codiciIn(x.ticket_correlati).includes(String(m.codice_quesito).trim().toUpperCase()))) {
+      add(fattoJira(j, rel, origine, `collegato al MySupport ${m.codice_quesito}`));
+    }
+  };
+  const daJira = (j, origine, nota) => {
+    add(fattoJira(j, rel, origine, nota));
+    for (const c of codiciIn(j.ticket_correlati)) { const m = mysupportDi(c); if (m) add(fattoMySupport(m, origine, `collegato a ${j.cod_task}`)); }
+  };
+  return { out, add, mysupportDi, daMySupport, daJira };
+}
+
+// Ticket citati nell'email, cercati SOLO tra quelli del cliente: chiavi Jira (ABC-123) e numeri
+// MySupport (e i ticket collegati a loro).
+function ticketCitati(testo, d, rel, raccolta) {
+  const chiavi = [...new Set((testo.match(/\b[A-Z][A-Z0-9]{1,9}-\d{1,7}\b/g) || []))].slice(0, 30);
+  const numeri = [...new Set((testo.match(/\b\d{5,10}\b/g) || []))].slice(0, 60);
+  for (const k of chiavi) {
+    const j = d.jira.find((x) => String(x.cod_task || '').toUpperCase() === k);
+    if (j) raccolta.daJira(j, 'citato');
+    const q = d.quotazioni.find((x) => String(x.codice || '').toUpperCase() === k);
+    if (q) raccolta.add(fattoQuotazione(q, rel, 'citato'));
+    if (!j && !q) raccolta.add({ codice: k, sistema: 'Jira', origine: 'citato', nonTrovato: true });
+  }
+  for (const n of numeri) {
+    const m = raccolta.mysupportDi(n);
+    if (m) raccolta.daMySupport(m, 'citato');
+  }
+}
+
+// ----------------------------------------------------------------------------
+// RICERCA PER ARGOMENTO (2026-10-22, richiesta utente): l'analisi guarda TUTTI i dati del
+// cliente dell'utente (tenant + utente + cliente) e prende i pezzi che parlano dello stesso
+// problema dell'email: recap cliente, recap interno e trascrizioni delle riunioni del cliente
+// (ultimi 18 mesi), task e quotazioni Jira, Issue, dati degli altri progetti del cliente.
+// Punteggio: parole dell'email (radici di 6 lettere, senza parole vuote) presenti nel pezzo,
+// pesate per rarità (le parole rare contano di più). Almeno 2 parole in comune, oppure una
+// parola rara.
+// ----------------------------------------------------------------------------
+const PAROLE_VUOTE = new Set(('ciao buongiorno buonasera salve grazie saluti cordiali distinti tutti tutto tutte questa questo '
+  + 'questi queste quello quella quelli quelle sono essere stato stata stati state come anche ancora sempre infatti pero perche '
+  + 'quindi allora mentre dove quando quale quali della delle dello degli dalla dalle dallo dagli nella nelle nello negli sulla '
+  + 'sulle sullo sugli alla alle allo agli fino verso dopo prima sopra sotto ogni altro altra altri altre loro nostro nostra '
+  + 'vostro vostra suoi sue avere hanno abbiamo avete fare fatto fatta fanno viene vengono continua continuano permane buona '
+  + 'giornata esempio aspetto messa disposizione indicato indicata indicazione correttamente problema problemi dati dato invece '
+  + 'possibile possibili verificare verifica grazie ancora molto anche oggi domani ieri mail email allegato allegati riguardo '
+  + 'quanto cosa cose essere potete potresti potrebbe sarebbe vorrei volevo chiedo chiedere sapere '
+  // articoli e preposizioni apostrofati («dell'indicazione» -> dell)
+  + 'dell sull nell dall quell coll dagl dall degl nell sull').split(' '));
+const senzaAccenti = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+function termini(testo) {
+  const out = new Set();
+  for (const w of senzaAccenti(minuscola(testo)).match(/[a-z0-9]+/g) || []) {
+    if (w.length < 4 || /^\d+$/.test(w) || PAROLE_VUOTE.has(w)) continue;
+    out.add(w.length > 6 ? w.slice(0, 6) : w);
+  }
+  return out;
+}
+// Segna ogni pezzo con punti, parole trovate e ok (abbastanza pertinente). La rarità di una
+// parola si misura DENTRO il gruppo passato (righe dei recap, pezzi di trascrizione, task
+// Jira…): «qualifica» può essere comune nelle trascrizioni ma rara tra le righe dei recap.
+// forti: parole dell'oggetto dell'email (riassume l'argomento), che pesano il doppio.
+// soloDuePiu: almeno 2 parole in comune, senza l'eccezione della parola rara (ticket e Issue:
+// da loro dipendono release e doppioni, serve precisione).
+function valutaPertinenza(chiavi, pezzi, forti = new Set(), soloDuePiu = false) {
+  const df = new Map();
+  for (const p of pezzi) {
+    p.t = termini(p.testo);
+    for (const k of chiavi) if (p.t.has(k)) df.set(k, (df.get(k) || 0) + 1);
+  }
+  const n = pezzi.length || 1;
+  for (const p of pezzi) {
+    const trovate = [...chiavi].filter((k) => p.t.has(k));
+    p.trovate = trovate;
+    p.punti = trovate.reduce((s, k) => s + Math.log(1 + n / df.get(k)) * (forti.has(k) ? 2 : 1), 0);
+    // Una sola parola basta se è specifica (almeno 5 lettere) e rara nel gruppo: al massimo 3
+    // pezzi o il 3% del gruppo.
+    p.ok = trovate.length >= 2
+      || (!soloDuePiu && trovate.length === 1 && trovate[0].length >= 5 && df.get(trovate[0]) <= Math.max(3, Math.round(n * 0.03)));
+    delete p.t;
+  }
+  return pezzi;
+}
+const migliori = (pezzi, tipi, max) => pezzi.filter((p) => p.ok && tipi.includes(p.tipo)).sort((a, b) => b.punti - a.punti).slice(0, max);
+
+// Riunioni del cliente dell'utente (recap, recap interno, trascrizione), ultimi 18 mesi.
+async function riunioniCliente(tenantId, userId, clientId) {
+  return righe(
+    `SELECT id_calendar, project_id::text AS project_id, oggetto, data_calendar, recap, recap_interno, trascrizione
+       FROM rec_meeting
+      WHERE tenant_id = $1 AND user_id = $2 AND client_id::text = $3 AND data_calendar >= CURRENT_DATE - 540
+      ORDER BY data_calendar DESC NULLS LAST, orario_calendar DESC NULLS LAST
+      LIMIT 150`, [tenantId, userId, clientId]);
+}
+
+function pezziRiunioni(riunioni) {
+  const pezzi = [];
+  for (const m of riunioni) {
+    const etichetta = `${giorno(m.data_calendar)} «${corto(m.oggetto || 'Riunione', 80)}»`;
+    const base = { data: giorno(m.data_calendar), oggetto: corto(m.oggetto || 'Riunione', 120), projectId: m.project_id || null, etichetta };
+    for (const [campo, tipo] of [['recap', 'recap cliente'], ['recap_interno', 'recap interno']]) {
+      const righeTesto = String(m[campo] || '').split(/\r?\n/).map((r) => r.replace(/^[#*\s>-]+/, '').trim()).filter((r) => r.length >= 15);
+      righeTesto.forEach((r, i) => {
+        const vicine = [righeTesto[i - 1], r, righeTesto[i + 1]].filter(Boolean).join(' / ');
+        pezzi.push({ ...base, tipo, testo: r, estratto: corto(vicine, 450) });
+      });
+    }
+    const t = String(m.trascrizione || '');
+    for (let i = 0; i < t.length; i += 450) {
+      const pezzo = t.slice(i, i + 650);
+      pezzi.push({ ...base, tipo: 'trascrizione', testo: pezzo, estratto: corto(pezzo, 650) });
+    }
+  }
+  return pezzi;
+}
+
+// Registri del cliente dell'utente: attività del recap interno (rec_meeting_attivita, le righe
+// «[Argomento] Descrizione» con owner e scadenza), To-Do, RAID, azioni a carico del cliente e
+// Change Request. Un pezzo per riga.
+const TIPI_REGISTRO = ['attività recap interno', 'To-Do', 'rischio', 'azione', 'issue RAID', 'decisione', 'dipendenza', 'assunzione', 'azione cliente', 'change request'];
+async function pezziRegistri(tenantId, userId, clientId, riunioni) {
+  const perCalendario = new Map(riunioni.map((m) => [m.id_calendar, m]));
+  const ids = [...perCalendario.keys()].filter(Boolean);
+  const p = [tenantId, userId, clientId];
+  const [attivita, todo, raid, azioni, cr] = await Promise.all([
+    ids.length ? righe(`SELECT id_calendar, argomento, descrizione, owner_nominativo, scadenza, completata FROM rec_meeting_attivita
+                         WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = ANY($3::text[])`, [tenantId, userId, ids]) : Promise.resolve([]),
+    righe(`SELECT project_id::text AS project_id, titile, description, status, due_date, assigned_to_text FROM tasks
+            WHERE tenant_id = $1 AND user_id = $2 AND client_id::text = $3 LIMIT 2000`, p),
+    righe(`SELECT project_id::text AS project_id, tipo, titolo, descrizione, mitigazione, owner, stato, data_revisione FROM pm_raid
+            WHERE tenant_id = $1 AND user_id = $2 AND client_id::text = $3 LIMIT 2000`, p),
+    righe(`SELECT project_id::text AS project_id, referente, descrizione, stato, data_scadenza, note FROM pm_azioni_cliente
+            WHERE tenant_id = $1 AND user_id = $2 AND client_id::text = $3 LIMIT 2000`, p),
+    righe(`SELECT project_id::text AS project_id, codice, titolo, descrizione, stato, data_richiesta, rif_jira FROM pm_change_request
+            WHERE tenant_id = $1 AND user_id = $2 AND client_id::text = $3 LIMIT 1000`, p)
+  ]);
+  const pezzi = [];
+  for (const a of attivita) {
+    const m = perCalendario.get(a.id_calendar) || {};
+    const testo = `${a.argomento ? `[${a.argomento}] ` : ''}${a.descrizione || ''}`;
+    pezzi.push({ tipo: 'attività recap interno', testo, data: giorno(m.data_calendar), oggetto: corto(m.oggetto || 'Riunione', 120), projectId: m.project_id || null,
+      etichetta: `${giorno(m.data_calendar)} «${corto(m.oggetto || 'Riunione', 80)}»`,
+      estratto: corto(`${testo}${a.owner_nominativo ? ` | owner ${a.owner_nominativo}` : ''}${a.scadenza ? ` | scadenza ${giorno(a.scadenza)}` : ''}${a.completata ? ' | completata' : ''}`, 450) });
+  }
+  const reg = (tipo, testo, extra, data, projectId) => pezzi.push({ tipo, testo, data, oggetto: '', projectId, etichetta: tipo, estratto: corto(`${testo}${extra}`, 450) });
+  for (const t of todo) reg('To-Do', `${t.titile || ''} ${t.description || ''}`, ` | ${t.status || ''}${t.assigned_to_text ? ` | ${t.assigned_to_text}` : ''}${t.due_date ? ` | scadenza ${giorno(t.due_date)}` : ''}`, giorno(t.due_date), t.project_id);
+  for (const r of raid) {
+    const tipo = { rischio: 'rischio', azione: 'azione', issue: 'issue RAID', decisione: 'decisione', dipendenza: 'dipendenza', assunzione: 'assunzione' }[minuscola(r.tipo)] || 'rischio';
+    reg(tipo, `${r.titolo || ''} ${r.descrizione || ''} ${r.mitigazione || ''}`, ` | ${r.stato || ''}${r.owner ? ` | owner ${r.owner}` : ''}`, giorno(r.data_revisione), r.project_id);
+  }
+  for (const a of azioni) reg('azione cliente', `${a.descrizione || ''} ${a.note || ''}`, ` | ${a.stato || ''}${a.referente ? ` | ${a.referente}` : ''}${a.data_scadenza ? ` | scadenza ${giorno(a.data_scadenza)}` : ''}`, giorno(a.data_scadenza), a.project_id);
+  for (const c of cr) reg('change request', `${c.codice || ''} ${c.titolo || ''} ${c.descrizione || ''}`, ` | ${c.stato || ''}${c.rif_jira ? ` | Jira ${c.rif_jira}` : ''}`, giorno(c.data_richiesta), c.project_id);
+  return pezzi;
 }
 
 const FORMATO_JSON = `
@@ -630,7 +809,8 @@ Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, con questa s
   "sintesi": "2-4 frasi: che cosa chiede o segnala l'email",
   "segnalazioni": [{"descrizione": "problema distinto, breve e chiaro", "categoria": "Bug|Richiesta|Configurazione|Altro", "priorita": "Alta|Media|Bassa", "mysupport": "codice o stringa vuota", "jira": "codice o stringa vuota"}],
   "ticket": [{"codice": "codice del ticket citato", "risposta": "cosa rispondere su questo ticket, SOLO dai dati"}],
-  "release": "risposta sulla data di rilascio (stringa vuota se l'email non la chiede)",
+  "riunioni": "cosa è già stato detto o deciso nelle riunioni su questo argomento, con data (stringa vuota se nei PASSAGGI non c'è nulla di pertinente)",
+  "release": "release e data di rilascio della correzione SOLO se ricavate dai TICKET COLLEGATI (stringa vuota se nessun ticket collegato ha una release)",
   "punti_attenzione": ["cose che il PM deve verificare prima di rispondere"],
   "risposta_email": "testo completo della bozza di risposta, senza oggetto"
 }
@@ -695,13 +875,77 @@ async function analizza(req, res) {
     const u = { ...user, tenant_id: trovato.tenantId };
     const progetti = (await progettiAperti(u).catch(() => [])).filter((p) => p.clientId === trovato.clientId)
       .map((p) => ({ id: p.projectId, nome: p.nome }));
-    const progetto = scegliProgetto(progetti, email, trovato);
-    const [dati, release, contesto] = await Promise.all([
+    const [dati, release, riunioni] = await Promise.all([
       datiCliente(trovato.tenantId, trovato.clientId),
       releaseTenant(trovato.tenantId),
-      progetto ? contestoProgetto(u, progetto.id, { riunioni: 3, maxRecap: 1500 }).then((c) => c.testo).catch(() => '') : Promise.resolve('')
+      riunioniCliente(trovato.tenantId, user.user_id, trovato.clientId)
     ]);
-    const ticket = ticketCitati(`${email.oggetto}\n${email.testo}`, dati);
+
+    // Ricerca per argomento su riunioni, task/quotazioni Jira e Issue del cliente. I nomi di chi
+    // scrive e dell'utente non sono parole chiave: compaiono in quasi tutte le riunioni.
+    const nomeUtente = (await righe('SELECT name, cognome FROM users WHERE id = $1', [user.user_id])).map((x) => [x.name, x.cognome].filter(Boolean).join(' '))[0] || '';
+    const chiavi = termini(`${email.oggetto}\n${email.testo}`);
+    for (const k of termini(`${email.mittente.nome} ${email.mittente.email.split('@')[0].replace(/[._-]+/g, ' ')} ${nomeUtente}`)) chiavi.delete(k);
+    const forti = new Set([...termini(email.oggetto)].filter((k) => chiavi.has(k)));
+    const pezziR = pezziRiunioni(riunioni);
+    const pezzi = [
+      ...valutaPertinenza(chiavi, await pezziRegistri(trovato.tenantId, user.user_id, trovato.clientId, riunioni), forti),
+      ...valutaPertinenza(chiavi, pezziR.filter((p) => p.tipo !== 'trascrizione'), forti),
+      ...valutaPertinenza(chiavi, pezziR.filter((p) => p.tipo === 'trascrizione'), forti),
+      ...valutaPertinenza(chiavi, dati.jira.map((x) => ({ tipo: 'jira', testo: `${x.cod_task || ''} ${x.tipo || ''} ${x.descrizione || ''}`, ref: x })), forti, true),
+      ...valutaPertinenza(chiavi, dati.quotazioni.map((x) => ({ tipo: 'quotazione', testo: `${x.codice || ''} ${x.descrizione || ''}`, ref: x })), forti, true),
+      ...valutaPertinenza(chiavi, dati.issue.map((x) => ({ tipo: 'issue', testo: `${x.descrizione || ''}`, ref: x })), forti, true)
+    ];
+    const daRiunioni = migliori(pezzi, ['recap cliente', 'recap interno'], 14);
+    const daTrascrizioni = migliori(pezzi, ['trascrizione'], 5);
+    const daRegistri = migliori(pezzi, TIPI_REGISTRO, 12);
+    // Progetto: riunioni e registri pertinenti votano per il loro progetto.
+    const voti = new Map();
+    for (const p of [...daRiunioni, ...daTrascrizioni, ...daRegistri]) if (p.projectId) voti.set(p.projectId, (voti.get(p.projectId) || 0) + p.punti);
+    const progetto = scegliProgetto(progetti, email, trovato, voti);
+
+    // Ticket: citati nell'email + collegati per argomento (task Jira, quotazioni e Issue simili).
+    const raccolta = raccoltaTicket(dati, release);
+    ticketCitati(`${email.oggetto}\n${email.testo}`, dati, release, raccolta);
+    for (const p of migliori(pezzi, ['jira'], 5)) raccolta.daJira(p.ref, 'argomento', `stesso argomento (${p.trovate.slice(0, 4).join(', ')})`);
+    for (const p of migliori(pezzi, ['quotazione'], 3)) raccolta.add(fattoQuotazione(p.ref, release, 'argomento'));
+    const issueSimili = migliori(pezzi, ['issue'], 5);
+    for (const p of issueSimili) {
+      for (const c of codiciIn(p.ref.mysupport)) { const m = raccolta.mysupportDi(c); if (m) raccolta.daMySupport(m, 'argomento', 'dalla Issue simile'); }
+      for (const c of codiciIn(p.ref.tkt_jira)) { const j = dati.jira.find((x) => String(x.cod_task || '').toUpperCase() === c); if (j) raccolta.daJira(j, 'argomento', 'dalla Issue simile'); }
+    }
+    const ticket = raccolta.out.slice(0, 25);
+
+    // Contesto: progetto scelto completo; degli altri progetti del cliente solo le righe pertinenti.
+    const contesto = progetto ? await contestoProgetto(u, progetto.id, { riunioni: 3, maxRecap: 3000 }).then((c) => c.testo).catch(() => '') : '';
+    const altri = [];
+    for (const p of progetti.filter((x) => !progetto || x.id !== progetto.id).slice(0, 4)) {
+      const t = await contestoProgetto(u, p.id, { riunioni: 0 }).then((c) => c.testo).catch(() => '');
+      for (const riga of t.split('\n')) if (riga.trim().length >= 15) altri.push({ tipo: 'progetto', testo: riga, etichetta: p.nome });
+    }
+    const righeAltri = migliori(valutaPertinenza(chiavi, altri), ['progetto'], 10);
+    // Ultimi recap del cliente (anche di altri progetti), completi: il contesto più recente.
+    const ultimiRecap = riunioni.filter((m) => String(m.recap || '').trim()).slice(0, 2);
+
+    const testoCorrelati = [
+      'PASSAGGI SULLO STESSO ARGOMENTO DALLE RIUNIONI DEL CLIENTE (recap e recap interno, dal più pertinente)',
+      daRiunioni.length ? daRiunioni.map((p) => `- ${p.etichetta} [${p.tipo}]: ${p.estratto}`).join('\n') : '(nessuno)',
+      '',
+      'ATTIVITÀ DEL RECAP INTERNO, TO-DO, RAID, AZIONI DEL CLIENTE E CHANGE REQUEST SULLO STESSO ARGOMENTO',
+      daRegistri.length ? daRegistri.map((p) => `- ${p.tipo}${p.data ? ` (${p.data})` : ''}${p.oggetto ? ` «${p.oggetto}»` : ''}: ${p.estratto}`).join('\n') : '(nessuno)',
+      '',
+      'PASSAGGI SULLO STESSO ARGOMENTO DALLE TRASCRIZIONI DELLE RIUNIONI DEL CLIENTE',
+      daTrascrizioni.length ? daTrascrizioni.map((p) => `- ${p.etichetta}: «${p.estratto}»`).join('\n') : '(nessuno)',
+      '',
+      'ISSUE DEL CLIENTE SULLO STESSO ARGOMENTO',
+      issueSimili.length ? issueSimili.map((p) => `- ${giorno(p.ref.data_segnalazione)} [${p.ref.stato}] ${corto(p.ref.descrizione, 300)}${p.ref.mysupport ? ` | MySupport ${p.ref.mysupport}` : ''}${p.ref.tkt_jira ? ` | Jira ${p.ref.tkt_jira}` : ''}`).join('\n') : '(nessuna)',
+      '',
+      'ALTRI PROGETTI DEL CLIENTE: RIGHE SULLO STESSO ARGOMENTO',
+      righeAltri.length ? righeAltri.map((p) => `- [${p.etichetta}] ${corto(p.testo, 300)}`).join('\n') : '(nessuna)',
+      '',
+      'ULTIMI RECAP DEL CLIENTE (completi)',
+      ultimiRecap.length ? ultimiRecap.map((m) => `--- ${giorno(m.data_calendar)} «${corto(m.oggetto || 'Riunione', 80)}»\n${String(m.recap).slice(0, 3000)}`).join('\n\n') : '(nessuno)'
+    ].join('\n');
     const testoEmail = [
       `Da: ${email.mittente.nome ? `${email.mittente.nome} <${email.mittente.email}>` : email.mittente.email}`,
       email.a.length ? `A: ${email.a.map((x) => x.email).join(', ')}` : '',
@@ -712,22 +956,28 @@ async function analizza(req, res) {
       email.testo + (email.troncato ? '\n[... email troncata per lunghezza ...]' : '')
     ].filter((x) => x !== '').join('\n');
     const testoTicket = ticket.length
-      ? ticket.map((t) => (t.nonTrovato ? `- ${t.codice} (${t.sistema}): NON presente tra i ticket di questo cliente in Projexa`
-        : `- ${t.codice} (${t.sistema}) | stato: ${t.stato || '-'} | in carico: ${t.inCarico || '-'} | release/versione: ${t.release || 'non indicata'} | aperto ${t.apertura || '-'}${t.chiusura ? ` | chiuso ${t.chiusura}` : ''}${t.descrizione ? ` | ${t.descrizione}` : ''}`)).join('\n')
-      : '(nessun ticket citato nell\'email trovato tra quelli del cliente)';
-    const testoRelease = release.length
-      ? release.map((r) => `- ${r.release}: ${r.data}${r.futura ? '' : ' (già rilasciata)'}`).join('\n')
-      : '(nessuna release pianificata in Projexa)';
-    const nomeUtente = (await righe('SELECT name, cognome FROM users WHERE id = $1', [user.user_id])).map((x) => [x.name, x.cognome].filter(Boolean).join(' '))[0] || '';
+      ? ticket.map((t) => (t.nonTrovato ? `- ${t.codice} (${t.sistema}, citato nell'email): NON presente tra i ticket di questo cliente in Projexa`
+        : `- ${t.codice} (${t.sistema}, ${t.origine === 'citato' ? 'citato nell\'email' : 'stesso argomento'}) | stato: ${t.stato || '-'} | in carico: ${t.inCarico || '-'} | versione: ${t.versione || 'non indicata'}${t.release ? ` | release ${t.release} del ${t.releaseData}` : ''} | aperto ${t.apertura || '-'}${t.chiusura ? ` | chiuso ${t.chiusura}` : ''}${t.descrizione ? ` | ${t.descrizione}` : ''}`)).join('\n')
+      : '(nessun ticket citato nell\'email né sullo stesso argomento tra quelli del cliente)';
+    // Release solo dai ticket collegati; il calendario completo serve solo se l'email chiede
+    // esplicitamente quando esce la prossima release.
+    const releaseCollegate = ticket.filter((t) => t.release).map((t) => `- ${t.codice}: release ${t.release} del ${t.releaseData}`);
+    const prossime = release.filter((r) => r.futura).slice(0, 3).map((r) => `${r.release} (${r.data})`).join(', ');
+    const testoRelease = [
+      releaseCollegate.length ? `Release dei ticket collegati:\n${releaseCollegate.join('\n')}` : 'Nessun ticket collegato ha una release: NON indicare date di rilascio.',
+      prossime ? `Calendario (usalo SOLO se l'email chiede esplicitamente quando esce la prossima release): ${prossime}` : ''
+    ].filter(Boolean).join('\n');
     const tpl = (await getPromptFor('OUTLOOK_ANALISI', u)).testo;
     const valori = {
       EMAIL: testoEmail, CLIENTE: trovato.nome || '', PROGETTO: progetto ? progetto.nome : 'non determinato', TICKET: testoTicket,
-      RELEASE: testoRelease, DATA: dataIt(oggiIso()), UTENTE: nomeUtente || 'il project manager'
+      RELEASE: testoRelease, CORRELATI: testoCorrelati, DATA: dataIt(oggiIso()), UTENTE: nomeUtente || 'il project manager'
     };
     const datiTesto = [contesto ? `${contesto}\n` : '', testoDatiCliente(dati)].join('\n');
     const build = (d) => {
-      const testo = tpl.includes('{{DATI}}') ? tpl : `${tpl}\n\nDATI\n{{DATI}}`;
-      return testo.replace(/\{\{(EMAIL|CLIENTE|PROGETTO|TICKET|RELEASE|DATA|UTENTE|DATI)\}\}/g, (x, k) => (k === 'DATI' ? d : valori[k])) + FORMATO_JSON;
+      let testo = tpl.includes('{{DATI}}') ? tpl : `${tpl}\n\nDATI\n{{DATI}}`;
+      // Prompt salvato prima del 22/10 (senza {{CORRELATI}}): i passaggi vanno in coda.
+      if (!testo.includes('{{CORRELATI}}')) testo += '\n\nPASSAGGI DI PROJEXA SULLO STESSO ARGOMENTO\n{{CORRELATI}}';
+      return testo.replace(/\{\{(EMAIL|CLIENTE|PROGETTO|TICKET|RELEASE|CORRELATI|DATA|UTENTE|DATI)\}\}/g, (x, k) => (k === 'DATI' ? d : valori[k])) + FORMATO_JSON;
     };
     const r = await chiediAi(u, build, datiTesto, { json: true, ai: req.aiScelta });
     const j = leggiJson(r.testo);
@@ -753,8 +1003,11 @@ async function analizza(req, res) {
       sintesi: corto(j.sintesi, 1500),
       segnalazioni: esitiIssue,
       ticket: ticket.map((t) => ({ ...t, risposta: risposteTicket.get(String(t.codice).toUpperCase()) || '' })),
-      release: corto(j.release, 800),
-      releasePianificate: release.filter((x) => x.futura).slice(0, 5),
+      // Release solo se un ticket collegato ne ha una (niente calendario generico).
+      release: releaseCollegate.length ? corto(j.release, 800) : '',
+      riunioni: corto(j.riunioni, 1500),
+      riunioniCorrelate: [...daRegistri, ...daRiunioni, ...daTrascrizioni].sort((a, b) => b.punti - a.punti).slice(0, 8)
+        .map((p) => ({ data: p.data, oggetto: p.oggetto, tipo: p.tipo, estratto: corto(p.estratto, 350) })),
       puntiAttenzione: (Array.isArray(j.punti_attenzione) ? j.punti_attenzione : []).slice(0, 8).map((x) => corto(x, 300)).filter(Boolean),
       rispostaEmail: String(j.risposta_email || '').slice(0, 8000).trim(),
       ai: { label: r.label || '', model: r.model || '', locale: !!r.locale }
