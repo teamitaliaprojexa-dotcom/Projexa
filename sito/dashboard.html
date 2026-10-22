@@ -18052,7 +18052,7 @@
 
         // Impostazioni › Profilo: riquadro «Add-in Outlook» per tutti gli utenti (js/outlook-addin.js).
         function injectOutlookAddinAction(listEl, source, argument, label) {
-            const profileName = String(label || argument || '').replace(/^(*)s*/, '').trim().toLowerCase();
+            const profileName = String(label || argument || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
             if (!listEl || source !== 'settings' || profileName !== 'profilo' || !window.OutlookAddin) return;
             window.OutlookAddin.inserisci(listEl);
         }
