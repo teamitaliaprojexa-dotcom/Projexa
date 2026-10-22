@@ -13553,6 +13553,14 @@
                 // Testo semplice: nessun HTML interpretato, a capo preservati dal CSS.
                 answerEl.textContent = data.text || (data.files && data.files.length ? '' : '(risposta vuota)');
                 if (data.truncated) answerEl.textContent += '\n\n[Risposta interrotta per lunghezza massima]';
+                // Anonymization Layer: dati personali sostituiti da segnaposto prima dell'invio.
+                if (data.anonimizzati > 0) {
+                    const nota = document.createElement('div');
+                    nota.className = 'ai-chat-anon';
+                    nota.style.cssText = 'margin-top:10px;font-size:12px;color:#059669;';
+                    nota.textContent = `🔒 ${data.anonimizzati} dat${data.anonimizzati === 1 ? 'o personale anonimizzato' : 'i personali anonimizzati'} prima dell'invio a ${(AI_INFO[key] && AI_INFO[key].label) || 'AI'} e ripristinati nella risposta`;
+                    answerEl.appendChild(nota);
+                }
                 if (data.trascrizioniEscluse > 0) {
                     showNotification(`${data.trascrizioniEscluse} trascrizion${data.trascrizioniEscluse === 1 ? 'e non inclusa' : 'i non incluse'} per il limite di lunghezza: restringi il periodo o togli qualche riunione`, 'info');
                 }

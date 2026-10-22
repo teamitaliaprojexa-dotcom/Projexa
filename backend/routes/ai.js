@@ -11,6 +11,10 @@
 // per domanda/risposta, quindi non è gestito.
 //
 // Il backend fa da proxy: la chiave non torna mai al browser.
+//
+// ANONYMIZATION LAYER (2026-10-22, config/pii.js): prima di ogni invio a queste AI esterne
+// (finestra AI, askAiProvider, Batch) i dati personali diventano segnaposto ([PERSONA_1]...) e
+// nella risposta tornano i valori veri. Le AI locali (Ollama «Projexa») non sono toccate.
 import express from 'express';
 import http from 'http';
 import https from 'https';
@@ -23,6 +27,7 @@ import { prepareAttachments, attachmentsText, pdfToText, EXPORT_FORMATS } from '
 import { getPromptFor } from '../config/prompts.js';
 import { attendiVmLibera, suPrecedenza, vmOccupata } from '../config/ollamaPrecedenza.js';
 import { iniziaLavoro, segnaAttesaProjexa } from '../config/lavoriProjexa.js';
+import { anonimizzaPrompt, salvaMappaBatch, ripristinaBatch, statoAnonimizzazione } from '../config/pii.js';
 
 const router = express.Router();
 
@@ -523,8 +528,12 @@ export async function inviaBatchAi(userId, providerName, prompt, opzioni = {}) {
   const apiKey = el[`${cfg.prefix}_api_key`];
   if (!apiKey) throw httpError(428, `${cfg.label} non collegato: attivalo da Impostazioni › AI`);
   const model = modelloUtente(cfg, el);
+  // Anonimizzazione: la tabella dei segnaposto si salva (cifrata) fino alla risposta del batch.
+  const { prompt: daInviare, anon } = await anonimizzaPrompt(userId, prompt, { etichetta: `${cfg.label} Batch` });
   try {
-    return { batchId: await BATCH[key].invia(apiKey, model, prompt, opzioni), model, label: cfg.label };
+    const batchId = await BATCH[key].invia(apiKey, model, daInviare, opzioni);
+    await salvaMappaBatch(key, batchId, userId, anon);
+    return { batchId, model, label: cfg.label };
   } catch (e) {
     // Piano che non permette il Batch: Gemini gratuito (400 "Precondition check failed" =
     // fatturazione non attiva, oppure 429 sulla richiesta batch), modello non incluso nel piano
@@ -542,6 +551,10 @@ export async function inviaBatchAi(userId, providerName, prompt, opzioni = {}) {
 }
 export const isBatchNonDisponibile = (e) => !!(e && e.code === 'BATCH_NON_DISPONIBILE');
 
+// Risposta JSON (Kick-off, RAID, associazioni...): i valori rimessi al posto dei segnaposto
+// vanno con virgolette e barre protette.
+const pareJson = (t) => /^\s*(```(json)?\s*)?[[{]/i.test(String(t || ''));
+
 export async function statoBatchAi(userId, providerName, batchId) {
   const key = String(providerName || '').trim().toLowerCase();
   const cfg = PROVIDERS[key];
@@ -549,7 +562,10 @@ export async function statoBatchAi(userId, providerName, batchId) {
   const el = await getIntegration(userId, cfg.provider);
   const apiKey = el[`${cfg.prefix}_api_key`];
   if (!apiKey) return { stato: 'fallito', errore: `${cfg.label} scollegato: chiave API non più disponibile` };
-  return { ...(await BATCH[key].stato(apiKey, batchId)), label: cfg.label };
+  const esito = await BATCH[key].stato(apiKey, batchId);
+  // Risposta con i segnaposto dell'anonimizzazione: si rimettono i valori veri.
+  if (esito.stato === 'pronto' && esito.text) esito.text = await ripristinaBatch(key, batchId, userId, esito.text, { json: pareJson(esito.text) });
+  return { ...esito, label: cfg.label };
 }
 
 // AI con chiave collegata dall'utente (per la scelta "Chiedi sempre" del recap): [{ nome, label }].
@@ -604,7 +620,7 @@ router.get('/status', requireAuth, async (req, res) => {
         model: modelloUtente(cfg, el), modelPredefinito: cfg.model, modelScelto: !!el[`${cfg.prefix}_model`]
       };
     }
-    res.json({ providers: out });
+    res.json({ providers: out, anonimizzazione: await statoAnonimizzazione() });
   } catch (error) {
     console.error('❌ AI_STATUS:', error.message);
     res.status(500).json({ error: error.message });
@@ -855,6 +871,21 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
     if (prompt.length > MAX_PROMPT_CHARS) return res.status(400).json({ error: `Richiesta troppo lunga (max ${MAX_PROMPT_CHARS} caratteri)` });
     // La trascrizione segue la richiesta dell'utente (il limite vale solo per quella scritta).
     if (trascrizione) prompt = `${prompt}\n\n${trascrizione}`;
+    // Anonimizzazione: richiesta, trascrizioni e testo degli allegati (Word, Excel, testo e PDF
+    // con testo, che si manda come testo). Le immagini e i PDF scansionati partono così come sono.
+    const { prompt: daInviare, anon } = await anonimizzaPrompt(req.user.user_id, prompt, { etichetta: `Finestra AI ${cfg.label}` });
+    prompt = daInviare;
+    if (anon) {
+      for (let i = 0; i < atts.length; i++) {
+        const a = atts[i];
+        if (a.kind === 'pdf') {
+          const testo = await pdfToText(a).catch(() => '');
+          if (testo && testo.trim().length > 50) atts[i] = { kind: 'text', name: a.name, text: await anon.maschera(testo) };
+        } else if (a.kind === 'text') {
+          atts[i] = { ...a, text: await anon.maschera(a.text) };
+        }
+      }
+    }
 
     const el = await getIntegration(req.user.user_id, cfg.provider);
     const apiKey = el[`${cfg.prefix}_api_key`];
@@ -866,7 +897,9 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
       { label: cfg.label, model: modelloUtente(cfg, el), fallbacks: key === 'gemini' ? geminiFallbackModels() : [], profile: 'interactive' }
     );
     res.json({
-      provider: key, model, text: result.text, files: result.files || [], truncated: !!result.truncated,
+      provider: key, model, text: anon ? anon.ripristina(result.text) : result.text, files: result.files || [], truncated: !!result.truncated,
+      // Dati personali sostituiti da segnaposto prima dell'invio (la dashboard lo segnala)
+      anonimizzati: anon ? anon.totale : 0,
       // Trascrizioni rimaste fuori per il limite di lunghezza (la dashboard lo segnala)
       trascrizioniEscluse: tr ? tr.escluse : 0
     });
@@ -896,11 +929,13 @@ export async function askAiProvider(userId, providerName, prompt, opzioni = {}) 
   const el = await getIntegration(userId, cfg.provider);
   const apiKey = el[`${cfg.prefix}_api_key`];
   if (!apiKey) throw httpError(428, `${cfg.label} non collegato: attivalo da Impostazioni › AI`);
+  const { prompt: daInviare, anon } = await anonimizzaPrompt(userId, prompt, { etichetta: cfg.label });
   const { result, model } = await withAiRetry(
-    (m) => ASK[key](apiKey, prompt, [], opzioni, m),
+    (m) => ASK[key](apiKey, daInviare, [], opzioni, m),
     { label: cfg.label, model: modelloUtente(cfg, el), fallbacks: key === 'gemini' ? geminiFallbackModels() : [], profile: 'background' }
   );
-  return { text: result.text, label: cfg.label, model };
+  const text = anon ? anon.ripristina(result.text, { json: !!opzioni.json || pareJson(result.text) }) : result.text;
+  return { text, label: cfg.label, model };
 }
 
 // ==========================================
@@ -1018,6 +1053,39 @@ function ollamaPostUnaVolta(url, body, timeoutMs, { signal } = {}) {
   });
 }
 
+// RAM DELLA VM (2026-10-22): un recap con «Projexa 14B» (~12 GB) partito mentre in RAM c'erano
+// ancora i modelli dell'Assistente PM della call precedente (tenuti 4 ore) ha esaurito i 24 GB e
+// bloccato la VM (sito e SSH senza risposta). Prima di usare un modello si scaricano gli ALTRI
+// modelli Ollama caricati: chi lavora qui ha già la precedenza (conPrecedenza: niente Assistente
+// PM in corso), quindi quei modelli non servono. Una volta al minuto per modello, non a ogni pezzo.
+// tenere: modelli da lasciare in RAM (quello che si sta per usare ed eventuali compagni).
+const OLLAMA_BASE = () => String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+const nomeOllama = (m) => String(m || '').replace(/:latest$/, '');
+const ultimoScarico = new Map();
+export async function liberaRamOllama(tenere, base = OLLAMA_BASE()) {
+  const keep = new Set([].concat(tenere || []).filter(Boolean).map(nomeOllama));
+  const chiave = `${base}|${[...keep].sort().join('|')}`;
+  if (!keep.size || Date.now() - (ultimoScarico.get(chiave) || 0) < 60000) return;
+  ultimoScarico.set(chiave, Date.now());
+  try {
+    const r = await fetch(`${base}/api/ps`, { signal: AbortSignal.timeout(5000) });
+    const d = await r.json();
+    for (const m of d.models || []) {
+      const nome = nomeOllama(m.name || m.model);
+      if (!nome || keep.has(nome)) continue;
+      await ollamaPost(`${base}/api/generate`, { model: m.name || m.model, keep_alive: 0 }, 30000).catch(() => {});
+      console.log(`[OLLAMA] ${nome} scaricato dalla RAM per lasciare posto a ${[...keep].join(', ')}`);
+    }
+  } catch (e) {
+    console.warn(`[OLLAMA] elenco dei modelli caricati non disponibile (${e.message})`);
+  }
+}
+
+// Core per recap e funzioni con «Projexa» (2026-10-22): 3 su 4, così sito, database e
+// trascrizione restano reattivi. Il tetto vero (3,5 core e RAM) è sul servizio ollama
+// (deploy/oracle/setup-limiti-ollama.sh); stesso valore dell'Assistente PM (OLLAMA_PM_THREADS).
+const OLLAMA_RECAP_THREADS = Math.max(1, Number(process.env.OLLAMA_RECAP_THREADS) || 3);
+
 // Modello per le funzioni con «Projexa» diverse dal recap (Dossier, funzioni PM, Email attività,
 // 2026-10-20): voce «Projexa 14B» -> base 14B (OLLAMA_FUNZIONI_14B_MODEL), altrimenti l'8B.
 // Si usa la base e non recap-projexa-14b: le istruzioni di sistema di quello parlano di recap.
@@ -1032,9 +1100,11 @@ export async function ollamaConPrecedenza(modelloScelto, fn) {
   const catena = [...new Set([...[].concat(modelloScelto || []).filter(Boolean), OLLAMA_7B()])];
   return conPrecedenza(async (signal) => {
     let i = 0;
+    await liberaRamOllama(catena[0]);
     let r = await fn(catena[0], signal);
     while (r.status === 404 && i < catena.length - 1 && /not found|pull/i.test(String((r.data && r.data.error) || ''))) {
       console.warn(`[OLLAMA] modello ${catena[i]} assente sulla VM: uso ${catena[i + 1]}`);
+      await liberaRamOllama(catena[i + 1]);
       r = await fn(catena[++i], signal);
     }
     return { ...r, model: catena[i] };
@@ -1048,7 +1118,7 @@ async function ollamaGenerate(prompt, numCtx, numPredict) {
   let response;
   try {
     response = await ollamaConPrecedenza(scelto, (model, signal) => ollamaPost(`${base}/api/generate`,
-      { model, prompt, stream: false, think: false, options: { num_ctx: numCtx, num_predict: numPredict, temperature: 0.3 } },
+      { model, prompt, stream: false, think: false, options: { num_ctx: numCtx, num_predict: numPredict, temperature: 0.3, num_thread: OLLAMA_RECAP_THREADS } },
       // Su CPU una riunione lunga può richiedere decine di minuti.
       Number(process.env.OLLAMA_TIMEOUT_MS) || 2 * 60 * 60 * 1000, { signal }));
   } catch (error) {
@@ -1166,15 +1236,17 @@ async function recapProjexaChat(sistema, compito, numPredict, modello = RECAP_PR
     if (i < 0) i = catena.length - 1;
     let model = catena[i];
     const corpo = () => ({ model, messages, stream: false, think: false, keep_alive: RECAP_PROJEXA_KEEP_ALIVE,
-      options: { num_ctx: numCtx, num_predict: numPredict, temperature: 0.3 } });
+      options: { num_ctx: numCtx, num_predict: numPredict, temperature: 0.3, num_thread: OLLAMA_RECAP_THREADS } });
     const timeout = Number(process.env.OLLAMA_TIMEOUT_MS) || 2 * 60 * 60 * 1000;
     let response;
     try {
+      await liberaRamOllama(model, base);
       response = await ollamaPost(`${base}/api/chat`, corpo(), timeout, { signal });
       while (response.status === 404 && i < catena.length - 1 && /not found|pull/i.test(String((response.data && response.data.error) || ''))) {
         recapProjexaAssente.set(model, Date.now() + 10 * 60000);
         console.warn(`[RECAP] modello ${model} assente su Ollama: uso ${catena[i + 1]}`);
         model = catena[++i];
+        await liberaRamOllama(model, base);
         response = await ollamaPost(`${base}/api/chat`, corpo(), timeout, { signal });
       }
     } catch (error) {

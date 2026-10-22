@@ -38,6 +38,11 @@
 // dell'utente. Su CPU il modello è lento: si valuta un tratto di riunione alla volta
 // (OLLAMA_PM_BLOCCHI blocchi da ~10 s, di norma un minuto di parlato) e la conversazione
 // cresce in coda, così Ollama rilegge solo il pezzo nuovo (cache del prompt di llama.cpp).
+//
+// ANONYMIZATION LAYER (2026-10-22, config/pii.js): con Gemini istruzioni, dati del progetto,
+// pezzi di trascrizione (modalità Testo) e domande scritte partono con i segnaposto
+// ([PERSONA_1]...), una tabella per sessione; i suggerimenti tornano con i nomi veri. L'AUDIO
+// (modalità Audio live e «Gemini trascrive») non si può anonimizzare e parte così com'è.
 // ============================================================================
 import express from 'express';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
@@ -47,9 +52,10 @@ import { getIntegration } from '../config/integrations.js';
 import { getPromptFor } from '../config/prompts.js';
 import { speakerName, trascriviBloccoBreve } from '../jobs/meetingTranscription.js';
 import { contestoProgetto, dataIt, oggiIso } from '../config/pmCore.js';
-import { ollamaPost, senzaRagionamento } from './ai.js';
+import { ollamaPost, senzaRagionamento, liberaRamOllama } from './ai.js';
 import { segnaPmProjexa, segnaAssistente, pmProjexaInCorso } from '../config/ollamaPrecedenza.js';
 import { encryptRowForWrite } from '../config/crypto.js';
+import { Anonimizzatore, NOTA_SEGNAPOSTO, piiAttivo } from '../config/pii.js';
 
 const router = express.Router();
 
@@ -555,7 +561,8 @@ function passaAlModelloSuccessivo(s, motivo) {
 
 // Ultimi pezzi di riunione da rimandare come contesto a una sessione Gemini nuova.
 function contestoUltimiPezzi(s) {
-  const ultimi = s.messaggi.filter((m) => m.tipo === 'trascrizione').slice(-CONTESTO_PEZZI).map((m) => m.testo);
+  const ultimi = s.messaggi.filter((m) => m.tipo === 'trascrizione').slice(-CONTESTO_PEZZI)
+    .map((m) => (s.anon ? s.anon.mascheraSubito(m.testo) : m.testo));
   return ultimi.length
     ? `Riprendi l'assistenza: la sessione precedente si è interrotta. Ecco gli ultimi pezzi della riunione, solo come contesto (non rispondere a questo messaggio):\n${ultimi.join('\n')}`
     : '';
@@ -648,7 +655,7 @@ function gestisciMessaggio(s, ws, msg) {
     const silenzio = !testo || SILENZIO_RE.test(testo) || scartata;
     if (scartata) console.log(`[ASSISTENTE PM] ${s.idCalendar}: risposta senza parola chiave scartata (${testo.length} caratteri)`);
     if (silenzio) s.silenzi++;
-    else aggiungi(s, 'ai', testo);
+    else aggiungi(s, 'ai', s.anon ? s.anon.ripristina(testo) : testo);
     console.log(`[ASSISTENTE PM] ${s.idCalendar}: risposta ${s.valutazioni} (turni chiesti ${s.turniChiesti}) ${sc.interrupted ? 'interrotta' : 'completa'}, ${silenzio ? 'nessun suggerimento' : `suggerimento di ${testo.length} caratteri`} · token contesto ${s.diag.token ?? '?'} · connessione n.${s.diag.connessioni} da ${secondiDa(s.diag.connessaIl)} s`);
     s.diag.tipi = {};
     s.riconnessioni = 0;
@@ -733,10 +740,18 @@ function prossimo(s) {
   if (s.chiusa || !s.pronta || s.inTurno || !s.coda.length || !s.ws) return;
   const voce = s.coda.shift();
   s.inTurno = true;
+  // Anonimizzazione del testo prima dell'invio (il servizio risponde in millisecondi): poi si
+  // rientra qui con il testo già trattato. Con PII_SE_NON_DISPONIBILE=blocca il pezzo si scarta.
+  if (s.anon && !voce.anonimo) {
+    s.anon.maschera(voce.testo).then((t) => { s.coda.unshift({ ...voce, testo: t, anonimo: true }); }, (e) => {
+      aggiungi(s, 'avviso', e.message);
+    }).finally(() => { s.inTurno = false; prossimo(s); });
+    return;
+  }
   s.risposta = '';
   s.rispostaLibera = !!voce.domanda;
-  // Per il voto: pezzo di riunione a cui risponderà Gemini.
-  s.trattoCorrente = voce.domanda ? '' : String(voce.testo).replace(/^TRASCRIZIONE[^\n]*\n/, '');
+  // Per il voto: pezzo di riunione a cui risponderà Gemini (con i nomi veri).
+  s.trattoCorrente = voce.domanda ? '' : String(s.anon ? s.anon.ripristina(voce.testo) : voce.testo).replace(/^TRASCRIZIONE[^\n]*\n/, '');
   s.rispostaDomanda = !!voce.domanda;
   s.timerTurno = setTimeout(() => {
     s.inTurno = false;
@@ -810,6 +825,9 @@ function preriscaldaOllama(s) {
   codaOllama = codaOllama.then(async () => {
     if (s.chiusa) return;
     try {
+      // RAM (2026-10-22): via dalla RAM i modelli del recap o delle funzioni (es. 14B), che
+      // l'Assistente PM interrompe comunque: con loro e i modelli di Pm projexa la VM si blocca.
+      await liberaRamOllama([s.modelloOllama, s.filtroModello, s.filtroRiserva, OLLAMA_PM_RISERVA], OLLAMA_PM_URL);
       // Istruzioni (di solito già in cache da una call precedente) + contesto della riunione.
       const r = await chiamaOllama(s, [{ role: 'system', content: s.istruzioni }, s.storia[0]], { num_predict: 8 });
       console.log(`[ASSISTENTE PM] ${s.idCalendar}: Pm projexa pronto (${s.modelloOllama}${s.filtroModello ? ` + filtro ${s.filtroModello}` : ""}, ${r.letti} token di istruzioni letti in ${r.secondi} s)`);
@@ -1131,6 +1149,9 @@ router.post('/avvia', requireAuth, async (req, res) => {
     // ci sono più attese, quindi due /avvia insieme non lasciano una sessione orfana aperta
     // verso Gemini (la seconda chiude sempre la prima). 2026-10-17
     const testoIstruzioni = await istruzioni(req.user, idCalendar, String(b.titolo || '').slice(0, 200), modalita, ai);
+    // Gemini: istruzioni e dati del progetto con i segnaposto (stessa tabella per tutta la sessione).
+    const anon = !ai.locale && piiAttivo() ? new Anonimizzatore(req.user.user_id) : null;
+    const istruzioniGemini = anon ? NOTA_SEGNAPOSTO + await anon.maschera(testoIstruzioni) : testoIstruzioni;
     // Pm projexa: istruzioni del filtro veloce (vuote = lavora solo il modello grande).
     let istruzioniFiltro = '';
     if (filtroDi(ai)) {
@@ -1148,7 +1169,7 @@ router.post('/avvia', requireAuth, async (req, res) => {
     const s = {
       chiave: k, idCalendar, apiKey, modalita, handle: null, ws: null, pronta: false, avviata: false, chiusa: false,
       titolo: String(b.titolo || '').trim().slice(0, 200) || 'Riunione', creataIl: Date.now(), chiusaIl: 0,
-      istruzioni: ai.locale ? testoIstruzioni.sistema : testoIstruzioni, bloccoInCoda: 0,
+      istruzioni: ai.locale ? testoIstruzioni.sistema : istruzioniGemini, bloccoInCoda: 0, anon,
       coda: [], inTurno: false, risposta: '', ascoltato: '', attesaAudio: [], timerTurno: null, riconnessioni: 0,
       timerAudio: null, attivitaAperta: false, audioNuovo: false, valutazioni: 0, silenzi: 0, rispostaLibera: false,
       attesaRisposta: false, timerRisposta: null, turniChiesti: 0, senzaRisposta: 0, senzaRispostaDiFila: 0, sblocchi: 0,

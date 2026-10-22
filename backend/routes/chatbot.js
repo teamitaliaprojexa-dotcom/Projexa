@@ -13,6 +13,10 @@
 // supportano) il manuale viene inviato insieme a ogni domanda: le risposte sono le stesse.
 //
 // Modello: CHATBOT_GEMINI_MODEL, altrimenti lo stesso di Impostazioni › AI (GEMINI_MODEL).
+//
+// Anonymization Layer (2026-10-22, config/pii.js): domanda, conversazione e contesto di chi
+// scrive (nomi di utente, Manager e collaboratori) partono con i segnaposto; la risposta torna
+// con i nomi veri. Il manuale non contiene dati personali e resta com'è.
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
@@ -23,6 +27,7 @@ import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { getIntegration } from '../config/integrations.js';
 import { PROVIDERS, callApi, readJson, withAiRetry, geminiFallbackModels } from './ai.js';
+import { Anonimizzatore, NOTA_SEGNAPOSTO, piiAttivo } from '../config/pii.js';
 
 const router = express.Router();
 
@@ -251,6 +256,11 @@ router.post('/', requireAuth, async (req, res) => {
     const [man, apiKey, contesto] = await Promise.all([loadManual(), getChatbotKey(), userContextText(req.user)]);
     const model = chatbotModel();
     const contents = toContents(req.body.storia, messaggio, contesto);
+    const anon = piiAttivo() ? new Anonimizzatore(req.user.user_id) : null;
+    if (anon) {
+      for (const c of contents) for (const p of c.parts) p.text = await anon.maschera(p.text);
+      if (anon.totale) contents[contents.length - 1].parts.unshift({ text: NOTA_SEGNAPOSTO.trim() });
+    }
 
     // Sovraccarico o limite di Gemini: nuovi tentativi e modelli alternativi (withAiRetry).
     // La cache di contesto vale solo per il modello principale: i modelli alternativi
@@ -272,7 +282,7 @@ router.post('/', requireAuth, async (req, res) => {
       }
     };
     const { result: risposta } = await withAiRetry(run, { label: 'Gemini', model, fallbacks: geminiFallbackModels(), profile: 'interactive' });
-    res.json({ risposta });
+    res.json({ risposta: anon ? anon.ripristina(risposta) : risposta });
   } catch (error) {
     console.error('❌ CHATBOT:', error.message);
     res.status(error.status || 500).json({ error: userMessage(error) });

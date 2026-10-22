@@ -1,0 +1,4 @@
+# Anonymization Layer (pii-service/app.py): Microsoft Presidio Analyzer + spaCy.
+# Il modello italiano it_core_news_lg si installa a parte (deploy/oracle/setup-pii.sh).
+presidio-analyzer>=2.2.355,<2.3
+spacy>=3.8,<3.9

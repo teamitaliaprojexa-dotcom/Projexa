@@ -241,6 +241,7 @@ function serviceUnits() {
   const assistente = whisperAssistentePorta();
   if (assistente) units.push({ unit: 'projexa-whisper-assistente', label: `Whisper.cpp (Assistente PM, ${assistente})` });
   if (parakeetUrl()) units.push({ unit: 'projexa-parakeet', label: 'Parakeet TDT 0.6B v3 (trascrizione)' });
+  if (process.env.PII_URL) units.push({ unit: 'projexa-pii', label: 'Anonymization Layer (Presidio + spaCy)' });
   units.push({ unit: 'ollama', label: 'Ollama (Projexa: recap, Assistente PM, funzioni AI, associazioni)' });
   // Backup notturno: dal 2026-10-01 è un job dello schedulatore (pagina Schedulazioni), non più un timer.
   units.push({ unit: 'projexa-monitor.timer', label: 'Controlli di salute' });
