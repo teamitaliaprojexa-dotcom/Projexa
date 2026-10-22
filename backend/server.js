@@ -12724,6 +12724,22 @@ app.get('/api/issue', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/issue/:id/cliente - Cliente di una issue dell'utente: la campanella (notifiche di
+// scadenza e dell'add-in Outlook) apre issue.html?issue=<id> e la pagina sceglie il cliente.
+app.get('/api/issue/:id/cliente', requireAuth, async (req, res) => {
+  try {
+    if (!/^[0-9a-f-]{36}$/i.test(String(req.params.id || ''))) return res.status(400).json({ error: 'Issue non valida' });
+    const r = await pickDb(req).query(
+      `SELECT client_id::text AS client_id FROM public.issue WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`,
+      [req.params.id, req.user.tenant_id, req.user.user_id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'Issue non trovata' });
+    res.json({ clientId: r.rows[0].client_id });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
 // POST /api/issue - Crea una nuova issue
 app.post('/api/issue', requireAuth, async (req, res) => {
   try {

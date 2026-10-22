@@ -3675,6 +3675,8 @@
         }
         .meeting-genrecap-btn:hover { background: #BAE6FD; }
         .meeting-genrecap-btn:disabled { opacity: 0.7; cursor: wait; }
+        /* Percentuale del recap con Projexa accanto al pulsante (2026-10-22) */
+        .meeting-recap-pct { margin-left: 0.35rem; font-size: 0.75rem; font-weight: 600; color: #9A3412; white-space: nowrap; cursor: help; }
         /* Recap preso in carico da «AI Automatizza»: arancione e non cliccabile (span, non
            button, così il suggerimento al passaggio del mouse compare sempre) */
         .meeting-genrecap-auto {
@@ -9593,6 +9595,13 @@
         const batchRecapIcon = '<i class="fas fa-hourglass-half meeting-queued" title="Recap in modalità Batch: arriva entro 24 ore (di solito pochi minuti), anche a pagina chiusa"></i>';
         // «AI Automatizza (solo Batch)» ha preso in carico il recap: pulsante arancione, non cliccabile.
         const autoRecapButton = '<span class="meeting-genrecap-auto" role="button" aria-disabled="true" title="È in carico l\'automatismo con AI per la generazione del recap (AI Automatizza)"><i class="fas fa-robot"></i> Recap</span>';
+        // Percentuale del recap cliente quando gira con Projexa sul server (stato delle riunioni:
+        // recap_percento, recap_fase); con le AI in Batch non c'è e non si mostra nulla.
+        function recapPercento(m) {
+            if (!m || m.recap_percento == null) return '';
+            const fase = m.recap_fase ? ` · ${m.recap_fase}` : '';
+            return `<span class="meeting-recap-pct" title="${escapeHtml(`Recap con Projexa: ${m.recap_percento}%${fase}`)}">${m.recap_percento}%</span>`;
+        }
 
         // «Chiedi sempre» in Impostazioni › AI (AI generazione e-mail recap / Esecuzione Recap):
         // prima di partire si chiede AI e/o esecuzione. Risolve { ai, esecuzione }, oppure null
@@ -9956,8 +9965,8 @@
                     // durante una generazione in corso il pulsante "Recap…" non va sovrascritto
                     if (!manualRecapRunning.has(ev.id)) {
                         const canRecap = m && m.has_trascrizione && !m.has_recap && !m.pending && !recording;
-                        setStatusCell(row, 'meeting-status-genrecap', m && m.recap_auto && !m.has_recap ? autoRecapButton
-                            : (m && m.recap_running && !m.has_recap ? (m.recap_batch ? batchRecapIcon : serverRecapIcon) : (canRecap ? manualRecapButton(ev.id) : '')));
+                        setStatusCell(row, 'meeting-status-genrecap', m && m.recap_auto && !m.has_recap ? autoRecapButton + recapPercento(m)
+                            : (m && m.recap_running && !m.has_recap ? (m.recap_batch ? batchRecapIcon : serverRecapIcon + recapPercento(m)) : (canRecap ? manualRecapButton(ev.id) : '')));
                     }
                     const queued = m && m.pending > 0
                         ? `<i class="fas fa-hourglass-half meeting-queued" title="Trascrizione in corso sul server: ${m.pending} blocc${m.pending === 1 ? 'o' : 'hi'} in coda"></i>`
@@ -14011,6 +14020,7 @@
                             ${n.tabella === 'tasks' && n.riga_id ? `<button type="button" class="notif-go" data-vai="${esc(n.riga_id)}" title="Apri la To-Do">Vai <i class="fas fa-arrow-right"></i></button>` : ''}
                             ${n.tabella === 'ai_lavori' && n.riga_id ? `<button type="button" class="notif-go" data-ai-lavoro="${esc(n.riga_id)}" title="Apri in Risultati AI">Apri <i class="fas fa-arrow-right"></i></button>` : ''}
                             ${n.fonte === 'progetto' && n.riga_id ? `<a class="notif-go" href="pm.html?projectId=${encodeURIComponent(n.riga_id)}" title="Apri il Cruscotto PM del progetto" style="text-decoration:none">Vai <i class="fas fa-arrow-right"></i></a>` : ''}
+                            ${n.tabella === 'issue' && n.riga_id ? `<a class="notif-go" href="issue.html?issue=${encodeURIComponent(n.riga_id)}" data-apri-pagina title="Apri la Issue" style="text-decoration:none">Vai <i class="fas fa-arrow-right"></i></a>` : ''}
                             ${n.tabella === 'pm_azioni_cliente' && n.riga_id ? `<a class="notif-go" href="portfolio.html?azione=${encodeURIComponent(n.riga_id)}" data-apri-pagina title="Apri l'azione del cliente nel Portfolio" style="text-decoration:none">Vai <i class="fas fa-arrow-right"></i></a>` : ''}
                             ${n.fonte === 'capacita' ? `<a class="notif-go" href="capacita.html?scheda=carico" data-apri-pagina title="Apri il carico delle persone" style="text-decoration:none">Vai <i class="fas fa-arrow-right"></i></a>` : ''}
                             ${n.vai ? `<button type="button" class="notif-go" data-vai-dest="${esc(n.id)}" title="${n.vai.projectId ? 'Apri il progetto' : 'Apri il cliente'}${n.vai.fieldId ? ' e la sua griglia' : ''}">Vai <i class="fas fa-arrow-right"></i></button>` : ''}

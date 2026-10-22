@@ -164,7 +164,9 @@
     }).catch(function () { /* nessuna analisi precedente */ });
   }
 
-  function analizza(projectId) {
+  // opz (facoltativo): { clientId: cliente scelto dal PM, senzaProgetto: true = tema del solo cliente }
+  function analizza(projectId, opz) {
+    opz = opz || {};
     var item = Office.context.mailbox.item;
     if (!item) return;
     var b = $('pxAnalizza');
@@ -183,7 +185,8 @@
         a: indirizzi(item.to), cc: indirizzi(item.cc),
         oggetto: item.subject || '', testo: String(res.value || ''),
         data: item.dateTimeCreated ? new Date(item.dateTimeCreated).toISOString() : '',
-        emailId: stato.emailId, projectId: projectId || ''
+        emailId: stato.emailId, projectId: projectId || '',
+        clientId: opz.clientId || '', senzaProgetto: !projectId && opz.senzaProgetto === true
       };
       statoAttesa('Invio a Projexa…');
       chiama('POST', '/analizza', corpo).then(function (r) {
@@ -255,15 +258,37 @@
     if (r.esito === 'cliente_non_trovato') {
       box.appendChild(el('h3', 'Cliente non trovato'));
       box.appendChild(el('p', r.messaggio || ''));
+      // Il PM sceglie il cliente e si rianalizza con quello.
+      if (r.clienti && r.clienti.length) {
+        var k0 = el('div', null, 'px-card');
+        var selCl = el('select');
+        r.clienti.forEach(function (x) { var o = el('option', x.nome); o.value = x.id; selCl.appendChild(o); });
+        k0.appendChild(el('label', 'Cliente'));
+        k0.appendChild(selCl);
+        var bc = el('button', 'Analizza con questo cliente', 'px-btn px-sec');
+        bc.type = 'button';
+        bc.addEventListener('click', function () { analizza('', { clientId: selCl.value }); });
+        k0.appendChild(bc);
+        box.appendChild(k0);
+      }
       return;
     }
     var c = r.cliente || {};
     box.appendChild(el('h3', 'Cliente e progetto'));
     var card = el('div', null, 'px-card');
     card.appendChild(el('div', c.nome || '-', 'px-oggetto'));
-    card.appendChild(el('div', 'Riconosciuto da: ' + (c.come === 'dominio' ? 'dominio di ' : (c.come === 'destinatario' ? 'destinatario ' : 'mittente ')) + (c.indirizzo || '') + (c.contatto ? ' (' + c.contatto + ')' : ''), 'px-muted'));
-    if (r.progetti && r.progetti.length > 1) {
+    var come = c.come === 'testo' ? 'testo dell\'email: ' + (c.motivo || '')
+      : c.come === 'scelto' ? 'scelta tua'
+        : (c.come === 'dominio' ? 'dominio di ' : (c.come === 'destinatario' ? 'destinatario ' : 'mittente ')) + (c.indirizzo || '') + (c.contatto ? ' (' + c.contatto + ')' : '');
+    card.appendChild(el('div', 'Riconosciuto da: ' + come, 'px-muted'));
+    if (r.interna) card.appendChild(el('span', 'Email interna tra colleghi', 'px-tag px-arancio'));
+    var selProgetto = null;
+    if (r.progetti && r.progetti.length) {
       var sel = el('select');
+      selProgetto = sel;
+      var nessuno = el('option', 'Nessun progetto (tema del cliente)'); nessuno.value = '';
+      if (!r.progetto) nessuno.selected = true;
+      sel.appendChild(nessuno);
       r.progetti.forEach(function (p) {
         var o = el('option', p.nome); o.value = p.id;
         if (r.progetto && r.progetto.id === p.id) o.selected = true;
@@ -273,10 +298,10 @@
       card.appendChild(lab); card.appendChild(sel);
       var rb = el('button', 'Rianalizza con questo progetto', 'px-btn px-sec');
       rb.type = 'button';
-      rb.addEventListener('click', function () { analizza(sel.value); });
+      rb.addEventListener('click', function () { analizza(sel.value, { clientId: c.id, senzaProgetto: !sel.value }); });
       card.appendChild(rb);
     } else {
-      card.appendChild(el('div', 'Progetto: ' + (r.progetto ? r.progetto.nome : 'nessun progetto aperto'), 'px-muted'));
+      card.appendChild(el('div', 'Progetto: nessun progetto aperto', 'px-muted'));
     }
     box.appendChild(card);
 
@@ -291,7 +316,9 @@
       box.appendChild(el('h3', 'Segnalazioni → Issue'));
       r.segnalazioni.forEach(function (s) {
         var k = el('div', null, 'px-card');
-        var esito = s.esito === 'creata' ? ['Issue creata', 'px-verde'] : (s.esito === 'gia_presente' ? ['Già presente', 'px-arancio'] : ['Non creata', 'px-rosso']);
+        var esito = s.esito === 'creata' ? ['Issue creata', 'px-verde']
+          : s.esito === 'gia_presente' ? ['Già presente', 'px-arancio']
+            : s.esito === 'interna' ? ['Email interna: Issue non creata', 'px-arancio'] : ['Non creata', 'px-rosso'];
         var riga = el('div');
         riga.appendChild(el('span', esito[0], 'px-tag ' + esito[1]));
         riga.appendChild(el('span', s.priorita + ' · ' + s.categoria, 'px-tag'));
@@ -357,6 +384,13 @@
       box.appendChild(ul2);
     }
 
+    // Azioni proposte: si registrano in Projexa solo con «Crea» (rischi e dipendenze nel RAID
+    // del progetto scelto sopra).
+    if (r.azioni && r.azioni.length) {
+      box.appendChild(el('h3', 'Azioni proposte'));
+      r.azioni.forEach(function (a) { box.appendChild(schedaAzione(a, selProgetto)); });
+    }
+
     if (r.rispostaEmail) {
       box.appendChild(el('h3', 'Bozza di risposta'));
       box.appendChild(el('div', r.rispostaEmail, 'px-risposta'));
@@ -373,6 +407,48 @@
       box.appendChild(az);
     }
     if (r.ai && r.ai.label) box.appendChild(el('p', 'Analisi di ' + r.ai.label + (r.ai.model ? ' (' + r.ai.model + ')' : '') + '. Controlla sempre la bozza prima di inviarla.', 'px-nota'));
+  }
+
+  var NOMI_AZIONI = { rischio: 'Rischio (RAID)', dipendenza: 'Dipendenza (RAID)', todo: 'To-Do', azione_cliente: 'Azione del cliente' };
+  var NOMI_REGISTRI = { pm_raid: 'RAID', tasks: 'To-Do', pm_azioni_cliente: 'Azioni del cliente' };
+  function dataBreve(iso) { var p = String(iso || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : ''; }
+
+  function schedaAzione(a, selProgetto) {
+    var k = el('div', null, 'px-card');
+    var testa = el('div');
+    testa.appendChild(el('span', NOMI_AZIONI[a.tipo] || a.tipo, 'px-tag'));
+    testa.appendChild(el('span', a.titolo, 'px-oggetto'));
+    k.appendChild(testa);
+    if (a.descrizione) k.appendChild(el('div', a.descrizione));
+    if (a.mitigazione) k.appendChild(el('div', 'Mitigazione: ' + a.mitigazione, 'px-muted'));
+    var meta = [];
+    if (a.scadenza) meta.push((a.tipo === 'rischio' || a.tipo === 'dipendenza' ? 'Revisione ' : 'Scadenza ') + dataBreve(a.scadenza));
+    if (a.owner) meta.push((a.tipo === 'azione_cliente' ? 'Referente: ' : 'Owner: ') + a.owner);
+    if (meta.length) k.appendChild(el('div', meta.join(' · '), 'px-muted'));
+    var esito = el('div');
+    var fatto = function (c) {
+      esito.textContent = '';
+      esito.appendChild(el('span', c.giaPresente ? 'Già presente' : 'Creata', 'px-tag ' + (c.giaPresente ? 'px-arancio' : 'px-verde')));
+      esito.appendChild(el('span', 'in ' + (NOMI_REGISTRI[c.tabella] || c.tabella) + (c.progetto ? ' · ' + c.progetto : ''), 'px-muted'));
+    };
+    k.appendChild(esito);
+    if (a.creata) { fatto(a.creata); return k; }
+    var b = el('button', 'Crea in Projexa', 'px-btn px-sec');
+    b.type = 'button';
+    b.addEventListener('click', function () {
+      b.disabled = true;
+      avviso('');
+      var lavoro = stato.lavoro;
+      chiama('POST', '/lavori/' + encodeURIComponent(lavoro) + '/azioni/' + a.n, { projectId: selProgetto ? selProgetto.value : '' })
+        .then(function (r) {
+          a.creata = r.dati;
+          fatto(r.dati);
+          b.remove();
+        })
+        .catch(function (e) { b.disabled = false; avviso(e.message); });
+    });
+    k.appendChild(b);
+    return k;
   }
 
   // ---------------------------------------------------------------------------

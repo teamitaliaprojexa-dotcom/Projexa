@@ -146,12 +146,13 @@ async function creaLavoro(req, operazione, scelte) {
 // Lavoro creato dal server senza una richiesta HTTP («AI Automatizza (solo Batch)» a fine
 // trascrizione, jobs/aiAutomatizza.js): stessa strada di un lavoro Batch chiesto dalla pagina.
 //   user = { tenant_id, user_id, email }, path = rotta dell'operazione (solo descrittiva),
-//   body = corpo che l'handler si aspetta, ai = { nome, label } dell'AI da usare.
+//   body = corpo che l'handler si aspetta, ai = { nome, label, locale? } dell'AI da usare
+//   (locale = Projexa sulla VM: niente Batch, il modello giusto lo sceglie eseguiLavoro).
 export async function creaLavoroAutomatico(user, operazione, { path, body, ai, titolo = '' }) {
   if (!OPERAZIONI[operazione] || !REGISTRO.has(operazione)) throw new Error(`Operazione AI non disponibile: ${operazione}`);
   const req = {
     user, method: 'POST', originalUrl: path, url: path, query: {}, body: body || {}, params: {},
-    aiScelta: { nome: ai.nome, label: ai.label, locale: false, esecuzione: 'batch', automatico: true }
+    aiScelta: { nome: ai.nome, label: ai.label, locale: !!ai.locale, esecuzione: ai.locale ? 'immediato' : 'batch', automatico: true }
   };
   return creaLavoro(req, operazione, { titolo, extra: null });
 }

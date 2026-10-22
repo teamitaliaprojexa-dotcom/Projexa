@@ -17,7 +17,7 @@
 // ============================================================================
 import db from './database.js';
 import { getIntegration } from './integrations.js';
-import { askAiProvider, PROVIDERS as AI_PROVIDERS, localRecapMode, askOllamaRecap } from '../routes/ai.js';
+import { askAiProvider, PROVIDERS as AI_PROVIDERS, localRecapMode, askOllamaRecap, askOllamaJson } from '../routes/ai.js';
 import { stripMarkdown } from '../jobs/meetingTranscription.js';
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -871,7 +871,8 @@ export async function aiPerPm(user, { soloEsterna = false } = {}) {
 // build(dati) -> prompt completo. Con l'AI locale i dati vengono riassunti a pezzi.
 // ai: AI già scelta per la richiesta (req.aiScelta da Impostazioni › AI › «AI Funzioni PM»,
 // vedi config/aiFunzioni.js e jobs/aiLavori.js); senza, la prima AI disponibile (aiPerPm).
-export async function chiediAi(user, build, dati, { json = false, soloEsterna = false, ai: scelta = null } = {}) {
+// modelloLocale: modello Ollama addestrato da provare per primo con Projexa (es. raid-projexa-14b).
+export async function chiediAi(user, build, dati, { json = false, soloEsterna = false, ai: scelta = null, modelloLocale = null } = {}) {
   if (scelta && !scelta.nome && scelta.errore) throw errore(428, scelta.errore);
   const ai = scelta && scelta.nome ? { nome: scelta.nome, locale: !!scelta.locale, label: scelta.label } : await aiPerPm(user, { soloEsterna: soloEsterna || json });
   if (!ai) {
@@ -879,8 +880,16 @@ export async function chiediAi(user, build, dati, { json = false, soloEsterna = 
       ? 'Serve un\'AI con chiave API (ChatGPT, Claude, Gemini o Mistral): sceglila in Impostazioni › AI › «AI generazione e-mail recap» (o «AI Slide Kick-Off») e collega la sua chiave'
       : 'Nessuna AI disponibile: sceglila in Impostazioni › AI › «AI generazione e-mail recap» e collega la sua chiave');
   }
+  // Projexa con risposta strutturata (RAID, Change Request, Add-in Outlook): JSON forzato da
+  // Ollama in una chiamata; se il testo non ci sta (413) si riassumono i dati a pezzi come prima.
+  const locale = async () => {
+    if (json) {
+      try { return await askOllamaJson(build(dati), { primo: modelloLocale }); } catch (e) { if (e.status !== 413) throw e; }
+    }
+    return askOllamaRecap(async (t) => build(t), dati);
+  };
   const r = ai.locale
-    ? await askOllamaRecap(async (t) => build(t), dati)
+    ? await locale()
     : await askAiProvider(user.user_id, ai.nome, build(dati), json ? { json: true } : {});
   return { testo: String(r.text || ''), label: r.label || ai.label, model: r.model || '', locale: ai.locale };
 }

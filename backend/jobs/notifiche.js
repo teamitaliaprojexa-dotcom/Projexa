@@ -10,7 +10,8 @@
 //      doppia. Si tengono solo le modifiche fatte da Jira o da Qlik (origine) e solo i campi
 //      previsti in notifiche_regole.
 //   2. SCADENZE: job schedulato "notifiche_scadenze" (eseguiNotificheScadenze), To-Do aperte
-//      con due_date domani, oggi o ieri. Una notifica per To-Do e soglia (chiave_dedup):
+//      con due_date e Issue aperte con deadline domani, oggi o ieri. Una notifica per riga
+//      e soglia (chiave_dedup):
 //      già presente e non letta -> niente; assente -> si crea; presente e letta -> torna da
 //      leggere (regola dell'utente).
 // Titolo e messaggio si salvano cifrati; il pool di projexa_notif li decifra in lettura.
@@ -394,43 +395,72 @@ function avvisaTabellaMancante() {
 // (= scaduta). Conta SOLO due_date: la colonna scadenza ha un'altra funzione e non si usa.
 // Destinatario: il proprietario. In più (2026-10-16) i promemoria delle azioni a carico del
 // cliente (config/azioniCliente.js, fonte «cliente»).
+// Issue (2026-10-22): aperte («Aperto» o «in Lavorazione», senza data di chiusura) con
+// «Scadenza» (colonna deadline) domani, oggi o ieri; stesse regole delle To-Do.
 const STATI_APERTI = ['todo', 'in_progress'];
+const STATI_ISSUE_APERTI = ['aperto', 'in lavorazione'];
 const SOGLIE = {
-  domani: { titolo: 'To-Do in scadenza domani' },
-  oggi: { titolo: 'To-Do in scadenza oggi' },
-  scaduta: { titolo: 'To-Do scaduta' }
+  domani: { titolo: 'To-Do in scadenza domani', issue: 'Issue in scadenza domani' },
+  oggi: { titolo: 'To-Do in scadenza oggi', issue: 'Issue in scadenza oggi' },
+  scaduta: { titolo: 'To-Do scaduta', issue: 'Issue scaduta' }
 };
+const SOGLIA_SQL = (col) => `CASE WHEN ${col} = CURRENT_DATE + 1 THEN 'domani' WHEN ${col} = CURRENT_DATE THEN 'oggi' ELSE 'scaduta' END`;
+
+// Una notifica per riga e soglia (chiave_dedup): assente -> nuova; presente e letta -> di
+// nuovo da leggere; presente non letta -> niente.
+async function notificaScadenza(report, { tenantId, userId, tabella, rigaId, due, soglia, titolo, messaggio }) {
+  const x = await notifDb.query(
+    `INSERT INTO notifiche (tenant_id, user_id, fonte, titolo, messaggio, tabella, riga_id, chiave_dedup)
+     VALUES ($1, $2, 'scadenza', $3, $4, $5, $6, $7)
+     ON CONFLICT (tenant_id, user_id, chiave_dedup) WHERE chiave_dedup IS NOT NULL
+     DO UPDATE SET letta = false, letta_il = NULL, aggiornata_il = now()
+       WHERE notifiche.letta
+     RETURNING (xmax = 0) AS nuova`,
+    [tenantId, userId, cifra(titolo), cifra(messaggio), tabella, rigaId, `scadenza|${tabella}|${rigaId}|${due}|${soglia}`]
+  );
+  if (!x.rows.length) report.giaPresenti += 1;
+  else if (x.rows[0].nuova) report.create += 1;
+  else report.rimesseDaLeggere += 1;
+}
 
 export async function eseguiNotificheScadenze() {
   const report = { ok: true, controllate: 0, create: 0, rimesseDaLeggere: 0, giaPresenti: 0, eliminateVecchie: 0 };
   const r = await db.query(
-    `SELECT id::text AS id, tenant_id, user_id, titile, due_date::text AS due,
-            CASE WHEN due_date = CURRENT_DATE + 1 THEN 'domani'
-                 WHEN due_date = CURRENT_DATE THEN 'oggi'
-                 ELSE 'scaduta' END AS soglia
+    `SELECT id::text AS id, tenant_id, user_id, titile, due_date::text AS due, ${SOGLIA_SQL('due_date')} AS soglia
        FROM tasks
       WHERE due_date BETWEEN CURRENT_DATE - 1 AND CURRENT_DATE + 1
         AND COALESCE(status, 'todo') = ANY($1)`,
     [STATI_APERTI]
   );
+  const issue = await db.query(
+    `SELECT id::text AS id, tenant_id, user_id, client_id, project_id, descrizione, deadline::text AS due, ${SOGLIA_SQL('deadline')} AS soglia
+       FROM issue
+      WHERE deadline BETWEEN CURRENT_DATE - 1 AND CURRENT_DATE + 1
+        AND lower(btrim(COALESCE(stato, 'Aperto'))) = ANY($1)
+        AND data_chiusura IS NULL
+        AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+    [STATI_ISSUE_APERTI]
+  );
   report.controllate = r.rows.length;
+  report.issueControllate = issue.rows.length;
   try {
     for (const t of r.rows) {
-      const chiave = `scadenza|tasks|${t.id}|${t.due}|${t.soglia}`;
-      const data = t.due.split('-').reverse().join('/');
-      // Assente -> nuova; presente e letta -> di nuovo da leggere; presente non letta -> niente.
-      const x = await notifDb.query(
-        `INSERT INTO notifiche (tenant_id, user_id, fonte, titolo, messaggio, tabella, riga_id, chiave_dedup)
-         VALUES ($1, $2, 'scadenza', $3, $4, 'tasks', $5, $6)
-         ON CONFLICT (tenant_id, user_id, chiave_dedup) WHERE chiave_dedup IS NOT NULL
-         DO UPDATE SET letta = false, letta_il = NULL, aggiornata_il = now()
-           WHERE notifiche.letta
-         RETURNING (xmax = 0) AS nuova`,
-        [t.tenant_id, t.user_id, cifra(SOGLIE[t.soglia].titolo), cifra(`${t.titile || '(senza titolo)'} · scadenza ${data}`), t.id, chiave]
-      );
-      if (!x.rows.length) report.giaPresenti += 1;
-      else if (x.rows[0].nuova) report.create += 1;
-      else report.rimesseDaLeggere += 1;
+      await notificaScadenza(report, {
+        tenantId: t.tenant_id, userId: t.user_id, tabella: 'tasks', rigaId: t.id, due: t.due, soglia: t.soglia,
+        titolo: SOGLIE[t.soglia].titolo, messaggio: `${t.titile || '(senza titolo)'} · scadenza ${t.due.split('-').reverse().join('/')}`
+      });
+    }
+    if (issue.rows.length) {
+      const { clienti, progetti } = await nomiClientiProgetti(issue.rows.map((x) => x.client_id), issue.rows.map((x) => x.project_id));
+      for (const t of issue.rows) {
+        const descrizione = String(t.descrizione || '(senza descrizione)').replace(/\s+/g, ' ').trim();
+        const dove = [clienti.get(String(t.client_id || '')), progetti.get(String(t.project_id || ''))].filter(Boolean).join(' · ');
+        await notificaScadenza(report, {
+          tenantId: t.tenant_id, userId: t.user_id, tabella: 'issue', rigaId: t.id, due: t.due, soglia: t.soglia,
+          titolo: SOGLIE[t.soglia].issue,
+          messaggio: `${descrizione.length > 200 ? `${descrizione.slice(0, 199)}…` : descrizione} · scadenza ${t.due.split('-').reverse().join('/')}${dove ? `\n${dove}` : ''}`
+        });
+      }
     }
     // Azioni a carico del cliente (config/azioniCliente.js): lettura dei recap nuovi e
     // promemoria al PM (in scadenza / da sollecitare). Un errore qui non blocca le To-Do.

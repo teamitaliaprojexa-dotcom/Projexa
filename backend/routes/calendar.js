@@ -34,6 +34,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { startLinkState, checkLinkState } from '../config/oauthLinkState.js';
 import { isAllowedOrigin } from '../config/origins.js';
 import { arricchisciEventi, completaRiunione } from '../config/riunioniOutlook.js';
+import { avanzamentoRiunione } from '../config/lavoriProjexa.js';
 import {
   getIntegration,
   saveIntegration,
@@ -1296,7 +1297,11 @@ router.post('/meetings/managed/status', requireAuth, async (req, res) => {
     if (recapBatch.size) controllaRecapBatchUtente(req.user);
     const out = {};
     for (const [id, row] of map) {
-      out[id] = { ...row, pending: pending.get(id) || 0, recap_running: recapRunning.has(id), recap_batch: recapBatch.has(id), recap_auto: recapAuto.has(id) };
+      // Avanzamento del recap cliente con Projexa (2026-10-22): dalla memoria del backend
+      // (config/lavoriProjexa.js), null se il recap non gira con il modello locale (es. Batch).
+      const l = avanzamentoRiunione(`${req.user.tenant_id}|${req.user.user_id}|${id}`).find((x) => x.tipo === 'recap');
+      out[id] = { ...row, pending: pending.get(id) || 0, recap_running: recapRunning.has(id), recap_batch: recapBatch.has(id), recap_auto: recapAuto.has(id),
+        recap_percento: l && l.percento != null ? l.percento : null, recap_fase: l ? (l.inAttesa ? `in pausa: la VM serve prima a ${l.inAttesa}` : l.fase || '') : '' };
     }
     res.json({ meetings: out });
   } catch (error) {

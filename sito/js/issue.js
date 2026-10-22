@@ -145,8 +145,30 @@ class IssueManager {
             if (!response.ok) throw new Error('Errore nel caricamento dei clienti');
             const clients = await response.json();
             this.populateClientSelect(clients);
+            await this.apriIssueDaIndirizzo();
         } catch (err) {
             this.showError('Errore nel caricamento dei clienti: ' + err.message);
+        }
+    }
+
+    // issue.html?issue=<id> (pulsante «Vai» della campanella): sceglie il cliente della issue
+    // e ne apre il dettaglio.
+    async apriIssueDaIndirizzo() {
+        const id = new URLSearchParams(window.location.search).get('issue');
+        if (!id) return;
+        try {
+            const response = await fetch(`/api/issue/${encodeURIComponent(id)}/cliente`, {
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() }
+            });
+            if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Issue non trovata');
+            const { clientId } = await response.json();
+            if (!Array.from(this.clientSelect.options).some(o => o.value === clientId)) throw new Error('Il cliente della issue non è tra i tuoi');
+            this.clientSelect.value = clientId;
+            await this.onClientChange();
+            const index = this.issues.findIndex(i => String(i.id) === String(id));
+            if (index >= 0) this.openDetail(index);
+        } catch (err) {
+            this.showError('Issue della notifica: ' + err.message);
         }
     }
 

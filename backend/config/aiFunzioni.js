@@ -36,8 +36,9 @@ export const OPERAZIONI = {
   dossier: { funzione: 'dossier', etichetta: 'Dossier Cliente', locale: true, facoltativa: true },
   kickoff: { funzione: 'kickoff', etichetta: 'Slide Kick-off', locale: false, file: true },
   offerta: { funzione: 'offerta', etichetta: 'Offerta Economica', locale: false, file: true },
-  pm_raid: { funzione: 'pm', etichetta: 'Rischi e decisioni dalla riunione', locale: false },
-  pm_cr: { funzione: 'pm', etichetta: 'Change Request dalla riunione', locale: false },
+  // Con Projexa (2026-10-22): JSON forzato da Ollama e solo dal recap (routes/pm.js).
+  pm_raid: { funzione: 'pm', etichetta: 'Rischi e decisioni dalla riunione', locale: true },
+  pm_cr: { funzione: 'pm', etichetta: 'Change Request dalla riunione', locale: true },
   pm_documento: { funzione: 'pm', etichetta: 'Documento di progetto (anteprima)', locale: true, facoltativa: true },
   pm_docx: { funzione: 'pm', etichetta: 'Documento di progetto (Word)', locale: false, file: true },
   pm_chiedi: { funzione: 'pm', etichetta: 'Chiedi al progetto', locale: false },

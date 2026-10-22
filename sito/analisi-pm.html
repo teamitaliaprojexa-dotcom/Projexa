@@ -62,6 +62,14 @@
         .voce { display: block; font-size: 0.86rem; margin-top: 0.3rem; }
         .voce .reg { display: inline-block; min-width: 82px; font-size: 0.72rem; font-weight: 700; color: var(--primary); text-transform: uppercase; }
         .tutte { max-height: 260px; overflow: auto; margin-top: 0.4rem; } .dom details summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; margin-top: 0.6rem; }
+        /* RAID e CR (2026-10-22): due risposte affiancate */
+        .duecol { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; margin-top: 0.6rem; }
+        .risp { border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.75rem; background: #FCFCFD; }
+        .risp.scelta { border: 2px solid var(--ok); background: #F0FDF4; }
+        .risp h3 { font-size: 0.9rem; margin-bottom: 0.3rem; }
+        .risp .el { font-size: 0.72rem; font-weight: 700; color: var(--primary); text-transform: uppercase; margin-top: 0.5rem; }
+        .risp .it { font-size: 0.85rem; margin-top: 0.25rem; padding-left: 0.6rem; border-left: 2px solid var(--line); }
+        @media (max-width: 760px) { .duecol { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
@@ -83,6 +91,7 @@
         <button data-tab="addestra"><i class="fas fa-graduation-cap"></i> Addestramento</button>
         <button data-tab="recap"><i class="fas fa-envelope-open-text"></i> Recap</button>
         <button data-tab="assoc"><i class="fas fa-link"></i> Associazioni</button>
+        <button data-tab="raid"><i class="fas fa-triangle-exclamation"></i> RAID e CR</button>
         <button data-tab="modello"><i class="fas fa-server"></i> Modello sulla VM</button>
     </div>
 
@@ -252,6 +261,35 @@
         </div>
     </section>
 
+    <!-- RAID E CR (2026-10-22): Projexa contro l'AI esterna, esempi per raid-projexa-14b -->
+    <section id="t-raid" class="hidden">
+        <div class="card">
+            <h2>Insegnare a Projexa a estrarre RAID e Change Request</h2>
+            <p class="muted">Ogni volta che RAID o Change Request si ricavano dal recap con <b>Projexa</b> (in automatico con AI Automatizza o dal pulsante), lo <b>stesso compito</b> va anche all'AI scelta nella scheda <i>Riunioni e analisi notturna</i> (oggi: <b id="xAi">—</b>), solo per confronto: non crea niente nel registro. Qui vedi le due risposte affiancate: premi <b>Giusta</b> su quella migliore, oppure <b>Nessuna delle due</b>. Le risposte scelte diventano gli esempi per addestrare <b>raid-projexa-14b</b>; «nessuna delle due» non insegna niente e resta fuori dal file.</p>
+            <div class="riga" style="margin-top:0.6rem"><span id="xConteggi" class="muted"></span></div>
+        </div>
+        <div class="card">
+            <div class="riga">
+                <select id="xEsito">
+                    <option value="da">Da valutare</option>
+                    <option value="fatte">Valutati</option>
+                    <option value="">Tutti</option>
+                </select>
+                <span id="xConteggio" class="muted" style="margin-left:auto"></span>
+            </div>
+        </div>
+        <div id="xLista"></div>
+        <div class="card">
+            <h2>Addestramento con Google Colab (gratuito)</h2>
+            <p class="muted">Consigliato con almeno 40-60 scelte. Stessa procedura degli altri modelli: scarica i due file, in Colab scegli <b>GPU T4</b>, carica il notebook, <b>Esegui tutto</b> e carica il .jsonl quando lo chiede. Alla fine si scarica <code>raid-projexa-14b-adapter.gguf</code>: caricalo nella scheda <b>Modello sulla VM</b> scegliendo <b>raid-projexa-14b</b>. Da quel momento RAID e Change Request con «Projexa 14B» usano il modello addestrato (se manca, la base qwen3:14b).</p>
+            <div class="riga" style="margin-top:0.8rem">
+                <button class="btn pri" id="xScarica"><i class="fas fa-download"></i> 1. Scarica gli esempi di RAID e CR (.jsonl)</button>
+                <button class="btn" id="xNotebook"><i class="fas fa-book"></i> 2. Notebook per il 14B (.ipynb)</button>
+                <a class="btn" href="https://colab.research.google.com/" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> 3. Apri Google Colab</a>
+            </div>
+        </div>
+    </section>
+
     <!-- MODELLO -->
     <section id="t-modello" class="hidden">
         <div class="card">
@@ -263,6 +301,7 @@
                     <option value="recap">recap-projexa — Recap con «Projexa» (8B)</option>
                     <option value="recap14">recap-projexa-14b — Recap con «Projexa 14B» (Qwen3 14B)</option>
                     <option value="assoc">assoc-projexa-14b — Associazione To-Do e RAID (Qwen3 14B)</option>
+                    <option value="raid">raid-projexa-14b — RAID e Change Request con «Projexa 14B» (Qwen3 14B)</option>
                 </select>
             </div>
             <div class="riga">
@@ -316,12 +355,13 @@
     // --- Schede ---
     function vai(tab) {
         document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-        ['domande', 'riunioni', 'addestra', 'recap', 'assoc', 'modello'].forEach((t) => $(`t-${t}`).classList.toggle('hidden', t !== tab));
+        ['domande', 'riunioni', 'addestra', 'recap', 'assoc', 'raid', 'modello'].forEach((t) => $(`t-${t}`).classList.toggle('hidden', t !== tab));
         if (tab === 'domande') caricaDomande();
         if (tab === 'riunioni') caricaRiunioni();
         if (tab === 'addestra') caricaEsempi();
         if (tab === 'recap') caricaRecap();
         if (tab === 'assoc') caricaAssoc();
+        if (tab === 'raid') caricaRaid();
         if (tab === 'modello') caricaModelli();
     }
     document.querySelectorAll('.tabs button').forEach((b) => { b.onclick = () => vai(b.dataset.tab); });
@@ -436,7 +476,7 @@
                 <td><b>${esc(m.nome)}</b> ${m.attuale ? '<span class="badge b-ok">in uso</span>' : m.backup ? '<span class="badge">backup</span>' : ''}</td>
                 <td>${(m.dimensione / 1e9).toLocaleString('it-IT', { maximumFractionDigits: 1 })} GB</td><td>${dataOra(m.modificato)}</td>
                 <td>${m.backup ? `<button class="btn" data-ripristina="${esc(m.nome)}"><i class="fas fa-rotate-left"></i> Ripristina</button> <button class="btn danger" data-elimina="${esc(m.nome)}"><i class="fas fa-trash"></i> Elimina</button>` : ''}</td></tr>`).join('')
-                || `<tr><td colspan="4" class="muted">Nessun modello ${esc(d.nome)} sulla VM${fam() === 'recap' ? ' (finché manca, il recap con Projexa usa qwen3:8b: crealo con deploy/oracle/ollama/recap-projexa.Modelfile)' : fam() === 'recap14' ? ' (finché manca, «Projexa 14B» usa recap-projexa: crealo con deploy/oracle/ollama/recap-projexa-14b.Modelfile)' : fam() === 'filtro' ? ' (finché manca, «Projexa 4B + 8B» usa qwen3:4b-instruct con gli esempi: nasce col primo adattatore caricato qui)' : fam() === 'assoc' ? ' (finché manca, l’associazione con Projexa usa qwen3:14b con i casi valutati: nasce col primo adattatore caricato qui)' : ''}.</td></tr>`;
+                || `<tr><td colspan="4" class="muted">Nessun modello ${esc(d.nome)} sulla VM${fam() === 'recap' ? ' (finché manca, il recap con Projexa usa qwen3:8b: crealo con deploy/oracle/ollama/recap-projexa.Modelfile)' : fam() === 'recap14' ? ' (finché manca, «Projexa 14B» usa recap-projexa: crealo con deploy/oracle/ollama/recap-projexa-14b.Modelfile)' : fam() === 'filtro' ? ' (finché manca, «Projexa 4B + 8B» usa qwen3:4b-instruct con gli esempi: nasce col primo adattatore caricato qui)' : fam() === 'assoc' ? ' (finché manca, l’associazione con Projexa usa qwen3:14b con i casi valutati: nasce col primo adattatore caricato qui)' : fam() === 'raid' ? ' (finché manca, RAID e Change Request con «Projexa 14B» usano qwen3:14b: nasce col primo adattatore caricato qui)' : ''}.</td></tr>`;
             const n = d.note && d.note[d.nome];
             $('notaModello').textContent = n ? `Ultima installazione: ${dataOra(n.installato)}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : `${d.nome} è ancora il modello di partenza (${d.base} senza addestramento). I backup occupano poco spazio: la base ${d.base} è condivisa.`;
         } catch (e) { $('modelli').innerHTML = `<tr><td colspan="4" class="muted">${esc(e.message)}</td></tr>`; }
@@ -479,7 +519,7 @@
     };
 
     const fam = () => $('famiglia').value;
-    const NOMI_FAMIGLIA = { pm: 'pm-projexa', filtro: 'pm-projexa-filtro', recap: 'recap-projexa', recap14: 'recap-projexa-14b', assoc: 'assoc-projexa-14b' };
+    const NOMI_FAMIGLIA = { pm: 'pm-projexa', filtro: 'pm-projexa-filtro', recap: 'recap-projexa', recap14: 'recap-projexa-14b', assoc: 'assoc-projexa-14b', raid: 'raid-projexa-14b' };
     $('famiglia').onchange = caricaModelli;
 
     // --- Recap (insegnante notturno di recap-projexa, jobs/analisiRecap.js) ---
@@ -695,6 +735,74 @@
     };
     $('aScarica').onclick = () => scaricaFile('/associazioni/scarica', 'assoc_projexa_addestramento.jsonl').catch(errore);
     $('aNotebook').onclick = () => scaricaFile('/associazioni/notebook', 'addestra_assoc_projexa_14b.ipynb').catch(errore);
+
+    // --- RAID e CR (Projexa contro l'AI esterna, jobs/analisiRaid.js) ---
+    let confronti = [];
+    const NOMI_ELENCHI = { rischi: 'Rischi', decisioni: 'Decisioni', dipendenze: 'Dipendenze', change_request: 'Change Request' };
+    async function caricaRaid() {
+        try {
+            const d = await api('GET', `/raid?esito=${encodeURIComponent($('xEsito').value)}`);
+            confronti = d.confronti;
+            $('xAi').textContent = d.ai;
+            const c = d.conteggi;
+            $('xConteggi').textContent = `Da valutare ${c.da_valutare} · giusta Projexa ${c.projexa} · giusta AI esterna ${c.insegnante} · nessuna ${c.nessuna}`;
+            disegnaRaid();
+        } catch (e) { errore(e); }
+    }
+    $('xEsito').onchange = caricaRaid;
+    // Una risposta: elenchi con le voci (titolo in grassetto, poi i campi utili).
+    function rispostaRaid(elenchi) {
+        if (!elenchi) return '<div class="muted">Risposta non leggibile.</div>';
+        const blocchi = Object.keys(NOMI_ELENCHI).filter((k) => (elenchi[k] || []).length).map((k) => `<div class="el">${NOMI_ELENCHI[k]} (${elenchi[k].length})</div>`
+            + elenchi[k].map((x) => {
+                const extra = [x.owner && `owner ${x.owner}`, x.probabilita && `P${x.probabilita}`, x.impatto && `I${x.impatto}`, x.decisa_da && `decisa da ${x.decisa_da}`,
+                    x.richiesta_da && `chiesta da ${x.richiesta_da}`, x.effort != null && x.effort !== '' && `effort ${x.effort}`, x.giorni != null && x.giorni !== '' && `+${x.giorni} gg`].filter(Boolean).join(' · ');
+                return `<div class="it"><b>${esc(x.titolo || '(senza titolo)')}</b>${x.descrizione ? `<div>${esc(x.descrizione)}</div>` : ''}${x.mitigazione ? `<div class="muted">Mitigazione: ${esc(x.mitigazione)}</div>` : ''}${x.motivo ? `<div class="muted">Motivo: ${esc(x.motivo)}</div>` : ''}${extra ? `<div class="muted">${esc(extra)}</div>` : ''}</div>`;
+            }).join(''));
+        return blocchi.join('') || '<div class="muted">Niente da registrare.</div>';
+    }
+    function disegnaRaid() {
+        $('xConteggio').textContent = `${confronti.length} confront${confronti.length === 1 ? 'o' : 'i'}`;
+        $('xLista').innerHTML = confronti.map((x) => {
+            const ins = x.insegnante;
+            const corpoIns = ins.stato === 'pronto' ? rispostaRaid(ins.elenchi)
+                : ins.stato === 'errore' ? `<div class="muted" style="color:var(--bad)">Errore: ${esc(ins.errore || '')}</div><button class="btn" data-x="riprova" style="margin-top:0.4rem"><i class="fas fa-rotate-right"></i> Chiedi di nuovo</button>`
+                : '<div class="muted"><i class="fas fa-spinner fa-spin"></i> in attesa della risposta…</div>';
+            const bott = (chi, testo, ok) => `<button class="btn ok ${x.scelta === chi ? 'on' : ''}" data-x="${chi}" ${ok ? '' : 'disabled'} style="margin-top:0.5rem"><i class="fas fa-check"></i> ${testo}</button>`;
+            return `<div class="dom ${x.scelta ? (x.scelta === 'nessuna' ? 'errata' : 'corretta') : ''}" data-id="${x.id}">
+                <div class="riga" style="justify-content:space-between">
+                    <b>${esc(x.oggetto || '(riunione)')} <span class="muted">${dataIt(x.data)}</span></b>
+                    <span class="muted">${esc([x.cliente, x.progetto].filter(Boolean).join(' · '))} · ${x.operazione === 'pm_cr' ? 'Change Request' : 'RAID e CR'} · ${dataOra(x.creato)}</span>
+                </div>
+                <div class="duecol">
+                    <div class="risp ${x.scelta === 'projexa' ? 'scelta' : ''}"><h3><span class="badge b-run">${esc(x.projexa.modello)}</span></h3>${rispostaRaid(x.projexa.elenchi)}
+                        ${bott('projexa', 'Giusta Projexa', !!x.projexa.elenchi)}</div>
+                    <div class="risp ${x.scelta === 'insegnante' ? 'scelta' : ''}"><h3><span class="badge b-warn">${esc(ins.ai || 'AI esterna')}</span></h3>${corpoIns}
+                        ${bott('insegnante', `Giusta ${esc(ins.ai || 'AI esterna')}`, ins.stato === 'pronto' && !!ins.elenchi)}</div>
+                </div>
+                <div class="riga" style="margin-top:0.6rem">
+                    <button class="btn ko ${x.scelta === 'nessuna' ? 'on' : ''}" data-x="nessuna"><i class="fas fa-xmark"></i> Nessuna delle due</button>
+                    ${x.scelta ? `<span class="muted">scelta del ${dataOra(x.sceltaIl)} · ripremi lo stesso pulsante per annullarla</span>` : ''}
+                </div>
+            </div>`;
+        }).join('') || '<div class="card muted">Nessun confronto in questa vista. Arrivano quando RAID o Change Request si estraggono con Projexa (in automatico dopo il recap, o dal pulsante).</div>';
+    }
+    $('xLista').onclick = async (e) => {
+        const b = e.target.closest('[data-x]');
+        const box = e.target.closest('.dom');
+        if (!b || !box) return;
+        const x = confronti.find((c) => c.id === box.dataset.id);
+        try {
+            if (b.dataset.x === 'riprova') { await api('POST', `/raid/${x.id}/insegnante`, {}); avviso('Richiesta mandata di nuovo: ricarica tra qualche secondo.'); }
+            else {
+                const scelta = x.scelta === b.dataset.x ? null : b.dataset.x; // stesso pulsante = annulla
+                await api('PUT', `/raid/${x.id}`, { scelta });
+            }
+            caricaRaid();
+        } catch (err) { errore(err); }
+    };
+    $('xScarica').onclick = () => scaricaFile('/raid/scarica', 'raid_projexa_addestramento.jsonl').catch(errore);
+    $('xNotebook').onclick = () => scaricaFile('/raid/notebook', 'addestra_raid_projexa_14b.ipynb').catch(errore);
 
     $('rScarica').onclick = () => scaricaFile('/recap/scarica', 'recap_projexa_addestramento.jsonl').catch(errore);
     $('rNotebook').onclick = () => scaricaFile('/recap/notebook', 'addestra_recap_projexa.ipynb').catch(errore);

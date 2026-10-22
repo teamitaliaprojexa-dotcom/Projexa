@@ -1119,14 +1119,19 @@ export async function ollamaConPrecedenza(modelloScelto, fn) {
   });
 }
 
-async function ollamaGenerate(prompt, numCtx, numPredict) {
+// formato: 'json' = risposta forzata a JSON valido (format di Ollama), per le funzioni che
+// leggono una risposta strutturata (RAID, Change Request). primo: modello addestrato da
+// provare prima di quello del lavoro (se manca sulla VM si passa a quello, ollamaConPrecedenza).
+async function ollamaGenerate(prompt, numCtx, numPredict, { formato = null, primo = null } = {}) {
   const base = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
   // Modello del lavoro in background (jobs/aiLavori.js: voce «Projexa» o «Projexa 14B»).
-  const scelto = (contestoAi.getStore() || {}).ollamaModello || OLLAMA_7B();
+  const delLavoro = (contestoAi.getStore() || {}).ollamaModello || OLLAMA_7B();
+  const scelto = primo ? [primo, delLavoro] : delLavoro;
   let response;
   try {
     response = await ollamaConPrecedenza(scelto, (model, signal) => ollamaPost(`${base}/api/generate`,
-      { model, prompt, stream: false, think: false, options: { num_ctx: numCtx, num_predict: numPredict, temperature: 0.3, num_thread: OLLAMA_RECAP_THREADS } },
+      { model, prompt, stream: false, think: false, ...(formato ? { format: formato } : {}),
+        options: { num_ctx: numCtx, num_predict: numPredict, temperature: formato ? 0.1 : 0.3, num_thread: OLLAMA_RECAP_THREADS } },
       // Su CPU una riunione lunga può richiedere decine di minuti.
       Number(process.env.OLLAMA_TIMEOUT_MS) || 2 * 60 * 60 * 1000, { signal }));
   } catch (error) {
@@ -1311,6 +1316,19 @@ export async function askOllamaRecap(buildPrompt, transcript, { meeting = false,
     if (result.truncated) throw httpError(502, 'Projexa: il testo è troppo lungo per il modello locale');
   }
   return { text: result.text, label: (contestoAi.getStore() || {}).ollamaEtichetta || 'Projexa', model: result.model };
+}
+
+// Risposta strutturata con Projexa (2026-10-22): un'unica chiamata con il JSON forzato da
+// Ollama. Niente riassunto a pezzi: il prompt deve stare nel contesto (RAID e Change Request
+// con Projexa leggono il recap, non la trascrizione).
+const OLLAMA_JSON_TOKENS = 3000;
+export async function askOllamaJson(prompt, { primo = null } = {}) {
+  if (prompt.length / OLLAMA_CHARS_PER_TOKEN + OLLAMA_JSON_TOKENS > OLLAMA_MAX_CTX) {
+    throw httpError(413, 'Projexa: il testo è troppo lungo per una risposta strutturata del modello locale');
+  }
+  const r = await ollamaGenerate(prompt, ctxFor(prompt.length, OLLAMA_JSON_TOKENS), OLLAMA_JSON_TOKENS, { formato: 'json', primo });
+  if (r.truncated) throw httpError(502, 'Projexa: il testo è troppo lungo per il modello locale');
+  return { text: r.text, label: (contestoAi.getStore() || {}).ollamaEtichetta || 'Projexa', model: r.model };
 }
 
 // Barra di avanzamento: il testo finale (recap dagli appunti) dura circa quanto 2,5 pezzi di

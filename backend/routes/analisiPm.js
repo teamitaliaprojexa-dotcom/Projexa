@@ -9,6 +9,8 @@
 //   - Analisi Recap (insegnante notturno di recap-projexa, jobs/analisiRecap.js): /recap/...;
 //   - Analisi Associazioni (insegnante dell'associazione To-Do e RAID, jobs/associaTodoRaid.js):
 //     confronto Projexa / AI insegnante, gruppi giusti e sbagliati, file per assoc-projexa-14b;
+//   - Analisi RAID e CR (jobs/analisiRaid.js): risposta di Projexa e dell'AI esterna affiancate,
+//     scelta di quella giusta, file per raid-projexa-14b: /raid...;
 //   - modello addestrato (adattatore LoRA .gguf) caricato su Ollama della VM con backup del
 //     precedente, ripristino ed eliminazione dei backup: /modelli...
 // ============================================================================
@@ -30,6 +32,8 @@ import { proponiRevisione, applicaProposta } from '../jobs/revisionePrompt.js';
 import { istruzioniRecapProjexa } from './ai.js';
 import { pmProjexaInCorso } from '../config/ollamaPrecedenza.js';
 import { getPromptFor } from '../config/prompts.js';
+import { leggiJson } from '../config/pmCore.js';
+import { OLLAMA_RAID_ADDESTRATO, chiediInsegnante, riprendiInsegnanti } from '../jobs/analisiRaid.js';
 
 const router = express.Router();
 const QUI = path.dirname(fileURLToPath(import.meta.url));
@@ -38,6 +42,7 @@ const NOTEBOOK_FILTRO = path.join(QUI, '..', 'prompts', 'colab_pm_projexa_filtro
 const NOTEBOOK_RECAP = path.join(QUI, '..', 'prompts', 'colab_recap_projexa.ipynb');
 const NOTEBOOK_RECAP_14B = path.join(QUI, '..', 'prompts', 'colab_recap_projexa_14b.ipynb');
 const NOTEBOOK_ASSOC = path.join(QUI, '..', 'prompts', 'colab_assoc_projexa_14b.ipynb');
+const NOTEBOOK_RAID = path.join(QUI, '..', 'prompts', 'colab_raid_projexa_14b.ipynb');
 const OLLAMA_URL = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const MODELLO = process.env.OLLAMA_PM_MODEL || 'pm-projexa';
 const MODELLO_RECAP = process.env.OLLAMA_RECAP_PROJEXA_MODEL || 'recap-projexa';
@@ -649,14 +654,126 @@ router.get('/associazioni/notebook', (req, res) => {
   fs.createReadStream(NOTEBOOK_ASSOC).on('error', (e) => rispondiErrore(res, e, 'notebook')).pipe(res);
 });
 
+// --- Analisi RAID e Change Request: Projexa contro l'AI esterna (2026-10-22) -----------------
+// Ogni estrazione di RAID o CR fatta con Projexa (jobs/analisiRaid.js): le due risposte e la
+// scelta dell'utente (projexa | insegnante | nessuna). La scelta è l'esempio per raid-projexa-14b.
+const rispondiErroreRaid = (res, e, cosa) => {
+  if (e.code === '42P01') return res.status(503).json({ error: 'Analisi RAID non attiva: manca Supporto/CreaDB/analisi_raid.sql' });
+  return rispondiErrore(res, e, cosa);
+};
+const ELENCHI_RAID = ['rischi', 'decisioni', 'dipendenze', 'change_request'];
+// Risposta dell'AI -> { rischi: [...], ... } (null se non è JSON leggibile).
+function elenchiRaid(testo) {
+  const j = leggiJson(testo);
+  if (!j || typeof j !== 'object') return null;
+  return Object.fromEntries(ELENCHI_RAID.filter((k) => Array.isArray(j[k])).map((k) => [k, j[k].filter((x) => x && typeof x === 'object')]));
+}
+
+router.get('/raid', async (req, res) => {
+  try {
+    riprendiInsegnanti(req.user).catch(() => {});
+    const esito = String(req.query.esito || 'da');
+    const filtro = esito === 'da' ? ' AND a.scelta IS NULL' : esito === 'fatte' ? ' AND a.scelta IS NOT NULL' : '';
+    const righe = (await db.query(
+      `SELECT a.id::text AS id, a.client_id::text AS client_id, a.project_id::text AS project_id, a.operazione, a.projexa_modello,
+              a.projexa_risposta, a.insegnante_ai, a.insegnante_stato, a.insegnante_risposta, a.insegnante_errore,
+              a.scelta, a.scelta_il, a.created_at, m.oggetto, m.data_calendar::text AS data
+         FROM pm_raid_analisi a
+         LEFT JOIN rec_meeting m ON m.tenant_id = a.tenant_id AND m.user_id = a.user_id AND m.id_calendar = a.id_calendar
+        WHERE a.tenant_id = $1 AND a.user_id = $2 ${filtro}
+        ORDER BY a.created_at DESC LIMIT 60`, chi(req))).rows;
+    const { clienti, progetti } = await nomiClientiProgetti(righe.map((r) => r.client_id), righe.map((r) => r.project_id));
+    const conteggi = (await db.query(
+      `SELECT count(*) FILTER (WHERE scelta IS NULL)::int AS da_valutare,
+              count(*) FILTER (WHERE scelta = 'projexa')::int AS projexa,
+              count(*) FILTER (WHERE scelta = 'insegnante')::int AS insegnante,
+              count(*) FILTER (WHERE scelta = 'nessuna')::int AS nessuna
+         FROM pm_raid_analisi WHERE tenant_id = $1 AND user_id = $2`, chi(req))).rows[0];
+    res.json({
+      ai: await aiScelta(req.user), conteggi,
+      confronti: righe.map((r) => ({
+        id: r.id, operazione: r.operazione, creato: r.created_at, oggetto: r.oggetto || '', data: r.data || '',
+        cliente: clienti.get(String(r.client_id || '')) || '', progetto: progetti.get(String(r.project_id || '')) || '',
+        projexa: { modello: r.projexa_modello || 'Projexa', elenchi: elenchiRaid(r.projexa_risposta) },
+        insegnante: { ai: r.insegnante_ai, stato: r.insegnante_stato, errore: r.insegnante_errore,
+          elenchi: r.insegnante_stato === 'pronto' ? elenchiRaid(r.insegnante_risposta) : null },
+        scelta: r.scelta, sceltaIl: r.scelta_il
+      }))
+    });
+  } catch (e) { rispondiErroreRaid(res, e, 'raid'); }
+});
+
+// Scelta della risposta giusta. Body: { scelta: 'projexa' | 'insegnante' | 'nessuna' | null }.
+router.put('/raid/:id', async (req, res) => {
+  try {
+    if (!UUID.test(req.params.id)) throw errore(400, 'Id non valido');
+    const v = (req.body || {}).scelta;
+    const scelta = ['projexa', 'insegnante', 'nessuna'].includes(v) ? v : null;
+    const r = (await db.query(
+      `SELECT insegnante_stato, projexa_risposta, insegnante_risposta FROM pm_raid_analisi WHERE id = $3 AND tenant_id = $1 AND user_id = $2`,
+      [...chi(req), req.params.id])).rows[0];
+    if (!r) throw errore(404, 'Confronto non trovato');
+    if (scelta === 'insegnante' && (r.insegnante_stato !== 'pronto' || !elenchiRaid(r.insegnante_risposta))) throw errore(409, 'La risposta dell\'AI esterna non c\'è o non è leggibile');
+    if (scelta === 'projexa' && !elenchiRaid(r.projexa_risposta)) throw errore(409, 'La risposta di Projexa non è leggibile: scegli l\'altra o «nessuna»');
+    await db.query(`UPDATE pm_raid_analisi SET scelta = $4, scelta_il = CASE WHEN $4::text IS NULL THEN NULL ELSE now() END
+                     WHERE id = $3 AND tenant_id = $1 AND user_id = $2`, [...chi(req), req.params.id, scelta]);
+    res.json({ ok: true, scelta });
+  } catch (e) { rispondiErroreRaid(res, e, 'scelta raid'); }
+});
+
+// Nuova richiesta all'AI esterna (errore o risposta mai arrivata).
+router.post('/raid/:id/insegnante', async (req, res) => {
+  try {
+    if (!UUID.test(req.params.id)) throw errore(400, 'Id non valido');
+    const r = await db.query(
+      `UPDATE pm_raid_analisi SET insegnante_stato = 'da_inviare', insegnante_errore = NULL, insegnante_ai = $4
+        WHERE id = $3 AND tenant_id = $1 AND user_id = $2 AND insegnante_stato <> 'pronto'`, [...chi(req), req.params.id, await aiScelta(req.user)]);
+    if (!r.rowCount) throw errore(404, 'Confronto non trovato o già con la risposta');
+    chiediInsegnante(req.params.id).catch(() => {});
+    res.json({ ok: true });
+  } catch (e) { rispondiErroreRaid(res, e, 'riprova insegnante raid'); }
+});
+
+// File per l'addestramento: compito ESATTO -> risposta scelta (JSON ripulito). «Nessuna delle
+// due» non diventa un esempio: non c'è una risposta giusta da insegnare.
+router.get('/raid/scarica', async (req, res) => {
+  try {
+    const righe = (await db.query(
+      `SELECT prompt, scelta, projexa_risposta, insegnante_risposta FROM pm_raid_analisi
+        WHERE tenant_id = $1 AND user_id = $2 AND scelta IN ('projexa', 'insegnante') ORDER BY created_at`, chi(req))).rows;
+    const jsonl = righe.map((r) => {
+      const el = elenchiRaid(r.scelta === 'projexa' ? r.projexa_risposta : r.insegnante_risposta);
+      return el ? JSON.stringify({ messages: [{ role: 'user', content: r.prompt }, { role: 'assistant', content: JSON.stringify(el) }] }) : null;
+    }).filter(Boolean);
+    if (!jsonl.length) throw errore(400, 'Nessuna scelta ancora: in RAID e CR premi «Giusta» sulla risposta migliore');
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="raid_projexa_addestramento_${new Date().toISOString().slice(0, 10)}.jsonl"`);
+    res.send(jsonl.join('\n') + '\n');
+  } catch (e) { rispondiErroreRaid(res, e, 'download raid'); }
+});
+
+router.get('/raid/notebook', (req, res) => {
+  res.setHeader('Content-Type', 'application/x-ipynb+json; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="addestra_raid_projexa_14b.ipynb"');
+  fs.createReadStream(NOTEBOOK_RAID).on('error', (e) => rispondiErrore(res, e, 'notebook')).pipe(res);
+});
+
 // --- Modelli su Ollama della VM -------------------------------------------------------------
 // famiglia (query, body): 'pm' = pm-projexa (Assistente PM), 'filtro' = pm-projexa-filtro (filtro
 // 4B dell'Assistente, base qwen3:4b-instruct), 'recap' = recap-projexa (Recap
 // cliente e interno, 7B), 'recap14' = recap-projexa-14b (voce «Projexa 14B», base Qwen3 14B),
-// 'assoc' = assoc-projexa-14b (associazione To-Do e RAID con «Projexa», base Qwen3 14B).
+// 'assoc' = assoc-projexa-14b (associazione To-Do e RAID con «Projexa», base Qwen3 14B),
+// 'raid' = raid-projexa-14b (RAID e Change Request con «Projexa 14B», base Qwen3 14B).
 // Stessa procedura: backup, creazione da base + adattatore, prova.
 const PROVA_RECAP = [{ role: 'user', content: 'Scrivi in una riga gli appunti di questo pezzo di riunione:\nMario Rossi: il file delle causali ve lo mandiamo entro venerdì.' }];
 const FAMIGLIE = {
+  // RAID e Change Request con «Projexa 14B» (2026-10-22): stessi parametri delle chiamate di
+  // routes/ai.js askOllamaJson (risposta JSON, temperatura bassa).
+  raid: {
+    nome: OLLAMA_RAID_ADDESTRATO, base: BASE_14B,
+    parametri: ['PARAMETER num_ctx 16384', 'PARAMETER temperature 0.1', 'PARAMETER num_predict 3000'],
+    prova: [{ role: 'user', content: 'Rispondi SOLO con un oggetto JSON {"rischi": [], "decisioni": [], "dipendenze": [], "change_request": []} per questo recap:\nIl cliente chiede un report in più sulle presenze; si decide di rilasciarlo con la 5.27.' }]
+  },
   // Stessi parametri delle chiamate di jobs/associaTodoRaid.js (risposta JSON, temperatura 0).
   assoc: {
     nome: OLLAMA_ADDESTRATO, base: BASE_14B,

@@ -18,6 +18,8 @@
 //                        stessa estrazione RAID propone anche le Change Request (una sola spesa).
 // RAID e Change Request partono SOLO se la riunione ha un progetto associato (tendine della
 // riga); senza progetto non si fa nulla per loro e partono solo i recap.
+// Con Projexa (2026-10-22) anche RAID e Change Request girano sulla VM: partono DOPO i recap
+// e si ricavano dal recap (non dalla trascrizione), con il JSON forzato da Ollama.
 // Se l'AI non ha il Batch (Projexa) o il fornitore rifiuta la richiesta Batch (es. Gemini
 // gratuito) quella funzione si esegue in Immediato, SOLO in questo caso.
 // Notifiche: un riepilogo del lancio + quelle di sempre a lavoro finito (recap pronto, recap
@@ -149,24 +151,27 @@ export async function avviaAutomazioneAi(user, idCalendar) {
   ).catch(() => ({ rows: [] }))).rows[0] : null;
   if (operazione && m && m.project_id) {
     const nome = operazione === 'pm_raid' ? (f.has('cr') ? 'RAID e Change Request' : 'RAID') : 'Change Request';
-    try {
-      // Projexa non sa dare risposte strutturate: si usa la prima AI con chiave collegata.
-      let aiPm = { nome: ai, label: labelAi };
-      if (locale) {
-        const c = (await aiCollegate(user.user_id))[0];
-        if (!c) throw new Error('serve un\'AI con chiave API (ChatGPT, Claude, Gemini o Mistral): Projexa non può farlo');
-        aiPm = { nome: c.nome, label: c.label };
-      }
+    const crea = async () => {
       const { creaLavoroAutomatico } = await import('./aiLavori.js');
-      await creaLavoroAutomatico(user, operazione, {
+      return creaLavoroAutomatico(user, operazione, {
         path: operazione === 'pm_raid' ? '/api/pm/raid/estrai' : '/api/pm/cr/estrai',
         body: { id_calendar: idCalendar, projectId: m.project_id },
-        ai: aiPm,
+        ai: { nome: ai, label: labelAi, locale },
         titolo: m.oggetto || ''
       });
-      righe.push(`${nome}: Batch con ${aiPm.label} (proposte in «Risultati AI»; se il Batch non è disponibile parte in Immediato)`);
-    } catch (e) {
-      righe.push(`${nome}: non avviato (${e.message})`);
+    };
+    if (locale) {
+      // Projexa (2026-10-22): si ricavano dal recap, quindi partono DOPO i recap in Immediato
+      // (la fila qui sotto è in ordine), con il JSON forzato da Ollama.
+      righe.push(`${nome}: con ${labelAi} dopo il recap, letto dal recap (proposte in «Risultati AI»)`);
+      daEseguireSubito.push({ nome, avvia: crea });
+    } else {
+      try {
+        await crea();
+        righe.push(`${nome}: Batch con ${labelAi} (proposte in «Risultati AI»; se il Batch non è disponibile parte in Immediato)`);
+      } catch (e) {
+        righe.push(`${nome}: non avviato (${e.message})`);
+      }
     }
   }
 

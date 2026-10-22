@@ -33,6 +33,8 @@ const PRIMO_SOLLECITO_MAX = 30; // azioni scadute da più di N giorni: nessun pr
 
 const normTesto = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N} ]+/gu, ' ').replace(/\s+/g, ' ').trim();
 const chiaveDi = (descrizione) => createHash('sha256').update(normTesto(descrizione)).digest('hex');
+// Stessa impronta per le azioni create da altre parti (Add-in Outlook).
+export const chiaveAzioneCliente = chiaveDi;
 
 async function ruoloUtente(user) {
   if (Number.isFinite(Number(user.id_roles))) return String(Number(user.id_roles));

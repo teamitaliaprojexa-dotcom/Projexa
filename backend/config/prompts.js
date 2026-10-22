@@ -130,9 +130,10 @@ export const PROMPT_FUNCTIONS = {
   // ticket collegati; CORRELATI = passaggi sullo stesso argomento (recap, recap interno,
   // trascrizioni, altri progetti, Issue simili). Il formato della risposta (JSON) lo aggiunge
   // sempre il server. In evoluzione: la riga standard segue il file finché nessuno la modifica.
+  // TIPO_EMAIL = email con il cliente oppure interna tra colleghi (cliente ricavato dal testo).
   OUTLOOK_ANALISI: {
     titolo: 'Add-in Outlook: analisi dell\'email',
-    segnaposto: ['EMAIL', 'CLIENTE', 'PROGETTO', 'DATI', 'TICKET', 'RELEASE', 'CORRELATI', 'DATA', 'UTENTE'],
+    segnaposto: ['EMAIL', 'CLIENTE', 'PROGETTO', 'DATI', 'TICKET', 'RELEASE', 'CORRELATI', 'DATA', 'UTENTE', 'TIPO_EMAIL'],
     sincronizzaFile: true
   }
 };

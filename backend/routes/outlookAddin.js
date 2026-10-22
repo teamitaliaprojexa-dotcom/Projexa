@@ -26,7 +26,12 @@
 //    nell'Outlook di un altro.
 //  - Il testo dell'email è un dato non fidato: nel prompt sta tra delimitatori, l'AI vede solo
 //    i dati di quel cliente e l'unica azione che può innescare è creare al massimo 3 Issue
-//    (validate e senza doppioni). La bozza di risposta non parte mai da sola: la apre Outlook.
+//    (validate e senza doppioni; mai per le email tra colleghi). Rischi, dipendenze, To-Do e
+//    azioni del cliente proposti dall'AI si registrano solo quando il PM preme «Crea».
+//    La bozza di risposta non parte mai da sola: la apre Outlook.
+//  - Email interne (2026-10-22): se nessun indirizzo porta a un cliente, il cliente si ricava
+//    dai ticket citati e dal nome scritto nel testo, tra i soli clienti dell'utente; se resta
+//    il dubbio lo sceglie il PM nel pannello.
 //  - Verso le AI esterne tutto passa dall'Anonymization Layer (config/pii.js, askAiProvider).
 //  - Limiti: analisi in corso per utente e per tenant, analisi all'ora, tentativi di codice.
 //  - Il testo dell'email si toglie dal lavoro appena concluso (cancellaInput); il risultato
@@ -38,7 +43,9 @@ import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { currentSignature, currentMembership } from '../config/session.js';
 import { contestoDaRichiesta } from '../config/auditContext.js';
-import { encryptRowForWrite } from '../config/crypto.js';
+import { encryptRowForWrite, encryptValue, isEncrypted, hasEncryptionKey } from '../config/crypto.js';
+import { cercaDoppione, todoAperte } from '../config/dedupVoci.js';
+import { chiaveAzioneCliente } from '../config/azioniCliente.js';
 import { getPromptFor } from '../config/prompts.js';
 import { rottaAi } from '../jobs/aiLavori.js';
 import { notificaOutlook } from '../jobs/notifiche.js';
@@ -395,9 +402,13 @@ function emailDaCorpo(b) {
   if (!testo) throw errore(400, 'Email senza testo');
   const emailId = /^[0-9a-f]{64}$/.test(String(b.emailId || '')) ? b.emailId : '';
   const projectId = UUID_RE.test(String(b.projectId || '')) ? String(b.projectId) : '';
+  // Cliente scelto dal PM nel pannello (cliente non riconosciuto o sbagliato) e «nessun
+  // progetto» (tema del solo cliente).
+  const clientId = UUID_RE.test(String(b.clientId || '')) ? String(b.clientId).toLowerCase() : '';
   return {
     mittente, a: elenco(b.a), cc: elenco(b.cc), oggetto: pulisci(b.oggetto, 500), testo,
-    data: pulisci(b.data, 40), emailId, projectId, troncato: String(b.testo || '').length > MAX_TESTO
+    data: pulisci(b.data, 40), emailId, projectId, clientId, senzaProgetto: !projectId && b.senzaProgetto === true,
+    troncato: String(b.testo || '').length > MAX_TESTO
   };
 }
 
@@ -526,6 +537,103 @@ router.get('/lavori', requireAddin, async (req, res) => {
   } catch (e) { invia(res, e, 'ELENCO LAVORI'); }
 });
 
+// «Crea» su un'azione proposta dall'analisi (2026-10-22): rischio o dipendenza -> pm_raid (serve
+// un progetto), To-Do -> tasks, azione a carico del cliente -> pm_azioni_cliente. Il contenuto
+// arriva dal risultato salvato dell'analisi, non dal pannello: il pannello sceglie solo quale
+// (n) e, al massimo, il progetto tra quelli aperti del cliente. Doppioni: To-Do aperte simili
+// (config/dedupVoci.js), RAID aperti con titolo molto simile, azioni del cliente con lo stesso
+// testo. L'azione creata resta segnata nel risultato (niente doppio clic).
+router.post('/lavori/:id/azioni/:n', requireAddin, async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    const n = Number(req.params.n);
+    if (!UUID_RE.test(id) || !Number.isInteger(n) || n < 0 || n >= MAX_AZIONI) throw errore(400, 'Azione non valida');
+    if (oltreLimite(`azi|${req.user.user_id}`, 60, 3600000)) throw errore(429, 'Troppe richieste: riprova tra poco');
+    const l = (await db.query(
+      `SELECT risultato FROM ai_lavori WHERE id = $1 AND tenant_id = $2 AND user_id = $3 AND operazione = $4 AND stato = 'pronto'`,
+      [id, req.user.tenant_id, req.user.user_id, OPERAZIONE])).rows[0];
+    if (!l) throw errore(404, 'Analisi non trovata (forse già eliminata): rianalizza l\'email');
+    let ris = null;
+    try { ris = JSON.parse(l.risultato); } catch { ris = null; }
+    const a = ris && Array.isArray(ris.azioni) ? ris.azioni.find((x) => x && x.n === n) : null;
+    if (!a || !TIPI_AZIONE.includes(a.tipo)) throw errore(404, 'Azione non trovata');
+    if (a.creata) return res.json({ esito: 'gia_creata', ...a.creata });
+    // Cliente dell'analisi: ancora visibile all'utente e nel tenant del collegamento.
+    const clientId = ris.cliente && ris.cliente.id;
+    const cl = clientId && (await clientiUtente(req.user)).clienti.find((c) => c.id === clientId && c.tenant_id === req.user.tenant_id);
+    if (!cl) throw errore(403, 'Il cliente dell\'analisi non è tra i tuoi clienti di questo spazio di lavoro');
+    const aperti = (await progettiAperti(req.user).catch(() => [])).filter((p) => p.clientId === clientId);
+    const voluto = UUID_RE.test(String((req.body || {}).projectId || '')) ? String(req.body.projectId) : (ris.progetto && ris.progetto.id) || '';
+    const prog = aperti.find((p) => p.projectId === voluto) || null;
+    const ruolo = Number.isFinite(Number(req.user.id_roles)) ? String(Number(req.user.id_roles)) : null;
+    const base = { tenant_id: req.user.tenant_id, user_id: req.user.user_id, client_id: clientId, project_id: prog ? prog.projectId : null, crypto: 1 };
+    const fonte = `Da email${ris.mittente && ris.mittente.email ? ` di ${ris.mittente.nome || ris.mittente.email}` : ''}${ris.oggetto ? ` «${corto(ris.oggetto, 120)}»` : ''} (${dataIt(oggiIso())})`;
+    const descrizione = corto([a.descrizione, fonte].filter(Boolean).join('\n'), 4000);
+    let creata;
+
+    if (a.tipo === 'rischio' || a.tipo === 'dipendenza') {
+      if (!prog) throw errore(400, 'Rischi e dipendenze stanno nel RAID di un progetto: scegli il progetto e premi di nuovo «Crea»');
+      const esistenti = await righe(
+        `SELECT id::text AS id, titolo FROM pm_raid WHERE tenant_id = $1 AND user_id = $2 AND project_id = $3 AND tipo = $4
+            AND stato <> 'chiuso' AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+        [req.user.tenant_id, req.user.user_id, prog.projectId, a.tipo]);
+      const doppione = esistenti.find((x) => similitudine(x.titolo, a.titolo) >= 0.8);
+      if (doppione) creata = { tabella: 'pm_raid', id: doppione.id, giaPresente: true };
+      else {
+        const riga = { ...base, tipo: a.tipo, titolo: a.titolo, descrizione, owner: a.owner || null, mitigazione: a.mitigazione || null,
+          data_revisione: a.scadenza || null, stato: 'aperto', origine: 'manuale', id_roles_write: ruolo };
+        creata = { tabella: 'pm_raid', id: await inserisciRiga('pm_raid', riga) };
+      }
+    } else if (a.tipo === 'todo') {
+      const owner = a.owner || '';
+      const esistenti = await todoAperte(req.user, { projectId: base.project_id, clientId });
+      const doppione = cercaDoppione({ registro: 'todo', titolo: a.titolo, descrizione, owner }, esistenti);
+      if (doppione) creata = { tabella: 'tasks', id: doppione.id, giaPresente: true };
+      else {
+        const colTasks = new Set((await db.query(
+          "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'tasks'")).rows.map((x) => x.column_name));
+        const ruoloN = ruolo != null ? Number(ruolo) : 90;
+        const riga = { ...base, tipo_task: 'Automatica', titile: a.titolo, description: descrizione, status: 'in_progress', priority: 'medium',
+          due_date: a.scadenza || null, data_inizio: oggiIso(), scadenza: '2099-12-31', id_roles: ruoloN, id_roles_write: ruoloN, created_by: req.user.user_id };
+        if (owner) riga.assigned_to_text = owner;
+        creata = { tabella: 'tasks', id: await inserisciRiga('tasks', riga, colTasks) };
+      }
+    } else {
+      const testoAzione = corto(`${a.titolo}${a.descrizione ? `: ${a.descrizione}` : ''}`, 4000);
+      const chiave = chiaveAzioneCliente(testoAzione);
+      const doppione = (await righe(
+        `SELECT id::text AS id, chiave FROM pm_azioni_cliente WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
+            AND stato = 'aperta' AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+        [req.user.tenant_id, req.user.user_id, clientId])).find((x) => x.chiave === chiave);
+      if (doppione) creata = { tabella: 'pm_azioni_cliente', id: doppione.id, giaPresente: true };
+      else {
+        const riga = { ...base, id_calendar: null, referente: a.owner || null, descrizione: testoAzione, data_scadenza: a.scadenza || null,
+          stato: 'aperta', origine: 'manuale', chiave, modificata: true, note: fonte, id_roles_write: ruolo };
+        creata = { tabella: 'pm_azioni_cliente', id: await inserisciRiga('pm_azioni_cliente', riga) };
+      }
+    }
+    creata = { ...creata, progetto: prog ? prog.nome : '' };
+    ris.azioni = ris.azioni.map((x) => (x && x.n === n ? { ...x, creata } : x));
+    await db.query('UPDATE ai_lavori SET risultato = $2 WHERE id = $1', [id, cifraTesto(JSON.stringify(ris))]);
+    console.log(`[OUTLOOK] ${req.user.email || req.user.user_id}: azione proposta ${a.tipo} ${creata.giaPresente ? 'già presente' : 'creata'} (${creata.tabella})`);
+    res.status(creata.giaPresente ? 200 : 201).json({ esito: creata.giaPresente ? 'gia_presente' : 'creata', ...creata });
+  } catch (e) {
+    if (e.code === '42P01') return invia(res, errore(503, 'Registro non ancora attivo in Projexa: va eseguito lo script SQL del registro (pm_senior.sql o azioni_cliente.sql)'), 'AZIONE');
+    invia(res, e, 'AZIONE');
+  }
+});
+
+async function inserisciRiga(tabella, riga, colonne = null) {
+  const { data } = await encryptRowForWrite(db, tabella, riga);
+  const cols = Object.keys(data).filter((c) => !colonne || colonne.has(c));
+  const r = await db.query(
+    `INSERT INTO ${tabella} (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id::text AS id`,
+    cols.map((c) => data[c]));
+  return r.rows[0].id;
+}
+// Come jobs/aiLavori.js: il risultato dei lavori AI resta cifrato.
+const cifraTesto = (v) => (!hasEncryptionKey() || isEncrypted(v) ? v : encryptValue(String(v)));
+
 // ----------------------------------------------------------------------------
 // ANALISI (gira nel lavoro AI, anche dopo un riavvio)
 // ----------------------------------------------------------------------------
@@ -541,12 +649,10 @@ async function righe(sql, params) {
   }
 }
 
-// Cliente dal mittente (o, se il mittente è interno, dai destinatari): prima email esatta di
-// un contatto o stakeholder, poi dominio. Solo clienti che l'utente vede (suoi o condivisi
-// con lui) nei tenant di cui è membro.
-async function trovaCliente(user, email) {
+// Clienti che l'utente vede (suoi o condivisi con lui) nei tenant di cui è membro.
+async function clientiUtente(user) {
   const tenants = (await righe('SELECT tenant_id::text AS t FROM user_tenants WHERE user_id = $1', [user.user_id])).map((r) => r.t);
-  if (!tenants.length) return null;
+  if (!tenants.length) return { tenants, clienti: [] };
   const clienti = await righe(
     `SELECT c.id::text AS id, c.tenant_id::text AS tenant_id, c.valore2 AS nome, c.user_id::text AS owner,
             (c.scadenza IS NULL OR c.scadenza >= CURRENT_DATE) AS aperto
@@ -554,19 +660,36 @@ async function trovaCliente(user, email) {
       WHERE c.tenant_id = ANY($1::uuid[]) AND c.argument = 'Cliente' AND c.campo = 'Cliente'
         AND (c.user_id = $2 OR EXISTS (SELECT 1 FROM client_shares s WHERE s.client_id = c.id AND s.shared_with_user_id = $2))`,
     [tenants, user.user_id]);
+  return { tenants, clienti };
+}
+
+// Cliente dal mittente (o, se il mittente è interno, dai destinatari): prima email esatta di
+// un contatto o stakeholder, poi dominio. Solo clienti che l'utente vede.
+// Cliente scelto dal PM nel pannello (email.clientId): vince su tutto.
+// daTesto (solo email, 2026-10-22): se nessun indirizzo porta a un cliente (scambio tra
+// colleghi, inoltri), il cliente si cerca dai ticket citati e dal nome scritto nel testo.
+// Il risultato dice anche se l'email è interna (tutti gli indirizzi su domini interni).
+async function trovaCliente(user, email, { daTesto = false } = {}) {
+  const { tenants, clienti } = await clientiUtente(user);
   if (!clienti.length) return null;
   const perId = new Map(clienti.map((c) => [c.id, c]));
   const ids = [...perId.keys()];
+  // Domini interni (dell'utente e dei colleghi in rubrica): non identificano un cliente.
+  const interni = new Set([dominio(user.email)]);
+  for (const r of await righe('SELECT email FROM rubrica WHERE tenant_id = ANY($1::uuid[])', [tenants])) if (r.email) interni.add(dominio(r.email));
+  interni.delete('');
+  const candidati = [email.mittente, ...email.a, ...email.cc].filter((x) => x && x.email);
+  const interna = candidati.length > 0 && candidati.every((x) => interni.has(dominio(x.email)));
+  if (email.clientId && perId.has(email.clientId)) {
+    const cl = perId.get(email.clientId);
+    return { tenantId: cl.tenant_id, clientId: cl.id, nome: cl.nome, come: 'scelto', indirizzo: '', contattoId: null, contatto: '', projectIdContatto: null, interna };
+  }
   const contatti = [
     ...(await righe('SELECT id::text AS id, client_id::text AS client_id, nome, cognome, email FROM contacts WHERE tenant_id = ANY($1::uuid[]) AND client_id::text = ANY($2::text[])', [tenants, ids]))
       .map((r) => ({ ...r, nominativo: [r.nome, r.cognome].filter(Boolean).join(' '), tipo: 'contatto' })),
     ...(await righe('SELECT client_id::text AS client_id, project_id::text AS project_id, nominativo, email FROM pm_stakeholder WHERE tenant_id = ANY($1::uuid[]) AND client_id::text = ANY($2::text[])', [tenants, ids]))
       .map((r) => ({ ...r, id: null, tipo: 'stakeholder' }))
   ].filter((c) => c.email && perId.has(c.client_id));
-  // Domini interni (dell'utente e dei colleghi in rubrica): non identificano un cliente.
-  const interni = new Set([dominio(user.email)]);
-  for (const r of await righe('SELECT email FROM rubrica WHERE tenant_id = ANY($1::uuid[])', [tenants])) if (r.email) interni.add(dominio(r.email));
-  const candidati = [email.mittente, ...email.a, ...email.cc].filter((x) => x && x.email);
   const preferito = (lista) => lista.sort((x, y) => (perId.get(y.client_id).aperto - perId.get(x.client_id).aperto)
     || ((perId.get(y.client_id).owner === user.user_id) - (perId.get(x.client_id).owner === user.user_id)))[0];
   for (const ind of candidati) {
@@ -575,7 +698,7 @@ async function trovaCliente(user, email) {
       const c = preferito(esatti);
       const cl = perId.get(c.client_id);
       return { tenantId: cl.tenant_id, clientId: cl.id, nome: cl.nome, come: ind === email.mittente ? 'mittente' : 'destinatario', indirizzo: ind.email,
-        contattoId: c.tipo === 'contatto' ? c.id : null, contatto: c.nominativo || ind.nome, projectIdContatto: c.project_id || null };
+        contattoId: c.tipo === 'contatto' ? c.id : null, contatto: c.nominativo || ind.nome, projectIdContatto: c.project_id || null, interna };
     }
   }
   for (const ind of candidati) {
@@ -584,17 +707,109 @@ async function trovaCliente(user, email) {
     const perDominio = [...new Set(contatti.filter((c) => dominio(c.email) === d).map((c) => c.client_id))];
     if (perDominio.length === 1) {
       const cl = perId.get(perDominio[0]);
-      return { tenantId: cl.tenant_id, clientId: cl.id, nome: cl.nome, come: 'dominio', indirizzo: ind.email, contattoId: null, contatto: ind.nome, projectIdContatto: null };
+      return { tenantId: cl.tenant_id, clientId: cl.id, nome: cl.nome, come: 'dominio', indirizzo: ind.email, contattoId: null, contatto: ind.nome, projectIdContatto: null, interna };
     }
   }
-  return null;
+  if (!daTesto) return null;
+  const t = await clienteDaTesto(tenants, clienti, interni, email, contatti);
+  return t ? { ...t, interna } : null;
 }
 
-// Progetto: quello scelto nel pannello, quello dello stakeholder, quello con più parole del
-// nome nell'oggetto/testo, quello delle riunioni dove si è parlato dello stesso argomento
-// (voti: project_id -> punti), altrimenti il primo.
+// Cliente dal testo dell'email (oggetto e corpo, risposte citate comprese): ticket citati che
+// Projexa conosce (task e quotazioni Jira, MySupport, Issue: 3 punti, 2 per le Issue), contatti
+// del cliente scritti nelle email citate (righe «Da:»/«A:»/«Cc:» del thread: 1 punto per
+// contatto, +2 per chi ha aperto la conversazione, cioè l'ultimo «Da:» esterno in fondo) e nome
+// del cliente scritto per esteso (2 punti, cercato nel testo senza gli indirizzi email: il
+// dominio di un indirizzo non è il nome scritto). Vince solo un cliente con più punti di tutti
+// gli altri: a pari merito il PM lo sceglie nel pannello. I codici possono essere cifrati: il
+// confronto si fa qui, non in SQL. Il progetto viene dai ticket se sono tutti di un progetto.
+// Il cliente che porta il nome dell'azienda interna (radice dei domini interni) non conta mai.
+const FORME_SOCIETARIE = new Set(['srl', 'spa', 'sas', 'snc', 'srls', 'sapa', 'scarl', 'scrl', 'coop', 'societa', 'gruppo', 'group', 'italia', 'italy', 'the', 'and']);
+const paroleNome = (s) => senzaAccenti(minuscola(s)).replace(/\b([a-z])\.(?=[a-z]\.)/g, '$1').replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+const INDIRIZZO_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
+async function clienteDaTesto(tenants, clienti, interni, email, contatti = []) {
+  const testo = `${email.oggetto}\n${email.testo}`;
+  const radiciInterne = new Set([...interni].map((d) => d.split('.')[0]));
+  const interno = (c) => paroleNome(c.nome).some((w) => radiciInterne.has(w));
+  const chiavi = new Set((testo.toUpperCase().match(/\b[A-Z][A-Z0-9]{1,9}-\d{1,7}\b/g) || []).slice(0, 30));
+  const numeri = new Set((testo.match(/\b\d{5,10}\b/g) || []).slice(0, 60));
+  const perId = new Map(clienti.filter((c) => !interno(c)).map((c) => [c.id, c]));
+  const voti = new Map(); // client_id -> { punti, motivi, progetti }
+  const segna = (clientId, punti, motivo, projectId) => {
+    if (!perId.has(clientId)) return;
+    const v = voti.get(clientId) || { punti: 0, motivi: [], progetti: new Set() };
+    if (v.motivi.includes(motivo)) return;
+    v.punti += punti;
+    v.motivi.push(motivo);
+    if (projectId) v.progetti.add(projectId);
+    voti.set(clientId, v);
+  };
+  if (chiavi.size || numeri.size) {
+    const p = [tenants, [...perId.keys()]];
+    const dove = 'WHERE tenant_id = ANY($1::uuid[]) AND client_id::text = ANY($2::text[])';
+    const [jira, quotazioni, mysupport, issue] = await Promise.all([
+      chiavi.size ? righe(`SELECT client_id::text AS client_id, project_id::text AS project_id, cod_task AS codice FROM task_app ${dove} LIMIT 50000`, p) : [],
+      chiavi.size ? righe(`SELECT client_id::text AS client_id, project_id::text AS project_id, codice FROM cl_quotazioni ${dove} LIMIT 20000`, p) : [],
+      numeri.size ? righe(`SELECT client_id::text AS client_id, project_id::text AS project_id, codice_quesito AS codice FROM mysupport ${dove} LIMIT 50000`, p) : [],
+      righe(`SELECT client_id::text AS client_id, project_id::text AS project_id, mysupport, tkt_jira FROM issue ${dove} LIMIT 20000`, p)
+    ]);
+    const cod = (x) => String(x.codice || '').trim().toUpperCase();
+    for (const x of jira) if (chiavi.has(cod(x))) segna(x.client_id, 3, `ticket ${cod(x)}`, x.project_id);
+    for (const x of quotazioni) if (chiavi.has(cod(x))) segna(x.client_id, 3, `quotazione ${cod(x)}`, x.project_id);
+    for (const x of mysupport) if (numeri.has(cod(x))) segna(x.client_id, 3, `MySupport ${cod(x)}`, x.project_id);
+    for (const x of issue) {
+      const c = [...codiciIn(x.tkt_jira).filter((k) => chiavi.has(k)), ...codiciIn(x.mysupport).filter((k) => numeri.has(k))][0];
+      if (c) segna(x.client_id, 2, `Issue con ${c}`, x.project_id);
+    }
+  }
+  // Contatti del cliente scritti nel thread (indirizzi esterni). Autore = ultimo «Da:»/«From:»
+  // con un indirizzo esterno: la prima email della conversazione, in fondo al testo.
+  const esterno = (e) => !interni.has(dominio(e)) && !DOMINI_PUBBLICI.has(dominio(e));
+  const indirizzi = new Set((testo.match(INDIRIZZO_RE) || []).map(minuscola).filter(esterno));
+  const autori = [...testo.matchAll(/(?:^|\n)[ \t*>]*(?:Da|From)\s*:[^\n]*/gi)]
+    .map((r) => (r[0].match(INDIRIZZO_RE) || []).map(minuscola).find(esterno)).filter(Boolean);
+  const autore = autori[autori.length - 1] || '';
+  const perCliente = new Map(); // client_id -> { punti, nomi }
+  for (const ind of indirizzi) {
+    for (const clientId of new Set(contatti.filter((c) => minuscola(c.email) === ind && perId.has(c.client_id)).map((c) => c.client_id))) {
+      const c = contatti.find((x) => x.client_id === clientId && minuscola(x.email) === ind);
+      const v = perCliente.get(clientId) || { punti: 0, nomi: [] };
+      v.punti += ind === autore ? 3 : 1;
+      v.nomi.push(`${c.nominativo || ind}${ind === autore ? ' (autore)' : ''}`);
+      perCliente.set(clientId, v);
+    }
+  }
+  for (const [clientId, v] of perCliente) {
+    v.nomi.sort((a, b) => b.endsWith('(autore)') - a.endsWith('(autore)'));
+    segna(clientId, v.punti, `contatti nel thread: ${v.nomi.slice(0, 3).join(', ')}${v.nomi.length > 3 ? ` e altri ${v.nomi.length - 3}` : ''}`);
+  }
+  // Nome del cliente per esteso, senza forme societarie («LEROY MERLIN ITALIA SRL» -> «leroy
+  // merlin»). Una sola parola solo se lunga almeno 5 lettere.
+  const base = ` ${paroleNome(testo.replace(INDIRIZZO_RE, ' ')).join(' ')} `;
+  for (const c of perId.values()) {
+    const parole = paroleNome(c.nome).filter((w) => !FORME_SOCIETARIE.has(w));
+    if (!parole.length) continue;
+    for (let k = parole.length; k >= 1; k--) {
+      const v = parole.slice(0, k).join(' ');
+      if (v.length < 5 || (k === 1 && parole.length > 1)) continue;
+      if (base.includes(` ${v} `)) { segna(c.id, 2, `nome «${v}» nel testo`); break; }
+    }
+  }
+  const ordinati = [...voti.entries()].sort((a, b) => b[1].punti - a[1].punti
+    || (perId.get(b[0]).aperto - perId.get(a[0]).aperto));
+  if (!ordinati.length || (ordinati[1] && ordinati[1][1].punti === ordinati[0][1].punti)) return null;
+  const [clientId, v] = ordinati[0];
+  const cl = perId.get(clientId);
+  return { tenantId: cl.tenant_id, clientId, nome: cl.nome, come: 'testo', indirizzo: '', motivo: v.motivi.slice(0, 4).join(', '),
+    contattoId: null, contatto: '', projectIdContatto: v.progetti.size === 1 ? [...v.progetti][0] : null };
+}
+
+// Progetto: quello scelto nel pannello, quello dello stakeholder (o dei ticket citati), quello
+// con più parole del nome nell'oggetto/testo, quello delle riunioni dove si è parlato dello
+// stesso argomento (voti: project_id -> punti), l'unico progetto aperto; altrimenti nessuno
+// (tema del cliente: meglio «non determinato» che il primo della lista, 2026-10-22).
 function scegliProgetto(progetti, email, trovato, voti = new Map()) {
-  if (!progetti.length) return null;
+  if (!progetti.length || email.senzaProgetto) return null;
   const perId = (id) => progetti.find((p) => p.id === id);
   if (email.projectId && perId(email.projectId)) return perId(email.projectId);
   if (trovato.projectIdContatto && perId(trovato.projectIdContatto)) return perId(trovato.projectIdContatto);
@@ -608,7 +823,7 @@ function scegliProgetto(progetti, email, trovato, voti = new Map()) {
   }
   if (migliore) return migliore;
   const votato = progetti.filter((p) => voti.get(p.id) > 0).sort((a, b) => voti.get(b.id) - voti.get(a.id))[0];
-  return votato || progetti[0];
+  return votato || (progetti.length === 1 ? progetti[0] : null);
 }
 
 const corto = (s, n) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
@@ -934,9 +1149,33 @@ Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, con questa s
   "riunioni": "cosa è già stato detto o deciso nelle riunioni su questo argomento, con data (stringa vuota se nei PASSAGGI non c'è nulla di pertinente)",
   "release": "release e data di rilascio della correzione SOLO se ricavate dai TICKET COLLEGATI (stringa vuota se nessun ticket collegato ha una release)",
   "punti_attenzione": ["cose che il PM deve verificare prima di rispondere"],
+  "azioni": [{"tipo": "rischio" | "dipendenza" | "todo" | "azione_cliente", "titolo": "breve", "descrizione": "contesto, con codici e date", "scadenza": "AAAA-MM-GG o stringa vuota", "owner": "chi la segue (nome) o stringa vuota", "mitigazione": "solo per i rischi, altrimenti stringa vuota"}],
   "risposta_email": "testo completo della bozza di risposta, senza oggetto"
 }
-"segnalazioni" è vuoto se l'email non segnala errori o malfunzionamenti.`;
+"segnalazioni" è vuoto se l'email non segnala errori o malfunzionamenti. "azioni" è vuoto se l'email non porta impegni, scadenze o rischi da registrare (al massimo 5).`;
+
+// Azioni proposte dall'AI (rischi, dipendenze, To-Do, azioni a carico del cliente): solo
+// mostrate nel pannello; si registrano in Projexa quando il PM preme «Crea» (POST
+// /lavori/:id/azioni/:n). n = posizione nell'elenco salvato nel risultato.
+const TIPI_AZIONE = ['rischio', 'dipendenza', 'todo', 'azione_cliente'];
+const MAX_AZIONI = 5;
+function dataValida(v) {
+  const s = String(v || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  const d = new Date(`${s}T00:00:00Z`);
+  const anno = Number(s.slice(0, 4));
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s || anno < 2000 || anno > 2100 ? '' : s;
+}
+function azioniProposte(lista) {
+  return (Array.isArray(lista) ? lista : [])
+    .map((a) => ({
+      tipo: voce(a && a.tipo, TIPI_AZIONE, ''), titolo: corto(a && a.titolo, 300), descrizione: corto(a && a.descrizione, 1500),
+      scadenza: dataValida(a && a.scadenza), owner: corto(a && a.owner, 200), mitigazione: corto(a && a.mitigazione, 1000)
+    }))
+    .filter((a) => a.tipo && a.titolo.length >= 5)
+    .slice(0, MAX_AZIONI)
+    .map((a, n) => ({ ...a, n, mitigazione: a.tipo === 'rischio' ? a.mitigazione : '' }));
+}
 
 const CATEGORIE = ['Bug', 'Richiesta', 'Configurazione', 'Altro'];
 const PRIORITA = ['Alta', 'Media', 'Bassa'];
@@ -989,10 +1228,14 @@ async function analizza(req, res) {
     const user = req.user;
     const email = emailDaCorpo(req.body || {});
     const base = { versione: 1, emailId: email.emailId, oggetto: email.oggetto, mittente: email.mittente };
-    const trovato = await trovaCliente(user, email);
+    const trovato = await trovaCliente(user, email, { daTesto: true });
     if (!trovato) {
-      return res.json({ ...base, esito: 'cliente_non_trovato',
-        messaggio: 'Il mittente (e i destinatari) non corrispondono a nessun contatto o stakeholder dei tuoi clienti in Projexa. Aggiungi il contatto alla scheda del cliente e riprova.' });
+      // Il PM sceglie il cliente nel pannello e rianalizza (clientId).
+      const clienti = (await clientiUtente(user)).clienti.filter((c) => c.aperto && c.tenant_id === user.tenant_id)
+        .map((c) => ({ id: c.id, nome: String(c.nome || '').trim() })).filter((c) => c.nome)
+        .sort((a, b) => a.nome.localeCompare(b.nome, 'it'));
+      return res.json({ ...base, esito: 'cliente_non_trovato', clienti,
+        messaggio: 'Né gli indirizzi (contatti e stakeholder dei tuoi clienti) né i ticket o i nomi scritti nell\'email portano a un solo cliente. Scegli il cliente qui sotto, oppure aggiungi il contatto alla scheda del cliente in Projexa.' });
     }
     const u = { ...user, tenant_id: trovato.tenantId };
     const progetti = (await progettiAperti(u).catch(() => [])).filter((p) => p.clientId === trovato.clientId)
@@ -1090,16 +1333,20 @@ async function analizza(req, res) {
       prossime ? `Calendario (usalo SOLO se l'email chiede esplicitamente quando esce la prossima release): ${prossime}` : ''
     ].filter(Boolean).join('\n');
     const tpl = (await getPromptFor('OUTLOOK_ANALISI', u)).testo;
+    const tipoEmail = trovato.interna
+      ? `EMAIL INTERNA: scambio tra colleghi (nessun indirizzo del cliente). Il cliente ${trovato.nome} è stato ricavato da: ${trovato.motivo || (trovato.come === 'scelto' ? 'scelta del PM' : `indirizzo ${trovato.indirizzo}`)}. La bozza è per i colleghi, non per il cliente.`
+      : `EMAIL CON IL CLIENTE: almeno un indirizzo è del cliente o di un esterno. La bozza è per il cliente.`;
     const valori = {
-      EMAIL: testoEmail, CLIENTE: trovato.nome || '', PROGETTO: progetto ? progetto.nome : 'non determinato', TICKET: testoTicket,
-      RELEASE: testoRelease, CORRELATI: testoCorrelati, DATA: dataIt(oggiIso()), UTENTE: nomeUtente || 'il project manager'
+      EMAIL: testoEmail, CLIENTE: trovato.nome || '', PROGETTO: progetto ? progetto.nome : 'non determinato (tema del cliente)', TICKET: testoTicket,
+      RELEASE: testoRelease, CORRELATI: testoCorrelati, DATA: dataIt(oggiIso()), UTENTE: nomeUtente || 'il project manager', TIPO_EMAIL: tipoEmail
     };
     const datiTesto = [contesto ? `${contesto}\n` : '', testoDatiCliente(dati)].join('\n');
     const build = (d) => {
       let testo = tpl.includes('{{DATI}}') ? tpl : `${tpl}\n\nDATI\n{{DATI}}`;
-      // Prompt salvato prima del 22/10 (senza {{CORRELATI}}): i passaggi vanno in coda.
+      // Prompt salvato prima del 22/10 (senza {{CORRELATI}} o {{TIPO_EMAIL}}): in coda.
       if (!testo.includes('{{CORRELATI}}')) testo += '\n\nPASSAGGI DI PROJEXA SULLO STESSO ARGOMENTO\n{{CORRELATI}}';
-      return testo.replace(/\{\{(EMAIL|CLIENTE|PROGETTO|TICKET|RELEASE|CORRELATI|DATA|UTENTE|DATI)\}\}/g, (x, k) => (k === 'DATI' ? d : valori[k])) + FORMATO_JSON;
+      if (!testo.includes('{{TIPO_EMAIL}}')) testo += '\n\nTIPO DI EMAIL\n{{TIPO_EMAIL}}';
+      return testo.replace(/\{\{(EMAIL|CLIENTE|PROGETTO|TICKET|RELEASE|CORRELATI|DATA|UTENTE|TIPO_EMAIL|DATI)\}\}/g, (x, k) => (k === 'DATI' ? d : valori[k])) + FORMATO_JSON;
     };
     const r = await chiediAi(u, build, datiTesto, { json: true, ai: req.aiScelta });
     const j = leggiJson(r.testo);
@@ -1113,14 +1360,19 @@ async function analizza(req, res) {
       }))
       .filter((s) => s.descrizione.length >= 10);
     const ctx = { tenantId: trovato.tenantId, clientId: trovato.clientId, clienteNome: trovato.nome, contattoId: trovato.contattoId, progetto, dati, email };
-    const esitiIssue = segnalazioni.length ? await creaIssue(user, ctx, segnalazioni) : [];
+    // Email tra colleghi: nessuna Issue automatica (il problema lo segnala il cliente, non un
+    // collega): le segnalazioni si mostrano e basta.
+    const esitiIssue = !segnalazioni.length ? []
+      : trovato.interna ? segnalazioni.map((s) => ({ ...s, esito: 'interna' }))
+        : await creaIssue(user, ctx, segnalazioni);
+    const azioni = azioniProposte(j.azioni);
     const risposteTicket = new Map((Array.isArray(j.ticket) ? j.ticket : []).slice(0, 30)
       .map((t) => [String(t && t.codice || '').trim().toUpperCase(), corto(t && t.risposta, 600)]));
 
     res.json({
-      ...base, esito: 'ok',
-      cliente: { id: trovato.clientId, nome: trovato.nome, come: trovato.come, indirizzo: trovato.indirizzo, contatto: trovato.contatto || '' },
-      progetto, progetti,
+      ...base, esito: 'ok', interna: !!trovato.interna,
+      cliente: { id: trovato.clientId, nome: trovato.nome, come: trovato.come, indirizzo: trovato.indirizzo, contatto: trovato.contatto || '', motivo: trovato.motivo || '' },
+      progetto, progetti, azioni,
       tipi: (Array.isArray(j.tipi) ? j.tipi : []).map((t) => minuscola(t)).filter((t) => TIPI.includes(t)).slice(0, 5),
       sintesi: corto(j.sintesi, 1500),
       segnalazioni: esitiIssue,
