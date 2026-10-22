@@ -32,6 +32,7 @@ import { notificaRiunione } from './notifiche.js';
 import { getIntegration } from '../config/integrations.js';
 import { transcribeAudio, transcribeAudioCpp, transcribeAudioGemini, transcribeAudioParakeet, parakeetUrl, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate } from '../routes/ai.js';
 import { segnaRegistrazione, segnaTrascrizione, assistenteInCorso } from '../config/ollamaPrecedenza.js';
+import { nomiPartecipanti } from '../config/riunioniOutlook.js';
 
 // Registrazione considerata in corso fino a questo tempo dall'ultimo pezzo audio arrivato (se la
 // fine non arriva, es. pagina chiusa): intanto i recap con «Projexa» aspettano (precedenza).
@@ -128,7 +129,8 @@ const PROMPT_STYLE = 'Buongiorno a tutti, possiamo iniziare. Allora, come diceva
 // cliente). Lo usano il prompt di Whisper, le hotwords di Parakeet e le correzioni proposte.
 export async function glossarioRiunione(user, idCalendar, names) {
   const m = (await db.query(
-    `SELECT oggetto, client_id FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+    `SELECT oggetto, client_id, to_char(data_calendar, 'YYYY-MM-DD') AS data, to_char(orario_calendar, 'HH24:MI') AS ora
+       FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
     [user.tenant_id, user.user_id, idCalendar]
   )).rows[0] || {};
   let cliente = '';
@@ -153,7 +155,10 @@ export async function glossarioRiunione(user, idCalendar, names) {
   } catch (e) { /* tabella assente: nessun termine */ }
 
   const me = await speakerName(user);
-  const persone = [...new Set([me, ...(names || [])].filter(Boolean))];
+  // Partecipanti dell'appuntamento collegato dall'Add-in di Outlook (config/riunioniOutlook.js):
+  // con il calendario condiviso il browser non ne ha i nomi.
+  const daOutlook = m.data && m.ora ? await nomiPartecipanti(user, { data: m.data, ora: m.ora, oggetto: m.oggetto }) : [];
+  const persone = [...new Set([me, ...(names || []), ...daOutlook].filter(Boolean))];
   return { oggetto: String(m.oggetto || '').trim(), clientId: m.client_id || null, cliente, persone, termini };
 }
 

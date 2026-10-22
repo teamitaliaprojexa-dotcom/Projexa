@@ -65,7 +65,7 @@
   // ---------------------------------------------------------------------------
   function vistaCollega(messaggio) {
     fermaAttesa();
-    mostra('vistaAnalisi', false); mostra('vistaFuori', false); mostra('pxFoot', false);
+    mostra('vistaAnalisi', false); mostra('vistaFuori', false); mostra('pxFoot', false); mostra('vistaRiunione', false);
     mostra('vistaCollega', true);
     $('pxChi').textContent = 'Non collegato';
     avviso(messaggio || '');
@@ -140,6 +140,12 @@
     $('pxRisultato').textContent = '';
     mostra('pxStato', false);
     var item = Office.context.mailbox.item;
+    mostra('vistaRiunione', false);
+    if (item && item.itemType === Office.MailboxEnums.ItemType.Appointment) {
+      mostra('vistaAnalisi', false); mostra('vistaFuori', false);
+      caricaRiunione(item);
+      return;
+    }
     if (!item || item.itemType !== Office.MailboxEnums.ItemType.Message) {
       mostra('vistaAnalisi', false); mostra('vistaFuori', true);
       return;
@@ -300,13 +306,19 @@
     if (r.riunioni || (r.riunioniCorrelate && r.riunioniCorrelate.length)) {
       box.appendChild(el('h3', 'Già discusso in riunione'));
       if (r.riunioni) box.appendChild(el('p', r.riunioni));
+      // Una scheda per riunione (o voce di registro), con i tipi trovati e fino a 2 estratti.
       (r.riunioniCorrelate || []).forEach(function (x) {
         var k = el('div', null, 'px-card');
         var riga = el('div');
-        riga.appendChild(el('span', x.tipo, 'px-tag'));
-        riga.appendChild(el('span', (x.data || '') + ' · ' + (x.oggetto || ''), 'px-muted'));
+        (x.tipi || [x.tipo]).forEach(function (t) { if (t) riga.appendChild(el('span', t, 'px-tag')); });
+        if (x.data || x.oggetto) riga.appendChild(el('span', [x.data, x.oggetto].filter(Boolean).join(' · '), 'px-muted'));
         k.appendChild(riga);
-        k.appendChild(el('div', x.estratto));
+        (x.estratti || [x.estratto]).forEach(function (e, i) {
+          if (!e) return;
+          var p = el('div', e);
+          if (i) p.style.marginTop = '6px';
+          k.appendChild(p);
+        });
         box.appendChild(k);
       });
     }
@@ -363,6 +375,112 @@
     if (r.ai && r.ai.label) box.appendChild(el('p', 'Analisi di ' + r.ai.label + (r.ai.model ? ' (' + r.ai.model + ')' : '') + '. Controlla sempre la bozza prima di inviarla.', 'px-nota'));
   }
 
+  // ---------------------------------------------------------------------------
+  // Appuntamento del calendario (2026-10-22): organizzatore e partecipanti verso Projexa
+  // ---------------------------------------------------------------------------
+  // In lettura (sei invitato) i campi sono valori; da organizzatore (modifica) sono oggetti da
+  // leggere con getAsync. valore() restituisce sempre una Promise col valore.
+  function valore(campo) {
+    if (campo && typeof campo.getAsync === 'function') {
+      return new Promise(function (ok) {
+        campo.getAsync(function (r) { ok(r.status === Office.AsyncResultStatus.Succeeded ? r.value : null); });
+      });
+    }
+    return Promise.resolve(campo == null ? null : campo);
+  }
+  function persona(x) { return x ? { nome: x.displayName || '', email: x.emailAddress || '' } : null; }
+  var datiRiunione = null;
+
+  function caricaRiunione(item) {
+    datiRiunione = null;
+    mostra('vistaRiunione', true); mostra('pxFoot', true);
+    $('pxRiuRisultato').hidden = true;
+    $('pxRiuRisultato').textContent = '';
+    $('pxCollegaRiu').disabled = true;
+    $('pxCollegaRiu').textContent = 'Collega a Projexa';
+    Promise.all([valore(item.subject), valore(item.start), valore(item.end), valore(item.organizer),
+      valore(item.requiredAttendees), valore(item.optionalAttendees), valore(item.location)]).then(function (v) {
+      var org = persona(v[3]) || { nome: '', email: stato.mailbox }; // da organizzatore: sei tu
+      datiRiunione = {
+        oggetto: v[0] || '', inizio: v[1] ? new Date(v[1]).toISOString() : '', fine: v[2] ? new Date(v[2]).toISOString() : '',
+        organizzatore: org, obbligatori: (v[4] || []).map(persona).filter(function (p) { return p && p.email; }),
+        facoltativi: (v[5] || []).map(persona).filter(function (p) { return p && p.email; }), luogo: v[6] || ''
+      };
+      $('pxRiuOggetto').textContent = datiRiunione.oggetto || '(senza oggetto)';
+      var inizio = v[1] ? new Date(v[1]) : null;
+      $('pxRiuQuando').textContent = inizio ? inizio.toLocaleString('it-IT', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      var n = datiRiunione.obbligatori.length + datiRiunione.facoltativi.length;
+      $('pxRiuChi').textContent = 'Organizzatore: ' + (org.nome || org.email || '-') + ' · ' + n + ' partecipant' + (n === 1 ? 'e' : 'i');
+      $('pxCollegaRiu').disabled = !datiRiunione.inizio;
+    });
+  }
+
+  function collegaRiunione(projectId) {
+    if (!datiRiunione) return;
+    var b = $('pxCollegaRiu');
+    b.disabled = true;
+    avviso('');
+    var corpo = {};
+    for (var k in datiRiunione) corpo[k] = datiRiunione[k];
+    corpo.projectId = projectId || '';
+    chiama('POST', '/appuntamento', corpo).then(function (r) {
+      mostraRiunione(r.dati);
+      b.textContent = 'Aggiorna in Projexa';
+    }).catch(function (e) { avviso(e.message); }).then(function () { b.disabled = false; });
+  }
+
+  function mostraRiunione(d) {
+    var box = $('pxRiuRisultato');
+    box.textContent = '';
+    box.hidden = false;
+    box.appendChild(el('h3', 'Cliente e progetto'));
+    var card = el('div', null, 'px-card');
+    if (d.cliente) {
+      card.appendChild(el('div', d.cliente.nome || '-', 'px-oggetto'));
+      card.appendChild(el('div', 'Riconosciuto da: ' + (d.cliente.come === 'dominio' ? 'dominio di ' : '') + (d.cliente.indirizzo || ''), 'px-muted'));
+      if (d.progetti && d.progetti.length > 1) {
+        var sel = el('select');
+        d.progetti.forEach(function (p) {
+          var o = el('option', p.nome); o.value = p.id;
+          if (d.progetto && d.progetto.id === p.id) o.selected = true;
+          sel.appendChild(o);
+        });
+        card.appendChild(el('label', 'Progetto'));
+        card.appendChild(sel);
+        var rb = el('button', 'Usa questo progetto', 'px-btn px-sec');
+        rb.type = 'button';
+        rb.addEventListener('click', function () { collegaRiunione(sel.value); });
+        card.appendChild(rb);
+      } else {
+        card.appendChild(el('div', 'Progetto: ' + (d.progetto ? d.progetto.nome : 'nessun progetto aperto'), 'px-muted'));
+      }
+    } else {
+      card.appendChild(el('div', 'Nessun partecipante corrisponde ai contatti dei tuoi clienti: cliente e progetto li sceglierai in Projexa.', 'px-muted'));
+    }
+    box.appendChild(card);
+
+    box.appendChild(el('h3', 'In Projexa'));
+    if (d.riunioni && d.riunioni.length) {
+      d.riunioni.forEach(function (x) {
+        box.appendChild(el('p', '«' + (x.oggetto || d.oggetto) + '»: ' + (x.campi.length ? 'completati ' + x.campi.join(', ') + '.' : 'era già completa (le scelte fatte a mano non si toccano).')));
+      });
+    } else {
+      box.appendChild(el('p', 'Salvato. Quando registri o carichi questa riunione, Projexa userà questi dati per cliente, progetto, destinatari del recap e nomi nella trascrizione. Nell\'elenco delle riunioni i partecipanti compaiono al prossimo aggiornamento.'));
+    }
+
+    var tutti = [];
+    if (d.organizzatore) tutti.push(d.organizzatore);
+    (d.partecipanti || []).forEach(function (p) { tutti.push(p); });
+    if (tutti.length) {
+      box.appendChild(el('h3', 'Partecipanti (' + tutti.length + ')'));
+      var ul = el('ul', null, 'px-lista');
+      tutti.forEach(function (p) {
+        ul.appendChild(el('li', (p.nome ? p.nome + ' · ' : '') + p.email + (p.tipo === 'organizzatore' ? ' (organizzatore)' : p.tipo === 'facoltativo' ? ' (facoltativo)' : '')));
+      });
+      box.appendChild(ul);
+    }
+  }
+
   // Risposta a tutti: Outlook apre la bozza con mittente, destinatari e Cc, oggetto «RE: …».
   function rispondiATutti(testo) {
     var esc = String(testo).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -388,6 +506,7 @@
     $('pxCodice').addEventListener('keydown', function (e) { if (e.key === 'Enter') collega(); });
     $('pxAnalizza').addEventListener('click', function () { analizza(''); });
     $('pxScollega').addEventListener('click', scollega);
+    $('pxCollegaRiu').addEventListener('click', function () { collegaRiunione(''); });
     // Pannello fissato: cambiando email si riparte da quella nuova.
     try {
       Office.context.mailbox.addHandlerAsync(Office.EventType.ItemChanged, function () {

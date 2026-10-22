@@ -43,6 +43,7 @@ import { getPromptFor } from '../config/prompts.js';
 import { rottaAi } from '../jobs/aiLavori.js';
 import { notificaOutlook } from '../jobs/notifiche.js';
 import { chiediAi, leggiJson, contestoProgetto, progettiAperti, dataIt, oggiIso } from '../config/pmCore.js';
+import { oraItaliana, salvaInfoOutlook, applicaARiunioni } from '../config/riunioniOutlook.js';
 
 const router = express.Router();
 
@@ -209,7 +210,32 @@ router.delete('/collegamento', requireAuth, async (req, res) => {
 // Manifest dell'add-in (uguale per tutti, nessun segreto dentro): indirizzi presi dall'URL
 // ufficiale di Projexa (APP_URL), così locale/staging/produzione hanno il proprio.
 const MANIFEST_ID = 'b6f3c1d2-7a4e-4f5b-9c8d-2e1f0a3b4c5d';
-const MANIFEST_VERSIONE = '1.0.0.0';
+// 1.1 (2026-10-22): pulsante «Collega a Projexa» anche sugli appuntamenti (invitato e organizzatore).
+// Stesso Id: ricaricando il file in Outlook l'add-in si aggiorna, non se ne crea un altro.
+const MANIFEST_VERSIONE = '1.1.0.0';
+// Pulsante del gruppo Projexa su una superficie di Outlook (email in lettura, appuntamenti).
+const puntoComandi = (superficie, sigla, etichetta, descrizione) => `          <ExtensionPoint xsi:type="${superficie}">
+            <OfficeTab id="TabDefault">
+              <Group id="projexaGroup${sigla}">
+                <Label resid="Group.Label"/>
+                <Control xsi:type="Button" id="projexaPulsante${sigla}">
+                  <Label resid="${etichetta}"/>
+                  <Supertip>
+                    <Title resid="${etichetta}"/>
+                    <Description resid="${descrizione}"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16"/>
+                    <bt:Image size="32" resid="Icon.32"/>
+                    <bt:Image size="80" resid="Icon.80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>`;
 const xmlEsc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 export function manifestXml(origine) {
   const o = xmlEsc(String(origine).replace(/\/+$/, ''));
@@ -247,10 +273,16 @@ export function manifestXml(origine) {
         <RequestedHeight>450</RequestedHeight>
       </DesktopSettings>
     </Form>
+    <Form xsi:type="ItemEdit">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="${o}/outlook/taskpane.html"/>
+      </DesktopSettings>
+    </Form>
   </FormSettings>
   <Permissions>ReadItem</Permissions>
   <Rule xsi:type="RuleCollection" Mode="Or">
     <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
+    <Rule xsi:type="ItemIs" ItemType="Appointment" FormType="ReadOrEdit"/>
   </Rule>
   <DisableEntityHighlighting>true</DisableEntityHighlighting>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
@@ -263,28 +295,9 @@ export function manifestXml(origine) {
       <Host xsi:type="MailHost">
         <DesktopFormFactor>
           <FunctionFile resid="Commands.Url"/>
-          <ExtensionPoint xsi:type="MessageReadCommandSurface">
-            <OfficeTab id="TabDefault">
-              <Group id="projexaGroup">
-                <Label resid="Group.Label"/>
-                <Control xsi:type="Button" id="projexaAnalizza">
-                  <Label resid="Button.Label"/>
-                  <Supertip>
-                    <Title resid="Button.Label"/>
-                    <Description resid="Button.Tooltip"/>
-                  </Supertip>
-                  <Icon>
-                    <bt:Image size="16" resid="Icon.16"/>
-                    <bt:Image size="32" resid="Icon.32"/>
-                    <bt:Image size="80" resid="Icon.80"/>
-                  </Icon>
-                  <Action xsi:type="ShowTaskpane">
-                    <SourceLocation resid="Taskpane.Url"/>
-                  </Action>
-                </Control>
-              </Group>
-            </OfficeTab>
-          </ExtensionPoint>
+${puntoComandi('MessageReadCommandSurface', 'Msg', 'Button.Label', 'Button.Tooltip')}
+${puntoComandi('AppointmentAttendeeCommandSurface', 'AppInv', 'App.Label', 'App.Tooltip')}
+${puntoComandi('AppointmentOrganizerCommandSurface', 'AppOrg', 'App.Label', 'App.Tooltip')}
         </DesktopFormFactor>
       </Host>
     </Hosts>
@@ -301,9 +314,11 @@ export function manifestXml(origine) {
       <bt:ShortStrings>
         <bt:String id="Group.Label" DefaultValue="Projexa"/>
         <bt:String id="Button.Label" DefaultValue="Analizza con Projexa"/>
+        <bt:String id="App.Label" DefaultValue="Collega a Projexa"/>
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="Button.Tooltip" DefaultValue="Analizza l'email aperta con i dati del cliente e del progetto in Projexa"/>
+        <bt:String id="App.Tooltip" DefaultValue="Porta in Projexa organizzatore e partecipanti della riunione, con cliente e progetto riconosciuti"/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>
@@ -408,6 +423,69 @@ async function limitiAnalisi(req, res, next) {
 }
 
 router.post('/analizza', requireAddin, limitiAnalisi, ...rottaAi(OPERAZIONE, analizza));
+
+// ----------------------------------------------------------------------------
+// APPUNTAMENTI DEL CALENDARIO (2026-10-22): «Collega a Projexa» su un appuntamento aperto.
+// Organizzatore e partecipanti -> cliente e progetto (come per il mittente di un'email) ->
+// salvati in rec_meeting_outlook (config/riunioniOutlook.js) e passati subito alle riunioni di
+// Projexa dello stesso giorno, ora e titolo (solo i campi vuoti). Niente AI.
+// ----------------------------------------------------------------------------
+router.post('/appuntamento', requireAddin, async (req, res) => {
+  try {
+    if (oltreLimite(`app|${req.user.user_id}`, 120, 3600000)) throw errore(429, 'Troppe richieste: riprova tra poco');
+    const imp = await impostazione(req.user);
+    if (!imp.attivo) throw errore(403, '«AI Add-in Outlook» non è attivo in Projexa › Impostazioni › AI', 'NON_ATTIVO');
+    const b = req.body || {};
+    const persona = (x, tipo) => {
+      const email = minuscola(x && x.email);
+      return EMAIL_RE.test(email) ? { nome: pulisci(x.nome, 120), email, tipo } : null;
+    };
+    const organizzatore = persona(b.organizzatore, 'organizzatore');
+    const lista = (v, tipo) => (Array.isArray(v) ? v : []).slice(0, 200).map((x) => persona(x, tipo)).filter(Boolean);
+    const obbligatori = lista(b.obbligatori, 'obbligatorio');
+    const facoltativi = lista(b.facoltativi, 'facoltativo');
+    const oggetto = pulisci(b.oggetto, 500);
+    const inizio = oraItaliana(b.inizio);
+    const fine = b.fine ? oraItaliana(b.fine) : null;
+    if (!inizio) throw errore(400, 'Data e ora dell\'appuntamento non leggibili');
+    if (!oggetto) throw errore(400, 'Appuntamento senza oggetto');
+    // Partecipanti senza doppioni (l'organizzatore a volte compare anche tra gli obbligatori).
+    const visti = new Set(organizzatore ? [organizzatore.email] : []);
+    const partecipanti = [...obbligatori, ...facoltativi].filter((p) => !visti.has(p.email) && visti.add(p.email));
+
+    // Cliente e progetto: dall'organizzatore e dai partecipanti, come per le email.
+    const email = { mittente: organizzatore || partecipanti[0] || null, a: obbligatori, cc: facoltativi, oggetto, testo: pulisci(b.luogo, 300), projectId: UUID_RE.test(String(b.projectId || '')) ? String(b.projectId) : '' };
+    let trovato = email.mittente ? await trovaCliente(req.user, email) : null;
+    // Tenant del cliente diverso da quello del collegamento: i dati restano nel tenant del token.
+    if (trovato && trovato.tenantId !== req.user.tenant_id) trovato = null;
+    let progetti = [];
+    let progetto = null;
+    if (trovato) {
+      progetti = (await progettiAperti(req.user).catch(() => [])).filter((p) => p.clientId === trovato.clientId).map((p) => ({ id: p.projectId, nome: p.nome }));
+      progetto = scegliProgetto(progetti, email, trovato);
+    }
+    const info = {
+      data: inizio.data, ora: inizio.ora, fine: fine ? fine.ora : null, oggetto,
+      organizzatore: organizzatore || {}, partecipanti,
+      clientId: trovato ? trovato.clientId : null, projectId: progetto ? progetto.id : null
+    };
+    try {
+      await salvaInfoOutlook(req.user, info);
+    } catch (e) {
+      if (e.code === '42P01') throw errore(503, 'Funzione non ancora attiva: va eseguito lo script Supporto/CreaDB/rec_meeting_outlook.sql');
+      throw e;
+    }
+    const riunioni = await applicaARiunioni(req.user, info);
+    console.log(`[OUTLOOK] ${req.user.email || req.user.user_id}: appuntamento collegato (${partecipanti.length + (organizzatore ? 1 : 0)} persone, cliente ${trovato ? 'riconosciuto' : 'non trovato'}, riunioni Projexa ${riunioni.length})`);
+    res.json({
+      oggetto, data: dataIt(inizio.data), ora: inizio.ora, fine: fine ? fine.ora : '',
+      organizzatore, partecipanti,
+      cliente: trovato ? { id: trovato.clientId, nome: trovato.nome, come: trovato.come, indirizzo: trovato.indirizzo } : null,
+      progetto, progetti,
+      riunioni: riunioni.map((r) => ({ oggetto: r.oggetto, campi: r.campi }))
+    });
+  } catch (e) { invia(res, e, 'APPUNTAMENTO'); }
+});
 
 // Stato e risultato di un'analisi: solo del proprio utente e tenant.
 router.get('/lavori/:id', requireAddin, async (req, res) => {
@@ -730,6 +808,50 @@ function valutaPertinenza(chiavi, pezzi, forti = new Set(), soloDuePiu = false) 
 }
 const migliori = (pezzi, tipi, max) => pezzi.filter((p) => p.ok && tipi.includes(p.tipo)).sort((a, b) => b.punti - a.punti).slice(0, max);
 
+// Estratto leggibile: senza orari [hh:mm:ss] e codici HTML (&#39;), centrato sulla prima parola
+// dell'email trovata nel pezzo invece che tagliato a caso.
+const ENTITA_HTML = { '&#39;': "'", '&apos;': "'", '&quot;': '"', '&amp;': '&', '&lt;': '<', '&gt;': '>', '&nbsp;': ' ' };
+function estrattoPulito(testo, trovate = [], max = 320) {
+  const t = String(testo || '').replace(/&#39;|&apos;|&quot;|&amp;|&lt;|&gt;|&nbsp;/g, (x) => ENTITA_HTML[x])
+    .replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]\s*/g, '').replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  const base = senzaAccenti(t.toLowerCase());
+  const pos = trovate.map((k) => base.search(new RegExp(`\\b${k}`))).filter((i) => i >= 0);
+  const centro = pos.length ? Math.min(...pos) : 0;
+  const da = Math.max(0, Math.min(centro - Math.round(max / 3), t.length - max));
+  return `${da > 0 ? '…' : ''}${t.slice(da, da + max).trim()}${da + max < t.length ? '…' : ''}`;
+}
+
+// Fonti per il pannello: UNA scheda per riunione (o per voce di registro), con al massimo 2
+// estratti di tipo diverso. La pertinenza si confronta in proporzione al migliore del suo
+// gruppo (i punteggi di trascrizioni, recap e registri non sono confrontabili) e a parità
+// vengono prima attività e registri, poi recap, poi trascrizioni.
+const PRIORITA_TIPO = (tipo) => (tipo === 'attività recap interno' ? 0 : TIPI_REGISTRO.includes(tipo) ? 1 : tipo === 'trascrizione' ? 3 : 2);
+function fontiPerScheda(gruppi, max = 6) {
+  const candidati = [];
+  for (const g of gruppi) {
+    const top = Math.max(1e-9, ...g.map((p) => p.punti));
+    for (const p of g) candidati.push({ ...p, rel: p.punti / top });
+  }
+  candidati.sort((a, b) => (b.rel - a.rel) || (PRIORITA_TIPO(a.tipo) - PRIORITA_TIPO(b.tipo)));
+  const schede = new Map();
+  for (const p of candidati) {
+    const chiave = p.oggetto ? `${p.data}|${p.oggetto}` : `${p.tipo}|${p.testo}`;
+    let s = schede.get(chiave);
+    if (!s) {
+      if (schede.size >= max) continue;
+      s = { data: p.data || '', oggetto: p.oggetto || '', tipi: [], estratti: [], rel: p.rel, prio: PRIORITA_TIPO(p.tipo) };
+      schede.set(chiave, s);
+    }
+    if (s.estratti.length >= 2 || s.tipi.includes(p.tipo)) continue;
+    s.tipi.push(p.tipo);
+    s.estratti.push(estrattoPulito(p.tipo === 'trascrizione' ? p.testo : (p.estratto || p.testo), p.trovate));
+    s.prio = Math.min(s.prio, PRIORITA_TIPO(p.tipo));
+  }
+  return [...schede.values()].sort((a, b) => (b.rel - a.rel) || (a.prio - b.prio))
+    .map(({ data, oggetto, tipi, estratti }) => ({ data, oggetto, tipi, estratti, tipo: tipi[0], estratto: estratti[0] }));
+}
+
 // Riunioni del cliente dell'utente (recap, recap interno, trascrizione), ultimi 18 mesi.
 async function riunioniCliente(tenantId, userId, clientId) {
   return righe(
@@ -935,7 +1057,7 @@ async function analizza(req, res) {
       daRegistri.length ? daRegistri.map((p) => `- ${p.tipo}${p.data ? ` (${p.data})` : ''}${p.oggetto ? ` «${p.oggetto}»` : ''}: ${p.estratto}`).join('\n') : '(nessuno)',
       '',
       'PASSAGGI SULLO STESSO ARGOMENTO DALLE TRASCRIZIONI DELLE RIUNIONI DEL CLIENTE',
-      daTrascrizioni.length ? daTrascrizioni.map((p) => `- ${p.etichetta}: «${p.estratto}»`).join('\n') : '(nessuno)',
+      daTrascrizioni.length ? daTrascrizioni.map((p) => `- ${p.etichetta}: «${estrattoPulito(p.testo, p.trovate, 650)}»`).join('\n') : '(nessuno)',
       '',
       'ISSUE DEL CLIENTE SULLO STESSO ARGOMENTO',
       issueSimili.length ? issueSimili.map((p) => `- ${giorno(p.ref.data_segnalazione)} [${p.ref.stato}] ${corto(p.ref.descrizione, 300)}${p.ref.mysupport ? ` | MySupport ${p.ref.mysupport}` : ''}${p.ref.tkt_jira ? ` | Jira ${p.ref.tkt_jira}` : ''}`).join('\n') : '(nessuna)',
@@ -1006,8 +1128,7 @@ async function analizza(req, res) {
       // Release solo se un ticket collegato ne ha una (niente calendario generico).
       release: releaseCollegate.length ? corto(j.release, 800) : '',
       riunioni: corto(j.riunioni, 1500),
-      riunioniCorrelate: [...daRegistri, ...daRiunioni, ...daTrascrizioni].sort((a, b) => b.punti - a.punti).slice(0, 8)
-        .map((p) => ({ data: p.data, oggetto: p.oggetto, tipo: p.tipo, estratto: corto(p.estratto, 350) })),
+      riunioniCorrelate: fontiPerScheda([daRegistri, daRiunioni, daTrascrizioni], 6),
       puntiAttenzione: (Array.isArray(j.punti_attenzione) ? j.punti_attenzione : []).slice(0, 8).map((x) => corto(x, 300)).filter(Boolean),
       rispostaEmail: String(j.risposta_email || '').slice(0, 8000).trim(),
       ai: { label: r.label || '', model: r.model || '', locale: !!r.locale }

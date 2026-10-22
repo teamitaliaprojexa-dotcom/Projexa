@@ -8,7 +8,7 @@
        Nessuno script inline: CSP dedicata alle pagine /outlook/ (server.js, CSP_OUTLOOK). -->
   <link rel="stylesheet" href="taskpane.css?v=20261022">
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <script src="taskpane.js?v=20261022-2" defer></script>
+  <script src="taskpane.js?v=20261022-4" defer></script>
 </head>
 <body>
   <header class="px-head">
@@ -48,9 +48,22 @@
       <div id="pxRisultato" hidden></div>
     </section>
 
+    <!-- Appuntamento del calendario: organizzatore e partecipanti verso Projexa -->
+    <section id="vistaRiunione" hidden>
+      <div class="px-email">
+        <div class="px-label">Riunione</div>
+        <div id="pxRiuOggetto" class="px-oggetto"></div>
+        <div id="pxRiuQuando" class="px-muted"></div>
+        <div id="pxRiuChi" class="px-muted"></div>
+      </div>
+      <button id="pxCollegaRiu" class="px-btn">Collega a Projexa</button>
+      <p class="px-nota">Porta in Projexa organizzatore e partecipanti (che il calendario condiviso non mostra) e riconosce cliente e progetto. Si usano per i destinatari del recap e per riconoscere i nomi nella trascrizione.</p>
+      <div id="pxRiuRisultato" hidden></div>
+    </section>
+
     <section id="vistaFuori" hidden>
-      <h2>Apri un'email</h2>
-      <p class="px-muted">Questo pannello funziona dentro Outlook, su un'email ricevuta.</p>
+      <h2>Apri un'email o una riunione</h2>
+      <p class="px-muted">Questo pannello funziona dentro Outlook, su un'email ricevuta o su un appuntamento del calendario.</p>
     </section>
   </main>
 

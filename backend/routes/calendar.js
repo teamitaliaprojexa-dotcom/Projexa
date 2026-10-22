@@ -33,6 +33,7 @@ import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
 import { startLinkState, checkLinkState } from '../config/oauthLinkState.js';
 import { isAllowedOrigin } from '../config/origins.js';
+import { arricchisciEventi, completaRiunione } from '../config/riunioniOutlook.js';
 import {
   getIntegration,
   saveIntegration,
@@ -604,7 +605,10 @@ router.post('/meetings/managed', requireAuth, async (req, res) => {
        RETURNING id`,
       [req.user.tenant_id, req.user.user_id, idCalendar, encRec(oggetto), provider, data, orario]
     );
-    res.json({ success: true, created: result.rowCount > 0 });
+    // Appuntamento collegato prima dall'Add-in di Outlook: cliente, progetto e destinatari del
+    // recap passano subito sulla riga nuova (solo dove sono vuoti).
+    const completati = result.rowCount > 0 ? await completaRiunione(req.user, idCalendar) : [];
+    res.json({ success: true, created: result.rowCount > 0, daOutlook: completati });
   } catch (error) {
     console.error('❌ REC_MEETING_INSERT:', error.message);
     res.status(500).json({ error: error.message });
@@ -1710,15 +1714,17 @@ router.get('/events', requireAuth, async (req, res) => {
     if (key === 'outlook') {
       const el = await getIntegration(req.user.user_id, PROVIDERS.outlook.provider);
       if (el.outlook_ics_url) {
-        const events = await withManagedFlag(req.user, await fetchIcsEvents(el.outlook_ics_url, timeMin, timeMax));
+        // Calendario condiviso (ICS): niente partecipanti. Quelli degli appuntamenti collegati
+        // dall'Add-in di Outlook si aggiungono qui (config/riunioniOutlook.js).
+        const events = await arricchisciEventi(req.user, await withManagedFlag(req.user, await fetchIcsEvents(el.outlook_ics_url, timeMin, timeMax)));
         return res.json({ events, count: events.length });
       }
     }
 
     const session = await getCalendarSession(req.user.user_id, key);
-    const events = await withManagedFlag(req.user, key === 'outlook'
+    const events = await arricchisciEventi(req.user, await withManagedFlag(req.user, key === 'outlook'
       ? await fetchOutlookEvents(session, timeMin, timeMax)
-      : await fetchGoogleEvents(session, timeMin, timeMax));
+      : await fetchGoogleEvents(session, timeMin, timeMax)));
 
     res.json({ events, count: events.length });
   } catch (error) {

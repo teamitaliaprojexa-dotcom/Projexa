@@ -46,7 +46,15 @@
             <li>Oppure nella barra in alto: <b>Home</b> › gruppo «Componenti aggiuntivi» › <b>Altre app</b> › <b>Projexa</b>.</li>
             <li>Per averlo sempre in vista: <b>Impostazioni</b> (rotellina) › <b>Posta</b> › <b>Personalizza azioni</b> ›
                 spunta <b>Analizza con Projexa</b> nella barra degli strumenti.</li>
+            <li><b>Sulle riunioni del calendario</b>: apri l'appuntamento (anche se l'organizzatore sei tu) ›
+                icona <b>App</b> o menu <b>…</b> › <b>Projexa</b> › <b>Collega a Projexa</b>. Porta in Projexa organizzatore
+                e partecipanti (il calendario condiviso non li mostra), con cliente e progetto riconosciuti: servono
+                per i destinatari del recap e per riconoscere i nomi nella trascrizione. Basta farlo una volta, prima o dopo la riunione.</li>
         </ul>
+        <div style="font-weight:600; margin:4px 0 2px;">Aggiornare l'add-in</div>
+        <div style="margin:0 0 6px; line-height:1.45;">Quando esce una nuova versione (es. 1.1 con le riunioni) premi di nuovo <b>Scarica add-in</b>;
+            in <b>aka.ms/olksideload</b> › <b>I miei componenti aggiuntivi</b> rimuovi <b>Projexa</b> (menu <b>…</b> › <b>Rimuovi</b>) e
+            aggiungi il nuovo file. È lo stesso add-in: si aggiorna, non ne compare un secondo, e di solito resta collegato.</div>
         <div style="font-weight:600; margin:4px 0 2px;">3. Collegamento (al primo uso)</div>
         <ol style="margin:0 0 8px 18px; padding:0; line-height:1.45;">
             <li>Qui premi <b>Collega Outlook</b>: compare un codice valido 10 minuti, usabile una volta sola.</li>
