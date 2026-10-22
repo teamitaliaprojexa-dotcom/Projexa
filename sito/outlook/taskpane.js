@@ -32,6 +32,8 @@
     a.textContent = testo;
     a.className = 'px-avviso' + (ok ? ' px-ok' : '');
     a.hidden = false;
+    // L'avviso è in cima al pannello: se il pannello è scorso in basso non si vedrebbe.
+    try { a.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) { /* client vecchi */ }
   }
 
   // ---------------------------------------------------------------------------
@@ -499,10 +501,21 @@
     var corpo = {};
     for (var k in datiRiunione) corpo[k] = datiRiunione[k];
     corpo.projectId = projectId || '';
+    var testoPrima = b.textContent;
+    b.textContent = 'Aggiornamento…';
     chiama('POST', '/appuntamento', corpo).then(function (r) {
       mostraRiunione(r.dati);
       b.textContent = 'Aggiorna in Projexa';
-    }).catch(function (e) { avviso(e.message); }).then(function () { b.disabled = false; });
+      // Riscontro sempre visibile: il pannello si ridisegna uguale quando non cambia nulla.
+      var ora = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+      var riu = r.dati.riunioni || [];
+      var cambiati = riu.filter(function (x) { return x.campi && x.campi.length; });
+      avviso(!riu.length
+        ? 'Salvato alle ' + ora + ': Projexa userà questi dati quando registri o carichi la riunione.'
+        : cambiati.length
+          ? 'Aggiornato alle ' + ora + ': completati ' + cambiati.map(function (x) { return x.campi.join(', '); }).join('; ') + '.'
+          : 'Controllato alle ' + ora + ': in Projexa la riunione ha già cliente, progetto e destinatari, niente da cambiare (le scelte fatte a mano non si toccano).', true);
+    }).catch(function (e) { b.textContent = testoPrima; avviso(e.message); }).then(function () { b.disabled = false; });
   }
 
   function mostraRiunione(d) {
@@ -551,7 +564,9 @@
       box.appendChild(el('h3', 'Partecipanti (' + tutti.length + ')'));
       var ul = el('ul', null, 'px-lista');
       tutti.forEach(function (p) {
-        ul.appendChild(el('li', (p.nome ? p.nome + ' · ' : '') + p.email + (p.tipo === 'organizzatore' ? ' (organizzatore)' : p.tipo === 'facoltativo' ? ' (facoltativo)' : '')));
+        // Nome uguale all'indirizzo (succede all'organizzatore): una volta sola.
+        var nome = p.nome && p.nome.toLowerCase() !== String(p.email).toLowerCase() ? p.nome + ' · ' : '';
+        ul.appendChild(el('li', nome + p.email + (p.tipo === 'organizzatore' ? ' (organizzatore)' : p.tipo === 'facoltativo' ? ' (facoltativo)' : '')));
       });
       box.appendChild(ul);
     }
