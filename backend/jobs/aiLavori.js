@@ -94,7 +94,7 @@ export function rottaAi(operazione, handler) {
       // «Projexa» (Ollama sulla VM, 2026-10-20): sempre in background come un lavoro Batch,
       // perché su CPU richiede minuti; stessa notifica e stessa finestra «Risultati AI».
       const locale = !!req.aiScelta.locale;
-      if (req.aiScelta.esecuzione !== 'batch' && !locale) return next();
+      if (req.aiScelta.esecuzione !== 'batch' && !locale && !OPERAZIONI[operazione].sempreInBackground) return next();
       const id = await creaLavoro(req, operazione, scelte);
       const occupata = locale ? vmOccupata() : false;
       res.status(202).json({
@@ -206,14 +206,22 @@ async function attendiBatch(lavoro, providerName, prompt, opzioni = {}) {
     passo = { batch_id: inv.batchId, model: inv.model, stato: 'in_corso' };
     await sleep(ATTESA_PRIMO_CONTROLLO);
   }
+  // Batch accettato ma fallito presso il fornitore (o senza risposta entro SCADENZA_ORE): il
+  // passaggio si ripete in Immediato (2026-10-22, richiesta utente), una volta sola.
+  const ripiegaDopoBatch = (motivo) => {
+    lavoro.ripiego = `Batch non riuscito (${String(motivo || '').slice(0, 200)}): eseguito in modalità Immediata`;
+    console.warn(`[AI BATCH] Lavoro ${lavoro.id}: ${lavoro.ripiego}`);
+    return subito();
+  };
   for (;;) {
     if (passo.stato === 'pronto') return { text: passo.testo || '', label: providerName, model: passo.model };
-    if (passo.stato === 'fallito') throw errore(502, passo.errore || 'Batch non riuscito');
+    if (passo.stato === 'fallito') return ripiegaDopoBatch(passo.errore || 'Batch non riuscito');
     if (passo.scaduto) {
       await db.query(`UPDATE ai_lavori_passi SET stato = 'fallito', errore = $3, concluso_il = now() WHERE lavoro_id = $1 AND chiave = $2`,
         [lavoro.id, chiave, `Nessuna risposta entro ${SCADENZA_ORE} ore`]);
-      throw errore(504, `${providerName}: nessuna risposta entro ${SCADENZA_ORE} ore`);
+      return ripiegaDopoBatch(`nessuna risposta entro ${SCADENZA_ORE} ore`);
     }
+    let fallitoBatch = null;
     try {
       const esito = await statoBatchAi(lavoro.user_id, providerName, passo.batch_id);
       if (esito.stato === 'pronto') {
@@ -224,13 +232,14 @@ async function attendiBatch(lavoro, providerName, prompt, opzioni = {}) {
       if (esito.stato === 'fallito') {
         await db.query(`UPDATE ai_lavori_passi SET stato = 'fallito', errore = $3, concluso_il = now() WHERE lavoro_id = $1 AND chiave = $2`,
           [lavoro.id, chiave, String(esito.errore || '').slice(0, 1000)]);
-        throw errore(502, esito.errore || 'Batch non riuscito');
+        fallitoBatch = esito.errore || 'Batch non riuscito';
       }
     } catch (e) {
       // Chiave scollegata o non valida: inutile aspettare. Rete o fornitore irraggiungibili: si riprova.
       if (e.status === 400 || e.status === 428 || e.status === 502 || e.status === 504) throw e;
       console.warn(`[AI BATCH] Lavoro ${lavoro.id}: controllo non riuscito (${e.message}), riprovo`);
     }
+    if (fallitoBatch) return ripiegaDopoBatch(fallitoBatch);
     await db.query(`UPDATE ai_lavori SET heartbeat = now() WHERE id = $1`, [lavoro.id]).catch(() => {});
     await sleep(ATTESA_CONTROLLI);
     const r = (await db.query(
@@ -280,7 +289,10 @@ export async function eseguiLavoro(id) {
     try {
       await conContestoAudit({ userId: l.user_id, tenantId: l.tenant_id, origine: `job:ai_batch ${l.operazione}` },
         () => contestoAi.run({
-          attendiBatch: (prov, prompt, opz) => attendiBatch(l, prov, prompt, opz),
+          // Operazioni sempre in background (Add-in Outlook) con esecuzione Immediata: l'AI si
+          // chiama subito, senza Batch API.
+          ...(OPERAZIONI[l.operazione]?.sempreInBackground && p.ai && p.ai.esecuzione !== 'batch'
+            ? {} : { attendiBatch: (prov, prompt, opz) => attendiBatch(l, prov, prompt, opz) }),
           ...(locale ? { ollamaModello: modelloFunzioni(p.ai.nome), ollamaEtichetta: p.ai.label } : {})
         }, () => handler(req, res)));
     } finally {
@@ -315,7 +327,9 @@ export async function eseguiLavoro(id) {
       if (!u.rowCount) throw errore(410, 'Lavoro eliminato');
     }
     console.log(`[AI BATCH] ✓ Lavoro ${l.id} (${l.operazione}) pronto${l.ripiego ? ' (eseguito Immediato: Batch non disponibile)' : ''}`);
-    await notificaLavoroAi({ tenantId: l.tenant_id, userId: l.user_id, lavoroId: l.id, operazione: OPERAZIONI[l.operazione].etichetta, titolo: l.titolo, ok: true, nota: l.ripiego });
+    // Add-in Outlook: il risultato si vede nel pannello di Outlook; la campanella avvisa solo
+    // degli errori e delle Issue create (le crea e le notifica l'handler).
+    if (!OPERAZIONI[l.operazione]?.notificaSoloErrori) await notificaLavoroAi({ tenantId: l.tenant_id, userId: l.user_id, lavoroId: l.id, operazione: OPERAZIONI[l.operazione].etichetta, titolo: l.titolo, ok: true, nota: l.ripiego });
   } catch (e) {
     if (!l) throw e;
     if (e.status === 410) { console.log(`[AI BATCH] Lavoro ${l.id} (${l.operazione}) eliminato dall'utente: interrotto`); return; }
@@ -325,6 +339,14 @@ export async function eseguiLavoro(id) {
   } finally {
     inEsecuzione.delete(id);
     if (l) await fs.rm(fileInput(l), { force: true }).catch(() => {});
+    // Dati in ingresso da non conservare (testo dell'email dell'Add-in Outlook): a lavoro
+    // concluso, bene o male, nei parametri resta solo la richiesta senza il corpo.
+    if (l && OPERAZIONI[l.operazione]?.cancellaInput) {
+      await db.query(
+        `UPDATE ai_lavori SET parametri = $2 WHERE id = $1 AND stato <> 'in_corso'`,
+        [l.id, cifra(JSON.stringify({ rimosso: true, operazione: l.operazione }))]
+      ).catch((e) => console.warn(`[AI BATCH] ${l.id}: dati in ingresso non rimossi (${e.message})`));
+    }
   }
 }
 

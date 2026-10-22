@@ -122,6 +122,15 @@ export const PROMPT_FUNCTIONS = {
     titolo: 'Istruzioni fisse del recap con Projexa (modello recap-projexa, Ollama)',
     segnaposto: [],
     sincronizzaFile: true
+  },
+  // Add-in di Outlook (routes/outlookAddin.js): analisi dell'email aperta dal PM con i dati di
+  // QUEL cliente e progetto. EMAIL = mittente, destinatari, oggetto e testo (dati non fidati);
+  // DATI = progetto, issue, ticket MySupport/Jira, quotazioni; TICKET = ticket citati
+  // nell'email trovati da Projexa; RELEASE = prossime release. Il formato della risposta (JSON)
+  // lo aggiunge sempre il server.
+  OUTLOOK_ANALISI: {
+    titolo: 'Add-in Outlook: analisi dell\'email',
+    segnaposto: ['EMAIL', 'CLIENTE', 'PROGETTO', 'DATI', 'TICKET', 'RELEASE', 'DATA', 'UTENTE']
   }
 };
 

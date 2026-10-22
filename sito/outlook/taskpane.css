@@ -1,0 +1,54 @@
+/* Pannello dell'Add-in di Outlook (taskpane.html). Colori di Projexa (css/style.css). */
+:root {
+  --primary: #2563eb;
+  --primary-dark: #1e40af;
+  --success: #16a34a;
+  --warning: #ea580c;
+  --danger: #dc2626;
+  --testo: #111827;
+  --muted: #6b7280;
+  --bordo: #e5e7eb;
+  --sfondo: #ffffff;
+  --sfondo-2: #f9fafb;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --testo: #f3f4f6; --muted: #9ca3af; --bordo: #374151; --sfondo: #1f2937; --sfondo-2: #111827; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--testo); background: var(--sfondo); }
+main { padding: 12px 14px 60px; }
+h2 { font-size: 15px; margin: 4px 0 10px; }
+h3 { font-size: 13px; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+.px-head { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--bordo); background: var(--sfondo-2); }
+.px-title { font-weight: 700; }
+.px-sub, .px-muted { color: var(--muted); font-size: 12px; }
+.px-btn { display: inline-block; width: 100%; margin: 10px 0 4px; padding: 9px 12px; border: 0; border-radius: 8px; background: var(--primary); color: #fff; font-weight: 600; cursor: pointer; font-size: 14px; }
+.px-btn:hover { background: var(--primary-dark); }
+.px-btn:disabled { opacity: .55; cursor: default; }
+.px-btn.px-sec { background: transparent; color: var(--primary); border: 1px solid var(--primary); }
+.px-link { background: none; border: 0; color: var(--primary); cursor: pointer; font-size: 12px; padding: 0; }
+input, select { width: 100%; padding: 8px 10px; border: 1px solid var(--bordo); border-radius: 6px; font-size: 15px; background: var(--sfondo); color: var(--testo); }
+#pxCodice { letter-spacing: .15em; text-transform: uppercase; font-family: Consolas, monospace; }
+label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+.px-passi { padding-left: 18px; margin: 0 0 6px; }
+.px-passi li { margin-bottom: 4px; }
+.px-nota { font-size: 12px; color: var(--muted); }
+.px-avviso { padding: 8px 10px; border-radius: 6px; margin-bottom: 10px; font-size: 13px; background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; }
+.px-avviso.px-ok { background: #f0fdf4; color: var(--success); border-color: #bbf7d0; }
+.px-email { padding: 8px 10px; border: 1px solid var(--bordo); border-radius: 8px; background: var(--sfondo-2); }
+.px-label { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+.px-oggetto { font-weight: 600; word-break: break-word; }
+.px-stato { margin-top: 8px; font-size: 13px; color: var(--muted); }
+.px-card { border: 1px solid var(--bordo); border-radius: 8px; padding: 8px 10px; margin: 6px 0; background: var(--sfondo); }
+.px-riga { display: flex; justify-content: space-between; gap: 8px; }
+.px-tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px; background: #eff6ff; color: var(--primary-dark); margin: 0 4px 4px 0; }
+.px-tag.px-verde { background: #f0fdf4; color: var(--success); }
+.px-tag.px-arancio { background: #fff7ed; color: var(--warning); }
+.px-tag.px-rosso { background: #fef2f2; color: var(--danger); }
+.px-risposta { white-space: pre-wrap; border: 1px solid var(--bordo); border-radius: 8px; padding: 10px; background: var(--sfondo-2); font-size: 13px; max-height: 320px; overflow: auto; }
+.px-azioni { display: flex; gap: 8px; }
+.px-azioni .px-btn { margin-top: 8px; }
+ul.px-lista { margin: 0; padding-left: 18px; }
+.px-foot { position: fixed; bottom: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 6px 14px; border-top: 1px solid var(--bordo); background: var(--sfondo-2); font-size: 11px; color: var(--muted); }
+.px-spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--bordo); border-top-color: var(--primary); border-radius: 50%; animation: pxgira 1s linear infinite; vertical-align: -2px; margin-right: 6px; }
+@keyframes pxgira { to { transform: rotate(360deg); } }

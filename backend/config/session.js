@@ -152,7 +152,7 @@ export async function revokeSessionToken(token) {
 
 const sigCache = new Map(); // user_id -> { sig, at }
 
-async function currentSignature(userId) {
+export async function currentSignature(userId) {
   const key = String(userId);
   const hit = sigCache.get(key);
   if (hit && Date.now() - hit.at < SIG_CACHE_MS) return hit.sig;
@@ -180,7 +180,7 @@ export function forgetSessionSignature(userId) {
 // (nessun admin di un cliente può usare impersonazione, SQL editor, dati di tutti i tenant).
 const membershipCache = new Map(); // "user|tenant" -> { m, at }
 
-async function currentMembership(userId, tenantId) {
+export async function currentMembership(userId, tenantId) {
   const key = `${userId}|${tenantId}`;
   const hit = membershipCache.get(key);
   if (hit && Date.now() - hit.at < SIG_CACHE_MS) return hit.m;

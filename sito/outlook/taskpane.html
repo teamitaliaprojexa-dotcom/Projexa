@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Projexa</title>
+  <!-- Pannello dell'Add-in di Outlook «Analizza con Projexa» (routes/outlookAddin.js).
+       Nessuno script inline: CSP dedicata alle pagine /outlook/ (server.js, CSP_OUTLOOK). -->
+  <link rel="stylesheet" href="taskpane.css?v=20261022">
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script src="taskpane.js?v=20261022" defer></script>
+</head>
+<body>
+  <header class="px-head">
+    <img src="../Logo_Projexa_P.png" alt="" width="28" height="28">
+    <div>
+      <div class="px-title">Projexa</div>
+      <div class="px-sub" id="pxChi">Analisi dell'email</div>
+    </div>
+  </header>
+
+  <main>
+    <div id="pxAvviso" class="px-avviso" hidden></div>
+
+    <!-- Collegamento: codice monouso generato in Projexa › Impostazioni › Profilo -->
+    <section id="vistaCollega" hidden>
+      <h2>Collega Outlook a Projexa</h2>
+      <ol class="px-passi">
+        <li>Apri Projexa › <b>Impostazioni › Profilo</b> › <b>Add-in Outlook</b>.</li>
+        <li>Premi <b>Collega Outlook</b>: compare un codice valido 10 minuti.</li>
+        <li>Scrivilo qui sotto e premi <b>Collega</b>.</li>
+      </ol>
+      <label for="pxCodice">Codice</label>
+      <input id="pxCodice" type="text" autocomplete="off" spellcheck="false" maxlength="12" placeholder="ABCD-EF23">
+      <button id="pxCollega" class="px-btn">Collega</button>
+      <p class="px-nota">Il collegamento vale solo per questa casella di posta e per il tuo utente Projexa. Puoi revocarlo in qualsiasi momento.</p>
+    </section>
+
+    <!-- Analisi dell'email aperta -->
+    <section id="vistaAnalisi" hidden>
+      <div class="px-email">
+        <div class="px-label">Email</div>
+        <div id="pxOggetto" class="px-oggetto"></div>
+        <div id="pxMittente" class="px-muted"></div>
+      </div>
+      <button id="pxAnalizza" class="px-btn">Analizza con Projexa</button>
+      <div id="pxStato" class="px-stato" hidden></div>
+      <div id="pxRisultato" hidden></div>
+    </section>
+
+    <section id="vistaFuori" hidden>
+      <h2>Apri un'email</h2>
+      <p class="px-muted">Questo pannello funziona dentro Outlook, su un'email ricevuta.</p>
+    </section>
+  </main>
+
+  <footer class="px-foot" id="pxFoot" hidden>
+    <span class="px-lock">🔒 Dati personali anonimizzati verso le AI esterne</span>
+    <button id="pxScollega" class="px-link" type="button">Scollega</button>
+  </footer>
+</body>
+</html>

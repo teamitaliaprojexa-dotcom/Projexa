@@ -23,6 +23,7 @@ import chatbotRoutes from './routes/chatbot.js';
 import assistentePmRoutes from './routes/assistentePm.js';
 import analisiPmRoutes from './routes/analisiPm.js';
 import mysupportPushRoutes, { utenteDaTokenPush, registraInvioPush, pushLimitato } from './routes/mysupportPush.js';
+import outlookAddinRoutes from './routes/outlookAddin.js';
 import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
 import jobSchedulesRoutes from './routes/job-schedules.js';
 import auditLogRoutes from './routes/audit-log.js';
@@ -125,15 +126,34 @@ const sitoPathCsp = path.join(path.dirname(fileURLToPath(import.meta.url)), '../
 function contentSecurityPolicy() {
   return [`script-src ${CSP_SCRIPT_BASE} ${impronteScriptInline(sitoPathCsp).join(' ')}`.trim(), "script-src-attr 'none'", ...CSP_ALTRE].join('; ');
 }
+// Pagine dell'Add-in di Outlook (sito/outlook/, 2026-10-22): Outlook sul web le mostra in un
+// riquadro dentro le sue pagine, quindi frame-ancestors ammette SOLO i domini di Outlook /
+// Microsoft 365 (niente X-Frame-Options). Script: solo file di Projexa e Office.js di Microsoft.
+// Nessuno script inline, nessun cookie: l'add-in usa il suo token (routes/outlookAddin.js).
+const CSP_OUTLOOK = [
+  "default-src 'self'",
+  "script-src 'self' https://appsforoffice.microsoft.com",
+  "script-src-attr 'none'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: https:",
+  "font-src 'self' data:",
+  "connect-src 'self' https://appsforoffice.microsoft.com",
+  "frame-src 'self' https://appsforoffice.microsoft.com",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self' https://outlook.office.com https://outlook.office365.com https://*.outlook.com https://outlook.live.com https://*.office.com https://*.office365.com https://*.cloud.microsoft https://*.microsoft365.com"
+].join('; ');
 
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  const paginaOutlook = req.path.startsWith('/outlook/');
+  if (!paginaOutlook) res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   // Microfono consentito solo alle pagine di Projexa (self): serve alla finestra
   // "Dispositivi audio" delle riunioni. Geolocalizzazione e fotocamera restano vietate.
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(self), camera=()');
-  res.setHeader('Content-Security-Policy', contentSecurityPolicy());
+  res.setHeader('Content-Security-Policy', paginaOutlook ? CSP_OUTLOOK : contentSecurityPolicy());
   // HSTS solo su HTTPS (dietro Caddy req.secure viene da X-Forwarded-Proto): il browser
   // userà sempre HTTPS per 180 giorni, anche se l'utente scrive http://.
   if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
@@ -259,6 +279,8 @@ app.use('/api/assistente-pm', assistentePmRoutes);
 app.use('/api/analisi-pm', analisiPmRoutes);
 // Token dello script del PC che invia MySupport (interruttore «DataBricks»): routes/mysupportPush.js.
 app.use('/api/mysupport/push', mysupportPushRoutes);
+// Add-in di Outlook «Analizza con Projexa» (pagine in sito/outlook/, token dedicato): routes/outlookAddin.js.
+app.use('/api/outlook', outlookAddinRoutes);
 // Cruscotto PM e Portfolio (funzioni da PM senior: salute, RAID, Change Request, stakeholder,
 // chiusura, documenti AI, Chiedi al progetto, briefing, baseline del Gantt): routes/pm.js.
 app.use('/api/pm', requireAuth, pmRoutes);

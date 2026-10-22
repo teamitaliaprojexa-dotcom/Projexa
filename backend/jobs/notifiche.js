@@ -310,6 +310,18 @@ export async function notificaLavoroAi({ tenantId, userId, lavoroId, operazione,
 }
 
 // ----------------------------------------------------------------------------
+// ADD-IN OUTLOOK (routes/outlookAddin.js): Issue creata dall'analisi di un'email.
+// ----------------------------------------------------------------------------
+export async function notificaOutlook({ tenantId, userId, titolo, messaggio, tabella = 'issue', rigaId = null }) {
+  try {
+    await inserisci({ tenantId, userId, fonte: 'outlook', titolo: String(titolo).slice(0, 300), messaggio: String(messaggio || '').slice(0, 600), tabella, rigaId });
+  } catch (e) {
+    if (e.code === '42P01') { avvisaTabellaMancante(); return; }
+    console.error('[NOTIFICHE] Notifica Outlook non creata:', e.message);
+  }
+}
+
+// ----------------------------------------------------------------------------
 // RIUNIONI: trascrizione completata e recap pronto (jobs/meetingTranscription.js, negli
 // stessi punti in cui si registra la riga unica del log). Destinatario: il proprietario
 // della riunione; nel testo l'oggetto, il cliente e il progetto se ci sono.

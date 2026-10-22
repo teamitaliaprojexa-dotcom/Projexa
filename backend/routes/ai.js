@@ -546,6 +546,14 @@ export async function inviaBatchAi(userId, providerName, prompt, opzioni = {}) {
       throw Object.assign(new Error(`${cfg.label}: il tuo piano non permette la modalità Batch (serve un piano a pagamento), eseguito in modalità Immediata`),
         { status: 409, code: 'BATCH_NON_DISPONIBILE', dettaglio: msg });
     }
+    // 2026-10-22 (richiesta utente): qualsiasi altro rifiuto della richiesta Batch (es. Gemini
+    // gratuito con un messaggio nuovo, modello non abilitato al Batch) fa ripiegare
+    // sull'Immediato. Restano errori veri solo la chiave mancante o non valida, con cui anche
+    // l'Immediato fallirebbe.
+    if (e.status !== 428 && !/chiave api .*non valida/i.test(msg)) {
+      throw Object.assign(new Error(`${cfg.label}: Batch non accettato (${msg.slice(0, 200)}), eseguito in modalità Immediata`),
+        { status: 409, code: 'BATCH_NON_DISPONIBILE', dettaglio: msg });
+    }
     throw e;
   }
 }

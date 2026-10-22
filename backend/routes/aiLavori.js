@@ -53,7 +53,7 @@ router.get('/', async (req, res) => {
   try {
     const r = await db.query(
       `SELECT id::text AS id, operazione, titolo, provider, stato, file_path, file_nome, errore, creato_il, concluso_il
-         FROM ai_lavori WHERE tenant_id = $1 AND user_id = $2 ORDER BY creato_il DESC LIMIT 200`,
+         FROM ai_lavori WHERE tenant_id = $1 AND user_id = $2 AND operazione <> 'outlook_analisi' ORDER BY creato_il DESC LIMIT 200`,
       [req.user.tenant_id, req.user.user_id]
     );
     res.json({ lavori: r.rows.map(riga) });

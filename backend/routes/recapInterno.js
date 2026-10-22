@@ -219,6 +219,23 @@ export async function avviaRecapInternoAutomatico(user, idCalendar, providerName
   return { modo: 'batch' };
 }
 
+// Batch del recap interno accettato ma fallito presso il fornitore (jobs/recapBatch.js,
+// 2026-10-22): si genera subito, in modalità Immediata.
+export async function recapInternoImmediato(user, idCalendar, providerName) {
+  const k = chiave(user, idCalendar);
+  if (inCorso.has(k)) return;
+  inCorso.add(k);
+  try {
+    await impostaStato(user, idCalendar, 'in_corso');
+    await genera(user, idCalendar, providerName);
+  } catch (e) {
+    await impostaStato(user, idCalendar, 'errore', String(e.message || e).slice(0, 1000)).catch(() => {});
+    throw e;
+  } finally {
+    inCorso.delete(k);
+  }
+}
+
 // Recap interno in modalità Batch arrivato dall'AI (jobs/recapBatch.js).
 export async function completaRecapInternoBatch(user, idCalendar, testo, label) {
   await salvaInterno(user, idCalendar, await prepara(user, idCalendar), testo, label);

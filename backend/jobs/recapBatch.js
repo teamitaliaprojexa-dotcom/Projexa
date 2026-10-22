@@ -13,7 +13,7 @@
 // ============================================================================
 import db from '../config/database.js';
 import { inviaBatchAi, statoBatchAi } from '../routes/ai.js';
-import { recapSource, buildRecapPrompt, salvaRecap } from './meetingTranscription.js';
+import { recapSource, buildRecapPrompt, salvaRecap, generateRecap } from './meetingTranscription.js';
 import { notificaRiunione } from './notifiche.js';
 
 // Oltre questo tempo senza risposta il batch si considera fallito (i fornitori garantiscono 24 ore).
@@ -112,10 +112,24 @@ async function controllaRiga(riga, report) {
     if (report) report.errori.push(`${riga.id_calendar}: ${errore}`);
     return 'fallito';
   };
+  // Batch accettato ma fallito presso il fornitore (o senza risposta entro SCADENZA_ORE): il
+  // recap si genera subito in modalità Immediata (2026-10-22, richiesta utente). Solo se anche
+  // l'Immediato non riesce la richiesta risulta fallita.
+  const immediato = async (motivo) => {
+    console.warn(`[RECAP BATCH] ${riga.id_calendar}: Batch non riuscito (${motivo}): ${interno ? 'recap interno' : 'recap'} in modalità Immediata`);
+    try {
+      if (interno) await (await modInterno()).recapInternoImmediato(user, riga.id_calendar, riga.provider);
+      else await generateRecap(user, riga.id_calendar, { origine: 'job:recap_batch', ai: riga.provider });
+      await concludi(riga, 'completato', `Batch non riuscito (${String(motivo).slice(0, 300)}): eseguito in modalità Immediata`);
+      return 'completato';
+    } catch (e) {
+      return fallito(`${motivo}; anche la modalità Immediata non è riuscita: ${e.message}`);
+    }
+  };
   try {
     const esito = await statoBatchAi(riga.user_id, riga.provider, riga.batch_id);
     if (esito.stato === 'in_corso') {
-      if (riga.scaduto) return fallito(`Nessuna risposta da ${riga.provider} entro ${SCADENZA_ORE} ore`);
+      if (riga.scaduto) return immediato(`nessuna risposta da ${riga.provider} entro ${SCADENZA_ORE} ore`);
       await db.query(`UPDATE rec_meeting_batch SET errore = NULL WHERE id = $1`, [riga.id]);
       return 'in_attesa';
     }
@@ -134,7 +148,7 @@ async function controllaRiga(riga, report) {
       console.log(`[RECAP BATCH] ✓ Recap pronto (${riga.provider}) per la riunione ${riga.id_calendar}`);
       return 'completato';
     }
-    return fallito(esito.errore);
+    return immediato(esito.errore || 'Batch non riuscito');
   } catch (error) {
     // Chiave non valida o riunione/trascrizione sparita: inutile riprovare. Altri errori
     // (rete, fornitore momentaneamente non raggiungibile): si riprova al prossimo giro.

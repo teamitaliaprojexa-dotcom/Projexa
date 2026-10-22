@@ -21,7 +21,10 @@ export const FUNZIONI = {
   kickoff: { ai: ['AI Slide Kick-Off'], esecuzione: 'Esecuzione Kick-Off' },
   // Offerta: senza il suo campo usa l'AI del Kick-off (comportamento precedente).
   offerta: { ai: ['AI Offerta Economica', 'AI Slide Kick-Off'], esecuzione: 'Esecuzione Offerta Economica' },
-  pm: { ai: ['AI Funzioni PM'], esecuzione: 'Esecuzione Funzioni PM' }
+  pm: { ai: ['AI Funzioni PM'], esecuzione: 'Esecuzione Funzioni PM' },
+  // Add-in di Outlook (2026-10-22, routes/outlookAddin.js): campo tipo 23 «AI Add-in Outlook»
+  // (valore1 = attivo, valore2 = AI). «Esecuzione Add-in Outlook» facoltativo (vuoto = Immediato).
+  outlook: { ai: ['AI Add-in Outlook'], esecuzione: 'Esecuzione Add-in Outlook', soloSuo: true }
 };
 
 // file = il risultato è un file da scaricare (in Batch resta nella cartella temporanea).
@@ -38,7 +41,11 @@ export const OPERAZIONI = {
   pm_documento: { funzione: 'pm', etichetta: 'Documento di progetto (anteprima)', locale: true, facoltativa: true },
   pm_docx: { funzione: 'pm', etichetta: 'Documento di progetto (Word)', locale: false, file: true },
   pm_chiedi: { funzione: 'pm', etichetta: 'Chiedi al progetto', locale: false },
-  pm_briefing: { funzione: 'pm', etichetta: 'Briefing della riunione', locale: true }
+  pm_briefing: { funzione: 'pm', etichetta: 'Briefing della riunione', locale: true },
+  // sempreInBackground: anche in Immediato diventa un lavoro (coda, più richieste insieme, ripresa
+  // dopo un riavvio); il pannello di Outlook ne legge lo stato. cancellaInput: a lavoro concluso
+  // il testo dell'email si toglie da ai_lavori.parametri (resta solo il risultato, 7 giorni).
+  outlook_analisi: { funzione: 'outlook', etichetta: 'Analisi email (Outlook)', locale: true, sempreInBackground: true, cancellaInput: true, notificaSoloErrori: true }
 };
 
 const CAMPO_RECAP = 'AI generazione e-mail recap';
@@ -64,7 +71,8 @@ async function impostazioni(user, operazione) {
   if (!op) throw errore(400, 'Funzione AI non riconosciuta');
   const f = FUNZIONI[op.funzione];
   let ai = '';
-  for (const campo of [...f.ai, CAMPO_RECAP]) {
+  // soloSuo: la funzione usa solo il suo campo (niente ripiego sull'AI del recap).
+  for (const campo of f.soloSuo ? f.ai : [...f.ai, CAMPO_RECAP]) {
     ai = await valore(user, campo);
     if (ai) break;
   }

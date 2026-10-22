@@ -13953,8 +13953,8 @@
             const delBtn = document.getElementById('notifDelBtn');
             const countEl = document.getElementById('notifCount');
             const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines', progetto: 'fas fa-gauge-high', ai: 'fas fa-wand-magic-sparkles', cliente: 'fas fa-handshake', capacita: 'fas fa-people-group' };
-            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione', progetto: 'Progetto', ai: 'AI', cliente: 'Azione cliente', capacita: 'Capacità' };
+            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines', progetto: 'fas fa-gauge-high', ai: 'fas fa-wand-magic-sparkles', cliente: 'fas fa-handshake', capacita: 'fas fa-people-group', outlook: 'fas fa-envelope-open-text' };
+            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione', progetto: 'Progetto', ai: 'AI', cliente: 'Azione cliente', capacita: 'Capacità', outlook: 'Outlook' };
             let elenco = [];
             let ultimoConteggio = null;
 
@@ -18050,6 +18050,13 @@
             loadTenantLogoInFlyout(action);
         }
 
+        // Impostazioni › Profilo: riquadro «Add-in Outlook» per tutti gli utenti (js/outlook-addin.js).
+        function injectOutlookAddinAction(listEl, source, argument, label) {
+            const profileName = String(label || argument || '').replace(/^(*)s*/, '').trim().toLowerCase();
+            if (!listEl || source !== 'settings' || profileName !== 'profilo' || !window.OutlookAddin) return;
+            window.OutlookAddin.inserisci(listEl);
+        }
+
         function initTenantLogoModal() {
             const modal = document.getElementById('tenantLogoModal');
             const fileInput = document.getElementById('tenantLogoFile');
@@ -18250,6 +18257,7 @@
                     listEl.innerHTML = '<div style="color: var(--text-muted);">Nessun dato</div>';
                     injectClientLogoAction(listEl, source, argument, label || argument);
                     injectTenantLogoAction(listEl, source, argument, label || argument);
+                    injectOutlookAddinAction(listEl, source, argument, label || argument);
                     applyDetailMode();
                     return;
                 }
@@ -18318,6 +18326,7 @@
                 injectClientLogoAction(listEl, source, argument, label || argument);
                 // Il logo organizzazione compare solo in Settings > Profilo per gli amministratori.
                 injectTenantLogoAction(listEl, source, argument, label || argument);
+                injectOutlookAddinAction(listEl, source, argument, label || argument);
                 // Il contenitore del tipo 11 è ora nel DOM: carica le griglie presenti.
                 hydrateType11Grids(listEl);
                 // Barra tipo 11: click apre/chiude la griglia sottostante (freccia su/giù).
@@ -23576,6 +23585,7 @@
          risposta 404 del modulo: senza questo script la voce Qlik resta display:none. -->
     <script src="js/Qlik_voucher.js?v=20261015-1"></script>
     <script src="js/mysupport-push.js?v=20261017-2"></script>
+    <script src="js/outlook-addin.js?v=20261022"></script>
 <script>
 (function () {
     const colorClasses = [
