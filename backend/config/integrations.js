@@ -26,7 +26,9 @@ const SECRET_ELEMENTS = new Set([
   // Link ICS pubblicato da Outlook: chi lo possiede legge il calendario, quindi è un segreto.
   'outlook_ics_url',
   // Chiavi API delle integrazioni AI (routes/ai.js)
-  'chatgpt_api_key', 'claude_api_key', 'gemini_api_key', 'mistral_api_key'
+  'chatgpt_api_key', 'claude_api_key', 'gemini_api_key', 'mistral_api_key',
+  // Chiavi admin (sola lettura dei costi) per il saldo stimato in Impostazioni › AI
+  'chatgpt_admin_key', 'claude_admin_key'
 ]);
 
 // La chiave è ENCRYPTION_KEY (config/crypto.js); INTEGR_ENC_KEY resta valida in

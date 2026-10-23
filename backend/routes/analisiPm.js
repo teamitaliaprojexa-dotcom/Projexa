@@ -32,6 +32,7 @@ import { proponiRevisione, applicaProposta } from '../jobs/revisionePrompt.js';
 import { istruzioniRecapProjexa } from './ai.js';
 import { pmProjexaInCorso } from '../config/ollamaPrecedenza.js';
 import { getPromptFor } from '../config/prompts.js';
+import { pseudonimizzaJsonl } from '../config/pii.js';
 import { leggiJson } from '../config/pmCore.js';
 import { OLLAMA_RAID_ADDESTRATO, chiediInsegnante, riprendiInsegnanti } from '../jobs/analisiRaid.js';
 
@@ -60,6 +61,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const errore = (status, msg) => Object.assign(new Error(msg), { status });
 const rispondiErrore = (res, e, cosa) => {
   if (!e.status) console.error(`❌ [ANALISI PM] ${cosa}:`, e.message);
+  // Download fermato a metà (es. pseudonimizzazione non disponibile): niente file da salvare.
+  if (!res.headersSent) { res.removeHeader('Content-Disposition'); res.removeHeader('Content-Type'); }
   res.status(e.status || 500).json({ error: e.code === '42P01' ? 'Analisi PM non attiva: manca Supporto/CreaDB/analisi_pm.sql' : e.message });
 };
 
@@ -253,7 +256,7 @@ router.get('/scarica', async (req, res) => {
         { role: 'system', content: sistema }, { role: 'user', content: msgFiltro(x.precedente, x.nuovo) }, { role: 'assistant', content: x.risposta }] }));
       res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="pm_projexa_filtro_addestramento_${new Date().toISOString().slice(0, 10)}.jsonl"`);
-      return res.send(righe.join('\n') + '\n');
+      return res.send((await pseudonimizzaJsonl(req.user.user_id, righe, 'addestramento del filtro PM')).join('\n') + '\n');
     }
     const { esempi } = await esempiAddestramento(req);
     if (!esempi.length) throw errore(400, 'Nessuna domanda valutata: segna prima le domande corrette ed errate');
@@ -261,7 +264,7 @@ router.get('/scarica', async (req, res) => {
       { role: 'system', content: SISTEMA }, { role: 'user', content: utenteMsg(x.tratto) }, { role: 'assistant', content: x.risposta }] }));
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="pm_projexa_addestramento_${new Date().toISOString().slice(0, 10)}.jsonl"`);
-    res.send(righe.join('\n') + '\n');
+    res.send((await pseudonimizzaJsonl(req.user.user_id, righe, 'addestramento PM')).join('\n') + '\n');
   } catch (e) { rispondiErrore(res, e, 'download'); }
 });
 
@@ -434,7 +437,7 @@ router.get('/recap/scarica', async (req, res) => {
       ...(sistema ? [{ role: 'system', content: sistema }] : []), { role: 'user', content: x.ingresso }, { role: 'assistant', content: x.risposta }] }));
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="recap_projexa_addestramento_${new Date().toISOString().slice(0, 10)}.jsonl"`);
-    res.send(jsonl.join('\n') + '\n');
+    res.send((await pseudonimizzaJsonl(req.user.user_id, jsonl, 'addestramento del recap')).join('\n') + '\n');
   } catch (e) { rispondiErroreRecap(res, e, 'download recap'); }
 });
 
@@ -644,7 +647,7 @@ router.get('/associazioni/scarica', async (req, res) => {
     });
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="assoc_projexa_addestramento_${new Date().toISOString().slice(0, 10)}.jsonl"`);
-    res.send(jsonl.join('\n') + '\n');
+    res.send((await pseudonimizzaJsonl(req.user.user_id, jsonl, 'addestramento delle associazioni')).join('\n') + '\n');
   } catch (e) { rispondiErroreAssoc(res, e, 'download associazioni'); }
 });
 
@@ -748,7 +751,7 @@ router.get('/raid/scarica', async (req, res) => {
     if (!jsonl.length) throw errore(400, 'Nessuna scelta ancora: in RAID e CR premi «Giusta» sulla risposta migliore');
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="raid_projexa_addestramento_${new Date().toISOString().slice(0, 10)}.jsonl"`);
-    res.send(jsonl.join('\n') + '\n');
+    res.send((await pseudonimizzaJsonl(req.user.user_id, jsonl, 'addestramento RAID e CR')).join('\n') + '\n');
   } catch (e) { rispondiErroreRaid(res, e, 'download raid'); }
 });
 

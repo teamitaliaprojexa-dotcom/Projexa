@@ -12930,13 +12930,99 @@
             });
         }
 
+        // Saldo stimato del credito (2026-10-23): solo per le AI che danno la spesa via API (con
+        // chiave admin). credito caricato - spesa da quel giorno, letto dal server ogni 15 minuti.
+        const AI_CON_SALDO = ['chatgpt', 'claude'];
+        const aiSaldi = {}; // key -> { at, dati }
+        const fmtSoldi = (n, simbolo) => `${Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${simbolo}`;
+        function aiSaldoTesto(key) {
+            const d = aiSaldi[key] && aiSaldi[key].dati;
+            if (!d) return '';
+            if (d.errore) return `<span title="${escapeHtml(d.errore)}" style="color:#B45309;"><i class="fas fa-exclamation-triangle"></i> saldo non letto</span>`;
+            if (!d.configurato) return '';
+            const titolo = `Credito ${fmtSoldi(d.credito, '$')} dal ${d.dal.split('-').reverse().join('/')}, spesi ${fmtSoldi(d.speso, '$')}. Stima: ricariche automatiche o crediti omaggio possono farla scostare.`;
+            return `<span title="${escapeHtml(titolo)}" style="font-weight:600;color:${d.saldo < 1 ? '#B91C1C' : 'var(--dark)'};">Saldo ≈ ${fmtSoldi(d.saldo, '$')}${d.saldoEur != null ? ` (≈ ${fmtSoldi(d.saldoEur, '€')})` : ''}</span>`;
+        }
+        async function caricaAiSaldo(key, forza = false) {
+            const c = aiSaldi[key];
+            if (!forza && c && (c.inCorso || Date.now() - c.at < 5 * 60000)) return;
+            aiSaldi[key] = { ...(c || {}), inCorso: true, at: Date.now() };
+            try {
+                const res = await fetch(`${API_URL}/ai/${key}/saldo${forza ? '?aggiorna=1' : ''}`, { headers: calendarAuthHeaders() });
+                const dati = await res.json().catch(() => ({}));
+                aiSaldi[key] = { at: Date.now(), dati: res.ok ? dati : { errore: dati.error || `Errore ${res.status}` } };
+            } catch (e) {
+                aiSaldi[key] = { at: Date.now(), dati: { errore: e.message } };
+            }
+            document.querySelectorAll(`[data-ai-saldo="${key}"]`).forEach((x) => { x.innerHTML = aiSaldoTesto(key); });
+        }
+
+        // Finestra «Aggiorna importo»: credito caricato (dollari), da quale giorno, chiave admin.
+        function aggiornaAiSaldo(key) {
+            const info = AI_INFO[key];
+            const modal = document.getElementById('aiSaldoModal');
+            const d = (aiSaldi[key] && aiSaldi[key].dati) || {};
+            const imp = document.getElementById('aiSaldoImporto');
+            const dal = document.getElementById('aiSaldoDal');
+            const chiave = document.getElementById('aiSaldoChiave');
+            const msg = document.getElementById('aiSaldoError');
+            const ok = document.getElementById('aiSaldoConfirm');
+            const cancel = document.getElementById('aiSaldoCancel');
+            document.getElementById('aiSaldoTitleText').textContent = `Credito di ${info.label}`;
+            imp.value = '';
+            dal.value = new Date().toISOString().slice(0, 10);
+            dal.max = dal.value;
+            chiave.value = '';
+            chiave.placeholder = d.adminKey ? 'già salvata: lascia vuoto per tenerla' : (key === 'claude' ? 'sk-ant-admin…' : 'sk-admin-…');
+            document.getElementById('aiSaldoAiuto').innerHTML = key === 'claude'
+                ? 'Crea la chiave admin in <b>console.anthropic.com › Settings › Admin keys</b> (serve il ruolo di amministratore dell\'organizzazione).'
+                : 'Crea la chiave admin in <b>platform.openai.com › Settings › Organization › Admin keys</b>, con permesso di sola lettura su «Usage».';
+            msg.textContent = '';
+            ok.disabled = false;
+            const close = () => {
+                modal.classList.remove('open');
+                ok.removeEventListener('click', onOk);
+                cancel.removeEventListener('click', close);
+            };
+            const onOk = async () => {
+                ok.disabled = true;
+                msg.style.color = 'var(--text-muted)';
+                msg.textContent = 'Verifica della chiave e lettura della spesa…';
+                try {
+                    const res = await fetch(`${API_URL}/ai/${key}/saldo`, {
+                        method: 'POST',
+                        headers: { ...calendarAuthHeaders(), 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ credito: imp.value, dal: dal.value, admin_key: chiave.value })
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) throw new Error(data.error || `Errore ${res.status}`);
+                    close();
+                    showNotification(`${info.label}: saldo ≈ ${fmtSoldi(data.saldo, '$')}`, 'success');
+                    await caricaAiSaldo(key, true);
+                } catch (e) {
+                    msg.style.color = '#B91C1C';
+                    msg.textContent = e.message;
+                    ok.disabled = false;
+                }
+            };
+            ok.addEventListener('click', onOk);
+            cancel.addEventListener('click', close);
+            modal.classList.add('open');
+            imp.focus();
+        }
+
         function renderAiSettingsStatus() {
             document.querySelectorAll('.ai-conn[data-ai-provider]').forEach((el) => {
                 const s = aiStatus[el.dataset.aiProvider] || {};
                 const toggle = el.parentElement && el.parentElement.querySelector('.ai-toggle');
                 if (s.connected) {
                     el.innerHTML = `<span class="calendar-conn-account"><i class="fas fa-check-circle" style="color:#10B981;"></i> chiave API collegata</span>`
-                        + `<button type="button" class="calendar-conn-btn calendar-conn-model" data-ai-action="model" data-ai-provider="${el.dataset.aiProvider}" title="Scegli la versione del modello"><i class="fas fa-sliders-h"></i> Versione: ${escapeHtml(s.model || 'predefinita')}</button>`;
+                        + `<button type="button" class="calendar-conn-btn calendar-conn-model" data-ai-action="model" data-ai-provider="${el.dataset.aiProvider}" title="Scegli la versione del modello"><i class="fas fa-sliders-h"></i> Versione: ${escapeHtml(s.model || 'predefinita')}</button>`
+                        + (AI_CON_SALDO.includes(el.dataset.aiProvider)
+                            ? `<span class="calendar-conn-account" data-ai-saldo="${el.dataset.aiProvider}" style="margin-left:0.4rem;">${aiSaldoTesto(el.dataset.aiProvider)}</span>`
+                              + `<button type="button" class="calendar-conn-btn calendar-conn-model" data-ai-action="saldo" data-ai-provider="${el.dataset.aiProvider}" title="Indica il credito caricato sul piano a pagamento"><i class="fas fa-coins"></i> Aggiorna importo</button>`
+                            : '');
+                    if (AI_CON_SALDO.includes(el.dataset.aiProvider)) caricaAiSaldo(el.dataset.aiProvider);
                 } else if (toggle && toggle.checked) {
                     el.innerHTML = `<span class="calendar-conn-account">non collegato</span>`
                         + `<button type="button" class="calendar-conn-btn calendar-conn-on" data-ai-action="connect" data-ai-provider="${el.dataset.aiProvider}"><i class="fas fa-key"></i> Collega</button>`;
@@ -13125,6 +13211,13 @@
                 e.preventDefault();
                 e.stopPropagation();
                 chooseAiModel(v.dataset.aiProvider);
+                return;
+            }
+            const sal = e.target.closest && e.target.closest('[data-ai-action="saldo"]');
+            if (sal) {
+                e.preventDefault();
+                e.stopPropagation();
+                aggiornaAiSaldo(sal.dataset.aiProvider);
                 return;
             }
             const b = e.target.closest && e.target.closest('[data-ai-action="connect"]');
@@ -23404,6 +23497,28 @@
             <div class="task-modal-footer">
                 <button id="aiModelCancel" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
                 <button id="aiModelConfirm" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #4338CA; color: white; font-weight: 600; cursor: pointer;">Salva</button>
+            </div>
+        </div>
+    </div>
+    <div id="aiSaldoModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="aiSaldoTitle">
+        <div class="task-modal-card" style="width: min(500px, calc(94vw * var(--ui-zoom-inv, 1)));">
+            <div class="task-modal-header">
+                <h3 id="aiSaldoTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-coins" style="color: #4338CA;"></i> <span id="aiSaldoTitleText">Credito AI</span></h3>
+            </div>
+            <div style="padding: 1.25rem; display: flex; flex-direction: column; gap: 0.6rem;">
+                <label for="aiSaldoImporto" style="font-size: 0.9rem; color: var(--dark); font-weight: 600;">Credito disponibile (dollari)</label>
+                <input id="aiSaldoImporto" type="text" inputmode="decimal" placeholder="es. 10,00" style="padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem;">
+                <label for="aiSaldoDal" style="font-size: 0.9rem; color: var(--dark); font-weight: 600;">Alla data del</label>
+                <input id="aiSaldoDal" type="date" style="padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem;">
+                <label for="aiSaldoChiave" style="font-size: 0.9rem; color: var(--dark); font-weight: 600;">Chiave admin (sola lettura dei costi)</label>
+                <input id="aiSaldoChiave" type="password" autocomplete="off" style="padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem;">
+                <p id="aiSaldoAiuto" style="margin: 0; font-size: 0.78rem; color: var(--text-muted);"></p>
+                <p style="margin: 0; font-size: 0.78rem; color: var(--text-muted);">Indica il credito che vedi nella pagina Billing del fornitore e il giorno: Projexa sottrae la spesa da quel giorno in poi. Quando ricarichi, aggiorna l'importo. È una stima: ricariche automatiche o crediti omaggio possono farla scostare.</p>
+                <p id="aiSaldoError" style="margin: 0; font-size: 0.85rem; min-height: 1.1em;"></p>
+            </div>
+            <div class="task-modal-footer">
+                <button id="aiSaldoCancel" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
+                <button id="aiSaldoConfirm" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #4338CA; color: white; font-weight: 600; cursor: pointer;">Salva</button>
             </div>
         </div>
     </div>

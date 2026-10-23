@@ -651,7 +651,11 @@ router.post('/:provider/key', requireAuth, requireProvider, async (req, res) => 
     const prev = await getIntegration(req.user.user_id, cfg.provider);
     await saveIntegration(req.user.user_id, cfg.provider, TIPO_INTEGRAZIONE, {
       [`${cfg.prefix}_api_key`]: apiKey,
-      [`${cfg.prefix}_model`]: prev[`${cfg.prefix}_model`] || undefined
+      [`${cfg.prefix}_model`]: prev[`${cfg.prefix}_model`] || undefined,
+      // ...e il saldo stimato (chiave admin e credito caricato), se impostato.
+      [`${cfg.prefix}_admin_key`]: prev[`${cfg.prefix}_admin_key`] || undefined,
+      [`${cfg.prefix}_credito`]: prev[`${cfg.prefix}_credito`] || undefined,
+      [`${cfg.prefix}_credito_dal`]: prev[`${cfg.prefix}_credito_dal`] || undefined
     });
     console.log(`[AI:${req.params.provider}] ✓ Chiave collegata per l'utente ${req.user.user_id}`);
     res.json({ success: true });
@@ -701,6 +705,128 @@ router.post('/:provider/model', requireAuth, requireProvider, async (req, res) =
     res.json({ success: true, model });
   } catch (error) {
     console.error(`❌ AI_MODEL (${req.params.provider}):`, error.message);
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+// ------------------------------------------
+// SALDO STIMATO DEL CREDITO (Impostazioni › AI, 2026-10-23)
+// ------------------------------------------
+// Nessun fornitore dà il saldo del credito via API. OpenAI e Anthropic danno però la SPESA,
+// con una chiave «admin» separata (OpenAI sk-admin-…, Anthropic sk-ant-admin…) che legge solo i
+// costi: l'utente indica con «Aggiorna importo» quanto credito ha caricato e da quale giorno, e
+// Projexa mostra credito - spesa da quel giorno. Stima: ricariche automatiche, crediti omaggio o
+// altre chiavi della stessa organizzazione possono farla scostare. Importi in dollari (la
+// valuta delle API), con il cambio in euro della BCE quando disponibile.
+// Elementi in integr_tok_auth: <prefix>_admin_key (segreta), <prefix>_credito, <prefix>_credito_dal.
+const SALDO_CACHE_MS = 15 * 60000;
+const saldoCache = new Map(); // "utente|provider|dal|credito" -> { at, speso }
+let cambioEur = { at: 0, usdPerEur: null };
+
+// Spesa in dollari dal giorno indicato (YYYY-MM-DD, UTC) a oggi.
+const SPESA = {
+  async chatgpt(adminKey, dal) {
+    let totale = 0;
+    let page = null;
+    const start = Math.floor(new Date(`${dal}T00:00:00Z`).getTime() / 1000);
+    for (let giri = 0; giri < 20; giri++) {
+      const q = new URLSearchParams({ start_time: String(start), bucket_width: '1d', limit: '180' });
+      if (page) q.set('page', page);
+      const r = await callApi(`https://api.openai.com/v1/organization/costs?${q}`, { headers: { Authorization: `Bearer ${adminKey}` }, timeoutMs: 30000 }, 'OpenAI (costi)');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw httpError(r.status === 401 || r.status === 403 ? 400 : 502, `OpenAI: ${(d.error && d.error.message) || `errore ${r.status}`} (serve una chiave admin sk-admin-…)`);
+      for (const b of d.data || []) for (const x of b.results || []) totale += Number(x.amount && x.amount.value) || 0;
+      if (!d.has_more || !d.next_page) break;
+      page = d.next_page;
+    }
+    return totale;
+  },
+  async claude(adminKey, dal) {
+    let centesimi = 0;
+    let page = null;
+    for (let giri = 0; giri < 40; giri++) {
+      const q = new URLSearchParams({ starting_at: `${dal}T00:00:00Z`, bucket_width: '1d', limit: '31' });
+      if (page) q.set('page', page);
+      const r = await callApi(`https://api.anthropic.com/v1/organizations/cost_report?${q}`, {
+        headers: { 'x-api-key': adminKey, 'anthropic-version': '2023-06-01' }, timeoutMs: 30000
+      }, 'Anthropic (costi)');
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw httpError(r.status === 401 || r.status === 403 ? 400 : 502, `Anthropic: ${(d.error && d.error.message) || `errore ${r.status}`} (serve una chiave admin sk-ant-admin…)`);
+      // amount = unità minime (centesimi) come stringa decimale: «123.45» = 1,23 $.
+      for (const b of d.data || []) for (const x of b.results || []) centesimi += Number(x.amount) || 0;
+      if (!d.has_more || !d.next_page) break;
+      page = d.next_page;
+    }
+    return centesimi / 100;
+  }
+};
+
+// Dollari per 1 euro dal cambio giornaliero della BCE (12 ore di cache); null se non disponibile.
+async function dollariPerEuro() {
+  if (cambioEur.usdPerEur && Date.now() - cambioEur.at < 12 * 3600000) return cambioEur.usdPerEur;
+  try {
+    const r = await fetch('https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml', { signal: AbortSignal.timeout(8000) });
+    const m = /currency=['"]USD['"]\s+rate=['"]([\d.]+)['"]/.exec(await r.text());
+    if (m) cambioEur = { at: Date.now(), usdPerEur: Number(m[1]) };
+  } catch { /* resta l'ultimo valore, o nessuno */ }
+  return cambioEur.usdPerEur;
+}
+
+const OGGI = () => new Date().toISOString().slice(0, 10);
+
+router.get('/:provider/saldo', requireAuth, requireProvider, async (req, res) => {
+  const cfg = req.aiProvider;
+  const spesa = SPESA[req.params.provider];
+  if (!spesa) return res.json({ supportato: false });
+  try {
+    const el = await getIntegration(req.user.user_id, cfg.provider);
+    const credito = Number(el[`${cfg.prefix}_credito`]);
+    const dal = el[`${cfg.prefix}_credito_dal`] || '';
+    const adminKey = el[`${cfg.prefix}_admin_key`] || '';
+    const base = { supportato: true, adminKey: !!adminKey, credito: Number.isFinite(credito) ? credito : null, dal, valuta: 'USD' };
+    if (!adminKey || !Number.isFinite(credito) || !dal) return res.json({ ...base, configurato: false });
+    const k = `${req.user.user_id}|${req.params.provider}|${dal}|${credito}`;
+    let c = saldoCache.get(k);
+    if (!c || Date.now() - c.at > SALDO_CACHE_MS || req.query.aggiorna === '1') {
+      c = { at: Date.now(), speso: await spesa(adminKey, dal) };
+      saldoCache.set(k, c);
+    }
+    const saldo = credito - c.speso;
+    const cambio = await dollariPerEuro();
+    res.json({ ...base, configurato: true, speso: c.speso, saldo, saldoEur: cambio ? saldo / cambio : null, letto: new Date(c.at).toISOString() });
+  } catch (error) {
+    if (!error.status) console.error(`❌ AI_SALDO (${req.params.provider}):`, error.message);
+    res.json({ supportato: true, configurato: true, errore: error.message });
+  }
+});
+
+// «Aggiorna importo»: { credito (dollari), dal (YYYY-MM-DD, facoltativo: oggi), admin_key (facoltativa
+// se già salvata) }. La chiave admin si verifica leggendo la spesa prima di salvarla.
+router.post('/:provider/saldo', requireAuth, requireProvider, async (req, res) => {
+  const cfg = req.aiProvider;
+  const spesa = SPESA[req.params.provider];
+  if (!spesa) return res.status(400).json({ error: `${cfg.label} non permette di leggere la spesa via API` });
+  try {
+    const b = req.body || {};
+    const credito = Number(String(b.credito ?? '').replace(',', '.'));
+    if (!Number.isFinite(credito) || credito < 0 || credito > 100000) return res.status(400).json({ error: 'Importo non valido' });
+    const dal = String(b.dal || OGGI()).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dal) || dal > OGGI()) return res.status(400).json({ error: 'Data non valida (non può essere nel futuro)' });
+    const el = await getIntegration(req.user.user_id, cfg.provider);
+    const nuova = String(b.admin_key || '').trim();
+    if (nuova && (nuova.length < 20 || /\s/.test(nuova))) return res.status(400).json({ error: 'Chiave admin non valida' });
+    const adminKey = nuova || el[`${cfg.prefix}_admin_key`];
+    if (!adminKey) return res.status(400).json({ error: `Serve la chiave admin di ${cfg.label} (sola lettura dei costi)` });
+    const speso = await spesa(adminKey, dal); // verifica la chiave
+    await updateIntegrationElements(req.user.user_id, cfg.provider, TIPO_INTEGRAZIONE, {
+      [`${cfg.prefix}_credito`]: String(credito), [`${cfg.prefix}_credito_dal`]: dal,
+      ...(nuova ? { [`${cfg.prefix}_admin_key`]: nuova } : {})
+    });
+    for (const k of saldoCache.keys()) if (k.startsWith(`${req.user.user_id}|${req.params.provider}|`)) saldoCache.delete(k);
+    console.log(`[AI:${req.params.provider}] Credito aggiornato dall'utente ${req.user.user_id}${nuova ? ' (nuova chiave admin)' : ''}`);
+    res.json({ success: true, credito, dal, speso, saldo: credito - speso });
+  } catch (error) {
+    if (!error.status) console.error(`❌ AI_SALDO_SALVA (${req.params.provider}):`, error.message);
     res.status(error.status || 500).json({ error: error.message });
   }
 });
