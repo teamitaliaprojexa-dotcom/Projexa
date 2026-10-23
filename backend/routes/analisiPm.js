@@ -19,7 +19,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -874,14 +874,171 @@ router.post('/modelli/carica', async (req, res) => {
   } catch (e) { rispondiErrore(res, e, 'caricamento'); }
 });
 
-// Installazione: backup del modello attuale (<nome>-bk-AAAAMMGG-HHMM), creazione del nuovo
-// <nome> = base + adattatore + parametri attuali, prova di risposta; se la prova fallisce si
-// torna al backup da soli. Body: { upload_id, nota, famiglia }.
+// Unione dell'adattatore LoRA al modello base (2026-10-23). Ollama 0.34 rifiuta «ADAPTER»
+// («LoRA adapters are no longer supported»): con gli strumenti di llama.cpp installati sulla VM
+// (deploy/oracle/setup-llama-cpp.sh, LLAMA_CPP_BIN) si fa
+//   1. llama-export-lora: base GGUF di Ollama + adattatore -> modello unito (pesi toccati in F16);
+//   2. llama-quantize: di nuovo Q4_K_M, come la base (stessa RAM e velocità di prima);
+//   3. Modelfile = quello della base (template, stop...) con FROM il file unito + i parametri.
+// Il file della base sta tra i blob di Ollama, leggibili solo dall'utente ollama: export-lora
+// gira con sudo. Spazio su disco: serve circa 4 volte la base (unito F16 + Q4 + copia di Ollama).
+const LLAMA_CPP_BIN = process.env.LLAMA_CPP_BIN || '/opt/projexa/llama-cpp/src/build/bin';
+const PARAM_NOSTRI = /^PARAMETER\s+(num_ctx|temperature|top_p|repeat_penalty|num_predict)\b/;
+
+// Comando con l'output letto riga per riga (per l'avanzamento). Errore = ultime righe.
+function eseguiRighe(cmd, args, { timeout, suRiga = () => {} }) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const coda = [];
+    let resto = '';
+    const leggi = (buf) => {
+      resto += String(buf);
+      const righe = resto.split(/\r|\n/);
+      resto = righe.pop();
+      for (const r of righe) {
+        if (!r.trim()) continue;
+        coda.push(r); if (coda.length > 8) coda.shift();
+        try { suRiga(r); } catch { /* l'avanzamento non deve fermare il comando */ }
+      }
+    };
+    p.stdout.on('data', leggi);
+    p.stderr.on('data', leggi);
+    const t = setTimeout(() => p.kill('SIGKILL'), timeout);
+    p.on('error', (e) => { clearTimeout(t); reject(e); });
+    p.on('close', (codice) => {
+      clearTimeout(t);
+      if (codice === 0) resolve();
+      else reject(new Error(`${path.basename(cmd === 'sudo' ? args[1] : cmd)}: ${coda.slice(-3).join(' ').slice(-400) || `codice ${codice}`}`));
+    });
+  });
+}
+
+async function unisciAdattatore(f, adattatore, cartella, parametri, avanz) {
+  for (const t of ['llama-export-lora', 'llama-quantize']) {
+    if (!fs.existsSync(path.join(LLAMA_CPP_BIN, t))) throw errore(500, `Strumento ${t} non installato sulla VM (deploy/oracle/setup-llama-cpp.sh)`);
+  }
+  const mfBase = await ollama(['show', f.base, '--modelfile'], 60000);
+  const da = (/^FROM\s+(\S+)/m.exec(mfBase) || [])[1];
+  if (!da || !da.startsWith('/')) throw errore(500, `File del modello base ${f.base} non trovato`);
+  let dimBase = 0;
+  await eseguiRighe('sudo', ['-n', 'stat', '-c', '%s', da], { timeout: 30000, suRiga: (r) => { dimBase = Number(r.trim()) || 0; } });
+  const st = fs.statfsSync(cartella);
+  const libero = st.bavail * st.bsize;
+  if (dimBase && libero < dimBase * 4.2) {
+    throw errore(507, `Spazio su disco insufficiente: servono circa ${Math.ceil(dimBase * 4.2 / 1e9)} GB liberi, ce ne sono ${Math.floor(libero / 1e9)}`);
+  }
+  const unito16 = path.join(cartella, 'unito-f16.gguf');
+  const unito = path.join(cartella, 'unito.gguf');
+  try {
+    // export-lora elenca prima tutti i tensori della base («file_input: <nome>»), poi li unisce
+    // o copia uno per uno («merge_tensor : <nome> [...]», «copy_tensor : <nome> [...]»).
+    avanz('unione', 0);
+    let totale = 0, fatti = 0;
+    await eseguiRighe('sudo', ['-n', path.join(LLAMA_CPP_BIN, 'llama-export-lora'), '-m', da, '--lora', adattatore, '-o', unito16, '-t', '3'], {
+      timeout: 2 * 3600000,
+      suRiga: (r) => {
+        if (/^file_input:\s+[\w.]+\.(weight|bias)$/.test(r)) totale += 1;
+        else if (/^(merge|copy)_tensor\s*:\s+\S+\s+\[/.test(r)) { fatti += 1; if (totale) avanz('unione', fatti / totale); }
+      }
+    });
+    await eseguiRighe('sudo', ['-n', 'chown', `${os.userInfo().username}:`, unito16], { timeout: 30000 });
+    // llama-quantize: «[  12/ 399] blk.0.attn_k.weight ...».
+    avanz('riduzione', 0);
+    await eseguiRighe(path.join(LLAMA_CPP_BIN, 'llama-quantize'), ['--allow-requantize', unito16, unito, 'Q4_K_M', '3'], {
+      timeout: 2 * 3600000,
+      suRiga: (r) => { const m = /^\[\s*(\d+)\s*\/\s*(\d+)\s*\]/.exec(r.trim()); if (m) avanz('riduzione', Number(m[1]) / Number(m[2])); }
+    });
+  } finally {
+    fs.rmSync(unito16, { force: true });
+  }
+  const iFrom = mfBase.split('\n').findIndex((x) => /^FROM\s/.test(x));
+  const corpo = mfBase.split('\n').filter((l, i) => !/^FROM\s/.test(l) && !PARAM_NOSTRI.test(l) && !(i < iFrom && /^#/.test(l)));
+  return { unito, modelfile: [`FROM ${unito}`, ...corpo, ...parametri].join('\n') + '\n' };
+}
+
+// Installazione IN BACKGROUND (2026-10-23): con l'unione dura 15-60 minuti, troppo per una
+// richiesta sola. POST /modelli/installa avvia e risponde subito; la pagina legge
+// GET /modelli/installazione ogni pochi secondi (fase, percentuale, tempi, esito).
+// Una sola installazione alla volta sulla VM. Lo stato resta in memoria: un riavvio del server
+// a metà la interrompe (il modello in uso resta quello di prima o il backup).
+const FASI_INSTALLAZIONE = [
+  { chiave: 'backup', etichetta: 'Backup del modello attuale', peso: 2 },
+  { chiave: 'unione', etichetta: 'Unione dell\'adattatore con la base', peso: 30 },
+  { chiave: 'riduzione', etichetta: 'Riduzione a Q4_K_M', peso: 38 },
+  { chiave: 'creazione', etichetta: 'Creazione del modello su Ollama', peso: 22 },
+  { chiave: 'prova', etichetta: 'Prova di risposta', peso: 8 }
+];
+let installazione = null; // { famiglia, nome, fase, percento, iniziata, faseDal, finita, esito, messaggio, prova, backup, da }
+
+function avanzamento(fase, quota = 0) {
+  if (!installazione) return;
+  if (installazione.fase !== fase) installazione.faseDal = new Date().toISOString();
+  installazione.fase = fase;
+  installazione.quotaFase = Math.max(0, Math.min(1, quota));
+  let prima = 0;
+  for (const x of FASI_INSTALLAZIONE) { if (x.chiave === fase) break; prima += x.peso; }
+  const peso = (FASI_INSTALLAZIONE.find((x) => x.chiave === fase) || { peso: 0 }).peso;
+  installazione.percento = Math.min(99, Math.round(prima + peso * installazione.quotaFase));
+}
+
+async function eseguiInstallazione(f, caricato, nota, email) {
+  const ora = new Date();
+  const stamp = stampOra(ora);
+  const cartella = path.join(CARTELLA_MODELLI, `${f.nome}-${stamp}`);
+  fs.mkdirSync(cartella, { recursive: true });
+  const adattatore = path.join(cartella, 'adapter.gguf');
+  fs.renameSync(caricato, adattatore);
+  // Parametri del modello attuale (num_ctx, temperatura...): restano uguali.
+  let parametri = f.parametri;
+  let haAttuale = false;
+  try {
+    const mf = await ollama(['show', f.nome, '--modelfile'], 60000);
+    haAttuale = true;
+    const p = mf.split('\n').filter((l) => PARAM_NOSTRI.test(l));
+    if (p.length) parametri = p;
+  } catch { /* il modello non c'è: si crea da zero */ }
+
+  const backup = `${f.nome}-bk-${stamp}`;
+  avanzamento('backup', 0);
+  if (haAttuale) await ollamaApi('/api/copy', { source: f.nome, destination: backup });
+  let unito = null;
+  try {
+    const u = await unisciAdattatore(f, adattatore, cartella, parametri, avanzamento);
+    unito = u.unito;
+    fs.writeFileSync(path.join(cartella, 'Modelfile'), u.modelfile);
+    // «copying file sha256:... 45%» mentre Ollama si copia il modello.
+    avanzamento('creazione', 0);
+    await eseguiRighe('ollama', ['create', f.nome, '-f', path.join(cartella, 'Modelfile')], {
+      timeout: 60 * 60000,
+      suRiga: (r) => { const m = /(\d{1,3})%/.exec(r); if (m) avanzamento('creazione', Number(m[1]) / 100); }
+    });
+    fs.rmSync(unito, { force: true }); // Ollama ne ha fatto la sua copia
+    unito = null;
+    // Prova: il modello nuovo deve rispondere (poi esce subito dalla RAM).
+    avanzamento('prova', 0);
+    const prova = await ollamaApi('/api/chat', { model: f.nome, stream: false, think: false, keep_alive: f.nome === MODELLO ? '4h' : 0,
+      messages: f.prova, options: { num_predict: 60 } });
+    const versioni = (() => { try { return JSON.parse(fs.readFileSync(path.join(CARTELLA_MODELLI, 'versioni.json'), 'utf8')); } catch { return {}; } })();
+    versioni[f.nome] = { installato: ora.toISOString(), da: email, nota: String(nota || '').slice(0, 300), backup: haAttuale ? backup : null, cartella };
+    fs.writeFileSync(path.join(CARTELLA_MODELLI, 'versioni.json'), JSON.stringify(versioni, null, 1));
+    console.log(`[ANALISI PM] nuovo ${f.nome} installato da ${email} (backup ${haAttuale ? backup : 'nessuno'})`);
+    return { backup: haAttuale ? backup : null, prova: String((prova.message && prova.message.content) || '').slice(0, 300) };
+  } catch (e) {
+    if (unito) fs.rmSync(unito, { force: true });
+    if (haAttuale) await ollamaApi('/api/copy', { source: backup, destination: f.nome }).catch(() => {});
+    throw errore(e.status === 507 ? 507 : 500, `Installazione non riuscita, rimesso il modello precedente: ${e.message}`);
+  }
+}
+
+// Avvio: backup del modello attuale (<nome>-bk-AAAAMMGG-HHMM), unione, creazione del nuovo
+// <nome> con i parametri attuali, prova; se qualcosa fallisce si torna al backup da soli.
+// Body: { upload_id, nota, famiglia }. Risposta 202: l'avanzamento è in GET /modelli/installazione.
 router.post('/modelli/installa', async (req, res) => {
   try {
     soloVm();
     const f = famiglia(req);
     noDuranteCall();
+    if (installazione && installazione.esito === 'in_corso') throw errore(409, `È già in corso l'installazione di ${installazione.nome}: attendi che finisca`);
     const id = String((req.body || {}).upload_id || '');
     if (!UUID.test(id)) throw errore(400, 'Caricamento non valido');
     const caricato = path.join(CARTELLA_MODELLI, 'caricamenti', `${id}.gguf`);
@@ -889,42 +1046,23 @@ router.post('/modelli/installa', async (req, res) => {
     const testa = Buffer.alloc(4);
     const fd = fs.openSync(caricato, 'r'); fs.readSync(fd, testa, 0, 4, 0); fs.closeSync(fd);
     if (testa.toString('latin1') !== 'GGUF') throw errore(400, 'Il file non è un .gguf valido');
-
-    const ora = new Date();
-    const stamp = stampOra(ora);
-    const cartella = path.join(CARTELLA_MODELLI, `${f.nome}-${stamp}`);
-    fs.mkdirSync(cartella, { recursive: true });
-    const adattatore = path.join(cartella, 'adapter.gguf');
-    fs.renameSync(caricato, adattatore);
-    // Parametri del modello attuale (num_ctx, temperatura...): restano uguali.
-    let parametri = f.parametri;
-    let haAttuale = false;
-    try {
-      const mf = await ollama(['show', f.nome, '--modelfile'], 60000);
-      haAttuale = true;
-      const p = mf.split('\n').filter((l) => /^PARAMETER\s+(num_ctx|temperature|top_p|repeat_penalty|num_predict)\b/.test(l));
-      if (p.length) parametri = p;
-    } catch { /* il modello non c'è: si crea da zero */ }
-    fs.writeFileSync(path.join(cartella, 'Modelfile'), [`FROM ${f.base}`, `ADAPTER ${adattatore}`, ...parametri].join('\n') + '\n');
-
-    const backup = `${f.nome}-bk-${stamp}`;
-    if (haAttuale) await ollamaApi('/api/copy', { source: f.nome, destination: backup });
-    try {
-      await ollama(['create', f.nome, '-f', path.join(cartella, 'Modelfile')]);
-      // Prova: il modello nuovo deve rispondere (poi esce subito dalla RAM).
-      const prova = await ollamaApi('/api/chat', { model: f.nome, stream: false, think: false, keep_alive: f.nome === MODELLO ? '4h' : 0,
-        messages: f.prova, options: { num_predict: 60 } });
-      const versioni = (() => { try { return JSON.parse(fs.readFileSync(path.join(CARTELLA_MODELLI, 'versioni.json'), 'utf8')); } catch { return {}; } })();
-      versioni[f.nome] = { installato: ora.toISOString(), da: req.user.email, nota: String(req.body.nota || '').slice(0, 300), backup: haAttuale ? backup : null, cartella };
-      fs.writeFileSync(path.join(CARTELLA_MODELLI, 'versioni.json'), JSON.stringify(versioni, null, 1));
-      console.log(`[ANALISI PM] nuovo ${f.nome} installato da ${req.user.email} (backup ${haAttuale ? backup : 'nessuno'})`);
-      res.json({ ok: true, backup: haAttuale ? backup : null, prova: String((prova.message && prova.message.content) || '').slice(0, 300) });
-    } catch (e) {
-      if (haAttuale) await ollamaApi('/api/copy', { source: backup, destination: f.nome }).catch(() => {});
-      throw errore(500, `Installazione non riuscita, rimesso il modello precedente: ${e.message}`);
-    }
+    const adesso = new Date().toISOString();
+    installazione = { famiglia: req.body.famiglia || 'pm', nome: f.nome, fase: 'backup', percento: 0, iniziata: adesso, faseDal: adesso, esito: 'in_corso', da: req.user.email };
+    const mia = installazione;
+    eseguiInstallazione(f, caricato, req.body.nota, req.user.email)
+      .then((r) => Object.assign(mia, { esito: 'ok', percento: 100, finita: new Date().toISOString(), ...r }))
+      .catch((e) => {
+        console.error(`❌ [ANALISI PM] installazione di ${f.nome}:`, e.message);
+        Object.assign(mia, { esito: 'errore', finita: new Date().toISOString(), messaggio: e.message });
+      });
+    res.status(202).json({ avviato: true });
   } catch (e) { rispondiErrore(res, e, 'installazione'); }
 });
+
+router.get('/modelli/installazione', (req, res) => {
+  res.json({ installazione, fasi: FASI_INSTALLAZIONE.map(({ chiave, etichetta }) => ({ chiave, etichetta })), ora: new Date().toISOString() });
+});
+
 
 // Ripristino di un backup come modello in uso (l'attuale diventa a sua volta un backup).
 router.post('/modelli/ripristina', async (req, res) => {

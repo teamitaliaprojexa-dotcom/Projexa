@@ -311,7 +311,8 @@
             </div>
             <div class="bar hidden" id="barra"><div></div></div>
             <div id="avanz" class="muted" style="margin-top:0.4rem"></div>
-            <p class="muted" style="margin-top:0.6rem">Projexa fa il <b>backup</b> del modello attuale, crea il nuovo modello scelto sopra (la sua base — qwen3:8b, qwen3:14b o qwen3:4b-instruct per il filtro — + il tuo adattatore, stessi parametri) e lo prova: se qualcosa non va torna da solo al precedente. Non si può fare mentre l'Assistente PM con Projexa è in uso (la VM lavora un paio di minuti).</p>
+            <div id="fasiInst" class="muted" style="margin-top:0.4rem; line-height:1.7"></div>
+            <p class="muted" style="margin-top:0.6rem">Projexa fa il <b>backup</b> del modello attuale, unisce il tuo adattatore alla base del modello scelto sopra (qwen3:8b, qwen3:14b o qwen3:4b-instruct per il filtro), crea il nuovo modello con gli stessi parametri e lo prova: se qualcosa non va torna da solo al precedente. Non si può fare mentre l'Assistente PM con Projexa è in uso. La VM lavora a lungo: circa 15-30 minuti per i modelli 4B e 8B, fino a un'ora per i 14B. Lascia la pagina aperta fino al messaggio finale.</p>
         </div>
         <div class="card">
             <h2>Modelli <span id="nomeFamiglia">pm-projexa</span> sulla VM</h2>
@@ -362,7 +363,7 @@
         if (tab === 'recap') caricaRecap();
         if (tab === 'assoc') caricaAssoc();
         if (tab === 'raid') caricaRaid();
-        if (tab === 'modello') caricaModelli();
+        if (tab === 'modello') { caricaModelli(); seguiInstallazione(); }
     }
     document.querySelectorAll('.tabs button').forEach((b) => { b.onclick = () => vai(b.dataset.tab); });
 
@@ -509,14 +510,50 @@
                 $('barra').firstElementChild.style.width = `${Math.round(100 * (i + 1) / parti)}%`;
                 $('avanz').textContent = `Caricamento ${i + 1}/${parti}…`;
             }
-            $('avanz').textContent = 'Backup, installazione e prova del modello (qualche minuto)…';
-            const r = await api('POST', '/modelli/installa', { upload_id: id, nota: $('nota').value, famiglia: fam() });
-            avviso(`Nuovo ${nomeModello} installato${r.backup ? `, backup: ${r.backup}` : ''}. Prova: «${r.prova}»`);
-            $('avanz').textContent = ''; $('file').value = ''; $('nota').value = '';
-        } catch (e) { errore(e); $('avanz').textContent = ''; }
-        $('installa').disabled = false; $('barra').classList.add('hidden'); $('barra').firstElementChild.style.width = '0';
-        caricaModelli();
+            await api('POST', '/modelli/installa', { upload_id: id, nota: $('nota').value, famiglia: fam() });
+            $('file').value = ''; $('nota').value = '';
+            seguiInstallazione();
+        } catch (e) {
+            errore(e); $('avanz').textContent = '';
+            $('installa').disabled = false; $('barra').classList.add('hidden'); $('barra').firstElementChild.style.width = '0';
+        }
     };
+
+    // Avanzamento dell'installazione sul server (GET /modelli/installazione ogni 3 secondi): barra
+    // con la percentuale totale, fasi, tempo trascorso e stima del tempo rimanente.
+    const durata = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); const m = Math.floor(s / 60); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : m ? `${m} min ${String(s % 60).padStart(2, '0')} s` : `${s} s`; };
+    let timerInst = null;
+    async function seguiInstallazione() {
+        clearTimeout(timerInst);
+        let d;
+        try { d = await api('GET', '/modelli/installazione'); } catch { timerInst = setTimeout(seguiInstallazione, 5000); return; }
+        const s = d.installazione;
+        if (!s) return;
+        const ora = new Date(d.ora).getTime();
+        const trascorso = ora - new Date(s.iniziata).getTime();
+        const inCorso = s.esito === 'in_corso';
+        $('installa').disabled = inCorso;
+        $('barra').classList.toggle('hidden', !inCorso);
+        $('barra').firstElementChild.style.width = `${s.percento || 0}%`;
+        const iFase = d.fasi.findIndex((x) => x.chiave === s.fase);
+        if (inCorso) {
+            const stima = s.percento >= 5 ? ` · mancano circa ${durata(trascorso * (100 - s.percento) / s.percento)}` : ' · stima del tempo rimanente tra poco';
+            $('avanz').innerHTML = `<b>${esc(s.nome)}: ${s.percento}%</b> · trascorsi ${durata(trascorso)}${stima}`;
+            $('fasiInst').innerHTML = d.fasi.map((x, i) => i < iFase ? `<div><i class="fas fa-check" style="color:#10B981"></i> ${esc(x.etichetta)}</div>`
+                : i === iFase ? `<div><i class="fas fa-spinner fa-spin" style="color:#4338CA"></i> <b>${esc(x.etichetta)}</b> · ${Math.round(100 * (s.quotaFase || 0))}% · da ${durata(ora - new Date(s.faseDal).getTime())}</div>`
+                : `<div style="opacity:0.55"><i class="far fa-circle"></i> ${esc(x.etichetta)}</div>`).join('');
+            timerInst = setTimeout(seguiInstallazione, 3000);
+            return;
+        }
+        // Finita: il messaggio una volta sola (poi resta in memoria sul server fino alla prossima).
+        $('avanz').textContent = ''; $('fasiInst').innerHTML = '';
+        const chiave = `inst-vista-${s.iniziata}`;
+        if (sessionStorage.getItem(chiave)) return;
+        sessionStorage.setItem(chiave, '1');
+        if (s.esito === 'ok') avviso(`Nuovo ${s.nome} installato in ${durata(new Date(s.finita) - new Date(s.iniziata))}${s.backup ? `, backup: ${s.backup}` : ''}. Prova: «${s.prova || ''}»`);
+        else avviso(s.messaggio || 'Installazione non riuscita', 'err');
+        caricaModelli();
+    }
 
     const fam = () => $('famiglia').value;
     const NOMI_FAMIGLIA = { pm: 'pm-projexa', filtro: 'pm-projexa-filtro', recap: 'recap-projexa', recap14: 'recap-projexa-14b', assoc: 'assoc-projexa-14b', raid: 'raid-projexa-14b' };
