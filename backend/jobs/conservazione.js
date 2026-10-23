@@ -7,7 +7,9 @@
 //   - svuota trascrizione, recap (anche la versione formattata) e recap interno delle riunioni
 //     più vecchie del limite (la riga della riunione resta: data, oggetto, cliente, progetto);
 //   - cancella le attività del recap interno di quelle riunioni (sono ricavate dalla
-//     trascrizione). I task già creati dalle attività restano: sono dati di progetto.
+//     trascrizione). I task già creati dalle attività restano: sono dati di progetto;
+//   - cancella i dati di addestramento ricavati da quelle riunioni (Analisi PM, Recap, RAID e
+//     CR, associazioni, esempi non attivi: conservazioneAnalisi, 2026-10-23).
 // Il limite si cambia con job_schedules.parametri = {"mesi": N} (minimo 6).
 // Gira solo sulla VM (schedulatore). Le variazioni finiscono nel log di audit come le altre.
 // ============================================================================
@@ -49,8 +51,53 @@ export async function eseguiConservazioneRiunioni({ mesi } = {}) {
   } finally {
     client.release();
   }
-  if (report.riunioniSvuotate || report.attivitaCancellate) {
-    console.log(`[CONSERVAZIONE] Riunioni oltre ${n} mesi: ${report.riunioniSvuotate} svuotate, ${report.attivitaCancellate} attività cancellate`);
+  report.analisi = await conservazioneAnalisi(limite);
+  const totAnalisi = Object.values(report.analisi).reduce((s, x) => s + (Number(x) || 0), 0);
+  if (report.riunioniSvuotate || report.attivitaCancellate || totAnalisi) {
+    console.log(`[CONSERVAZIONE] Oltre ${n} mesi: ${report.riunioniSvuotate} riunioni svuotate, ${report.attivitaCancellate} attività cancellate, ${totAnalisi} righe di analisi/addestramento cancellate`);
   }
   return report;
+}
+
+// Dati di ADDESTRAMENTO ricavati dalle riunioni (2026-10-23, richiesta utente): pezzi di
+// trascrizione, appunti, recap e prompt copiati in Analisi PM (domande), Analisi Recap, RAID e CR,
+// associazioni To-Do/RAID ed esempi salvati. Stesso limite delle trascrizioni: si cancellano le
+// righe di riunioni più vecchie del limite (o, se la riunione non c'è più o la riga non ne ha
+// una, quelle create prima del limite). Le versioni di esempi ATTIVE restano: le usa Projexa.
+// Ogni tabella è facoltativa (SQL non eseguito = si salta).
+const ANALISI = [
+  // Domande da PM e riunioni analizzate (analisi_pm.sql).
+  { nome: 'domandePm', tabella: 'pm_analisi', riunione: true },
+  { nome: 'riunioniPm', tabella: 'pm_analisi_riunioni', riunione: true },
+  // Insegnante notturno del recap (analisi_recap.sql).
+  { nome: 'recap', tabella: 'recap_analisi', riunione: true },
+  { nome: 'riunioniRecap', tabella: 'recap_analisi_riunioni', riunione: true },
+  // Confronti RAID e Change Request (analisi_raid.sql): id_calendar può mancare.
+  { nome: 'raid', tabella: 'pm_raid_analisi', riunione: true },
+  // Associazioni To-Do e RAID (elenco delle voci inviato all'AI): non legate a una riunione.
+  { nome: 'associazioni', tabella: 'pm_associazioni', riunione: false },
+  // Esempi salvati con «Usa come esempi»: solo le versioni non attive.
+  { nome: 'esempi', tabella: 'pm_projexa_esempi', riunione: false, extra: 'AND NOT attivo' }
+];
+
+async function conservazioneAnalisi(limite) {
+  const out = {};
+  for (const a of ANALISI) {
+    const sql = a.riunione
+      ? `DELETE FROM ${a.tabella} x
+          WHERE COALESCE(
+                  (SELECT m.data_calendar FROM rec_meeting m
+                    WHERE m.tenant_id = x.tenant_id AND m.user_id = x.user_id AND m.id_calendar = x.id_calendar LIMIT 1),
+                  x.created_at::date) < CURRENT_DATE - $1::interval`
+      : `DELETE FROM ${a.tabella} WHERE created_at < now() - $1::interval ${a.extra || ''}`;
+    try {
+      out[a.nome] = (await db.query(sql, [limite])).rowCount;
+    } catch (e) {
+      // Tabella o colonna non ancora create: nulla da conservare.
+      if (e.code === '42P01' || e.code === '42703') continue;
+      console.error(`[CONSERVAZIONE] ${a.tabella}: ${e.message}`);
+      out[a.nome] = `errore: ${e.message}`;
+    }
+  }
+  return out;
 }

@@ -1046,6 +1046,18 @@ router.post('/modelli/installa', async (req, res) => {
     const testa = Buffer.alloc(4);
     const fd = fs.openSync(caricato, 'r'); fs.readSync(fd, testa, 0, 4, 0); fs.closeSync(fd);
     if (testa.toString('latin1') !== 'GGUF') throw errore(400, 'Il file non è un .gguf valido');
+    // Adattatore addestrato su un'altra base (es. notebook del recap 8B usato per recap-projexa-14b,
+    // 2026-10-23): export-lora si bloccherebbe a metà. I metadati in testa al file dicono la base
+    // («Qwen/Qwen3-8B», «Qwen3 14B Unsloth...»): si confronta la taglia con quella della famiglia.
+    const intesta = Buffer.alloc(64 * 1024);
+    const fd2 = fs.openSync(caricato, 'r'); const letti = fs.readSync(fd2, intesta, 0, intesta.length, 0); fs.closeSync(fd2);
+    const tagliaFile = (/Qwen3[-_ ](\d+)B/i.exec(intesta.subarray(0, letti).toString('latin1')) || [])[1];
+    const tagliaFamiglia = (/(\d+)b/i.exec(f.base) || [])[1];
+    if (tagliaFile && tagliaFamiglia && tagliaFile !== tagliaFamiglia) {
+      const giusta = Object.entries(FAMIGLIE).filter(([, x]) => ((/(\d+)b/i.exec(x.base) || [])[1]) === tagliaFile).map(([, x]) => x.nome).join(' o ');
+      fs.rmSync(caricato, { force: true });
+      throw errore(400, `Questo adattatore è stato addestrato su Qwen3 ${tagliaFile}B, ma ${f.nome} usa Qwen3 ${tagliaFamiglia}B. ${giusta ? `Va installato su ${giusta}, ` : ''}oppure va rifatto l'addestramento con il notebook di ${f.nome}.`);
+    }
     const adesso = new Date().toISOString();
     installazione = { famiglia: req.body.famiglia || 'pm', nome: f.nome, fase: 'backup', percento: 0, iniziata: adesso, faseDal: adesso, esito: 'in_corso', da: req.user.email };
     const mia = installazione;
