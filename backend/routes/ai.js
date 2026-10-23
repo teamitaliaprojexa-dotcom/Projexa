@@ -655,7 +655,8 @@ router.post('/:provider/key', requireAuth, requireProvider, async (req, res) => 
       // ...e il saldo stimato (chiave admin e credito caricato), se impostato.
       [`${cfg.prefix}_admin_key`]: prev[`${cfg.prefix}_admin_key`] || undefined,
       [`${cfg.prefix}_credito`]: prev[`${cfg.prefix}_credito`] || undefined,
-      [`${cfg.prefix}_credito_dal`]: prev[`${cfg.prefix}_credito_dal`] || undefined
+      [`${cfg.prefix}_credito_dal`]: prev[`${cfg.prefix}_credito_dal`] || undefined,
+      [`${cfg.prefix}_credito_base`]: prev[`${cfg.prefix}_credito_base`] || undefined
     });
     console.log(`[AI:${req.params.provider}] ✓ Chiave collegata per l'utente ${req.user.user_id}`);
     res.json({ success: true });
@@ -791,9 +792,11 @@ router.get('/:provider/saldo', requireAuth, requireProvider, async (req, res) =>
       c = { at: Date.now(), speso: await spesa(adminKey, dal) };
       saldoCache.set(k, c);
     }
-    const saldo = credito - c.speso;
+    // Spesa dopo il salvataggio: quella fino a quel momento è già dentro il credito indicato.
+    const speso = Math.max(0, c.speso - (Number(el[`${cfg.prefix}_credito_base`]) || 0));
+    const saldo = credito - speso;
     const cambio = await dollariPerEuro();
-    res.json({ ...base, configurato: true, speso: c.speso, saldo, saldoEur: cambio ? saldo / cambio : null, letto: new Date(c.at).toISOString() });
+    res.json({ ...base, configurato: true, speso, saldo, saldoEur: cambio ? saldo / cambio : null, letto: new Date(c.at).toISOString() });
   } catch (error) {
     if (!error.status) console.error(`❌ AI_SALDO (${req.params.provider}):`, error.message);
     res.json({ supportato: true, configurato: true, errore: error.message });
@@ -818,13 +821,17 @@ router.post('/:provider/saldo', requireAuth, requireProvider, async (req, res) =
     const adminKey = nuova || el[`${cfg.prefix}_admin_key`];
     if (!adminKey) return res.status(400).json({ error: `Serve la chiave admin di ${cfg.label} (sola lettura dei costi)` });
     const speso = await spesa(adminKey, dal); // verifica la chiave
+    // Il credito letto nella pagina Billing comprende già la spesa fatta fino a questo momento:
+    // si conserva come «base» e si sottrae solo quella successiva (le API danno la spesa a
+    // giorni interi, non dall'ora del salvataggio). 2026-10-23
     await updateIntegrationElements(req.user.user_id, cfg.provider, TIPO_INTEGRAZIONE, {
       [`${cfg.prefix}_credito`]: String(credito), [`${cfg.prefix}_credito_dal`]: dal,
+      [`${cfg.prefix}_credito_base`]: String(speso),
       ...(nuova ? { [`${cfg.prefix}_admin_key`]: nuova } : {})
     });
     for (const k of saldoCache.keys()) if (k.startsWith(`${req.user.user_id}|${req.params.provider}|`)) saldoCache.delete(k);
     console.log(`[AI:${req.params.provider}] Credito aggiornato dall'utente ${req.user.user_id}${nuova ? ' (nuova chiave admin)' : ''}`);
-    res.json({ success: true, credito, dal, speso, saldo: credito - speso });
+    res.json({ success: true, credito, dal, speso: 0, saldo: credito });
   } catch (error) {
     if (!error.status) console.error(`❌ AI_SALDO_SALVA (${req.params.provider}):`, error.message);
     res.status(error.status || 500).json({ error: error.message });

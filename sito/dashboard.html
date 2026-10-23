@@ -12940,7 +12940,7 @@
             if (!d) return '';
             if (d.errore) return `<span title="${escapeHtml(d.errore)}" style="color:#B45309;"><i class="fas fa-exclamation-triangle"></i> saldo non letto</span>`;
             if (!d.configurato) return '';
-            const titolo = `Credito ${fmtSoldi(d.credito, '$')} dal ${d.dal.split('-').reverse().join('/')}, spesi ${fmtSoldi(d.speso, '$')}. Stima: ricariche automatiche o crediti omaggio possono farla scostare.`;
+            const titolo = `Credito ${fmtSoldi(d.credito, '$')} al ${d.dal.split('-').reverse().join('/')}, spesi da allora ${fmtSoldi(d.speso, '$')}. Stima: ricariche automatiche o crediti omaggio possono farla scostare.`;
             return `<span title="${escapeHtml(titolo)}" style="font-weight:600;color:${d.saldo < 1 ? '#B91C1C' : 'var(--dark)'};">Saldo ≈ ${fmtSoldi(d.saldo, '$')}${d.saldoEur != null ? ` (≈ ${fmtSoldi(d.saldoEur, '€')})` : ''}</span>`;
         }
         async function caricaAiSaldo(key, forza = false) {
