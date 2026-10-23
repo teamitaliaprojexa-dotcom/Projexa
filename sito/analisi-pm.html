@@ -302,6 +302,7 @@
                     <option value="recap14">recap-projexa-14b — Recap con «Projexa 14B» (Qwen3 14B)</option>
                     <option value="assoc">assoc-projexa-14b — Associazione To-Do e RAID (Qwen3 14B)</option>
                     <option value="raid">raid-projexa-14b — RAID e Change Request con «Projexa 14B» (Qwen3 14B)</option>
+                    <option value="tutte">Tutte — solo elenco dei modelli e dei backup</option>
                 </select>
             </div>
             <div class="riga">
@@ -469,14 +470,33 @@
     $('fNotebook').onclick = () => scaricaFile('/notebook?famiglia=filtro', 'addestra_pm_projexa_filtro.ipynb').catch(errore);
 
     // --- Modello sulla VM ---
+    // Riga della tabella; fam = famiglia del modello (per Ripristina / Elimina anche nella vista «Tutte»).
+    const rigaModello = (m, f) => `<tr>
+                <td><b>${esc(m.nome)}</b> ${m.attuale ? '<span class="badge b-ok">in uso</span>' : m.backup ? '<span class="badge">backup</span>' : ''}</td>
+                <td>${(m.dimensione / 1e9).toLocaleString('it-IT', { maximumFractionDigits: 1 })} GB</td><td>${dataOra(m.modificato)}</td>
+                <td>${m.backup ? `<button class="btn" data-ripristina="${esc(m.nome)}" data-fam="${f}"><i class="fas fa-rotate-left"></i> Ripristina</button> <button class="btn danger" data-elimina="${esc(m.nome)}" data-fam="${f}"><i class="fas fa-trash"></i> Elimina</button>` : ''}</td></tr>`;
+    // «Tutte» (2026-10-23): un blocco per famiglia, con l'ultima installazione; niente caricamento.
+    async function caricaTutte() {
+        $('nomeFamiglia').textContent = 'Projexa (tutti)';
+        const famiglie = Object.keys(NOMI_FAMIGLIA);
+        const elenchi = await Promise.all(famiglie.map((f) => api('GET', `/modelli?famiglia=${f}`).catch((e) => ({ errore: e.message, modelli: [] }))));
+        $('modelli').innerHTML = famiglie.map((f, i) => {
+            const d = elenchi[i];
+            const n = d.note && d.note[d.nome];
+            const testa = `<tr><td colspan="4" style="background:var(--bg, #f8fafc)"><b>${esc(NOMI_FAMIGLIA[f])}</b> <span class="muted">· ${esc($('famiglia').querySelector(`option[value="${f}"]`).textContent.split('—')[1] || '')}${n ? ` · ultima installazione ${dataOra(n.installato)}` : d.base ? ` · ancora ${esc(d.base)} senza addestramento` : ''}</span></td></tr>`;
+            const righe = d.modelli.map((m) => rigaModello(m, f)).join('') || `<tr><td colspan="4" class="muted">${esc(d.errore || 'Nessun modello sulla VM: si usa il modello base')}</td></tr>`;
+            return testa + righe;
+        }).join('');
+        $('notaModello').textContent = 'Per installare un adattatore scegli sopra il modello a cui appartiene.';
+    }
     async function caricaModelli() {
+        const tutte = fam() === 'tutte';
+        $('installa').disabled = tutte; $('file').disabled = tutte; $('nota').disabled = tutte;
+        if (tutte) { try { await caricaTutte(); } catch (e) { $('modelli').innerHTML = `<tr><td colspan="4" class="muted">${esc(e.message)}</td></tr>`; } return; }
         try {
             $('nomeFamiglia').textContent = NOMI_FAMIGLIA[fam()];
             const d = await api('GET', `/modelli?famiglia=${fam()}`);
-            $('modelli').innerHTML = d.modelli.map((m) => `<tr>
-                <td><b>${esc(m.nome)}</b> ${m.attuale ? '<span class="badge b-ok">in uso</span>' : m.backup ? '<span class="badge">backup</span>' : ''}</td>
-                <td>${(m.dimensione / 1e9).toLocaleString('it-IT', { maximumFractionDigits: 1 })} GB</td><td>${dataOra(m.modificato)}</td>
-                <td>${m.backup ? `<button class="btn" data-ripristina="${esc(m.nome)}"><i class="fas fa-rotate-left"></i> Ripristina</button> <button class="btn danger" data-elimina="${esc(m.nome)}"><i class="fas fa-trash"></i> Elimina</button>` : ''}</td></tr>`).join('')
+            $('modelli').innerHTML = d.modelli.map((m) => rigaModello(m, fam())).join('')
                 || `<tr><td colspan="4" class="muted">Nessun modello ${esc(d.nome)} sulla VM${fam() === 'recap' ? ' (finché manca, il recap con Projexa usa qwen3:8b: crealo con deploy/oracle/ollama/recap-projexa.Modelfile)' : fam() === 'recap14' ? ' (finché manca, «Projexa 14B» usa recap-projexa: crealo con deploy/oracle/ollama/recap-projexa-14b.Modelfile)' : fam() === 'filtro' ? ' (finché manca, «Projexa 4B + 8B» usa qwen3:4b-instruct con gli esempi: nasce col primo adattatore caricato qui)' : fam() === 'assoc' ? ' (finché manca, l’associazione con Projexa usa qwen3:14b con i casi valutati: nasce col primo adattatore caricato qui)' : fam() === 'raid' ? ' (finché manca, RAID e Change Request con «Projexa 14B» usano qwen3:14b: nasce col primo adattatore caricato qui)' : ''}.</td></tr>`;
             const n = d.note && d.note[d.nome];
             $('notaModello').textContent = n ? `Ultima installazione: ${dataOra(n.installato)}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : `${d.nome} è ancora il modello di partenza (${d.base} senza addestramento). I backup occupano poco spazio: la base ${d.base} è condivisa.`;
@@ -485,15 +505,16 @@
     $('modelli').onclick = async (e) => {
         const r = e.target.closest('[data-ripristina]'), el = e.target.closest('[data-elimina]');
         try {
-            if (r && confirm(`Rimettere in uso ${r.dataset.ripristina}? Il modello attuale diventa a sua volta un backup.`)) { await api('POST', '/modelli/ripristina', { nome: r.dataset.ripristina, famiglia: fam() }); avviso('Ripristinato.'); caricaModelli(); }
+            if (r && confirm(`Rimettere in uso ${r.dataset.ripristina}? Il modello attuale diventa a sua volta un backup.`)) { await api('POST', '/modelli/ripristina', { nome: r.dataset.ripristina, famiglia: r.dataset.fam || fam() }); avviso('Ripristinato.'); caricaModelli(); }
             if (el && confirm(`Eliminare definitivamente il backup ${el.dataset.elimina}? Non si potrà più tornare a quella versione.`)) {
-                const x = await fetch(`${API_URL}/modelli/${encodeURIComponent(el.dataset.elimina)}?famiglia=${fam()}`, { method: 'DELETE', headers: auth() });
+                const x = await fetch(`${API_URL}/modelli/${encodeURIComponent(el.dataset.elimina)}?famiglia=${el.dataset.fam || fam()}`, { method: 'DELETE', headers: auth() });
                 const d = await x.json().catch(() => ({})); if (!x.ok) throw new Error(d.error || `Errore ${x.status}`);
                 avviso('Backup eliminato.'); caricaModelli();
             }
         } catch (err) { errore(err); }
     };
     $('installa').onclick = async () => {
+        if (fam() === 'tutte') return avviso('Scegli il modello a cui appartiene l\'adattatore (non «Tutte»).', 'err');
         const f = $('file').files[0];
         if (!f) return avviso('Scegli il file .gguf scaricato da Colab.', 'err');
         if (!/\.gguf$/i.test(f.name)) return avviso('Serve un file .gguf.', 'err');
