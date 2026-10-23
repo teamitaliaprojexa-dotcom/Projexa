@@ -27,6 +27,7 @@ import { parseDueDate } from '../jobs/recapTasks.js';
 import { notificaRiunione } from '../jobs/notifiche.js';
 import { avanzamentoRiunione } from '../config/lavoriProjexa.js';
 import { cercaDoppione, aggiornamento, todoAperte, ownerTodo, aggiornaTodo } from '../config/dedupVoci.js';
+import { accodaRiunione, inFila } from '../jobs/filaRiunione.js';
 
 const router = express.Router();
 const errore = (status, message) => Object.assign(new Error(message), { status });
@@ -191,7 +192,7 @@ async function genera(user, idCalendar, providerName) {
 export async function avviaRecapInternoAutomatico(user, idCalendar, providerName) {
   await richiedeTabelle();
   const k = chiave(user, idCalendar);
-  if (inCorso.has(k)) throw errore(409, 'Recap interno già in preparazione');
+  if (inCorso.has(k) || inFila(user, idCalendar, 'recap_interno')) throw errore(409, 'Recap interno già in preparazione');
   const immediato = (motivo) => ({
     modo: 'immediato', motivo,
     avvia: async () => {
@@ -308,8 +309,9 @@ router.get('/', async (req, res) => {
     let stato = r.recap_interno_stato || null;
     // In attesa del Batch: si controlla subito presso l'AI (in background).
     if (stato === 'batch') controllaRecapBatchUtente(req.user);
-    // «in corso» rimasto da un riavvio del server: la generazione si è interrotta.
-    if (stato === 'in_corso' && !inCorso.has(chiave(req.user, m.id_calendar))) stato = 'interrotto';
+    // «in corso» rimasto da un riavvio del server: la generazione si è interrotta. Non se è
+    // ancora in una fila da riprendere o in attesa del suo turno (jobs/filaRiunione.js).
+    if (stato === 'in_corso' && !inCorso.has(chiave(req.user, m.id_calendar)) && !inFila(req.user, m.id_calendar, 'recap_interno')) stato = 'interrotto';
     const att = (await db.query(
       `SELECT id::text AS id, ordine, argomento, descrizione, owner_nominativo, owner_email, rubrica_id::text AS rubrica_id,
               scadenza::text AS scadenza, task_id::text AS task_id, origine
@@ -361,7 +363,7 @@ router.post('/genera', async (req, res) => {
       if (!['immediato', 'batch'].includes(esecuzione)) throw errore(400, 'Scegli se eseguire il recap interno Immediato o in Batch');
     }
     const k = chiave(req.user, m.id_calendar);
-    if (inCorso.has(k)) throw errore(409, 'Il recap interno di questa riunione è già in preparazione');
+    if (inCorso.has(k) || inFila(req.user, m.id_calendar, 'recap_interno')) throw errore(409, 'Il recap interno di questa riunione è già in preparazione');
     const user = { tenant_id: req.user.tenant_id, user_id: req.user.user_id, email: req.user.email, id_roles: req.user.id_roles };
     // Batch (non per Projexa, già gratuito): metà prezzo, risposta entro 24 ore; la
     // raccoglie jobs/recapBatch.js (o il controllo all'apertura della scheda).
@@ -378,14 +380,11 @@ router.post('/genera', async (req, res) => {
         nota = e.message;
       }
     }
-    inCorso.add(k);
+    // Fila su disco (jobs/filaRiunione.js, 2026-10-23): un riavvio del server a metà la
+    // riprende invece di lasciarla «in corso» per sempre. Errore = stato «errore» nella scheda.
     await impostaStato(req.user, m.id_calendar, 'in_corso');
-    genera(user, m.id_calendar, providerName)
-      .catch(async (e) => {
-        console.error(`❌ RECAP_INTERNO ${m.id_calendar}:`, e.message);
-        await impostaStato(user, m.id_calendar, 'errore', String(e.message || e).slice(0, 1000)).catch(() => {});
-      })
-      .finally(() => inCorso.delete(k));
+    await accodaRiunione(user, m.id_calendar, { nome: providerName, label: providerName, locale },
+      [{ tipo: 'recap_interno', nome: 'Recap Interno' }]);
     res.status(202).json({ avviato: true, nota });
   } catch (e) { invia(res, e, 'GENERA'); }
 });

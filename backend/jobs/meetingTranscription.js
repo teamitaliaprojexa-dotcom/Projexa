@@ -1058,7 +1058,11 @@ async function processFinalizeInterno(job) {
     }
   } catch (error) {
     const attempts = (Number(job.attempts) || 0) + 1;
-    if (isTemporary(error) && attempts < 10) {
+    // Projexa oltre il tempo massimo: riprovare dà lo stesso esito e occupa la VM per ore
+    // (2026-10-22: 10 tentativi previsti da ~4 ore l'uno). Con gli appunti salvati su disco un
+    // nuovo tentativo rifà solo il testo finale; dopo 3 ci si ferma (resta il pulsante Recap).
+    const massimo = error.codice === 'OLLAMA_TIMEOUT' ? 3 : 10;
+    if (isTemporary(error) && attempts < massimo) {
       await db.query(
         `UPDATE rec_meeting_chunks SET attempts = $2, last_error = $3, next_try_at = NOW() + interval '2 minutes' WHERE id = $1`,
         [job.id, attempts, encRec(String(error.message || error).slice(0, 500))]

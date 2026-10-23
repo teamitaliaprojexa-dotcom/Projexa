@@ -429,6 +429,68 @@ async function vociInviate(u, richiestaId) {
   return r.ordine.map((k) => perChiave.get(k) || { tabella: k.split('|')[0], id: k.split('|')[1], registro: 'chiusa', titolo: '' });
 }
 
+// Projexa: Ollama della VM, subito (gratuito, niente Batch). Dal 2026-10-20 con il 14B (alle 5
+// la VM è libera e nessuno aspetta; se il 14B manca, il 7B) e con la precedenza ad Assistente PM
+// e trascrizione se si allunga fino all'inizio delle call. Dal 2026-10-21 prima il modello
+// addestrato (assoc-projexa-14b) se c'è, e i casi già valutati.
+// perPrompt = voci da scrivere nel prompt, voci = le stesse con i dati attuali (posizione n).
+const inCorsoLocali = new Set(); // richieste con Projexa in esecuzione in questo processo
+async function associaConProjexa(rich, u, { perPrompt, voci, esempi, insegnante }, report, esiti) {
+  inCorsoLocali.add(String(rich.id));
+  try {
+    const r = await ollamaConPrecedenza([OLLAMA_ADDESTRATO, OLLAMA_MODELLO], (model, signal) => ollamaPost(`${OLLAMA_URL}/api/chat`, {
+      model, stream: false, format: 'json', think: false, keep_alive: '10m',
+      messages: [{ role: 'user', content: prompt(perPrompt, esempi) }],
+      options: { num_ctx: 8192, temperature: 0, num_predict: 800 }
+    }, 40 * 60000, { signal }));
+    if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
+    report.collegate += await chiudiRichiesta(rich, u, voci, senzaRagionamento(r.data && r.data.message && r.data.message.content), esiti);
+    report.locali++;
+    // Stesso elenco all'AI insegnante (giro successivo del job, funzione insegnante()).
+    if (insegnante) await db.query(`UPDATE pm_associazioni SET insegnante_stato = 'da_inviare' WHERE id = $1`, [rich.id]);
+  } finally {
+    inCorsoLocali.delete(String(rich.id));
+  }
+}
+
+// 1b. Richieste con Projexa interrotte da un riavvio del server (2026-10-23): la chiamata a
+//     Ollama vive solo nel processo, e il 2026-10-22 un deploy a metà ha lasciato la richiesta
+//     «inviato» per sempre (senza collegamenti né insegnante). Si rifanno con le stesse voci
+//     (elenco salvato all'invio); oltre RIPRESA_LOCALI_ORE si chiudono in errore.
+const RIPRESA_LOCALI_ORE = 48;
+async function riprendiLocali(report, esiti) {
+  const righe = (await db.query(
+    `SELECT id, tenant_id::text AS tenant_id, user_id::text AS user_id, project_id::text AS project_id, client_id::text AS client_id, created_at
+       FROM pm_associazioni WHERE stato = 'inviato' AND batch_id IS NULL AND ai = 'Projexa' ORDER BY created_at`)).rows;
+  for (const a of righe) {
+    if (inCorsoLocali.has(String(a.id))) continue;
+    const u = { tenant_id: a.tenant_id, user_id: a.user_id };
+    try {
+      if (Date.now() - new Date(a.created_at).getTime() > RIPRESA_LOCALI_ORE * 3600000) {
+        throw new Error(`associazione con Projexa interrotta (riavvio del server) e non ripresa entro ${RIPRESA_LOCALI_ORE} ore`);
+      }
+      const voci = await vociInviate(u, a.id);
+      let perPrompt = voci;
+      let insegnante = false;
+      try {
+        const el = (await db.query('SELECT elenco FROM pm_associazioni WHERE id = $1', [a.id])).rows[0];
+        if (el && el.elenco) {
+          perPrompt = JSON.parse(el.elenco);
+          insegnante = await insegnanteAttivo(u).catch(() => false);
+        }
+      } catch (e) {
+        if (e.code !== '42703') throw e; // analisi_associazioni.sql non eseguito: voci attuali
+      }
+      const esempi = await esempiValutati(u).catch(() => '');
+      console.log(`[ASSOCIAZIONE] Riprendo con Projexa la richiesta ${a.id} (progetto ${a.project_id}) interrotta da un riavvio`);
+      await associaConProjexa(a, u, { perPrompt, voci, esempi, insegnante }, report, esiti);
+    } catch (e) {
+      report.errori.push(`Projexa progetto ${a.project_id}: ${e.message}`);
+      await db.query(`UPDATE pm_associazioni SET stato = 'errore', errore = $2, concluso_il = now() WHERE id = $1`, [a.id, String(e.message).slice(0, 1000)]);
+    }
+  }
+}
+
 // 2. Invio della mattina: un progetto alla volta per ogni utente.
 async function invia(report, esiti) {
   const giorno = oggiRoma();
@@ -494,20 +556,7 @@ async function invia(report, esiti) {
       if (!rich) continue;
       try {
         if (locale) {
-          // Projexa: Ollama della VM, subito (gratuito, niente Batch). Dal 2026-10-20 con il 14B
-          // (alle 5 la VM è libera e nessuno aspetta; se il 14B manca, il 7B) e con la
-          // precedenza ad Assistente PM e trascrizione se si allunga fino all'inizio delle call.
-          // Dal 2026-10-21 prima il modello addestrato (assoc-projexa-14b) se c'è, e i casi già valutati.
-          const r = await ollamaConPrecedenza([OLLAMA_ADDESTRATO, OLLAMA_MODELLO], (model, signal) => ollamaPost(`${OLLAMA_URL}/api/chat`, {
-            model, stream: false, format: 'json', think: false, keep_alive: '10m',
-            messages: [{ role: 'user', content: prompt(scelte, esempi) }],
-            options: { num_ctx: 8192, temperature: 0, num_predict: 800 }
-          }, 40 * 60000, { signal }));
-          if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
-          report.collegate += await chiudiRichiesta(rich, u, scelte, senzaRagionamento(r.data && r.data.message && r.data.message.content), esiti);
-          report.locali++;
-          // Stesso elenco all'AI insegnante (giro successivo del job, funzione insegnante()).
-          if (insegnante) await db.query(`UPDATE pm_associazioni SET insegnante_stato = 'da_inviare' WHERE id = $1`, [rich.id]);
+          await associaConProjexa(rich, u, { perPrompt: scelte, voci: scelte, esempi, insegnante }, report, esiti);
         } else {
           const b = await inviaBatchAi(u.user_id, ai, prompt(scelte), { json: true });
           await db.query('UPDATE pm_associazioni SET batch_id = $2 WHERE id = $1', [rich.id, b.batchId]);
@@ -584,6 +633,7 @@ export async function eseguiAssociaTodoRaid() {
   const report = { inviati: 0, locali: 0, raccolti: 0, inAttesa: 0, collegate: 0, saltati: 0, insegnante: 0, errori: [] };
   const esiti = [];
   await raccogli(report, esiti);
+  try { await riprendiLocali(report, esiti); } catch (e) { report.errori.push(`ripresa Projexa: ${e.message}`); }
   await invia(report, esiti);
   try { await insegnante(report); } catch (e) { report.errori.push(`insegnante: ${e.message}`); }
   try { await completaDescrizioni(report); } catch (e) { report.errori.push(`descrizioni «Collegato a»: ${e.message}`); }

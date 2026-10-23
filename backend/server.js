@@ -37,6 +37,7 @@ import { sendMail, buildRichiestaCancellazioneEmail, EMAIL_PROJEXA } from './con
 import { regoleColonne, metaColonna, etichetteColonne, etichetteValori, opzioniColonna, applicaRegoleScrittura, ordineGriglia, filtroSopraGriglia, TABELLE_VERIFICA, etichettaComune } from './config/gridColumnRules.js';
 import { kickTranscriptionWorker, speakerName, stripMarkdown } from './jobs/meetingTranscription.js';
 import { rottaAi, avviaLavoriAi } from './jobs/aiLavori.js';
+import { riprendiFileRiunioni } from './jobs/filaRiunione.js';
 import { infoAi } from './config/aiFunzioni.js';
 import aiLavoriRoutes from './routes/aiLavori.js';
 import { askAiProvider, askOllamaRecap } from './routes/ai.js';
@@ -12933,6 +12934,9 @@ app.listen(PORT, () => {
   avviaInvioAudit();
   // Lavori AI in Batch: ripresa dopo un riavvio e pulizia dei file temporanei (jobs/aiLavori.js).
   avviaLavoriAi({ conSchedulatore: schedulerAttivo() });
+  // Recap, Recap interno, RAID/CR in Immediato (AI Automatizza, pulsante Genera) interrotti dal
+  // riavvio: ripartono dal passo interrotto (jobs/filaRiunione.js), dopo la ripresa dei lavori AI.
+  setTimeout(() => riprendiFileRiunioni().catch((e) => console.error('❌ [FILA RIUNIONE] ripresa:', e.message)), 20000);
 });
 
 // Graceful shutdown

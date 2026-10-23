@@ -28,6 +28,11 @@ import { getPromptFor } from '../config/prompts.js';
 import { attendiVmLibera, suPrecedenza, vmOccupata } from '../config/ollamaPrecedenza.js';
 import { iniziaLavoro, segnaAttesaProjexa } from '../config/lavoriProjexa.js';
 import { anonimizzaPrompt, salvaMappaBatch, ripristinaBatch, statoAnonimizzazione } from '../config/pii.js';
+import { encryptValue, decryptValue, isEncrypted } from '../config/crypto.js';
+import fsp from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { createHash } from 'crypto';
 
 const router = express.Router();
 
@@ -1238,7 +1243,8 @@ async function conPrecedenza(fn) {
 
 // Una richiesta a recap-projexa (o recap-projexa-14b): system = istruzioni fisse, user = compito.
 // Modello assente sulla VM: si passa al successivo di [scelto, recap-projexa, OLLAMA_RECAP_MODEL].
-async function recapProjexaChat(sistema, compito, numPredict, modello = RECAP_PROJEXA_MODEL) {
+// timeoutMs: limite della singola richiesta (il testo finale ne ha uno più ampio, vedi sotto).
+async function recapProjexaChat(sistema, compito, numPredict, modello = RECAP_PROJEXA_MODEL, { timeoutMs = 0 } = {}) {
   const base = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
   // Contesto fisso (cache e niente ricarica del modello); più grande solo se il compito non ci sta.
   const numCtx = Math.max(RECAP_PROJEXA_CTX, ctxFor(sistema.length + compito.length, numPredict));
@@ -1250,7 +1256,7 @@ async function recapProjexaChat(sistema, compito, numPredict, modello = RECAP_PR
     let model = catena[i];
     const corpo = () => ({ model, messages, stream: false, think: false, keep_alive: RECAP_PROJEXA_KEEP_ALIVE,
       options: { num_ctx: numCtx, num_predict: numPredict, temperature: 0.3, num_thread: OLLAMA_RECAP_THREADS } });
-    const timeout = Number(process.env.OLLAMA_TIMEOUT_MS) || 2 * 60 * 60 * 1000;
+    const timeout = timeoutMs || Number(process.env.OLLAMA_TIMEOUT_MS) || 2 * 60 * 60 * 1000;
     let response;
     try {
       await liberaRamOllama(model, base);
@@ -1264,8 +1270,10 @@ async function recapProjexaChat(sistema, compito, numPredict, modello = RECAP_PR
       }
     } catch (error) {
       if (signal.aborted) throw error;
-      const reason = error.name === 'TimeoutError' ? 'tempo di attesa scaduto' : (error.code || error.message);
-      throw httpError(503, `Projexa: modello locale non raggiungibile (${reason})`);
+      const scaduto = error.name === 'TimeoutError';
+      const reason = scaduto ? 'tempo di attesa scaduto' : (error.code || error.message);
+      // OLLAMA_TIMEOUT: il recap a fine registrazione non lo ripete all'infinito (processFinalize).
+      throw Object.assign(httpError(503, `Projexa: modello locale non raggiungibile (${reason})`), scaduto ? { codice: 'OLLAMA_TIMEOUT' } : {});
     }
     const data = response.data || {};
     if (!response.ok) throw httpError(502, `Projexa: ${data.error || `errore ${response.status}`}`);
@@ -1335,6 +1343,50 @@ export async function askOllamaJson(prompt, { primo = null } = {}) {
 // appunti (misura 2026-10-21, Projexa 14B: pezzi ~10 minuti, testo finale ~25).
 const PESO_TESTO_FINALE = 2.5;
 
+// Appunti dei pezzi salvati su disco (2026-10-23). Un errore sul testo finale (2026-10-22:
+// tempo scaduto dopo 2 ore) faceva ripetere ogni volta anche tutti i pezzi, ~2 ore di VM a
+// tentativo, all'infinito. Ora ogni appunto si salva cifrato: un nuovo tentativo, un riavvio
+// del server o il Recap interno della stessa riunione (stessi pezzi, stesso modello) li
+// rileggono e rifanno solo il testo finale. Chiave = hash di modello + istruzioni + pezzo:
+// trascrizione o istruzioni cambiate = appunti nuovi. Cancellati dopo APPUNTI_GIORNI giorni.
+// Cartella fuori da backend/ (il deploy la sincronizza con --delete).
+const APPUNTI_DIR = process.env.RECAP_APPUNTI_DIR || path.join(process.env.AI_TEMP_DIR
+  || (process.platform === 'win32' ? path.join(os.tmpdir(), 'projexa-ai-temp') : '/opt/projexa/ai-temp'), 'recap-appunti');
+const APPUNTI_GIORNI = 3;
+let appuntiPuliti = 0;
+const fileAppunti = (modello, sistema, compito) =>
+  path.join(APPUNTI_DIR, `${createHash('sha256').update(`${modello}\n${OLLAMA_NOTES_TOKENS}\n${sistema}\n${compito}`).digest('hex')}.txt`);
+
+async function appuntoSalvato(file) {
+  try {
+    const t = await fsp.readFile(file, 'utf8');
+    if (!isEncrypted(t)) return t || null;
+    const chiaro = decryptValue(t);
+    return isEncrypted(chiaro) ? null : chiaro; // chiave cambiata: si rifà il pezzo
+  } catch { return null; }
+}
+
+async function salvaAppunto(file, testo) {
+  try {
+    await fsp.mkdir(APPUNTI_DIR, { recursive: true });
+    await fsp.writeFile(file, encryptValue(String(testo || '')), 'utf8');
+    if (Date.now() - appuntiPuliti > 3600000) {
+      appuntiPuliti = Date.now();
+      const limite = Date.now() - APPUNTI_GIORNI * 86400000;
+      for (const nome of await fsp.readdir(APPUNTI_DIR)) {
+        const f = path.join(APPUNTI_DIR, nome);
+        const st = await fsp.stat(f).catch(() => null);
+        if (st && st.mtimeMs < limite) await fsp.rm(f, { force: true }).catch(() => {});
+      }
+    }
+  } catch (e) {
+    console.warn(`[RECAP] appunto non salvato su disco (${e.message}): un nuovo tentativo lo rifarà`);
+  }
+}
+
+// Testo finale (recap dagli appunti): più tempo dei pezzi, è la richiesta più lunga.
+const RECAP_FINALE_TIMEOUT_MS = Number(process.env.OLLAMA_RECAP_FINALE_TIMEOUT_MS) || 4 * 60 * 60 * 1000;
+
 // Recap cliente / Recap interno di una riunione con recap-projexa.
 async function askRecapProjexa(buildPrompt, transcript, contesto, ai, lavoro = { fase: () => {} }) {
   const sistema = await istruzioniRecapProjexa();
@@ -1342,10 +1394,17 @@ async function askRecapProjexa(buildPrompt, transcript, contesto, ai, lavoro = {
   const fromNotes = async (pieceChars) => {
     const { messaggi } = pezziRecapRiunione(transcript, contesto, pieceChars);
     const notes = [];
+    let giaFatti = 0;
     for (const [i, p] of messaggi.entries()) {
       lavoro.fase(`appunti, pezzo ${i + 1} di ${messaggi.length}`, i, messaggi.length + PESO_TESTO_FINALE);
-      notes.push((await recapProjexaChat(sistema, p, OLLAMA_NOTES_TOKENS, modello)).text);
+      const file = fileAppunti(modello, sistema, p);
+      const salvato = await appuntoSalvato(file);
+      if (salvato) { notes.push(salvato); giaFatti += 1; continue; }
+      const testo = (await recapProjexaChat(sistema, p, OLLAMA_NOTES_TOKENS, modello)).text;
+      await salvaAppunto(file, testo);
+      notes.push(testo);
     }
+    if (giaFatti) console.log(`[RECAP] ${contesto ? `«${contesto}»: ` : ''}${giaFatti} appunti su ${messaggi.length} già pronti, riletti dal disco`);
     pezzi = messaggi.length;
     return testoDagliAppunti(notes);
   };
@@ -1353,11 +1412,12 @@ async function askRecapProjexa(buildPrompt, transcript, contesto, ai, lavoro = {
   const { plain, unico } = pezziRecapRiunione(transcript, contesto);
   let prompt = await buildPrompt(unico ? plain : await fromNotes(OLLAMA_MEETING_CHUNK_CHARS));
   lavoro.fase('testo finale', pezzi, pezzi + PESO_TESTO_FINALE);
-  let result = await recapProjexaChat(sistema, prompt, OLLAMA_OUTPUT_TOKENS, modello);
+  console.log(`[RECAP] testo finale con ${modello}: ${pezzi ? `${pezzi} pezzi di appunti` : 'trascrizione intera'}, prompt di ~${Math.round(prompt.length / OLLAMA_CHARS_PER_TOKEN)} token`);
+  let result = await recapProjexaChat(sistema, prompt, OLLAMA_OUTPUT_TOKENS, modello, { timeoutMs: RECAP_FINALE_TIMEOUT_MS });
   if (result.truncated) {
     console.warn('⚠️ [RECAP] Ollama: nuovo tentativo riassumendo la trascrizione a pezzi più piccoli');
     prompt = await buildPrompt(await fromNotes(Math.floor(OLLAMA_MEETING_CHUNK_CHARS / 2)));
-    result = await recapProjexaChat(sistema, prompt, OLLAMA_OUTPUT_TOKENS, modello);
+    result = await recapProjexaChat(sistema, prompt, OLLAMA_OUTPUT_TOKENS, modello, { timeoutMs: RECAP_FINALE_TIMEOUT_MS });
     if (result.truncated) throw httpError(502, 'Projexa: la riunione è troppo lunga per il modello locale');
   }
   return { text: result.text, label: etichettaRecapProjexa(ai), model: result.model };
