@@ -15,6 +15,7 @@ import express from 'express';
 import crypto from 'crypto';
 import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
+import { notificaMySupportScript } from '../jobs/notifiche.js';
 
 const router = express.Router();
 const SCOPO = 'mysupport_push';
@@ -110,6 +111,34 @@ router.post('/token', requireAuth, async (req, res) => {
   } catch (e) {
     if (tabellaMancante(res, e)) return;
     console.error('[MYSUPPORT PUSH] genera token:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Avviso dallo script del PC (2026-10-23): oggi solo «login Databricks scaduto», che prima si
+// vedeva soltanto nel log del PC (e ci si accorgeva giorni dopo dal file vecchio). Stesso token
+// del push. Body: { tipo: 'login_databricks', dettaglio? } -> notifica in campanella.
+const AVVISI = {
+  login_databricks: {
+    titolo: 'MySupport: login Databricks scaduto',
+    messaggio: 'Il report MySupport del PC non riesce più ad accedere a Databricks e i dati MySupport non si aggiornano. Rifai il login dal PC: comando «databricks auth login» nel file LEGGIMI.md dello script (Documenti\\Claude\\Report\\Programmi).'
+  }
+};
+router.post('/avviso', async (req, res) => {
+  try {
+    if (pushLimitato('ip:' + (req.ip || ''))) return res.status(429).json({ error: 'Troppe richieste: riprova tra qualche minuto' });
+    const tok = await utenteDaTokenPush(req);
+    if (!tok) return res.status(401).json({ error: 'Token non valido o revocato: generane uno nuovo in Impostazioni › DataBricks' });
+    const tipo = String((req.body && req.body.tipo) || '');
+    const a = AVVISI[tipo];
+    if (!a) return res.status(400).json({ error: 'Avviso sconosciuto' });
+    const dettaglio = String((req.body && req.body.dettaglio) || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    await notificaMySupportScript({ tenantId: tok.tenant_id, userId: tok.user_id, tipo, titolo: a.titolo, messaggio: dettaglio ? `${a.messaggio} Errore: ${dettaglio}` : a.messaggio });
+    console.warn(`[MYSUPPORT PUSH] utente ${tok.user_id}: avviso dallo script del PC (${tipo})`);
+    res.json({ ok: true });
+  } catch (e) {
+    if (tabellaMancante(res, e)) return;
+    console.error('[MYSUPPORT PUSH] avviso:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

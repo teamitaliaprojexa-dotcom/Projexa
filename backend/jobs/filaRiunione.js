@@ -44,6 +44,9 @@ async function scrivi(nome, fila) {
   }
 }
 
+// File in corso o in attesa su questo server (aggiornamenti automatici della VM: niente riavvio).
+export const fileRiunioniAttive = () => attive.size;
+
 // true se per la riunione c'è un passo di quel tipo ancora da fare (o in corso) in una fila:
 // la scheda Recap interno non lo mostra «interrotto» e «Genera» non lo raddoppia.
 export function inFila(user, idCalendar, tipo) {
@@ -76,6 +79,14 @@ async function eseguiPasso(fila, passo) {
   }
 }
 
+// Projexa irraggiungibile per poco (Ollama riavviato o in ricarica: ECONNRESET, ECONNREFUSED):
+// il passo si ripete dopo una breve attesa invece di finire in errore (2026-10-23: il riavvio di
+// Ollama aveva fatto fallire due Recap interni in fila). Non il tempo scaduto: rifarlo subito
+// darebbe lo stesso esito.
+const TENTATIVI_PASSO = 3;
+const ATTESA_RIPROVA_MS = 2 * 60000;
+const temporaneo = (e) => e.status === 503 && e.codice !== 'OLLAMA_TIMEOUT' && /non raggiungibile/i.test(String(e.message || ''));
+
 async function esegui(nome, fila) {
   try {
     while (fila.passi.length) {
@@ -83,6 +94,13 @@ async function esegui(nome, fila) {
       try {
         await eseguiPasso(fila, passo);
       } catch (e) {
+        passo.tentativi = Number(passo.tentativi || 0) + 1;
+        if (temporaneo(e) && passo.tentativi < TENTATIVI_PASSO) {
+          console.warn(`[FILA RIUNIONE] ${fila.idCalendar}: ${passo.nome}, tentativo ${passo.tentativi} non riuscito (${e.message}): riprovo tra ${ATTESA_RIPROVA_MS / 60000} minuti`);
+          await scrivi(nome, fila);
+          await new Promise((r) => setTimeout(r, ATTESA_RIPROVA_MS));
+          continue;
+        }
         console.error(`❌ [FILA RIUNIONE] ${fila.idCalendar}: ${passo.nome} non generato: ${e.message}`);
         if (passo.notifica) {
           await notificaAutomazioneAi({

@@ -19,6 +19,7 @@
 import db from '../config/database.js';
 import { eseguiAggiornaIntegrazioni } from './aggiornaIntegrazioni.js';
 import { eseguiBackupDb, eseguiCopiaStaging, eseguiPuliziaVm } from './scriptVm.js';
+import { eseguiAggiornamentiVm } from './aggiornamentiVm.js';
 import { eseguiNotificheScadenze } from './notifiche.js';
 import { eseguiNotificheProgetti, eseguiDigestSettimanale } from './pmJobs.js';
 import { eseguiRecapBatch } from './recapBatch.js';
@@ -46,6 +47,9 @@ const JOBS = {
   copia_staging_neon: () => eseguiCopiaStaging(),
   // Pulizia di cache e log della VM che non si puliscono da soli (vedi scriptVm.js).
   pulizia_vm: () => eseguiPuliziaVm(),
+  // Aggiornamenti automatici della VM (jobs/aggiornamentiVm.js): sicurezza + kernel, riavvio
+  // solo se serve e la VM è libera, controllo dei servizi, esito in campanella a utente_config.
+  aggiornamenti_vm: (riga) => eseguiAggiornamentiVm(riga),
   // Notifiche delle scadenze (To-Do), per tutti i tenant: vedi jobs/notifiche.js.
   notifiche_scadenze: () => eseguiNotificheScadenze(),
   // Funzioni da PM senior (jobs/pmJobs.js): fotografia giornaliera e notifiche proattive dei
@@ -86,6 +90,7 @@ export const INFO_JOB = {
   backup_db: { etichetta: 'Backup database VM su Object Storage', jira: false },
   copia_staging_neon: { etichetta: 'Copia database VM su staging Neon', jira: false },
   pulizia_vm: { etichetta: 'Pulizia cache e log della VM', jira: false },
+  aggiornamenti_vm: { etichetta: 'Aggiornamenti di sicurezza e kernel della VM (riavvio solo se libera)', jira: false },
   notifiche_scadenze: { etichetta: 'Notifiche delle scadenze (To-Do)', jira: false },
   pm_notifiche_progetti: { etichetta: 'Salute progetti: notifiche e fotografia giornaliera', jira: false },
   pm_digest_settimanale: { etichetta: 'Digest settimanale via email ai PM', jira: false },

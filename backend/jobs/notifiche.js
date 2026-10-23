@@ -311,6 +311,42 @@ export async function notificaLavoroAi({ tenantId, userId, lavoroId, operazione,
 }
 
 // ----------------------------------------------------------------------------
+// SCRIPT MYSUPPORT DEL PC (routes/mysupportPush.js, POST /api/mysupport/push/avviso,
+// 2026-10-23): login Databricks scaduto. Una notifica per utente, tipo e giorno: lo script gira
+// 3 volte al giorno e le esecuzioni successive aggiornano solo il testo, senza farla tornare
+// da leggere (il giorno dopo, se il problema resta, ne arriva una nuova).
+// ----------------------------------------------------------------------------
+export async function notificaMySupportScript({ tenantId, userId, tipo, titolo, messaggio }) {
+  const giorno = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' }); // AAAA-MM-GG
+  try {
+    await notifDb.query(
+      `INSERT INTO notifiche (tenant_id, user_id, fonte, titolo, messaggio, tabella, riga_id, chiave_dedup)
+       VALUES ($1, $2, 'mysupport', $3, $4, NULL, NULL, $5)
+       ON CONFLICT (tenant_id, user_id, chiave_dedup) WHERE chiave_dedup IS NOT NULL
+       DO UPDATE SET titolo = EXCLUDED.titolo, messaggio = EXCLUDED.messaggio, aggiornata_il = now()`,
+      [tenantId, userId, cifra(String(titolo).slice(0, 300)), cifra(String(messaggio || '').slice(0, 600)), `mysupport|${tipo}|${giorno}`]
+    );
+  } catch (e) {
+    if (e.code === '42P01') { avvisaTabellaMancante(); return; }
+    console.error('[NOTIFICHE] Notifica dello script MySupport non creata:', e.message);
+  }
+}
+
+// ----------------------------------------------------------------------------
+// SISTEMA (jobs/aggiornamentiVm.js, 2026-10-23): esito degli aggiornamenti automatici della VM,
+// al proprietario della schedulazione (admin del tenant PROJEXA).
+// ----------------------------------------------------------------------------
+export async function notificaSistema({ tenantId, userId, titolo, messaggio }) {
+  if (!tenantId || !userId) return;
+  try {
+    await inserisci({ tenantId, userId, fonte: 'sistema', titolo: String(titolo).slice(0, 300), messaggio: String(messaggio || '').slice(0, 1500), tabella: null, rigaId: null });
+  } catch (e) {
+    if (e.code === '42P01') { avvisaTabellaMancante(); return; }
+    console.error('[NOTIFICHE] Notifica di sistema non creata:', e.message);
+  }
+}
+
+// ----------------------------------------------------------------------------
 // ADD-IN OUTLOOK (routes/outlookAddin.js): Issue creata dall'analisi di un'email.
 // ----------------------------------------------------------------------------
 export async function notificaOutlook({ tenantId, userId, titolo, messaggio, tabella = 'issue', rigaId = null }) {

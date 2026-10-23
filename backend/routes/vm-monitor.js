@@ -227,7 +227,7 @@ function downsample(points, n) {
 // ----------------------------------------------------------------------------
 // SERVIZI E DATABASE
 // ----------------------------------------------------------------------------
-function serviceUnits() {
+export function serviceUnits() {
   const units = [
     { unit: 'caddy', label: 'Caddy (HTTPS)' },
     { unit: 'postgresql-18', label: 'PostgreSQL' },
@@ -248,7 +248,7 @@ function serviceUnits() {
   return units;
 }
 
-function serviceStates(units) {
+export function serviceStates(units) {
   return new Promise((resolve) => {
     execFile('systemctl', ['is-active', ...units.map((u) => u.unit)], { timeout: 5000 }, (err, stdout) => {
       const lines = String(stdout || '').trim().split('\n');
@@ -510,7 +510,7 @@ const AGG_LOG = '/var/tmp/projexa-aggiornamenti.log';
 const AGG_STATO = '/var/tmp/projexa-aggiornamenti.json'; // { pid, avviato, email }
 let ultimaVerifica = null; // { letto, pacchetti, riavvio, errore }
 
-function sudoDnf(args, timeout) {
+export function sudoDnf(args, timeout) {
   return new Promise((resolve) => {
     execFile('sudo', ['-n', 'dnf', ...args], { timeout, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({ codice: err ? (typeof err.code === 'number' ? err.code : -1) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') });
@@ -529,7 +529,7 @@ function pacchettiDa(stdout) {
 }
 
 // dnf needs-restarting -r: codice 1 = serve il riavvio della VM, 0 = no.
-async function riavvioNecessario() {
+export async function riavvioNecessario() {
   const r = await sudoDnf(['needs-restarting', '-r'], 60000);
   if (r.codice === 0) return { necessario: false };
   if (r.codice === 1) return { necessario: true, motivo: r.stdout.trim().split('\n').slice(0, 8).join('\n') };
@@ -557,7 +557,7 @@ function pidVivo(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
 
-function statoInstallazione() {
+export function statoInstallazione() {
   let info = null;
   try { info = JSON.parse(fs.readFileSync(AGG_STATO, 'utf8')); } catch { return null; }
   const testo = read(AGG_LOG);

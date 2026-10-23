@@ -13962,8 +13962,8 @@
             const delBtn = document.getElementById('notifDelBtn');
             const countEl = document.getElementById('notifCount');
             const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines', progetto: 'fas fa-gauge-high', ai: 'fas fa-wand-magic-sparkles', cliente: 'fas fa-handshake', capacita: 'fas fa-people-group', outlook: 'fas fa-envelope-open-text' };
-            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione', progetto: 'Progetto', ai: 'AI', cliente: 'Azione cliente', capacita: 'Capacità', outlook: 'Outlook' };
+            const ICONE = { jira: 'fab fa-jira', qlik: 'fas fa-chart-line', scadenza: 'fas fa-hourglass-half', riunione: 'fas fa-microphone-lines', progetto: 'fas fa-gauge-high', ai: 'fas fa-wand-magic-sparkles', cliente: 'fas fa-handshake', capacita: 'fas fa-people-group', outlook: 'fas fa-envelope-open-text', mysupport: 'fas fa-headset', sistema: 'fas fa-shield-halved' };
+            const ETICHETTE = { jira: 'Jira', qlik: 'Qlik', scadenza: 'Scadenza', riunione: 'Riunione', progetto: 'Progetto', ai: 'AI', cliente: 'Azione cliente', capacita: 'Capacità', outlook: 'Outlook', mysupport: 'MySupport', sistema: 'Sistema' };
             let elenco = [];
             let ultimoConteggio = null;
 

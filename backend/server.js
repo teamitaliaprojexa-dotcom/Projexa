@@ -38,6 +38,7 @@ import { regoleColonne, metaColonna, etichetteColonne, etichetteValori, opzioniC
 import { kickTranscriptionWorker, speakerName, stripMarkdown } from './jobs/meetingTranscription.js';
 import { rottaAi, avviaLavoriAi } from './jobs/aiLavori.js';
 import { riprendiFileRiunioni } from './jobs/filaRiunione.js';
+import { completaDopoRiavvio } from './jobs/aggiornamentiVm.js';
 import { infoAi } from './config/aiFunzioni.js';
 import aiLavoriRoutes from './routes/aiLavori.js';
 import { askAiProvider, askOllamaRecap } from './routes/ai.js';
@@ -12937,6 +12938,9 @@ app.listen(PORT, () => {
   // Recap, Recap interno, RAID/CR in Immediato (AI Automatizza, pulsante Genera) interrotti dal
   // riavvio: ripartono dal passo interrotto (jobs/filaRiunione.js), dopo la ripresa dei lavori AI.
   setTimeout(() => riprendiFileRiunioni().catch((e) => console.error('❌ [FILA RIUNIONE] ripresa:', e.message)), 20000);
+  // VM riavviata dagli aggiornamenti automatici (jobs/aggiornamentiVm.js): controllo dei servizi
+  // e notifica in campanella, solo se il riavvio l'ha fatto quel job.
+  completaDopoRiavvio();
 });
 
 // Graceful shutdown
