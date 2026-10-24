@@ -1,6 +1,6 @@
 ---
 name: projexa-deploy-setup
-description: Come è distribuito Projexa (Render/branch/OneDrive) e i tranelli relativi
+description: Come è distribuito Projexa (Render/branch/cartella locale) e i tranelli relativi
 metadata:
   type: project
 ---
@@ -13,4 +13,4 @@ Setup di deploy di Projexa (aggiornato 2026-08-17):
 - **`JWT_SECRET` su Render**: obbligatorio (>= 16 char) perché `backend/config/jwt.js` fa fail-fast. Se manca, il server non parte (era il vecchio comportamento col fallback debole a mascherarlo). Non cambiarlo o si invalidano i token.
 - **URL frontend**: `API_URL`/`BACKEND_URL` ora sono localhost-aware: su localhost usano l'origine, altrimenti puntano a `https://projexa-4mix.onrender.com`.
 
-⚠️ **Tranello OneDrive**: il repo è dentro OneDrive (`C:\Users\y.dacco\OneDrive - TeamSystem...`). OneDrive sincronizza la cartella `.git` e **ripristina i commit locali**, facendo divergere locale e remote (GitHub Desktop mostra file "non committati" anche dopo il push). I push arrivano comunque su GitHub. Rimedio definitivo: spostare il repo fuori da OneDrive e ri-clonare. Vedi [[projexa-security-hardening]].
+**Cartella del progetto (dal 2026-10-24)**: `C:\Users\ydacc\Documents\Projexa\Projexa_Staging\Projexa\`, fuori da OneDrive. La vecchia cartella dentro OneDrive (`C:\Users\y.dacco\OneDrive - TeamSystem...`) non si usa più: lì OneDrive sincronizzava la cartella `.git` e ripristinava i commit locali, facendo divergere locale e remote. Vedi [[projexa-security-hardening]].
