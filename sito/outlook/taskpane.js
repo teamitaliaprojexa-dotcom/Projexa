@@ -319,6 +319,7 @@
       r.segnalazioni.forEach(function (s) {
         var k = el('div', null, 'px-card');
         var esito = s.esito === 'creata' ? ['Issue creata', 'px-verde']
+          : s.esito === 'aggiornata' ? ['Issue esistente aggiornata', 'px-verde']
           : s.esito === 'gia_presente' ? ['Già presente', 'px-arancio']
             : s.esito === 'interna' ? ['Email interna: Issue non creata', 'px-arancio'] : ['Non creata', 'px-rosso'];
         var riga = el('div');
@@ -326,6 +327,10 @@
         riga.appendChild(el('span', s.priorita + ' · ' + s.categoria, 'px-tag'));
         k.appendChild(riga);
         k.appendChild(el('div', s.descrizione));
+        if (s.esito === 'aggiornata') {
+          if (s.issueDescrizione) k.appendChild(el('div', 'Issue esistente [' + (s.issueStato || '') + ']: ' + s.issueDescrizione, 'px-muted'));
+          k.appendChild(el('div', 'Aggiornato: ' + (s.campi || []).join(', ') + (s.integrazione ? ' — aggiunto: ' + s.integrazione : ''), 'px-muted'));
+        }
         if (s.esito === 'gia_presente' && s.issueDescrizione) k.appendChild(el('div', 'Issue esistente [' + (s.issueStato || '') + ']: ' + s.issueDescrizione, 'px-muted'));
         if (s.errore) k.appendChild(el('div', s.errore, 'px-muted'));
         box.appendChild(k);

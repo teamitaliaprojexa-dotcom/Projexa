@@ -34,6 +34,7 @@ import { titoloVoce } from '../config/dedupVoci.js';
 import { askAiProvider, inviaBatchAi, statoBatchAi, isBatchNonDisponibile, ollamaPost, ollamaConPrecedenza, senzaRagionamento } from '../routes/ai.js';
 import { nomiClientiProgetti } from './notifiche.js';
 import { analisiPmAbilitata, aiScelta } from './analisiPm.js';
+import { controllaIssueDoppie } from './issueDoppie.js';
 
 const CAMPO = 'associazione autom. todolist e raid';
 const AI = { chatgpt: 'chatgpt', gpt: 'chatgpt', claude: 'claude', gemini: 'gemini', mistral: 'mistral' };
@@ -630,15 +631,20 @@ async function insegnante(report) {
 }
 
 export async function eseguiAssociaTodoRaid() {
-  const report = { inviati: 0, locali: 0, raccolti: 0, inAttesa: 0, collegate: 0, saltati: 0, insegnante: 0, errori: [] };
+  const report = { inviati: 0, locali: 0, raccolti: 0, inAttesa: 0, collegate: 0, saltati: 0, insegnante: 0, issueDoppie: 0, errori: [] };
   const esiti = [];
   await raccogli(report, esiti);
   try { await riprendiLocali(report, esiti); } catch (e) { report.errori.push(`ripresa Projexa: ${e.message}`); }
   await invia(report, esiti);
   try { await insegnante(report); } catch (e) { report.errori.push(`insegnante: ${e.message}`); }
   try { await completaDescrizioni(report); } catch (e) { report.errori.push(`descrizioni «Collegato a»: ${e.message}`); }
+  // Issue doppie dello stesso cliente (jobs/issueDoppie.js, 2026-10-26): stessa AI, a ogni giro.
+  try {
+    const utenti = (await utentiAttivi()).map((u) => ({ ...u, aiNome: /^projexa/i.test(u.ai) ? 'Projexa' : AI[u.ai.toLowerCase()] })).filter((u) => u.aiNome);
+    await controllaIssueDoppie(utenti, report);
+  } catch (e) { report.errori.push(`issue doppie: ${e.message}`); }
   await notificaEsiti(esiti);
-  const testo = `Batch inviati ${report.inviati}, Projexa ${report.locali}, risultati raccolti ${report.raccolti}, in attesa ${report.inAttesa}, voci collegate ${report.collegate}${report.insegnante ? `, risposte dell'insegnante ${report.insegnante}` : ''}${report.saltati ? `, utenti con AI non utilizzabile ${report.saltati}` : ''}${report.errori.length ? ` · errori: ${report.errori.slice(0, 5).join(' | ')}` : ''}`;
+  const testo = `Batch inviati ${report.inviati}, Projexa ${report.locali}, risultati raccolti ${report.raccolti}, in attesa ${report.inAttesa}, voci collegate ${report.collegate}${report.insegnante ? `, risposte dell'insegnante ${report.insegnante}` : ''}${report.issueDoppie ? `, Issue doppie messe in revisione ${report.issueDoppie}` : ''}${report.saltati ? `, utenti con AI non utilizzabile ${report.saltati}` : ''}${report.errori.length ? ` · errori: ${report.errori.slice(0, 5).join(' | ')}` : ''}`;
   console.log(`[ASSOCIAZIONE] ${testo}`);
   // ok:false = esito «errori» nella pagina Schedulazioni (dettaglio in ultimo_report).
   return { ok: report.errori.length === 0, riepilogo: testo, ...report };

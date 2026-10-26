@@ -1,16 +1,20 @@
 ---
 name: projexa-deploy-setup
-description: Come è distribuito Projexa (Render/branch/OneDrive) e i tranelli relativi
+description: Come è distribuito Projexa (VM Oracle, branch master, cartelle sul PC personale)
 metadata:
   type: project
 ---
 
-Setup di deploy di Projexa (aggiornato 2026-08-17):
+Setup di deploy di Projexa (aggiornato 2026-10-25):
 
-- **Backend**: Render, servizio su `https://projexa-4mix.onrender.com`. Serve ANCHE il frontend statico (`server.js` fa `express.static(../sito)`), quindi sito + API sono sullo stesso dominio se si usa l'URL onrender.
-- **Branch di deploy**: dal 2026-08-17 Render distribuisce da **`master`**, non da `main`. `main` è rimasto indietro/incasinato (mix di "Add files via upload" web + push desktop) e un merge `master`→`main` dà conflitti. Il codice buono è su `master`.
-- **GitHub Pages**: esiste un deploy `github-pages` (dominio `github.io`) che serve il frontend da `main` → è stale/rotto. **Usare sempre `https://projexa-4mix.onrender.com/login.html`**, NON l'URL github.io.
-- **`JWT_SECRET` su Render**: obbligatorio (>= 16 char) perché `backend/config/jwt.js` fa fail-fast. Se manca, il server non parte (era il vecchio comportamento col fallback debole a mascherarlo). Non cambiarlo o si invalidano i token.
-- **URL frontend**: `API_URL`/`BACKEND_URL` ora sono localhost-aware: su localhost usano l'origine, altrimenti puntano a `https://projexa-4mix.onrender.com`.
+- **Produzione**: VM Oracle Cloud (`129.152.0.49`, utente `opc`), dominio `https://www.projexa.it`. Caddy (HTTPS) → Node su `127.0.0.1:3001` gestito da PM2. Il backend serve ANCHE il frontend statico (`server.js` fa `express.static(../sito)`). Render è dismesso: gli URL `onrender.com` non vanno più usati.
+- **Branch di deploy**: `master`. Il push su `master` avvia `.github/workflows/deploy-oracle.yml` (rsync, `npm ci`, `pm2 reload`). `main` è rimasto indietro: il codice buono è su `master`.
+- **GitHub Pages**: il deploy `github-pages` (dominio `github.io`) serve un frontend vecchio da `main` → non usarlo.
+- **`JWT_SECRET`**: obbligatorio (>= 16 char) perché `backend/config/jwt.js` fa fail-fast. Non cambiarlo o si invalidano i token.
+- **Cartelle sul PC personale** (`C:\Users\ydacc\`, il repo non è più in OneDrive):
+  - `Documents\Projexa\Projexa_Staging\Projexa` = sviluppo/staging
+  - `Documents\Projexa\Projexa_Prod\Projexa` = versione da pubblicare
+  - `Documents\GitHub\Projexa` = clone git da cui si fa il push; `Projexa_Prod\ZZ-copia file Github.bat` copia Prod qui (senza `Supporto`) e fa commit + push su `master`.
+- **Chiave SSH**: `C:\Users\ydacc\.ssh\ssh-key-2026-09-25.key` (usata da `deploy/oracle/db-tunnel.ps1` e `oracle-console.ps1`).
 
-⚠️ **Tranello OneDrive**: il repo è dentro OneDrive (`C:\Users\y.dacco\OneDrive - TeamSystem...`). OneDrive sincronizza la cartella `.git` e **ripristina i commit locali**, facendo divergere locale e remote (GitHub Desktop mostra file "non committati" anche dopo il push). I push arrivano comunque su GitHub. Rimedio definitivo: spostare il repo fuori da OneDrive e ri-clonare. Vedi [[projexa-security-hardening]].
+Vedi [[projexa-security-hardening]].

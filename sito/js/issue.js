@@ -546,7 +546,7 @@ class IssueManager {
                 '-- Seleziona richiedente --', set('richiedente')),
             categoria: () => fixedSelect('categoria', ['Bug', 'Richiesta', 'Configurazione', 'Report', 'Altro']),
             stato: () => {
-                const select = fixedSelect('stato', ['Aperto', 'in Lavorazione', 'Chiuso', 'Sospeso']);
+                const select = fixedSelect('stato', ['Aperto', 'in Lavorazione', 'In revisione', 'Chiuso', 'Sospeso']);
                 // Stato e data di chiusura vanno insieme: "Chiuso" mette la data di oggi
                 // (se manca), qualunque altro stato la svuota.
                 select.addEventListener('change', () => {

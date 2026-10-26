@@ -843,7 +843,7 @@ const chiusa = (stato) => /chius|risolt|annull|complet|done|closed|resolved/i.te
 async function datiCliente(tenantId, clientId) {
   const p = [tenantId, clientId];
   const [issue, mysupport, jira, quotazioni] = await Promise.all([
-    righe(`SELECT id::text AS id, project_id::text AS project_id, data_segnalazione, descrizione, categoria, stato, priorita, owner, mysupport, tkt_jira, deadline, data_chiusura
+    righe(`SELECT id::text AS id, user_id::text AS user_id, project_id::text AS project_id, data_segnalazione, descrizione, categoria, stato, priorita, owner, mysupport, tkt_jira, deadline, data_chiusura, note
              FROM issue WHERE tenant_id = $1 AND client_id::text = $2 LIMIT 3000`, p),
     righe(`SELECT codice_quesito, stato_finale, operatore, data_apertura, data_chiusura, modulo, urgenza, procedura
              FROM mysupport WHERE tenant_id = $1 AND client_id::text = $2 LIMIT 5000`, p),
@@ -853,7 +853,11 @@ async function datiCliente(tenantId, clientId) {
              FROM cl_quotazioni WHERE tenant_id = $1 AND client_id::text = $2 LIMIT 2000`, p)
   ]);
   const recenti = (l, campo) => [...l].sort((x, y) => String(y[campo] || '').localeCompare(String(x[campo] || '')));
-  return { issue: recenti(issue, 'data_segnalazione'), mysupport: recenti(mysupport, 'data_apertura'), jira: recenti(jira, 'data_apertura'), quotazioni: recenti(quotazioni, 'data_richiesta') };
+  // Codice delle Issue aperte nel prompt ([I1], [I2]…): l'AI lo usa per dire che una
+  // segnalazione dell'email è già una Issue (segnalazioni[].issue, vedi creaIssue).
+  const ordinate = recenti(issue, 'data_segnalazione');
+  ordinate.filter((x) => !chiusa(x.stato)).forEach((x, i) => { x.rif = `I${i + 1}`; });
+  return { issue: ordinate, mysupport: recenti(mysupport, 'data_apertura'), jira: recenti(jira, 'data_apertura'), quotazioni: recenti(quotazioni, 'data_richiesta') };
 }
 
 function testoDatiCliente(d) {
@@ -861,7 +865,7 @@ function testoDatiCliente(d) {
   const aperte = d.issue.filter((x) => !chiusa(x.stato));
   L.push(`ISSUE DEL CLIENTE (aperte ${aperte.length}, ultime chiuse comprese fino a 40)`);
   for (const x of [...aperte, ...d.issue.filter((y) => chiusa(y.stato))].slice(0, 40)) {
-    L.push(`- ${giorno(x.data_segnalazione)} [${x.stato}] ${x.categoria || ''}/${x.priorita || ''}: ${corto(x.descrizione, 220)}${x.owner ? ` | owner ${x.owner}` : ''}${x.mysupport ? ` | MySupport ${x.mysupport}` : ''}${x.tkt_jira ? ` | Jira ${x.tkt_jira}` : ''}${x.deadline ? ` | scadenza ${giorno(x.deadline)}` : ''}`);
+    L.push(`- ${x.rif ? `[${x.rif}] ` : ''}${giorno(x.data_segnalazione)} [${x.stato}] ${x.categoria || ''}/${x.priorita || ''}: ${corto(x.descrizione, x.rif ? 500 : 220)}${x.owner ? ` | owner ${x.owner}` : ''}${x.mysupport ? ` | MySupport ${x.mysupport}` : ''}${x.tkt_jira ? ` | Jira ${x.tkt_jira}` : ''}${x.deadline ? ` | scadenza ${giorno(x.deadline)}` : ''}`);
   }
   L.push('', 'TICKET MYSUPPORT DEL CLIENTE (più recenti, fino a 40)');
   for (const x of d.mysupport.slice(0, 40)) {
@@ -1144,7 +1148,7 @@ Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, con questa s
 {
   "tipi": ["errore" | "stato_ticket" | "data_rilascio" | "informazioni" | "altro"],
   "sintesi": "2-4 frasi: che cosa chiede o segnala l'email",
-  "segnalazioni": [{"descrizione": "problema distinto, breve e chiaro", "categoria": "Bug|Richiesta|Configurazione|Altro", "priorita": "Alta|Media|Bassa", "mysupport": "codice o stringa vuota", "jira": "codice o stringa vuota"}],
+  "segnalazioni": [{"descrizione": "problema distinto, breve e chiaro", "categoria": "Bug|Richiesta|Configurazione|Altro", "priorita": "Alta|Media|Bassa", "mysupport": "codice o stringa vuota", "jira": "codice o stringa vuota", "issue": "codice [I..] della Issue aperta che è già questa segnalazione, senza parentesi, o stringa vuota", "integrazione": "solo se issue è compilato: informazioni dell'email ASSENTI nella Issue esistente, o stringa vuota"}],
   "ticket": [{"codice": "codice del ticket citato", "risposta": "cosa rispondere su questo ticket, SOLO dai dati"}],
   "riunioni": "cosa è già stato detto o deciso nelle riunioni su questo argomento, con data (stringa vuota se nei PASSAGGI non c'è nulla di pertinente)",
   "release": "release e data di rilascio della correzione SOLO se ricavate dai TICKET COLLEGATI (stringa vuota se nessun ticket collegato ha una release)",
@@ -1152,7 +1156,7 @@ Rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo, con questa s
   "azioni": [{"tipo": "rischio" | "dipendenza" | "todo" | "azione_cliente", "titolo": "breve", "descrizione": "contesto, con codici e date", "scadenza": "AAAA-MM-GG o stringa vuota", "owner": "chi la segue (nome) o stringa vuota", "mitigazione": "solo per i rischi, altrimenti stringa vuota"}],
   "risposta_email": "testo completo della bozza di risposta, senza oggetto"
 }
-"segnalazioni" è vuoto se l'email non segnala errori o malfunzionamenti. "azioni" è vuoto se l'email non porta impegni, scadenze o rischi da registrare (al massimo 5).`;
+"segnalazioni" è vuoto se l'email non segnala errori o malfunzionamenti. Prima di scrivere una segnalazione controlla le ISSUE DEL CLIENTE aperte (codice [I1], [I2]…): se lo stesso problema c'è già, anche descritto con altre parole (per esempio la stessa email analizzata un'altra volta), metti il suo codice in "issue" e in "integrazione" solo le informazioni nuove (dettagli, codici, persone coinvolte) che la Issue non ha ancora; stringa vuota se non c'è niente di nuovo. "azioni" è vuoto se l'email non porta impegni, scadenze o rischi da registrare (al massimo 5).`;
 
 // Azioni proposte dall'AI (rischi, dipendenze, To-Do, azioni a carico del cliente): solo
 // mostrate nel pannello; si registrano in Projexa quando il PM preme «Crea» (POST
@@ -1182,12 +1186,58 @@ const PRIORITA = ['Alta', 'Media', 'Bassa'];
 const TIPI = ['errore', 'stato_ticket', 'data_rilascio', 'informazioni', 'altro'];
 const voce = (v, ammessi, base) => ammessi.find((a) => a.toLowerCase() === minuscola(v)) || base;
 
-// Issue nuove dalle segnalazioni (al massimo 3): già presente se un'issue aperta del cliente
-// ha lo stesso ticket o una descrizione molto simile.
+// Origine scritta nelle note della Issue: «…dall'email di X del gg/mm/aaaa, oggetto «…»».
+const origineEmail = (email) => `dall'email di ${email.mittente.nome || email.mittente.email}${email.data ? ` del ${giorno(email.data)}` : ''}${email.oggetto ? `, oggetto «${email.oggetto}»` : ''}`;
+
+// Segnalazione che l'AI ha riconosciuto in una Issue aperta (2026-10-26: rilanciando la stessa
+// email nasceva un doppione scritto con altre parole). Sulla Issue, se è dell'utente: i ticket
+// mancanti e in fondo alla descrizione le informazioni nuove dell'email. Una volta sola per
+// email (nota con l'origine), così rilanciarla non ripete l'integrazione.
+async function aggiornaIssue(user, ctx, issue, s) {
+  const base = { issueId: issue.id, issueDescrizione: corto(issue.descrizione, 200), issueStato: issue.stato };
+  if (issue.user_id !== user.user_id) return { ...base, esito: 'gia_presente' }; // Issue di un collega: non si tocca
+  const origine = origineEmail(ctx.email);
+  const set = {};
+  if (s.mysupport && !issue.mysupport) set.mysupport = s.mysupport;
+  if (s.jira && !issue.tkt_jira) set.tkt_jira = s.jira;
+  if (!issue.project_id && ctx.progetto) set.project_id = ctx.progetto.id;
+  const giaIntegrata = String(issue.note || '').includes(`Aggiornata da Projexa (Add-in Outlook) ${origine}`);
+  if (s.integrazione && !giaIntegrata && similitudine(issue.descrizione, s.integrazione) < 0.8) {
+    set.descrizione = `${issue.descrizione || ''}\n\n[Aggiornata dall'email del ${giorno(ctx.email.data || oggiIso())}] ${s.integrazione}`.trim();
+  }
+  if (!Object.keys(set).length) return { ...base, esito: 'gia_presente' };
+  if (!giaIntegrata) set.note = `${issue.note ? `${issue.note}\n` : ''}Aggiornata da Projexa (Add-in Outlook) ${origine}`.slice(0, 4000);
+  const { data } = await encryptRowForWrite(db, 'issue', set, { id: issue.id });
+  const cols = Object.keys(data);
+  await db.query(`UPDATE issue SET ${cols.map((c, i) => `"${c}" = $${i + 4}`).join(', ')} WHERE id::text = $1 AND tenant_id = $2 AND user_id = $3`,
+    [issue.id, ctx.tenantId, user.user_id, ...cols.map((c) => data[c])]);
+  Object.assign(issue, set);
+  const campi = Object.keys(set).filter((c) => c !== 'note').map((c) => ({ tkt_jira: 'Jira', mysupport: 'MySupport', project_id: 'progetto', descrizione: 'descrizione' }[c]));
+  await notificaOutlook({
+    tenantId: ctx.tenantId, userId: user.user_id,
+    titolo: `Issue aggiornata da email: ${ctx.clienteNome}`,
+    messaggio: `${campi.join(', ')}: ${corto(s.integrazione || issue.descrizione, 400)}`, tabella: 'issue', rigaId: issue.id
+  });
+  return { ...base, esito: 'aggiornata', campi, integrazione: set.descrizione ? s.integrazione : '' };
+}
+
+// Issue nuove dalle segnalazioni (al massimo 3). Già presente se l'AI l'ha riconosciuta in una
+// Issue aperta del cliente (codice [I..], allora si aggiorna) o se un'issue aperta ha lo stesso
+// ticket o una descrizione molto simile.
 async function creaIssue(user, ctx, segnalazioni) {
   const out = [];
   const aperte = ctx.dati.issue.filter((x) => !chiusa(x.stato));
   for (const s of segnalazioni.slice(0, MAX_ISSUE_PER_EMAIL)) {
+    const riconosciuta = s.issue && aperte.find((x) => x.rif === s.issue);
+    if (riconosciuta) {
+      try {
+        out.push({ ...s, ...(await aggiornaIssue(user, ctx, riconosciuta, s)) });
+      } catch (e) {
+        console.error('[OUTLOOK] Issue non aggiornata:', e.message);
+        out.push({ ...s, esito: 'gia_presente', issueId: riconosciuta.id, issueDescrizione: corto(riconosciuta.descrizione, 200), issueStato: riconosciuta.stato, errore: 'Aggiornamento non riuscito: completala a mano' });
+      }
+      continue;
+    }
     const doppione = aperte.find((x) => (s.mysupport && String(x.mysupport || '').includes(s.mysupport))
       || (s.jira && String(x.tkt_jira || '').toUpperCase().includes(s.jira.toUpperCase()))
       || similitudine(x.descrizione, s.descrizione) >= 0.6);
@@ -1199,7 +1249,7 @@ async function creaIssue(user, ctx, segnalazioni) {
       const riga = {
         tenant_id: ctx.tenantId, user_id: user.user_id, client_id: ctx.clientId, project_id: ctx.progetto ? ctx.progetto.id : null,
         visibilita: 'Cliente', categoria: s.categoria, stato: 'Aperto', priorita: s.priorita, descrizione: s.descrizione,
-        note: corto(`Creata da Projexa (Add-in Outlook) dall'email di ${ctx.email.mittente.nome || ctx.email.mittente.email}${ctx.email.data ? ` del ${giorno(ctx.email.data)}` : ''}${ctx.email.oggetto ? `, oggetto «${ctx.email.oggetto}»` : ''}`, 1000),
+        note: corto(`Creata da Projexa (Add-in Outlook) ${origineEmail(ctx.email)}`, 1000),
         mysupport: s.mysupport || null, tkt_jira: s.jira || null, data_segnalazione: oggiIso(), richiedente: ctx.contattoId || null
       };
       const { data } = await encryptRowForWrite(db, 'issue', riga);
@@ -1208,7 +1258,7 @@ async function creaIssue(user, ctx, segnalazioni) {
         `INSERT INTO issue (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id::text AS id`,
         cols.map((c) => data[c]));
       const id = r.rows[0].id;
-      aperte.push({ id, descrizione: s.descrizione, mysupport: s.mysupport, tkt_jira: s.jira, stato: 'Aperto' });
+      aperte.push({ id, user_id: user.user_id, descrizione: s.descrizione, mysupport: s.mysupport, tkt_jira: s.jira, stato: 'Aperto' });
       out.push({ ...s, esito: 'creata', issueId: id });
       await notificaOutlook({
         tenantId: ctx.tenantId, userId: user.user_id,
@@ -1356,7 +1406,8 @@ async function analizza(req, res) {
       .map((s) => ({
         descrizione: corto(s && s.descrizione, 1000), categoria: voce(s && s.categoria, CATEGORIE, 'Bug'), priorita: voce(s && s.priorita, PRIORITA, 'Media'),
         mysupport: /^\d{5,10}$/.test(String(s && s.mysupport || '').trim()) ? String(s.mysupport).trim() : '',
-        jira: /^[A-Z][A-Z0-9]{1,9}-\d{1,7}$/i.test(String(s && s.jira || '').trim()) ? String(s.jira).trim().toUpperCase() : ''
+        jira: /^[A-Z][A-Z0-9]{1,9}-\d{1,7}$/i.test(String(s && s.jira || '').trim()) ? String(s.jira).trim().toUpperCase() : '',
+        issue: String(s && s.issue || '').replace(/[[\]\s]/g, '').toUpperCase(), integrazione: corto(s && s.integrazione, 1000)
       }))
       .filter((s) => s.descrizione.length >= 10);
     const ctx = { tenantId: trovato.tenantId, clientId: trovato.clientId, clienteNome: trovato.nome, contattoId: trovato.contattoId, progetto, dati, email };
