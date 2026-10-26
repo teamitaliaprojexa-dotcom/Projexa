@@ -9,7 +9,8 @@
         /* Analisi PM (2026-10-20): domande da PM senior proposte di notte dall'AI sulle riunioni
            segnate, da valutare; file per l'addestramento su Google Colab; modello su Ollama della VM.
            Solo per gli utenti di ANALISI_PM_EMAILS (backend/routes/analisiPm.js). */
-        :root { --surface: #fff; --bg: #f5f5f5; --primary: #3B82F6; --ink: #1F2937; --muted: #6B7280; --line: #E5E7EB; --ok: #059669; --bad: #DC2626; --warn: #B45309; --soft: #EFF6FF; }
+        /* Revisione UI (2026-10-26): --ok e --pri-btn più scuri per il contrasto del testo (WCAG 4.5:1). */
+        :root { --surface: #fff; --bg: #f5f5f5; --primary: #3B82F6; --pri-btn: #1D4ED8; --ink: #1F2937; --muted: #6B7280; --line: #E5E7EB; --ok: #047857; --bad: #DC2626; --warn: #B45309; --soft: #EFF6FF; }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; background: var(--bg); color: var(--ink); font-size: 14px; }
         .wrap { max-width: 1180px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
@@ -21,12 +22,16 @@
         .tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line); margin-bottom: 1rem; flex-wrap: wrap; }
         .tabs button { border: 0; background: none; padding: 0.7rem 1rem; font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 3px solid transparent; }
         .tabs button.on { color: var(--primary); border-bottom-color: var(--primary); }
+        .tabs .n { margin-left: 0.3rem; background: var(--soft); color: var(--pri-btn); }
         .card { background: var(--surface); border-radius: 12px; padding: 1.1rem; margin-bottom: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
         .riga { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
-        select, input[type=text] { font: inherit; padding: 0.45rem 0.6rem; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+        select, input[type=text] { font: inherit; padding: 0.45rem 0.6rem; border: 1px solid var(--line); border-radius: 8px; background: #fff; max-width: 100%; }
+        input[type=file] { max-width: 100%; }
         .btn { font: inherit; font-weight: 600; font-size: 0.85rem; padding: 0.45rem 0.85rem; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 0.4rem; color: var(--ink); text-decoration: none; }
         .btn:hover { border-color: var(--primary); color: var(--primary); }
-        .btn.pri { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .btn.pri { background: var(--pri-btn); color: #fff; border-color: var(--pri-btn); }
+        .btn.pri:hover { color: #fff; background: #1E40AF; }
+        .btn:focus-visible, .tabs button:focus-visible, .back:focus-visible, summary:focus-visible { outline: 2px solid #1E40AF; outline-offset: 2px; }
         .btn.ok.on { background: #ECFDF5; border-color: #6EE7B7; color: var(--ok); }
         .btn.ko.on { background: #FEF2F2; border-color: #FCA5A5; color: var(--bad); }
         .btn.danger { color: var(--bad); }
@@ -38,12 +43,13 @@
         .badge { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: 999px; background: #F3F4F6; color: var(--muted); }
         .b-ok { background: #ECFDF5; color: var(--ok); } .b-bad { background: #FEF2F2; color: var(--bad); } .b-run { background: var(--soft); color: var(--primary); } .b-warn { background: #FFFBEB; color: var(--warn); }
         .dom { border: 1px solid var(--line); border-radius: 10px; padding: 0.9rem; margin-bottom: 0.7rem; background: #fff; }
-        .dom.corretta { border-left: 4px solid var(--ok); } .dom.errata { border-left: 4px solid var(--bad); opacity: 0.85; }
+        .dom.corretta { border-left: 4px solid var(--ok); } .dom.errata { border-left: 4px solid var(--bad); }
         .tratto { white-space: pre-wrap; font-size: 0.84rem; background: #F9FAFB; border-radius: 8px; padding: 0.6rem 0.75rem; max-height: 200px; overflow: auto; margin: 0.5rem 0; color: #374151; }
         .domanda { font-weight: 600; font-size: 0.95rem; }
-        .editor { display: none; gap: 0.4rem; margin-top: 0.5rem; grid-template-columns: 130px 240px 1fr; }
-        .editor.open { display: grid; }
-        .msg { display: none; padding: 0.6rem 0.9rem; border-radius: 8px; margin-bottom: 1rem; }
+        .editor { display: none; gap: 0.4rem; margin-top: 0.5rem; grid-template-columns: 130px minmax(0, 260px) 1fr; }
+        .editor.open { display: grid; } .editor select { width: 100%; }
+        /* Avviso fisso in alto (non fa scorrere la pagina mentre si valuta). */
+        .msg { display: none; position: fixed; top: 1rem; left: 50%; transform: translateX(-50%); z-index: 50; width: max-content; max-width: min(640px, calc(100vw - 2rem)); padding: 0.6rem 0.9rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,.12); }
         .msg.info { display: block; background: #ECFDF5; color: var(--ok); } .msg.err { display: block; background: #FEF2F2; color: var(--bad); }
         ol.guida { padding-left: 1.3rem; line-height: 1.7; } ol.guida li { margin-bottom: 0.25rem; }
         .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 0.5rem; } .bar > div { height: 100%; background: var(--primary); width: 0; }
@@ -58,7 +64,11 @@
         @media (max-width: 760px) { .editor.open { grid-template-columns: 1fr; } }
         /* Associazioni (2026-10-21) */
         .gr { border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.75rem; margin-top: 0.6rem; background: #FCFCFD; }
-        .gr.giusto { border-left: 4px solid var(--ok); } .gr.sbagliato { border-left: 4px solid var(--bad); opacity: 0.8; }
+        .gr.giusto { border-left: 4px solid var(--ok); } .gr.sbagliato { border-left: 4px solid var(--bad); }
+        .gr .btn .eff { font-weight: 400; color: var(--muted); }
+        .b-ins { background: #F5F3FF; color: #6D28D9; }
+        .legenda { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; margin-top: 0.6rem; }
+        .voce.in-gruppo .badge { margin-left: 0.3rem; }
         .voce { display: block; font-size: 0.86rem; margin-top: 0.3rem; }
         .voce .reg { display: inline-block; min-width: 82px; font-size: 0.72rem; font-weight: 700; color: var(--primary); text-transform: uppercase; }
         .tutte { max-height: 260px; overflow: auto; margin-top: 0.4rem; } .dom details summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; margin-top: 0.6rem; }
@@ -70,6 +80,26 @@
         .risp .el { font-size: 0.72rem; font-weight: 700; color: var(--primary); text-transform: uppercase; margin-top: 0.5rem; }
         .risp .it { font-size: 0.85rem; margin-top: 0.25rem; padding-left: 0.6rem; border-left: 2px solid var(--line); }
         @media (max-width: 760px) { .duecol { grid-template-columns: 1fr; } }
+        /* Revisione UI (2026-10-26): «Come funziona» e addestramento chiusi, tabelle che scorrono, schermi stretti. */
+        details.come { margin-top: 0.5rem; } details.come > summary, details.colab > summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; }
+        details.come > p { margin-top: 0.4rem; }
+        details.colab > summary { list-style: none; } details.colab > summary::-webkit-details-marker { display: none; }
+        details.colab > summary h2 { display: inline; margin: 0; color: var(--ink); }
+        details.colab > summary::before { content: '\25B8'; display: inline-block; width: 1.1rem; color: var(--muted); }
+        details.colab[open] > summary::before { content: '\25BE'; }
+        details.colab[open] > summary { margin-bottom: 0.6rem; }
+        .scorri { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .stato { padding: 1rem 1.1rem; }
+        .stato.err { color: var(--bad); }
+        @media (max-width: 640px) {
+            .wrap { padding: 1rem 0.75rem 3rem; }
+            .top h1 { font-size: 1.3rem; }
+            .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+            .tabs::-webkit-scrollbar { display: none; }
+            .tabs button { white-space: nowrap; padding: 0.6rem 0.75rem; }
+            .riga > .destra { margin-left: 0 !important; width: 100%; }
+            #modelli td:last-child .btn { margin-top: 0.3rem; }
+        }
     </style>
 </head>
 <body>
@@ -82,32 +112,34 @@
         <a class="back" href="dashboard.html"><i class="fas fa-arrow-left"></i> Dashboard</a>
     </div>
     <div id="msg" class="msg"></div>
+    <div id="avvio" class="card muted"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Caricamento…</div>
     <div id="negato" class="card hidden"><i class="fas fa-lock"></i> Pagina non disponibile per il tuo utente.</div>
 
     <div id="pagina" class="hidden">
-    <div class="tabs">
-        <button data-tab="domande" class="on"><i class="fas fa-list-check"></i> Domande da valutare</button>
-        <button data-tab="riunioni"><i class="fas fa-moon"></i> Riunioni e analisi notturna</button>
-        <button data-tab="addestra"><i class="fas fa-graduation-cap"></i> Addestramento</button>
-        <button data-tab="recap"><i class="fas fa-envelope-open-text"></i> Recap</button>
-        <button data-tab="assoc"><i class="fas fa-link"></i> Associazioni</button>
-        <button data-tab="raid"><i class="fas fa-triangle-exclamation"></i> RAID e CR</button>
-        <button data-tab="modello"><i class="fas fa-server"></i> Modello sulla VM</button>
-    </div>
+    <!-- Schede (2026-10-26): ARIA come monitor.html, scheda nell'hash, badge con quanto c'è da valutare -->
+    <nav class="tabs" role="tablist" aria-label="Sezioni di Analisi PM">
+        <button type="button" role="tab" aria-selected="true" aria-controls="t-domande" data-tab="domande" class="on"><i class="fas fa-list-check" aria-hidden="true"></i> Domande da valutare<span class="badge n hidden" id="nDomande"></span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="t-riunioni" data-tab="riunioni"><i class="fas fa-moon" aria-hidden="true"></i> Riunioni e analisi notturna</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="t-addestra" data-tab="addestra"><i class="fas fa-graduation-cap" aria-hidden="true"></i> Addestramento</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="t-recap" data-tab="recap"><i class="fas fa-envelope-open-text" aria-hidden="true"></i> Recap<span class="badge n hidden" id="nRecap"></span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="t-assoc" data-tab="assoc"><i class="fas fa-link" aria-hidden="true"></i> Associazioni<span class="badge n hidden" id="nAssoc"></span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="t-raid" data-tab="raid"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> RAID e CR<span class="badge n hidden" id="nRaid"></span></button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="t-modello" data-tab="modello"><i class="fas fa-server" aria-hidden="true"></i> Modello sulla VM</button>
+    </nav>
 
     <!-- DOMANDE -->
-    <section id="t-domande">
+    <section id="t-domande" role="tabpanel">
         <div class="card">
             <div class="riga">
-                <select id="fEsito">
+                <select id="fEsito" aria-label="Mostra le domande">
                     <option value="da">Da valutare</option>
                     <option value="corretta">Corrette</option>
                     <option value="errata">Errate</option>
                     <option value="">Tutte</option>
                 </select>
-                <select id="fRiunione"><option value="">Tutte le riunioni</option></select>
+                <select id="fRiunione" aria-label="Riunione"><option value="">Tutte le riunioni</option></select>
                 <label class="muted"><input type="checkbox" id="fMancate"> solo domande che non hai fatto</label>
-                <span id="conteggio" class="muted" style="margin-left:auto"></span>
+                <span id="conteggio" class="muted destra" style="margin-left:auto" aria-live="polite"></span>
             </div>
             <p class="muted" style="margin-top:0.6rem">Per ogni domanda vedi il pezzo di riunione su cui si basa. <b>Corretta</b> = è una domanda giusta da fare in quel momento (puoi anche correggerne il testo); <b>Errata</b> = lì non andava suggerito nulla, o non così. «L'hai chiesto tu» = nella riunione l'hai fatta davvero poco dopo; «Mancata» = non è stata fatta.</p>
         </div>
@@ -115,11 +147,11 @@
     </section>
 
     <!-- RIUNIONI -->
-    <section id="t-riunioni" class="hidden">
+    <section id="t-riunioni" class="hidden" role="tabpanel">
         <div class="card">
             <h2>AI dell'analisi notturna</h2>
             <div class="riga">
-                <select id="ai">
+                <select id="ai" aria-label="AI dell'analisi notturna">
                     <option value="Gemini">Gemini (gratuito) — un gruppo di pezzi ogni 30 minuti</option>
                     <option value="ChatGPT">ChatGPT (solo Batch, metà prezzo) — risultato entro la mattina</option>
                 </select>
@@ -128,7 +160,7 @@
             </div>
             <p class="muted" style="margin-top:0.6rem">Per mandare una riunione all'analisi: apri la sua <b>trascrizione</b> e premi <b>Analisi PM</b>. Di notte (00:00-06:30) il job la analizza con l'AI scelta qui; finita l'analisi il segno sulla riunione si toglie da solo. La chiave dell'AI è quella collegata in Impostazioni › AI.</p>
         </div>
-        <div class="card">
+        <div class="card scorri">
             <table>
                 <thead><tr><th>Riunione</th><th>Stato</th><th>AI</th><th>Domande</th><th>Da valutare</th></tr></thead>
                 <tbody id="riunioni"></tbody>
@@ -137,13 +169,13 @@
     </section>
 
     <!-- ADDESTRAMENTO -->
-    <section id="t-addestra" class="hidden">
+    <section id="t-addestra" class="hidden" role="tabpanel">
         <div class="card">
             <h2>Subito, senza addestramento</h2>
-            <p class="muted">Le domande che hai segnato come corrette diventano esempi nelle istruzioni di Pm projexa (fino a 24, più 10 casi in cui stare zitto), dalla prossima call. Nella stessa versione nascono anche gli esempi del <b>filtro 4B</b> (voce «Projexa 4B + 8B»): fino a 6 pezzi con «SI n», di segnali diversi, e 5 con «NO».</p>
+            <p class="muted">Le domande che hai segnato come corrette diventano esempi nelle istruzioni di PM Projexa (fino a 24, più 10 casi in cui stare zitto), dalla prossima riunione. Nella stessa versione nascono anche gli esempi del <b>filtro 4B</b> (voce «Projexa 4B + 8B»): fino a 6 pezzi con «SI n», di segnali diversi, e 5 con «NO».</p>
             <div class="riga" style="margin-top:0.6rem">
-                <button class="btn pri" id="usaEsempi"><i class="fas fa-wand-magic-sparkles"></i> Usa le corrette come esempi per Pm projexa</button>
-                <select id="versioniEsempi"></select>
+                <button class="btn pri" id="usaEsempi"><i class="fas fa-wand-magic-sparkles"></i> Usa le corrette come esempi per PM Projexa</button>
+                <select id="versioniEsempi" aria-label="Versione degli esempi"></select>
                 <button class="btn" id="attivaEsempi">Attiva questa versione</button>
             </div>
         </div>
@@ -168,7 +200,7 @@
         </div>
         <div class="card">
             <h2>Addestramento del filtro 4B (voce «Projexa 4B + 8B»)</h2>
-            <p class="muted">Il filtro è il modello piccolo che legge ogni pezzo di riunione e decide se passarlo a Pm projexa: se sbaglia con un «NO», il suggerimento non arriva mai. Impara dalle stesse valutazioni: pezzo con una domanda <b>Corretta</b> = «SI n»; pezzo con domande solo <b>Errate</b> o senza domande = «NO»; i pezzi con domande ancora da valutare sono esclusi. Stessa procedura di sopra (GPU T4, Esegui tutto, carichi il .jsonl del filtro); alla fine si scarica <code>pm-projexa-filtro-adapter.gguf</code>: caricalo nella scheda <b>Modello sulla VM</b> scegliendo <b>pm-projexa-filtro</b>. Il notebook stampa quanti SI e NO riconosce su esempi tenuti da parte. Consigliato con almeno 50-100 domande corrette.</p>
+            <p class="muted">Il filtro è il modello piccolo che legge ogni pezzo di riunione e decide se passarlo a PM Projexa: se sbaglia con un «NO», il suggerimento non arriva mai. Impara dalle stesse valutazioni: pezzo con una domanda <b>Corretta</b> = «SI n»; pezzo con domande solo <b>Errate</b> o senza domande = «NO»; i pezzi con domande ancora da valutare sono esclusi. Stessa procedura di sopra (GPU T4, Esegui tutto, carichi il .jsonl del filtro); alla fine si scarica <code>pm-projexa-filtro-adapter.gguf</code>: caricalo nella scheda <b>Modello sulla VM</b> scegliendo <b>pm-projexa-filtro</b>. Il notebook stampa quanti SI e NO riconosce su esempi tenuti da parte. Consigliato con almeno 50-100 domande corrette.</p>
             <div class="riga" style="margin-top:0.8rem">
                 <button class="btn pri" id="fScarica"><i class="fas fa-download"></i> 1. Scarica gli esempi del filtro (.jsonl)</button>
                 <button class="btn" id="fNotebook"><i class="fas fa-book"></i> 2. Notebook del filtro 4B (.ipynb)</button>
@@ -178,13 +210,14 @@
     </section>
 
     <!-- RECAP (2026-10-20): esempi per addestrare recap-projexa, il modello di «Projexa» per Recap cliente e Recap interno -->
-    <section id="t-recap" class="hidden">
+    <section id="t-recap" class="hidden" role="tabpanel">
         <div class="card">
             <h2>Insegnare a Projexa a scrivere i recap</h2>
-            <p class="muted">Apri la <b>trascrizione</b> di una riunione e premi <b>Analisi Recap</b>. Di notte (00:15-06:45) l'AI scelta nella scheda <i>Riunioni e analisi notturna</i> rifà il lavoro di Projexa con gli stessi compiti: gli <b>appunti</b> di ogni pezzo, il <b>recap per il cliente</b> e il <b>recap interno</b>. La mattina segna qui ogni risposta come <b>Corretta</b> (correggendo il testo se serve) o <b>Errata</b>: le corrette diventano gli esempi per addestrare il modello <b>recap-projexa</b>, separato da quello dell'Assistente PM.</p>
-            <div class="riga" style="margin-top:0.6rem"><span id="rJob" class="muted"></span><span id="rConteggi" class="muted" style="margin-left:auto"></span></div>
+            <p>Segna ogni risposta dell'AI come <b>Corretta</b> (correggendo il testo se serve) o <b>Errata</b>.</p>
+            <details class="come"><summary>Come funziona</summary><p class="muted">Apri la <b>trascrizione</b> di una riunione e premi <b>Analisi Recap</b>. Di notte (00:15-06:45) l'AI scelta nella scheda <i>Riunioni e analisi notturna</i> rifà il lavoro di Projexa con gli stessi compiti: gli <b>appunti</b> di ogni pezzo, il <b>recap per il cliente</b> e il <b>recap interno</b>. La mattina segna qui ogni risposta come <b>Corretta</b> (correggendo il testo se serve) o <b>Errata</b>: le corrette diventano gli esempi per addestrare il modello <b>recap-projexa</b>, separato da quello dell'Assistente PM.</p></details>
+            <div class="riga" style="margin-top:0.6rem"><span id="rJob" class="muted"></span><span id="rConteggi" class="muted destra" style="margin-left:auto" aria-live="polite"></span></div>
         </div>
-        <div class="card">
+        <div class="card scorri">
             <table>
                 <thead><tr><th>Riunione</th><th>Stato</th><th>AI</th><th>Risposte</th><th>Da valutare</th></tr></thead>
                 <tbody id="rRiunioni"></tbody>
@@ -192,20 +225,20 @@
         </div>
         <div class="card">
             <div class="riga">
-                <select id="rEsito">
+                <select id="rEsito" aria-label="Mostra le risposte">
                     <option value="da">Da valutare</option>
                     <option value="corretta">Corrette</option>
                     <option value="errata">Errate</option>
                     <option value="">Tutte</option>
                 </select>
-                <select id="rTipo">
+                <select id="rTipo" aria-label="Compito">
                     <option value="">Tutti i compiti</option>
                     <option value="appunti">Appunti dei pezzi</option>
                     <option value="recap">Recap per il cliente</option>
                     <option value="interno">Recap interno</option>
                 </select>
-                <select id="rRiunione"><option value="">Tutte le riunioni</option></select>
-                <span id="rConteggio" class="muted" style="margin-left:auto"></span>
+                <select id="rRiunione" aria-label="Riunione"><option value="">Tutte le riunioni</option></select>
+                <span id="rConteggio" class="muted destra" style="margin-left:auto" aria-live="polite"></span>
             </div>
             <p class="muted" style="margin-top:0.6rem">Correggi il testo direttamente nel riquadro e premi <b>Corretta</b>: si salva la tua versione. Sul recap per il cliente puoi usare <b>Usa il recap salvato</b> per partire da quello che hai davvero inviato. Gli appunti contano quanto i recap: se mancano argomenti o le azioni hanno la persona sbagliata, correggili.</p>
         </div>
@@ -220,8 +253,8 @@
             </div>
             <div id="proposte" style="margin-top:0.8rem"></div>
         </div>
-        <div class="card">
-            <h2>Addestramento con Google Colab (gratuito)</h2>
+        <details class="card colab">
+            <summary><h2>Addestramento con Google Colab (gratuito)</h2></summary>
             <p class="muted">Consigliato con almeno 30-50 risposte corrette, tra appunti e recap. Stessa procedura dell'Assistente PM: scarica i due file, in Colab scegli <b>GPU T4</b>, carica il notebook, <b>Esegui tutto</b> e carica il .jsonl quando lo chiede. Alla fine si scarica <code>recap-projexa-adapter.gguf</code> (o <code>recap-projexa-14b-adapter.gguf</code>): caricalo nella scheda <b>Modello sulla VM</b> scegliendo <b>recap-projexa</b> (o <b>recap-projexa-14b</b>). Il file degli esempi è lo stesso per i due modelli: il 14B, per stare nella GPU gratuita, usa solo gli esempi fino a 4.096 token (soprattutto gli appunti).</p>
             <div class="riga" style="margin-top:0.8rem">
                 <button class="btn pri" id="rScarica"><i class="fas fa-download"></i> 1. Scarica gli esempi del recap (.jsonl)</button>
@@ -229,73 +262,75 @@
                 <button class="btn" id="rNotebook14"><i class="fas fa-book"></i> 2. Notebook per il 14B (.ipynb)</button>
                 <a class="btn" href="https://colab.research.google.com/" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> 3. Apri Google Colab</a>
             </div>
-        </div>
+        </details>
     </section>
 
     <!-- ASSOCIAZIONI (2026-10-21): insegnante dell'associazione To-Do e RAID, esempi per assoc-projexa-14b -->
-    <section id="t-assoc" class="hidden">
+    <section id="t-assoc" class="hidden" role="tabpanel">
         <div class="card">
             <h2>Insegnare a Projexa ad associare To-Do e RAID</h2>
-            <p class="muted">Con <b>Projexa</b> nel campo <i>Impostazioni › AI › «Associazione Autom. ToDoList e RAID»</i>, ogni mattina (lun-ven alle 5:00) Projexa collega le voci che parlano della stessa cosa. Lo <b>stesso elenco</b> va anche all'AI scelta nella scheda <i>Riunioni e analisi notturna</i> (Gemini subito, ChatGPT in Batch), che risponde solo per confronto e non collega niente. Qui vedi i gruppi trovati dai due: segna ogni gruppo <b>Giusto</b> (le voci si collegano davvero) o <b>Sbagliato</b> (se erano collegate si scollegano). Se manca un gruppo aggiungilo dall'elenco delle voci inviate. Poi premi <b>Valutazione completa</b>: diventa un esempio per addestrare <b>assoc-projexa-14b</b>. Gli ultimi gruppi valutati (8 giusti e 8 sbagliati) entrano già dal giorno dopo come esempi nelle istruzioni di Projexa.</p>
-            <div class="riga" style="margin-top:0.6rem"><span id="aJob" class="muted"></span><span id="aConteggi" class="muted" style="margin-left:auto"></span></div>
+            <p>Segna ogni gruppo <b>Giusto</b> (le voci vengono collegate) o <b>Sbagliato</b> (se erano collegate vengono scollegate), poi premi <b>Valutazione completa</b>.</p>
+            <details class="come"><summary>Come funziona</summary><p class="muted">Con <b>Projexa</b> nel campo <i>Impostazioni › AI › «Associazione automatica To-Do e RAID»</i>, ogni mattina (lun-ven alle 5:00) Projexa collega le voci che parlano della stessa cosa. Lo <b>stesso elenco</b> va anche all'AI scelta nella scheda <i>Riunioni e analisi notturna</i> (Gemini subito, ChatGPT in Batch), che risponde solo per confronto e non collega niente. Qui vedi i gruppi trovati dai due: segna ogni gruppo <b>Giusto</b> (le voci si collegano davvero) o <b>Sbagliato</b> (se erano collegate si scollegano). Se manca un gruppo aggiungilo dall'elenco delle voci inviate. Poi premi <b>Valutazione completa</b>: diventa un esempio per addestrare <b>assoc-projexa-14b</b>. Gli ultimi gruppi valutati (8 giusti e 8 sbagliati) entrano già dal giorno dopo come esempi nelle istruzioni di Projexa.</p></details>
+            <div class="legenda muted">Chi ha proposto il gruppo: <span class="badge b-run">Projexa</span> <span class="badge b-ins">AI di confronto</span> <span class="badge">Tu</span> · la percentuale è la confidenza dichiarata</div>
+            <div class="riga" style="margin-top:0.6rem"><span id="aJob" class="muted"></span></div>
         </div>
         <div class="card">
             <div class="riga">
-                <select id="aEsito">
+                <select id="aEsito" aria-label="Mostra le associazioni">
                     <option value="da">Da valutare</option>
                     <option value="fatte">Valutate</option>
                     <option value="">Tutte</option>
                 </select>
-                <span id="aConteggio" class="muted" style="margin-left:auto"></span>
+                <span id="aConteggio" class="muted destra" style="margin-left:auto" aria-live="polite"></span>
             </div>
         </div>
         <div id="aLista"></div>
-        <div class="card">
-            <h2>Addestramento con Google Colab (gratuito)</h2>
+        <details class="card colab">
+            <summary><h2>Addestramento con Google Colab (gratuito)</h2></summary>
             <p class="muted">Consigliato con almeno 50-100 valutazioni complete (contano anche i giorni in cui la risposta giusta è «nessun gruppo»). Stessa procedura degli altri modelli: scarica i due file, in Colab scegli <b>GPU T4</b>, carica il notebook, <b>Esegui tutto</b> e carica il .jsonl quando lo chiede. Alla fine si scarica <code>assoc-projexa-14b-adapter.gguf</code>: caricalo nella scheda <b>Modello sulla VM</b> scegliendo <b>assoc-projexa-14b</b>. Da quel momento l'associazione delle 5:00 usa il modello addestrato (se manca, la base qwen3:14b).</p>
             <div class="riga" style="margin-top:0.8rem">
                 <button class="btn pri" id="aScarica"><i class="fas fa-download"></i> 1. Scarica gli esempi delle associazioni (.jsonl)</button>
                 <button class="btn" id="aNotebook"><i class="fas fa-book"></i> 2. Notebook per il 14B (.ipynb)</button>
                 <a class="btn" href="https://colab.research.google.com/" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> 3. Apri Google Colab</a>
             </div>
-        </div>
+        </details>
     </section>
 
     <!-- RAID E CR (2026-10-22): Projexa contro l'AI esterna, esempi per raid-projexa-14b -->
-    <section id="t-raid" class="hidden">
+    <section id="t-raid" class="hidden" role="tabpanel">
         <div class="card">
             <h2>Insegnare a Projexa a estrarre RAID e Change Request</h2>
-            <p class="muted">Ogni volta che RAID o Change Request si ricavano dal recap con <b>Projexa</b> (in automatico con AI Automatizza o dal pulsante), lo <b>stesso compito</b> va anche all'AI scelta nella scheda <i>Riunioni e analisi notturna</i> (oggi: <b id="xAi">—</b>), solo per confronto: non crea niente nel registro. Qui vedi le due risposte affiancate: premi <b>Giusta</b> su quella migliore, oppure <b>Nessuna delle due</b>. Le risposte scelte diventano gli esempi per addestrare <b>raid-projexa-14b</b>; «nessuna delle due» non insegna niente e resta fuori dal file.</p>
-            <div class="riga" style="margin-top:0.6rem"><span id="xConteggi" class="muted"></span></div>
+            <p>Per ogni confronto premi <b>Giusta</b> sulla risposta migliore, oppure <b>Nessuna delle due</b>.</p>
+            <details class="come"><summary>Come funziona</summary><p class="muted">Ogni volta che RAID o Change Request si ricavano dal recap con <b>Projexa</b> (in automatico con AI Automatizza o dal pulsante), lo <b>stesso compito</b> va anche all'AI scelta nella scheda <i>Riunioni e analisi notturna</i> (oggi: <b id="xAi">—</b>), solo per confronto: non crea niente nel registro. Qui vedi le due risposte affiancate: premi <b>Giusta</b> su quella migliore, oppure <b>Nessuna delle due</b>. Le risposte scelte diventano gli esempi per addestrare <b>raid-projexa-14b</b>; «nessuna delle due» non insegna niente e resta fuori dal file.</p></details>
         </div>
         <div class="card">
             <div class="riga">
-                <select id="xEsito">
+                <select id="xEsito" aria-label="Mostra i confronti">
                     <option value="da">Da valutare</option>
                     <option value="fatte">Valutati</option>
                     <option value="">Tutti</option>
                 </select>
-                <span id="xConteggio" class="muted" style="margin-left:auto"></span>
+                <span id="xConteggio" class="muted destra" style="margin-left:auto" aria-live="polite"></span>
             </div>
         </div>
         <div id="xLista"></div>
-        <div class="card">
-            <h2>Addestramento con Google Colab (gratuito)</h2>
+        <details class="card colab">
+            <summary><h2>Addestramento con Google Colab (gratuito)</h2></summary>
             <p class="muted">Consigliato con almeno 40-60 scelte. Stessa procedura degli altri modelli: scarica i due file, in Colab scegli <b>GPU T4</b>, carica il notebook, <b>Esegui tutto</b> e carica il .jsonl quando lo chiede. Alla fine si scarica <code>raid-projexa-14b-adapter.gguf</code>: caricalo nella scheda <b>Modello sulla VM</b> scegliendo <b>raid-projexa-14b</b>. Da quel momento RAID e Change Request con «Projexa 14B» usano il modello addestrato (se manca, la base qwen3:14b).</p>
             <div class="riga" style="margin-top:0.8rem">
                 <button class="btn pri" id="xScarica"><i class="fas fa-download"></i> 1. Scarica gli esempi di RAID e CR (.jsonl)</button>
                 <button class="btn" id="xNotebook"><i class="fas fa-book"></i> 2. Notebook per il 14B (.ipynb)</button>
                 <a class="btn" href="https://colab.research.google.com/" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> 3. Apri Google Colab</a>
             </div>
-        </div>
+        </details>
     </section>
 
     <!-- MODELLO -->
-    <section id="t-modello" class="hidden">
+    <section id="t-modello" class="hidden" role="tabpanel">
         <div class="card">
             <h2>Carica e installa un modello addestrato</h2>
             <div class="riga" style="margin-bottom:0.6rem">
-                <select id="famiglia">
+                <select id="famiglia" aria-label="Modello">
                     <option value="pm">pm-projexa — Assistente PM</option>
                     <option value="filtro">pm-projexa-filtro — Filtro 4B dell'Assistente PM (Qwen3 4B)</option>
                     <option value="recap">recap-projexa — Recap con «Projexa» (8B)</option>
@@ -315,7 +350,7 @@
             <div id="fasiInst" class="muted" style="margin-top:0.4rem; line-height:1.7"></div>
             <p class="muted" style="margin-top:0.6rem">Projexa fa il <b>backup</b> del modello attuale, unisce il tuo adattatore alla base del modello scelto sopra (qwen3:8b, qwen3:14b o qwen3:4b-instruct per il filtro), crea il nuovo modello con gli stessi parametri e lo prova: se qualcosa non va torna da solo al precedente. Non si può fare mentre l'Assistente PM con Projexa è in uso. La VM lavora a lungo: circa 15-30 minuti per i modelli 4B e 8B, fino a un'ora per i 14B. Lascia la pagina aperta fino al messaggio finale.</p>
         </div>
-        <div class="card">
+        <div class="card scorri">
             <h2>Modelli <span id="nomeFamiglia">pm-projexa</span> sulla VM</h2>
             <table><thead><tr><th>Nome</th><th>Dimensione</th><th>Data</th><th></th></tr></thead><tbody id="modelli"></tbody></table>
             <div id="notaModello" class="muted" style="margin-top:0.6rem"></div>
@@ -332,7 +367,7 @@
     const dataIt = (d) => d ? new Date(d).toLocaleDateString('it-IT') : '';
     const dataOra = (d) => d ? new Date(d).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
     const PAROLE = ['DOMANDA', 'RISCHIO', 'CR', 'ATTENZIONE', 'AGENDA'];
-    const SEGNALI = ['', 'Promessa senza data / data ambigua', 'Richiesta nuova: CR', 'Ordine, fattura, pagamenti', 'Si aspetta qualcosa da altri', 'Problema: ticket e fix', 'Diagnosi: caso concreto', 'Rilascio, fix, impatti', 'Attività che spettano al cliente', 'Go-live', 'Analisi, stima, risorse', 'Decisione rinviata', 'Numeri contestati', 'Fine call: azioni e SAL'];
+    const SEGNALI = ['', 'Promessa senza data / data ambigua', 'Richiesta nuova: CR', 'Ordine, fattura, pagamenti', 'Si aspetta qualcosa da altri', 'Problema: ticket e fix', 'Diagnosi: caso concreto', 'Rilascio, fix, impatti', 'Attività che spettano al cliente', 'Go-live', 'Analisi, stima, risorse', 'Decisione rinviata', 'Numeri contestati', 'Fine riunione: azioni e SAL'];
     const FORMATO = /^\s*(DOMANDA|RISCHIO|CR|ATTENZIONE|AGENDA)\s*\[\s*(\d{1,2})\s*\]\s*:\s*(.+)$/i;
     let domande = [];
 
@@ -342,8 +377,34 @@
         if (!r.ok) throw Object.assign(new Error(d.error || `Errore ${r.status}`), { status: r.status });
         return d;
     }
-    function avviso(t, tipo = 'info') { const m = $('msg'); m.className = `msg ${tipo}`; m.textContent = t; clearTimeout(avviso.t); if (tipo === 'info') avviso.t = setTimeout(() => { m.className = 'msg'; }, 6000); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    // Avviso fisso in alto: non fa scorrere la pagina (si valuta a metà di liste lunghe). Gli errori restano di più.
+    function avviso(t, tipo = 'info') { const m = $('msg'); m.className = `msg ${tipo}`; m.setAttribute('role', tipo === 'err' ? 'alert' : 'status'); m.textContent = t; clearTimeout(avviso.t); avviso.t = setTimeout(() => { m.className = 'msg'; }, tipo === 'err' ? 10000 : 6000); }
     const errore = (e) => avviso(e.message, 'err');
+    // Stati di una lista: caricamento ed errore con «Riprova» al posto del contenuto (cella = colonne, per le tabelle).
+    const SPIN = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>';
+    function inCarica(el, cella) {
+        el.setAttribute('aria-busy', 'true');
+        el.innerHTML = cella ? `<tr><td colspan="${cella}" class="muted">${SPIN} Caricamento…</td></tr>` : `<div class="card muted stato">${SPIN} Caricamento…</div>`;
+    }
+    function inErrore(el, e, riprova, cella) {
+        el.removeAttribute('aria-busy');
+        const corpo = `<i class="fas fa-triangle-exclamation" aria-hidden="true"></i> ${esc(e.message)} <button type="button" class="btn" data-riprova><i class="fas fa-rotate-right" aria-hidden="true"></i> Riprova</button>`;
+        el.innerHTML = cella ? `<tr><td colspan="${cella}" class="stato err">${corpo}</td></tr>` : `<div class="card stato err">${corpo}</div>`;
+        el.querySelector('[data-riprova]').onclick = (ev) => { ev.stopPropagation(); riprova(); };
+    }
+    const pronto = (el) => el.removeAttribute('aria-busy');
+    // Un solo salvataggio per scheda alla volta: niente doppi clic sui pulsanti che fanno da interruttore.
+    async function occupato(box, fn) {
+        if (box.dataset.busy) return;
+        box.dataset.busy = '1';
+        const bott = [...box.querySelectorAll('button')].filter((b) => !b.disabled);
+        bott.forEach((b) => { b.disabled = true; });
+        try { await fn(); } finally { delete box.dataset.busy; bott.forEach((b) => { if (b.isConnected) b.disabled = false; }); }
+    }
+    // Badge sulle schede con quanto c'è da valutare.
+    function contaScheda(id, n) { const el = $(id); el.textContent = n || ''; el.classList.toggle('hidden', !n); el.setAttribute('aria-label', n ? `${n} da valutare` : ''); }
+    const pressato = (on) => `aria-pressed="${on}"${on ? ' title="Ripremi per togliere la valutazione"' : ''}`;
+    const LINK_SCHED = ' (<a href="monitor.html#schedulazioni">Monitor › Schedulazioni</a>)';
     async function scaricaFile(url, nome) {
         const r = await fetch(API_URL + url, { headers: auth() });
         if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `Errore ${r.status}`); }
@@ -355,9 +416,12 @@
     }
 
     // --- Schede ---
+    const SCHEDE = ['domande', 'riunioni', 'addestra', 'recap', 'assoc', 'raid', 'modello'];
     function vai(tab) {
-        document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-        ['domande', 'riunioni', 'addestra', 'recap', 'assoc', 'raid', 'modello'].forEach((t) => $(`t-${t}`).classList.toggle('hidden', t !== tab));
+        if (!SCHEDE.includes(tab)) tab = 'domande';
+        document.querySelectorAll('.tabs button').forEach((b) => { const on = b.dataset.tab === tab; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+        SCHEDE.forEach((t) => $(`t-${t}`).classList.toggle('hidden', t !== tab));
+        if (location.hash !== `#${tab}`) history.replaceState(null, '', `#${tab}`);
         if (tab === 'domande') caricaDomande();
         if (tab === 'riunioni') caricaRiunioni();
         if (tab === 'addestra') caricaEsempi();
@@ -370,17 +434,20 @@
 
     // --- Domande ---
     async function caricaDomande() {
+        inCarica($('domande'));
         try {
             const q = new URLSearchParams({ esito: $('fEsito').value, mancate: $('fMancate').checked ? '1' : '' });
             if ($('fRiunione').value) q.set('id_calendar', $('fRiunione').value);
             domande = (await api('GET', `/domande?${q}`)).domande;
             disegnaDomande();
-        } catch (e) { errore(e); }
+        } catch (e) { inErrore($('domande'), e, caricaDomande); }
     }
     ['fEsito', 'fRiunione', 'fMancate'].forEach((id) => { $(id).onchange = caricaDomande; });
     function parti(t) { const m = String(t || '').match(FORMATO); return m ? { parola: m[1].toUpperCase(), n: Number(m[2]), frase: m[3] } : { parola: 'DOMANDA', n: 1, frase: '' }; }
     function disegnaDomande() {
         $('conteggio').textContent = `${domande.length} domand${domande.length === 1 ? 'a' : 'e'}`;
+        if ($('fEsito').value === 'da' && !$('fRiunione').value && !$('fMancate').checked) contaScheda('nDomande', domande.length);
+        pronto($('domande'));
         let ultima = '';
         $('domande').innerHTML = domande.map((d) => {
             const testo = d.testo_corretto || d.suggerimento;
@@ -401,9 +468,9 @@
                     <input type="text" data-frase value="${esc(p.frase)}">
                 </div>
                 <div class="riga" style="margin-top:0.6rem">
-                    <button class="btn ok ${d.esito === 'corretta' ? 'on' : ''}" data-az="corretta"><i class="fas fa-check"></i> Corretta</button>
-                    <button class="btn ko ${d.esito === 'errata' ? 'on' : ''}" data-az="errata"><i class="fas fa-xmark"></i> Errata</button>
-                    <button class="btn" data-az="modifica"><i class="fas fa-pen"></i> Correggi il testo</button>
+                    <button type="button" class="btn ok ${d.esito === 'corretta' ? 'on' : ''}" data-az="corretta" ${pressato(d.esito === 'corretta')}><i class="fas fa-check" aria-hidden="true"></i> Corretta</button>
+                    <button type="button" class="btn ko ${d.esito === 'errata' ? 'on' : ''}" data-az="errata" ${pressato(d.esito === 'errata')}><i class="fas fa-xmark" aria-hidden="true"></i> Errata</button>
+                    <button type="button" class="btn" data-az="modifica" aria-expanded="false"><i class="fas fa-pen" aria-hidden="true"></i> Correggi il testo</button>
                 </div>
             </div>`;
         }).join('') || '<div class="card muted">Nessuna domanda in questa vista. Le nuove arrivano la mattina, dopo l\'analisi notturna.</div>';
@@ -414,7 +481,7 @@
         if (!b || !box) return;
         const d = domande.find((x) => x.id === box.dataset.id);
         const editor = box.querySelector('.editor');
-        if (b.dataset.az === 'modifica') { editor.classList.toggle('open'); return; }
+        if (b.dataset.az === 'modifica') { b.setAttribute('aria-expanded', String(editor.classList.toggle('open'))); return; }
         let testo = d.testo_corretto || '';
         if (editor.classList.contains('open')) {
             const frase = box.querySelector('[data-frase]').value.trim();
@@ -423,20 +490,24 @@
             if (testo === d.suggerimento) testo = '';
         }
         const esito = d.esito === b.dataset.az && !editor.classList.contains('open') ? null : b.dataset.az; // stesso pulsante = annulla
-        try {
-            await api('PUT', `/domande/${d.id}`, { esito, testo_corretto: testo });
-            Object.assign(d, { esito, testo_corretto: testo || null });
-            if ($('fEsito').value === 'da' && esito) { domande = domande.filter((x) => x !== d); }
-            disegnaDomande();
-        } catch (err) { errore(err); }
+        await occupato(box, async () => {
+            try {
+                await api('PUT', `/domande/${d.id}`, { esito, testo_corretto: testo });
+                Object.assign(d, { esito, testo_corretto: testo || null });
+                if ($('fEsito').value === 'da' && esito) { domande = domande.filter((x) => x !== d); }
+                disegnaDomande();
+            } catch (err) { errore(err); }
+        });
     };
 
     // --- Riunioni e AI ---
     async function caricaRiunioni() {
+        inCarica($('riunioni'), 5);
         try {
             const d = await api('GET', '/impostazioni');
             $('ai').value = d.ai;
-            $('job').textContent = d.job ? (d.job.attivo ? `Prossimo giro: ${dataOra(d.job.prossima_esecuzione) || '—'}` : 'Job analisi_pm disattivato (Monitor › Schedulazioni)') : 'Job analisi_pm non presente';
+            $('job').innerHTML = d.job ? (d.job.attivo ? `Prossimo giro: ${dataOra(d.job.prossima_esecuzione) || '—'}` : `Job analisi_pm disattivato${LINK_SCHED}`) : 'Job analisi_pm non presente';
+            pronto($('riunioni'));
             const stato = (r) => r.segnata && !r.stato ? '<span class="badge b-run">in attesa della notte</span>'
                 : r.stato === 'in_corso' ? `<span class="badge b-run">in corso</span><div class="muted">pezzi ${r.prossimo_da}/${r.pezzi_tot || '?'}</div>`
                 : r.stato === 'batch' ? '<span class="badge b-run">Batch ChatGPT inviato</span>'
@@ -448,7 +519,7 @@
             const prima = $('fRiunione').value;
             $('fRiunione').innerHTML = '<option value="">Tutte le riunioni</option>' + d.riunioni.filter((r) => r.domande).map((r) => `<option value="${esc(r.id_calendar)}">${dataIt(r.data)} · ${esc(r.oggetto || '')} (${r.da_valutare} da valutare)</option>`).join('');
             $('fRiunione').value = prima;
-        } catch (e) { errore(e); }
+        } catch (e) { inErrore($('riunioni'), e, caricaRiunioni, 5); }
     }
     $('salvaAi').onclick = async () => { try { await api('PUT', '/impostazioni', { ai: $('ai').value }); avviso(`Analisi notturna con ${$('ai').value}.`); } catch (e) { errore(e); } };
 
@@ -460,8 +531,8 @@
         } catch (e) { errore(e); }
     }
     $('usaEsempi').onclick = async () => {
-        if (!confirm('Creare una nuova versione di esempi dalle domande corrette e renderla attiva per Pm projexa?')) return;
-        try { const r = await api('POST', '/esempi', {}); avviso(`Versione ${r.versione} attiva con ${r.esempi} esempi per Pm projexa e ${r.esempiFiltro || 0} per il filtro 4B: si usano dalla prossima call.`); caricaEsempi(); } catch (e) { errore(e); }
+        if (!confirm('Creare una nuova versione di esempi dalle domande corrette e renderla attiva per PM Projexa?')) return;
+        try { const r = await api('POST', '/esempi', {}); avviso(`Versione ${r.versione} attiva con ${r.esempi} esempi per PM Projexa e ${r.esempiFiltro || 0} per il filtro 4B: si usano dalla prossima riunione.`); caricaEsempi(); } catch (e) { errore(e); }
     };
     $('attivaEsempi').onclick = async () => { try { await api('POST', '/esempi/attiva', { versione: Number($('versioniEsempi').value) }); avviso('Fatto.'); caricaEsempi(); } catch (e) { errore(e); } };
     $('scarica').onclick = () => scaricaFile('/scarica', 'pm_projexa_addestramento.jsonl').catch(errore);
@@ -483,7 +554,7 @@
         $('modelli').innerHTML = famiglie.map((f, i) => {
             const d = elenchi[i];
             const n = d.note && d.note[d.nome];
-            const testa = `<tr><td colspan="4" style="background:var(--bg, #f8fafc)"><b>${esc(NOMI_FAMIGLIA[f])}</b> <span class="muted">· ${esc($('famiglia').querySelector(`option[value="${f}"]`).textContent.split('—')[1] || '')}${n ? ` · ultima installazione ${dataOra(n.installato)}` : d.base ? ` · ancora ${esc(d.base)} senza addestramento` : ''}</span></td></tr>`;
+            const testa = `<tr><td colspan="4" style="background:var(--bg)"><b>${esc(NOMI_FAMIGLIA[f])}</b> <span class="muted">· ${esc($('famiglia').querySelector(`option[value="${f}"]`).textContent.split('—')[1] || '')}${n ? ` · ultima installazione ${dataOra(n.installato)}` : d.base ? ` · ancora ${esc(d.base)} senza addestramento` : ''}</span></td></tr>`;
             const righe = d.modelli.map((m) => rigaModello(m, f)).join('') || `<tr><td colspan="4" class="muted">${esc(d.errore || 'Nessun modello sulla VM: si usa il modello base')}</td></tr>`;
             return testa + righe;
         }).join('');
@@ -492,15 +563,17 @@
     async function caricaModelli() {
         const tutte = fam() === 'tutte';
         $('installa').disabled = tutte; $('file').disabled = tutte; $('nota').disabled = tutte;
-        if (tutte) { try { await caricaTutte(); } catch (e) { $('modelli').innerHTML = `<tr><td colspan="4" class="muted">${esc(e.message)}</td></tr>`; } return; }
+        inCarica($('modelli'), 4);
+        if (tutte) { try { await caricaTutte(); pronto($('modelli')); } catch (e) { inErrore($('modelli'), e, caricaModelli, 4); } return; }
         try {
             $('nomeFamiglia').textContent = NOMI_FAMIGLIA[fam()];
             const d = await api('GET', `/modelli?famiglia=${fam()}`);
+            pronto($('modelli'));
             $('modelli').innerHTML = d.modelli.map((m) => rigaModello(m, fam())).join('')
                 || `<tr><td colspan="4" class="muted">Nessun modello ${esc(d.nome)} sulla VM${fam() === 'recap' ? ' (finché manca, il recap con Projexa usa qwen3:8b: crealo con deploy/oracle/ollama/recap-projexa.Modelfile)' : fam() === 'recap14' ? ' (finché manca, «Projexa 14B» usa recap-projexa: crealo con deploy/oracle/ollama/recap-projexa-14b.Modelfile)' : fam() === 'filtro' ? ' (finché manca, «Projexa 4B + 8B» usa qwen3:4b-instruct con gli esempi: nasce col primo adattatore caricato qui)' : fam() === 'assoc' ? ' (finché manca, l’associazione con Projexa usa qwen3:14b con i casi valutati: nasce col primo adattatore caricato qui)' : fam() === 'raid' ? ' (finché manca, RAID e Change Request con «Projexa 14B» usano qwen3:14b: nasce col primo adattatore caricato qui)' : ''}.</td></tr>`;
             const n = d.note && d.note[d.nome];
             $('notaModello').textContent = n ? `Ultima installazione: ${dataOra(n.installato)}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : `${d.nome} è ancora il modello di partenza (${d.base} senza addestramento). I backup occupano poco spazio: la base ${d.base} è condivisa.`;
-        } catch (e) { $('modelli').innerHTML = `<tr><td colspan="4" class="muted">${esc(e.message)}</td></tr>`; }
+        } catch (e) { inErrore($('modelli'), e, caricaModelli, 4); }
     }
     $('modelli').onclick = async (e) => {
         const r = e.target.closest('[data-ripristina]'), el = e.target.closest('[data-elimina]');
@@ -560,8 +633,8 @@
         if (inCorso) {
             const stima = s.percento >= 5 ? ` · mancano circa ${durata(trascorso * (100 - s.percento) / s.percento)}` : ' · stima del tempo rimanente tra poco';
             $('avanz').innerHTML = `<b>${esc(s.nome)}: ${s.percento}%</b> · trascorsi ${durata(trascorso)}${stima}`;
-            $('fasiInst').innerHTML = d.fasi.map((x, i) => i < iFase ? `<div><i class="fas fa-check" style="color:#10B981"></i> ${esc(x.etichetta)}</div>`
-                : i === iFase ? `<div><i class="fas fa-spinner fa-spin" style="color:#4338CA"></i> <b>${esc(x.etichetta)}</b> · ${Math.round(100 * (s.quotaFase || 0))}% · da ${durata(ora - new Date(s.faseDal).getTime())}</div>`
+            $('fasiInst').innerHTML = d.fasi.map((x, i) => i < iFase ? `<div><i class="fas fa-check" style="color:var(--ok)" aria-hidden="true"></i> ${esc(x.etichetta)}</div>`
+                : i === iFase ? `<div><i class="fas fa-spinner fa-spin" style="color:var(--primary)" aria-hidden="true"></i> <b>${esc(x.etichetta)}</b> · ${Math.round(100 * (s.quotaFase || 0))}% · da ${durata(ora - new Date(s.faseDal).getTime())}</div>`
                 : `<div style="opacity:0.55"><i class="far fa-circle"></i> ${esc(x.etichetta)}</div>`).join('');
             timerInst = setTimeout(seguiInstallazione, 3000);
             return;
@@ -584,9 +657,12 @@
     let risposte = [];
     const TIPO = { appunti: 'Appunti', recap: 'Recap per il cliente', interno: 'Recap interno' };
     async function caricaRecap() {
+        inCarica($('rRiunioni'), 5);
         try {
             const d = await api('GET', '/recap/riunioni');
-            $('rJob').textContent = d.job ? (d.job.attivo ? `Prossimo giro: ${dataOra(d.job.prossima_esecuzione) || '—'}` : 'Job analisi_recap disattivato (Monitor › Schedulazioni)') : 'Job analisi_recap non presente';
+            pronto($('rRiunioni'));
+            contaScheda('nRecap', d.riunioni.reduce((s, r) => s + (Number(r.da_valutare) || 0), 0));
+            $('rJob').innerHTML = d.job ? (d.job.attivo ? `Prossimo giro: ${dataOra(d.job.prossima_esecuzione) || '—'}` : `Job analisi_recap disattivato${LINK_SCHED}`) : 'Job analisi_recap non presente';
             $('rConteggi').textContent = d.conteggi.length ? 'Corrette: ' + d.conteggi.map((c) => `${TIPO[c.tipo]} ${c.corrette}`).join(' · ') : '';
             const fase = { appunti: 'appunti', recap: 'recap cliente', interno: 'recap interno' };
             const stato = (r) => r.segnata && !r.stato ? '<span class="badge b-run">in attesa della notte</span>'
@@ -602,19 +678,21 @@
             $('rRiunione').value = prima;
             caricaRisposte();
             caricaProposte();
-        } catch (e) { errore(e); }
+        } catch (e) { inErrore($('rRiunioni'), e, caricaRecap, 5); }
     }
     async function caricaRisposte() {
+        inCarica($('rRisposte'));
         try {
             const q = new URLSearchParams({ esito: $('rEsito').value, tipo: $('rTipo').value });
             if ($('rRiunione').value) q.set('id_calendar', $('rRiunione').value);
             risposte = (await api('GET', `/recap/risposte?${q}`)).risposte;
             disegnaRisposte();
-        } catch (e) { errore(e); }
+        } catch (e) { inErrore($('rRisposte'), e, caricaRisposte); }
     }
     ['rEsito', 'rTipo', 'rRiunione'].forEach((id) => { $(id).onchange = caricaRisposte; });
     function disegnaRisposte() {
         $('rConteggio').textContent = `${risposte.length} rispost${risposte.length === 1 ? 'a' : 'e'}`;
+        pronto($('rRisposte'));
         let ultima = '';
         $('rRisposte').innerHTML = risposte.map((d) => {
             const titolo = d.id_calendar !== ultima ? `<h2 style="margin:1rem 0 0.5rem">${esc(d.oggetto || '(riunione)')} <span class="muted">${dataIt(d.data)}</span></h2>` : '';
@@ -627,9 +705,9 @@
                 <details><summary>Compito dato al modello (trascrizione o appunti)</summary><div class="tratto">${esc(d.ingresso)}</div></details>
                 <textarea data-testo>${esc(d.testo_corretto || d.risposta)}</textarea>
                 <div class="riga" style="margin-top:0.6rem">
-                    <button class="btn ok ${d.esito === 'corretta' ? 'on' : ''}" data-az="corretta"><i class="fas fa-check"></i> Corretta</button>
-                    <button class="btn ko ${d.esito === 'errata' ? 'on' : ''}" data-az="errata"><i class="fas fa-xmark"></i> Errata</button>
-                    <button class="btn" data-az="originale"><i class="fas fa-rotate-left"></i> Testo dell'AI</button>
+                    <button type="button" class="btn ok ${d.esito === 'corretta' ? 'on' : ''}" data-az="corretta" ${pressato(d.esito === 'corretta')}><i class="fas fa-check" aria-hidden="true"></i> Corretta</button>
+                    <button type="button" class="btn ko ${d.esito === 'errata' ? 'on' : ''}" data-az="errata" ${pressato(d.esito === 'errata')}><i class="fas fa-xmark" aria-hidden="true"></i> Errata</button>
+                    <button type="button" class="btn" data-az="originale"><i class="fas fa-rotate-left"></i> Testo dell'AI</button>
                     ${d.tipo === 'recap' ? '<button class="btn" data-az="salvato"><i class="fas fa-envelope"></i> Usa il recap salvato</button>' : ''}
                 </div>
             </div>`;
@@ -649,10 +727,12 @@
             const corretto = testo && testo !== String(d.risposta).trim() ? testo : '';
             // Stesso pulsante senza modifiche al testo = valutazione annullata.
             const esito = d.esito === b.dataset.az && corretto === (d.testo_corretto || '') ? null : b.dataset.az;
-            await api('PUT', `/recap/risposte/${d.id}`, { esito, testo_corretto: corretto });
-            Object.assign(d, { esito, testo_corretto: corretto || null });
-            if ($('rEsito').value === 'da' && esito) risposte = risposte.filter((x) => x !== d);
-            disegnaRisposte();
+            await occupato(box, async () => {
+                await api('PUT', `/recap/risposte/${d.id}`, { esito, testo_corretto: corretto });
+                Object.assign(d, { esito, testo_corretto: corretto || null });
+                if ($('rEsito').value === 'da' && esito) risposte = risposte.filter((x) => x !== d);
+                disegnaRisposte();
+            });
         } catch (err) { errore(err); }
     };
     // --- Proposte di modifica dei prompt (jobs/revisionePrompt.js) ---
@@ -713,37 +793,55 @@
 
     // --- Associazioni (insegnante dell'associazione To-Do e RAID, jobs/associaTodoRaid.js) ---
     let assoc = [];
-    async function caricaAssoc() {
+    // silenzioso = ricarica dopo un salvataggio: niente «Caricamento…», così la lista non salta e resta dov'era.
+    async function caricaAssoc(silenzioso) {
+        if (silenzioso !== true) inCarica($('aLista'));
         try {
             const d = await api('GET', `/associazioni?esito=${encodeURIComponent($('aEsito').value)}`);
             assoc = d.associazioni;
-            $('aJob').textContent = d.job ? (d.job.attivo ? `Prossimo giro: ${dataOra(d.job.prossima_esecuzione) || '—'} · insegnante: ${d.ai}` : 'Job associa_todo_raid disattivato (Monitor › Schedulazioni)') : 'Job associa_todo_raid non presente';
-            $('aConteggi').textContent = `Da valutare ${d.conteggi.da_valutare} · valutate ${d.conteggi.valutate}`;
+            $('aJob').innerHTML = d.job ? (d.job.attivo ? `Prossimo giro: ${dataOra(d.job.prossima_esecuzione) || '—'} · AI di confronto: ${esc(d.ai)}` : `Job associa_todo_raid disattivato${LINK_SCHED}`) : 'Job associa_todo_raid non presente';
+            assoc.conteggi = d.conteggi;
+            contaScheda('nAssoc', d.conteggi.da_valutare);
             disegnaAssoc();
-        } catch (e) { errore(e); }
+        } catch (e) { if (silenzioso === true) errore(e); else inErrore($('aLista'), e, caricaAssoc); }
     }
     $('aEsito').onchange = caricaAssoc;
     function disegnaAssoc() {
-        $('aConteggio').textContent = `${assoc.length} associazion${assoc.length === 1 ? 'e' : 'i'}`;
+        const k = assoc.conteggi || {};
+        $('aConteggio').textContent = `${assoc.length} in vista · da valutare ${k.da_valutare ?? 0} · valutate ${k.valutate ?? 0}`;
+        pronto($('aLista'));
+        // Restano aperti i riquadri «Aggiungi un gruppo» che lo erano prima del ridisegno.
+        const aperti = new Set([...$('aLista').querySelectorAll('.dom')].filter((x) => x.querySelector('details[open]')).map((x) => x.dataset.id));
         const STATO_VOCE = { chiusa: 'chiusa', eliminata: 'eliminata' };
         const voce = (v) => `<span class="reg">${esc(v.registro)}</span> ${esc(v.titolo)}${v.owner ? ` <span class="muted">· ${esc(v.owner)}</span>` : ''}${STATO_VOCE[v.stato] ? ` <span class="badge">${STATO_VOCE[v.stato]}</span>` : ''}`;
+        const fonte = (f) => `<span class="badge ${f.ai === 'Projexa' ? 'b-run' : f.ai === 'Tu' ? '' : 'b-ins'}"${f.confidenza ? ` title="Confidenza dichiarata: ${f.confidenza}%"` : ''}>${esc(f.ai)}${f.confidenza ? ` ${f.confidenza}%` : ''}</span>`;
         $('aLista').innerHTML = assoc.map((a) => {
             const ins = a.insegnante;
-            const statoIns = ins.stato === 'pronto' ? `<span class="badge b-ok">${esc(ins.ai)} ha risposto</span>`
-                : ins.stato === 'errore' ? `<span class="badge b-bad" title="${esc(ins.errore || '')}">${esc(ins.ai || 'insegnante')}: errore</span>`
-                : `<span class="badge b-run">in attesa di ${esc(ins.ai || 'insegnante')}</span>`;
-            const gruppi = a.gruppi.map((g) => `<div class="gr ${g.esito || ''}" data-voci="${g.voci.join(',')}">
+            const nomeIns = esc(ins.ai || 'AI di confronto');
+            const statoIns = ins.stato === 'pronto' ? `<span class="badge b-ok">${nomeIns} ha risposto</span>`
+                : ins.stato === 'errore' ? `<span class="badge b-bad">${nomeIns}: errore</span>`
+                : `<span class="badge b-ins">${SPIN} in attesa di ${nomeIns}</span>`;
+            // In quale gruppo è già ogni voce (per l'elenco «Aggiungi un gruppo»).
+            const inGruppo = {};
+            a.gruppi.forEach((g, i) => g.voci.forEach((n) => { (inGruppo[n] = inGruppo[n] || []).push(i + 1); }));
+            const gruppi = a.gruppi.map((g, i) => {
+                // Il pulsante dice cosa succede alle voci vere (routes/analisiPm.js, PUT /associazioni/:id/gruppo).
+                const effG = g.collegate ? 'restano collegate' : 'le collego';
+                const effS = g.collegate ? 'le scollego' : 'restano separate';
+                return `<div class="gr ${g.esito || ''}" data-voci="${g.voci.join(',')}">
                     <div class="riga" style="justify-content:space-between">
-                        <span>${g.fonti.map((f) => `<span class="badge ${f.ai === 'Projexa' ? 'b-run' : f.ai === 'Tu' ? '' : 'b-warn'}">${esc(f.ai)}${f.confidenza ? ` ${f.confidenza}%` : ''}</span>`).join(' ')}</span>
-                        ${g.collegate ? '<span class="badge b-ok"><i class="fas fa-link"></i> collegate ora</span>' : '<span class="muted">non collegate</span>'}
+                        <span><b class="muted">Gruppo ${i + 1}</b> ${g.fonti.map(fonte).join(' ')}</span>
+                        <span>${g.collegate ? '<span class="badge b-ok"><i class="fas fa-link" aria-hidden="true"></i> collegate ora</span>' : '<span class="muted">non collegate</span>'}
+                        ${g.esito ? `<span class="badge ${g.esito === 'giusto' ? 'b-ok' : 'b-bad'}">${g.esito}</span>` : '<span class="badge">da valutare</span>'}</span>
                     </div>
                     ${g.voci.map((n) => `<div class="voce">${voce(a.voci[n - 1])}</div>`).join('')}
                     ${g.fonti.filter((f) => f.motivo).map((f) => `<div class="muted" style="margin-top:0.3rem">${esc(f.ai)}: ${esc(f.motivo)}</div>`).join('')}
                     <div class="riga" style="margin-top:0.5rem">
-                        <button class="btn ok ${g.esito === 'giusto' ? 'on' : ''}" data-g="giusto"><i class="fas fa-check"></i> Giusto</button>
-                        <button class="btn ko ${g.esito === 'sbagliato' ? 'on' : ''}" data-g="sbagliato"><i class="fas fa-xmark"></i> Sbagliato</button>
+                        <button type="button" class="btn ok ${g.esito === 'giusto' ? 'on' : ''}" data-g="giusto" ${pressato(g.esito === 'giusto')}><i class="fas fa-check" aria-hidden="true"></i> Giusto <span class="eff">(${effG})</span></button>
+                        <button type="button" class="btn ko ${g.esito === 'sbagliato' ? 'on' : ''}" data-g="sbagliato" ${pressato(g.esito === 'sbagliato')}><i class="fas fa-xmark" aria-hidden="true"></i> Sbagliato <span class="eff">(${effS})</span></button>
                     </div>
-                </div>`).join('') || '<div class="muted" style="margin-top:0.5rem">Né Projexa né l\'insegnante hanno trovato gruppi. Se va bene così premi «Valutazione completa»; se manca un gruppo aggiungilo qui sotto.</div>';
+                </div>`;
+            }).join('') || '<div class="muted" style="margin-top:0.5rem">Né Projexa né l\'insegnante hanno trovato gruppi. Se va bene così premi «Valutazione completa»; se manca un gruppo aggiungilo qui sotto.</div>';
             const mancano = a.gruppi.filter((g) => !g.esito).length;
             const attesa = ['da_inviare', 'inviato'].includes(ins.stato);
             return `<div class="dom ${a.completa ? 'corretta' : ''}" data-id="${a.id}">
@@ -751,45 +849,59 @@
                     <b>${esc([a.cliente, a.progetto].filter(Boolean).join(' · ') || 'Progetto')}</b>
                     <span><span class="muted">${dataIt(a.giorno)} · ${a.voci.length} voci inviate</span> ${statoIns} ${a.completa ? '<span class="badge b-ok">valutata</span>' : ''}</span>
                 </div>
+                ${ins.stato === 'errore' && ins.errore ? `<div class="muted" style="color:var(--bad); margin-top:0.3rem">${nomeIns}: ${esc(ins.errore)}</div>` : ''}
                 ${gruppi}
-                <details><summary>Aggiungi un gruppo che manca</summary>
-                    <div class="tutte">${a.voci.map((v) => `<label class="voce"><input type="checkbox" value="${v.n}"> ${voce(v)}</label>`).join('')}</div>
-                    <button class="btn" data-g="aggiungi" style="margin-top:0.5rem"><i class="fas fa-link"></i> Collega le voci scelte come gruppo giusto</button>
+                <details${aperti.has(String(a.id)) ? ' open' : ''}><summary>Aggiungi un gruppo che manca</summary>
+                    <div class="tutte">${a.voci.map((v) => `<label class="voce${inGruppo[v.n] ? ' in-gruppo' : ''}"><input type="checkbox" value="${v.n}"> ${voce(v)}${inGruppo[v.n] ? ` <span class="badge">già nel gruppo ${inGruppo[v.n].join(', ')}</span>` : ''}</label>`).join('')}</div>
+                    <button type="button" class="btn" data-g="aggiungi" style="margin-top:0.5rem" disabled><i class="fas fa-link" aria-hidden="true"></i> <span data-etichetta>Scegli almeno 2 voci</span></button>
                 </details>
                 <div class="riga" style="margin-top:0.7rem">${a.completa
-                    ? '<button class="btn" data-c="riapri"><i class="fas fa-rotate-left"></i> Riapri la valutazione</button>'
-                    : `<button class="btn pri" data-c="completa" ${mancano || attesa ? 'disabled' : ''}><i class="fas fa-flag-checkered"></i> Valutazione completa</button>
-                       ${mancano ? `<span class="muted">${mancano} grupp${mancano === 1 ? 'o' : 'i'} da valutare</span>` : attesa ? '<span class="muted">aspetta la risposta dell\'insegnante</span>' : ''}`}</div>
+                    ? '<button type="button" class="btn" data-c="riapri"><i class="fas fa-rotate-left" aria-hidden="true"></i> Riapri la valutazione</button>'
+                    : `<button type="button" class="btn pri" data-c="completa" ${mancano || attesa ? 'disabled' : ''}><i class="fas fa-flag-checkered" aria-hidden="true"></i> Valutazione completa</button>
+                       ${mancano ? `<span class="muted">${mancano} grupp${mancano === 1 ? 'o' : 'i'} da valutare</span>` : attesa ? `<span class="muted">aspetta la risposta di ${nomeIns}</span>` : ''}`}</div>
             </div>`;
-        }).join('') || '<div class="card muted">Nessuna associazione in questa vista. Arrivano dopo il giro delle 5:00 (lun-ven) se nel campo «Associazione Autom. ToDoList e RAID» hai Projexa e c\'erano voci nuove o modificate.</div>';
+        }).join('') || '<div class="card muted">Nessuna associazione in questa vista. Arrivano dopo il giro delle 5:00 (lun-ven) se nel campo «Associazione automatica To-Do e RAID» hai Projexa e c\'erano voci nuove o modificate.</div>';
     }
+    // «Aggiungi un gruppo»: contatore delle voci scelte, pulsante attivo da 2 voci.
+    $('aLista').onchange = (e) => {
+        const tutte = e.target.closest('.tutte');
+        if (!tutte) return;
+        const box = tutte.closest('.dom');
+        const n = tutte.querySelectorAll('input:checked').length;
+        const b = box.querySelector('[data-g="aggiungi"]');
+        b.disabled = n < 2;
+        b.querySelector('[data-etichetta]').textContent = n < 2 ? `Scegli almeno 2 voci (${n} scelt${n === 1 ? 'a' : 'e'})` : `Collega le ${n} voci scelte come gruppo giusto`;
+    };
     $('aLista').onclick = async (e) => {
         const box = e.target.closest('.dom');
         const g = e.target.closest('[data-g]');
         const c = e.target.closest('[data-c]');
         if (!box || (!g && !c)) return;
         const a = assoc.find((x) => x.id === box.dataset.id);
-        try {
-            if (g) {
-                let voci, esito;
-                if (g.dataset.g === 'aggiungi') {
-                    voci = [...box.querySelectorAll('.tutte input:checked')].map((x) => Number(x.value));
-                    if (voci.length < 2) return avviso('Scegli almeno 2 voci.', 'err');
-                    esito = 'giusto';
+        await occupato(box, async () => {
+            try {
+                if (g) {
+                    let voci, esito;
+                    if (g.dataset.g === 'aggiungi') {
+                        voci = [...box.querySelectorAll('.tutte input:checked')].map((x) => Number(x.value));
+                        if (voci.length < 2) return avviso('Scegli almeno 2 voci.', 'err');
+                        esito = 'giusto';
+                    } else {
+                        const gr = g.closest('.gr');
+                        voci = gr.dataset.voci.split(',').map(Number);
+                        const prima = a.gruppi.find((x) => x.voci.join(',') === gr.dataset.voci);
+                        esito = prima && prima.esito === g.dataset.g ? null : g.dataset.g; // stesso pulsante = annulla
+                    }
+                    const r = await api('PUT', `/associazioni/${a.id}/gruppo`, { voci, esito });
+                    if (r.azione) avviso(r.azione === 'collegate' ? 'Voci collegate: chiudendone una si chiudono anche le altre.' : 'Voci scollegate.');
+                    else if (!esito) avviso('Valutazione tolta: il collegamento delle voci resta com\'è.');
                 } else {
-                    const gr = g.closest('.gr');
-                    voci = gr.dataset.voci.split(',').map(Number);
-                    const prima = a.gruppi.find((x) => x.voci.join(',') === gr.dataset.voci);
-                    esito = prima && prima.esito === g.dataset.g ? null : g.dataset.g; // stesso pulsante = annulla
+                    await api('POST', `/associazioni/${a.id}/completa`, { completa: c.dataset.c === 'completa' });
+                    if (c.dataset.c === 'completa') avviso('Valutazione completa: è un esempio per l\'addestramento.');
                 }
-                const r = await api('PUT', `/associazioni/${a.id}/gruppo`, { voci, esito });
-                if (r.azione) avviso(r.azione === 'collegate' ? 'Voci collegate: chiudendone una si chiudono anche le altre.' : 'Voci scollegate.');
-            } else {
-                await api('POST', `/associazioni/${a.id}/completa`, { completa: c.dataset.c === 'completa' });
-                if (c.dataset.c === 'completa') avviso('Valutazione completa: è un esempio per l\'addestramento.');
-            }
-            caricaAssoc();
-        } catch (err) { errore(err); }
+                await caricaAssoc(true);
+            } catch (err) { errore(err); }
+        });
     };
     $('aScarica').onclick = () => scaricaFile('/associazioni/scarica', 'assoc_projexa_addestramento.jsonl').catch(errore);
     $('aNotebook').onclick = () => scaricaFile('/associazioni/notebook', 'addestra_assoc_projexa_14b.ipynb').catch(errore);
@@ -797,15 +909,17 @@
     // --- RAID e CR (Projexa contro l'AI esterna, jobs/analisiRaid.js) ---
     let confronti = [];
     const NOMI_ELENCHI = { rischi: 'Rischi', decisioni: 'Decisioni', dipendenze: 'Dipendenze', change_request: 'Change Request' };
-    async function caricaRaid() {
+    // silenzioso come in caricaAssoc: dopo una scelta la lista non salta.
+    async function caricaRaid(silenzioso) {
+        if (silenzioso !== true) inCarica($('xLista'));
         try {
             const d = await api('GET', `/raid?esito=${encodeURIComponent($('xEsito').value)}`);
             confronti = d.confronti;
             $('xAi').textContent = d.ai;
-            const c = d.conteggi;
-            $('xConteggi').textContent = `Da valutare ${c.da_valutare} · giusta Projexa ${c.projexa} · giusta AI esterna ${c.insegnante} · nessuna ${c.nessuna}`;
+            confronti.conteggi = d.conteggi;
+            contaScheda('nRaid', d.conteggi.da_valutare);
             disegnaRaid();
-        } catch (e) { errore(e); }
+        } catch (e) { if (silenzioso === true) errore(e); else inErrore($('xLista'), e, caricaRaid); }
     }
     $('xEsito').onchange = caricaRaid;
     // Una risposta: elenchi con le voci (titolo in grassetto, poi i campi utili).
@@ -813,20 +927,22 @@
         if (!elenchi) return '<div class="muted">Risposta non leggibile.</div>';
         const blocchi = Object.keys(NOMI_ELENCHI).filter((k) => (elenchi[k] || []).length).map((k) => `<div class="el">${NOMI_ELENCHI[k]} (${elenchi[k].length})</div>`
             + elenchi[k].map((x) => {
-                const extra = [x.owner && `owner ${x.owner}`, x.probabilita && `P${x.probabilita}`, x.impatto && `I${x.impatto}`, x.decisa_da && `decisa da ${x.decisa_da}`,
+                const extra = [x.owner && `responsabile ${x.owner}`, x.probabilita && `P${x.probabilita}`, x.impatto && `I${x.impatto}`, x.decisa_da && `decisa da ${x.decisa_da}`,
                     x.richiesta_da && `chiesta da ${x.richiesta_da}`, x.effort != null && x.effort !== '' && `effort ${x.effort}`, x.giorni != null && x.giorni !== '' && `+${x.giorni} gg`].filter(Boolean).join(' · ');
                 return `<div class="it"><b>${esc(x.titolo || '(senza titolo)')}</b>${x.descrizione ? `<div>${esc(x.descrizione)}</div>` : ''}${x.mitigazione ? `<div class="muted">Mitigazione: ${esc(x.mitigazione)}</div>` : ''}${x.motivo ? `<div class="muted">Motivo: ${esc(x.motivo)}</div>` : ''}${extra ? `<div class="muted">${esc(extra)}</div>` : ''}</div>`;
             }).join(''));
         return blocchi.join('') || '<div class="muted">Niente da registrare.</div>';
     }
     function disegnaRaid() {
-        $('xConteggio').textContent = `${confronti.length} confront${confronti.length === 1 ? 'o' : 'i'}`;
+        const c = confronti.conteggi || {};
+        $('xConteggio').textContent = `${confronti.length} in vista · da valutare ${c.da_valutare ?? 0} · giusta Projexa ${c.projexa ?? 0} · giusta AI di confronto ${c.insegnante ?? 0} · nessuna ${c.nessuna ?? 0}`;
+        pronto($('xLista'));
         $('xLista').innerHTML = confronti.map((x) => {
             const ins = x.insegnante;
             const corpoIns = ins.stato === 'pronto' ? rispostaRaid(ins.elenchi)
-                : ins.stato === 'errore' ? `<div class="muted" style="color:var(--bad)">Errore: ${esc(ins.errore || '')}</div><button class="btn" data-x="riprova" style="margin-top:0.4rem"><i class="fas fa-rotate-right"></i> Chiedi di nuovo</button>`
-                : '<div class="muted"><i class="fas fa-spinner fa-spin"></i> in attesa della risposta…</div>';
-            const bott = (chi, testo, ok) => `<button class="btn ok ${x.scelta === chi ? 'on' : ''}" data-x="${chi}" ${ok ? '' : 'disabled'} style="margin-top:0.5rem"><i class="fas fa-check"></i> ${testo}</button>`;
+                : ins.stato === 'errore' ? `<div class="muted" style="color:var(--bad)">Errore: ${esc(ins.errore || '')}</div><button type="button" class="btn" data-x="riprova" style="margin-top:0.4rem"><i class="fas fa-rotate-right" aria-hidden="true"></i> Chiedi di nuovo</button>`
+                : `<div class="muted">${SPIN} in attesa della risposta…</div>`;
+            const bott = (chi, testo, ok) => `<button type="button" class="btn ok ${x.scelta === chi ? 'on' : ''}" data-x="${chi}" ${pressato(x.scelta === chi)} ${ok ? '' : 'disabled'} style="margin-top:0.5rem"><i class="fas fa-check" aria-hidden="true"></i> ${testo}</button>`;
             return `<div class="dom ${x.scelta ? (x.scelta === 'nessuna' ? 'errata' : 'corretta') : ''}" data-id="${x.id}">
                 <div class="riga" style="justify-content:space-between">
                     <b>${esc(x.oggetto || '(riunione)')} <span class="muted">${dataIt(x.data)}</span></b>
@@ -835,11 +951,11 @@
                 <div class="duecol">
                     <div class="risp ${x.scelta === 'projexa' ? 'scelta' : ''}"><h3><span class="badge b-run">${esc(x.projexa.modello)}</span></h3>${rispostaRaid(x.projexa.elenchi)}
                         ${bott('projexa', 'Giusta Projexa', !!x.projexa.elenchi)}</div>
-                    <div class="risp ${x.scelta === 'insegnante' ? 'scelta' : ''}"><h3><span class="badge b-warn">${esc(ins.ai || 'AI esterna')}</span></h3>${corpoIns}
+                    <div class="risp ${x.scelta === 'insegnante' ? 'scelta' : ''}"><h3><span class="badge b-ins">${esc(ins.ai || 'AI esterna')}</span></h3>${corpoIns}
                         ${bott('insegnante', `Giusta ${esc(ins.ai || 'AI esterna')}`, ins.stato === 'pronto' && !!ins.elenchi)}</div>
                 </div>
                 <div class="riga" style="margin-top:0.6rem">
-                    <button class="btn ko ${x.scelta === 'nessuna' ? 'on' : ''}" data-x="nessuna"><i class="fas fa-xmark"></i> Nessuna delle due</button>
+                    <button type="button" class="btn ko ${x.scelta === 'nessuna' ? 'on' : ''}" data-x="nessuna" ${pressato(x.scelta === 'nessuna')}><i class="fas fa-xmark" aria-hidden="true"></i> Nessuna delle due</button>
                     ${x.scelta ? `<span class="muted">scelta del ${dataOra(x.sceltaIl)} · ripremi lo stesso pulsante per annullarla</span>` : ''}
                 </div>
             </div>`;
@@ -850,14 +966,16 @@
         const box = e.target.closest('.dom');
         if (!b || !box) return;
         const x = confronti.find((c) => c.id === box.dataset.id);
-        try {
-            if (b.dataset.x === 'riprova') { await api('POST', `/raid/${x.id}/insegnante`, {}); avviso('Richiesta mandata di nuovo: ricarica tra qualche secondo.'); }
-            else {
-                const scelta = x.scelta === b.dataset.x ? null : b.dataset.x; // stesso pulsante = annulla
-                await api('PUT', `/raid/${x.id}`, { scelta });
-            }
-            caricaRaid();
-        } catch (err) { errore(err); }
+        await occupato(box, async () => {
+            try {
+                if (b.dataset.x === 'riprova') { await api('POST', `/raid/${x.id}/insegnante`, {}); avviso('Richiesta mandata di nuovo: ricarica tra qualche secondo.'); }
+                else {
+                    const scelta = x.scelta === b.dataset.x ? null : b.dataset.x; // stesso pulsante = annulla
+                    await api('PUT', `/raid/${x.id}`, { scelta });
+                }
+                await caricaRaid(true);
+            } catch (err) { errore(err); }
+        });
     };
     $('xScarica').onclick = () => scaricaFile('/raid/scarica', 'raid_projexa_addestramento.jsonl').catch(errore);
     $('xNotebook').onclick = () => scaricaFile('/raid/notebook', 'addestra_raid_projexa_14b.ipynb').catch(errore);
@@ -870,11 +988,20 @@
     (async () => {
         try {
             const c = await api('GET', '/config');
+            $('avvio').classList.add('hidden');
             if (!c.abilitato) { $('negato').classList.remove('hidden'); return; }
             $('pagina').classList.remove('hidden');
+            // Badge delle schede non aperte: da valutare di Domande, Recap, Associazioni e RAID (in sottofondo, senza disegnare).
+            api('GET', '/domande?esito=da').then((d) => contaScheda('nDomande', d.domande.length)).catch(() => {});
+            api('GET', '/recap/riunioni').then((d) => contaScheda('nRecap', d.riunioni.reduce((s, r) => s + (Number(r.da_valutare) || 0), 0))).catch(() => {});
+            api('GET', '/associazioni?esito=da').then((d) => contaScheda('nAssoc', d.conteggi.da_valutare)).catch(() => {});
+            api('GET', '/raid?esito=da').then((d) => contaScheda('nRaid', d.conteggi.da_valutare)).catch(() => {});
+            const scheda = location.hash.slice(1);
+            // caricaRiunioni riempie anche il filtro «Riunione» delle Domande.
+            if (SCHEDE.includes(scheda) && scheda !== 'domande') { vai(scheda); if (scheda !== 'riunioni') caricaRiunioni(); return; }
+            vai('domande');
             await caricaRiunioni();
-            caricaDomande();
-        } catch (e) { errore(e); }
+        } catch (e) { $('avvio').classList.add('hidden'); errore(e); }
     })();
 </script>
 </body>

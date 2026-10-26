@@ -10,6 +10,9 @@ function getAuthHeaders() {
     return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 
+// Stati salvati con la grafia precedente a Supporto/CreaDB/uniforma_nomi_e_stati.sql: si mostrano con quella nuova
+const ETICHETTE_STATO = { 'in Lavorazione': 'In lavorazione' };
+
 // Colonne della griglia e della finestra di dettaglio, nell'ordine di visualizzazione
 const COLONNE_ISSUE = [
     'data_segnalazione', 'project_id', 'visibilita', 'modulo',
@@ -173,7 +176,7 @@ class IssueManager {
     }
 
     populateClientSelect(clients) {
-        this.clientSelect.innerHTML = '<option value="">-- Seleziona azienda --</option>';
+        this.clientSelect.innerHTML = '<option value="">-- Seleziona cliente --</option>';
         clients.forEach(client => {
             const option = document.createElement('option');
             option.value = client.id;
@@ -354,8 +357,8 @@ class IssueManager {
 
     formatColumnName(col) {
         const names = {
-            'data_segnalazione': 'Data Segnalazione',
-            'project_id': 'Project ID',
+            'data_segnalazione': 'Data segnalazione',
+            'project_id': 'ID progetto',
             'visibilita': 'Visibilità',
             'modulo': 'Modulo',
             'richiedente': 'Richiedente',
@@ -365,7 +368,7 @@ class IssueManager {
             'stato': 'Stato',
             'priorita': 'Priorità',
             'descrizione': 'Descrizione',
-            'owner': 'Owner',
+            'owner': 'Responsabile',
             'deadline': 'Scadenza',
             'note': 'Note',
             'data_chiusura': 'Data chiusura'
@@ -412,7 +415,7 @@ class IssueManager {
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'jira-lookup-btn';
-                btn.title = 'Cerca il ticket in Quotazioni e Task Jira';
+                btn.title = 'Cerca il ticket in Quotazioni e Ticket Jira';
                 btn.setAttribute('aria-label', btn.title);
                 btn.innerHTML = '<i class="fas fa-search"></i>';
                 btn.addEventListener('click', () => this.openJiraLookup(issue[col]));
@@ -429,6 +432,7 @@ class IssueManager {
 
     formatCellValue(value, column) {
         if (!value) return '';
+        if (column === 'stato') return ETICHETTE_STATO[value] || String(value);
         if (column.includes('date') || column === 'data_segnalazione' || column === 'deadline' || column === 'data_chiusura') {
             return new Date(value).toLocaleDateString('it-IT');
         }
@@ -509,7 +513,7 @@ class IssueManager {
             // Mantiene un eventuale valore storico non più previsto
             if (current && !values.includes(current)) values = [current, ...values];
             if (!current) select.appendChild(new Option('', ''));
-            values.forEach(v => select.appendChild(new Option(v, v, false, v === current)));
+            values.forEach(v => select.appendChild(new Option(ETICHETTE_STATO[v] || v, v, false, v === current)));
             select.addEventListener('change', () => set(col)(select.value));
             return select;
         };
@@ -546,7 +550,7 @@ class IssueManager {
                 '-- Seleziona richiedente --', set('richiedente')),
             categoria: () => fixedSelect('categoria', ['Bug', 'Richiesta', 'Configurazione', 'Report', 'Altro']),
             stato: () => {
-                const select = fixedSelect('stato', ['Aperto', 'in Lavorazione', 'In revisione', 'Chiuso', 'Sospeso']);
+                const select = fixedSelect('stato', ['Aperto', 'In lavorazione', 'In revisione', 'Chiuso', 'Sospeso']);
                 // Stato e data di chiusura vanno insieme: "Chiuso" mette la data di oggi
                 // (se manca), qualunque altro stato la svuota.
                 select.addEventListener('change', () => {
@@ -808,7 +812,7 @@ class IssueManager {
         me.type = 'button';
         me.className = 'owner-me';
         me.textContent = 'me';
-        me.title = 'Owner = io (contatto di rubrica con la mia email)';
+        me.title = 'Responsabile = io (contatto di rubrica con la mia email)';
         me.addEventListener('click', event => {
             event.preventDefault();
             const mine = this.ownerOptions.find(o => o.value === this.ownerMe);
@@ -948,8 +952,8 @@ class IssueManager {
 
             // --- KPI (righe 7-8), gli stessi della pagina ---
             const kpi = [
-                ['Totale issue aperti', this.kpiAperti.textContent],
-                ['Issue chiusi', this.kpiChiusi.textContent],
+                ['Totale issue aperte', this.kpiAperti.textContent],
+                ['Issue chiuse', this.kpiChiusi.textContent],
                 ['Priorità alta', this.kpiAlta.textContent],
                 ['Priorità media', this.kpiMedia.textContent],
                 ['Priorità bassa', this.kpiBassa.textContent],
@@ -1073,7 +1077,7 @@ class IssueManager {
         if (!result.righe.length) {
             const p = document.createElement('p');
             p.className = 'jira-none';
-            p.textContent = 'Nessuna corrispondenza in Quotazioni né in Task Jira';
+            p.textContent = 'Nessuna corrispondenza in Quotazioni né in Ticket Jira';
             section.appendChild(p);
             return section;
         }

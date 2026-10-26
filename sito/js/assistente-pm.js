@@ -24,8 +24,8 @@
         return t ? { Authorization: `Bearer ${t}` } : {};
     };
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    // Voce «Projexa» del campo = agente Pm projexa su Ollama della VM (solo modalità testo).
-    const nomeAi = (ai) => (ai === 'Projexa' ? 'Pm projexa' : (ai || 'Gemini'));
+    // Voce «Projexa» del campo = agente PM Projexa su Ollama della VM (solo modalità testo).
+    const nomeAi = (ai) => (ai === 'Projexa' ? 'PM Projexa' : (ai || 'Gemini'));
     const zoom = () => (window.uiZoom ? window.uiZoom() : 1) || 1;
 
     const css = `
@@ -378,7 +378,7 @@
         // Impostazioni › «Esecuzione Assistente PM»: Testo/Audio = parte subito con quella
         // modalità; "Chiedi Sempre" (o vuoto) = scelta nella finestra.
         let modalita = d.modalita === 'testo' || d.modalita === 'audio' ? d.modalita : null;
-        if (modalita) bodyEl.innerHTML = `<div class="apm-msg info">Collegamento a ${s.ai === 'Projexa' ? 'Pm projexa' : 'Gemini Live'}…</div>`;
+        if (modalita) bodyEl.innerHTML = `<div class="apm-msg info">Collegamento a ${s.ai === 'Projexa' ? 'PM Projexa' : 'Gemini Live'}…</div>`;
         else modalita = await new Promise((resolve) => { s.scelta = resolve; disegnaScelta(); });
         if (!modalita || s !== stato) return null; // finestra chiusa o registrazione fermata
         try {
@@ -417,7 +417,7 @@
         bodyEl.querySelectorAll('.apm-modo').forEach((b) => b.addEventListener('click', () => {
             const m = b.dataset.modo;
             try { localStorage.setItem(MODO_KEY, m); } catch (e) { /* solo preferenza */ }
-            bodyEl.innerHTML = `<div class="apm-msg info">Collegamento a ${stato && stato.ai === 'Projexa' ? 'Pm projexa' : 'Gemini Live'}…</div>`;
+            bodyEl.innerHTML = `<div class="apm-msg info">Collegamento a ${stato && stato.ai === 'Projexa' ? 'PM Projexa' : 'Gemini Live'}…</div>`;
             const r = stato && stato.scelta;
             if (stato) stato.scelta = null;
             if (r) r(m);
@@ -449,7 +449,7 @@
         s.timer = null;
         if (s.scelta) s.scelta(null);
         const tieni = daRegistrazione && conMessaggi(s);
-        // Risposta: scaricaWord = «Download automatico file Ass PM AI» acceso.
+        // Risposta: scaricaWord = «Download automatico file Assistente PM» acceso.
         const chiusa = fetch(`${API_URL}/assistente-pm/ferma`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...auth() },
@@ -468,12 +468,12 @@
                 : 'Registrazione fermata: l\'assistente è chiuso. Usa il pulsante Word in alto per conservare suggerimenti e trascrizione (disponibili per 2 ore), poi chiudi la finestra con la X.' });
         aggiornaStato(false);
         disegna(true);
-        // Impostazioni › «Download automatico file Ass PM AI»: export in Word senza clic.
+        // Impostazioni › «Download automatico file Assistente PM»: export in Word senza clic.
         if (esito.scaricaWord) esporta();
     }
 
     // «Chiudi definitivamente» (2026-10-20): la X nasconde soltanto la finestra e l'assistente
-    // continua a lavorare; questo pulsante chiude la sessione anche sul server (con Pm projexa
+    // continua a lavorare; questo pulsante chiude la sessione anche sul server (con PM Projexa
     // ferma Ollama sulla VM e ne libera la memoria). La registrazione e la trascrizione della
     // riunione proseguono; i messaggi restano 2 ore (pulsante «Assistente PM» per rivederli).
     async function chiudiDefinitivamente() {
@@ -640,7 +640,7 @@
         return null;
     }
 
-    // Durata dei blocchi brevi (secondi) per la dashboard. Pm projexa: ~25 s, perché Whisper
+    // Durata dei blocchi brevi (secondi) per la dashboard. PM Projexa: ~25 s, perché Whisper
     // sulla VM elabora comunque finestre da 30 s (blocchi da 10 s costavano uguale e con Ollama
     // in parallelo arrivavano uno al minuto, prova 2026-10-20). null = valori della dashboard.
     function durataBlocchi() {

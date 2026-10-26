@@ -851,7 +851,7 @@ async function settingValore(user, campo) {
 // quello (solo per i testi, non per le risposte strutturate). null se nessuna.
 export async function aiPerPm(user, { soloEsterna = false } = {}) {
   const nomi = [];
-  for (const c of ['AI generazione e-mail recap', 'AI Slide Kick-Off', 'AI Offerta Economica']) {
+  for (const c of ['AI generazione e-mail recap', 'AI Slide Kick-off', 'AI Offerta economica']) {
     const v = await settingValore(user, c);
     if (v && !nomi.includes(v)) nomi.push(v);
   }
@@ -877,7 +877,7 @@ export async function chiediAi(user, build, dati, { json = false, soloEsterna = 
   const ai = scelta && scelta.nome ? { nome: scelta.nome, locale: !!scelta.locale, label: scelta.label } : await aiPerPm(user, { soloEsterna: soloEsterna || json });
   if (!ai) {
     throw errore(428, json || soloEsterna
-      ? 'Serve un\'AI con chiave API (ChatGPT, Claude, Gemini o Mistral): sceglila in Impostazioni › AI › «AI generazione e-mail recap» (o «AI Slide Kick-Off») e collega la sua chiave'
+      ? 'Serve un\'AI con chiave API (ChatGPT, Claude, Gemini o Mistral): sceglila in Impostazioni › AI › «AI generazione e-mail recap» (o «AI Slide Kick-off») e collega la sua chiave'
       : 'Nessuna AI disponibile: sceglila in Impostazioni › AI › «AI generazione e-mail recap» e collega la sua chiave');
   }
   // Projexa con risposta strutturata (RAID, Change Request, Add-in Outlook): JSON forzato da

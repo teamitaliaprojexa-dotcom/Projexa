@@ -16,7 +16,7 @@ Dati economici:
 - Effort totale: {{EFFORT}}
 - Preventivo: {{PREVENTIVO}}
 
-Piano di fatturazione (griglia Invoice del progetto):
+Piano di fatturazione (griglia Fatturazione del progetto):
 {{INVOICE}}
 
 Istruzioni:

@@ -1460,7 +1460,7 @@
             font: inherit;
             font-size: 0.8rem;
         }
-        .type11-grid-toolbar button.primary { background: #10B981; color: white; border-color: #10B981; }
+        .type11-grid-toolbar button.primary { background: #047857; color: white; border-color: #10B981; }
         .type11-grid-toolbar button.danger { color: #B91C1C; border-color: #FCA5A5; }
         .type11-grid-toolbar button:disabled { opacity: 0.45; cursor: default; }
         .type11-grid-table.type11-editable tbody tr { cursor: pointer; }
@@ -1582,7 +1582,7 @@
         .parent-form-tool.active { outline: 3px solid rgba(15, 118, 110, 0.28); outline-offset: 2px; }
         .parent-form-footer { display: flex; justify-content: flex-end; gap: 0.6rem; padding: 0.9rem 1.2rem; border-top: 1px solid var(--border); }
         .parent-form-footer button { border: 0; border-radius: 7px; padding: 0.55rem 1.1rem; font-weight: 600; cursor: pointer; }
-        .parent-form-save { background: #10B981; color: #fff; }
+        .parent-form-save { background: #047857; color: #fff; }
         .parent-form-cancel { background: #E5E7EB; color: #374151; }
         /* Clienti/progetti di un collaboratore del team del Manager (sola lettura) */
         /* Griglia raggiunta dal «Vai» di una notifica: evidenziata per un attimo */
@@ -1807,7 +1807,7 @@
         }
 
         .btn-primary {
-            background: var(--primary);
+            background: var(--primary-strong);
             color: white;
         }
 
@@ -1843,7 +1843,7 @@
         }
 
         .btn-icon:hover {
-            background: var(--primary);
+            background: var(--primary-strong);
             color: white;
             border-color: var(--primary);
         }
@@ -2980,7 +2980,7 @@
             padding: 0.5rem 0.8rem;
             border: none;
             border-radius: 7px;
-            background: #10B981;
+            background: #047857;
             color: white;
             font-weight: 600;
             cursor: pointer;
@@ -3526,7 +3526,7 @@
         }
         .task-assignee-add {
             padding: 0.2rem 0.6rem; border: none; border-radius: 6px;
-            background: #10B981; color: white; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+            background: #047857; color: white; font-size: 0.78rem; font-weight: 600; cursor: pointer;
         }
         .task-assignee-add:hover { background: #059669; }
         .rubrica-add-modal { z-index: 3000; }
@@ -3578,7 +3578,7 @@
         .ai-tr-item input[type="checkbox"] { flex: none; margin: 0; }
         .ai-tr-azioni { display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap; }
         .ai-tr-conteggio { flex: 1; font-size: 0.8rem; color: var(--text-muted); }
-        .ai-tr-usa { padding: 0.4rem 0.9rem; border: none; border-radius: 8px; background: #6366F1; color: white; font-weight: 600; cursor: pointer; }
+        .ai-tr-usa { padding: 0.4rem 0.9rem; border: none; border-radius: 8px; background: #4F46E5; color: white; font-weight: 600; cursor: pointer; }
         .ai-tr-usa:disabled { opacity: 0.5; cursor: default; }
         .ai-chat-files { display: flex; flex-wrap: wrap; gap: 0.4rem; }
         .ai-chat-files:empty { display: none; }
@@ -3626,7 +3626,7 @@
             cursor: pointer;
             white-space: nowrap;
         }
-        .calendar-conn-on { background: #10B981; color: white; }
+        .calendar-conn-on { background: #047857; color: white; }
         .calendar-conn-ics { background: #0078D4; color: white; }
         .calendar-conn-off { background: #FEE2E2; color: #B91C1C; }
         .calendar-conn-model { background: #EEF2FF; color: #4338CA; }
@@ -4415,20 +4415,91 @@
             .settings-detail-flyout { transition: opacity 0.15s ease !important; }
             .sidebar .sidebar-menu li.dock-bounce > a { animation: none; }
         }
+
+        /* ==================================================================
+           ACCESSIBILITÀ (WCAG 2.2 AA). Regole in fondo per prevalere sulle precedenti.
+           ================================================================== */
+        /* Colori dei pulsanti con testo bianco: contrasto almeno 4,5:1 */
+        :root {
+            --primary-strong: #1D4ED8;
+            --secondary-strong: #047857;
+            --warning-strong: #B45309;
+            --danger-strong: #B91C1C;
+            --focus-ring: #1E40AF;
+            --field-border: #8A929E;
+        }
+        /* Testo visibile solo agli screen reader */
+        .sr-only {
+            position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+            overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+        }
+        /* Salto al contenuto: compare solo quando riceve il focus */
+        .skip-link {
+            position: fixed; top: 8px; left: 8px; z-index: 5000; padding: 0.6rem 1rem;
+            background: var(--primary-strong); color: #fff; border-radius: 8px; font-weight: 600;
+            text-decoration: none; transform: translateY(-200%); transition: transform 0.15s ease;
+        }
+        .skip-link:focus { transform: translateY(0); }
+        /* Focus sempre visibile da tastiera */
+        :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+        .search-box input:focus-visible { outline: none; }
+        .search-box:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+        .project-search-item:focus-visible,
+        .project-search-item.active { background: #D1FAE5; outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+        .kpi-mbo-center-info:focus-visible,
+        .gp-stat:focus-visible,
+        .rev-ylabel:focus-visible,
+        .ms-riga .c.ms-link:focus-visible,
+        .ms-ap-nome.ms-link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+        .settings-flyout ul li[data-client-id]:focus-visible,
+        .settings-flyout ul li[data-argument]:focus-visible,
+        .settings-flyout ul li.flyout-group-head:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+        /* Interruttori: focus visibile e stato "spento" distinguibile (1.4.11) */
+        .toggle-slider { background: #6B7280; }
+        .toggle-switch input:checked + .toggle-slider { background: var(--secondary-strong); }
+        .toggle-switch input:focus-visible + .toggle-slider { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+        /* Bordi dei campi con contrasto 3:1 */
+        input[type="text"], input[type="search"], input[type="email"], input[type="password"],
+        input[type="date"], input[type="number"], select, textarea { border-color: var(--field-border) !important; }
+        .search-box input, .meetings-date-input { border-color: transparent !important; }
+        /* Etichette del dock anche con la tastiera, non solo al passaggio del mouse */
+        .sidebar .sidebar-menu li > a:focus-visible > span { opacity: 1; }
+        /* Pulsanti definiti da classi con colori a basso contrasto */
+        .upload-btn.primary, .btn-primary { background: var(--primary-strong); border-color: var(--primary-strong); }
+        .btn-icon:hover { background: var(--primary-strong); }
+        .type11-grid-toolbar button.primary,
+        .parent-form-save,
+        .client-logo-action button,
+        .mt-btn.mt-green, .mt-btn.mt-close,
+        .mi-btn.verde,
+        .task-assignee-add,
+        .calendar-conn-on { background: var(--secondary-strong); border-color: var(--secondary-strong); }
+        .task-assignee-add:hover, .mt-btn.mt-green:hover { background: #065F46; }
+        .ai-tr-usa { background: #4F46E5; }
+        .air-azioni button.primario { background: #0369A1; border-color: #0369A1; }
+        /* Pulsanti di "Password dimenticata" e testi di errore */
+        #changePasswordForgot { color: var(--primary-strong) !important; }
+        #changePasswordError { color: var(--danger-strong) !important; }
     </style>
     <script src="js/azioni.js?v=20261017-2"></script>
 </head>
 <body>
+    <!-- Primo elemento con il Tab: salta il dock (che nel DOM viene prima del contenuto) -->
+    <a href="#contenuto" class="skip-link">Vai al contenuto</a>
+    <!-- Annunci per gli screen reader (showNotification e messaggi di stato: js/a11y.js) -->
+    <div id="srAnnunci" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div id="srAvvisi" class="sr-only" role="alert" aria-live="assertive" aria-atomic="true"></div>
     <!-- SIDEBAR -->
-    <aside class="sidebar">
+    <aside class="sidebar" aria-label="Barra di navigazione">
         <div class="sidebar-header">
-            <img src="Logo_Projexa.png" alt="Projexa" style="height: 40px; width: auto; flex: 0 0 auto;">
+            <img src="Logo_Projexa.png" alt="" style="height: 40px; width: auto; flex: 0 0 auto;">
             <div class="sidebar-logo">Projexa</div>
-            <button id="sidebarToggle" class="sidebar-toggle" title="Riduci/Espandi">
-                <i class="fas fa-chevron-left"></i>
+            <button id="sidebarToggle" class="sidebar-toggle" title="Riduci/Espandi" aria-label="Riduci o espandi la barra">
+                <i class="fas fa-chevron-left" aria-hidden="true"></i>
             </button>
         </div>
 
+        <nav aria-label="Navigazione principale" style="display: contents;">
         <ul class="sidebar-menu">
             <li><a href="#" class="active"><img class="dock-logo" src="Logo_Projexa.png" alt=""> <span>Dashboard</span></a></li>
             <li class="nav-clients" style="position: relative;">
@@ -4484,7 +4555,7 @@
             <li id="navMonitor" style="display: none;"><a href="monitor.html"><i class="fas fa-gauge-high"></i> <span>Monitor</span></a></li>
             <!-- Analisi PM (domande da PM senior proposte di notte, addestramento di Pm projexa):
                  solo gli utenti di ANALISI_PM_EMAILS (routes/analisiPm.js) -->
-            <li id="navAnalisiPm" style="display: none;"><a href="analisi-pm.html" title="Analisi PM: domande da valutare e addestramento di Pm projexa"><i class="fas fa-user-tie"></i> <span>Analisi PM</span></a></li>
+            <li id="navAnalisiPm" style="display: none;"><a href="analisi-pm.html" title="Analisi PM: domande da valutare e addestramento di PM Projexa"><i class="fas fa-user-tie"></i> <span>Analisi PM</span></a></li>
             <!-- Registrazione libera (non legata al calendario): chiede il nome e avvia la registrazione -->
             <li id="navRecord" data-dash-flag="registra" style="border: none;"><a href="#" id="navRecordLink" title="Nuova registrazione"><svg class="sidebar-icon nav-record-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="#DC2626" stroke-width="1.8"/><rect x="9.6" y="5.6" width="4.8" height="8.2" rx="2.4" fill="#DC2626"/><path d="M7.4 11.4a4.6 4.6 0 0 0 9.2 0" fill="none" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/><path d="M12 16v2.4M9.6 18.4h4.8" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/></svg> <span>Registra</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
@@ -4494,20 +4565,20 @@
                     <div class="settings-flyout-inner">
                         <div class="settings-flyout-title">Impostazioni</div>
                         <div id="settingsListEditWrap" style="display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 0.8rem; margin-bottom: 0.5rem;">
-                            <span>Abilita modifica</span>
-                            <label class="toggle-switch"><input type="checkbox" id="settingsListEditToggle"><span class="toggle-slider"></span></label>
+                            <span id="settingsListEditLabel">Abilita modifica</span>
+                            <label class="toggle-switch"><input type="checkbox" id="settingsListEditToggle" role="switch" aria-labelledby="settingsListEditLabel"><span class="toggle-slider"></span></label>
                         </div>
                         <div id="settingsArgToolbar" style="display: none; gap: 6px; margin-bottom: 0.9rem;">
-                            <button id="settingsAddArgBtn" type="button" title="Aggiungi argomento" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #3B82F6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-plus"></i></button>
-                            <button id="settingsDelArgBtn" type="button" title="Elimina argomento" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #EF4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-trash"></i></button>
+                            <button id="settingsAddArgBtn" type="button" title="Aggiungi argomento" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #1D4ED8; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-plus"></i></button>
+                            <button id="settingsDelArgBtn" type="button" title="Elimina argomento" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #B91C1C; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-trash"></i></button>
                             <button id="settingsRenArgBtn" type="button" title="Rinomina argomento" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #6B7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-pen"></i></button>
                         </div>
                         <!-- Form aggiunta argomento (stile flyout 2): nome + tipo + ruolo -->
                         <div id="settingsNewArgForm" style="display: none; margin-bottom: 0.75rem;">
                             <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Tenant</label>
                             <input id="settingsNewArgTenant" type="text" disabled value="…" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem; background: #f3f4f6; color: #6b7280;">
-                            <input id="settingsNewArgName" type="text" placeholder="Nome dell'argomento" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;">
-                            <select id="settingsNewArgType" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;"></select>
+                            <input id="settingsNewArgName" type="text" placeholder="Nome dell'argomento" aria-label="Nome dell'argomento" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;">
+                            <select id="settingsNewArgType" aria-label="Tipo dell'argomento" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;"></select>
                             <div id="settingsNewArgTabellaWrap" style="display: none; margin-bottom: 0.5rem;">
                                 <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Tabella</label>
                                 <input id="settingsNewArgTabella" type="text" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;">
@@ -4523,7 +4594,7 @@
                             <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Visibile a (ruolo)</label>
                             <select id="settingsNewArgRoles" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;"></select>
                             <div style="display: flex; gap: 0.5rem;">
-                                <button id="settingsNewArgAdd" type="button" style="flex: 1; padding: 0.4rem; background: #10B981; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Aggiungi</button>
+                                <button id="settingsNewArgAdd" type="button" style="flex: 1; padding: 0.4rem; background: #047857; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Aggiungi</button>
                                 <button id="settingsNewArgCancel" type="button" style="flex: 0 0 auto; padding: 0.4rem 0.8rem; background: #e5e7eb; border: none; border-radius: 4px; cursor: pointer;">Annulla</button>
                             </div>
                         </div>
@@ -4534,6 +4605,7 @@
                 </div>
             </li>
         </ul>
+        </nav>
 
         <div class="sidebar-footer">
             <div class="user-profile">
@@ -4553,39 +4625,39 @@
             <!-- Titolo + toggle "Abilita modifica" (solo per i Clienti) -->
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem;">
                 <div style="display: flex; align-items: center; gap: 0.4rem; min-width: 0;">
-                    <button id="detailBackBtn" type="button" title="Indietro" style="display: none; flex: 0 0 auto; width: 26px; height: 26px; background: #e5e7eb; border: none; border-radius: 6px; font-size: 1.2rem; line-height: 1; cursor: pointer;">‹</button>
+                    <button id="detailBackBtn" type="button" title="Indietro" aria-label="Indietro" style="display: none; flex: 0 0 auto; width: 26px; height: 26px; background: #e5e7eb; border: none; border-radius: 6px; font-size: 1.2rem; line-height: 1; cursor: pointer;">‹</button>
                     <div class="settings-flyout-title" id="settingsDetailTitle" style="margin-bottom: 0;">Dettaglio</div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 0.5rem; flex: 0 0 auto;">
-                    <button id="reopenProjectBtn" type="button" style="display: none; flex: 0 0 auto; padding: 0.35rem 0.75rem; background: var(--secondary); color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">Riapri progetto</button>
+                    <button id="reopenProjectBtn" type="button" style="display: none; flex: 0 0 auto; padding: 0.35rem 0.75rem; background: var(--secondary-strong); color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">Riapri progetto</button>
                     <label id="showAllProjectFieldsWrap" style="display: none; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">
                         <span>Mostra tutti i campi</span>
                         <span class="toggle-switch"><input type="checkbox" id="showAllProjectFieldsToggle"><span class="toggle-slider"></span></span>
                     </label>
-                    <button id="closeProjectBtn" type="button" style="display: none; flex: 0 0 auto; padding: 0.35rem 0.75rem; background: var(--warning); color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">Chiudi Progetto</button>
+                    <button id="closeProjectBtn" type="button" style="display: none; flex: 0 0 auto; padding: 0.35rem 0.75rem; background: var(--warning-strong); color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">Chiudi progetto</button>
                     <label id="clientEditToggleWrap" style="display: none; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">
                         <span>Abilita modifica</span>
                         <span class="toggle-switch"><input type="checkbox" id="clientEditToggle"><span class="toggle-slider"></span></span>
                     </label>
-                    <button id="detailCloseBtn" type="button" title="Chiudi" style="display: none; flex: 0 0 auto; width: 26px; height: 26px; background: #e5e7eb; border: none; border-radius: 6px; font-size: 1rem; line-height: 1; cursor: pointer;">✕</button>
+                    <button id="detailCloseBtn" type="button" title="Chiudi" aria-label="Chiudi" style="display: none; flex: 0 0 auto; width: 26px; height: 26px; background: #e5e7eb; border: none; border-radius: 6px; font-size: 1rem; line-height: 1; cursor: pointer;">✕</button>
                 </div>
             </div>
             <!-- Prompt AI: solo nel dettaglio Impostazioni "AI Intelligenza Artificiale". Per tutti:
                  l'admin del tenant PROJEXA modifica anche lo standard, gli altri solo il proprio
                  personalizzato (controllo in /api/prompts). -->
             <div id="settingsPromptAiWrap" style="display: none; margin-bottom: 0.75rem;">
-                <a href="prompt-editor.html" style="display: inline-flex; align-items: center; gap: 6px; padding: 0.35rem 0.75rem; background: var(--primary); color: white; border-radius: 6px; font-weight: 600; font-size: 0.8rem; text-decoration: none;"><i class="fas fa-envelope-open-text"></i> Prompt AI</a>
+                <a href="prompt-editor.html" style="display: inline-flex; align-items: center; gap: 6px; padding: 0.35rem 0.75rem; background: var(--primary-strong); color: white; border-radius: 6px; font-weight: 600; font-size: 0.8rem; text-decoration: none;"><i class="fas fa-envelope-open-text"></i> Prompt AI</a>
             </div>
             <!-- Pulsanti struttura campi (Nuovo / Elimina / Rinomina), visibili solo con modifica abilitata -->
             <div id="clientEditButtons" style="display: none; gap: 0.35rem; margin-bottom: 0.75rem;">
-                <button id="clientNewFieldBtn" type="button" title="Aggiungi campo" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #3B82F6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-plus"></i></button>
-                <button id="clientDeleteBtn" type="button" title="Elimina campi" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #EF4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-trash"></i></button>
+                <button id="clientNewFieldBtn" type="button" title="Aggiungi campo" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #1D4ED8; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-plus"></i></button>
+                <button id="clientDeleteBtn" type="button" title="Elimina campi" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #B91C1C; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-trash"></i></button>
                 <button id="clientRenameBtn" type="button" title="Rinomina campi" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #6B7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-pen"></i></button>
-                <button id="clientReorderBtn" type="button" title="Sposta campi (trascina per riordinare)" style="display: none; flex: 0 0 auto; width: 28px; height: 28px; align-items: center; justify-content: center; padding: 0; background: #10B981; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-up-down-left-right"></i></button>
+                <button id="clientReorderBtn" type="button" title="Sposta campi (trascina per riordinare)" style="display: none; flex: 0 0 auto; width: 28px; height: 28px; align-items: center; justify-content: center; padding: 0; background: #047857; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-up-down-left-right"></i></button>
             </div>
             <div id="clientNewFieldForm" style="display: none; margin-bottom: 0.75rem;">
-                <input id="clientNewFieldName" type="text" placeholder="Nome del campo" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;">
-                <select id="clientNewFieldType" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;"></select>
+                <input id="clientNewFieldName" type="text" placeholder="Nome del campo" aria-label="Nome del campo" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;">
+                <select id="clientNewFieldType" aria-label="Tipo del campo" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;"></select>
                 <div id="clientNewFieldTabellaWrap" style="display: none; margin-bottom: 0.5rem;">
                     <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Tabella</label>
                     <input id="clientNewFieldTabella" type="text" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px;">
@@ -4605,7 +4677,7 @@
                 <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.2rem;">Visibile a (ruolo)</label>
                 <select id="clientNewFieldRoles" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 0.5rem;"></select>
                 <div style="display: flex; gap: 0.5rem;">
-                    <button id="clientNewFieldAdd" type="button" style="flex: 1; padding: 0.4rem; background: #10B981; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Aggiungi</button>
+                    <button id="clientNewFieldAdd" type="button" style="flex: 1; padding: 0.4rem; background: #047857; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Aggiungi</button>
                     <button id="clientNewFieldCancel" type="button" style="flex: 0 0 auto; padding: 0.4rem 0.8rem; background: #e5e7eb; border: none; border-radius: 4px; cursor: pointer;">Annulla</button>
                 </div>
             </div>
@@ -4614,7 +4686,7 @@
             <div id="clientDeleteBar" style="display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;">
                 <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0 0 0.5rem;">Seleziona i campi custom da eliminare.</p>
                 <div style="display: flex; gap: 0.5rem;">
-                    <button id="clientDeleteConfirm" type="button" disabled style="flex: 1; padding: 0.6rem 1rem; background: #EF4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: not-allowed; opacity: 0.5;">Salva</button>
+                    <button id="clientDeleteConfirm" type="button" disabled style="flex: 1; padding: 0.6rem 1rem; background: #B91C1C; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: not-allowed; opacity: 0.5;">Salva</button>
                     <button id="clientDeleteCancel" type="button" style="flex: 0 0 auto; padding: 0.6rem 0.9rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button>
                 </div>
             </div>
@@ -4622,12 +4694,12 @@
             <div id="clientRenameBar" style="display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;">
                 <p style="font-size: 0.8rem; color: var(--text-muted); margin: 0 0 0.5rem;">Modifica i nomi dei campi custom, poi salva.</p>
                 <div style="display: flex; gap: 0.5rem;">
-                    <button id="clientRenameConfirm" type="button" style="flex: 1; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva rinomina</button>
+                    <button id="clientRenameConfirm" type="button" style="flex: 1; padding: 0.6rem 1rem; background: #047857; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva rinomina</button>
                     <button id="clientRenameCancel" type="button" style="flex: 0 0 auto; padding: 0.6rem 0.9rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button>
                 </div>
             </div>
             <div id="settingsDetailSaveBar" style="display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;">
-                <button id="settingsDetailSaveBtn" style="width: 100%; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button>
+                <button id="settingsDetailSaveBtn" style="width: 100%; padding: 0.6rem 1rem; background: #047857; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button>
             </div>
         </div>
     </div>
@@ -4637,7 +4709,7 @@
         <div class="parent-form-dialog" id="parentFormDialog">
             <div class="parent-form-header">
                 <div class="parent-form-title-wrap">
-                    <button id="parentFormBack" class="parent-form-icon-btn" type="button" title="Indietro" style="display:none;">‹</button>
+                    <button id="parentFormBack" class="parent-form-icon-btn" type="button" title="Indietro" aria-label="Indietro" style="display:none;">‹</button>
                     <div id="parentFormTitle" class="parent-form-title">Dettaglio</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:0.75rem;">
@@ -4645,7 +4717,7 @@
                         <span>Abilita modifica</span>
                         <span class="toggle-switch"><input type="checkbox" id="parentFormEditToggle"><span class="toggle-slider"></span></span>
                     </label>
-                    <button id="parentFormClose" class="parent-form-icon-btn" type="button" title="Chiudi">✕</button>
+                    <button id="parentFormClose" class="parent-form-icon-btn" type="button" title="Chiudi" aria-label="Chiudi">✕</button>
                 </div>
             </div>
             <div id="parentFormToolbar" class="parent-form-toolbar">
@@ -4666,20 +4738,20 @@
     <!-- Modale: ambito tenant per aggiunta/eliminazione argomenti Impostazioni -->
     <!-- z-index sopra il form centrale del Nodo Padre (.parent-form-overlay, 720): la scelta
          dell'ambito viene chiesta anche da lì e non deve finire dietro all'overlay. -->
-    <div id="settingsTenantScopeModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 780; display: none; align-items: center; justify-content: center;">
+    <div id="settingsTenantScopeModal" role="dialog" aria-modal="true" aria-labelledby="settingsTenantScopeTitle" aria-describedby="settingsTenantScopeText" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 780; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: calc(90vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <h3 id="settingsTenantScopeTitle" style="margin: 0 0 0.5rem; color: var(--dark);">Argomento impostazioni</h3>
             <p id="settingsTenantScopeText" style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.25rem;">La modifica deve avvenire su questo tenant o su tutti i tenant?</p>
             <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-                <button id="settingsScopeThisTenant" type="button" style="padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Questo tenant</button>
-                <button id="settingsScopeAllTenants" type="button" style="padding: 0.6rem 1rem; background: #EF4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Tutti i tenant</button>
+                <button id="settingsScopeThisTenant" type="button" style="padding: 0.6rem 1rem; background: #047857; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Questo tenant</button>
+                <button id="settingsScopeAllTenants" type="button" style="padding: 0.6rem 1rem; background: #B91C1C; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Tutti i tenant</button>
                 <button id="settingsScopeCancel" type="button" style="padding: 0.6rem 1rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button>
             </div>
         </div>
     </div>
 
     <!-- Modale: Nuovo utente (routine tipo_valore=50, valore2='Nuovo_utente') -->
-    <div id="newUserModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 650; display: none; align-items: center; justify-content: center;">
+    <div id="newUserModal" role="dialog" aria-modal="true" aria-labelledby="newUserTitle" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 650; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 460px; max-width: calc(92vw * var(--ui-zoom-inv, 1)); max-height: calc(85vh * var(--ui-zoom-inv, 1)); overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <div id="newUserTenant" style="font-size: 0.8rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.25rem;"></div>
             <h3 id="newUserTitle" style="margin: 0 0 1rem; color: var(--dark);">Nuovo utente</h3>
@@ -4689,7 +4761,7 @@
                 <select id="newUserRole" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;"></select>
             </div>
             <div style="display:flex; gap:0.5rem; margin-top:1rem;">
-                <button id="newUserSave" type="button" data-click="saveNewUser" style="flex:1; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva</button>
+                <button id="newUserSave" type="button" data-click="saveNewUser" style="flex:1; padding:0.6rem 1rem; background:#047857; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva</button>
                 <button id="newUserCancel" type="button" data-click="nascondi" data-arg="newUserModal" style="flex:0 0 auto; padding:0.6rem 0.9rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button>
             </div>
         </div>
@@ -4697,7 +4769,7 @@
 
     <!-- Modale: Modifica password (campo tipo_valore=40). La nuova password viene
          salvata come hash bcrypt su Projexa-Auth (users.password_hash). -->
-    <div id="changePasswordModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 660; display: none; align-items: center; justify-content: center;">
+    <div id="changePasswordModal" role="dialog" aria-modal="true" aria-labelledby="changePasswordTitle" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 660; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 420px; max-width: calc(92vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <div id="changePasswordUser" style="font-size: 0.8rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.25rem;"></div>
             <h3 id="changePasswordTitle" style="margin: 0 0 1rem; color: var(--dark);">Modifica password</h3>
@@ -4721,23 +4793,23 @@
                 <input id="changePasswordShow" type="checkbox"> Mostra le password
             </label>
             <div style="font-size:0.78rem; color:var(--text-muted);">La nuova password deve avere almeno 8 caratteri.</div>
-            <div id="changePasswordError" style="display:none; font-size:0.8rem; color:#EF4444; margin-top:0.5rem;"></div>
-            <div id="changePasswordInfo" style="display:none; font-size:0.8rem; color:#065F46; background:#ECFDF5; border:1px solid #A7F3D0; border-radius:6px; padding:0.5rem 0.6rem; margin-top:0.5rem;"></div>
+            <div id="changePasswordError" role="alert" style="display:none; font-size:0.8rem; color:#B91C1C; margin-top:0.5rem;"></div>
+            <div id="changePasswordInfo" role="status" style="display:none; font-size:0.8rem; color:#065F46; background:#ECFDF5; border:1px solid #A7F3D0; border-radius:6px; padding:0.5rem 0.6rem; margin-top:0.5rem;"></div>
             <div style="display:flex; gap:0.5rem; margin-top:1rem;">
-                <button id="changePasswordSave" type="button" data-click="saveChangePassword" style="flex:1; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva</button>
+                <button id="changePasswordSave" type="button" data-click="saveChangePassword" style="flex:1; padding:0.6rem 1rem; background:#047857; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva</button>
                 <button id="changePasswordCancel" type="button" data-click="closeChangePasswordModal" style="flex:0 0 auto; padding:0.6rem 0.9rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button>
             </div>
         </div>
     </div>
 
     <!-- Modale: tipo campo (standard / custom) — solo per id_roles <= 20 -->
-    <div id="clientKindModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
+    <div id="clientKindModal" role="dialog" aria-modal="true" aria-labelledby="clientKindTitle" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: calc(90vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
-            <h3 style="margin: 0 0 0.5rem; color: var(--dark);">Nuovo campo</h3>
+            <h3 id="clientKindTitle" style="margin: 0 0 0.5rem; color: var(--dark);">Nuovo campo</h3>
             <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.25rem;">Vuoi rendere il campo standard o custom?</p>
             <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-                <button id="clientKindStandard" type="button" style="padding: 0.6rem 1rem; background: #3B82F6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Standard</button>
-                <button id="clientKindCustom" type="button" style="padding: 0.6rem 1rem; background: #8B5CF6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Custom</button>
+                <button id="clientKindStandard" type="button" style="padding: 0.6rem 1rem; background: #1D4ED8; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Standard</button>
+                <button id="clientKindCustom" type="button" style="padding: 0.6rem 1rem; background: #6D28D9; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Custom</button>
                 <button id="clientKindCancel" type="button" style="padding: 0.6rem 1rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button>
             </div>
         </div>
@@ -4745,13 +4817,13 @@
 
     <!-- Modale: ambito eliminazione campi custom (tutti i clienti / solo questo) -->
     <!-- Come sopra: deve restare visibile anche sopra il form centrale del Nodo Padre. -->
-    <div id="clientDeleteScopeModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 780; display: none; align-items: center; justify-content: center;">
+    <div id="clientDeleteScopeModal" role="dialog" aria-modal="true" aria-labelledby="clientScopeTitle" aria-describedby="clientScopeText" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 780; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: calc(90vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
             <h3 id="clientScopeTitle" style="margin: 0 0 0.5rem; color: var(--dark);">Elimina campi custom</h3>
             <p id="clientScopeText" style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1.25rem;">L'eliminazione deve avvenire su tutti i clienti o solo su quello selezionato?</p>
             <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-                <button id="clientDeleteScopeAll" type="button" style="padding: 0.6rem 1rem; background: #EF4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Tutti i clienti</button>
-                <button id="clientDeleteScopeThis" type="button" style="padding: 0.6rem 1rem; background: #F59E0B; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Solo questo cliente</button>
+                <button id="clientDeleteScopeAll" type="button" style="padding: 0.6rem 1rem; background: #B91C1C; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Tutti i clienti</button>
+                <button id="clientDeleteScopeThis" type="button" style="padding: 0.6rem 1rem; background: #B45309; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Solo questo cliente</button>
                 <button id="clientDeleteScopeCancel" type="button" style="padding: 0.6rem 1rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button>
             </div>
         </div>
@@ -4760,14 +4832,14 @@
     <!-- Barra impersonificazione (in alto al centro, solo admin) -->
     <div id="impersonateBar" style="display: none; align-items: center; gap: 0.6rem;">
         <span id="impersonateLabel" style="font-size: 0.85rem; color: var(--text-muted);"></span>
-        <button id="impersonateBtn" type="button" style="padding: 0.4rem 0.9rem; background: #8B5CF6; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Impersona</button>
-        <button id="impersonateReturnBtn" type="button" style="display: none; padding: 0.4rem 0.9rem; background: #EF4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Ritorna</button>
+        <button id="impersonateBtn" type="button" style="padding: 0.4rem 0.9rem; background: #6D28D9; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Impersona</button>
+        <button id="impersonateReturnBtn" type="button" style="display: none; padding: 0.4rem 0.9rem; background: #B91C1C; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Ritorna</button>
     </div>
 
     <!-- Modale selezione tenant + utente per impersonificazione -->
-    <div id="impersonateModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 500; display: none; align-items: center; justify-content: center;">
+    <div id="impersonateModal" role="dialog" aria-modal="true" aria-labelledby="impersonateTitle" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 500; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 380px; max-width: calc(90vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
-            <h3 style="margin: 0 0 1rem; color: var(--dark);">Impersona utente</h3>
+            <h3 id="impersonateTitle" style="margin: 0 0 1rem; color: var(--dark);">Impersona utente</h3>
             <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Tenant</label>
             <select id="impersonateTenant" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 1rem;"></select>
             <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem;">Utente</label>
@@ -4775,13 +4847,13 @@
             <div style="font-size: 0.9rem; margin-bottom: 1.25rem;">Ruolo: <strong id="impersonateRole" style="color: var(--primary);">—</strong></div>
             <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
                 <button id="impersonateCancel" type="button" style="padding: 0.5rem 1rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button>
-                <button id="impersonateConfirm" type="button" style="padding: 0.5rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Conferma</button>
+                <button id="impersonateConfirm" type="button" style="padding: 0.5rem 1rem; background: #047857; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Conferma</button>
             </div>
         </div>
     </div>
 
     <!-- MAIN CONTENT -->
-    <main class="main">
+    <main class="main" id="contenuto" tabindex="-1">
         <div class="header">
             <div class="header-top">
                 <div class="header-title">
@@ -4793,7 +4865,7 @@
                         (function () {
                             try {
                                 const u = JSON.parse(localStorage.getItem('user') || '{}');
-                                if (u && u.name) document.getElementById('greeting').textContent = 'Welcome, ' + u.name;
+                                if (u && u.name) document.getElementById('greeting').textContent = 'Ciao, ' + u.name;
                             } catch (e) { /* resta vuoto fino a updateGreeting */ }
                         })();
                     </script>
@@ -4801,24 +4873,25 @@
                 <div class="header-actions">
                     <div class="search-box" id="projectSearchBox">
                         <i class="fas fa-search" style="color: var(--text-muted);"></i>
-                        <input id="projectSearchInput" type="text" placeholder="Cerca un progetto..." autocomplete="off" aria-controls="projectSearchResults" aria-expanded="false">
-                        <div id="projectSearchResults" class="project-search-results" role="listbox"></div>
+                        <input id="projectSearchInput" type="text" placeholder="Cerca un progetto…" autocomplete="off" role="combobox" aria-label="Cerca un progetto" aria-autocomplete="list" aria-controls="projectSearchResults" aria-expanded="false">
+                        <div id="projectSearchResults" class="project-search-results" role="listbox" aria-label="Progetti trovati"></div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 0.75rem;">
                         <i class="fas fa-building" style="color: var(--text-muted); font-size: 1rem;"></i>
                         <div class="todo-multiselect" id="clientFilterMS">
-                            <button type="button" class="todo-multiselect-toggle" id="clientFilterToggle" style="min-width: 200px; padding: 0.75rem 1rem; font-size: 0.95rem; font-weight: 500;">
+                            <span id="clientFilterName" class="sr-only">Filtro clienti:</span>
+                            <button type="button" class="todo-multiselect-toggle" id="clientFilterToggle" aria-labelledby="clientFilterName clientFilterLabel" aria-expanded="false" aria-controls="clientFilterPanel" style="min-width: 200px; padding: 0.75rem 1rem; font-size: 0.95rem; font-weight: 500;">
                                 <span id="clientFilterLabel">Tutti i clienti</span>
                                 <span class="chevron">▾</span>
                             </button>
-                            <div class="todo-multiselect-panel" id="clientFilterPanel">
+                            <div class="todo-multiselect-panel" id="clientFilterPanel" role="group" aria-label="Clienti">
                                 <div class="todo-multiselect-divider"></div>
                                 <button type="button" class="todo-multiselect-clear" data-clear="client">Deseleziona tutto</button>
                             </div>
                         </div>
                     </div>
                     <div class="notif-wrap" id="notifWrap">
-                        <button type="button" class="btn-icon" id="notifBtn" title="Notifiche" aria-haspopup="true" aria-expanded="false">
+                        <button type="button" class="btn-icon" id="notifBtn" title="Notifiche" aria-label="Notifiche" aria-haspopup="dialog" aria-controls="notifPanel" aria-expanded="false">
                             <i class="fas fa-bell"></i>
                         </button>
                         <span class="notif-badge" id="notifBadge" style="display: none;"></span>
@@ -4850,19 +4923,19 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
                     <div class="section-title" style="margin: 0; position: relative;">
                         <span class="meetings-date-wrap"><button id="meetingsDateBtn" type="button" class="meetings-date-btn" title="Scegli il giorno delle riunioni" aria-label="Scegli il giorno delle riunioni"><i class="fas fa-calendar-alt"></i></button><input id="meetingsDatePicker" type="date" class="meetings-date-input" tabindex="-1" aria-hidden="true"></span>
-                        <span id="meetingsTitle">Riunioni</span>
+                        <span id="meetingsTitle" role="heading" aria-level="2">Riunioni</span>
                         <button id="meetingsTodayBtn" type="button" class="meetings-today-btn" style="display: none;" title="Torna alle riunioni di oggi">Oggi</button>
                         <label id="meetingsShowAllWrap" class="meetings-show-all" title="Spuntato: tutte le riunioni di oggi, anche quelle già passate. Tolto: solo da adesso in poi."><input id="meetingsShowAll" type="checkbox" checked> Mostra tutti</label>
                     </div>
                     <div style="display: flex; gap: 1rem; align-items: center;">
                         <button id="audioDevicesBtn" type="button" class="audio-devices-btn" title="Dispositivi audio: microfono e altoparlanti" aria-label="Dispositivi audio"><i class="fas fa-cog"></i></button>
-                        <select id="calendarProviderSelector" style="padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; cursor: pointer; background: white; color: var(--dark); font-weight: 500;">
-                            <option value="google">📅 Google Calendar</option>
-                            <option value="microsoft">📧 Outlook Calendar</option>
+                        <select id="calendarProviderSelector" aria-label="Calendario da usare" style="padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; cursor: pointer; background: white; color: var(--dark); font-weight: 500;">
+                            <option value="google">Google Calendar</option>
+                            <option value="microsoft">Outlook Calendar</option>
                         </select>
                         <span id="calendarAccount" style="font-size: 0.8rem; color: var(--text-muted);"></span>
-                        <span id="lastSyncTime" style="font-size: 0.8rem; color: var(--text-muted);">Sincronizzazione...</span>
-                        <button id="refreshMeetingsBtn" style="padding: 0.5rem 1rem; background: #4285F4; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem; transition: all 0.3s; display: inline-block;">
+                        <span id="lastSyncTime" style="font-size: 0.8rem; color: var(--text-muted);">Sincronizzazione…</span>
+                        <button id="refreshMeetingsBtn" style="padding: 0.5rem 1rem; background: #1D4ED8; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem; transition: all 0.3s; display: inline-block;">
                             <i class="fas fa-sync"></i> Aggiorna
                         </button>
                     </div>
@@ -4873,7 +4946,7 @@
                     <div style="display: flex; align-items: center; justify-content: center; padding: 3rem; color: var(--text-muted);">
                         <div style="text-align: center;">
                             <i class="fas fa-calendar" style="font-size: 2.5rem; margin-bottom: 1rem; opacity: 0.3;"></i>
-                            <p style="font-size: 1rem; margin: 0;">Caricamento riunioni...</p>
+                            <p style="font-size: 1rem; margin: 0;">Caricamento riunioni…</p>
                         </div>
                     </div>
                 </div>
@@ -4887,15 +4960,15 @@
             <!-- TO DO LIST -->
             <div class="todo-section" data-dash-flag="todo" style="margin-bottom: 3rem; background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                    <div class="section-title" style="margin: 0;">
+                    <div class="section-title" role="heading" aria-level="2" style="margin: 0;">
                         <i class="fas fa-list-check" style="color: var(--primary);"></i>
-                        To Do List
+                        To-Do List
                     </div>
                     <div style="display: flex; gap: 0.5rem;">
-                        <button id="newTodoBtn" style="padding: 0.5rem 1rem; background: #10B981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem;">
-                            <i class="fas fa-plus"></i> Nuovo task
+                        <button id="newTodoBtn" style="padding: 0.5rem 1rem; background: #047857; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem;">
+                            <i class="fas fa-plus"></i> Nuova To-Do
                         </button>
-                        <button id="expandTodoBtn" style="padding: 0.5rem 1rem; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem;">
+                        <button id="expandTodoBtn" style="padding: 0.5rem 1rem; background: var(--primary-strong); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem;">
                             Espandi
                         </button>
                     </div>
@@ -4904,16 +4977,16 @@
                 <!-- FILTRI -->
                 <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; align-items: center; flex-wrap: wrap;">
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <label style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Priorità:</label>
+                        <span id="priorityFilterName" style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Priorità:</span>
                         <div class="todo-multiselect" id="priorityFilterMS" data-filter="priority">
-                            <button type="button" class="todo-multiselect-toggle" id="priorityFilterToggle">
+                            <button type="button" class="todo-multiselect-toggle" id="priorityFilterToggle" aria-labelledby="priorityFilterName priorityFilterLabel" aria-expanded="false" aria-controls="priorityFilterPanel">
                                 <span id="priorityFilterLabel">Tutte</span>
-                                <span class="chevron">▾</span>
+                                <span class="chevron" aria-hidden="true">▾</span>
                             </button>
-                            <div class="todo-multiselect-panel" id="priorityFilterPanel">
-                                <label class="todo-multiselect-option"><input type="checkbox" value="high"> 🔴 Alta</label>
-                                <label class="todo-multiselect-option"><input type="checkbox" value="medium"> 🟡 Media</label>
-                                <label class="todo-multiselect-option"><input type="checkbox" value="low"> 🟢 Bassa</label>
+                            <div class="todo-multiselect-panel" id="priorityFilterPanel" role="group" aria-labelledby="priorityFilterName">
+                                <label class="todo-multiselect-option"><input type="checkbox" value="high"> <span aria-hidden="true">🔴</span> Alta</label>
+                                <label class="todo-multiselect-option"><input type="checkbox" value="medium"> <span aria-hidden="true">🟡</span> Media</label>
+                                <label class="todo-multiselect-option"><input type="checkbox" value="low"> <span aria-hidden="true">🟢</span> Bassa</label>
                                 <div class="todo-multiselect-divider"></div>
                                 <button type="button" class="todo-multiselect-clear" data-clear="priority">Deseleziona tutto</button>
                             </div>
@@ -4921,13 +4994,13 @@
                     </div>
 
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <label style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Status:</label>
+                        <span id="statusFilterName" style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Stato:</span>
                         <div class="todo-multiselect" id="statusFilterMS" data-filter="status">
-                            <button type="button" class="todo-multiselect-toggle" id="statusFilterToggle">
+                            <button type="button" class="todo-multiselect-toggle" id="statusFilterToggle" aria-labelledby="statusFilterName statusFilterLabel" aria-expanded="false" aria-controls="statusFilterPanel">
                                 <span id="statusFilterLabel">Tutti</span>
-                                <span class="chevron">▾</span>
+                                <span class="chevron" aria-hidden="true">▾</span>
                             </button>
-                            <div class="todo-multiselect-panel" id="statusFilterPanel">
+                            <div class="todo-multiselect-panel" id="statusFilterPanel" role="group" aria-labelledby="statusFilterName">
                                 <label class="todo-multiselect-option"><input type="checkbox" value="todo"> Da fare</label>
                                 <label class="todo-multiselect-option"><input type="checkbox" value="in_progress"> In corso</label>
                                 <label class="todo-multiselect-option"><input type="checkbox" value="completed"> Completata</label>
@@ -4939,13 +5012,13 @@
                     </div>
 
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <label style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Scadenza:</label>
+                        <span id="dateFilterName" style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Scadenza:</span>
                         <div class="todo-multiselect" id="dateFilterMS" data-filter="date">
-                            <button type="button" class="todo-multiselect-toggle" id="dateFilterToggle">
+                            <button type="button" class="todo-multiselect-toggle" id="dateFilterToggle" aria-labelledby="dateFilterName dateFilterLabel" aria-expanded="false" aria-controls="dateFilterPanel">
                                 <span id="dateFilterLabel">Tutte le date</span>
-                                <span class="chevron">▾</span>
+                                <span class="chevron" aria-hidden="true">▾</span>
                             </button>
-                            <div class="todo-multiselect-panel" id="dateFilterPanel">
+                            <div class="todo-multiselect-panel" id="dateFilterPanel" role="group" aria-labelledby="dateFilterName">
                                 <label class="todo-multiselect-option"><input type="checkbox" value="today"> Oggi</label>
                                 <label class="todo-multiselect-option"><input type="checkbox" value="week"> Questa settimana</label>
                                 <label class="todo-multiselect-option"><input type="checkbox" value="month"> Questo mese</label>
@@ -4959,13 +5032,13 @@
 
                     <!-- Assegnato a: opzioni ricavate dalle task caricate (renderAssigneeFilterOptions) -->
                     <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <label style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Assegnato a:</label>
+                        <span id="assigneeFilterName" style="font-weight: 500; color: var(--dark); font-size: 0.9rem;">Assegnato a:</span>
                         <div class="todo-multiselect" id="assigneeFilterMS" data-filter="assignee">
-                            <button type="button" class="todo-multiselect-toggle" id="assigneeFilterToggle">
+                            <button type="button" class="todo-multiselect-toggle" id="assigneeFilterToggle" aria-labelledby="assigneeFilterName assigneeFilterLabel" aria-expanded="false" aria-controls="assigneeFilterPanel">
                                 <span id="assigneeFilterLabel">Tutti</span>
-                                <span class="chevron">▾</span>
+                                <span class="chevron" aria-hidden="true">▾</span>
                             </button>
-                            <div class="todo-multiselect-panel" id="assigneeFilterPanel" style="max-height: 320px; overflow-y: auto;">
+                            <div class="todo-multiselect-panel" id="assigneeFilterPanel" role="group" aria-labelledby="assigneeFilterName" style="max-height: 320px; overflow-y: auto;">
                                 <div class="todo-multiselect-divider"></div>
                                 <button type="button" class="todo-multiselect-clear" data-clear="assignee">Deseleziona tutto</button>
                             </div>
@@ -4973,10 +5046,10 @@
                     </div>
 
                     <button id="resetFiltersBtn" style="padding: 0.5rem 0.75rem; background: rgba(107, 114, 128, 0.1); color: var(--text-muted); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85rem; transition: all 0.3s;">
-                        ⟲ Reset
+                        ⟲ Azzera filtri
                     </button>
                     <!-- Compare scegliendo uno o più nominativi in "Assegnato a": una email a tutti con le attività di ciascuno -->
-                    <button type="button" id="todoEmailBtn" style="display: none; padding: 0.5rem 0.9rem; background: #10B981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem;" title="Prepara l'email «Attività a tuo carico» con le task filtrate">
+                    <button type="button" id="todoEmailBtn" style="display: none; padding: 0.5rem 0.9rem; background: #047857; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem;" title="Prepara l'email «Attività a tuo carico» con le To-Do filtrate">
                         <i class="fas fa-envelope"></i> Invia email
                     </button>
                 </div>
@@ -4988,7 +5061,7 @@
 
                 <!-- Info contatore -->
                 <div style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;">
-                    Visualizzati: <span id="todoCount">10</span> di <span id="todoTotal">0</span> task
+                    Visualizzati: <span id="todoCount">10</span> di <span id="todoTotal">0</span> To-Do
                 </div>
             </div>
 
@@ -4997,28 +5070,30 @@
             <div class="kpi-fatt-card" style="background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
                     <div>
-                        <div class="section-title" style="margin: 0;">
+                        <div class="section-title" role="heading" aria-level="2" style="margin: 0;">
                             <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--primary);"><path d="M3 21V9h4v12H3Zm7 0V3h4v18h-4Zm7 0v-8h4v8h-4Z"/></svg>
                             KPI Fatturato
                         </div>
                     </div>
                     <div style="display: flex; gap: 1rem; align-items: center;">
-                        <label style="font-weight: 500; color: var(--dark);">Anno:</label>
+                        <label for="yearSelector" style="font-weight: 500; color: var(--dark);">Anno:</label>
                         <select id="yearSelector" style="padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; cursor: pointer;">
-                            <option value="">Caricamento...</option>
+                            <option value="">Caricamento…</option>
                         </select>
                     </div>
                 </div>
 
                 <!-- Grafico -->
                 <div id="chartContainer" style="height: 400px; margin-bottom: 2rem; position: relative;">
-                    <canvas id="revenueChart"></canvas>
+                    <!-- Alternativa testuale: aria-label e tabella dei dati per gli screen reader
+                         generate a ogni aggiornamento del grafico (plugin in js/a11y.js) -->
+                    <canvas id="revenueChart" role="img" aria-label="Grafico del fatturato per mese">Grafico del fatturato per mese</canvas>
                 </div>
 
                 <!-- Totale Fatturato -->
                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 1.5rem; background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(16, 185, 129, 0.1) 100%); border-radius: 8px; border: 1px solid var(--border);">
                     <div>
-                        <div style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem;">Fatturato Totale</div>
+                        <div style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem;">Fatturato totale</div>
                         <div style="font-size: 1.2rem; color: var(--dark); font-weight: 600;">Anno: <span id="selectedYear">2024</span></div>
                     </div>
                     <div style="text-align: right;">
@@ -5032,7 +5107,7 @@
                  fatturato futuro e da fatturare dell'anno rispetto all'obiettivo -->
             <div class="kpi-mbo-card" style="background: white; padding: 2rem; border-radius: 12px; border: 1px solid var(--border);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                    <div class="section-title" style="margin: 0;">
+                    <div class="section-title" role="heading" aria-level="2" style="margin: 0;">
                         <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: #8B5CF6;"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14Zm0 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/></svg>
                         MBO
                     </div>
@@ -5061,13 +5136,13 @@
                  cliente › progetto › voce di costo › componenti -->
             <div data-dash-flag="kpiGestioneProgetto" class="gp-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                    <div class="section-title" style="margin: 0;">
+                    <div class="section-title" role="heading" aria-level="2" style="margin: 0;">
                         <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--primary);"><path d="M3 5h18v2H3V5Zm0 6h12v2H3v-2Zm0 6h8v2H3v-2Zm14-3 2 2 3-3 1.4 1.4L19 18.8l-3.4-3.4L17 14Z"/></svg>
                         Gestione Progetto
                     </div>
                     <div class="gp-legend">
                         <span><i class="gp-dot" style="background:#6ee7b7;"></i>Offerta (100%)</span>
-                        <span><i class="gp-dot" style="background:#2563eb;"></i>Time spent</span>
+                        <span><i class="gp-dot" style="background:#2563eb;"></i>Tempo speso</span>
                         <span><i class="gp-dot" style="background:#dc2626;"></i>Oltre l'offerta</span>
                     </div>
                 </div>
@@ -5080,7 +5155,7 @@
                  Interruttore delle Preferenze «Mostra kpi Offerte e ordini». -->
             <div data-dash-flag="kpiOfferte" class="gp-card" id="gpoCard">
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                    <div class="section-title" style="margin: 0;">
+                    <div class="section-title" role="heading" aria-level="2" style="margin: 0;">
                         <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--primary);"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v.5l8 5 8-5V6H4Zm16 2.85-7.47 4.67a1 1 0 0 1-1.06 0L4 8.85V18h16V8.85Z"/></svg>
                         Offerte e ordini
                     </div>
@@ -5093,7 +5168,7 @@
                  per fascia e per cliente. Compare solo se ci sono quesiti MySupport chiusi. -->
             <div class="gp-card" id="msCard" hidden>
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                    <div class="section-title" style="margin: 0;">
+                    <div class="section-title" role="heading" aria-level="2" style="margin: 0;">
                         <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: #EF4444;"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8Zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7Z"/></svg>
                         MySupport – tempi di chiusura
                     </div>
@@ -5107,9 +5182,9 @@
                  (loadKpiMySupport), nessun filtro sull'anno. -->
             <div class="gp-card" id="msApCard" hidden>
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                    <div class="section-title" style="margin: 0;">
+                    <div class="section-title" role="heading" aria-level="2" style="margin: 0;">
                         <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: #3B82F6;"><path d="M4 5h11v2H4V5Zm0 6h16v2H4v-2Zm0 6h8v2H4v-2Z"/></svg>
-                        MySupport tkt in gestione
+                        MySupport – quesiti in gestione
                     </div>
                 </div>
                 <div id="msApContent" class="gp-content"><div class="gp-empty">Caricamento…</div></div>
@@ -5120,9 +5195,9 @@
                  API /api/dashboard/rilasci (backend/server.js). -->
             <div data-dash-flag="kpiRilasci" class="gp-card dash-flag-off" id="relCard">
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                    <div class="section-title" style="margin: 0;">
+                    <div class="section-title" role="heading" aria-level="2" style="margin: 0;">
                         <svg class="section-icon-svg" viewBox="0 0 24 24" aria-hidden="true" style="color: #7C3AED;"><path d="M12 2c3.5 2 5.5 5.6 5.5 9.5 0 1.3-.2 2.5-.6 3.6l2.6 2.6-1.4 1.4-2.1-2.1A8 8 0 0 1 12 19a8 8 0 0 1-4-2.1l-2.1 2.1-1.4-1.4 2.6-2.6c-.4-1.1-.6-2.3-.6-3.6C6.5 7.6 8.5 4 12 2Zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm-2 13h4v1.5h-4V21Z"/></svg>
-                        Rilascio release
+                        Rilasci
                     </div>
                     <div class="gp-legend" id="relInfo"></div>
                 </div>
@@ -5249,7 +5324,7 @@
                 if (tenantName) subLines += `<span style="${subLineStyle}">${escapeHtml(tenantName)}</span>`;
                 if (roleName) subLines += `<span style="${subLineStyle}">${escapeHtml(roleName)}</span>`;
 
-                const textBlock = `<span style="display: block;">Welcome, ${escapeHtml(userName)}</span>${subLines}`;
+                const textBlock = `<span style="display: block;">Ciao, ${escapeHtml(userName)}</span>${subLines}`;
 
                 // Foto utente opzionale + testo + logo dell'organizzazione del tenant.
                 const safePicture = safeUrl(picture);
@@ -5314,7 +5389,7 @@
         }
 
         function logout() {
-            if (confirm('Sei sicuro di voler effettuare il logout?')) {
+            if (confirm('Vuoi uscire da Projexa?')) {
                 window.ProjexaKeepAlive?.stop?.();
                 // Il server revoca la sessione e cancella il cookie HttpOnly.
                 fetch(`${API_URL}/auth/logout`, { method: 'POST', keepalive: true }).catch(() => {});
@@ -5327,7 +5402,7 @@
                 localStorage.removeItem('currentTenant');
                 localStorage.removeItem('originalToken');
                 localStorage.removeItem('originalUser');
-                showNotification('Logout effettuato', 'success');
+                showNotification('Disconnessione effettuata', 'success');
                 setTimeout(() => {
                     window.location.href = 'login.html';
                 }, 1000);
@@ -5341,7 +5416,7 @@
                 top: 20px;
                 right: 20px;
                 padding: 1rem 1.5rem;
-                background: ${type === 'success' ? '#10B981' : '#3B82F6'};
+                background: ${type === 'success' ? '#047857' : '#1D4ED8'};
                 color: white;
                 border-radius: 8px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.15);
@@ -5350,7 +5425,10 @@
                 animation: slideIn 0.3s ease;
             `;
             notification.textContent = message;
+            notification.setAttribute('aria-hidden', 'true'); // annunciato dalla regione live qui sotto
             document.body.appendChild(notification);
+            // Screen reader (WCAG 4.1.3): il testo passa dalla regione live persistente #srAnnunci.
+            if (window.a11yAnnuncia) window.a11yAnnuncia(message);
 
             setTimeout(() => {
                 notification.style.animation = 'slideOut 0.3s ease';
@@ -5477,7 +5555,7 @@
             modal.style.display = 'flex';
             const config = dashboardKpis.find(kpi => String(kpi.id) === String(kpiId));
             title.textContent = config?.title || 'Dettaglio KPI';
-            body.innerHTML = '<div class="kpi-modal-empty">Caricamento...</div>';
+            body.innerHTML = '<div class="kpi-modal-empty">Caricamento…</div>';
 
             try {
                 const queryString = buildKpiQueryString();
@@ -5799,7 +5877,7 @@
                             hoverBackgroundColor: 'rgba(59, 130, 246, 0.9)',
                         },
                         {
-                            label: `Fatturato Futuro ${datasetYearLabel}`,
+                            label: `Fatturato futuro ${datasetYearLabel}`,
                             data: forecasts,
                             backgroundColor: 'rgba(16, 185, 129, 0.7)',
                             borderColor: 'rgb(16, 185, 129)',
@@ -5808,7 +5886,7 @@
                             hoverBackgroundColor: 'rgba(16, 185, 129, 0.9)',
                         },
                         {
-                            label: `Da Fatturare ${datasetYearLabel}`,
+                            label: `Da fatturare ${datasetYearLabel}`,
                             data: daFatturare,
                             backgroundColor: 'rgba(245, 158, 11, 0.7)',
                             borderColor: 'rgb(245, 158, 11)',
@@ -5995,7 +6073,7 @@
             const label = pct == null ? 'n.d.' : `${Math.round(pct)}%`;
             return {
                 pct, over, cls, label,
-                meter: `<div class="gp-meter${big ? ' big' : ''}${over ? ' over' : ''}${o > 0 ? '' : ' none'}" title="Time spent ${label} dell'offerta"><span style="width:${width}%;"></span></div>`,
+                meter: `<div class="gp-meter${big ? ' big' : ''}${over ? ' over' : ''}${o > 0 ? '' : ' none'}" title="Tempo speso ${label} dell'offerta"><span style="width:${width}%;"></span></div>`,
                 badge: `<span class="gp-badge ${cls}${big ? ' big' : ''}">${label}</span>`
             };
         }
@@ -6630,9 +6708,9 @@
                 ? `<span class="ms-ap-nome ms-link" data-ms-scheda="${escapeHtml(c.client_id)}" data-ms-name="${escapeHtml(c.cliente)}" role="button" tabindex="0" title="Apri la scheda di ${escapeHtml(c.cliente)} nella sezione MySupport">${escapeHtml(c.cliente)}</span>`
                 : `<span class="ms-ap-nome">${escapeHtml(c.cliente)}</span>`;
             return `<div class="ms-aperti">
-                <div class="ms-sintesi"><span>Ticket non chiusi: <b>${totale}</b></span><span>Clienti: <b>${aperti.length}</b></span></div>
+                <div class="ms-sintesi"><span>Quesiti non chiusi: <b>${totale}</b></span><span>Clienti: <b>${aperti.length}</b></span></div>
                 ${aperti.map(c => `<div class="ms-ap-cliente">
-                    <div class="ms-ap-testa">${nome(c)}<span class="ms-ap-tot" title="Ticket non chiusi del cliente (somma delle righe sotto)">(${c.n})</span></div>
+                    <div class="ms-ap-testa">${nome(c)}<span class="ms-ap-tot" title="Quesiti non chiusi del cliente (somma delle righe sotto)">(${c.n})</span></div>
                     ${c.stati.map(s => `<div class="ms-ap-riga">
                         <span class="ms-ap-stato" title="${escapeHtml(s.stato)}">${escapeHtml(s.stato)}</span>
                         <div class="ms-ap-track"><div class="ms-ap-bar" style="--c:${colore.get(s.stato)}; width:${(s.n / max) * 100}%;"></div></div>
@@ -6807,7 +6885,10 @@
         // eccetto eventualmente quello passato in "except".
         function closeAllTodoMultiselects(except = null) {
             document.querySelectorAll('.todo-multiselect.open').forEach(node => {
-                if (node !== except) node.classList.remove('open');
+                if (node !== except) {
+                    node.classList.remove('open');
+                    node.querySelector('.todo-multiselect-toggle')?.setAttribute('aria-expanded', 'false');
+                }
             });
         }
 
@@ -6822,6 +6903,14 @@
                 const isOpen = wrapper.classList.contains('open');
                 closeAllTodoMultiselects();
                 wrapper.classList.toggle('open', !isOpen);
+                toggle.setAttribute('aria-expanded', String(!isOpen));
+            });
+            // Esc dentro il pannello o sul pulsante: chiude e riporta il focus sul pulsante.
+            wrapper.addEventListener('keydown', (e) => {
+                if (e.key !== 'Escape' || !wrapper.classList.contains('open')) return;
+                e.stopPropagation();
+                closeAllTodoMultiselects();
+                toggle.focus();
             });
             if (!multiselectOutsideClickBound) {
                 document.addEventListener('click', () => closeAllTodoMultiselects());
@@ -6920,6 +7009,7 @@
             const input = document.getElementById('projectSearchInput');
             results?.classList.remove('open');
             input?.setAttribute('aria-expanded', 'false');
+            input?.removeAttribute('aria-activedescendant');
         }
 
         function refreshProjectSearch() {
@@ -6952,11 +7042,14 @@
                 if (input.value.trim() !== term) return;
                 if (!Array.isArray(projects) || projects.length === 0) {
                     results.innerHTML = '<div class="project-search-message">Nessun progetto trovato</div>';
+                    if (window.a11yAnnuncia) window.a11yAnnuncia('Nessun progetto trovato');
                     return;
                 }
 
-                results.innerHTML = projects.map(project => `
-                    <button type="button" class="project-search-item" role="option"
+                // Opzioni del combobox: si scorrono con le frecce dal campo (aria-activedescendant),
+                // quindi non sono tappe del Tab.
+                results.innerHTML = projects.map((project, index) => `
+                    <button type="button" class="project-search-item" role="option" id="projectSearchOpt${index}" tabindex="-1" aria-selected="false"
                             data-project-id="${escapeHtml(project.id)}"
                             data-project-name="${escapeHtml(project.name)}"
                             data-client-id="${escapeHtml(project.client_id)}"
@@ -6979,6 +7072,7 @@
                         openProjectDetail(projectId, projectName, clientId, projectClosed);
                     });
                 });
+                if (window.a11yAnnuncia) window.a11yAnnuncia(`${projects.length} ${projects.length === 1 ? 'progetto trovato' : 'progetti trovati'}: usa le frecce per sceglierlo`);
             } catch (error) {
                 if (error.name === 'AbortError') return;
                 results.innerHTML = `<div class="project-search-message">${escapeHtml(error.message)}</div>`;
@@ -6997,7 +7091,24 @@
             });
             input.addEventListener('focus', refreshProjectSearch);
             input.addEventListener('keydown', event => {
-                if (event.key === 'Escape') closeProjectSearchResults();
+                if (event.key === 'Escape') { closeProjectSearchResults(); return; }
+                // Frecce su/giù: scorrono i risultati; Invio apre quello evidenziato.
+                const items = [...document.querySelectorAll('#projectSearchResults.open .project-search-item')];
+                if (!items.length) return;
+                let index = items.findIndex(item => item.classList.contains('active'));
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    index = (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+                    items.forEach((item, i) => {
+                        item.classList.toggle('active', i === index);
+                        item.setAttribute('aria-selected', String(i === index));
+                    });
+                    input.setAttribute('aria-activedescendant', items[index].id);
+                    items[index].scrollIntoView({ block: 'nearest' });
+                } else if (event.key === 'Enter' && index >= 0) {
+                    event.preventDefault();
+                    items[index].click();
+                }
             });
             document.addEventListener('click', event => {
                 if (!box.contains(event.target)) closeProjectSearchResults();
@@ -7147,8 +7258,8 @@
             const nomi = todoNomiEmail();
             btn.style.display = nomi.length ? '' : 'none';
             if (nomi.length) btn.title = nomi.length === 1
-                ? `Prepara l'email «Attività a tuo carico» per ${nomi[0]} con le task filtrate`
-                : `Prepara un'email per ${nomi.join(', ')} con le attività di ciascuno (task filtrate)`;
+                ? `Prepara l'email «Attività a tuo carico» per ${nomi[0]} con le To-Do filtrate`
+                : `Prepara un'email per ${nomi.join(', ')} con le attività di ciascuno (To-Do filtrate)`;
         }
 
         async function sendTodoAssigneeEmail() {
@@ -7437,7 +7548,7 @@
             if (todoLoadError) {
                 todoList.innerHTML = `<div class="todo-empty"><i class="fas fa-triangle-exclamation"></i> ${escapeHtml(todoLoadError)}</div>`;
             } else if (displayedTodos.length === 0) {
-                todoList.innerHTML = '<div class="todo-empty">Nessuna task trovata</div>';
+                todoList.innerHTML = '<div class="todo-empty">Nessuna To-Do trovata</div>';
             } else {
                 const gridColumns = todoGridColumns();
                 const header = gridColumns.map(column =>
@@ -7447,12 +7558,12 @@
                     <tr>
                     ${gridColumns.map((column, columnIndex) => {
                         const editButton = columnIndex === 0
-                            ? `<button type="button" class="todo-edit-btn" data-task-id="${escapeHtml(todo.__task_id)}" title="Modifica task"><i class="fas fa-pen"></i></button>`
+                            ? `<button type="button" class="todo-edit-btn" data-task-id="${escapeHtml(todo.__task_id)}" title="Modifica To-Do"><i class="fas fa-pen"></i></button>`
                             : '';
                         const cellValue = column.name === 'description'
                             ? (todo.description
                             ? `<button type="button" class="todo-description-btn" data-task-id="${escapeHtml(todo.__task_id)}" title="Visualizza descrizione"><i class="fas fa-magnifying-glass"></i></button>`
-                            : '<span style="color:#9CA3AF;">—</span>')
+                            : '<span style="color:#6B7280;" aria-label="vuoto">—</span>')
                             : formatTodoValue(todo[column.name], column);
                         return `<td>${editButton}${cellValue}</td>`;
                     }).join('')}</tr>
@@ -7484,7 +7595,7 @@
             if (currentTodoPage >= todos.length) {
                 expandBtn.style.opacity = '0.5';
                 expandBtn.disabled = true;
-                expandBtn.textContent = 'Tutte le task caricate';
+                expandBtn.textContent = 'Tutte le To-Do caricate';
             } else {
                 expandBtn.style.opacity = '1';
                 expandBtn.disabled = false;
@@ -7513,7 +7624,7 @@
         }
 
         function formatTodoValue(value, column) {
-            if (value === null || value === undefined || value === '') return '<span style="color:#9CA3AF;">—</span>';
+            if (value === null || value === undefined || value === '') return '<span style="color:#6B7280;" aria-label="vuoto">—</span>';
             if (column.type === 'date') {
                 const date = parseTodoDate(value);
                 return Number.isNaN(date.getTime()) ? escapeHtml(String(value)) : escapeHtml(date.toLocaleDateString('it-IT'));
@@ -7957,7 +8068,7 @@
                         <label class="rubrica-add-field">Email *<input type="email" id="rubricaAddEmail" maxlength="255" autocomplete="off" placeholder="nome.cognome@azienda.com"></label>
                         <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.3rem;">
                             <button type="button" class="rubrica-add-close" style="padding: 0.45rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; cursor: pointer;">Annulla</button>
-                            <button type="button" id="rubricaAddSave" style="padding: 0.45rem 1.1rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-plus"></i> Aggiungi</button>
+                            <button type="button" id="rubricaAddSave" style="padding: 0.45rem 1.1rem; border: none; border-radius: 8px; background: #047857; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-plus"></i> Aggiungi</button>
                         </div>
                     </div>
                 </div>`;
@@ -8059,11 +8170,11 @@
 
         async function openTaskModal(task = null) {
             if (todoColumns.length === 0) {
-                showNotification('Impossibile aprire il task: struttura non disponibile', 'info');
+                showNotification('Impossibile aprire la To-Do: struttura non disponibile', 'info');
                 return;
             }
             editingTodoId = task?.__task_id || null;
-            document.getElementById('taskModalTitle').textContent = editingTodoId ? 'Modifica task' : 'Nuovo task';
+            document.getElementById('taskModalTitle').textContent = editingTodoId ? 'Modifica To-Do' : 'Nuova To-Do';
             // Elimina: solo per una task esistente (in modifica).
             const deleteButton = document.getElementById('taskModalDelete');
             if (deleteButton) { deleteButton.style.display = editingTodoId ? '' : 'none'; deleteButton.disabled = false; }
@@ -8113,7 +8224,7 @@
         // finestra di modifica), dopo la conferma. DELETE /api/dashboard/tasks/:id.
         async function deleteTodoTask(taskId, button) {
             const task = todoData.find(row => String(row.__task_id) === String(taskId));
-            const titolo = task && (task.titile || task.title) ? `«${task.titile || task.title}»` : 'questa task';
+            const titolo = task && (task.titile || task.title) ? `«${task.titile || task.title}»` : 'questa To-Do';
             if (!confirm(`Eliminare ${titolo}? L'operazione non si può annullare.`)) return false;
             if (button) button.disabled = true;
             try {
@@ -8126,7 +8237,7 @@
                 if (String(editingTodoId) === String(taskId)) closeTaskModal();
                 await loadTodoData();
                 applyFiltersAndRender();
-                showNotification('Task eliminata', 'success');
+                showNotification('To-Do eliminata', 'success');
                 return true;
             } catch (error) {
                 showNotification('Errore: ' + error.message, 'info');
@@ -8167,7 +8278,7 @@
                 await loadTodoData();
                 currentTodoPage = 10;
                 applyFiltersAndRender();
-                showNotification(wasEditing ? 'Task aggiornata' : 'Task inserita', 'success');
+                showNotification(wasEditing ? 'To-Do aggiornata' : 'To-Do inserita', 'success');
             } catch (error) {
                 showNotification('Errore: ' + error.message, 'info');
             } finally {
@@ -8431,7 +8542,7 @@
                     font-size: 0.95rem;
                     transition: all 0.3s;
                 `;
-                logoutBtn.innerHTML = '<i class="fas fa-sign-out-alt"></i> Logout';
+                logoutBtn.innerHTML = '<i class="fas fa-sign-out-alt"></i> Esci';
                 logoutBtn.onmouseover = () => {
                     logoutBtn.style.background = 'rgba(239, 68, 68, 0.2)';
                     logoutBtn.style.borderColor = 'rgba(239, 68, 68, 0.5)';
@@ -8722,7 +8833,7 @@
             } catch (error) {
                 todoColumns = [];
                 todoData = [];
-                todoLoadError = 'Impossibile caricare le task: ' + error.message;
+                todoLoadError = 'Impossibile caricare le To-Do: ' + error.message;
                 console.warn('[TO DO LIST]', error.message);
             }
         }
@@ -8964,7 +9075,7 @@
                 if (!(await window.MySupportPush.attiva())) { revertCalendarToggle(toggle, false); return; }
                 dbxDopo(toggle, true);
             } else {
-                const yes = await confirmCalendarDisconnect('DataBricks', 'Revoca il token dello script MySupport del PC');
+                const yes = await confirmCalendarDisconnect('Databricks', 'Revoca il token dello script MySupport del PC');
                 if (!yes || !(await window.MySupportPush.disattiva())) { revertCalendarToggle(toggle, true); return; }
                 dbxDopo(toggle, false);
             }
@@ -10479,10 +10590,10 @@
         function recapTaskRowHtml(item = {}) {
             const off = item.exists ? ' off' : '';
             return `<div class="recap-task-row${off}">
-                <input type="checkbox" class="recap-task-on" ${item.exists ? '' : 'checked'} aria-label="Crea questo task">
+                <input type="checkbox" class="recap-task-on" ${item.exists ? '' : 'checked'} aria-label="Crea questa To-Do">
                 <div>
-                    <textarea class="recap-task-desc" rows="2" placeholder="Descrizione del task">${escapeHtml(item.description || '')}</textarea>
-                    ${item.exists ? '<span class="recap-task-exists"><i class="fas fa-circle-info"></i> Già presente tra i task di questa riunione: non selezionato</span>' : ''}
+                    <textarea class="recap-task-desc" rows="2" placeholder="Descrizione della To-Do">${escapeHtml(item.description || '')}</textarea>
+                    ${item.exists ? '<span class="recap-task-exists"><i class="fas fa-circle-info"></i> Già presente tra le To-Do di questa riunione: non selezionata</span>' : ''}
                 </div>
                 <input type="date" class="recap-task-due" value="${escapeHtml(item.due_date || '')}" aria-label="Scadenza">
                 <button type="button" class="recap-task-del" title="Togli questa riga" aria-label="Togli questa riga"><i class="fas fa-trash"></i></button>
@@ -10523,7 +10634,7 @@
                 const dt = (v) => v ? String(v).slice(0, 10).split('-').reverse().join('/') : '—';
                 const who = d.assigned_to
                     ? `<b>${escapeHtml(d.assigned_to.name)}</b>`
-                    : '<span class="recap-tasks-warn">non trovato in rubrica (nessun contatto con la tua email): i task resteranno senza assegnatario</span>';
+                    : '<span class="recap-tasks-warn">non trovato in rubrica (nessun contatto con la tua email): le To-Do resteranno senza assegnatario</span>';
                 const items = Array.isArray(d.items) ? d.items : [];
                 const cli = d.cliente && d.cliente.disponibile ? { disponibile: true, items: Array.isArray(d.cliente.items) ? d.cliente.items : [] } : { disponibile: false, items: [] };
                 body.innerHTML = `
@@ -10566,7 +10677,7 @@
                 .filter((x) => x.descrizione);
             const titile = (document.getElementById('recapTasksTitolo')?.value || '').trim();
             if (items.length && !titile) { showNotification('Il titolo è obbligatorio', 'info'); return; }
-            if (!items.length && !azioni.length) { showNotification('Seleziona almeno un task o un\'azione del cliente con la descrizione', 'info'); return; }
+            if (!items.length && !azioni.length) { showNotification('Seleziona almeno una To-Do o un\'azione del cliente con la descrizione', 'info'); return; }
             const btn = document.getElementById('recapTasksSave');
             btn.disabled = true;
             const fatto = [];
@@ -10583,7 +10694,7 @@
                 };
                 if (items.length) {
                     const d = await invia('/calendar/meetings/managed/recap-tasks', { id_calendar: recapTasksEventId, titile, items });
-                    fatto.push(`${d.created === 1 ? 'creato 1 task' : `creati ${d.created} task`}${d.assigned ? '' : ' (senza assegnatario)'}`);
+                    fatto.push(`${d.created === 1 ? 'creata 1 To-Do' : `create ${d.created} To-Do`}${d.assigned ? '' : ' (senza assegnatario)'}`);
                     // Doppioni di To-Do già aperte (config/dedupVoci.js): aggiornate o lasciate com'erano.
                     if (d.aggiornati) fatto.push(`${d.aggiornati} già present${d.aggiornati === 1 ? 'e' : 'i'} e aggiornat${d.aggiornati === 1 ? 'o' : 'i'} con le novità`);
                     if (d.giaPresenti) fatto.push(`${d.giaPresenti} già present${d.giaPresenti === 1 ? 'e' : 'i'} (non ricreat${d.giaPresenti === 1 ? 'o' : 'i'})`);
@@ -10751,8 +10862,13 @@
         function mtMostraScheda(nome, silenzioso = false) {
             const modal = document.getElementById('meetingTextModal');
             const pane = document.getElementById('mtInterno');
-            document.querySelectorAll('#mtTabs .mt-tab').forEach((b) => b.classList.toggle('on', b.dataset.mtTab === nome));
-            const elementi = [...document.querySelectorAll('#meetingTextModal .mt-side .mt-btn:not(#meetingTextDone)'),
+            document.querySelectorAll('#mtTabs .mt-tab').forEach((b) => {
+                const on = b.dataset.mtTab === nome;
+                b.classList.toggle('on', on);
+                b.setAttribute('aria-selected', String(on));
+                b.tabIndex = on ? 0 : -1;
+            });
+            const elementi =[...document.querySelectorAll('#meetingTextModal .mt-side .mt-btn:not(#meetingTextDone)'),
                 document.getElementById('meetingEmailFields'), document.getElementById('meetingRteBar'), document.getElementById('meetingTextBody')].filter(Boolean);
             if (nome === 'interno') {
                 if (!mi.nascosti) {
@@ -10774,6 +10890,18 @@
             if (t.dataset.mtTab === 'cliente' && mi.dirty && !confirm('Ci sono modifiche non salvate al recap interno. Lasciarle?')) return;
             if (t.dataset.mtTab === 'cliente') mi.dirty = false;
             mtMostraScheda(t.dataset.mtTab);
+        });
+        // Schede da tastiera (pattern ARIA Tabs): frecce sinistra/destra, Home, Fine.
+        document.addEventListener('keydown', (e) => {
+            const t = e.target.closest && e.target.closest('#mtTabs .mt-tab');
+            if (!t || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+            e.preventDefault();
+            const tabs = [...document.querySelectorAll('#mtTabs .mt-tab')];
+            const i = tabs.indexOf(t);
+            const j = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1
+                : (i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+            tabs[j].focus();
+            tabs[j].click();
         });
 
         // Numero di attività interne accanto al nome della scheda (all'apertura della finestra).
@@ -10839,16 +10967,16 @@
             pane.innerHTML = `
                 <div class="mi-bar">
                     <span class="stato">${STATI[d.stato] || 'Il recap interno non è ancora stato generato: premi «Genera» (usa l\'AI del recap e la trascrizione della riunione).'}</span>
-                    <button type="button" class="mi-btn" id="miGenera" ${d.stato === 'in_corso' ? 'disabled' : ''} title="L'AI scrive la sintesi per il team e l'elenco delle attività interne. Rigenerando, le attività già trasformate in task restano."><i class="fas fa-wand-magic-sparkles"></i> ${generato ? 'Rigenera' : 'Genera recap interno'}</button>
+                    <button type="button" class="mi-btn" id="miGenera" ${d.stato === 'in_corso' ? 'disabled' : ''} title="L'AI scrive la sintesi per il team e l'elenco delle attività interne. Rigenerando, le attività già trasformate in To-Do restano."><i class="fas fa-wand-magic-sparkles"></i> ${generato ? 'Rigenera' : 'Genera recap interno'}</button>
                     <button type="button" class="mi-btn primario" id="miSalva" ${mi.dirty ? '' : 'disabled'}><i class="fas fa-floppy-disk"></i> Salva</button>
-                    <button type="button" class="mi-btn verde" id="miTask" ${daTask ? '' : 'disabled'} title="Crea una To-Do per ogni attività selezionata, assegnata al suo owner"><i class="fas fa-list-check"></i> Crea task</button>
-                    <button type="button" class="mi-btn" id="miEmail" ${mi.righe.length ? '' : 'disabled'} title="Una email a tutti gli owner con le attività raggruppate per persona"><i class="fas fa-envelope"></i> Email al team</button>
+                    <button type="button" class="mi-btn verde" id="miTask" ${daTask ? '' : 'disabled'} title="Crea una To-Do per ogni attività selezionata, assegnata al suo responsabile"><i class="fas fa-list-check"></i> Crea To-Do</button>
+                    <button type="button" class="mi-btn" id="miEmail" ${mi.righe.length ? '' : 'disabled'} title="Una email a tutti i responsabili con le attività raggruppate per persona"><i class="fas fa-envelope"></i> Email al team</button>
                 </div>
                 <div><div class="mi-sez">Sintesi per il team</div>
                     <textarea class="mi-sintesi" id="miSintesi" placeholder="La sintesi interna compare qui dopo la generazione; puoi anche scriverla o correggerla a mano.">${escapeHtml(d.sintesi || '')}</textarea></div>
                 <div>
-                    <div class="mi-sez" style="display:flex; align-items:center; gap:0.5rem;">Attività del team <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--text-muted);">· scegli l'owner di ogni attività dalla rubrica (in cima le persone del team del progetto) o scrivilo</span></div>
-                    ${mi.righe.length ? `<table class="mi-t"><thead><tr><th title="Selezionate per Crea task"><input type="checkbox" id="miTutte"></th><th style="width:16%">Argomento</th><th>Attività</th><th style="width:20%">Owner</th><th style="width:13%">Scadenza</th><th style="width:70px">Task</th><th></th></tr></thead><tbody>
+                    <div class="mi-sez" style="display:flex; align-items:center; gap:0.5rem;">Attività del team <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--text-muted);">· scegli il responsabile di ogni attività dalla rubrica (in cima le persone del team del progetto) o scrivilo</span></div>
+                    ${mi.righe.length ? `<table class="mi-t"><thead><tr><th title="Selezionate per Crea To-Do"><input type="checkbox" id="miTutte"></th><th style="width:16%">Argomento</th><th>Attività</th><th style="width:20%">Responsabile</th><th style="width:13%">Scadenza</th><th style="width:70px">To-Do</th><th></th></tr></thead><tbody>
                         ${mi.righe.map((r, i) => `<tr class="${r.task_id ? 'fatto' : ''}" data-i="${i}">
                             <td><input type="checkbox" data-mi="sel" ${r.sel && !r.task_id ? 'checked' : ''} ${r.task_id ? 'disabled' : ''}></td>
                             <td><input type="text" data-mi="argomento" value="${escapeHtml(r.argomento || '')}"></td>
@@ -10963,7 +11091,7 @@
         }
 
         async function miGenera() {
-            if (mi.righe.some((r) => !r.task_id) && !confirm('Rigenerando, le attività non ancora trasformate in task vengono sostituite da quelle nuove (anche owner e scadenze scelti). Procedere?')) return;
+            if (mi.righe.some((r) => !r.task_id) && !confirm('Rigenerando, le attività non ancora trasformate in To-Do vengono sostituite da quelle nuove (anche responsabili e scadenze scelti). Procedere?')) return;
             const b = document.getElementById('miGenera');
             if (b) b.disabled = true;
             try {
@@ -10989,9 +11117,9 @@
         async function miCreaTask() {
             if (mi.dirty && !(await miSalva(true))) return;
             const ids = mi.righe.filter((r) => r.sel && !r.task_id && r.id).map((r) => r.id);
-            if (!ids.length) { showNotification('Seleziona le attività da trasformare in task', 'info'); return; }
+            if (!ids.length) { showNotification('Seleziona le attività da trasformare in To-Do', 'info'); return; }
             const senzaOwner = mi.righe.filter((r) => ids.includes(r.id) && !String(r.owner_nominativo || '').trim()).length;
-            if (senzaOwner && !confirm(`${senzaOwner} attività non hanno owner: i loro task resteranno senza assegnatario. Creare comunque?`)) return;
+            if (senzaOwner && !confirm(`${senzaOwner} attività non hanno un responsabile: le loro To-Do resteranno senza assegnatario. Creare comunque?`)) return;
             const b = document.getElementById('miTask');
             if (b) b.disabled = true;
             try {
@@ -11001,13 +11129,13 @@
                 });
                 const d = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
-                showNotification([`${d.creati} task creati nella To-Do List`,
+                showNotification([`${d.creati} To-Do create nella To-Do List`,
                     d.aggiornati ? `${d.aggiornati} già present${d.aggiornati === 1 ? 'e' : 'i'} e aggiornat${d.aggiornati === 1 ? 'o' : 'i'}` : '',
                     d.giaPresenti ? `${d.giaPresenti} già present${d.giaPresenti === 1 ? 'e' : 'i'}` : ''].filter(Boolean).join(', '), 'success');
                 await miCarica(mi.idCal);
                 try { if (typeof loadTodoData === 'function') loadTodoData(); } catch (e) { /* To-Do List non visibile */ }
             } catch (err) {
-                showNotification('Crea task: ' + err.message, 'info');
+                showNotification('Crea To-Do: ' + err.message, 'info');
                 if (b) b.disabled = false;
             }
         }
@@ -11049,7 +11177,7 @@
                 if (navigator.clipboard) navigator.clipboard.writeText(body).catch(() => {});
                 showNotification('Testo lungo: è stato copiato negli appunti, incollalo nell\'email con Ctrl+V', 'info');
             }
-            if (!to.length) showNotification('Nessun owner ha un\'email: aggiungi i destinatari nell\'email', 'info');
+            if (!to.length) showNotification('Nessun responsabile ha un\'email: aggiungi i destinatari nell\'email', 'info');
             fetch(`${API_URL}/audit/email`, {
                 method: 'POST', keepalive: true, headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tipo: 'recap_interno', a: to, cc: [], mittente: '', oggetto: subject, riferimento: mi.idCal, servizio: kind === 'google' ? 'gmail_web' : 'programma_posta' })
@@ -11638,7 +11766,7 @@
                 if (auto) return;
                 document.getElementById('meetingPanelTitle').textContent = d.riunione.oggetto || 'Riunione';
                 document.getElementById('meetingPanelSub').textContent = '';
-                body.innerHTML = '<div class="mp-vuoto">Collega la riunione a un <b>cliente</b> (e a un progetto) con le tendine della riga: qui compariranno attività, To-Do, task Jira, quotazioni e quesiti MySupport.</div>';
+                body.innerHTML = '<div class="mp-vuoto">Collega la riunione a un <b>cliente</b> (e a un progetto) con le tendine della riga: qui compariranno attività, To-Do, ticket Jira, quotazioni e quesiti MySupport.</div>';
                 return;
             }
             renderMeetingPanel(d);
@@ -11764,6 +11892,26 @@
             });
             panel.querySelector('.mp-resize-l')?.addEventListener('pointerdown', (e) => start(e, 'l'));
             panel.querySelector('.mp-resize-r')?.addEventListener('pointerdown', (e) => start(e, 'r'));
+            // Tastiera (WCAG 2.1.1 / 2.5.7): sulle maniglie, frecce sinistra/destra = 20 px.
+            panel.querySelectorAll('.mp-resize').forEach((h) => {
+                const lato = h.classList.contains('mp-resize-l') ? 'l' : 'r';
+                h.setAttribute('role', 'separator');
+                h.setAttribute('aria-orientation', 'vertical');
+                h.setAttribute('aria-label', 'Larghezza del pannello (frecce sinistra e destra)');
+                h.tabIndex = 0;
+                h.addEventListener('keydown', (e) => {
+                    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+                    e.preventDefault();
+                    const g0 = current();
+                    const dx = e.key === 'ArrowRight' ? 20 : -20;
+                    if (lato === 'r') apply({ ...g0, width: g0.width + dx });
+                    else {
+                        const w = Math.min(Math.max(g0.width - dx, MIN_W), vw() - 16);
+                        apply({ ...g0, width: w, left: g0.left + g0.width - w });
+                    }
+                    save();
+                });
+            });
             // Doppio clic sulla testata: torna alla posizione e larghezza predefinite.
             panel.querySelector('.mp-head')?.addEventListener('dblclick', (e) => {
                 if (e.target.closest('button, a')) return;
@@ -12240,12 +12388,12 @@
                 return;
             }
             if (soloAssistente) {
-                // Interruttore «Ai Assistente PM» spento: inutile chiedere la condivisione dell'audio.
+                // Interruttore «AI Assistente PM» spento: inutile chiedere la condivisione dell'audio.
                 try {
                     const r = await fetch(`${API_URL}/assistente-pm/config`, { headers: getAuthHeaders() });
                     const d = await r.json().catch(() => ({}));
                     if (r.ok && !d.attiva) {
-                        showNotification('Assistente PM spento: attivalo in Impostazioni › «Ai Assistente PM»', 'info');
+                        showNotification('Assistente PM spento: attivalo in Impostazioni › «AI Assistente PM»', 'info');
                         return;
                     }
                 } catch (e) { /* si prova comunque: l'errore lo mostrerà la finestra */ }
@@ -12446,7 +12594,7 @@
                 : 'Audio della riunione non condiviso: verrà trascritto solo il tuo microfono. Ferma e riavvia la registrazione attivando "Condividi anche l\'audio di sistema".'));
             updateRecStatus(rec);
             if (!rec.hasSystemAudio) showNotification(soloAssistente ? 'Audio di sistema non condiviso: l\'assistente sente solo il tuo microfono' : 'Audio di sistema non condiviso: verrà trascritto solo il tuo microfono', 'info');
-            // «Ai Assistente PM» acceso: finestra dell'assistente e blocchi brevi per lui.
+            // «AI Assistente PM» acceso: finestra dell'assistente e blocchi brevi per lui.
             rec.apMic = []; rec.apSys = []; rec.apLen = 0; rec.apFlushed = 0; rec.apScanFrom = 0; rec.apQuietRun = 0;
             rec.assistente = false;
             if (window.AssistentePm) {
@@ -14018,7 +14166,7 @@
             const refreshBtn = document.getElementById('refreshMeetingsBtn');
             if (refreshBtn) {
                 refreshBtn.addEventListener('click', async () => {
-                    refreshBtn.innerHTML = '<i class="fas fa-sync" style="animation: spin 0.6s linear infinite;"></i> Aggiornamento...';
+                    refreshBtn.innerHTML = '<i class="fas fa-sync" style="animation: spin 0.6s linear infinite;"></i> Aggiornamento…';
                     await loadTodaysMeetings();
                     setTimeout(() => {
                         refreshBtn.innerHTML = '<i class="fas fa-sync"></i> Aggiorna';
@@ -14884,7 +15032,7 @@
                 const projects = res.ok ? await res.json() : [];
                 // Cliente di un collaboratore del team (sola lettura): niente nuovi progetti.
                 const teamClient = !!document.querySelector(`#projectClientsList li[data-client-id="${CSS.escape(String(clientId))}"][data-client-team="1"], #clientsList li[data-client-id="${CSS.escape(String(clientId))}"][data-client-team="1"]`);
-                const addBtn = teamClient ? '' : `<button id="projAddBtn" type="button" style="margin-bottom:0.75rem; padding:0.4rem 0.7rem; background:#3B82F6; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">+ Nuovo progetto</button>`;
+                const addBtn = teamClient ? '' : `<button id="projAddBtn" type="button" style="margin-bottom:0.75rem; padding:0.4rem 0.7rem; background:#1D4ED8; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">+ Nuovo progetto</button>`;
                 // Progetti del team: etichetta «Team: …» (si aprono in sola lettura).
                 const rows = (projects || []).map(p => `<div class="settings-detail-link proj-row" data-proj-id="${escapeHtml(p.id)}" data-proj-name="${escapeHtml(p.name)}"><span class="flyout-item-label">${escapeHtml(p.name)}${teamBadgeHtml(p)}</span><span class="parent-arrow">›</span></div>`).join('')
                     || '<div style="color: var(--text-muted);">Nessun progetto</div>';
@@ -14910,7 +15058,7 @@
             const opts = ['<option value="">Modello standard</option>'].concat((models || []).map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}${m.team && m.owner_name ? ' (Team: ' + escapeHtml(m.owner_name) + ')' : ''}</option>`)).join('');
             listEl.innerHTML = `<div style="margin-bottom:0.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Nome progetto</label><input id="npName" type="text" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;"></div>
                 <div style="margin-bottom:0.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Copia struttura da</label><select id="npModel" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">${opts}</select></div>
-                <div style="display:flex; gap:0.5rem;"><button id="npCreate" type="button" style="flex:1; padding:0.5rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Crea</button><button id="npCancel" type="button" style="flex:0 0 auto; padding:0.5rem 0.8rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button></div>`;
+                <div style="display:flex; gap:0.5rem;"><button id="npCreate" type="button" style="flex:1; padding:0.5rem; background:#047857; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Crea</button><button id="npCancel" type="button" style="flex:0 0 auto; padding:0.5rem 0.8rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button></div>`;
             document.getElementById('npCancel').addEventListener('click', () => renderProjectList(clientId, clientName));
             document.getElementById('npCreate').addEventListener('click', async () => {
                 const name = document.getElementById('npName').value.trim();
@@ -15102,10 +15250,10 @@
 
         // table = tabella della griglia (tipo 11) della scheda a cui porta il clic sul contatore.
         const PROJ_KPI = [
-            { key: 'task', label: 'Task', icon: 'fa-ticket', cls: 'k-task', title: 'Tkt Jira del progetto non scaduti', table: 'task_app' },
+            { key: 'task', label: 'Task', icon: 'fa-ticket', cls: 'k-task', title: 'Ticket Jira del progetto non scaduti', table: 'task_app' },
             { key: 'quotazioni', label: 'Quotazioni', icon: 'fa-file-invoice-dollar', cls: 'k-quot', title: 'Quotazioni del progetto non scadute', table: 'cl_quotazioni' },
-            { key: 'meeting', label: 'Meeting', icon: 'fa-video', cls: 'k-meet', title: 'Meeting del progetto non scaduti', table: 'rec_meeting' },
-            { key: 'todo', label: 'To Do', icon: 'fa-list-check', cls: 'k-todo', title: 'Voci della To do List del progetto non scadute', table: 'tasks' },
+            { key: 'meeting', label: 'Riunioni', icon: 'fa-video', cls: 'k-meet', title: 'Riunioni del progetto non scadute', table: 'rec_meeting' },
+            { key: 'todo', label: 'To-Do', icon: 'fa-list-check', cls: 'k-todo', title: 'To-Do del progetto non scadute', table: 'tasks' },
             // Solo nella scheda cliente: quesiti MySupport non chiusi (tabella mysupport).
             { key: 'mysupport', label: 'MySupport', icon: 'fa-headset', cls: 'k-ms', title: 'Quesiti MySupport del cliente non chiusi', table: 'mysupport', soloCliente: true }
         ];
@@ -15176,9 +15324,9 @@
         // Pulsante Check List del progetto: il flag parte "da iniziare" e lo aggiorna
         // aggiornaFlagCheckList quando ci sono i dati della check list del progetto.
         function projCheckListBtnHtml() {
-            return '<button type="button" class="proj-ck" id="projCheckListBtn" title="Check List del progetto">' +
+            return '<button type="button" class="proj-ck" id="projCheckListBtn" title="Checklist del progetto">' +
                 '<img class="proj-ck-img" src="checklist.png" alt="">' +
-                '<span class="proj-ck-lbl">Check List</span><span class="proj-ck-cnt" id="projCheckListCnt"></span></button>' +
+                '<span class="proj-ck-lbl">Checklist</span><span class="proj-ck-cnt" id="projCheckListCnt"></span></button>' +
                 // Kick-off: subito dopo Check List (vedi KICK-OFF DEL PROGETTO più sotto)
                 '<button type="button" class="proj-ck proj-ko" id="projKickoffBtn" title="Kick-off del progetto: slide generate dall\'AI">' +
                 '<img class="proj-ck-img" src="kickoff.png" alt="">' +
@@ -15229,9 +15377,9 @@
             if (!btn) return;
             const f = Number(fatte) || 0, t = Number(totali) || 0;
             btn.classList.remove('da-iniziare', 'in-corso', 'fatta');
-            if (t > 0 && f >= t) { btn.classList.add('fatta'); btn.title = 'Check List del progetto: completata'; }
-            else if (f > 0) { btn.classList.add('in-corso'); btn.title = `Check List del progetto: ${f} di ${t}`; }
-            else { btn.classList.add('da-iniziare'); btn.title = t ? `Check List del progetto: da iniziare (0 di ${t})` : 'Check List del progetto: da iniziare'; }
+            if (t > 0 && f >= t) { btn.classList.add('fatta'); btn.title = 'Checklist del progetto: completata'; }
+            else if (f > 0) { btn.classList.add('in-corso'); btn.title = `Checklist del progetto: ${f} di ${t}`; }
+            else { btn.classList.add('da-iniziare'); btn.title = t ? `Checklist del progetto: da iniziare (0 di ${t})` : 'Checklist del progetto: da iniziare'; }
             if (cnt) cnt.textContent = f > 0 && f < t ? `${f}/${t}` : '';
         }
         // === CHECK LIST DEL PROGETTO (pulsante nella testata della scheda progetto) ===
@@ -15258,9 +15406,9 @@
             if (m) return m;
             document.body.insertAdjacentHTML('beforeend', `<div class="ckp-overlay" id="ckpOverlay" role="dialog" aria-modal="true" aria-labelledby="ckpTitle">
                 <div class="ckp-box">
-                    <div class="ckp-head"><img src="checklist.png" alt=""><h3 id="ckpTitle">Check List<small id="ckpSub"></small></h3><label class="ckp-mod" title="Aggiungi, rinomina, sposta ed elimina fasi e attività custom del progetto"><input type="checkbox" id="ckpModifica"><span class="ckp-mod-sw"></span>Abilita modifica</label><button type="button" class="ckp-close" id="ckpClose" aria-label="Chiudi">&times;</button></div>
+                    <div class="ckp-head"><img src="checklist.png" alt=""><h3 id="ckpTitle">Checklist<small id="ckpSub"></small></h3><label class="ckp-mod" title="Aggiungi, rinomina, sposta ed elimina fasi e attività custom del progetto"><input type="checkbox" id="ckpModifica"><span class="ckp-mod-sw"></span>Abilita modifica</label><button type="button" class="ckp-close" id="ckpClose" aria-label="Chiudi">&times;</button></div>
                     <div class="ckp-body" id="ckpBody"></div>
-                    <div class="ckp-foot"><span class="ckp-foot-testo" id="ckpFoot"></span><button type="button" class="ckp-agg" id="ckpNuovaFase" style="display:none" title="Aggiunge una nuova voce custom in fondo alla check list"><i class="fas fa-plus"></i> Aggiungi Attività</button><button type="button" class="ckp-del" id="ckpElimina" title="Cancella tutta la check list di questo progetto"><i class="fas fa-trash"></i> Elimina</button></div>
+                    <div class="ckp-foot"><span class="ckp-foot-testo" id="ckpFoot"></span><button type="button" class="ckp-agg" id="ckpNuovaFase" style="display:none" title="Aggiunge una nuova voce custom in fondo alla checklist"><i class="fas fa-plus"></i> Aggiungi attività</button><button type="button" class="ckp-del" id="ckpElimina" title="Cancella tutta la checklist di questo progetto"><i class="fas fa-trash"></i> Elimina</button></div>
                 </div></div>`);
             m = document.getElementById('ckpOverlay');
             // «Abilita modifica»: ridisegna la finestra con i comandi per le righe custom.
@@ -15316,9 +15464,9 @@
             if (del) {
                 del.style.display = rows.length ? '' : 'none';
                 del.disabled = rows.some(r => r.__can_write === false);
-                del.title = del.disabled ? 'Alcune voci sono in sola lettura per il tuo ruolo' : 'Cancella tutta la check list di questo progetto';
+                del.title = del.disabled ? 'Alcune voci sono in sola lettura per il tuo ruolo' : 'Cancella tutta la checklist di questo progetto';
                 del.onclick = async () => {
-                    if (!confirm(`Eliminare la check list di questo progetto (${rows.length} voci, con spunte e date)?`)) return;
+                    if (!confirm(`Eliminare la checklist di questo progetto (${rows.length} voci, con spunte e date)?`)) return;
                     if (!confirm('Conferma definitiva: la cancellazione non si può annullare. Procedere?')) return;
                     del.disabled = true;
                     try {
@@ -15330,7 +15478,7 @@
                         if (!r.ok) throw new Error(x.error || `Errore ${r.status}`);
                         document.getElementById('ckpOverlay')?.classList.remove('open');
                         aggiornaFlagCheckList(0, 0);
-                        showNotification('Check List eliminata', 'success');
+                        showNotification('Checklist eliminata', 'success');
                     } catch (err) {
                         showNotification('Errore: ' + err.message, 'info');
                         del.disabled = false;
@@ -15343,7 +15491,7 @@
             const body = document.getElementById('ckpBody');
             if (!rows.length) {
                 body.innerHTML = `<div class="ckp-empty">${d.tipologia
-                    ? `Nessuna check list configurata per la tipologia «${escapeHtml(d.tipologia)}» (Impostazioni › Configura Check List).`
+                    ? `Nessuna checklist configurata per la tipologia «${escapeHtml(d.tipologia)}» (Impostazioni › Configura Checklist).`
                     : 'Il progetto non ha una Tipologia: impostala nella scheda del progetto.'}</div>`;
                 return;
             }
@@ -15611,9 +15759,9 @@
                 // Riallineamento automatico all'apertura: si segnala solo se ha cambiato qualcosa.
                 const e = d.esito || {};
                 const parti = [e.aggiunte ? `${e.aggiunte} aggiunte` : '', e.aggiornate ? `${e.aggiornate} aggiornate` : '', e.chiuse ? `${e.chiuse} tolte` : ''].filter(Boolean);
-                if (parti.length) showNotification(`Check List aggiornata: ${parti.join(', ')}`, 'success');
+                if (parti.length) showNotification(`Checklist aggiornata: ${parti.join(', ')}`, 'success');
             } catch (err) {
-                showNotification('Check List: ' + err.message, 'info');
+                showNotification('Checklist: ' + err.message, 'info');
             } finally {
                 btn.disabled = false;
             }
@@ -15623,7 +15771,7 @@
         // Finestra con: Teams (persone scelte dalla rubrica, salvate in proj_componenti),
         // Licenze (campo «Licenze da attivare» del progetto), Template (.pptx scelto dal PC, ogni
         // volta), Prompt (editor dei prompt sulla funzione KICKOFF) e AI di Impostazioni › AI ›
-        // «AI Slide Kick-Off» in sola lettura. «Genera» manda il template al server, che lo fa
+        // «AI Slide Kick-off» in sola lettura. «Genera» manda il template al server, che lo fa
         // compilare all'AI e restituisce il nuovo .pptx: resta solo nel browser (icona da
         // scaricare), sul server non viene salvato nulla.
         const KO_MAX_FILE = 40 * 1024 * 1024;
@@ -15639,7 +15787,7 @@
                             <div class="ko-cerca"><i class="fas fa-search"></i><input type="text" id="koCerca" placeholder="Cerca in rubrica (nome, email o ruolo)…" autocomplete="off"><div class="ko-risultati" id="koRisultati"></div></div>
                             <div class="ko-chips" id="koTeam"></div></div>
                         <div class="ko-sez"><h4><i class="fas fa-key"></i> Licenze</h4><div class="ko-lic" id="koLicenze"></div></div>
-                        <div class="ko-sez"><h4><i class="fas fa-file-powerpoint"></i> Template</h4>
+                        <div class="ko-sez"><h4><i class="fas fa-file-powerpoint"></i> Modello</h4>
                             <div class="ko-riga"><label class="ko-btn" for="koFileInput"><i class="fas fa-folder-open"></i> Scegli file</label>
                             <input type="file" id="koFileInput" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" hidden>
                             <span class="ko-file vuoto" id="koFileNome">Nessun file scelto (.pptx)</span></div></div>
@@ -15690,7 +15838,7 @@
                 e.target.value = '';
                 if (!f) return;
                 if (!/\.pptx$/i.test(f.name)) { showNotification('Scegli un file PowerPoint .pptx (i vecchi .ppt vanno prima salvati come .pptx)', 'info'); return; }
-                if (f.size > KO_MAX_FILE) { showNotification('Il template supera 40 MB', 'info'); return; }
+                if (f.size > KO_MAX_FILE) { showNotification('Il modello supera 40 MB', 'info'); return; }
                 koFile = f;
                 koDisegna();
             });
@@ -15709,22 +15857,22 @@
             const nome = document.getElementById('koFileNome');
             nome.textContent = koFile ? koFile.name : 'Nessun file scelto (.pptx)';
             nome.classList.toggle('vuoto', !koFile);
-            // AI in sola lettura: quella scelta in Impostazioni › AI › «AI Slide Kick-Off».
+            // AI in sola lettura: quella scelta in Impostazioni › AI › «AI Slide Kick-off».
             const ai = d.ai || {};
             const aiEl = document.getElementById('koAi');
             let problema = '';
-            if (!ai.nome) problema = 'scegli l\'AI in Impostazioni › AI › «AI Slide Kick-Off»';
+            if (!ai.nome) problema = 'scegli l\'AI in Impostazioni › AI › «AI Slide Kick-off»';
             else if (!ai.supportata) problema = `«${ai.nome}» non può generare le slide`;
             else if (!ai.connessa) problema = `${ai.nome} senza chiave API: collegala in Impostazioni › AI`;
             aiEl.className = 'ko-ai' + (problema ? ' ko-ai-ko' : '');
             aiEl.innerHTML = problema
                 ? `<i class="fas fa-triangle-exclamation"></i> AI: ${escapeHtml(problema)}`
                 : `<i class="fas fa-robot"></i> AI: <b>${escapeHtml(ai.nome)}</b>`;
-            aiEl.title = 'AI che genera le slide (Impostazioni › AI › «AI Slide Kick-Off»), in sola lettura';
+            aiEl.title = 'AI che genera le slide (Impostazioni › AI › «AI Slide Kick-off»), in sola lettura';
             const gen = document.getElementById('koGenera');
             if (!gen.classList.contains('in-corso')) {
                 gen.disabled = !!problema || !koFile;
-                gen.title = problema ? problema.charAt(0).toUpperCase() + problema.slice(1) : (!koFile ? 'Scegli prima il file Template (.pptx)' : 'Genera le slide di Kick-off');
+                gen.title = problema ? problema.charAt(0).toUpperCase() + problema.slice(1) : (!koFile ? 'Scegli prima il file modello (.pptx)' : 'Genera le slide di Kick-off');
             }
         }
         async function koCercaRubrica() {
@@ -15788,7 +15936,7 @@
         async function koGenera() {
             const gen = document.getElementById('koGenera');
             if (!koFile || gen.disabled) return;
-            // Impostazioni › AI › «AI Slide Kick-Off» / «Esecuzione Kick-Off»: "Chiedi sempre" = finestra di scelta.
+            // Impostazioni › AI › «AI Slide Kick-off» / «Esecuzione Kick-Off»: "Chiedi sempre" = finestra di scelta.
             let sc;
             try { sc = await ProjexaAi.scegli('kickoff', { apiUrl: API_URL, headers: getAuthHeaders }); } catch (e) { showNotification('Kick-off: ' + e.message, 'info'); return; }
             if (!sc) return;
@@ -15813,7 +15961,7 @@
                 }
                 if (!r.ok) {
                     const d = await r.json().catch(() => ({}));
-                    throw new Error(d.error || (r.status === 413 ? 'Template troppo grande' : `Errore ${r.status}`));
+                    throw new Error(d.error || (r.status === 413 ? 'Modello troppo grande' : `Errore ${r.status}`));
                 }
                 const blob = await r.blob();
                 const cd = r.headers.get('Content-Disposition') || '';
@@ -15891,13 +16039,13 @@
                     <div class="ko-body">
                         <div class="ko-sez"><h4><i class="fas fa-building"></i> Cliente</h4><div class="of-dati" id="ofCliente"></div></div>
                         <div class="ko-sez"><h4><i class="fas fa-euro-sign"></i> Dati economici</h4><div class="of-dati" id="ofDati"></div></div>
-                        <div class="ko-sez"><h4><i class="fas fa-file-invoice-dollar"></i> Invoice</h4><div class="of-inv" id="ofInvoice"></div></div>
-                        <div class="ko-sez"><h4><i class="fas fa-file-word"></i> Template</h4>
+                        <div class="ko-sez"><h4><i class="fas fa-file-invoice-dollar"></i> Fatturazione</h4><div class="of-inv" id="ofInvoice"></div></div>
+                        <div class="ko-sez"><h4><i class="fas fa-file-word"></i> Modello</h4>
                             <div class="ko-riga"><label class="ko-btn" for="ofFileInput"><i class="fas fa-folder-open"></i> Scegli file</label>
                             <input type="file" id="ofFileInput" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
                             <span class="ko-file vuoto" id="ofFileNome">Nessun file scelto (.docx)</span></div></div>
                         <div class="ko-sez"><h4><i class="fas fa-robot"></i> Prompt</h4>
-                            <div class="ko-riga"><button type="button" class="ko-btn" id="ofPrompt" title="Apre il prompt Offerta Economica: puoi modificare il tuo prompt personalizzato"><i class="fas fa-pen"></i> Prompt</button>
+                            <div class="ko-riga"><button type="button" class="ko-btn" id="ofPrompt" title="Apre il prompt Offerta economica: puoi modificare il tuo prompt personalizzato"><i class="fas fa-pen"></i> Prompt</button>
                             <span class="ko-ai" id="ofAi"></span></div></div>
                         <div id="ofEsito"></div>
                     </div>
@@ -15921,7 +16069,7 @@
                 e.target.value = '';
                 if (!f) return;
                 if (!/\.docx$/i.test(f.name)) { showNotification('Scegli un file Word .docx (i vecchi .doc vanno prima salvati come .docx)', 'info'); return; }
-                if (f.size > KO_MAX_FILE) { showNotification('Il template supera 40 MB', 'info'); return; }
+                if (f.size > KO_MAX_FILE) { showNotification('Il modello supera 40 MB', 'info'); return; }
                 ofFile = f;
                 ofDisegna();
             });
@@ -15942,13 +16090,13 @@
             const inv = d.invoice || { colonne: [], righe: [] };
             document.getElementById('ofInvoice').innerHTML = inv.righe.length
                 ? `<table><thead><tr>${inv.colonne.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead><tbody>${inv.righe.map(r => `<tr>${r.map(c => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
-                : '<span class="ko-vuoto">Nessuna riga nella griglia Invoice del progetto.</span>';
+                : '<span class="ko-vuoto">Nessuna riga nella griglia Fatturazione del progetto.</span>';
             const nome = document.getElementById('ofFileNome');
             nome.textContent = ofFile ? ofFile.name : 'Nessun file scelto (.docx)';
             nome.classList.toggle('vuoto', !ofFile);
             const ai = d.ai || {};
             let problema = '';
-            if (!ai.nome) problema = 'scegli l\'AI in Impostazioni › AI («AI Offerta Economica» oppure «AI Slide Kick-Off»)';
+            if (!ai.nome) problema = 'scegli l\'AI in Impostazioni › AI («AI Offerta economica» oppure «AI Slide Kick-off»)';
             else if (!ai.supportata) problema = `«${ai.nome}» non può generare l'offerta`;
             else if (!ai.connessa) problema = `${ai.nome} senza chiave API: collegala in Impostazioni › AI`;
             const aiEl = document.getElementById('ofAi');
@@ -15958,7 +16106,7 @@
             const gen = document.getElementById('ofGenera');
             if (!gen.classList.contains('in-corso')) {
                 gen.disabled = !!problema || !ofFile;
-                gen.title = problema ? problema.charAt(0).toUpperCase() + problema.slice(1) : (!ofFile ? 'Scegli prima il file Template (.docx)' : 'Genera l\'offerta economica');
+                gen.title = problema ? problema.charAt(0).toUpperCase() + problema.slice(1) : (!ofFile ? 'Scegli prima il file modello (.docx)' : 'Genera l\'offerta economica');
             }
         }
         async function ofGenera() {
@@ -15987,7 +16135,7 @@
                 }
                 if (!r.ok) {
                     const x = await r.json().catch(() => ({}));
-                    throw new Error(x.error || (r.status === 413 ? 'Template troppo grande' : `Errore ${r.status}`));
+                    throw new Error(x.error || (r.status === 413 ? 'Modello troppo grande' : `Errore ${r.status}`));
                 }
                 const blob = await r.blob();
                 const m = /filename\*=UTF-8''([^;]+)/i.exec(r.headers.get('Content-Disposition') || '');
@@ -17131,7 +17279,7 @@
                     : '';
                 // Area condivisione (mode 5): elenco utenti del tenant + pulsante Condividi.
                 const shareAreaHtml = canShare
-                    ? `<div id="shareArea" style="display:none; padding-top:0.75rem; border-top:1px solid var(--border); margin-top:0.75rem;"><div style="font-size:0.85rem; font-weight:600; margin-bottom:0.5rem;">Condividi con:</div><div id="shareUsers" style="color: var(--text-muted); font-size:0.85rem;"></div><div id="shareBtnWrap" style="display:none; margin-top:0.75rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Permesso</label><select id="sharePermission" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px; margin-bottom:0.5rem;"><option value="write">Scrittura (può modificare)</option><option value="read">Lettura (sola visualizzazione)</option></select><button id="shareBtn" type="button" style="width:100%; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Condividi</button></div></div>`
+                    ? `<div id="shareArea" style="display:none; padding-top:0.75rem; border-top:1px solid var(--border); margin-top:0.75rem;"><div style="font-size:0.85rem; font-weight:600; margin-bottom:0.5rem;">Condividi con:</div><div id="shareUsers" style="color: var(--text-muted); font-size:0.85rem;"></div><div id="shareBtnWrap" style="display:none; margin-top:0.75rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Permesso</label><select id="sharePermission" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px; margin-bottom:0.5rem;"><option value="write">Scrittura (può modificare)</option><option value="read">Lettura (sola visualizzazione)</option></select><button id="shareBtn" type="button" style="width:100%; padding:0.6rem 1rem; background:#047857; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Condividi</button></div></div>`
                     : '';
                 listEl.innerHTML = toggleHtml + rowsHtml + saveBarHtml + shareAreaHtml;
 
@@ -17490,10 +17638,10 @@
 
                 const toggleHtml = desc.readOnly ? '' : `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;"><label style="display: flex; align-items: center; gap: 6px; cursor: pointer;"><span>Abilita modifica</span><span class="toggle-switch"><input type="checkbox" id="linkedListEditToggle" ${edit ? 'checked' : ''}><span class="toggle-slider"></span></span></label></div>`;
                 const addHtml = edit ? `<div style="display:flex; gap:0.4rem; margin-bottom:0.75rem;">
-                    <button id="linkedAddBtn" type="button" title="Inserisci nuovo record" style="width:30px; height:30px; background:#3B82F6; color:white; border:none; border-radius:6px; cursor:pointer;"><i class="fas fa-plus"></i></button>
+                    <button id="linkedAddBtn" type="button" title="Inserisci nuovo record" style="width:30px; height:30px; background:#1D4ED8; color:white; border:none; border-radius:6px; cursor:pointer;"><i class="fas fa-plus"></i></button>
                     <button id="linkedEditHintBtn" type="button" title="Modifica record" style="width:30px; height:30px; background:#6B7280; color:white; border:none; border-radius:6px; cursor:pointer;"><i class="fas fa-pen"></i></button>
-                    <button id="linkedDeleteHintBtn" type="button" title="Elimina record" style="width:30px; height:30px; background:#EF4444; color:white; border:none; border-radius:6px; cursor:pointer;"><i class="fas fa-trash"></i></button>
-                    ${orgView ? '' : `<button id="linkedMoveBtn" type="button" title="Sposta record" style="width:30px; height:30px; background:#10B981; color:white; border:none; border-radius:6px; cursor:pointer;${desc.reorder ? ' outline:3px solid rgba(16,185,129,.3);' : ''}"><i class="fas fa-up-down-left-right"></i></button>`}
+                    <button id="linkedDeleteHintBtn" type="button" title="Elimina record" style="width:30px; height:30px; background:#B91C1C; color:white; border:none; border-radius:6px; cursor:pointer;"><i class="fas fa-trash"></i></button>
+                    ${orgView ? '' : `<button id="linkedMoveBtn" type="button" title="Sposta record" style="width:30px; height:30px; background:#047857; color:white; border:none; border-radius:6px; cursor:pointer;${desc.reorder ? ' outline:3px solid rgba(16,185,129,.3);' : ''}"><i class="fas fa-up-down-left-right"></i></button>`}
                     <span style="align-self:center; color:var(--text-muted); font-size:.8rem;">${desc.reorder ? 'Trascina i record e salva la disposizione' : 'Clicca un record per modificarlo; usa ✕ per eliminarlo'}</span>
                 </div>` : '';
                 let itemsHtml;
@@ -17509,7 +17657,7 @@
                     }).join('');
                 }
                 const orderSaveHtml = edit && desc.reorder
-                    ? '<button id="linkedOrderSave" type="button" style="width:100%; margin-top:.75rem; padding:.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva disposizione</button>'
+                    ? '<button id="linkedOrderSave" type="button" style="width:100%; margin-top:.75rem; padding:.6rem 1rem; background:#047857; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva disposizione</button>'
                     : '';
                 listEl.innerHTML = toggleHtml + addHtml + itemsHtml + orderSaveHtml;
 
@@ -17579,7 +17727,7 @@
             try {
                 if (refTable === 'clients') {
                     const r = await fetch(`${API_URL}/clients/names`, { headers: getAuthHeaders() });
-                    if (r.ok) { const d = await r.json(); options = d.map(c => ({ id: c.id, display: c.name || ('Item ' + c.id) })); }
+                    if (r.ok) { const d = await r.json(); options = d.map(c => ({ id: c.id, display: c.name || ('Voce ' + c.id) })); }
                 } else {
                     // Stessa priorità usata lato server per le colonne FK: prima una colonna
                     // "desc_*" (es. desc_worker), poi i nomi leggibili più comuni, altrimenti l'id.
@@ -17603,7 +17751,7 @@
                         if (clientCol) d = d.filter(row => String(row[clientCol] || '') === String(clientId));
                         options = d.map(row => ({
                             id: row.id,
-                            display: (descCol ? row[descCol] : null) || row.nominativo || row.name || row.display_name || row.description || row.title || row.valore2 || ('Item ' + row.id)
+                            display: (descCol ? row[descCol] : null) || row.nominativo || row.name || row.display_name || row.description || row.title || row.valore2 || ('Voce ' + row.id)
                         }));
                     }
                 }
@@ -17684,7 +17832,7 @@
             for (const c of editable) {
                 fieldsHtml += await renderLinkedFieldHtml(c, '', null, false, desc.clientId);
             }
-            const barHtml = `<div style="display: flex; gap: 0.5rem; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;"><button id="linkedNewSave" style="flex: 1; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button><button id="linkedNewCancel" style="flex: 0 0 auto; padding: 0.6rem 0.9rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button></div>`;
+            const barHtml = `<div style="display: flex; gap: 0.5rem; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;"><button id="linkedNewSave" style="flex: 1; padding: 0.6rem 1rem; background: #047857; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button><button id="linkedNewCancel" style="flex: 0 0 auto; padding: 0.6rem 0.9rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Annulla</button></div>`;
             listEl.innerHTML = tenantHtml + fieldsHtml + barHtml;
 
             document.getElementById('linkedNewSave').addEventListener('click', () => saveLinkedNewRow(desc));
@@ -17789,7 +17937,7 @@
                     const readonly = !edit || meta.generated;
                     fieldsHtml += await renderLinkedFieldHtml(meta, v, 'linked-field', readonly, desc.clientId);
                 }
-                const saveHtml = `<div id="linkedSaveBar" style="display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;"><button id="linkedSaveBtn" style="width: 100%; padding: 0.6rem 1rem; background: #10B981; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button></div>`;
+                const saveHtml = `<div id="linkedSaveBar" style="display: none; padding-top: 1rem; border-top: 1px solid var(--border); margin-top: 0.5rem;"><button id="linkedSaveBtn" style="width: 100%; padding: 0.6rem 1rem; background: #047857; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">Salva</button></div>`;
                 listEl.innerHTML = toggleHtml + fieldsHtml + saveHtml;
 
                 // Toggle: abilita/disabilita la modifica (ri-render)
@@ -20070,7 +20218,7 @@
             ];
             const dove = (id) => DOVE.find(x => x.id === id) || { label: id, chip: id, frase: 'il campo' };
             const chip = (ver) => ver && ver.campo
-                ? `<span class="ckc-chip ver" title="Condizione: la voce entra nella check list solo se è vera"><i class="fas fa-filter"></i>${escapeHtml(dove(ver.tabella).chip)} · ${escapeHtml(ver.campo)} ${escapeHtml(opLabel(ver.operatore))} ${escapeHtml(risLabel(ver.risultato))}</span>`
+                ? `<span class="ckc-chip ver" title="Condizione: la voce entra nella checklist solo se è vera"><i class="fas fa-filter"></i>${escapeHtml(dove(ver.tabella).chip)} · ${escapeHtml(ver.campo)} ${escapeHtml(opLabel(ver.operatore))} ${escapeHtml(risLabel(ver.risultato))}</span>`
                 : '<span class="ckc-chip none"><i class="far fa-circle"></i>manuale</span>';
 
             widget.innerHTML = `<div class="ckc">
@@ -20153,8 +20301,8 @@
                         <div class="ckc-field"><label>Descrizione</label><textarea id="ckcFDesc" rows="2" maxlength="255" ${ro ? 'readonly' : ''}>${escapeHtml(a.titolo)}</textarea></div>
                         <div class="ckc-field"><label>Tipo verifica</label><input value="selezione" readonly></div>
                         <div class="ckc-swrow"><div><b>Condizione${isFase ? ' della fase' : ''}</b><small>${isFase
-                            ? 'La fase, con tutte le sue attività, entra nella check list del progetto solo se la condizione è vera (es. il cliente ha una certa licenza). Le attività possono avere in più una condizione loro.'
-                            : 'La voce entra nella check list del progetto solo se un campo del cliente, del progetto, delle sue quotazioni, dei suoi task di sviluppo o una licenza del cliente ha il valore atteso'}</small></div>
+                            ? 'La fase, con tutte le sue attività, entra nella checklist del progetto solo se la condizione è vera (es. il cliente ha una certa licenza). Le attività possono avere in più una condizione loro.'
+                            : 'La voce entra nella checklist del progetto solo se un campo del cliente, del progetto, delle sue quotazioni, dei suoi task di sviluppo o una licenza del cliente ha il valore atteso'}</small></div>
                             <label class="toggle-switch"><input type="checkbox" id="ckcFVer" ${on ? 'checked' : ''} ${dis}><span class="toggle-slider"></span></label></div>
                         ${on ? `<div class="ckc-verbox">
                             <div class="ckc-field"><label>Dove</label><div class="ckc-seg ckc-seg-dove" id="ckcFTab">
@@ -20378,7 +20526,7 @@
                     });
                     const d = await r.json().catch(() => ({}));
                     if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
-                    showNotification('Check List salvata', 'success');
+                    showNotification('Checklist salvata', 'success');
                     ckcDrawer()._chiudi();
                     await loadChecklistConfigurator(widget);
                 } catch (e) {
@@ -20977,7 +21125,7 @@
                         <textarea class="field-text-area" rows="14"></textarea>
                         <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
                             <button type="button" class="field-text-close" style="padding: 0.45rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; cursor: pointer;">Chiudi</button>
-                            <button type="button" class="field-text-apply" style="padding: 0.45rem 1.1rem; border: none; border-radius: 8px; background: #6366F1; color: white; font-weight: 600; cursor: pointer;">Applica</button>
+                            <button type="button" class="field-text-apply" style="padding: 0.45rem 1.1rem; border: none; border-radius: 8px; background: #4F46E5; color: white; font-weight: 600; cursor: pointer;">Applica</button>
                         </div>
                     </div>
                 </div>`;
@@ -21085,7 +21233,7 @@
                 a.remove();
                 setTimeout(() => URL.revokeObjectURL(url), 1000);
             } catch (e) {
-                showNotification('Template non scaricato: ' + e.message, 'info');
+                showNotification('Modello non scaricato: ' + e.message, 'info');
             } finally {
                 if (btn) btn.disabled = false;
             }
@@ -21425,7 +21573,7 @@
                 const key = uploadKeyFromCampo(row.campo);
                 input = key
                     ? `<span class="upload-actions">
-                            <button type="button" class="upload-btn" data-stop data-click="downloadUploadTemplate" data-arg="${key}" title="Scarica il file modello da compilare"><i class="fas fa-file-download"></i> Scarica template</button>
+                            <button type="button" class="upload-btn" data-stop data-click="downloadUploadTemplate" data-arg="${key}" title="Scarica il file modello da compilare"><i class="fas fa-file-download"></i> Scarica modello</button>
                             <button type="button" class="upload-btn primary" data-stop data-click="startUploadImport" data-arg="${key}" title="Importa il file compilato"><i class="fas fa-file-upload"></i> Importa</button>
                        </span>`
                     : `<span style="color: var(--text-muted);" title="Caricamento non previsto per questo campo">—</span>`;
@@ -21854,7 +22002,7 @@
                 '<label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Copia struttura da</label>' +
                 '<select id="ncFlyModel" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px; margin-bottom:1rem;"></select>' +
                 '<div style="display:flex; gap:0.5rem;">' +
-                '<button id="ncFlyCreate" type="button" style="flex:1; padding:0.6rem 1rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Crea</button>' +
+                '<button id="ncFlyCreate" type="button" style="flex:1; padding:0.6rem 1rem; background:#047857; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Crea</button>' +
                 '<button id="ncFlyCancel" type="button" style="flex:0 0 auto; padding:0.6rem 0.9rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button>' +
                 '</div>';
             const modelSel = document.getElementById('ncFlyModel');
@@ -21961,7 +22109,7 @@
                 <select id="tvfType" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;" ${mode === 'edit' ? 'disabled' : ''}></select></div>
                 <div id="tvfFields"></div>
                 <div style="display:flex; gap:.5rem; margin-top:1rem;">
-                    <button id="tvfSave" style="flex:1; padding:.5rem; background:#10B981; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva</button>
+                    <button id="tvfSave" style="flex:1; padding:.5rem; background:#047857; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Salva</button>
                     <button id="tvfCancel" style="padding:.5rem .8rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button>
                 </div>`;
             document.body.appendChild(overlay);
@@ -22408,7 +22556,7 @@
             const closeProjectBtn = document.getElementById('closeProjectBtn');
             if (closeProjectBtn) closeProjectBtn.addEventListener('click', async () => {
                 if (currentDetailSource !== 'projects' || !currentDetailArgument) return;
-                if (!confirm('Confermi al chiusura del progetto?')) return;
+                if (!confirm('Confermi la chiusura del progetto?')) return;
                 closeProjectBtn.disabled = true;
                 try {
                     const response = await fetch(`${API_URL}/projects/close`, {
@@ -23147,6 +23295,21 @@
                 window.removeEventListener('mousemove', onMove);
                 window.removeEventListener('mouseup', onUp);
             };
+            // Tastiera (WCAG 2.1.1 / 2.5.7): frecce sinistra/destra = 20 px in meno/in più.
+            handle.setAttribute('role', 'separator');
+            handle.setAttribute('aria-orientation', 'vertical');
+            handle.setAttribute('aria-label', 'Larghezza del pannello (frecce sinistra e destra)');
+            handle.tabIndex = 0;
+            handle.addEventListener('keydown', (e) => {
+                if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+                e.preventDefault();
+                const z = window.uiZoom ? window.uiZoom() : 1;
+                const left = flyoutEl.getBoundingClientRect().left;
+                const step = e.key === 'ArrowRight' ? 20 * z : -20 * z;
+                let w = flyoutEl.getBoundingClientRect().width + step;
+                w = Math.max(minW * z, Math.min(w, window.innerWidth - left - 20)) / z;
+                flyoutEl.style.setProperty(varName, w + 'px');
+            });
             handle.addEventListener('mousedown', (e) => {
                 active = true;
                 startX = e.clientX;
@@ -23253,7 +23416,7 @@
                     <input id="meetingAudioFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.opus,.flac,.webm" style="display: none;">
                     <button id="meetingTextSave" type="button" class="mt-btn mt-primary" style="display: none;" title="Salva il recap modificato, con la formattazione e i destinatari dell'email"><i class="fas fa-floppy-disk"></i> Salva</button>
                     <button id="meetingTextEmail" type="button" class="mt-btn" style="display: none;" title="Apri una nuova email con destinatari, oggetto e testo (Outlook del computer o Gmail, secondo il calendario default)"><i class="fas fa-envelope"></i> Email</button>
-                    <button id="meetingTextTasks" type="button" class="mt-btn mt-green" style="display: none;" title="Crea i task dalle tue righe di &quot;AZIONI IN CARICO&quot; e scegli le azioni a carico del cliente (le rivedi prima di salvarle)"><i class="fas fa-list-check"></i> Crea task</button>
+                    <button id="meetingTextTasks" type="button" class="mt-btn mt-green" style="display: none;" title="Crea le To-Do dalle tue righe di &quot;AZIONI IN CARICO&quot; e scegli le azioni a carico del cliente (le rivedi prima di salvarle)"><i class="fas fa-list-check"></i> Crea To-Do</button>
                     <button id="meetingTextRaid" type="button" class="mt-btn" style="display: none;" title="L'AI propone rischi, decisioni, dipendenze e Change Request (in bozza) da registrare nel Cruscotto PM del progetto della riunione"><i class="fas fa-shield-halved"></i> Rischi e decisioni</button>
                     <button id="meetingTextFix" type="button" class="mt-btn" title="Applica al testo le correzioni automatiche (parole sbagliate → giuste) impostate per te e per il cliente della riunione"><i class="fas fa-spell-check"></i> Applica correzioni</button>
                     <button id="meetingTextProponi" type="button" class="mt-btn" style="display: none;" title="Projexa cerca nel testo i nomi scritti male (partecipanti, team, rubrica, cliente) e propone le correzioni da salvare"><i class="fas fa-wand-magic-sparkles"></i> Proponi correzioni</button>
@@ -23270,8 +23433,8 @@
                 <div class="mt-main">
                     <!-- Schede del recap: cliente (il recap di sempre) e interno (per il team) -->
                     <div id="mtTabs" class="mt-tabs" role="tablist" style="display: none;">
-                        <button type="button" class="mt-tab on" data-mt-tab="cliente" role="tab"><i class="fas fa-handshake"></i> Recap cliente</button>
-                        <button type="button" class="mt-tab" data-mt-tab="interno" role="tab"><i class="fas fa-users-gear"></i> Recap interno <span class="n" id="mtTabInternoN" style="display:none"></span></button>
+                        <button type="button" class="mt-tab on" data-mt-tab="cliente" role="tab" id="mtTabCliente" aria-selected="true" aria-controls="meetingTextBody"><i class="fas fa-handshake"></i> Recap cliente</button>
+                        <button type="button" class="mt-tab" data-mt-tab="interno" role="tab" id="mtTabInterno" aria-selected="false" aria-controls="mtInterno" tabindex="-1"><i class="fas fa-users-gear"></i> Recap interno <span class="n" id="mtTabInternoN" style="display:none"></span></button>
                     </div>
                     <div id="meetingTextSub" style="font-size: 0.8rem; color: var(--text-muted);"></div>
                     <!-- Dati dell'email (solo recap) -->
@@ -23326,7 +23489,7 @@
             <div style="padding: 1.25rem; display: flex; flex-direction: column; gap: 0.5rem;">
                 <label for="newRecordingName" style="font-size: 0.9rem; color: var(--dark); font-weight: 600;">Nome della registrazione</label>
                 <input id="newRecordingName" type="text" maxlength="200" autocomplete="off" style="padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem;">
-                <p id="newRecordingError" style="margin: 0; font-size: 0.8rem; color: #B91C1C; min-height: 1em;"></p>
+                <p id="newRecordingError" role="alert" style="margin: 0; font-size: 0.8rem; color: #B91C1C; min-height: 1em;"></p>
             </div>
             <div class="task-modal-footer">
                 <button id="newRecordingCancel" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
@@ -23339,14 +23502,14 @@
     <div id="recapTasksModal" class="task-modal" style="z-index: 820;" role="dialog" aria-modal="true" aria-labelledby="recapTasksTitle">
         <div class="task-modal-card" style="width: min(920px, calc(96vw * var(--ui-zoom-inv, 1)));">
             <div class="task-modal-header">
-                <h3 id="recapTasksTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-list-check" style="color: #10B981;"></i> Crea task e azioni del cliente</h3>
+                <h3 id="recapTasksTitle" style="margin: 0; color: var(--dark); font-size: 1.05rem;"><i class="fas fa-list-check" style="color: #10B981;"></i> Crea To-Do e azioni del cliente</h3>
                 <button id="recapTasksClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
             </div>
             <div id="recapTasksBody" class="recap-tasks-body"></div>
             <div class="task-modal-footer">
                 <button id="recapTasksAdd" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer; margin-right: auto;"><i class="fas fa-plus"></i> Aggiungi riga</button>
                 <button id="recapTasksCancel" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
-                <button id="recapTasksSave" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-check"></i> Salva selezionate</button>
+                <button id="recapTasksSave" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #047857; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-check"></i> Salva selezionate</button>
             </div>
         </div>
     </div>
@@ -23362,13 +23525,13 @@
     </div>
     <div id="meetingRecorder" class="meeting-recorder" role="region" aria-label="Registrazione riunione" style="display: none;">
         <div class="meeting-recorder-head">
-            <span class="meeting-recorder-dot" id="meetingRecorderDot"></span>
+            <span class="meeting-recorder-dot" id="meetingRecorderDot" aria-hidden="true"></span>
             <strong id="meetingRecorderTitle">Riunione</strong>
             <button id="meetingRecorderAssistente" type="button" aria-label="Assistente PM" title="Riapri la finestra dell'Assistente PM (suggerimenti e trascrizione live)"><i class="fas fa-user-tie"></i></button>
             <button id="meetingRecorderPanel" type="button" aria-label="Linea della riunione" title="Linea della riunione: attività, To-Do, Jira, quotazioni, MySupport"><i class="fas fa-route"></i></button>
             <button id="meetingRecorderClose" type="button" aria-label="Chiudi" title="Chiudi"><i class="fas fa-times"></i></button>
         </div>
-        <p id="meetingRecorderStatus" class="meeting-recorder-status"></p>
+        <p id="meetingRecorderStatus" class="meeting-recorder-status" role="status" aria-live="polite"></p>
         <!-- Livelli in tempo reale: se la barra "Riunione" resta ferma mentre gli altri parlano,
              l'audio della riunione non arriva a Projexa (vedi avviso sotto) -->
         <div id="meetingRecorderLevels" class="rec-levels" style="display: none;">
@@ -23428,7 +23591,7 @@
             </div>
             <div class="task-modal-footer">
                 <button id="audioDevicesRefresh" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-sync"></i> Aggiorna elenco</button>
-                <button id="audioDevicesDone" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #4285F4; color: white; font-weight: 600; cursor: pointer;">Chiudi</button>
+                <button id="audioDevicesDone" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #1D4ED8; color: white; font-weight: 600; cursor: pointer;">Chiudi</button>
             </div>
         </div>
     </div>
@@ -23442,11 +23605,11 @@
                 <input id="aiKeyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Incolla qui la tua chiave API" style="padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem;">
                 <p id="aiKeyHint" style="margin: 0; font-size: 0.8rem; color: var(--text-muted);"></p>
                 <p style="margin: 0; font-size: 0.78rem; color: var(--text-muted);">La chiave viene verificata e salvata cifrata. L'uso è addebitato sul tuo account API del fornitore (è separato dall'abbonamento ChatGPT Plus / Claude Pro / Gemini Advanced).</p>
-                <p id="aiKeyError" style="margin: 0; font-size: 0.85rem; min-height: 1.1em;"></p>
+                <p id="aiKeyError" role="alert" style="margin: 0; font-size: 0.85rem; min-height: 1.1em;"></p>
             </div>
             <div class="task-modal-footer">
                 <button id="aiKeyCancel" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
-                <button id="aiKeyConfirm" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #10B981; color: white; font-weight: 600; cursor: pointer;">Collega</button>
+                <button id="aiKeyConfirm" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #047857; color: white; font-weight: 600; cursor: pointer;">Collega</button>
             </div>
         </div>
     </div>
@@ -23463,13 +23626,13 @@
                 <div id="recapChoiceEsRow" style="display: flex; flex-direction: column; gap: 0.4rem;">
                     <span style="font-size: 0.9rem; color: var(--dark); font-weight: 600;">Esecuzione</span>
                     <label style="font-size: 0.88rem; color: var(--dark); display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;"><input type="radio" name="recapChoiceEs" value="immediato" checked> <span><b>Immediato</b> – il recap è pronto in pochi secondi, al prezzo normale.</span></label>
-                    <label style="font-size: 0.88rem; color: var(--dark); display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;"><input type="radio" name="recapChoiceEs" value="batch"> <span><b>Batch (50% off)</b> – costa la metà, ma arriva entro 24 ore (di solito pochi minuti), anche a pagina chiusa.</span></label>
+                    <label style="font-size: 0.88rem; color: var(--dark); display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;"><input type="radio" name="recapChoiceEs" value="batch"> <span><b>Batch (−50%)</b> – costa la metà, ma arriva entro 24 ore (di solito pochi minuti), anche a pagina chiusa.</span></label>
                 </div>
                 <p id="recapChoiceEsNote" style="margin: 0; font-size: 0.8rem; color: var(--text-muted); display: none;">Projexa è gratuito: parte subito sul server, senza modalità Batch.</p>
             </div>
             <div class="task-modal-footer">
                 <button id="recapChoiceCancel" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
-                <button id="recapChoiceConfirm" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #0EA5E9; color: white; font-weight: 600; cursor: pointer;">Genera</button>
+                <button id="recapChoiceConfirm" type="button" style="padding: 0.6rem 1.2rem; border: none; border-radius: 8px; background: #0369A1; color: white; font-weight: 600; cursor: pointer;">Genera</button>
             </div>
         </div>
     </div>
@@ -23492,7 +23655,7 @@
                 <label for="aiModelSelect" style="font-size: 0.9rem; color: var(--dark); font-weight: 600;">Modello da usare</label>
                 <select id="aiModelSelect" style="padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem;"></select>
                 <p style="margin: 0; font-size: 0.78rem; color: var(--text-muted);">L'elenco mostra i modelli disponibili con la tua chiave API. Vale per tutte le funzioni di Projexa che usano questa AI (finestra AI, recap, Kick-off, Offerta, Dossier...). I modelli più grandi sono più precisi ma più lenti e costosi; le versioni "mini", "small" o "lite" costano meno.</p>
-                <p id="aiModelError" style="margin: 0; font-size: 0.85rem; min-height: 1.1em;"></p>
+                <p id="aiModelError" role="alert" style="margin: 0; font-size: 0.85rem; min-height: 1.1em;"></p>
             </div>
             <div class="task-modal-footer">
                 <button id="aiModelCancel" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
@@ -23514,7 +23677,7 @@
                 <input id="aiSaldoChiave" type="password" autocomplete="off" style="padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem;">
                 <p id="aiSaldoAiuto" style="margin: 0; font-size: 0.78rem; color: var(--text-muted);"></p>
                 <p style="margin: 0; font-size: 0.78rem; color: var(--text-muted);">Indica il credito che vedi nella pagina Billing del fornitore e il giorno: Projexa sottrae la spesa da quel giorno in poi. Quando ricarichi, aggiorna l'importo. È una stima: ricariche automatiche o crediti omaggio possono farla scostare.</p>
-                <p id="aiSaldoError" style="margin: 0; font-size: 0.85rem; min-height: 1.1em;"></p>
+                <p id="aiSaldoError" role="alert" style="margin: 0; font-size: 0.85rem; min-height: 1.1em;"></p>
             </div>
             <div class="task-modal-footer">
                 <button id="aiSaldoCancel" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
@@ -23560,17 +23723,18 @@
                     <button id="aiChatAttach" type="button" title="Allega file (immagini, PDF, Word, Excel, testo) – max 5 file, 10 MB in tutto" style="margin-right: auto; padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-paperclip"></i> Allega</button>
                     <button id="aiChatCopy" type="button" style="padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-copy"></i> Copia risposta</button>
                     <div class="ai-chat-dl">
-                        <button id="aiChatDownload" type="button" disabled style="padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-download"></i> Scarica <i class="fas fa-caret-down"></i></button>
-                        <div id="aiChatDownloadMenu" class="ai-chat-dl-menu" role="menu">
-                            <button type="button" data-ai-export="docx" role="menuitem"><i class="fas fa-file-word" style="color:#2B579A;"></i> Word (.docx)</button>
-                            <button type="button" data-ai-export="pdf" role="menuitem"><i class="fas fa-file-pdf" style="color:#DC2626;"></i> PDF (.pdf)</button>
-                            <button type="button" data-ai-export="xlsx" role="menuitem"><i class="fas fa-file-excel" style="color:#217346;"></i> Excel (.xlsx)</button>
-                            <button type="button" data-ai-export="txt" role="menuitem"><i class="fas fa-file-alt" style="color:#6B7280;"></i> Testo (.txt)</button>
+                        <!-- Pannello di pulsanti semplici (niente role="menu"): aria-expanded aggiornato da js/a11y.js -->
+                        <button id="aiChatDownload" type="button" disabled aria-expanded="false" aria-controls="aiChatDownloadMenu" style="padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;"><i class="fas fa-download"></i> Scarica <i class="fas fa-caret-down"></i></button>
+                        <div id="aiChatDownloadMenu" class="ai-chat-dl-menu" role="group" aria-label="Formato del file da scaricare">
+                            <button type="button" data-ai-export="docx"><i class="fas fa-file-word" style="color:#2B579A;"></i> Word (.docx)</button>
+                            <button type="button" data-ai-export="pdf"><i class="fas fa-file-pdf" style="color:#DC2626;"></i> PDF (.pdf)</button>
+                            <button type="button" data-ai-export="xlsx"><i class="fas fa-file-excel" style="color:#217346;"></i> Excel (.xlsx)</button>
+                            <button type="button" data-ai-export="txt"><i class="fas fa-file-alt" style="color:#6B7280;"></i> Testo (.txt)</button>
                         </div>
                     </div>
-                    <button id="aiChatSend" type="button" style="padding: 0.5rem 1.2rem; border: none; border-radius: 8px; background: #6366F1; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-paper-plane"></i> Invia</button>
+                    <button id="aiChatSend" type="button" style="padding: 0.5rem 1.2rem; border: none; border-radius: 8px; background: #4F46E5; color: white; font-weight: 600; cursor: pointer;"><i class="fas fa-paper-plane"></i> Invia</button>
                 </div>
-                <div id="aiChatAnswer" class="ai-chat-answer" aria-live="polite"></div>
+                <div id="aiChatAnswer" class="ai-chat-answer" aria-live="polite" aria-busy="false"></div>
                 <div id="aiChatOutFiles" class="ai-chat-files"></div>
             </div>
         </div>
@@ -23613,7 +23777,7 @@
     <div id="taskModal" class="task-modal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
         <div class="task-modal-card">
             <div class="task-modal-header">
-                <h3 id="taskModalTitle" style="margin: 0; color: var(--dark);">Nuovo task</h3>
+                <h3 id="taskModalTitle" style="margin: 0; color: var(--dark);">Nuova To-Do</h3>
                 <button id="taskModalClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;">
                     <i class="fas fa-times"></i>
                 </button>
@@ -23622,7 +23786,7 @@
             <div class="task-modal-footer">
                 <button id="taskModalDelete" type="button" style="display: none; margin-right: auto; padding: 0.6rem 1rem; border: 1px solid #FCA5A5; border-radius: 8px; background: #FEF2F2; color: #B91C1C; font-weight: 600; cursor: pointer;"><i class="fas fa-trash-can"></i> Elimina</button>
                 <button id="taskModalCancel" type="button" style="padding: 0.6rem 1rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>
-                <button id="taskModalSave" type="button" style="padding: 0.6rem 1rem; border: none; border-radius: 8px; background: var(--primary); color: white; font-weight: 600; cursor: pointer;">Salva task</button>
+                <button id="taskModalSave" type="button" style="padding: 0.6rem 1rem; border: none; border-radius: 8px; background: var(--primary-strong); color: white; font-weight: 600; cursor: pointer;">Salva To-Do</button>
             </div>
         </div>
     </div>
@@ -23642,11 +23806,11 @@
                 <label for="clientLogoFile" style="display:block; margin:1rem 0 0.35rem; font-weight:600;">File immagine</label>
                 <input id="clientLogoFile" type="file" accept="image/png,image/jpeg,image/webp" style="width:100%;">
                 <div style="margin-top:0.4rem; color:var(--text-muted); font-size:0.8rem;">Formati ammessi: PNG, JPEG e WebP. Dimensione massima: 1 MB.</div>
-                <div id="clientLogoStatus" style="min-height:1.3rem; margin-top:0.65rem; font-size:0.85rem;"></div>
+                <div id="clientLogoStatus" role="status" style="min-height:1.3rem; margin-top:0.65rem; font-size:0.85rem;"></div>
             </div>
             <div class="task-modal-footer">
                 <button id="clientLogoCancel" type="button" style="padding:0.6rem 1rem; border:1px solid var(--border); border-radius:8px; background:white; cursor:pointer;">Annulla</button>
-                <button id="clientLogoUpload" type="button" style="padding:0.6rem 1rem; border:none; border-radius:8px; background:#10B981; color:white; font-weight:600; cursor:pointer;">Carica logo</button>
+                <button id="clientLogoUpload" type="button" style="padding:0.6rem 1rem; border:none; border-radius:8px; background:#047857; color:white; font-weight:600; cursor:pointer;">Carica logo</button>
             </div>
         </div>
     </div>
@@ -23666,30 +23830,30 @@
                 <label for="tenantLogoFile" style="display:block; margin:1rem 0 0.35rem; font-weight:600;">File immagine</label>
                 <input id="tenantLogoFile" type="file" accept="image/png,image/jpeg,image/webp" style="width:100%;">
                 <div style="margin-top:0.4rem; color:var(--text-muted); font-size:0.8rem;">Formati ammessi: PNG, JPEG e WebP. Dimensione massima: 1 MB.</div>
-                <div id="tenantLogoStatus" style="min-height:1.3rem; margin-top:0.65rem; font-size:0.85rem;"></div>
+                <div id="tenantLogoStatus" role="status" style="min-height:1.3rem; margin-top:0.65rem; font-size:0.85rem;"></div>
             </div>
             <div class="task-modal-footer">
                 <button id="tenantLogoCancel" type="button" style="padding:0.6rem 1rem; border:1px solid var(--border); border-radius:8px; background:white; cursor:pointer;">Annulla</button>
-                <button id="tenantLogoUpload" type="button" style="padding:0.6rem 1rem; border:none; border-radius:8px; background:#10B981; color:white; font-weight:600; cursor:pointer;">Carica logo</button>
+                <button id="tenantLogoUpload" type="button" style="padding:0.6rem 1rem; border:none; border-radius:8px; background:#047857; color:white; font-weight:600; cursor:pointer;">Carica logo</button>
             </div>
         </div>
     </div>
     <!-- Modale Privacy e dati personali (GDPR art. 17): richiesta di cancellazione al team Projexa -->
-    <div id="privacyModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 700; display: none; align-items: center; justify-content: center;">
+    <div id="privacyModal" role="dialog" aria-modal="true" aria-labelledby="privacyModalTitle" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 700; display: none; align-items: center; justify-content: center;">
         <div style="background: white; border-radius: 10px; padding: 1.5rem; width: 440px; max-width: calc(92vw * var(--ui-zoom-inv, 1)); box-shadow: 0 10px 40px rgba(0,0,0,0.25);">
-            <h3 style="margin: 0 0 0.5rem; color: var(--dark);">Privacy e dati personali</h3>
+            <h3 id="privacyModalTitle" style="margin: 0 0 0.5rem; color: var(--dark);">Privacy e dati personali</h3>
             <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0 0 1rem;">Puoi chiedere la cancellazione del tuo account (art. 17 GDPR). La richiesta arriva al team Projexa, che la gestisce entro 30 giorni e ti contatta all'indirizzo email del tuo account. I dati di clienti, progetti e attività appartengono alla tua azienda: la loro sorte viene concordata con lei.</p>
             <div style="display: flex; flex-direction: column; gap: 0.6rem;">
                 <label for="pmMotivo" style="font-size: 0.8rem; font-weight: 600; color: var(--dark);">Motivo o note (facoltativo)</label>
                 <textarea id="pmMotivo" maxlength="2000" rows="3" style="width: 100%; box-sizing: border-box; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 0.88rem; resize: vertical;"></textarea>
-                <button id="pmRichiesta" type="button" style="padding: 0.6rem 1rem; background: #EF4444; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">✉ Richiedi la cancellazione dell'account</button>
+                <button id="pmRichiesta" type="button" style="padding: 0.6rem 1rem; background: #B91C1C; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer;">✉ Richiedi la cancellazione dell'account</button>
                 <a href="privacy.html" target="_blank" rel="noopener" style="text-align: center; font-size: 0.85rem; color: var(--primary);">Leggi l'informativa privacy e cookie</a>
                 <button id="pmClose" type="button" style="padding: 0.5rem 1rem; background: #e5e7eb; border: none; border-radius: 6px; cursor: pointer;">Chiudi</button>
             </div>
         </div>
     </div>
     <!-- Modale di dettaglio KPI (Progetti attivi / completati / Rischi aperti) -->
-    <div id="kpiModal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
+    <div id="kpiModal" role="dialog" aria-modal="true" aria-labelledby="kpiModalTitle" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
         <div class="kpi-modal-card">
             <div class="kpi-modal-header">
                 <h3 id="kpiModalTitle" style="margin: 0; color: var(--dark);">Dettaglio KPI</h3>
@@ -23711,6 +23875,8 @@
     <script src="js/Qlik_voucher.js?v=20261015-1"></script>
     <script src="js/mysupport-push.js?v=20261017-2"></script>
     <script src="js/outlook-addin.js?v=20261022-3"></script>
+    <!-- Accessibilità: finestre (focus, Esc), annunci, tastiera nei flyout, grafici -->
+    <script src="js/a11y.js?v=20261026-1"></script>
 <script>
 (function () {
     const colorClasses = [

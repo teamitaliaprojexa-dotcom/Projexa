@@ -235,7 +235,7 @@ async function selectTable(tableId) {
 
   // Update header
   document.getElementById('selectedTableName').textContent = table.display_name;
-  document.getElementById('selectedTableDesc').textContent = table.description || 'No description';
+  document.getElementById('selectedTableDesc').textContent = table.description || 'Nessuna descrizione';
 
   // Add action buttons
   const tableData = document.getElementById('tableData');
@@ -247,7 +247,7 @@ async function selectTable(tableId) {
   buttonsDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 20px;';
   buttonsDiv.innerHTML = `
     <button data-click="newRecord" data-arg="${table.table_name}" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
-    <button data-click="importCsv" data-arg="${table.table_name}" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Import CSV</button>
+    <button data-click="importCsv" data-arg="${table.table_name}" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Importa CSV</button>
   `;
   tableData.insertBefore(buttonsDiv, tableData.firstChild);
 
@@ -287,7 +287,7 @@ async function loadTableData(tableName) {
       headers: { 'Authorization': `Bearer ${getToken()}` }
     });
 
-    if (!response.ok) { restore('<p>Error loading data</p>'); return; }
+    if (!response.ok) { restore('<p>Errore nel caricamento dei dati</p>'); return; }
 
     const data = await response.json();
     const hasFilters = Object.keys(currentFilters).length > 0;
@@ -301,7 +301,7 @@ async function loadTableData(tableName) {
     } else if (hasFilters && currentColumns.length) {
       columns = currentColumns;
     } else {
-      restore('<p>No data in this table</p>');
+      restore('<p>Nessun dato in questa tabella</p>');
       return;
     }
 
@@ -329,9 +329,9 @@ async function loadTableData(tableName) {
                   return `<td style="padding: 12px; color: var(--gray-700);">${escapeHtml(strValue)}</td>`;
                 }).join('')}
                 <td style="padding: 12px; text-align: center; display: flex; gap: 8px; justify-content: center;">
-                  <button class="btn-edit" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #3B82F6;" title="Edit">✏️</button>
+                  <button class="btn-edit" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #3B82F6;" title="Modifica">✏️</button>
                   <button class="btn-duplicate" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #10B981;" title="Duplica">📋</button>
-                  <button class="btn-delete" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #EF4444;" title="Delete">✕</button>
+                  <button class="btn-delete" style="background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; color: #EF4444;" title="Elimina">✕</button>
                 </td>
               </tr>
             `).join('')}
@@ -378,10 +378,10 @@ async function editTable(tableId) {
   const table = allTables.find(t => t.id === tableId);
   if (!table) return;
 
-  const newDisplayName = prompt('Display Name:', table.display_name);
+  const newDisplayName = prompt('Nome visualizzato:', table.display_name);
   if (!newDisplayName) return;
 
-  const newDescription = prompt('Description:', table.description || '');
+  const newDescription = prompt('Descrizione:', table.description || '');
 
   try {
     const response = await fetch(`${API_URL}/table-structures/${tableId}`, {
@@ -409,7 +409,7 @@ async function editTable(tableId) {
 
 // Delete table
 async function deleteTable(tableId) {
-  if (!confirm('Are you sure you want to delete this table entry?')) return;
+  if (!confirm('Eliminare questa voce?')) return;
 
   try {
     const response = await fetch(`${API_URL}/table-structures/${tableId}`, {
@@ -422,7 +422,7 @@ async function deleteTable(tableId) {
       if (currentTable && currentTable.id === tableId) {
         currentTable = null;
         document.getElementById('tableData').innerHTML = `
-          <p class="loading">Select a table from the list</p>
+          <p class="loading">Seleziona una tabella dall'elenco</p>
         `;
       }
     }
@@ -436,8 +436,8 @@ async function loadTableStructuresTable() {
   currentFilters = {};   // reset filtri
   currentColumns = [];
   // Update header
-  document.getElementById('selectedTableName').textContent = 'Table Structures';
-  document.getElementById('selectedTableDesc').textContent = 'Manage database tables metadata';
+  document.getElementById('selectedTableName').textContent = 'Strutture delle tabelle';
+  document.getElementById('selectedTableDesc').textContent = 'Gestisci i metadati delle tabelle del database';
 
   // Add action buttons
   const tableData = document.getElementById('tableData');
@@ -449,7 +449,7 @@ async function loadTableStructuresTable() {
   buttonsDiv.style.cssText = 'display: flex; gap: 10px; margin-bottom: 20px;';
   buttonsDiv.innerHTML = `
     <button data-click="newRecord" data-arg="table_structures" style="background: #10B981; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">New</button>
-    <button data-click="importCsv" data-arg="table_structures" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Import CSV</button>
+    <button data-click="importCsv" data-arg="table_structures" style="background: #3B82F6; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Importa CSV</button>
   `;
   tableData.insertBefore(buttonsDiv, tableData.firstChild);
 
@@ -471,7 +471,7 @@ async function createFormField(columnName, value, fkInfo, contextRecord) {
 
   // Check if this is a password field
   if (columnName === 'password' || columnName === 'password_hash') {
-    return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><input type="password" name="${safeColumn}" placeholder="Enter password" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"></div>`;
+    return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><input type="password" name="${safeColumn}" placeholder="Inserisci la password" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"></div>`;
   }
 
   // Check if this is a boolean field (starts with is_ or has_)
@@ -487,7 +487,7 @@ async function createFormField(columnName, value, fkInfo, contextRecord) {
       const res = await fetch(`${API_URL}/lookup/clients`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
       if (res.ok) {
         const rows = await res.json();
-        const optionsHtml = rows.map(r => `<option value="${escapeHtml(r.id)}" ${String(r.id) == String(value) ? 'selected' : ''}>${escapeHtml(r.name || ('Item ' + r.id))}</option>`).join('');
+        const optionsHtml = rows.map(r => `<option value="${escapeHtml(r.id)}" ${String(r.id) == String(value) ? 'selected' : ''}>${escapeHtml(r.name || ('Voce ' + r.id))}</option>`).join('');
         return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><select name="${safeColumn}" id="ff_client_id" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"><option value="">-- Seleziona --</option>${optionsHtml}</select></div>`;
       }
     } catch (e) { console.error('Error loading ele_clienti:', e); }
@@ -502,7 +502,7 @@ async function createFormField(columnName, value, fkInfo, contextRecord) {
       const res = await fetch(`${API_URL}/lookup/projects${qs}`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
       if (res.ok) {
         const rows = await res.json();
-        const optionsHtml = rows.map(r => `<option value="${escapeHtml(r.id)}" ${String(r.id) == String(value) ? 'selected' : ''}>${escapeHtml(r.name || ('Item ' + r.id))}</option>`).join('');
+        const optionsHtml = rows.map(r => `<option value="${escapeHtml(r.id)}" ${String(r.id) == String(value) ? 'selected' : ''}>${escapeHtml(r.name || ('Voce ' + r.id))}</option>`).join('');
         return `<div style="margin-bottom: 1rem;"><label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">${safeColumn}</label><select name="${safeColumn}" id="ff_project_id" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit;"><option value="">-- Seleziona --</option>${optionsHtml}</select></div>`;
       }
     } catch (e) { console.error('Error loading ele_progetti:', e); }
@@ -629,7 +629,7 @@ async function editRecord(tableName, recordId) {
   const fkMap = fkMapFromMeta(meta);
   currentModalColumns = Object.keys(record).filter(col => !hiddenColumns.includes(col) && !generated.has(col));
 
-  document.getElementById('modalTitle').textContent = 'Edit Record';
+  document.getElementById('modalTitle').textContent = 'Modifica record';
 
   const formFields = document.getElementById('formFields');
   let htmlContent = await renderTenantFieldHtml();
@@ -695,7 +695,7 @@ async function duplicateRecord(tableName, recordId) {
   const fkMap = fkMapFromMeta(meta);
   currentModalColumns = Object.keys(record).filter(col => !hiddenColumns.includes(col) && !generated.has(col));
 
-  document.getElementById('modalTitle').textContent = 'Duplica Record';
+  document.getElementById('modalTitle').textContent = 'Duplica record';
 
   const formFields = document.getElementById('formFields');
   let htmlContent = await renderTenantFieldHtml();
@@ -777,7 +777,7 @@ async function newRecord(tableName) {
       : [];
   }
 
-  document.getElementById('modalTitle').textContent = 'New Record';
+  document.getElementById('modalTitle').textContent = 'Nuovo record';
 
   const formFields = document.getElementById('formFields');
   let htmlContent = await renderTenantFieldHtml();
@@ -872,7 +872,7 @@ async function saveRecord(event) {
     }
   } catch (error) {
     console.error('Error saving record:', error);
-    alert('Error saving record');
+    alert('Errore nel salvataggio del record');
   }
 }
 
@@ -886,7 +886,7 @@ function closeModal() {
 
 // Delete a record
 async function deleteRecord(tableName, recordId) {
-  if (!confirm('Are you sure you want to delete this record?')) return;
+  if (!confirm('Eliminare questo record?')) return;
 
   try {
     const response = await fetch(`${API_URL}/data/${tableName}/${recordId}`, {
@@ -905,11 +905,11 @@ async function deleteRecord(tableName, recordId) {
     } else {
       // Mostra il messaggio del server (es. 409: record collegato ad altri dati).
       const err = await response.json().catch(() => ({}));
-      alert(err.error || 'Error deleting record');
+      alert(err.error || 'Errore nell\'eliminazione del record');
     }
   } catch (error) {
     console.error('Error deleting record:', error);
-    alert('Error deleting record');
+    alert('Errore nell\'eliminazione del record');
   }
 }
 

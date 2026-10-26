@@ -430,7 +430,7 @@
     if (a.mitigazione) k.appendChild(el('div', 'Mitigazione: ' + a.mitigazione, 'px-muted'));
     var meta = [];
     if (a.scadenza) meta.push((a.tipo === 'rischio' || a.tipo === 'dipendenza' ? 'Revisione ' : 'Scadenza ') + dataBreve(a.scadenza));
-    if (a.owner) meta.push((a.tipo === 'azione_cliente' ? 'Referente: ' : 'Owner: ') + a.owner);
+    if (a.owner) meta.push((a.tipo === 'azione_cliente' ? 'Referente: ' : 'Responsabile: ') + a.owner);
     if (meta.length) k.appendChild(el('div', meta.join(' · '), 'px-muted'));
     var esito = el('div');
     var fatto = function (c) {

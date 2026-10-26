@@ -4,7 +4,7 @@
 # (Background-Veloce): modello multilingue con l'italiano, ONNX int8 eseguito da sherpa-onnx
 # sulla CPU ARM, molto più veloce di Whisper large-v3-turbo. Usato da:
 #   - «modalità Trascrizione» = Parakeet (coda delle riunioni, PARAKEET_URL)
-#   - «Ai Assistente PM» = «Projexa 4B + 8B (Parakeet trascrive)» (blocchi brevi dell'assistente)
+#   - «AI Assistente PM» = «Projexa 4B + 8B (Parakeet trascrive)» (blocchi brevi dell'assistente)
 # Servizio systemd projexa-parakeet su 127.0.0.1:8103 (senza chiave, come whisper.cpp).
 # Il codice del servizio arriva con il deploy in /opt/projexa/parakeet-service/app.py.
 # Uso: dopo il deploy, copiare lo script sulla VM (scp) e lanciare  bash ~/setup-parakeet.sh [core]   (default 4)

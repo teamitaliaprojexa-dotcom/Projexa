@@ -10,7 +10,7 @@
     const API_URL = location.origin + '/api';
     const POS_KEY = 'projexaChatbotPos';
     const HISTORY_KEY = 'projexaChatbotStoria';
-    const GREETING = 'Ciao sono Projexa, come posso aiutarti?';
+    const GREETING = 'Ciao, sono Projexa: come posso aiutarti?';
     const BTN_SIZE = 60;
     const MARGIN = 12;
     const DRAG_THRESHOLD = 5;
@@ -140,7 +140,7 @@
                 <textarea rows="1" maxlength="2000" placeholder="Scrivi la tua domanda… es. come creo un nuovo progetto?"></textarea>
                 <button type="submit" title="Invia" aria-label="Invia">➤</button>
             </form>
-            <div class="pxbot-foot">Risposte generate dall'AI in base al Manuale Utente: possono contenere errori.</div>`;
+            <div class="pxbot-foot">Risposte generate dall'Risposte dell’AI basate sul Manuale utente: possono contenere errori.</div>`;
 
         // Fuori dal <body>: la dashboard applica lo zoom dell'interfaccia al body
         // (body.style.zoom) e gli elementi fissi al suo interno verrebbero scalati, con

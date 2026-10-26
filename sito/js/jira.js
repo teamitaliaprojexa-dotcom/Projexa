@@ -123,7 +123,7 @@
                 <span class="jira-spacer"></span>
                 <span class="jira-account" id="jiraAccount"></span>
                 <button type="button" class="jira-btn jira-btn-primary" id="jiraConnect">Collega account Jira</button>
-                <button type="button" class="jira-btn jira-btn-plain" id="jiraAggiornaIntegrazioni" title="Sincronizza quotazioni e task da Jira per tutti gli utenti del tenant"><i class="fas fa-rotate"></i> Aggiorna Integrazioni</button>
+                <button type="button" class="jira-btn jira-btn-plain" id="jiraAggiornaIntegrazioni" title="Sincronizza quotazioni e ticket da Jira per tutti gli utenti del tenant"><i class="fas fa-rotate"></i> Aggiorna Integrazioni</button>
                 <button type="button" class="jira-btn jira-btn-danger" id="jiraDisconnect">Scollega</button>
                 <button type="button" class="jira-btn jira-btn-plain" id="jiraClose" title="Chiudi">✕</button>
             </div>

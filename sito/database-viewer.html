@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Projexa - Database Viewer</title>
+  <title>Projexa - Visualizzatore database</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="css/style.css">
   <!-- Scala dell'interfaccia (preferenza "Dimensioni", 100 = ridotta del 25%) -->
@@ -72,7 +72,7 @@
     <aside class="sidebar">
       <div class="sidebar-header">
         <h2>Projexa</h2>
-        <button id="logoutBtn" class="btn-small">Logout</button>
+        <button id="logoutBtn" class="btn-small">Esci</button>
       </div>
       <nav class="sidebar-nav">
         <a href="dashboard.html" class="nav-item" style="background-color: #3B82F6; color: white; display: block; padding: 10px; border-radius: 4px; font-weight: 600; text-align: center;">Dashboard</a>
@@ -80,7 +80,7 @@
 
       <div class="sidebar-section" style="margin-top: 2rem;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-          <h4 style="margin: 0; font-size: 0.85rem; color: var(--gray-600); text-transform: uppercase;">Tables</h4>
+          <h4 style="margin: 0; font-size: 0.85rem; color: var(--gray-600); text-transform: uppercase;">Tabelle</h4>
           <button data-click="loadTableStructuresTable" style="background: #3B82F6; color: white; border: none; border-radius: 4px; width: 24px; height: 24px; cursor: pointer; font-weight: bold; padding: 0;">+</button>
         </div>
         <div id="tablesList"></div>
@@ -89,7 +89,7 @@
 
     <main class="main-content">
       <header class="dashboard-header">
-        <h1>Database Viewer</h1>
+        <h1>Visualizzatore database</h1>
         <div class="header-info">
           <label style="font-size: 0.9rem; margin-right: 1rem;">Ambiente:
             <select id="dbSelect" style="padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; margin-left: 4px;">
@@ -105,7 +105,7 @@
           <button data-click="vaiA" data-arg="sql-editor.html" style="background: #8B5CF6; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; margin-right: 1rem;">
             <i class="fas fa-code"></i> SQL Editor
           </button>
-          <span id="userInfo">User</span>
+          <span id="userInfo">Utente</span>
           <span id="tenantInfo">Tenant</span>
         </div>
       </header>
@@ -113,11 +113,11 @@
       <div class="content-area">
         <section class="section">
           <div style="margin-bottom: 20px;">
-            <h3 id="selectedTableName">Select a table</h3>
+            <h3 id="selectedTableName">Seleziona una tabella</h3>
             <p id="selectedTableDesc" style="color: var(--gray-600);"></p>
           </div>
           <div id="tableData" class="table-container">
-            <p class="loading">Select a table from the list</p>
+            <p class="loading">Seleziona una tabella dall'elenco</p>
           </div>
         </section>
       </div>
@@ -127,7 +127,7 @@
   <!-- Modal for Edit/New Record -->
   <div id="recordModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;">
     <div style="background: white; border-radius: 8px; padding: 2rem; max-width: 500px; width: 90%; max-height: calc(80vh * var(--ui-zoom-inv, 1)); overflow-y: auto;">
-      <h2 id="modalTitle">Edit Record</h2>
+      <h2 id="modalTitle">Modifica record</h2>
       <form id="recordForm" data-submit="saveRecord">
         <div id="formFields"></div>
         <div style="display: flex; gap: 10px; margin-top: 2rem; justify-content: flex-end;">
@@ -171,8 +171,8 @@
 
       <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
         <button type="button" data-click="closeCryptoMigration" style="padding: 10px 20px; background: #e5e7eb; border: 1px solid #ccc; border-radius: 4px; cursor: pointer;">Chiudi</button>
-        <button type="button" id="cryptoDecryptBtn" data-click="runCryptoMigration" data-arg="decrypt" style="display: none; padding: 10px 20px; background: #6B7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Decripta</button>
-        <button type="button" id="cryptoEncryptBtn" data-click="runCryptoMigration" data-arg="encrypt" style="display: none; padding: 10px 20px; background: #DC2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Crypta</button>
+        <button type="button" id="cryptoDecryptBtn" data-click="runCryptoMigration" data-arg="decrypt" style="display: none; padding: 10px 20px; background: #6B7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Decifra</button>
+        <button type="button" id="cryptoEncryptBtn" data-click="runCryptoMigration" data-arg="encrypt" style="display: none; padding: 10px 20px; background: #DC2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Cifra</button>
       </div>
     </div>
   </div>

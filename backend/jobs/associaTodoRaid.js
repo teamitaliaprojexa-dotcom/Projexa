@@ -36,7 +36,8 @@ import { nomiClientiProgetti } from './notifiche.js';
 import { analisiPmAbilitata, aiScelta } from './analisiPm.js';
 import { controllaIssueDoppie } from './issueDoppie.js';
 
-const CAMPO = 'associazione autom. todolist e raid';
+// Nome nuovo dal 2026-10-26 (Supporto/CreaDB/uniforma_nomi_e_stati.sql); il vecchio vale ancora.
+const CAMPI = ['associazione automatica to-do e raid', 'associazione autom. todolist e raid'];
 const AI = { chatgpt: 'chatgpt', gpt: 'chatgpt', claude: 'claude', gemini: 'gemini', mistral: 'mistral' };
 const CONFIDENZA_MIN = 80;     // sotto, l'abbinamento non si scrive
 const MAX_VOCI = 60;           // voci per richiesta (un progetto)
@@ -388,10 +389,10 @@ async function utentiAttivi() {
   return (await db.query(
     `SELECT DISTINCT ON (tenant_id, user_id) tenant_id::text AS tenant_id, user_id::text AS user_id, btrim(valore2) AS ai
        FROM settings
-      WHERE lower(btrim(campo)) IN ($1, '(*) ' || $1)
+      WHERE lower(btrim(regexp_replace(campo, '^\\(\\*\\)\\s*', ''))) = ANY($1::text[])
         AND coalesce(btrim(valore2), '') <> ''
         AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
-      ORDER BY tenant_id, user_id, id`, [CAMPO])).rows;
+      ORDER BY tenant_id, user_id, id`, [CAMPI])).rows;
 }
 
 // 1. Risultati Batch pronti.
@@ -514,7 +515,7 @@ async function invia(report, esiti) {
     }
     if (!locale && !ai) {
       await notifica(u, 'ai', 'Associazione To-Do e RAID non eseguita',
-        `«${u.ai}» non è utilizzabile per l'associazione automatica: scegli ChatGPT, Claude, Gemini (a pagamento), Mistral o Projexa in Impostazioni › AI › «Associazione Autom. ToDoList e RAID».`);
+        `«${u.ai}» non è utilizzabile per l'associazione automatica: scegli ChatGPT, Claude, Gemini (a pagamento), Mistral o Projexa in Impostazioni › AI › «Associazione automatica To-Do e RAID».`);
       report.saltati++;
       continue;
     }
@@ -569,7 +570,7 @@ async function invia(report, esiti) {
           // Gemini gratuito (o piano senza Batch): niente associazione, si avvisa e si passa
           // all'utente successivo (gli altri progetti darebbero lo stesso errore).
           await notifica(u, 'batch', 'Associazione To-Do e RAID non eseguita',
-            `${e.message.replace(/, eseguito in modalità Immediata$/, '')}. L'associazione automatica usa sempre il Batch: scegli un'altra AI (o Projexa, gratuita) in Impostazioni › AI › «Associazione Autom. ToDoList e RAID».`);
+            `${e.message.replace(/, eseguito in modalità Immediata$/, '')}. L'associazione automatica usa sempre il Batch: scegli un'altra AI (o Projexa, gratuita) in Impostazioni › AI › «Associazione automatica To-Do e RAID».`);
           report.errori.push(`${u.user_id}: Batch non disponibile (${ai})`);
           break;
         }

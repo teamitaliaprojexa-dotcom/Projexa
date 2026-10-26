@@ -237,7 +237,7 @@
                     <!-- MySupport: import manuale disattivato (2026-10-15). I dati li invia (dal 2026-10-17) lo
                          script schedulato del PC (token di Impostazioni › «DataBricks», js/mysupport-push.js). -->
                     <div style="padding:0.75rem 1rem; background:#F9FAFB; color:#9CA3AF; border:1px dashed #D1D5DB; border-radius:7px; font-weight:600; cursor:not-allowed;" title="Import manuale disattivato">
-                        MySupport <span style="display:block; font-size:0.78rem; font-weight:400; margin-top:0.2rem;">Arriva da solo: lo invia lo script del report MySupport del PC (token in Impostazioni › DataBricks)</span>
+                        MySupport <span style="display:block; font-size:0.78rem; font-weight:400; margin-top:0.2rem;">Arriva da solo: lo invia lo script del report MySupport del PC (token in Impostazioni › Databricks)</span>
                     </div>
                 </div>
                 <div style="display:flex; justify-content:flex-end; margin-top:1rem;">
@@ -371,10 +371,10 @@
         const nonTrovatiHtml = nonTrovati.length
             ? `<div style="margin-top:0.75rem;"><strong>Clienti del file non abbinati (${nonTrovati.length}, ${scartate} righe non caricate):</strong>
                <div style="max-height:140px; overflow-y:auto; font-size:0.8rem; color:#6B7280; margin-top:0.3rem;">${nonTrovati.map(([nome, n]) => `${esc(nome)} (${n})`).join('<br>')}</div>
-               <div style="font-size:0.78rem; color:#6B7280; margin-top:0.3rem;">Per caricarli, scrivi il nome come nel file nel campo <em>My Support</em> della scheda del cliente.</div></div>`
+               <div style="font-size:0.78rem; color:#6B7280; margin-top:0.3rem;">Per caricarli, scrivi il nome come nel file nel campo <em>MySupport</em> della scheda del cliente.</div></div>`
             : '';
         const ambiguiHtml = r.ambigui.size
-            ? `<div style="margin-top:0.75rem; color:#B45309;"><strong>Nome My Support presente su più clienti (righe non caricate):</strong>
+            ? `<div style="margin-top:0.75rem; color:#B45309;"><strong>Nome MySupport presente su più clienti (righe non caricate):</strong>
                <div style="font-size:0.8rem; margin-top:0.3rem;">${[...r.ambigui].map(esc).join('<br>')}</div></div>`
             : '';
         modal.innerHTML = `
@@ -637,8 +637,8 @@
         modal.innerHTML = `
             <div style="background:white; border-radius:10px; padding:1.5rem; width:480px; max-width:92vw; box-shadow:0 10px 40px rgba(0,0,0,0.25);">
                 <h3 style="margin:0 0 0.75rem; color:#B91C1C;">File non valido</h3>
-                <p style="margin:0; color:#374151; line-height:1.45;">Il file non ha la struttura del template: ${esc(why)}.</p>
-                <p style="margin:0.75rem 0 0; color:#374151; line-height:1.45;"><strong>Usa il template originale</strong> (pulsante "Scarica template"), compilalo senza modificare foglio e colonne e importalo di nuovo.</p>
+                <p style="margin:0; color:#374151; line-height:1.45;">Il file non ha la struttura del modello: ${esc(why)}.</p>
+                <p style="margin:0.75rem 0 0; color:#374151; line-height:1.45;"><strong>Usa il modello originale</strong> (pulsante "Scarica modello"), compilalo senza modificare foglio e colonne e importalo di nuovo.</p>
                 <div style="display:flex; justify-content:flex-end; margin-top:1.25rem;">
                     <button id="qlikTemplateErrorClose" type="button" style="padding:0.5rem 1rem; background:#3B82F6; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Chiudi</button>
                 </div>

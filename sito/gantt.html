@@ -444,14 +444,14 @@
     <div class="main-scroll" id="mainScroll">
         <div class="empty-state" id="emptyState">
             <h3>Nessuna attività in questo progetto</h3>
-            <p>Puoi generare le attività dalle fasi [Licenze] della Check List con <b>Genera</b>, copiare la struttura (argomenti e ordinamento) da un altro progetto, oppure creare le attività da zero scegliendo il modello in alto e usando il pulsante <b>Aggiungi</b>.</p>
-            <button class="btn blue" id="generaBtnEmpty" title="Crea le attività dalle fasi [Licenze] della Check List del progetto"><i class="fas fa-wand-magic-sparkles"></i> Genera</button>
+            <p>Puoi generare le attività dalle fasi [Licenze] della Checklist con <b>Genera</b>, copiare la struttura (argomenti e ordinamento) da un altro progetto, oppure creare le attività da zero scegliendo il modello in alto e usando il pulsante <b>Aggiungi</b>.</p>
+            <button class="btn blue" id="generaBtnEmpty" title="Crea le attività dalle fasi [Licenze] della Checklist del progetto"><i class="fas fa-wand-magic-sparkles"></i> Genera</button>
             <button class="btn blue" id="copyBtnEmpty"><i class="fas fa-copy"></i> Copia progetto da</button>
         </div>
         <div class="board" id="board"></div>
     </div>
 
-    <div class="dep-banner" id="depBanner"><i class="fas fa-arrow-pointer"></i> Clicca sul pulsante da cui dipende questa attività (Esc per annullare)</div>
+    <div class="dep-banner" id="depBanner"><i class="fas fa-arrow-pointer"></i> Clicca sull'attività da cui dipende quella selezionata (Esc per annullare)</div>
 
     <!-- Flyout Configurazione -->
     <div class="flyout" id="flyout">
@@ -536,7 +536,7 @@
                         <option>Da iniziare</option>
                         <option>Programmata</option>
                         <option>In corso</option>
-                        <option>In Revisione</option>
+                        <option>In revisione</option>
                         <option>Completata</option>
                     </select>
                 </div>
@@ -551,7 +551,7 @@
             </div>
             <div class="row2">
                 <div>
-                    <label for="cfgOwner">Owner</label>
+                    <label for="cfgOwner">Responsabile</label>
                     <!-- Interno = team del progetto, Cliente = contatti del cliente, Fornitore = testo libero -->
                     <select id="cfgOwner">
                         <option value="">—</option>
@@ -584,7 +584,7 @@
             <div class="cfg-toggle-row">
                 <div>
                     <label for="cfgMostraCliente" style="margin-bottom:2px;">Mostra al cliente</label>
-                    <div class="cfg-hint">Se disattivo l'attività non compare in «Mostra gantt»</div>
+                    <div class="cfg-hint">Se disattivato, l'attività non compare in «Mostra Gantt»</div>
                 </div>
                 <label class="toggle-switch"><input type="checkbox" id="cfgMostraCliente"><span class="toggle-slider"></span></label>
             </div>
@@ -592,17 +592,17 @@
                 <label>Dipendenza</label>
                 <div class="dep-current">
                     <span class="dep-name" id="cfgDepName">Nessuna</span>
-                    <button class="btn" id="cfgDepPick" title="Scegli cliccando su un pulsante"><i class="fas fa-crosshairs"></i> Scegli</button>
+                    <button class="btn" id="cfgDepPick" title="Scegli cliccando su un'attività"><i class="fas fa-crosshairs"></i> Scegli</button>
                     <button class="btn" id="cfgDepClear" title="Rimuovi dipendenza"><i class="fas fa-xmark"></i></button>
                 </div>
             </div>
             <div>
-                <button class="btn" id="cfgAddChild"><i class="fas fa-plus"></i> Aggiungi sotto-attività</button>
+                <button class="btn" id="cfgAddChild"><i class="fas fa-plus"></i> Aggiungi sottoattività</button>
             </div>
         </div>
         <div class="flyout-foot">
             <button class="btn blue" id="cfgDuplicate" title="Duplica questo argomento con tutti quelli sottostanti"><i class="fas fa-copy"></i> Duplica argomento</button>
-            <button class="btn danger" id="cfgDelete"><i class="fas fa-trash"></i> Cancella pulsante</button>
+            <button class="btn danger" id="cfgDelete"><i class="fas fa-trash"></i> Elimina attività</button>
         </div>
     </div>
 
@@ -979,7 +979,7 @@
                 });
                 const idMap = result.idMap || {};
                 if (result.checklistAggiornate) {
-                    showToast(`Check List aggiornata: ${result.checklistAggiornate} ${result.checklistAggiornate === 1 ? 'voce' : 'voci'}`);
+                    showToast(`Checklist aggiornata: ${result.checklistAggiornate} ${result.checklistAggiornate === 1 ? 'voce' : 'voci'}`);
                 }
                 forEachNode(n => {
                     if (n.isNew && idMap[n.id]) { n.id = idMap[n.id]; n.isNew = false; }
@@ -1328,7 +1328,7 @@
                     const critico = mostraCritico && ganttPm && ganttPm.critico.includes(node.id);
                     const figli = node.children.some(c => nodeLevel(c) <= modelCols);
                     const freccia = figli
-                        ? `<button type="button" class="tg-btn" data-toggle-id="${escapeHtml(node.id)}" title="${collapsed.has(node.id) ? 'Mostra' : 'Nascondi'} le sotto attività"><i class="fas fa-chevron-${collapsed.has(node.id) ? 'right' : 'down'}"></i></button>`
+                        ? `<button type="button" class="tg-btn" data-toggle-id="${escapeHtml(node.id)}" title="${collapsed.has(node.id) ? 'Mostra' : 'Nascondi'} le sottoattività"><i class="fas fa-chevron-${collapsed.has(node.id) ? 'right' : 'down'}"></i></button>`
                         : '<span class="tg-spacer"></span>';
                     html += `<div class="cell tree-cell" style="padding-left:${8 + (level - 1) * 24}px"><span class="cell-in">${freccia}<button type="button" class="node-btn lv${level}${node.milestone ? ' ms' : ''}${critico ? ' critico' : ''}" draggable="true" data-node-id="${escapeHtml(node.id)}" data-level="${level}">
                         <span class="node-text">${node.milestone ? '<i class="fas fa-diamond ms-mark"></i>' : ''}${escapeHtml(node.name || '(senza nome)')}</span>
@@ -1366,7 +1366,7 @@
                     EFF_PARTI.forEach(([c, l, col]) => {
                         if (effNum(node[c]) == null) return;
                         const stato = level > 1
-                            ? { avz: Math.max(0, Math.min(100, Math.round(Number(node.avanzamento) || 0))), testo: String(node.stato || '').trim() }
+                            ? { avz: Math.max(0, Math.min(100, Math.round(Number(node.avanzamento) || 0))), testo: String(node.stato || '').trim().replace(/^In Revisione$/, 'In revisione') }
                             : null;
                         barre += bar(effNum(node[c]), col, l, false, stato);
                     });
@@ -1374,7 +1374,7 @@
                     // barra mostra comunque l'Avanzamento %, in grigio e senza ore/giorni.
                     if (!barre && level > 1) {
                         const avz = Math.max(0, Math.min(100, Math.round(Number(node.avanzamento) || 0)));
-                        const testo = String(node.stato || '').trim();
+                        const testo = String(node.stato || '').trim().replace(/^In Revisione$/, 'In revisione');
                         const grigio = '#94A3B8';
                         barre = `<div class="eff-bar" title="${escapeHtml(`Avanzamento ${avz}%${testo ? ` · ${testo}` : ''} (nessun effort indicato)`)}"><span class="eff-track"><span class="eff-fill" style="width:100%; background:linear-gradient(to right, ${grigio} ${avz}%, ${grigio}40 ${avz}%);"></span></span><span class="eff-avz${avz >= 100 ? ' done' : ''}">${avz >= 100 ? '<i class="fas fa-check"></i> ' : ''}${avz}%</span><span class="eff-val"><small>—</small></span></div>`;
                     }
@@ -1762,7 +1762,7 @@
             const effEl = document.getElementById('cfgEffettivo');
             const somma = node.children.length > 0;
             effEl.readOnly = readOnly || somma;
-            effEl.title = somma ? 'Somma delle sotto attività' : '';
+            effEl.title = somma ? 'Somma delle sottoattività' : '';
             effEl.value = c.effettivo == null ? '' : c.effettivo;
             const margEl = document.getElementById('cfgMarginalita'), sforEl = document.getElementById('cfgSforamento');
             margEl.value = fmt(c.marginalita);
@@ -2030,8 +2030,8 @@
             if (!selectedNode) return;
             const count = subtreeIds(selectedNode).length;
             const msg = count > 1
-                ? `Cancellare questo pulsante e le ${count - 1} sotto-attività collegate?`
-                : 'Cancellare questo pulsante?';
+                ? `Eliminare questa attività e le ${count - 1} sottoattività collegate?`
+                : 'Eliminare questa attività?';
             if (!confirm(msg)) return;
             deleteNode(selectedNode);
             closeFlyout();
@@ -2156,11 +2156,11 @@
                 a.remove();
                 setTimeout(() => URL.revokeObjectURL(url), 2000);
                 const logoStatus = res.headers.get('X-Gantt-Logo');
-                showToast(logoStatus === 'assente' ? 'Export pronto (nessun logo caricato per questo cliente)'
-                    : logoStatus === 'formato' ? 'Export pronto (logo cliente non leggibile: ricaricalo in PNG o JPEG)'
-                    : 'Export pronto');
+                showToast(logoStatus === 'assente' ? 'Esportazione pronta (nessun logo caricato per questo cliente)'
+                    : logoStatus === 'formato' ? 'Esportazione pronta (logo cliente non leggibile: ricaricalo in PNG o JPEG)'
+                    : 'Esportazione pronta');
             } catch (e) {
-                showToast('Errore export: ' + e.message);
+                showToast('Errore nell\'esportazione: ' + e.message);
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = original;
@@ -2199,7 +2199,7 @@
             const n = flatNodes().length;
             document.getElementById('svuotaTitle').textContent = step === 1 ? 'Cancellare il Gantt?' : 'Conferma definitiva';
             document.getElementById('svuotaText').textContent = step === 1
-                ? `Verranno eliminate tutte le ${n} attività del Gantt di questo progetto (argomenti, sotto attività, date, dipendenze e baseline).`
+                ? `Verranno eliminate tutte le ${n} attività del Gantt di questo progetto (argomenti, sottoattività, date, dipendenze e baseline).`
                 : 'Sei sicuro? L\'eliminazione è definitiva e non si può annullare.';
             document.getElementById('svuotaConfirm').innerHTML = step === 1
                 ? '<i class="fas fa-trash"></i> Continua' : '<i class="fas fa-trash"></i> Elimina tutto';
@@ -2238,7 +2238,7 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generazione…';
             try {
                 const r = await api('/projects/gantt-activity/genera', { method: 'POST', body: JSON.stringify(ctxBody) });
-                showToast(`Create ${r.inserite} attività (${r.fasi} fasi) ${r.origine === 'checklist' ? 'dalla Check List' : 'dalla configurazione della Check List'}`);
+                showToast(`Create ${r.inserite} attività (${r.fasi} fasi) ${r.origine === 'checklist' ? 'dalla Checklist' : 'dalla configurazione della Checklist'}`);
                 await loadData();
             } catch (e) {
                 showToast('Errore: ' + e.message);

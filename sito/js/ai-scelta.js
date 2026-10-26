@@ -60,7 +60,7 @@
                         <select id="pxAiSel">${lista.map((a) => `<option value="${esc(a.nome)}">${esc(a.label)}</option>`).join('')}</select></div>` : ''}
                     ${o.chiediEsecuzione ? `<div id="pxAiEs"><span class="tit" style="font-size:0.9rem;font-weight:600">Esecuzione</span>
                         <label class="px-ai-opz"><input type="radio" name="pxAiEs" value="immediato" checked> <span><b>Immediato</b> – risultato subito, prezzo normale.</span></label>
-                        <label class="px-ai-opz"><input type="radio" name="pxAiEs" value="batch"> <span><b>Batch (50% off)</b> – costa la metà, arriva entro 24 ore (di solito pochi minuti) anche a pagina chiusa: ricevi la notifica e lo trovi in «Risultati AI».</span></label></div>
+                        <label class="px-ai-opz"><input type="radio" name="pxAiEs" value="batch"> <span><b>Batch (−50%)</b> – costa la metà, arriva entro 24 ore (di solito pochi minuti) anche a pagina chiusa: ricevi la notifica e lo trovi in «Risultati AI».</span></label></div>
                         <p class="px-ai-nota" id="pxAiNoBatch" style="display:none">Projexa è gratuito: lavora in background sul server (senza Batch), ricevi la notifica in campanella.</p>` : ''}
                 </div>
                 <div class="px-ai-foot"><button type="button" class="px-ai-annulla">Annulla</button><button type="button" class="px-ai-ok">Continua</button></div>

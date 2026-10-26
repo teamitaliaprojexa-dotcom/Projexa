@@ -278,11 +278,11 @@
                 <span>Gestione:</span><b>${dt.aOre ? 'a ore (HH)' : 'a giorni'}</b>
                 <span>A consuntivo:</span><b>${dt.aConsuntivo ? 'Sì' : 'No'}</b>
             </div>`;
-            h += tab('Team Work', [{ t: 'Nominativo' }, { t: 'Ruolo' }, { t: 'Email' }], perCommessa(dt.team, (x) => [x.nominativo, x.ruolo, x.email]));
-            h += tab('Licenze da Attivare', [{ t: 'Licenza' }, { t: 'Referente' }, { t: `Analisi (${u})`, n: 1 }, { t: `Configurazione (${u})`, n: 1 }, { t: `Formazione (${u})`, n: 1 }, { t: `Programmazione (${u})`, n: 1 }, { t: `Totale (${u})`, n: 1 }],
+            h += tab('Team di progetto', [{ t: 'Nominativo' }, { t: 'Ruolo' }, { t: 'Email' }], perCommessa(dt.team, (x) => [x.nominativo, x.ruolo, x.email]));
+            h += tab('Licenze da attivare', [{ t: 'Licenza' }, { t: 'Referente' }, { t: `Analisi (${u})`, n: 1 }, { t: `Configurazione (${u})`, n: 1 }, { t: `Formazione (${u})`, n: 1 }, { t: `Programmazione (${u})`, n: 1 }, { t: `Totale (${u})`, n: 1 }],
                 dt.licenze.map((x) => ({ celle: [x.licenza || '', x.referente || '', nfmt(x.analisi), nfmt(x.configurazione), nfmt(x.formazione), nfmt(x.programmazione), nfmt(x.totale)], completato: x.completato })));
             h += blocchiTq;
-            h += tab('Meeting e recap', [{ t: 'Data' }, { t: 'Orario' }], dt.riunioni.map((x) => [dataIt(x.data), x.orario]));
+            h += tab('Riunioni e recap', [{ t: 'Data' }, { t: 'Orario' }], dt.riunioni.map((x) => [dataIt(x.data), x.orario]));
 
             // Dal Cruscotto PM
             h += '<h3 class="sotto">Dal Cruscotto PM</h3>';
@@ -297,13 +297,13 @@
             h += tab('Costi esterni', [{ t: 'Data' }, { t: 'Categoria' }, { t: 'Descrizione' }, { t: 'Fornitore' }, { t: 'Previsto', n: 1 }, { t: 'Effettivo', n: 1 }, { t: 'Note' }],
                 dt.esterni.map((x) => ({ celle: [dataIt(x.data), x.categoria || '', x.descrizione || '', x.fornitore || '', euro(x.previsto), euro(x.effettivo), x.note || ''], completato: x.completato })));
             const raid = (t) => dt.raid.filter((x) => t.includes(x.tipo)).sort((a, b) => (a.completato ? 1 : 0) - (b.completato ? 1 : 0));
-            h += tab('Rischi', [{ t: 'Rischio' }, { t: 'Probabilità', n: 1 }, { t: 'Impatto', n: 1 }, { t: 'Punteggio', n: 1 }, { t: 'Owner' }, { t: 'Risposta al rischio' }, { t: 'Revisione' }, { t: 'Stato' }],
+            h += tab('Rischi', [{ t: 'Rischio' }, { t: 'Probabilità', n: 1 }, { t: 'Impatto', n: 1 }, { t: 'Punteggio', n: 1 }, { t: 'Responsabile' }, { t: 'Risposta al rischio' }, { t: 'Revisione' }, { t: 'Stato' }],
                 raid(['rischio']).map((x) => ({ celle: [x.titolo, x.probabilita ?? '', x.impatto ?? '', x.punteggio ?? '', x.owner || '', x.mitigazione || '', dataIt(x.data_revisione), STATI_RAID[x.stato] || x.stato || ''], completato: x.completato })));
             h += tab('Decisioni', [{ t: 'Data' }, { t: 'Decisione' }, { t: 'Decisa da' }, { t: 'Motivazione' }],
                 raid(['decisione']).map((x) => ({ celle: [dataIt(x.data_revisione), x.titolo, x.decisa_da || '', x.mitigazione || x.descrizione || ''], completato: x.completato })));
-            h += tab('Dipendenze e assunzioni', [{ t: 'Tipo' }, { t: 'Titolo' }, { t: 'Owner' }, { t: 'Revisione' }, { t: 'Stato' }, { t: 'Descrizione' }],
+            h += tab('Dipendenze e assunzioni', [{ t: 'Tipo' }, { t: 'Titolo' }, { t: 'Responsabile' }, { t: 'Revisione' }, { t: 'Stato' }, { t: 'Descrizione' }],
                 raid(['dipendenza', 'assunzione']).map((x) => ({ celle: [x.tipo === 'dipendenza' ? 'Dipendenza' : 'Assunzione', x.titolo, x.owner || '', dataIt(x.data_revisione), STATI_RAID[x.stato] || x.stato || '', x.descrizione || ''], completato: x.completato })));
-            h += tab('Issue', [{ t: 'Data' }, { t: 'Descrizione' }, { t: 'Categoria' }, { t: 'Priorità' }, { t: 'Owner' }, { t: 'Stato' }, { t: 'Scadenza' }],
+            h += tab('Issue', [{ t: 'Data' }, { t: 'Descrizione' }, { t: 'Categoria' }, { t: 'Priorità' }, { t: 'Responsabile' }, { t: 'Stato' }, { t: 'Scadenza' }],
                 dt.issue.map((x) => [dataIt(x.data_segnalazione), x.descrizione || '', x.categoria || '', x.priorita || '', x.owner || '', x.stato || '', dataIt(x.scadenza)]));
             h += tab('Change Request', [{ t: 'Codice' }, { t: 'Titolo' }, { t: 'Stato' }, { t: 'Richiesta il' }, { t: 'Richiesta da' }, { t: `Effort (${u})`, n: 1 }, { t: 'Importo', n: 1 }, { t: 'Tempi (gg)', n: 1 }, { t: 'Decisa il' }],
                 dt.cr.map((x) => ({ celle: [x.codice || '', x.titolo || '', STATI_CR[x.stato] || x.stato || '', dataIt(x.data_richiesta), x.richiesta_da || '', nfmt(x.effort_delta), euro(x.importo_delta), x.giorni_delta ?? '', dataIt(x.data_decisione)], completato: x.completato })));
@@ -364,14 +364,14 @@
             }
             // Rilascio release: task del progetto nelle release non ancora uscite.
             const r = k.rilasci;
-            if (r && r.errore) h += nonDisp('Rilascio release', r);
+            if (r && r.errore) h += nonDisp('Rilasci', r);
             else {
                 const righe = [];
                 (r || []).forEach((x) => {
                     righe.push({ gruppo: `Release ${x.release} · rilascio il ${dataIt(x.data)} (${x.task.length} task)` });
                     x.task.forEach((t) => righe.push([t.codice || '', t.descrizione, t.stato, t.assegnatario]));
                 });
-                h += tab('Rilascio release', [{ t: 'Task' }, { t: 'Descrizione' }, { t: 'Stato' }, { t: 'Assegnatario' }], righe);
+                h += tab('Rilasci', [{ t: 'Task' }, { t: 'Descrizione' }, { t: 'Stato' }, { t: 'Assegnatario' }], righe);
             }
             if (msTempi) h += mySupportTempiHtml(msTempi, 'h3');
             // Capacità e risorse (solo con la funzione accesa: altrimenti null e niente sezione).
@@ -407,14 +407,14 @@
         // MySupport del cliente: tempi di chiusura per anno (fasce del KPI) e ticket non chiusi per stato.
         function mySupportTempiHtml(ms, livello = 'h2') {
             const titolo = `<${livello}>MySupport – tempi di chiusura${livello === 'h3' ? ' (cliente)' : ''}</${livello}>`;
-            if (!ms.anni.length && !ms.aperti.length) return titolo + '<div class="vuoto">Nessun ticket MySupport.</div>';
+            if (!ms.anni.length && !ms.aperti.length) return titolo + '<div class="vuoto">Nessun quesito MySupport.</div>';
             let h = titolo;
             if (ms.anni.length) {
                 h += `<table><thead><tr><th>Anno di chiusura</th><th class="n">Chiusi</th><th class="n">Tempo medio</th><th class="n">Tempo mediano</th>${ms.fasce.map((x) => `<th class="n">${esc(x)}</th>`).join('')}</tr></thead>
                 <tbody>${ms.anni.map((a) => `<tr><td>${a.anno}</td><td class="n">${a.n}</td><td class="n">${esc(oreGiorni(a.mediaOre))}</td><td class="n">${esc(oreGiorni(a.medianaOre))}</td>${a.fasce.map((v) => `<td class="n">${v ? `${v} <small style="color:#6B7280">(${Math.round((v / a.n) * 100)}%)</small>` : ''}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
             }
             const tot = ms.aperti.reduce((t, x) => t + x.n, 0);
-            if (tot) h += `<div style="margin-top:1.5mm;font-size:10.5px;">Ticket non chiusi oggi: <b>${tot}</b> – ${ms.aperti.map((x) => `${esc(x.stato)} ${x.n}`).join(' · ')}</div>`;
+            if (tot) h += `<div style="margin-top:1.5mm;font-size:10.5px;">Quesiti non chiusi oggi: <b>${tot}</b> – ${ms.aperti.map((x) => `${esc(x.stato)} ${x.n}`).join(' · ')}</div>`;
             return h;
         }
 
@@ -541,9 +541,9 @@
 
                 // Parti del cliente intero: non nel Dossier Progetto.
                 if (!soloProg) {
-                    if (sez.task) html += sezioneHtml(sez.task, sez.task.righe.filter((r) => !r.progetto), 'Task senza progetto');
+                    if (sez.task) html += sezioneHtml(sez.task, sez.task.righe.filter((r) => !r.progetto), 'Ticket Jira senza progetto');
                     if (sez.quotazioni) html += sezioneHtml(sez.quotazioni, sez.quotazioni.righe.filter((r) => !r.progetto), 'Quotazioni senza progetto');
-                    if (sez.mysupport) html += sezioneHtml(sez.mysupport, sez.mysupport.righe, 'Ticket MySupport non chiusi');
+                    if (sez.mysupport) html += sezioneHtml(sez.mysupport, sez.mysupport.righe, 'Quesiti MySupport non chiusi');
                     if (d.mysupportTempi) html += mySupportTempiHtml(d.mysupportTempi);
                     if (sez.issue) html += sezioneHtml(sez.issue, sez.issue.righe, 'Issue');
                 }

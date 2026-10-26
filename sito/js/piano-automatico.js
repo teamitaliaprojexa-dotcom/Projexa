@@ -339,7 +339,7 @@
                 if (!da) badge = '<span class="pa-badge ok"><i class="fas fa-check"></i> Niente da fare</span>';
                 else if (!c.attive.length) {
                     badge = '<span class="pa-badge ko"><i class="fas fa-xmark"></i> Nessuno nel piano</span>';
-                    nota = `<div class="pa-nota-r ko">${r.persone.length ? 'Accendi «Nel piano» per almeno una persona nelle Persone sul progetto qui sotto.' : 'Nel team del progetto non c\'è nessuno con questo ruolo: aggiungilo nel Team Work della scheda progetto.'}</div>`;
+                    nota = `<div class="pa-nota-r ko">${r.persone.length ? 'Accendi «Nel piano» per almeno una persona nelle Persone sul progetto qui sotto.' : 'Nel team del progetto non c\'è nessuno con questo ruolo: aggiungilo nel Team di progetto della scheda progetto.'}</div>`;
                 } else if (c.impossibile && c.mancano > 0.05 && !c.piano.some((p) => p.perc > 100)) {
                     badge = `<span class="pa-badge ko"><i class="fas fa-xmark"></i> Mancano ${g1(c.mancano)} gg</span>`;
                     nota = `<div class="pa-nota-r ko">Con le percentuali che hai fissato copri ${g1(c.coperte)} gg su ${g1(c.resto)} (mancano ${h1(c.mancano)}): alza una percentuale o rimetti «auto».</div>`;
@@ -540,7 +540,7 @@
                 const numeri = (f) => {
                     const titCons = f.daEffettivo ? 'Ore lavorate = Effettivo scritto nel Gantt'
                         : "Ore lavorate = stima della fase × avanzamento % dell'attività nel Gantt (scrivi l'Effettivo nel Gantt per usare le ore reali)";
-                    return `<span class="lc-num" title="Stima della fase (Licenze da Attivare)">Tot <b>${esc(unita(f.stima))}</b></span>`
+                    return `<span class="lc-num" title="Stima della fase (Licenze da attivare)">Tot <b>${esc(unita(f.stima))}</b></span>`
                         + `<span class="lc-num cons" title="${esc(titCons)}">Lavorate <b>${esc(unita(f.consuntivo))}</b></span>`
                         + (f.daFare <= 0.001 ? '<span class="lc-num ok"><i class="fas fa-check"></i> fatto</span>' : `<span class="lc-num da">Da fare <b>${esc(unita(f.daFare))}</b></span>`);
                 };
@@ -721,7 +721,7 @@
                 ${avvisi.length ? `<details class="pa-sett pa-segnalazioni"><summary><i class="fas fa-chevron-right"></i> Segnalazioni (${avvisi.length})</summary><div class="pa-avvisi">${avvisi.join('')}</div></details>` : ''}
                 ${d.ruoli.length ? sezioni : '<div class="pm-vuoto">Niente da pianificare: il consuntivo ha già raggiunto la stima.</div>'}
                 ${fasi ? `<details class="pa-sett" open><summary><i class="fas fa-chevron-right"></i> Licenze e fasi del Gantt nel piano</summary>${fasi}</details>` : ''}
-                <p class="pa-nota">Ore da fare per ruolo = Stima − Consuntivo dei Costi Progetto, ripartite sulle fasi del Gantt (Analisi, Configurazione, Formazione, Programmazione di ogni licenza) in base all'effort e alla parte non ancora fatta (avanzamento), nelle date di ogni fase. Le fanno le persone del Nominativo dell'attività (Owner Interno), altrimenti il team del progetto con quel ruolo, divise in base alle ore settimanali della Rubrica. Per cambiare il piano modifica date, avanzamento e Nominativo nel Gantt. Le assenze non sono ancora considerate.</p>
+                <p class="pa-nota">Ore da fare per ruolo = Stima − Consuntivo dei Costi Progetto, ripartite sulle fasi del Gantt (Analisi, Configurazione, Formazione, Programmazione di ogni licenza) in base all'effort e alla parte non ancora fatta (avanzamento), nelle date di ogni fase. Le fanno le persone del Nominativo dell'attività (Responsabile Interno), altrimenti il team del progetto con quel ruolo, divise in base alle ore settimanali della Rubrica. Per cambiare il piano modifica date, avanzamento e Nominativo nel Gantt. Le assenze non sono ancora considerate.</p>
             </div>`;
             box.querySelector('[data-pa-consegna]').addEventListener('change', (e) => { consegnaScelta = e.target.value || null; carica(); });
             box.querySelector('[data-pa-ripristina]')?.addEventListener('click', () => { consegnaScelta = null; carica(); });

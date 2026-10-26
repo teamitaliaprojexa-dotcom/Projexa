@@ -18,9 +18,9 @@ import { PROVIDERS, aiCollegate, localRecapMode } from '../routes/ai.js';
 export const FUNZIONI = {
   email_attivita: { ai: ['AI Email attività'], esecuzione: 'Esecuzione Email attività' },
   dossier: { ai: ['AI Dossier Cliente'], esecuzione: 'Esecuzione Dossier' },
-  kickoff: { ai: ['AI Slide Kick-Off'], esecuzione: 'Esecuzione Kick-Off' },
+  kickoff: { ai: ['AI Slide Kick-off'], esecuzione: 'Esecuzione Kick-off' },
   // Offerta: senza il suo campo usa l'AI del Kick-off (comportamento precedente).
-  offerta: { ai: ['AI Offerta Economica', 'AI Slide Kick-Off'], esecuzione: 'Esecuzione Offerta Economica' },
+  offerta: { ai: ['AI Offerta economica', 'AI Slide Kick-off'], esecuzione: 'Esecuzione Offerta economica' },
   pm: { ai: ['AI Funzioni PM'], esecuzione: 'Esecuzione Funzioni PM' },
   // Add-in di Outlook (2026-10-22, routes/outlookAddin.js): campo tipo 23 «AI Add-in Outlook»
   // (valore1 = attivo, valore2 = AI). «Esecuzione Add-in Outlook» facoltativo (vuoto = Immediato).
@@ -35,7 +35,7 @@ export const OPERAZIONI = {
   email_azioni_cliente: { funzione: 'email_attivita', etichetta: 'Email azioni del cliente', locale: true },
   dossier: { funzione: 'dossier', etichetta: 'Dossier Cliente', locale: true, facoltativa: true },
   kickoff: { funzione: 'kickoff', etichetta: 'Slide Kick-off', locale: false, file: true },
-  offerta: { funzione: 'offerta', etichetta: 'Offerta Economica', locale: false, file: true },
+  offerta: { funzione: 'offerta', etichetta: 'Offerta economica', locale: false, file: true },
   // Con Projexa (2026-10-22): JSON forzato da Ollama e solo dal recap (routes/pm.js).
   pm_raid: { funzione: 'pm', etichetta: 'Rischi e decisioni dalla riunione', locale: true },
   pm_cr: { funzione: 'pm', etichetta: 'Change Request dalla riunione', locale: true },

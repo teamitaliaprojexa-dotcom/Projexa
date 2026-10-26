@@ -143,7 +143,7 @@
                     ['Obiettivi raggiunti', esc(c.obiettivi_raggiunti || '–')],
                     ['Attività residue', esc(c.attivita_residue || '–')]
                 ])}`;
-                html += `<h2>Lessons learned</h2>${tab(['Tipo', 'Categoria', 'Lezione', 'Raccomandazione'], d.lessons.map((l) => [l.tipo === 'positivo' ? 'Ha funzionato' : 'Da migliorare', esc(l.categoria || ''), esc(l.testo), esc(l.raccomandazione || '')]))}`;
+                html += `<h2>Lezioni apprese</h2>${tab(['Tipo', 'Categoria', 'Lezione', 'Raccomandazione'], d.lessons.map((l) => [l.tipo === 'positivo' ? 'Ha funzionato' : 'Da migliorare', esc(l.categoria || ''), esc(l.testo), esc(l.raccomandazione || '')]))}`;
                 html += '<div class="firme"><div>Per il fornitore (Project Manager)</div><div>Per il cliente (accettazione)</div></div>';
             }
             html += `<div class="piede"><span>Projexa · ${esc(d.titolo)} · ${esc(d.progetto.nome)}</span><span>${dataIt(d.data)}${d.ai.label ? ` · commento: ${esc(d.ai.label)}` : ''}</span></div>`;

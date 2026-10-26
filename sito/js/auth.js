@@ -107,7 +107,7 @@ if (document.getElementById('loginForm')) {
         saveSession();
 
         if (successMessage) {
-          successMessage.textContent = 'Login successful! Redirecting...';
+          successMessage.textContent = 'Accesso riuscito, reindirizzamento…';
           successMessage.classList.add('show');
         }
 
@@ -117,14 +117,14 @@ if (document.getElementById('loginForm')) {
       } else {
         const data = await response.json();
         if (errorMessage) {
-          errorMessage.textContent = data.error || 'Login failed';
+          errorMessage.textContent = data.error || 'Accesso non riuscito';
           errorMessage.classList.add('show');
         }
       }
     } catch (error) {
       console.error('Login error:', error);
       if (errorMessage) {
-        errorMessage.textContent = 'Connection error. Please check your backend.';
+        errorMessage.textContent = 'Errore di connessione al server.';
         errorMessage.classList.add('show');
       }
     }
@@ -143,7 +143,7 @@ if (document.getElementById('loginForm')) {
       // Il nome dell'azienda lo sceglie chi si registra: escape obbligatorio (2026-10-17).
       tenantItem.innerHTML = `
         <h3>${escTesto(tenant.name)}</h3>
-        <p>Click to select this workspace</p>
+        <p>Clic per scegliere questa organizzazione</p>
       `;
 
       tenantItem.addEventListener('click', async () => {
@@ -164,7 +164,7 @@ if (document.getElementById('loginForm')) {
             window.location.href = 'dashboard.html';
           } else {
             if (errorMessage) {
-              errorMessage.textContent = 'Failed to select workspace';
+              errorMessage.textContent = 'Scelta dell\'organizzazione non riuscita';
               errorMessage.classList.add('show');
             }
             tenantModal.classList.remove('hidden');
@@ -172,7 +172,7 @@ if (document.getElementById('loginForm')) {
         } catch (error) {
           console.error('Tenant selection error:', error);
           if (errorMessage) {
-            errorMessage.textContent = 'Connection error';
+            errorMessage.textContent = 'Errore di connessione';
             errorMessage.classList.add('show');
           }
           tenantModal.classList.remove('hidden');

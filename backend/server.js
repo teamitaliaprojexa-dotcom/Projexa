@@ -3388,7 +3388,9 @@ async function ofDati(req, prog) {
     const row = candidati.find((r) => ofValore(r) !== '') || candidati[0];
     dati[k] = row ? ofValore(row) : '';
   }
-  const invoice = perCampo.get('invoice');
+  // Griglia «Fatturazione» (fino al 2026-10-26 «Invoice»): la si riconosce dalla tabella.
+  const invoice = r.rows.find((x) => String(x.tabella || '').trim().toLowerCase() === 'invoice' && String(x.tipo_valore) === '11')
+    || perCampo.get('fatturazione') || perCampo.get('invoice');
   // Dati del cliente del progetto (campi di clients con master_id = cliente, come le condizioni
   // della Check List). Nomi confrontati senza maiuscole, spazi e punti ("P.iva" = "P. IVA").
   const chiave = (c) => ofNormCampo(c).replace(/[^a-z0-9]/g, '');
@@ -3525,7 +3527,7 @@ app.post('/api/projects/offerta/genera', requireAuth,
         PARTITA_IVA: dati.partitaIva || '(non indicata)',
         INVOICE: invoice.righe.length
           ? [invoice.colonne.join(' | '), ...invoice.righe.map((r) => r.join(' | '))].join('\n')
-          : '(nessuna riga nella griglia Invoice)',
+          : '(nessuna riga nella griglia Fatturazione)',
         DATA: new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }),
         UTENTE: String(nomi.utente || '').trim() || req.user.email || ''
       };
@@ -7177,7 +7179,7 @@ async function importaRigheMySupport(tenantId, rowsIn) {
   //    Il valore può essere cifrato: il confronto si fa dopo la lettura.
   const campi = await db.query(
     `SELECT argument, valore2 FROM clients
-      WHERE tenant_id = $1 AND LOWER(BTRIM(regexp_replace(campo, '^\\(\\*\\)\\s*', ''))) = 'my support'
+      WHERE tenant_id = $1 AND LOWER(BTRIM(regexp_replace(campo, '^\\(\\*\\)\\s*', ''))) IN ('mysupport', 'my support')
         AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
     [tenantId]
   );
@@ -7281,7 +7283,7 @@ app.post('/api/mysupport/push', async (req, res) => {
   try {
     if (pushLimitato('ip:' + (req.ip || ''))) return res.status(429).json({ error: 'Troppe richieste: riprova tra qualche minuto' });
     const tok = await utenteDaTokenPush(req);
-    if (!tok) return res.status(401).json({ error: 'Token non valido o revocato: generane uno nuovo in Impostazioni › DataBricks' });
+    if (!tok) return res.status(401).json({ error: 'Token non valido o revocato: generane uno nuovo in Impostazioni › Databricks' });
     const blocco = Math.max(1, parseInt(req.body?.blocco, 10) || 1);
     const blocchi = Math.max(blocco, parseInt(req.body?.blocchi, 10) || 1);
     const esito = await importaRigheMySupport(tok.tenant_id, Array.isArray(req.body?.rows) ? req.body.rows : []);

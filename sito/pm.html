@@ -271,14 +271,14 @@
             const origine = (x) => (x.origine === 'riunione' ? ' <span class="pill riunione" title="Estratto da una riunione"><i class="fas fa-microphone-lines"></i></span>' : '')
                 + (x.riga_chiusa ? ` <span class="pill rifiutata" title="Tolta dal registro: aprila per riaprirla">fuori registro dal ${chiusaIl(x)}</span>` : '');
             const rischi = per('rischio').sort((a, b) => (a.stato === 'chiuso') - (b.stato === 'chiuso') || (b.punteggio || 0) - (a.punteggio || 0));
-            const tabRischi = rischi.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th class="n">Punti</th><th>Rischio</th><th class="n">P</th><th class="n">I</th><th>Owner</th><th>Risposta</th><th>Revisione</th><th>Stato</th></tr></thead><tbody>
+            const tabRischi = rischi.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th class="n">Punti</th><th>Rischio</th><th class="n">P</th><th class="n">I</th><th>Responsabile</th><th>Risposta</th><th>Revisione</th><th>Stato</th></tr></thead><tbody>
                 ${rischi.map((x) => riga(x, () => `<td class="n">${x.punteggio ? `<span class="punti ${classePunti(x.punteggio)}">${x.punteggio}</span>` : '–'}</td><td><b>${esc(x.titolo)}</b>${origine(x)}${x.descrizione ? `<div class="pm-nota">${esc(x.descrizione)}</div>` : ''}</td><td class="n">${x.probabilita || '–'}</td><td class="n">${x.impatto || '–'}</td><td>${esc(x.owner || '')}</td><td>${esc(x.mitigazione || '')}</td><td>${dataIt(x.data_revisione)}${x.data_revisione && x.data_revisione < (dati ? dati.oggi : '') && x.stato !== 'chiuso' ? ' <i class="fas fa-bell" style="color:#DC2626" title="Da rivedere"></i>' : ''}</td><td><span class="pill ${x.stato}">${STATI[x.stato] || x.stato}</span></td>`)).join('')}</tbody></table></div>`
                 : '<div class="pm-vuoto">Nessun rischio registrato.</div>';
             const tabSemplice = (lista, conData) => (lista.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr>${conData ? '<th>Data</th>' : ''}<th>Titolo</th><th>${conData ? 'Decisa da' : 'Owner'}</th><th>Stato</th></tr></thead><tbody>
                 ${lista.map((x) => riga(x, () => `${conData ? `<td>${dataIt(x.data_revisione)}</td>` : ''}<td><b>${esc(x.titolo)}</b>${origine(x)}${x.tipo === 'assunzione' ? ' <span class="pill">assunzione</span>' : ''}${x.descrizione ? `<div class="pm-nota">${esc(x.descrizione)}</div>` : ''}</td><td>${esc(conData ? x.decisa_da || '' : x.owner || '')}</td><td><span class="pill ${x.stato}">${STATI[x.stato] || x.stato}</span></td>`)).join('')}</tbody></table></div>`
                 : '<div class="pm-vuoto">Nessun elemento.</div>');
             const azioni = raidDati.task.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Azione</th><th>Assegnata a</th><th>Scadenza</th></tr></thead><tbody>${raidDati.task.map((t) => `<tr><td><a class="pm-link" href="dashboard.html?openTask=${encodeURIComponent(t.id)}" title="Apri la To-Do in modifica"><b>${esc(t.titolo)}</b> <i class="fas fa-arrow-right" style="font-size:0.7em"></i></a>${t.descrizione ? `<div class="pm-nota">${esc(t.descrizione.slice(0, 220))}</div>` : ''}</td><td>${esc(t.assegnato || '–')}</td><td style="color:${t.scaduta ? '#DC2626' : 'inherit'}">${dataIt(t.scadenza) || '–'}${t.scaduta ? ' (scaduta)' : ''}</td></tr>`).join('')}</tbody></table></div>` : '<div class="pm-vuoto">Nessuna azione aperta sul progetto.</div>';
-            const issue = raidDati.issue.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Issue</th><th>Priorità</th><th>Owner</th><th>Stato</th></tr></thead><tbody>${raidDati.issue.map((i) => `<tr><td>${esc(String(i.descrizione || '').slice(0, 300))}</td><td>${esc(i.priorita || '')}</td><td>${esc(i.owner || '')}</td><td>${esc(i.stato || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="pm-vuoto">Nessuna issue aperta sul progetto.</div>';
+            const issue = raidDati.issue.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Issue</th><th>Priorità</th><th>Responsabile</th><th>Stato</th></tr></thead><tbody>${raidDati.issue.map((i) => `<tr><td>${esc(String(i.descrizione || '').slice(0, 300))}</td><td>${esc(i.priorita || '')}</td><td>${esc(i.owner || '')}</td><td>${esc(i.stato || '')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="pm-vuoto">Nessuna issue aperta sul progetto.</div>';
             const nuovo = (t) => `<button class="pm-btn piccolo" data-nuovo="${t}"><i class="fas fa-plus"></i> ${TIPI[t].label}</button>`;
             p.innerHTML = `${raidDati.tabelle ? '' : sqlMancante()}
                 <div class="pm-card">
@@ -434,7 +434,7 @@
                     const persona = (x) => (eCr(x) ? 'richiesta_da' : x.tipo === 'decisione' ? 'decisa_da' : 'owner');
                     const ETICH_PERSONA = { owner: 'Owner', decisa_da: 'Decisa da', richiesta_da: 'Richiesta da' };
                     box.innerHTML = `<div class="pm-nota">Proposte di ${esc(r.ai)} · togli la spunta a quelle da non salvare, correggi titoli e valori. Per le Change Request: effort (${esc(unita)}) e slittamento in giorni solo se detti in riunione.</div>
-                        <div class="pm-scroll"><table class="pm-t"><thead><tr><th></th><th>Tipo</th><th>Titolo e dettaglio</th><th>Probabilità · effort</th><th>Impatto · giorni</th><th title="Una sola persona per riga: per Rischio e Dipendenza l'owner, per Decisione chi ha deciso, per Change Request chi l'ha richiesta">Persona</th></tr></thead><tbody>
+                        <div class="pm-scroll"><table class="pm-t"><thead><tr><th></th><th>Tipo</th><th>Titolo e dettaglio</th><th>Probabilità · effort</th><th>Impatto · giorni</th><th title="Una sola persona per riga: per Rischio e Dipendenza il responsabile, per Decisione chi ha deciso, per Change Request chi l'ha richiesta">Persona</th></tr></thead><tbody>
                         ${proposte.map((x, i) => `<tr><td><input type="checkbox" data-i="${i}" ${x.esiste ? '' : 'checked'}></td><td><span class="pill${eCr(x) ? ' bozza' : ''}">${eCr(x) ? 'Change Request' : TIPI[x.tipo].label}</span>${eCr(x) ? '<div class="pm-nota">in bozza</div>' : ''}${x.esiste ? '<div class="pm-nota">già presente</div>' : ''}</td>
                             <td><input class="pm-input" data-c="titolo" data-i="${i}" value="${esc(x.titolo)}"><div class="pm-nota">${esc(x.descrizione)}${x.mitigazione ? ` · Risposta: ${esc(x.mitigazione)}` : ''}${x.motivo ? ` · Motivo: ${esc(x.motivo)}` : ''}</div></td>
                             <td>${x.tipo === 'rischio' ? `<select class="pm-input" data-c="probabilita" data-i="${i}">${opzioni15(x.probabilita, ETICH_P)}</select>` : eCr(x) ? `<input class="pm-input" data-c="effort_delta" data-i="${i}" value="${x.effort_delta ?? ''}" placeholder="non detto" inputmode="decimal">` : ''}</td>
@@ -945,10 +945,10 @@
                             <button class="pm-btn primario" id="salvaCh" ${sola ? 'disabled' : ''}><i class="fas fa-floppy-disk"></i> Salva</button>
                             <button class="pm-btn" id="verbale"><i class="fas fa-file-signature"></i> Verbale di chiusura</button>
                         </div>
-                        <p class="pm-nota">Il progetto si chiude poi con il pulsante arancione «Chiudi Progetto» della scheda.</p>
+                        <p class="pm-nota">Il progetto si chiude poi con il pulsante arancione «Chiudi progetto» della scheda.</p>
                     </div>
                     <div class="pm-card">
-                        <h2><i class="fas fa-graduation-cap"></i> Lessons learned</h2>
+                        <h2><i class="fas fa-graduation-cap"></i> Lezioni apprese</h2>
                         <div class="pm-form">
                             <label>Tipo<select class="pm-input" id="lezTipo"><option value="migliorare">Da migliorare</option><option value="positivo">Ha funzionato</option></select></label>
                             <label>Categoria<select class="pm-input" id="lezCat"><option value="">–</option>${['Pianificazione', 'Cliente', 'Team', 'Tecnica', 'Commerciale', 'Comunicazione', 'Qualità', 'Fornitori'].map((x) => `<option>${x}</option>`).join('')}</select></label>
@@ -1055,14 +1055,14 @@
                     <p class="pm-nota">L'AI scrive il commento; numeri, tabelle, rischi, milestone e Change Request li mette Projexa.</p>
                     <div style="display:grid; gap:0.7rem; margin-top:0.6rem">
                         <div class="pm-card" style="margin:0"><b><i class="fas fa-print"></i> Anteprima da stampare o salvare in PDF</b><div class="pm-nota">Si apre in una nuova scheda.</div></div>
-                        <div class="pm-card" style="margin:0"><b><i class="fas fa-file-word" style="color:#2563EB"></i> Su un tuo template Word (.docx)</b><div class="pm-nota">L'AI compila il template come per l'Offerta economica. Il file non resta su Projexa.</div>
+                        <div class="pm-card" style="margin:0"><b><i class="fas fa-file-word" style="color:#2563EB"></i> Su un tuo modello Word (.docx)</b><div class="pm-nota">L'AI compila il modello come per l'Offerta economica. Il file non resta su Projexa.</div>
                             <input type="file" id="docTpl" accept=".docx" style="margin-top:0.5rem"></div>
                     </div>`,
                 pulsanti: [{ testo: 'Annulla' },
                     { testo: '<i class="fas fa-file-word"></i> Genera Word', azione: async (mm) => {
                         const f = mm.querySelector('#docTpl').files[0];
-                        if (!f) throw new Error('Scegli il template .docx');
-                        if (!/\.docx$/i.test(f.name)) throw new Error('Il template deve essere un file .docx');
+                        if (!f) throw new Error('Scegli il modello .docx');
+                        if (!/\.docx$/i.test(f.name)) throw new Error('Il modello deve essere un file .docx');
                         const dalV = mm.querySelector('#docDal')?.value || '';
                         const sc = await ProjexaAi.scegli('pm_docx', { apiUrl: PM.API_URL, headers: PM.auth });
                         if (!sc) return false;
@@ -1133,7 +1133,7 @@
                 <div class="pm-card"><h2><i class="fas fa-user-clock"></i> Persone sul progetto <span class="azioni"><a class="pm-btn piccolo" href="capacita.html?scheda=carico&da=${encodeURIComponent(projectId)}"><i class="fas fa-table-cells"></i> Carico di tutte</a>${daAllocare.length ? `<button class="pm-btn piccolo verde" id="allocaTutti" title="Alloca le ${daAllocare.length} persone del team non ancora allocate, con la proposta mostrata"><i class="fas fa-wand-magic-sparkles"></i> Alloca tutto il team (${daAllocare.length})</button>` : ''}<button class="pm-btn piccolo primario" id="nuovaAllP"><i class="fas fa-plus"></i> Allocazione</button></span></h2>
                     <p class="pm-nota" style="margin-top:0">Le persone arrivano dal <b>team del progetto</b> (Kick-off), con il loro ruolo nel progetto. Per chi non è allocato Projexa propone periodo e percentuale: giornate da fare del ruolo divise tra le persone del team con quel ruolo, sulle ore settimanali della persona. «Alloca» la conferma. Clic su un'allocazione per cambiarla. Con <b>Nel piano</b> scegli chi partecipa al Piano automatico qui sopra: il lavoro del ruolo si divide solo tra le persone attive; le ore settimanali vengono dalla Rubrica (32 h se non indicate).</p>
                     ${righeTeam.length || extra.length ? `<div class="pm-scroll"><table class="pm-t"><thead><tr><th>Persona</th><th>Ruolo nel progetto</th><th class="n">Consuntivo</th><th>Allocazione</th><th></th><th class="n" title="Chi è nel piano partecipa al Piano automatico: il lavoro del suo ruolo si divide tra le persone attive">Nel piano</th></tr></thead><tbody>${righeTeam.join('')}${extra.join('')}</tbody></table></div>`
-                        : '<div class="pm-vuoto">Nessuna persona nel team del progetto: aggiungile nel Team Work della scheda progetto (o con il Kick-off), poi torna qui.</div>'}
+                        : '<div class="pm-vuoto">Nessuna persona nel team del progetto: aggiungile nel Team di progetto della scheda progetto (o con il Kick-off), poi torna qui.</div>'}
                 </div>`;
             // Piano automatico (js/piano-automatico.js): consegna, stima e consuntivo -> % per persona.
             PianoAutomatico.monta(p.querySelector('#paBox'), { projectId, onApplicato: () => caricaRisorse() });

@@ -28,7 +28,7 @@ const TEMPLATE_DATA_ROWS = TEMPLATE_LAST_DATA_ROW - FIRST_DATA_ROW + 1;
 // Righe del template usate come modello di stile.
 const ROW_HEADER_FIRST = 11, ROW_HEADER = 19, ROW_ITEM = 12, ROW_ITEM_LAST = 18;
 // Stati del foglio «Setup» (E7:E12): solo questi colorano la barra.
-const STATI = ['Completata', 'Programmata', 'In corso', 'Da pianificare', 'Da iniziare', 'In Revisione'];
+const STATI = ['Completata', 'Programmata', 'In corso', 'Da pianificare', 'Da iniziare', 'In revisione'];
 
 function httpError(status, message) {
   return Object.assign(new Error(message), { statusCode: status });

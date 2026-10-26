@@ -46,7 +46,7 @@
                     <input id="msPushTokenVal" type="text" readonly value="${esc(token)}" style="flex:1; font-family:monospace; font-size:0.82rem; padding:0.5rem; border:1px solid #D1D5DB; border-radius:6px; background:#F9FAFB;">
                     <button id="msPushTokenCopia" type="button" style="padding:0.5rem 0.9rem; background:#3B82F6; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;"><i class="fas fa-copy"></i> Copia</button>
                 </div>
-                <p style="margin:0.6rem 0 0; color:#6B7280; font-size:0.8rem;">Il token vale solo per inviare i dati MySupport al tuo tenant. Spegnendo l'interruttore «DataBricks» viene revocato.</p>
+                <p style="margin:0.6rem 0 0; color:#6B7280; font-size:0.8rem;">Il token vale solo per inviare i dati MySupport al tuo tenant. Spegnendo l'interruttore «Databricks» viene revocato.</p>
                 <div style="display:flex; justify-content:flex-end; margin-top:1rem;">
                     <button id="msPushTokenChiudi" type="button" style="padding:0.5rem 1rem; background:white; color:#4B5563; border:1px solid #D1D5DB; border-radius:6px; cursor:pointer;">Chiudi</button>
                 </div>

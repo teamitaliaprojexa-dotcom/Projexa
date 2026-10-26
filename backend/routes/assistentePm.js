@@ -60,8 +60,9 @@ import { Anonimizzatore, NOTA_SEGNAPOSTO, piiAttivo } from '../config/pii.js';
 const router = express.Router();
 
 const CAMPO = 'ai assistente pm';
-// Campo booleano (creato dall'utente 2026-10-13): export Word automatico a «Ferma».
-const CAMPO_DOWNLOAD = 'download automatico file ass pm ai';
+// Campo booleano (creato dall'utente 2026-10-13): export Word automatico a «Ferma». Nome nuovo
+// dal 2026-10-26 (Supporto/CreaDB/uniforma_nomi_e_stati.sql); il vecchio vale ancora.
+const CAMPI_DOWNLOAD = ['download automatico file assistente pm', 'download automatico file ass pm ai'];
 // Campo a tendina (creato dall'utente 2026-10-14): modalità scelta in automatico (modalitaImpostata).
 const CAMPO_ESECUZIONE = 'esecuzione assistente pm';
 // Modello principale e, in ordine, quelli di riserva usati se Gemini chiude la sessione per
@@ -1434,10 +1435,10 @@ router.post('/ferma', requireAuth, async (req, res) => {
     const r = (await db.query(
       `SELECT valore1 FROM settings
         WHERE tenant_id = $1 AND user_id = $2
-          AND lower(btrim(campo)) IN ($3, '(*) ' || $3)
+          AND lower(btrim(regexp_replace(campo, '^\\(\\*\\)\\s*', ''))) = ANY($3::text[])
           AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
         ORDER BY id LIMIT 1`,
-      [req.user.tenant_id, req.user.user_id, CAMPO_DOWNLOAD]
+      [req.user.tenant_id, req.user.user_id, CAMPI_DOWNLOAD]
     )).rows[0];
     scaricaWord = !!(r && vero(r.valore1));
   } catch (e) { console.warn('[ASSISTENTE PM] impostazione download automatico non letta:', e.message); }

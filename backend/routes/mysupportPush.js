@@ -128,7 +128,7 @@ router.post('/avviso', async (req, res) => {
   try {
     if (pushLimitato('ip:' + (req.ip || ''))) return res.status(429).json({ error: 'Troppe richieste: riprova tra qualche minuto' });
     const tok = await utenteDaTokenPush(req);
-    if (!tok) return res.status(401).json({ error: 'Token non valido o revocato: generane uno nuovo in Impostazioni › DataBricks' });
+    if (!tok) return res.status(401).json({ error: 'Token non valido o revocato: generane uno nuovo in Impostazioni › Databricks' });
     const tipo = String((req.body && req.body.tipo) || '');
     const a = AVVISI[tipo];
     if (!a) return res.status(400).json({ error: 'Avviso sconosciuto' });

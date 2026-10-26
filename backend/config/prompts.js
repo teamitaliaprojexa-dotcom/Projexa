@@ -37,7 +37,7 @@ export const PROMPT_FUNCTIONS = {
   // Pulsante «Offerta economica» della scheda progetto: istruzioni per compilare il template
   // Word (.docx). Il formato della risposta (JSON con le modifiche) lo aggiunge il server.
   OFFERTA_ECONOMICA: {
-    titolo: 'Offerta Economica',
+    titolo: 'Offerta economica',
     segnaposto: ['PROGETTO', 'CLIENTE', 'RAGIONE_SOCIALE', 'CODICE_FISCALE', 'PARTITA_IVA', 'IMPORTO', 'SCONTO', 'IMPORTO_NON_SCONTATO', 'EFFORT', 'PREVENTIVO', 'INVOICE', 'DATA', 'UTENTE']
   },
   // To-Do List › filtro «Assegnato a» › «Invia email»: testo dell'email «Attività a tuo
