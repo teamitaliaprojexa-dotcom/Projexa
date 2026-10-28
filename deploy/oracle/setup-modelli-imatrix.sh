@@ -127,6 +127,7 @@ for arg in "$@"; do
   # Nessuna copia di riserva (2026-10-28, disco da 173 GB): per tornare al Q4_K_M di prima basta
   # «ollama pull <base>». Il file vecchio si libera quando nessun modello lo usa più.
   echo "[5/5] Sostituisco $base su Ollama"
+  vecchio=$(ollama show "$base" --modelfile | awk '/^FROM / { print $2; exit }')
   mf="$BASI/$slug.Modelfile"
   { echo "FROM $TMP"; ollama show "$base" --modelfile | awk '/^FROM / { dopo = 1; next } dopo || !/^#/'; } > "$mf"
   ollama create "$base" -f "$mf" | tr '\r' '\n' | grep -E 'success|error' || true
@@ -144,13 +145,15 @@ d[base] = {'f16': f16 or None, 'imatrix': imx, 'quantizzato': datetime.datetime.
 json.dump(d, open(p, 'w'), indent=1)
 PY
 
-  # Modelli dei Modelfile sulla stessa base: Ollama li ha legati ai file di prima.
+  # Modelli dei Modelfile sulla stessa base: Ollama li ha legati ai file di prima. Si ricreano SOLO
+  # se usano ancora il file della base vecchia (non addestrati): un modello con pesi propri è
+  # addestrato anche se manca in versioni.json (2026-10-28: recap-projexa-14b installato così).
   for m in "$MODELFILES"/*.Modelfile; do
     nome=$(basename "$m" .Modelfile)
     [ "$(awk '/^FROM / { print $2; exit }' "$m")" = "$base" ] || continue
     ollama show "$nome" >/dev/null 2>&1 || continue
-    if python3 -c "import json,sys; sys.exit(0 if sys.argv[2] in json.load(open(sys.argv[1])) else 1)" "$CARTELLA/versioni.json" "$nome" 2>/dev/null; then
-      echo "  $nome è addestrato: da riapplicare (job quantizza_modelli o Analisi PM › Riapplica)"
+    if [ "$(ollama show "$nome" --modelfile | awk '/^FROM / { print $2; exit }')" != "$vecchio" ]; then
+      echo "  $nome ha pesi propri (addestrato): lasciato com'è, si riapplica dal job o da Analisi PM"
     else
       ollama create "$nome" -f "$m" | tr '\r' '\n' | grep -E 'success|error' || true
       echo "  $nome ricreato sulla base nuova"
