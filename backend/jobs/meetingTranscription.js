@@ -30,7 +30,7 @@ import { SALTA_LOG_ON, SALTA_LOG_OFF, registraTestoRiunione } from '../config/au
 import { contestoAudit } from '../config/auditContext.js';
 import { notificaRiunione } from './notifiche.js';
 import { getIntegration } from '../config/integrations.js';
-import { transcribeAudio, transcribeAudioCpp, transcribeAudioGemini, transcribeAudioParakeet, parakeetUrl, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate } from '../routes/ai.js';
+import { transcribeAudio, transcribeAudioCpp, transcribeAudioGemini, transcribeAudioParakeet, parakeetUrl, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate, diarizzazioneUrl, impronteVocali } from '../routes/ai.js';
 import { segnaRegistrazione, segnaTrascrizione, assistenteInCorso } from '../config/ollamaPrecedenza.js';
 import { nomiPartecipanti } from '../config/riunioniOutlook.js';
 
@@ -220,6 +220,203 @@ function avgEnergy(list, start, end) {
   return n ? sum / n : 0;
 }
 
+// ----------------------------------------------------------------------------
+// DIARIZZAZIONE, FASE 1 (2026-10-28): «Partecipanti» divisi in «Partecipante 1, 2…»
+// ----------------------------------------------------------------------------
+// Con DIARIZZAZIONE_URL impostata, per ogni frase degli altri partecipanti (quelle dove l'audio
+// di sistema prevale sul microfono) il servizio diarizzazione-service calcola l'impronta vocale
+// (vettore numerico della voce, NON l'audio né il testo). Le impronte del blocco restano, cifrate,
+// in rec_meeting_voci; a fine registrazione (dividiPartecipanti, prima del recap) si raggruppano
+// quelle di TUTTA la riunione e le righe «Partecipanti» diventano «Partecipante N», con N
+// coerente dall'inizio alla fine. Solo numeri: nessun nome, nessuna impronta tenuta oltre 48 ore.
+// Le funzioni live (Assistente PM) non la usano. Tabella: Supporto/CreaDB/rec_meeting_voci.sql
+// Somiglianza minima (coseno) tra due impronte per dire «stessa voce». Prova del 2026-10-28 con
+// il modello wespeaker resnet34: stessa voce 0,93-0,95, voci diverse 0,59-0,63.
+const DIAR_SOGLIA = Number(process.env.DIARIZZAZIONE_SOGLIA) || 0.65;
+const DIAR_MIN_SEC = 4;            // gruppi con meno parlato: uniti al gruppo più simile (se abbastanza simile)
+const DIAR_EREDITA_SEC = 10;       // righe senza impronta (troppo brevi): prendono il numero della riga vicina
+const DIAR_LABEL = (n) => `Partecipante ${n}`;
+const DIAR_LABEL_RE = /^\[(\d{2}):(\d{2}):(\d{2})\] (Partecipanti|Partecipante \d+): /;
+const avvisiDiarizzazione = { fino: 0 };
+
+const prodotto = (a, b) => { let s = 0; for (let i = 0; i < a.length && i < b.length; i++) s += a[i] * b[i]; return s; };
+const norma = (a) => Math.sqrt(prodotto(a, a));
+function coseno(a, b) {
+  const n = norma(a) * norma(b);
+  return n > 0 ? prodotto(a, b) / n : 0;
+}
+// Senza impronta su una delle due frasi non si può dire: si considera la stessa voce.
+const stessaVoce = (a, b) => !a || !b || coseno(a, b) >= DIAR_SOGLIA;
+function sommaVoci(a, pesoA, b, pesoB) {
+  const na = norma(a) || 1;
+  const nb = norma(b) || 1;
+  const pa = Math.max(0.1, pesoA);
+  const pb = Math.max(0.1, pesoB);
+  return a.map((x, i) => (x / na) * pa + ((b[i] || 0) / nb) * pb);
+}
+function normalizzaVoce(v) {
+  const n = norma(v) || 1;
+  return v.map((x) => Math.round((x / n) * 10000) / 10000);
+}
+
+// Impronte vocali delle frasi degli altri partecipanti (l.who === OTHERS_LABEL) del blocco:
+// le scrive in l.voce. Un errore del servizio non ferma la trascrizione: il blocco resta solo
+// senza diarizzazione (avviso nel log al massimo ogni 10 minuti).
+async function aggiungiImpronte(audio, lines) {
+  if (!diarizzazioneUrl()) return;
+  const altri = lines.filter((l) => l.who === OTHERS_LABEL);
+  if (!altri.length) return;
+  try {
+    const voci = await impronteVocali(audio, altri);
+    altri.forEach((l, i) => { if (voci[i]) l.voce = voci[i]; });
+  } catch (e) {
+    if (avvisiDiarizzazione.fino < Date.now()) {
+      console.warn(`[DIARIZZAZIONE] impronte non calcolate (${e.message}): righe «${OTHERS_LABEL}» senza divisione`);
+      avvisiDiarizzazione.fino = Date.now() + 10 * 60000;
+    }
+  }
+}
+
+// Raggruppamento delle impronte (agglomerativo, per centroidi): si uniscono via via i due
+// gruppi più simili finché la somiglianza resta sopra DIAR_SOGLIA. I gruppi con poco parlato
+// (impronte meno affidabili) si uniscono poi al gruppo grande più simile, se lo è abbastanza.
+// items: [{ voce, dur }] in ordine di tempo -> numero del partecipante (1, 2, …) per ciascuno,
+// in ordine di prima apparizione.
+export function raggruppaVoci(items, soglia = DIAR_SOGLIA) {
+  // Somma delle impronte (già normalizzate) pesate per secondi di parlato, al massimo 30.
+  const gruppi = items.map((it, i) => ({ somma: it.voce.map((x) => x * Math.min(30, Math.max(0.5, it.dur || 0))), dur: it.dur || 0, membri: [i], primo: i }));
+  const attivi = new Set(gruppi.map((_, i) => i));
+  for (;;) {
+    let best = null;
+    const ids = [...attivi];
+    for (let x = 0; x < ids.length; x++) {
+      for (let y = x + 1; y < ids.length; y++) {
+        const s = coseno(gruppi[ids[x]].somma, gruppi[ids[y]].somma);
+        if (s >= soglia && (!best || s > best.s)) best = { a: ids[x], b: ids[y], s };
+      }
+    }
+    if (!best) break;
+    unisci(gruppi, attivi, best.a, best.b);
+  }
+  const piccoli = [...attivi].filter((g) => gruppi[g].dur < DIAR_MIN_SEC);
+  const grandi = [...attivi].filter((g) => gruppi[g].dur >= DIAR_MIN_SEC);
+  for (const p of piccoli) {
+    let best = null;
+    for (const g of grandi) {
+      const s = coseno(gruppi[p].somma, gruppi[g].somma);
+      if (s >= soglia - 0.2 && (!best || s > best.s)) best = { g, s };
+    }
+    if (best) unisci(gruppi, attivi, best.g, p);
+  }
+  const ordine = [...attivi].sort((a, b) => gruppi[a].primo - gruppi[b].primo);
+  const numero = new Array(items.length);
+  ordine.forEach((g, n) => gruppi[g].membri.forEach((i) => { numero[i] = n + 1; }));
+  return numero;
+}
+function unisci(gruppi, attivi, a, b) {
+  const ga = gruppi[a];
+  const gb = gruppi[b];
+  ga.somma = ga.somma.map((x, i) => x + (gb.somma[i] || 0));
+  ga.dur += gb.dur;
+  ga.membri.push(...gb.membri);
+  ga.primo = Math.min(ga.primo, gb.primo);
+  attivi.delete(b);
+}
+
+// Impronte di un blocco trascritto, in attesa della fine della riunione (cifrate). Una riga per
+// blocco: un nuovo tentativo dello stesso blocco la sostituisce. Si salvano anche le righe senza
+// impronta (frasi brevi): a fine riunione prendono il numero delle righe vicine.
+async function salvaVoci(job, voci) {
+  if (!diarizzazioneUrl() || !voci.length) return;
+  try {
+    await db.query(
+      `INSERT INTO rec_meeting_voci (tenant_id, user_id, id_calendar, chunk_id, offset_sec, voci)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (chunk_id) DO UPDATE SET voci = EXCLUDED.voci`,
+      [job.tenant_id, job.user_id, job.id_calendar, job.id, Number(job.offset_sec) || 0, encRec(JSON.stringify(voci))]
+    );
+  } catch (e) {
+    // Tabella assente (SQL non ancora eseguito): niente diarizzazione, la trascrizione va avanti.
+    console.warn(`[DIARIZZAZIONE] ${job.id_calendar}: impronte non salvate (${e.message})`);
+  }
+}
+
+// A fine registrazione: raggruppa le impronte di tutta la riunione (anche delle registrazioni
+// precedenti, finché sono entro le 48 ore) e riscrive le etichette delle righe degli altri
+// partecipanti. Le righe si riconoscono dall'orario [hh:mm:ss], nello stesso ordine in cui sono
+// state scritte; quelle senza impronta (frasi brevi) prendono il numero della riga degli altri
+// più vicina entro DIAR_EREDITA_SEC. Righe già modificate a mano (etichetta diversa) non si toccano.
+async function dividiPartecipanti(user, idCalendar) {
+  let righe;
+  try {
+    righe = (await db.query(
+      `SELECT voci FROM rec_meeting_voci WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3
+        ORDER BY offset_sec, created_at`,
+      [user.tenant_id, user.user_id, idCalendar]
+    )).rows;
+  } catch (e) {
+    if (e.code !== '42P01') console.error(`❌ [DIARIZZAZIONE] ${idCalendar}: ${e.message}`);
+    return;
+  }
+  const items = righe.flatMap((r) => { try { return JSON.parse(r.voci) || []; } catch { return []; } });
+  const conVoce = items.filter((it) => Array.isArray(it.voce) && it.voce.length);
+  if (!conVoce.length) return;
+  raggruppaVoci(conVoce).forEach((n, i) => { conVoce[i].n = n; });
+  const perSecondo = new Map();
+  for (const it of items) {
+    if (!perSecondo.has(it.sec)) perSecondo.set(it.sec, []);
+    perSecondo.get(it.sec).push(it);
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const cur = (await client.query(
+      `SELECT trascrizione FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1 FOR UPDATE`,
+      [user.tenant_id, user.user_id, idCalendar]
+    )).rows[0];
+    if (!cur || !cur.trascrizione) { await client.query('ROLLBACK'); return; }
+    const linee = cur.trascrizione.split('\n');
+    const altri = []; // { i, sec, n }
+    linee.forEach((riga, i) => {
+      const m = DIAR_LABEL_RE.exec(riga);
+      if (!m) return;
+      const sec = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+      const it = (perSecondo.get(sec) || []).shift();
+      if (it) altri.push({ i, sec, n: it.n || null });
+    });
+    // Righe senza impronta: numero della riga vicina (prima la precedente).
+    altri.forEach((a, k) => {
+      if (a.n) return;
+      const vicine = [altri[k - 1], altri[k + 1]].filter((b) => b && b.n && Math.abs(b.sec - a.sec) <= DIAR_EREDITA_SEC);
+      if (vicine.length) a.eredita = vicine[0].n;
+    });
+    let cambiate = 0;
+    for (const a of altri) {
+      const n = a.n || a.eredita;
+      if (!n) continue;
+      const nuova = linee[a.i].replace(DIAR_LABEL_RE, (tutto, h, mi, s) => `[${h}:${mi}:${s}] ${DIAR_LABEL(n)}: `);
+      if (nuova !== linee[a.i]) { linee[a.i] = nuova; cambiate++; }
+    }
+    if (!cambiate) { await client.query('ROLLBACK'); return; }
+    await client.query(SALTA_LOG_ON);
+    await client.query(
+      `UPDATE rec_meeting SET trascrizione = $1, crypto = 1 WHERE tenant_id = $2 AND user_id = $3 AND id_calendar = $4`,
+      [encRec(linee.join('\n')), user.tenant_id, user.user_id, idCalendar]
+    );
+    await client.query(SALTA_LOG_OFF);
+    await client.query('COMMIT');
+    trascrizioniDaRegistrare.add(recapKey(user, idCalendar));
+    const totale = new Set(conVoce.map((it) => it.n)).size;
+    console.log(`[DIARIZZAZIONE] ${idCalendar}: ${totale} partecipant${totale === 1 ? 'e' : 'i'} distint${totale === 1 ? 'o' : 'i'}, ${cambiate} righe aggiornate`);
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error(`❌ [DIARIZZAZIONE] ${idCalendar}: etichette non aggiornate (${e.message})`);
+  } finally {
+    client.release();
+  }
+}
+
 // Unione dei segmenti di Whisper in frasi leggibili: Whisper (soprattutto whisper.cpp)
 // restituisce pezzi di 2-3 parole e a volte spezza una parola a metà ("cedol" + "ini").
 // Si uniscono i pezzi consecutivi della STESSA persona finché la frase non è finita
@@ -229,6 +426,9 @@ const LINE_MIN_CHARS = 60;    // sotto questa lunghezza si continua anche dopo i
 const LINE_MAX_CHARS = 320;   // oltre si va comunque a capo
 const LINE_MAX_GAP_SEC = 3;   // pausa oltre la quale inizia una nuova riga
 
+// Con la diarizzazione (l.voce = impronta vocale del segmento) due frasi degli altri
+// partecipanti si uniscono solo se la voce è la stessa; l'impronta della riga è la somma di
+// quelle dei suoi segmenti, pesate per durata (voceSec = secondi di parlato con impronta).
 function mergeLines(lines) {
   const out = [];
   for (const l of lines) {
@@ -241,16 +441,21 @@ function mergeLines(lines) {
       const sentenceDone = /[.?!…]["'»”)]?$/.test(last.text) && last.text.length >= LINE_MIN_CHARS;
       const join = l.cont || (last.who === l.who
         && !sentenceDone
+        && stessaVoce(last.voce, l.voce)
         && start - last.end <= LINE_MAX_GAP_SEC
         && last.text.length + text.length < LINE_MAX_CHARS);
       if (join) {
         const glue = l.cont || /^[.,;:!?…)»”]/.test(text) ? '' : ' ';
         last.text += glue + text;
         last.end = Math.max(last.end, end);
+        if (l.voce) {
+          last.voce = sommaVoci(last.voce, last.voceSec, l.voce, end - start);
+          last.voceSec += end - start;
+        }
         continue;
       }
     }
-    out.push({ start, end, who: l.who || '', text });
+    out.push({ start, end, who: l.who || '', text, ...(l.voce ? { voce: l.voce, voceSec: end - start } : {}) });
   }
   return out;
 }
@@ -300,11 +505,20 @@ function cleanSegments(lines) {
 }
 
 // Righe "[hh:mm:ss] Nome: testo" di un blocco, con l'intestazione di sessione se presente.
-function formatLines(lines, offset, startLabel) {
+// voci (facoltativo): vi si aggiunge, per ogni riga degli altri partecipanti e nello stesso
+// ordine, { sec, dur, voce } (voce null se nessuna frase della riga ha l'impronta): servono a
+// dividerli in «Partecipante 1, 2…» a fine riunione (dividiPartecipanti).
+function formatLines(lines, offset, startLabel, voci = null) {
   lines.sort((a, b) => a.start - b.start);
   let add = '';
   if (startLabel) add += `\n--- ${String(startLabel).slice(0, 80)} ---\n`;
-  for (const l of mergeLines(cleanSegments(lines))) add +=`[${hhmmss((Number(offset) || 0) + l.start)}] ${l.who ? `${l.who}: ` : ''}${l.text}\n`;
+  for (const l of mergeLines(cleanSegments(lines))) {
+    const sec = (Number(offset) || 0) + l.start;
+    add += `[${hhmmss(sec)}] ${l.who ? `${l.who}: ` : ''}${l.text}\n`;
+    if (voci && l.who === OTHERS_LABEL) {
+      voci.push({ sec: Math.floor(sec), dur: Math.round((l.voceSec || 0) * 10) / 10, voce: l.voce ? normalizzaVoce(l.voce) : null });
+    }
+  }
   return add;
 }
 
@@ -342,7 +556,8 @@ async function trascriviAudio(user, audio, mime, baseUrl, prompt = '', hotwords 
 }
 
 // Trascrive un blocco sul servizio Whisper indicato (o su Gemini, baseUrl = CORSIA_GEMINI) e
-// restituisce il testo formattato.
+// restituisce { text, voci }: testo formattato e, con la diarizzazione, le impronte vocali
+// delle righe degli altri partecipanti (formatLines).
 //  - traccia unica (audio_mix): UNA trascrizione; per ogni frase si confronta il volume del
 //    microfono con quello dell'audio di sistema nello stesso intervallo: se prevale il
 //    microfono la frase è dell'utente, altrimenti degli altri partecipanti;
@@ -356,7 +571,8 @@ async function transcribeJob(job, baseUrl) {
     const me = energy.mic ? await speakerName(user) : '';
     const prompt = await buildWhisperPrompt(user, job.id_calendar, energy.names);
     const hotwords = baseUrl && baseUrl === parakeetUrl() ? await buildHotwords(user, job.id_calendar, energy.names) : [];
-    const r = await trascriviAudio(user, Buffer.from(job.audio_mix, 'base64'), mime, baseUrl, prompt, hotwords);
+    const audio = Buffer.from(job.audio_mix, 'base64');
+    const r = await trascriviAudio(user, audio, mime, baseUrl, prompt, hotwords);
     for (const seg of r.segments) {
       let who = '';
       if (energy.mic && energy.system) {
@@ -366,6 +582,7 @@ async function transcribeJob(job, baseUrl) {
       }
       lines.push({ start: seg.start, end: seg.end, who, text: seg.text, cont: seg.cont });
     }
+    await aggiungiImpronte(audio, lines);
   } else {
     if (job.audio_mic) {
       const me = await speakerName(user);
@@ -378,7 +595,9 @@ async function transcribeJob(job, baseUrl) {
       r.segments.forEach((x) => lines.push({ start: x.start, end: x.end, who, text: x.text, cont: x.cont }));
     }
   }
-  return formatLines(lines, job.offset_sec, job.start_label);
+  const voci = [];
+  const text = formatLines(lines, job.offset_sec, job.start_label, voci);
+  return { text, voci };
 }
 
 // Blocco breve (8-15 s) dell'«Assistente PM» (routes/assistentePm.js): trascritto SUBITO, fuori
@@ -882,7 +1101,10 @@ function lostChunkNote(job, reason) {
 // Trascrive un blocco già "prenotato" (state = 'transcribing') sul servizio indicato.
 async function processAudioJob(job, baseUrl) {
   try {
-    const text = await transcribeJob(job, baseUrl);
+    const { text, voci } = await transcribeJob(job, baseUrl);
+    // Prima di segnare il blocco 'done': così le impronte ci sono già quando la riga
+    // «finalize» arriva in testa alla fila.
+    await salvaVoci(job, voci);
     await db.query(
       `UPDATE rec_meeting_chunks SET state = 'done', result = $2, audio_mix = NULL, audio_mic = NULL, audio_system = NULL WHERE id = $1`,
       [job.id, encRec(text || ' ')]
@@ -979,6 +1201,9 @@ async function processFinalize(job) {
 
 async function processFinalizeInterno(job) {
   const user = jobUser(job);
+  // Diarizzazione: «Partecipanti» -> «Partecipante N» prima di log, copia condivisa e recap.
+  // Solo al primo tentativo (i nuovi tentativi riguardano solo il recap).
+  if (!(Number(job.attempts) > 0)) await dividiPartecipanti(user, job.id_calendar);
   // Trascrizione finita: UNA riga nel log con tutto il testo (i blocchi non sono stati
   // registrati uno per uno). Solo se il testo è cambiato dall'ultima riga registrata.
   if (trascrizioniDaRegistrare.delete(recapKey(user, job.id_calendar))) {
@@ -1274,6 +1499,11 @@ async function cleanupStale() {
     [String(STALE_HOURS)]
   );
   if (r.rowCount) console.warn(`[TRASCRIZIONE] scartati ${r.rowCount} blocchi più vecchi di ${STALE_HOURS} ore`);
+  // Impronte vocali della diarizzazione: mai tenute oltre lo stesso limite.
+  await db.query(
+    `DELETE FROM rec_meeting_voci WHERE created_at < NOW() - ($1 || ' hours')::interval`,
+    [String(STALE_HOURS)]
+  ).catch((e) => { if (e.code !== '42P01') console.error(`❌ [DIARIZZAZIONE] pulizia impronte: ${e.message}`); });
   await reclaimStuck();
 }
 

@@ -1743,6 +1743,35 @@ export async function transcribeAudioParakeet(base, audioBuffer, mime, hotwords 
   }
 }
 
+// Diarizzazione, fase 1 (2026-10-28): servizio delle impronte vocali (diarizzazione-service/app.py,
+// systemd projexa-diarizzazione, deploy/oracle/setup-diarizzazione.sh). Indirizzo:
+// DIARIZZAZIONE_URL (sulla VM 127.0.0.1:8105, senza chiave). Vuoto = diarizzazione spenta.
+export function diarizzazioneUrl() {
+  return String(process.env.DIARIZZAZIONE_URL || '').trim().replace(/\/+$/, '');
+}
+
+// Impronta vocale di ogni segmento [{ start, end }] del blocco WAV (POST /voci, segmenti
+// nell'header X-Segmenti "inizio-fine,..."): array nello stesso ordine, null per i segmenti
+// troppo corti. Nessun nuovo tentativo: se il servizio non risponde il blocco resta senza
+// diarizzazione (righe «Partecipanti» come prima).
+export async function impronteVocali(audioBuffer, segmenti) {
+  const base = diarizzazioneUrl();
+  if (!base || !segmenti.length) return segmenti.map(() => null);
+  const data = await readJson(await callApi(`${base}/voci`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'audio/wav',
+      'X-Segmenti': segmenti.map((s) => `${(Number(s.start) || 0).toFixed(2)}-${(Number(s.end) || 0).toFixed(2)}`).join(',')
+    },
+    body: audioBuffer,
+    timeoutMs: 120000
+  }, 'Diarizzazione'), 'Diarizzazione');
+  if (data.error || !Array.isArray(data.voci) || data.voci.length !== segmenti.length) {
+    throw httpError(502, `Diarizzazione: ${String(data.error || 'risposta non valida').slice(0, 200)}`);
+  }
+  return data.voci.map((v) => (Array.isArray(v) && v.length ? v.map(Number) : null));
+}
+
 // Whisper dedicato all'Assistente PM (deploy/oracle/setup-whisper-assistente.sh): porta, solo se
 // ASSISTENTE_PM_WHISPER_CPP_URL punta a questa macchina (sulla VM: 127.0.0.1:8102; in locale
 // è il tunnel 18101, che non è un servizio di questo PC: lì non vale).

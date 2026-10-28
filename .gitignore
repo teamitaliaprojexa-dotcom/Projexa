@@ -144,6 +144,8 @@ vite.config.ts.timestamp-*
 
 # Servizio Whisper (Python): ambiente locale e cache
 whisper-service/.venv/
+diarizzazione-service/.venv/
+diarizzazione-service/modelli/
 __pycache__/
 
 # Database viewer: solo uso locale, mai su GitHub
