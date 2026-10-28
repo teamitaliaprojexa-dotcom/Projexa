@@ -3859,6 +3859,16 @@ app.get('/api/:source(settings|clients|projects)/grid-widget/fk-options', requir
 
 // Inserisce una nuova riga nella griglia (tipo_valore = 11). tenant_id/user_id/client_id
 // (e project_id per i progetti) vengono sempre forzati dal contesto, non dal browser.
+// Errori delle griglie (2026-10-28): una riga uguale a una già presente (vincolo UNIQUE, es.
+// Costi Progetto con la stessa voce di costo) dava «Errore interno del server». La riga doppia
+// spesso è scaduta e quindi nascosta dal filtro «Attive»: lo si dice all'utente.
+function rispondiErroreGriglia(res, error) {
+  if (error && error.code === '23505') {
+    return res.status(409).json({ error: 'Esiste già una riga con questi valori (stessa voce/combinazione). Se non la vedi, potrebbe essere scaduta: passa al filtro «Tutte» e modifica quella invece di crearne una nuova.' });
+  }
+  res.status(error.statusCode || 500).json({ error: error.message });
+}
+
 app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, async (req, res) => {
   // Campi tipo 4 del progetto: valore2 riallineato dopo il salvataggio della griglia.
   if (req.params.source === 'projects') tipo4AFineRisposta(req, res, String((req.body && req.body.fieldId) || (req.query && req.query.fieldId) || '').trim());
@@ -3923,7 +3933,7 @@ app.post('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth,
     if (tableName === 'rubrica') sincronizzaRubricaTenant(req.user.tenant_id);
     res.status(201).json(stripSensitive(result.rows)[0]);
   } catch (error) {
-    res.status(error.statusCode || 500).json({ error: error.message });
+    rispondiErroreGriglia(res, error);
   }
 });
 
@@ -4107,7 +4117,7 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/rows', requireAuth,
     if (client) {
       try { await client.query('ROLLBACK'); } catch (rollbackError) { /* ignore */ }
     }
-    res.status(error.statusCode || 500).json({ error: error.message });
+    rispondiErroreGriglia(res, error);
   } finally {
     if (client) client.release();
   }
@@ -4167,7 +4177,7 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/expire', requireAut
     );
     res.json({ updated: result.rowCount });
   } catch (error) {
-    res.status(error.statusCode || 500).json({ error: error.message });
+    rispondiErroreGriglia(res, error);
   }
 });
 
@@ -4232,7 +4242,7 @@ app.put('/api/:source(settings|clients|projects)/grid-widget/row', requireAuth, 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
     res.json(stripSensitive(result.rows)[0]);
   } catch (error) {
-    res.status(error.statusCode || 500).json({ error: error.message });
+    rispondiErroreGriglia(res, error);
   }
 });
 
@@ -11499,6 +11509,14 @@ app.post('/api/projects/reopen', requireAuth, async (req, res) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+    // Data messa dalla chiusura: la scadenza attuale della riga del progetto.
+    const chiuso = (await client.query(
+      `SELECT scadenza::date::text AS d FROM projects
+        WHERE id = $1 AND tenant_id = $2 AND user_id = $3 AND client_id = $4
+          AND argument = 'Progetto' AND campo = 'Progetto' AND scadenza < CURRENT_DATE`,
+      [projectId, req.user.tenant_id, req.user.user_id, clientId]
+    )).rows[0];
+    const dataChiusura = chiuso ? chiuso.d : null;
     const result = await client.query(
       `WITH RECURSIVE project_tree(id) AS (
          SELECT id
@@ -11528,8 +11546,49 @@ app.post('/api/projects/reopen', requireAuth, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Progetto non trovato o non autorizzato' });
     }
+    // Tabelle collegate (2026-10-28): la riapertura aggiornava solo projects, mentre «Chiudi
+    // Progetto» scade anche commesse, Costi Progetto, componenti, task... (function_db). Si
+    // riaprono, sulle stesse tabelle della chiusura, le righe con la scadenza messa dalla
+    // chiusura (= quella che aveva il progetto): le righe scadute in altre date restano chiuse.
+    let collegate = 0;
+    if (dataChiusura) {
+      let fdb = await client.query(
+        `SELECT * FROM function_db WHERE cod_istruzione = 3 AND lower(istruzione) = 'update' AND funzione = 'Chiudi Progetto' AND tenant_id = $1`,
+        [req.user.tenant_id]
+      );
+      if (fdb.rows.length === 0) {
+        fdb = await client.query(
+          `SELECT * FROM function_db WHERE cod_istruzione = 3 AND lower(istruzione) = 'update' AND funzione = 'Chiudi Progetto' AND tenant_id IS NULL`
+        );
+      }
+      for (const r of fdb.rows) {
+        const tab = r.fun_tabella, col = r.fun_colonna;
+        if (!tab || !col || tab === 'projects') continue;
+        assertValidIdentifier(tab);
+        assertValidIdentifier(col);
+        assertCanWriteTable(req, tab);
+        const tcols = await getTableColumns(tab);
+        if (!tcols.has(col)) continue;
+        let projCol = (r.fun_project || '').trim();
+        if (!projCol && tcols.has('project_id')) projCol = 'project_id';
+        if (!projCol || !tcols.has(projCol)) continue;
+        assertValidIdentifier(projCol);
+        let tenCol = (r.fun_tenant || '').trim();
+        if (!tenCol && tcols.has('tenant_id')) tenCol = 'tenant_id';
+        let usrCol = (r.fun_user || '').trim();
+        if (!usrCol && tcols.has('user_id')) usrCol = 'user_id';
+
+        const p = [projectId, dataChiusura];
+        const parts = [`"${projCol}"::text = $1`, `"${col}"::date = $2::date`];
+        if (tenCol) { assertValidIdentifier(tenCol); p.push(req.user.tenant_id); parts.push(`"${tenCol}" = $${p.length}`); }
+        if (usrCol) { assertValidIdentifier(usrCol); p.push(req.user.user_id); parts.push(`"${usrCol}" = $${p.length}`); }
+        if (tcols.has('client_id')) { p.push(clientId); parts.push(`client_id::text = $${p.length}`); }
+        const rr = await client.query(`UPDATE "${tab}" SET "${col}" = DATE '2099-12-31' WHERE ${parts.join(' AND ')}`, p);
+        collegate += rr.rowCount;
+      }
+    }
     await client.query('COMMIT');
-    res.json({ updated: result.rowCount, scadenza: '2099-12-31' });
+    res.json({ updated: result.rowCount, collegate, scadenza: '2099-12-31' });
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch (rollbackError) { /* ignore */ }
     res.status(error.statusCode || 500).json({ error: error.message });
