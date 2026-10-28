@@ -277,7 +277,7 @@ app.use('/api/audit', auditEventiRoutes);
 app.use('/api/chatbot', chatbotRoutes);
 // Finestra «Assistente PM» durante la registrazione (Gemini Live): routes/assistentePm.js.
 app.use('/api/assistente-pm', assistentePmRoutes);
-// Analisi PM notturna, valutazione delle domande e modello addestrato (solo ANALISI_PM_EMAILS).
+// Analisi PM notturna, valutazione delle domande e modello addestrato (solo con «Addestramento Ai Projexa» in settings).
 app.use('/api/analisi-pm', analisiPmRoutes);
 // Token dello script del PC che invia MySupport (interruttore «DataBricks»): routes/mysupportPush.js.
 app.use('/api/mysupport/push', mysupportPushRoutes);

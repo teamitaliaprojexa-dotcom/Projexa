@@ -25,10 +25,27 @@ const TRATTO_CHARS = 1200;            // testo del pezzo salvato con la domanda
 const AI_AMMESSE = ['Gemini', 'ChatGPT'];
 export const FORMATO_RE = /^\s*(DOMANDA|RISCHIO|CR|ATTENZIONE|AGENDA)\s*\[\s*(\d{1,2})\s*\]\s*:\s*(.+)$/i;
 
-// Utenti abilitati (ANALISI_PM_EMAILS nel .env, separati da virgola): pagina, pulsante e deploy.
-export function analisiPmAbilitata(email) {
-  const elenco = String(process.env.ANALISI_PM_EMAILS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
-  return !!email && elenco.includes(String(email).trim().toLowerCase());
+// Utenti abilitati (2026-10-28): campo settings «Addestramento Ai Projexa» a true (valore1) per
+// tenant/utente, non scaduto. Vale per pagina Analisi PM, pulsanti della trascrizione, deploy
+// dei modelli e insegnanti (Associazioni, RAID e CR). user = { tenant_id, user_id }.
+const CAMPO_ADDESTRAMENTO = 'addestramento ai projexa';
+export async function analisiPmAbilitata(user) {
+  if (!user || !user.tenant_id || !user.user_id) return false;
+  try {
+    const r = await db.query(
+      `SELECT 1 FROM settings
+        WHERE tenant_id = $1 AND user_id = $2
+          AND lower(btrim(campo)) IN ($3, '(*) ' || $3)
+          AND valore1 = true
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+        LIMIT 1`,
+      [user.tenant_id, user.user_id, CAMPO_ADDESTRAMENTO]
+    );
+    return r.rows.length > 0;
+  } catch (e) {
+    console.error('❌ [ANALISI PM] controllo «Addestramento Ai Projexa»:', e.message);
+    return false;
+  }
 }
 
 // Pezzi di ~PEZZO_CHARS caratteri a righe intere. Stessa funzione per analisi e download:

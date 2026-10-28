@@ -28,7 +28,6 @@
 // ============================================================================
 import db from '../config/database.js';
 import notifDb from '../config/notifDatabase.js';
-import authDb from '../config/authDatabase.js';
 import { encryptValue, encryptRowForWrite } from '../config/crypto.js';
 import { titoloVoce } from '../config/dedupVoci.js';
 import { askAiProvider, inviaBatchAi, statoBatchAi, isBatchNonDisponibile, ollamaPost, ollamaConPrecedenza, senzaRagionamento } from '../routes/ai.js';
@@ -268,11 +267,9 @@ export async function scollegaVoci(u, chiavi) {
   for (const c of colls) await descriviGruppo(u, c);
 }
 
-// Insegnante attivo per l'utente: pagina Analisi PM abilitata (ANALISI_PM_EMAILS).
+// Insegnante attivo per l'utente: pagina Analisi PM abilitata («Addestramento Ai Projexa»).
 async function insegnanteAttivo(u) {
-  if (!String(process.env.ANALISI_PM_EMAILS || '').trim()) return false;
-  const r = (await authDb.query('SELECT email FROM users WHERE id = $1', [u.user_id])).rows[0];
-  return analisiPmAbilitata(r && r.email);
+  return analisiPmAbilitata(u);
 }
 
 // --------------------------------------------------------------------------

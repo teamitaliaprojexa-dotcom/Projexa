@@ -1,5 +1,5 @@
 // ============================================================================
-// ANALISI PM (pagina sito/analisi-pm.html, 2026-10-20) - solo utenti in ANALISI_PM_EMAILS
+// ANALISI PM (pagina sito/analisi-pm.html, 2026-10-20) - solo utenti con «Addestramento Ai Projexa» = true in settings
 // ----------------------------------------------------------------------------
 //   - segno «Analisi PM» sulla riunione (finestra della trascrizione): GET/POST /flag;
 //   - AI dell'analisi notturna (Gemini gratuito / ChatGPT Batch): GET/PUT /impostazioni;
@@ -67,11 +67,11 @@ const rispondiErrore = (res, e, cosa) => {
 };
 
 // Configurazione per la dashboard (voce di menu e pulsante nella trascrizione).
-router.get('/config', requireAuth, (req, res) => res.json({ abilitato: analisiPmAbilitata(req.user.email) }));
+router.get('/config', requireAuth, async (req, res) => res.json({ abilitato: await analisiPmAbilitata(req.user) }));
 
-// Da qui in poi solo gli utenti abilitati.
-router.use(requireAuth, (req, res, next) => (analisiPmAbilitata(req.user.email)
-  ? next() : res.status(403).json({ error: 'Analisi PM non abilitata per il tuo utente' })));
+// Da qui in poi solo gli utenti abilitati (settings «Addestramento Ai Projexa» = true).
+router.use(requireAuth, async (req, res, next) => ((await analisiPmAbilitata(req.user))
+  ? next() : res.status(403).json({ error: 'Analisi PM non abilitata: serve «Addestramento Ai Projexa» attivo in Impostazioni' })));
 const chi = (req) => [req.user.tenant_id, req.user.user_id];
 
 // --- Segno sulla riunione -------------------------------------------------------------------

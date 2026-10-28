@@ -2,7 +2,7 @@
 // ANALISI RAID E CHANGE REQUEST: confronto Projexa / AI esterna (2026-10-22)
 // ----------------------------------------------------------------------------
 // Quando RAID o Change Request si estraggono con «Projexa» (routes/pm.js, /raid/estrai e
-// /cr/estrai) per un utente di ANALISI_PM_EMAILS, il compito ESATTO e la risposta di Projexa si
+// /cr/estrai) per un utente con «Addestramento Ai Projexa», il compito ESATTO e la risposta di Projexa si
 // salvano in pm_raid_analisi e lo stesso compito va subito all'AI scelta nella pagina Analisi PM
 // (Gemini o ChatGPT, in modalità Immediata: il testo è il recap, corto). L'AI esterna risponde
 // solo per confronto: non crea niente nel registro. In Analisi PM › RAID e CR l'utente sceglie
@@ -11,7 +11,6 @@
 // Tabella: Supporto/CreaDB/analisi_raid.sql (senza tabella nessun confronto, il resto va).
 // ============================================================================
 import db from '../config/database.js';
-import authDb from '../config/authDatabase.js';
 import { encryptValue } from '../config/crypto.js';
 import { askAiProvider } from '../routes/ai.js';
 import { analisiPmAbilitata, aiScelta } from './analisiPm.js';
@@ -21,9 +20,7 @@ export const OLLAMA_RAID_ADDESTRATO = process.env.OLLAMA_RAID_PROJEXA_MODEL || '
 const RIPROVA_MS = 10 * 60000;
 
 async function insegnanteAttivo(user) {
-  if (!String(process.env.ANALISI_PM_EMAILS || '').trim()) return false;
-  const email = user.email || ((await authDb.query('SELECT email FROM users WHERE id = $1', [user.user_id])).rows[0] || {}).email;
-  return analisiPmAbilitata(email);
+  return analisiPmAbilitata(user);
 }
 
 // Salva il confronto e chiede la risposta all'AI esterna in background. Non lancia mai errori:
