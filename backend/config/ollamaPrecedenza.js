@@ -14,8 +14,14 @@
 // precedenza anche sulla trascrizione delle riunioni con Whisper. Finché è aperto, i blocchi
 // della riunione restano in coda (jobs/meetingTranscription.js, assistenteInCorso) e ripartono
 // a piena potenza quando l'assistente si chiude.
+// 2026-10-28: anche l'aggiornamento dei modelli (quantizzazione con imatrix, jobs/quantizzaModelli.js,
+// e installazione di un adattatore, routes/analisiPm.js) ferma i lavori con «Projexa»: usa molta
+// RAM fuori da Ollama. Vale anche il file LOCK_MODELLI, scritto da
+// deploy/oracle/setup-modelli-imatrix.sh: copre il lancio a mano e un riavvio del backend a metà.
 // ============================================================================
+import fs from 'fs';
 
+export const LOCK_MODELLI = '/var/tmp/projexa-modelli.lock';
 const attive = new Map();      // chiave -> scadenza (ms; Infinity = finché non si toglie)
 const ascoltatori = new Set(); // funzioni chiamate quando parte un'attività con precedenza
 
@@ -51,11 +57,27 @@ export const assistenteInCorso = () => { pulisci(); return [...attive.keys()].so
 export const segnaRegistrazione = (chiave, attiva, ttlMs) => segna(`reg:${chiave}`, attiva, ttlMs);
 export const segnaTrascrizione = (chiave, attiva) => segna(`whisper:${chiave}`, attiva, 30 * 60000);
 
-export const vmOccupata = () => { pulisci(); return attive.size > 0; };
+// Aggiornamento dei modelli di Ollama (quantizzazione o installazione di un adattatore).
+export const segnaModelli = (chiave, attivo) => segna(`modelli:${chiave}`, attivo);
+// File di blocco dello script: vale solo se il processo che l'ha scritto è ancora vivo.
+function lockModelli() {
+  try {
+    const pid = Number(fs.readFileSync(LOCK_MODELLI, 'utf8').trim());
+    if (!pid) return false;
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM'; // processo vivo di un altro utente (es. sudo)
+  }
+}
+export const modelliInAggiornamento = () => { pulisci(); return [...attive.keys()].some((k) => k.startsWith('modelli:')) || lockModelli(); };
+
+export const vmOccupata = () => { pulisci(); return attive.size > 0 || lockModelli(); };
 const descrizione = () => {
   const k = [...attive.keys()];
   return [k.some((x) => x.startsWith('pm:') || x.startsWith('ass:')) && 'Assistente PM', k.some((x) => x.startsWith('reg:')) && 'registrazione in corso',
-    k.some((x) => x.startsWith('whisper:')) && 'trascrizione'].filter(Boolean).join(', ');
+    k.some((x) => x.startsWith('whisper:')) && 'trascrizione',
+    (k.some((x) => x.startsWith('modelli:')) || lockModelli()) && 'aggiornamento dei modelli di Projexa'].filter(Boolean).join(', ');
 };
 
 // Registra fn, chiamata quando parte un'attività con precedenza. Restituisce la funzione per toglierla.

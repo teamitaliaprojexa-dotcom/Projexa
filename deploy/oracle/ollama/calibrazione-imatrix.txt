@@ -1,0 +1,94 @@
+Riunione di avanzamento progetto presenze e paghe - cliente Alfa Logistica S.r.l.
+Partecipanti: Marco Bianchi (PM TeamSystem), Laura Verdi (consulente HR), Giulia Neri (responsabile personale cliente), Paolo Russo (IT cliente).
+
+Marco Bianchi: Buongiorno a tutti, partiamo dallo stato dell'avvio. La settimana scorsa abbiamo chiuso la configurazione delle causali di assenza e oggi vorrei capire a che punto siete con il file delle anagrafiche.
+Giulia Neri: Il file delle anagrafiche è quasi pronto, mancano i dipendenti della sede di Verona. Ve lo mandiamo entro venerdì, al massimo lunedì mattina.
+Marco Bianchi: Perfetto. Se arriva lunedì riusciamo comunque a fare l'importazione di prova martedì, così mercoledì Laura può controllare i contratti.
+Laura Verdi: Sì, però mi serve anche l'elenco dei livelli del CCNL Commercio e Trasporti, perché alcuni dipendenti hanno superminimi assorbibili e devo capire come li gestite oggi.
+Paolo Russo: Per quello vi giro l'estrazione dal vecchio gestionale. Il problema è che il campo del superminimo non è sempre compilato, in alcuni casi è dentro le note.
+Marco Bianchi: Allora lo segno come rischio: dati incompleti sul superminimo, possibile ritardo sul primo cedolino parallelo. Paolo, riesci a fare una verifica a campione su venti dipendenti?
+Paolo Russo: Sì, entro giovedì.
+Giulia Neri: Un'altra cosa: il nostro amministratore delegato chiede un report mensile delle ore di straordinario per centro di costo. È previsto nell'offerta?
+Marco Bianchi: Nell'offerta c'è il report standard degli straordinari, non quello per centro di costo. Lo apriamo come richiesta di modifica: lo valuto con il team e vi mando una stima entro la prossima settimana.
+Laura Verdi: Decidiamo anche le date della formazione? Io proporrei due sessioni, il 16 e il 26 novembre, la mattina dalle 9:30 alle 12:30.
+Giulia Neri: Va bene, il 16 in presenza a Milano e il 26 da remoto su Teams.
+Marco Bianchi: Ok, decisione presa. Riepilogo le attività: Giulia manda le anagrafiche entro lunedì; Paolo fa la verifica sui superminimi entro giovedì; io preparo la stima per il report per centro di costo; Laura organizza le sessioni di formazione. Il prossimo stato avanzamento è giovedì 7 alle 15.
+
+Appunti della riunione:
+- Configurazione causali di assenza completata la settimana scorsa.
+- File anagrafiche: mancano i dipendenti della sede di Verona; il cliente lo invia entro venerdì, al più tardi lunedì mattina.
+- Importazione di prova prevista martedì, controllo dei contratti mercoledì.
+- Superminimi: il campo non è sempre compilato nel vecchio gestionale; verifica a campione su venti dipendenti entro giovedì.
+- Richiesta del cliente: report mensile degli straordinari per centro di costo, non compreso nell'offerta; stima entro la prossima settimana.
+- Formazione: 16 novembre in presenza a Milano, 26 novembre da remoto, ore 9:30-12:30.
+- Prossimo stato avanzamento: giovedì 7 alle 15.
+
+Oggetto: Recap riunione di avanzamento - progetto presenze e paghe
+
+Gentile Giulia,
+grazie per l'incontro di oggi. Di seguito il riepilogo dei punti principali e delle prossime attività.
+
+Stato del progetto
+La configurazione delle causali di assenza è completata. Il prossimo passo è l'importazione di prova delle anagrafiche, prevista per martedì, seguita dal controllo dei contratti.
+
+Prossime attività
+1. Invio del file anagrafiche completo, comprese le persone della sede di Verona (Alfa Logistica, entro lunedì mattina).
+2. Verifica a campione dei superminimi su venti dipendenti (Paolo Russo, entro giovedì).
+3. Stima per il report mensile degli straordinari per centro di costo (TeamSystem, entro la prossima settimana).
+4. Organizzazione delle sessioni di formazione del 16 e del 26 novembre (Laura Verdi).
+
+Decisioni
+- Formazione in due sessioni: 16 novembre in presenza a Milano e 26 novembre da remoto, dalle 9:30 alle 12:30.
+
+Il prossimo stato avanzamento è fissato per giovedì 7 alle ore 15.
+Un cordiale saluto,
+Marco Bianchi
+
+Recap interno (solo team TeamSystem)
+Clima della riunione buono, il cliente è collaborativo ma i dati arrivano in ritardo. Punto di attenzione principale: i superminimi nel vecchio gestionale sono incompleti e rischiano di far slittare il primo cedolino parallelo previsto a dicembre. La richiesta del report per centro di costo è fuori perimetro: va gestita come change request con stima e approvazione scritta prima di iniziare. Laura è satura fino a metà novembre: verificare la disponibilità per la seconda sessione di formazione.
+
+{"rischi": [{"titolo": "Dati incompleti sui superminimi", "descrizione": "Nel vecchio gestionale il superminimo è spesso nelle note: possibile ritardo sul primo cedolino parallelo.", "probabilita": "media", "impatto": "alto", "owner": "Paolo Russo"}], "decisioni": [{"titolo": "Formazione il 16 e il 26 novembre", "descrizione": "Prima sessione in presenza a Milano, seconda da remoto, 9:30-12:30.", "owner": "Laura Verdi"}], "dipendenze": [{"titolo": "File anagrafiche completo", "descrizione": "L'importazione di prova dipende dall'invio del file con la sede di Verona.", "owner": "Giulia Neri"}], "change_request": [{"titolo": "Report straordinari per centro di costo", "descrizione": "Report mensile non compreso nell'offerta, da stimare.", "owner": "Marco Bianchi"}]}
+
+{"gruppi": [{"todo": ["Organizzare le sessioni di formazione presenze"], "raid": ["Sessioni di formazione presenze il 16 e 26 novembre"], "motivo": "Il To-Do realizza la decisione presa in riunione."}, {"todo": ["Preparare la stima del report straordinari"], "raid": ["Report straordinari per centro di costo"], "motivo": "Stessa richiesta del cliente."}]}
+
+Pezzo di riunione: «Cliente: il file delle causali ve lo mandiamo a breve.» Risposta: SI 1
+Pezzo di riunione: «Ok, ci sentiamo dopo, grazie a tutti.» Risposta: NO
+Pezzo di riunione: «Il cedolino di ottobre è uscito con l'IRPEF sbagliata per tre persone.» Risposta: SI 2
+
+Riunione tecnica integrazione - cliente Beta Servizi S.p.A.
+Andrea Galli (PM): Oggi parliamo dell'integrazione con il sistema contabile. Il tracciato delle scritture del costo del personale lo generiamo dalla procedura paghe, poi va importato nel vostro gestionale.
+Sara Costa (amministrazione cliente): Noi oggi lo carichiamo a mano da un foglio Excel. Ci servirebbe il dettaglio per centro di costo e per commessa, con contributi INPS e INAIL separati.
+Andrea Galli: Il tracciato standard ha già centro di costo e voce contabile. La commessa invece richiede una tabella di ripartizione: chi la mantiene?
+Sara Costa: La manteniamo noi, ma ci serve un modello di file. E vorremmo provare con i dati di settembre prima del rilascio.
+Andrea Galli: Va bene. Vi mando il modello entro mercoledì; la prova con settembre la facciamo la settimana del 20. Il rischio è che il piano dei conti cambi a gennaio con il nuovo esercizio.
+Sara Costa: Sì, il piano dei conti cambia. Lo sapremo a metà dicembre.
+Andrea Galli: Allora lo segno come dipendenza: piano dei conti 2027 da ricevere entro il 15 dicembre, altrimenti il tracciato va rifatto a gennaio.
+
+Appunti:
+- Integrazione contabile: tracciato delle scritture generato dalla procedura paghe, importazione nel gestionale del cliente.
+- Il cliente chiede centro di costo, commessa, contributi INPS e INAIL separati.
+- Ripartizione per commessa: tabella mantenuta dal cliente su modello fornito da TeamSystem entro mercoledì.
+- Prova con i dati di settembre nella settimana del 20.
+- Dipendenza: piano dei conti 2027 atteso entro il 15 dicembre.
+
+Stato avanzamento settimanale - progetto HCM Gamma Retail
+Avanzamento complessivo: 62% (pianificato 70%). Le attività di configurazione organigramma e ruoli sono chiuse; restano aperti i flussi di approvazione delle ferie per i punti vendita e la migrazione dello storico presenze degli ultimi 24 mesi. Il ritardo è dovuto alla validazione delle regole di turnazione, ricevuta con dieci giorni di ritardo. Azioni correttive: aggiunta una giornata di consulenza a settimana fino a fine mese e test di carico anticipati. Budget consumato: 41 giornate su 60. Rischi aperti: 3 (1 alto). Change request approvate: 2, in valutazione: 1.
+
+Verbale di chiusura del progetto
+Il progetto si chiude con il rilascio in produzione del modulo note spese e della app per i dipendenti. Tutte le attività previste dall'offerta sono state completate; restano in carico al supporto due segnalazioni minori sulla stampa del riepilogo mensile. Il cliente conferma l'accettazione dei deliverable. Lezioni apprese: coinvolgere prima l'IT del cliente per le autorizzazioni di rete e definire fin dall'avvio chi approva le modifiche al perimetro.
+
+Domande frequenti dei responsabili del personale
+Come si calcola il rateo di tredicesima per un dipendente assunto a metà mese? Si considera il mese se il rapporto ha coperto almeno quindici giorni. Quando scade l'invio dell'UniEmens? Entro la fine del mese successivo a quello di competenza. Cosa cambia con il passaggio da part-time a full-time a metà periodo? Vanno riproporzionati ferie, permessi e ratei, e aggiornata la comunicazione obbligatoria. Il conguaglio fiscale di fine anno tiene conto delle detrazioni per familiari a carico comunicate dal dipendente; se mancano, l'imposta può risultare a debito.
+
+L'Italia è una repubblica parlamentare. Milano, Roma, Torino, Napoli, Bologna e Firenze sono tra le città più popolose. La primavera porta giornate più lunghe, e a ottobre le prime piogge segnano l'inizio dell'autunno. Nel fine settimana molte famiglie vanno al mare o in montagna; il lunedì si torna in ufficio, si leggono le email arretrate e si organizzano le riunioni della settimana. Un buon piano di progetto indica obiettivi, attività, responsabili, scadenze e criteri di accettazione; senza questi elementi è difficile capire se il lavoro è davvero finito.
+
+Weekly status meeting - payroll migration project
+Owner: Mark. The data migration is 80% complete. The customer will send the remaining employee records by Friday. Risk: incomplete historical data for overtime may delay the parallel run. Decision: training sessions on November 16 and 26. Action items: send the cost-center template by Wednesday; confirm the go-live date by the end of the month.
+
+Tabella ore per centro di costo (ottobre 2026):
+CDC 101 Magazzino Verona - ore ordinarie 3.420, straordinari 186, assenze 212
+CDC 102 Magazzino Milano - ore ordinarie 4.105, straordinari 240, assenze 198
+CDC 201 Amministrazione - ore ordinarie 1.280, straordinari 12, assenze 64
+Totale: ore ordinarie 8.805, straordinari 438, assenze 474.
+
+SELECT p.nome, COUNT(t.id) AS attivita_aperte FROM progetti p JOIN todo t ON t.id_progetto = p.id WHERE t.stato <> 'chiuso' GROUP BY p.nome ORDER BY attivita_aperte DESC;

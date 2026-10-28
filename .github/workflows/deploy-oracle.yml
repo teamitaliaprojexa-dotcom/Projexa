@@ -39,6 +39,9 @@ jobs:
           rsync -az --delete -e "$RSYNC_SSH" --exclude __pycache__ ./pii-service/ "$TARGET/pii-service/"
           # Manuale Utente: lo legge l'assistente AI della dashboard (backend/routes/chatbot.js)
           rsync -az --delete -e "$RSYNC_SSH" ./Documentazione/ "$TARGET/Documentazione/"
+          # Script della VM usati dai job (setup-modelli-imatrix.sh: job quantizza_modelli) e Modelfile.
+          # Senza --delete: in /opt/projexa/deploy/oracle non si cancella niente.
+          rsync -az -e "$RSYNC_SSH" ./deploy/oracle/ "$TARGET/deploy/oracle/"
 
       - name: Installa dipendenze e riavvia
         run: |

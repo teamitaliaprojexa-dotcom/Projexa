@@ -12,7 +12,10 @@
 #   - MemorySwapMax=1G niente swap «infinito» che rallenta tutta la macchina;
 #   - OOMScoreAdjust=500: in caso di memoria finita il kernel sacrifica Ollama, non DB o sito;
 #   - OLLAMA_LOAD_TIMEOUT=15m (2026-10-28): con questi tetti il 14B può metterci più dei 5 minuti
-#     predefiniti a caricarsi («timed out waiting for llama-server to start»).
+#     predefiniti a caricarsi («timed out waiting for llama-server to start»);
+#   - OLLAMA_FLASH_ATTENTION=1 + OLLAMA_KV_CACHE_TYPE=q8_0 (2026-10-28): la memoria del contesto
+#     (cache KV) a 8 bit invece di 16, circa metà RAM per il contesto (~1,1 GB in meno per 8B e
+#     4B a 16k, ~1,2 GB per il 14B) con qualità praticamente uguale. Non q4_0: con Qwen peggiora.
 # Il backend (routes/ai.js, liberaRamOllama) scarica i modelli non in uso prima di ogni recap e
 # usa 3 core (OLLAMA_RECAP_THREADS), così il 14B sta sotto il tetto.
 # Il file è un drop-in separato: le variabili già in projexa.conf (OLLAMA_MAX_LOADED_MODELS...)
@@ -33,6 +36,8 @@ MemoryMax=17G
 MemorySwapMax=1G
 OOMScoreAdjust=500
 Environment=OLLAMA_LOAD_TIMEOUT=15m
+Environment=OLLAMA_FLASH_ATTENTION=1
+Environment=OLLAMA_KV_CACHE_TYPE=q8_0
 UNIT
 
 sudo systemctl daemon-reload
@@ -42,4 +47,5 @@ systemctl is-active ollama
 for p in CPUQuotaPerSecUSec CPUWeight Nice MemoryHigh MemoryMax MemorySwapMax OOMScoreAdjust; do
   printf '%-20s %s\n' "$p" "$(systemctl show -p "$p" --value ollama)"
 done
+systemctl show -p Environment --value ollama | tr ' ' '\n' | grep -E 'FLASH_ATTENTION|KV_CACHE' || true
 free -h

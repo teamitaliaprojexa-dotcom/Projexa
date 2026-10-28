@@ -54,7 +54,7 @@ async function serviziFermi() {
 // Motivi per cui adesso la VM NON va riavviata (elenco vuoto = libera).
 async function motiviVmOccupata(rigaId) {
   const motivi = [];
-  if (vmOccupata()) motivi.push('registrazione, trascrizione o Assistente PM in corso');
+  if (vmOccupata()) motivi.push('registrazione, trascrizione, Assistente PM o aggiornamento dei modelli in corso');
   const lavori = lavoriProjexaInCorso();
   if (lavori.length) motivi.push(`${lavori.length} lavor${lavori.length === 1 ? 'o' : 'i'} di Projexa in corso (${lavori.map((l) => l.cosa).join(', ')})`);
   if (fileRiunioniAttive()) motivi.push('recap o recap interni in fila');

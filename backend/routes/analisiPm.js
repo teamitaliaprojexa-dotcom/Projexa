@@ -30,7 +30,7 @@ import { nomiClientiProgetti } from '../jobs/notifiche.js';
 import { TIPI as TIPI_RECAP } from '../jobs/analisiRecap.js';
 import { proponiRevisione, applicaProposta } from '../jobs/revisionePrompt.js';
 import { istruzioniRecapProjexa } from './ai.js';
-import { pmProjexaInCorso } from '../config/ollamaPrecedenza.js';
+import { pmProjexaInCorso, segnaModelli, modelliInAggiornamento } from '../config/ollamaPrecedenza.js';
 import { getPromptFor } from '../config/prompts.js';
 import { pseudonimizzaJsonl } from '../config/pii.js';
 import { leggiJson } from '../config/pmCore.js';
@@ -808,11 +808,12 @@ const FAMIGLIE = {
     prova: [{ role: 'user', content: 'Scrivi in una riga gli appunti di questo pezzo di riunione:\nMario Rossi: il file delle causali ve lo mandiamo entro venerdì.' }]
   }
 };
-const famiglia = (req) => {
-  const f = FAMIGLIE[String((req.query && req.query.famiglia) || (req.body && req.body.famiglia) || 'pm')];
+const famigliaDa = (chiave) => {
+  const f = FAMIGLIE[String(chiave || 'pm')];
   if (!f) throw errore(400, 'Famiglia di modelli non valida');
   return { ...f, bk: new RegExp(`^${f.nome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-bk-\\d{8}-\\d{4}(:latest)?$`) };
 };
+const famiglia = (req) => famigliaDa((req.query && req.query.famiglia) || (req.body && req.body.famiglia));
 const soloVm = () => { if (process.platform !== 'linux') throw errore(400, 'Disponibile solo sulla VM (non in locale)'); };
 // La prova carica il modello in RAM: durante una call toglierebbe posto all'Assistente PM.
 const noDuranteCall = () => { if (pmProjexaInCorso()) throw errore(409, 'L\'Assistente PM (Pm projexa) è in uso: riprova a call finita'); };
@@ -845,7 +846,10 @@ router.get('/modelli', async (req, res) => {
     }));
     let note = {};
     try { note = JSON.parse(fs.readFileSync(path.join(CARTELLA_MODELLI, 'versioni.json'), 'utf8')); } catch { /* nessuna installazione */ }
-    res.json({ modelli: nomi.sort((a, b) => String(b.modificato).localeCompare(String(a.modificato))), note, base: f.base, nome: f.nome });
+    const chiave = Object.keys(FAMIGLIE).find((k) => FAMIGLIE[k].nome === f.nome);
+    const basi = leggiBasi()[f.base] || null;
+    res.json({ modelli: nomi.sort((a, b) => String(b.modificato).localeCompare(String(a.modificato))), note, base: f.base, nome: f.nome,
+      baseImatrix: basi && basi.imatrix ? { f16: !!basi.f16, quantizzato: basi.quantizzato } : null, daRiapplicare: famiglieDaRiapplicare().includes(chiave) });
   } catch (e) { rispondiErrore(res, e, 'modelli'); }
 });
 
@@ -882,8 +886,28 @@ router.post('/modelli/carica', async (req, res) => {
 //   3. Modelfile = quello della base (template, stop...) con FROM il file unito + i parametri.
 // Il file della base sta tra i blob di Ollama, leggibili solo dall'utente ollama: export-lora
 // gira con sudo. Spazio su disco: serve circa 4 volte la base (unito F16 + Q4 + copia di Ollama).
+// 2026-10-28: se la base è stata rifatta da deploy/oracle/setup-modelli-imatrix.sh (basi/basi.json)
+// l'adattatore si unisce alla base ORIGINALE F16 e si quantizza una volta sola, con la matrice di
+// importanza: niente doppia riduzione a 4 bit. Senza F16 (base non ancora rifatta, F16 tolta o
+// spazio insufficiente) si unisce al Q4_K_M come prima, con la matrice se c'è: l'addestramento
+// funziona sempre, cambia solo la qualità. Il tipo di unione resta in versioni.json (unione).
 const LLAMA_CPP_BIN = process.env.LLAMA_CPP_BIN || '/opt/projexa/llama-cpp/src/build/bin';
 const PARAM_NOSTRI = /^PARAMETER\s+(num_ctx|temperature|top_p|repeat_penalty|num_predict)\b/;
+const UNIONE_MIGLIORE = 'F16 + imatrix';
+export const leggiBasi = () => { try { return JSON.parse(fs.readFileSync(path.join(CARTELLA_MODELLI, 'basi', 'basi.json'), 'utf8')); } catch { return {}; } };
+const leggiVersioni = () => { try { return JSON.parse(fs.readFileSync(path.join(CARTELLA_MODELLI, 'versioni.json'), 'utf8')); } catch { return {}; } };
+
+// Modelfile di un modello di Ollama e percorso del suo file .gguf (null se non è un file).
+async function fileModello(nome) {
+  const mf = await ollama(['show', nome, '--modelfile'], 60000);
+  const da = (/^FROM\s+(\S+)/m.exec(mf) || [])[1];
+  return { mf, da: da && da.startsWith('/') ? da : null };
+}
+async function dimensioneFile(file) {
+  let n = 0;
+  await eseguiRighe('sudo', ['-n', 'stat', '-c', '%s', file], { timeout: 30000, suRiga: (r) => { n = Number(r.trim()) || 0; } });
+  return n;
+}
 
 // Comando con l'output letto riga per riga (per l'avanzamento). Errore = ultime righe.
 function eseguiRighe(cmd, args, { timeout, suRiga = () => {} }) {
@@ -917,15 +941,23 @@ async function unisciAdattatore(f, adattatore, cartella, parametri, avanz) {
   for (const t of ['llama-export-lora', 'llama-quantize']) {
     if (!fs.existsSync(path.join(LLAMA_CPP_BIN, t))) throw errore(500, `Strumento ${t} non installato sulla VM (deploy/oracle/setup-llama-cpp.sh)`);
   }
-  const mfBase = await ollama(['show', f.base, '--modelfile'], 60000);
-  const da = (/^FROM\s+(\S+)/m.exec(mfBase) || [])[1];
-  if (!da || !da.startsWith('/')) throw errore(500, `File del modello base ${f.base} non trovato`);
-  let dimBase = 0;
-  await eseguiRighe('sudo', ['-n', 'stat', '-c', '%s', da], { timeout: 30000, suRiga: (r) => { dimBase = Number(r.trim()) || 0; } });
+  // Template, stop... restano quelli della base in uso (il Q4_K_M con lo stesso nome).
+  const { mf: mfBase, da: daQ4 } = await fileModello(f.base);
+  if (!daQ4) throw errore(500, `File del modello base ${f.base} non trovato`);
+  const info = leggiBasi()[f.base] || {};
+  const imatrix = info.imatrix && fs.existsSync(info.imatrix) ? info.imatrix : null;
   const st = fs.statfsSync(cartella);
   const libero = st.bavail * st.bsize;
-  if (dimBase && libero < dimBase * 4.2) {
-    throw errore(507, `Spazio su disco insufficiente: servono circa ${Math.ceil(dimBase * 4.2 / 1e9)} GB liberi, ce ne sono ${Math.floor(libero / 1e9)}`);
+  let da = daQ4, origine = 'Q4_K_M', dimBase = await dimensioneFile(daQ4), fattore = 4.2;
+  if (info.f16) {
+    // Unito F16 (quanto la F16) + Q4 + copia di Ollama (~0,3 della F16 ciascuno).
+    const f16 = await fileModello(info.f16).catch(() => ({}));
+    const dimF16 = f16.da ? await dimensioneFile(f16.da).catch(() => 0) : 0;
+    if (dimF16 && libero >= dimF16 * 1.8) { da = f16.da; origine = 'F16'; dimBase = dimF16; fattore = 1.8; }
+    else console.warn(`[ANALISI PM] ${f.nome}: base F16 ${info.f16} ${dimF16 ? `senza spazio (servono ~${Math.ceil(dimF16 * 1.8 / 1e9)} GB)` : 'assente'}: unione dal Q4_K_M`);
+  }
+  if (dimBase && libero < dimBase * fattore) {
+    throw errore(507, `Spazio su disco insufficiente: servono circa ${Math.ceil(dimBase * fattore / 1e9)} GB liberi, ce ne sono ${Math.floor(libero / 1e9)}`);
   }
   const unito16 = path.join(cartella, 'unito-f16.gguf');
   const unito = path.join(cartella, 'unito.gguf');
@@ -935,16 +967,17 @@ async function unisciAdattatore(f, adattatore, cartella, parametri, avanz) {
     avanz('unione', 0);
     let totale = 0, fatti = 0;
     await eseguiRighe('sudo', ['-n', path.join(LLAMA_CPP_BIN, 'llama-export-lora'), '-m', da, '--lora', adattatore, '-o', unito16, '-t', '3'], {
-      timeout: 2 * 3600000,
+      timeout: 3 * 3600000,
       suRiga: (r) => {
         if (/^file_input:\s+[\w.]+\.(weight|bias)$/.test(r)) totale += 1;
         else if (/^(merge|copy)_tensor\s*:\s+\S+\s+\[/.test(r)) { fatti += 1; if (totale) avanz('unione', fatti / totale); }
       }
     });
     await eseguiRighe('sudo', ['-n', 'chown', `${os.userInfo().username}:`, unito16], { timeout: 30000 });
-    // llama-quantize: «[  12/ 399] blk.0.attn_k.weight ...».
+    // llama-quantize: «[  12/ 399] blk.0.attn_k.weight ...». La matrice della base vale anche per
+    // il modello unito (l'adattatore cambia poco i pesi, i nomi dei tensori sono gli stessi).
     avanz('riduzione', 0);
-    await eseguiRighe(path.join(LLAMA_CPP_BIN, 'llama-quantize'), ['--allow-requantize', unito16, unito, 'Q4_K_M', '3'], {
+    await eseguiRighe(path.join(LLAMA_CPP_BIN, 'llama-quantize'), [...(imatrix ? ['--imatrix', imatrix] : []), '--allow-requantize', unito16, unito, 'Q4_K_M', '3'], {
       timeout: 2 * 3600000,
       suRiga: (r) => { const m = /^\[\s*(\d+)\s*\/\s*(\d+)\s*\]/.exec(r.trim()); if (m) avanz('riduzione', Number(m[1]) / Number(m[2])); }
     });
@@ -953,7 +986,7 @@ async function unisciAdattatore(f, adattatore, cartella, parametri, avanz) {
   }
   const iFrom = mfBase.split('\n').findIndex((x) => /^FROM\s/.test(x));
   const corpo = mfBase.split('\n').filter((l, i) => !/^FROM\s/.test(l) && !PARAM_NOSTRI.test(l) && !(i < iFrom && /^#/.test(l)));
-  return { unito, modelfile: [`FROM ${unito}`, ...corpo, ...parametri].join('\n') + '\n' };
+  return { unito, modelfile: [`FROM ${unito}`, ...corpo, ...parametri].join('\n') + '\n', unione: `${origine}${imatrix ? ' + imatrix' : ''}` };
 }
 
 // Installazione IN BACKGROUND (2026-10-23): con l'unione dura 15-60 minuti, troppo per una
@@ -1005,6 +1038,7 @@ async function eseguiInstallazione(f, caricato, nota, email) {
   try {
     const u = await unisciAdattatore(f, adattatore, cartella, parametri, avanzamento);
     unito = u.unito;
+    if (installazione) installazione.unione = u.unione;
     fs.writeFileSync(path.join(cartella, 'Modelfile'), u.modelfile);
     // «copying file sha256:... 45%» mentre Ollama si copia il modello.
     avanzamento('creazione', 0);
@@ -1018,11 +1052,11 @@ async function eseguiInstallazione(f, caricato, nota, email) {
     avanzamento('prova', 0);
     const prova = await ollamaApi('/api/chat', { model: f.nome, stream: false, think: false, keep_alive: f.nome === MODELLO ? '4h' : 0,
       messages: f.prova, options: { num_predict: 60 } });
-    const versioni = (() => { try { return JSON.parse(fs.readFileSync(path.join(CARTELLA_MODELLI, 'versioni.json'), 'utf8')); } catch { return {}; } })();
-    versioni[f.nome] = { installato: ora.toISOString(), da: email, nota: String(nota || '').slice(0, 300), backup: haAttuale ? backup : null, cartella };
+    const versioni = leggiVersioni();
+    versioni[f.nome] = { installato: ora.toISOString(), da: email, nota: String(nota || '').slice(0, 300), backup: haAttuale ? backup : null, cartella, unione: u.unione };
     fs.writeFileSync(path.join(CARTELLA_MODELLI, 'versioni.json'), JSON.stringify(versioni, null, 1));
-    console.log(`[ANALISI PM] nuovo ${f.nome} installato da ${email} (backup ${haAttuale ? backup : 'nessuno'})`);
-    return { backup: haAttuale ? backup : null, prova: String((prova.message && prova.message.content) || '').slice(0, 300) };
+    console.log(`[ANALISI PM] nuovo ${f.nome} installato da ${email} (unione ${u.unione}, backup ${haAttuale ? backup : 'nessuno'})`);
+    return { backup: haAttuale ? backup : null, unione: u.unione, prova: String((prova.message && prova.message.content) || '').slice(0, 300) };
   } catch (e) {
     if (unito) fs.rmSync(unito, { force: true });
     if (haAttuale) await ollamaApi('/api/copy', { source: backup, destination: f.nome }).catch(() => {});
@@ -1039,6 +1073,7 @@ router.post('/modelli/installa', async (req, res) => {
     const f = famiglia(req);
     noDuranteCall();
     if (installazione && installazione.esito === 'in_corso') throw errore(409, `È già in corso l'installazione di ${installazione.nome}: attendi che finisca`);
+    if (modelliInAggiornamento()) throw errore(409, 'È in corso l\'aggiornamento delle basi dei modelli (job quantizza_modelli): riprova a lavoro finito');
     const id = String((req.body || {}).upload_id || '');
     if (!UUID.test(id)) throw errore(400, 'Caricamento non valido');
     const caricato = path.join(CARTELLA_MODELLI, 'caricamenti', `${id}.gguf`);
@@ -1058,17 +1093,67 @@ router.post('/modelli/installa', async (req, res) => {
       fs.rmSync(caricato, { force: true });
       throw errore(400, `Questo adattatore è stato addestrato su Qwen3 ${tagliaFile}B, ma ${f.nome} usa Qwen3 ${tagliaFamiglia}B. ${giusta ? `Va installato su ${giusta}, ` : ''}oppure va rifatto l'addestramento con il notebook di ${f.nome}.`);
     }
-    const adesso = new Date().toISOString();
-    installazione = { famiglia: req.body.famiglia || 'pm', nome: f.nome, fase: 'backup', percento: 0, iniziata: adesso, faseDal: adesso, esito: 'in_corso', da: req.user.email };
-    const mia = installazione;
-    eseguiInstallazione(f, caricato, req.body.nota, req.user.email)
-      .then((r) => Object.assign(mia, { esito: 'ok', percento: 100, finita: new Date().toISOString(), ...r }))
-      .catch((e) => {
-        console.error(`❌ [ANALISI PM] installazione di ${f.nome}:`, e.message);
-        Object.assign(mia, { esito: 'errore', finita: new Date().toISOString(), messaggio: e.message });
-      });
+    avviaInstallazione(req.body.famiglia || 'pm', f, caricato, req.body.nota, req.user.email);
     res.status(202).json({ avviato: true });
   } catch (e) { rispondiErrore(res, e, 'installazione'); }
+});
+
+// Avvio in background (una installazione alla volta). Mentre lavora i recap e le funzioni con
+// «Projexa» aspettano (segnaModelli, config/ollamaPrecedenza.js). Restituisce la promessa
+// dell'esito (la usa jobs/quantizzaModelli.js); la pagina segue GET /modelli/installazione.
+function avviaInstallazione(chiave, f, caricato, nota, email) {
+  if (installazione && installazione.esito === 'in_corso') throw errore(409, `È già in corso l'installazione di ${installazione.nome}: attendi che finisca`);
+  const adesso = new Date().toISOString();
+  installazione = { famiglia: chiave, nome: f.nome, fase: 'backup', percento: 0, iniziata: adesso, faseDal: adesso, esito: 'in_corso', da: email };
+  const mia = installazione;
+  segnaModelli('installazione', true);
+  return eseguiInstallazione(f, caricato, nota, email)
+    .then((r) => Object.assign(mia, { esito: 'ok', percento: 100, finita: new Date().toISOString(), ...r }))
+    .catch((e) => {
+      console.error(`❌ [ANALISI PM] installazione di ${f.nome}:`, e.message);
+      return Object.assign(mia, { esito: 'errore', finita: new Date().toISOString(), messaggio: e.message });
+    })
+    .finally(() => segnaModelli('installazione', false));
+}
+
+// Modelli addestrati da riapplicare sulla base rifatta (F16 + imatrix, setup-modelli-imatrix.sh):
+// installati PRIMA che la base fosse rifatta e con l'adattatore ancora salvato sulla VM. Chi è
+// già stato reinstallato dopo (anche dal Q4_K_M per mancanza di spazio) non torna in elenco.
+export function famiglieDaRiapplicare() {
+  const basi = leggiBasi();
+  const versioni = leggiVersioni();
+  return Object.keys(FAMIGLIE).filter((k) => {
+    const f = FAMIGLIE[k], v = versioni[f.nome], b = basi[f.base];
+    return v && b && b.f16 && b.imatrix && v.unione !== UNIONE_MIGLIORE && !(new Date(v.installato) >= new Date(b.quantizzato))
+      && v.cartella && fs.existsSync(path.join(v.cartella, 'adapter.gguf'));
+  });
+}
+
+// Stesso adattatore dell'ultima installazione, unito di nuovo (oggi: alla base F16 con la matrice).
+// Restituisce la promessa dell'esito.
+export function riapplicaAdattatore(chiave, email) {
+  soloVm();
+  const f = famigliaDa(chiave);
+  noDuranteCall();
+  if (installazione && installazione.esito === 'in_corso') throw errore(409, `È già in corso l'installazione di ${installazione.nome}: attendi che finisca`);
+  if (modelliInAggiornamento()) throw errore(409, 'È in corso l\'aggiornamento delle basi dei modelli (job quantizza_modelli): riprova a lavoro finito');
+  const v = leggiVersioni()[f.nome];
+  const adattatore = v && v.cartella ? path.join(v.cartella, 'adapter.gguf') : '';
+  if (!adattatore || !fs.existsSync(adattatore)) throw errore(404, `Nessun adattatore di ${f.nome} salvato sulla VM: va caricato di nuovo`);
+  fs.mkdirSync(path.join(CARTELLA_MODELLI, 'caricamenti'), { recursive: true });
+  const caricato = path.join(CARTELLA_MODELLI, 'caricamenti', `${crypto.randomUUID()}.gguf`);
+  fs.copyFileSync(adattatore, caricato);
+  const nota = `Riapplicato sulla base nuova${v.nota ? ` · ${v.nota}` : ''}`;
+  return avviaInstallazione(chiave, f, caricato, nota, email);
+}
+
+// Body: { famiglia }. Risposta 202: l'avanzamento è in GET /modelli/installazione.
+router.post('/modelli/riapplica', async (req, res) => {
+  try {
+    const p = riapplicaAdattatore(String((req.body || {}).famiglia || 'pm'), req.user.email);
+    p.catch(() => {});
+    res.status(202).json({ avviato: true });
+  } catch (e) { rispondiErrore(res, e, 'riapplicazione'); }
 });
 
 router.get('/modelli/installazione', (req, res) => {

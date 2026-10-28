@@ -348,12 +348,16 @@
             <div class="bar hidden" id="barra"><div></div></div>
             <div id="avanz" class="muted" style="margin-top:0.4rem"></div>
             <div id="fasiInst" class="muted" style="margin-top:0.4rem; line-height:1.7"></div>
-            <p class="muted" style="margin-top:0.6rem">Projexa fa il <b>backup</b> del modello attuale, unisce il tuo adattatore alla base del modello scelto sopra (qwen3:8b, qwen3:14b o qwen3:4b-instruct per il filtro), crea il nuovo modello con gli stessi parametri e lo prova: se qualcosa non va torna da solo al precedente. Non si può fare mentre l'Assistente PM con Projexa è in uso. La VM lavora a lungo: circa 15-30 minuti per i modelli 4B e 8B, fino a un'ora per i 14B. Lascia la pagina aperta fino al messaggio finale.</p>
+            <p class="muted" style="margin-top:0.6rem">Projexa fa il <b>backup</b> del modello attuale, unisce il tuo adattatore alla base del modello scelto sopra (qwen3:8b, qwen3:14b o qwen3:4b-instruct per il filtro), crea il nuovo modello con gli stessi parametri e lo prova: se qualcosa non va torna da solo al precedente. Quando la base è già stata rifatta dall'originale (job «quantizza_modelli»), l'unione parte dai pesi originali e la riduzione a 4 bit si fa una volta sola, con una qualità migliore. Non si può fare mentre l'Assistente PM con Projexa è in uso. La VM lavora a lungo: circa 15-30 minuti per i modelli 4B e 8B, fino a un'ora per i 14B. Lascia la pagina aperta fino al messaggio finale.</p>
         </div>
         <div class="card scorri">
             <h2>Modelli <span id="nomeFamiglia">pm-projexa</span> sulla VM</h2>
             <table><thead><tr><th>Nome</th><th>Dimensione</th><th>Data</th><th></th></tr></thead><tbody id="modelli"></tbody></table>
             <div id="notaModello" class="muted" style="margin-top:0.6rem"></div>
+            <div id="riapplicaBox" class="hidden" style="margin-top:0.6rem">
+                <button class="btn" id="riapplica"><i class="fas fa-arrows-rotate" aria-hidden="true"></i> Riapplica sulla base nuova</button>
+                <span class="muted">La base è stata rifatta dall'originale: riapplicando lo stesso adattatore il modello addestrato guadagna qualità, con la stessa RAM.</span>
+            </div>
         </div>
     </section>
     </div>
@@ -564,6 +568,7 @@
         const tutte = fam() === 'tutte';
         $('installa').disabled = tutte; $('file').disabled = tutte; $('nota').disabled = tutte;
         inCarica($('modelli'), 4);
+        $('riapplicaBox').classList.add('hidden');
         if (tutte) { try { await caricaTutte(); pronto($('modelli')); } catch (e) { inErrore($('modelli'), e, caricaModelli, 4); } return; }
         try {
             $('nomeFamiglia').textContent = NOMI_FAMIGLIA[fam()];
@@ -572,7 +577,9 @@
             $('modelli').innerHTML = d.modelli.map((m) => rigaModello(m, fam())).join('')
                 || `<tr><td colspan="4" class="muted">Nessun modello ${esc(d.nome)} sulla VM${fam() === 'recap' ? ' (finché manca, il recap con Projexa usa qwen3:8b: crealo con deploy/oracle/ollama/recap-projexa.Modelfile)' : fam() === 'recap14' ? ' (finché manca, «Projexa 14B» usa recap-projexa: crealo con deploy/oracle/ollama/recap-projexa-14b.Modelfile)' : fam() === 'filtro' ? ' (finché manca, «Projexa 4B + 8B» usa qwen3:4b-instruct con gli esempi: nasce col primo adattatore caricato qui)' : fam() === 'assoc' ? ' (finché manca, l’associazione con Projexa usa qwen3:14b con i casi valutati: nasce col primo adattatore caricato qui)' : fam() === 'raid' ? ' (finché manca, RAID e Change Request con «Projexa 14B» usano qwen3:14b: nasce col primo adattatore caricato qui)' : ''}.</td></tr>`;
             const n = d.note && d.note[d.nome];
-            $('notaModello').textContent = n ? `Ultima installazione: ${dataOra(n.installato)}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : `${d.nome} è ancora il modello di partenza (${d.base} senza addestramento). I backup occupano poco spazio: la base ${d.base} è condivisa.`;
+            $('notaModello').textContent = (n ? `Ultima installazione: ${dataOra(n.installato)}${n.unione ? ` · unione ${n.unione}` : ''}${n.nota ? ` · ${n.nota}` : ''}${n.backup ? ` · backup ${n.backup}` : ''}` : `${d.nome} è ancora il modello di partenza (${d.base} senza addestramento). I backup occupano poco spazio: la base ${d.base} è condivisa.`)
+                + (d.baseImatrix ? ` · base ${d.base} rifatta il ${dataOra(d.baseImatrix.quantizzato)} (Q4_K_M con imatrix${d.baseImatrix.f16 ? ', originale F16 sulla VM' : ''})` : '');
+            $('riapplicaBox').classList.toggle('hidden', !d.daRiapplicare);
         } catch (e) { inErrore($('modelli'), e, caricaModelli, 4); }
     }
     $('modelli').onclick = async (e) => {
@@ -613,6 +620,16 @@
         }
     };
 
+    // Stesso adattatore dell'ultima installazione, unito di nuovo sulla base rifatta (F16 + imatrix).
+    $('riapplica').onclick = async () => {
+        if (!confirm(`Riapplicare l'ultimo adattatore di ${NOMI_FAMIGLIA[fam()]} sulla base nuova? Prima viene fatto il backup del modello attuale; la VM lavora 15-60 minuti.`)) return;
+        try {
+            await api('POST', '/modelli/riapplica', { famiglia: fam() });
+            $('riapplicaBox').classList.add('hidden');
+            seguiInstallazione();
+        } catch (e) { errore(e); }
+    };
+
     // Avanzamento dell'installazione sul server (GET /modelli/installazione ogni 3 secondi): barra
     // con la percentuale totale, fasi, tempo trascorso e stima del tempo rimanente.
     const durata = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); const m = Math.floor(s / 60); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : m ? `${m} min ${String(s % 60).padStart(2, '0')} s` : `${s} s`; };
@@ -644,7 +661,7 @@
         const chiave = `inst-vista-${s.iniziata}`;
         if (sessionStorage.getItem(chiave)) return;
         sessionStorage.setItem(chiave, '1');
-        if (s.esito === 'ok') avviso(`Nuovo ${s.nome} installato in ${durata(new Date(s.finita) - new Date(s.iniziata))}${s.backup ? `, backup: ${s.backup}` : ''}. Prova: «${s.prova || ''}»`);
+        if (s.esito === 'ok') avviso(`Nuovo ${s.nome} installato in ${durata(new Date(s.finita) - new Date(s.iniziata))}${s.unione ? ` (unione ${s.unione})` : ''}${s.backup ? `, backup: ${s.backup}` : ''}. Prova: «${s.prova || ''}»`);
         else avviso(s.messaggio || 'Installazione non riuscita', 'err');
         caricaModelli();
     }

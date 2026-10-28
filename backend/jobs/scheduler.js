@@ -28,6 +28,7 @@ import { eseguiConservazioneRiunioni } from './conservazione.js';
 import { eseguiAssociaTodoRaid } from './associaTodoRaid.js';
 import { eseguiAnalisiPm } from './analisiPm.js';
 import { eseguiAnalisiRecap } from './analisiRecap.js';
+import { eseguiQuantizzaModelli } from './quantizzaModelli.js';
 import { conContestoAudit } from '../config/auditContext.js';
 
 // Job schedulabili: la chiave è il valore di job_schedules.job.
@@ -70,7 +71,10 @@ const JOBS = {
   analisi_pm: () => eseguiAnalisiPm(),
   // Insegnante notturno del recap (jobs/analisiRecap.js): appunti, recap cliente e recap interno
   // scritti da Gemini/ChatGPT sulle riunioni segnate, esempi per addestrare recap-projexa.
-  analisi_recap: () => eseguiAnalisiRecap()
+  analisi_recap: () => eseguiAnalisiRecap(),
+  // Basi dei modelli di Ollama F16 + Q4_K_M con imatrix (jobs/quantizzaModelli.js): un passo per
+  // giro in background (una base o un modello addestrato da riapplicare), solo a VM libera.
+  quantizza_modelli: (riga) => eseguiQuantizzaModelli(riga)
 };
 
 // Job eseguiti dal BROWSER dell'utente (utente_config) mentre Projexa è aperta, non dal
@@ -99,7 +103,8 @@ export const INFO_JOB = {
   conservazione_riunioni: { etichetta: 'Conservazione: trascrizioni e recap oltre 24 mesi', jira: false },
   associa_todo_raid: { etichetta: 'Associazione automatica To-Do e RAID (AI)', jira: false, perUtente: true },
   analisi_pm: { etichetta: 'Analisi PM notturna delle riunioni segnate (AI)', jira: false, perUtente: true },
-  analisi_recap: { etichetta: 'Analisi Recap notturna: esempi per addestrare recap-projexa (AI)', jira: false, perUtente: true }
+  analisi_recap: { etichetta: 'Analisi Recap notturna: esempi per addestrare recap-projexa (AI)', jira: false, perUtente: true },
+  quantizza_modelli: { etichetta: 'Modelli Projexa: basi F16 + Q4_K_M con imatrix (un passo per giro, VM libera)', jira: false }
 };
 
 export function schedulerAttivo() {
