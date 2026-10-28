@@ -718,7 +718,7 @@ router.put('/raid/:id', async (req, res) => {
     if (!r) throw errore(404, 'Confronto non trovato');
     if (scelta === 'insegnante' && (r.insegnante_stato !== 'pronto' || !elenchiRaid(r.insegnante_risposta))) throw errore(409, 'La risposta dell\'AI esterna non c\'è o non è leggibile');
     if (scelta === 'projexa' && !elenchiRaid(r.projexa_risposta)) throw errore(409, 'La risposta di Projexa non è leggibile: scegli l\'altra o «nessuna»');
-    await db.query(`UPDATE pm_raid_analisi SET scelta = $4, scelta_il = CASE WHEN $4::text IS NULL THEN NULL ELSE now() END
+    await db.query(`UPDATE pm_raid_analisi SET scelta = $4::varchar, scelta_il = CASE WHEN $4::varchar IS NULL THEN NULL ELSE now() END
                      WHERE id = $3 AND tenant_id = $1 AND user_id = $2`, [...chi(req), req.params.id, scelta]);
     res.json({ ok: true, scelta });
   } catch (e) { rispondiErroreRaid(res, e, 'scelta raid'); }
