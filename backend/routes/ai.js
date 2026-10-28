@@ -1112,7 +1112,10 @@ export function localRecapMode(providerName) {
 
 // Istruzioni per riassumere un pezzo di trascrizione. Regole rigide perché il modello locale
 // (7B) tende a saltare gli argomenti brevi, a inventare scadenze e ad assegnare azioni a caso.
-export const RECAP_CHUNK_PROMPT = `Questo è un pezzo ({{N}} di {{TOT}}) della trascrizione di una riunione{{CONTESTO}}.
+// 2026-10-28: regole fisse PRIMA, numero del pezzo e titolo in fondo accanto al testo. Così
+// l'inizio del prompt è uguale per tutti i pezzi e Ollama lo tiene già letto (cache del prompt)
+// invece di rileggerlo a ogni pezzo.
+export const RECAP_CHUNK_PROMPT = `Ti do un pezzo della trascrizione di una riunione.
 La trascrizione è automatica: può contenere parole storpiate e chiacchiere fuori tema.
 
 Scrivi appunti in italiano, in testo semplice, un punto per riga:
@@ -1123,6 +1126,7 @@ Scrivi appunti in italiano, in testo semplice, un punto per riga:
 - Ignora saluti, battute e discorsi personali.
 Usa solo informazioni presenti nel testo, senza introduzioni né commenti.
 
+Pezzo {{N}} di {{TOT}} della riunione{{CONTESTO}}.
 Trascrizione:
 {{TESTO}}`;
 
