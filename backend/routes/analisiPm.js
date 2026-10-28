@@ -950,11 +950,12 @@ async function unisciAdattatore(f, adattatore, cartella, parametri, avanz) {
   const libero = st.bavail * st.bsize;
   let da = daQ4, origine = 'Q4_K_M', dimBase = await dimensioneFile(daQ4), fattore = 4.2;
   if (info.f16) {
-    // Unito F16 (quanto la F16) + Q4 + copia di Ollama (~0,3 della F16 ciascuno).
+    // Picco: unito F16 (quanto la F16) + Q4 (~0,32); l'unito F16 si toglie prima della copia di
+    // Ollama. 1,4 con un po' di margine (14B: ~41 GB).
     const f16 = await fileModello(info.f16).catch(() => ({}));
     const dimF16 = f16.da ? await dimensioneFile(f16.da).catch(() => 0) : 0;
-    if (dimF16 && libero >= dimF16 * 1.8) { da = f16.da; origine = 'F16'; dimBase = dimF16; fattore = 1.8; }
-    else console.warn(`[ANALISI PM] ${f.nome}: base F16 ${info.f16} ${dimF16 ? `senza spazio (servono ~${Math.ceil(dimF16 * 1.8 / 1e9)} GB)` : 'assente'}: unione dal Q4_K_M`);
+    if (dimF16 && libero >= dimF16 * 1.4) { da = f16.da; origine = 'F16'; dimBase = dimF16; fattore = 1.4; }
+    else console.warn(`[ANALISI PM] ${f.nome}: base F16 ${info.f16} ${dimF16 ? `senza spazio (servono ~${Math.ceil(dimF16 * 1.4 / 1e9)} GB)` : 'assente'}: unione dal Q4_K_M`);
   }
   if (dimBase && libero < dimBase * fattore) {
     throw errore(507, `Spazio su disco insufficiente: servono circa ${Math.ceil(dimBase * fattore / 1e9)} GB liberi, ce ne sono ${Math.floor(libero / 1e9)}`);

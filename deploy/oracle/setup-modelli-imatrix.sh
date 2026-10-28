@@ -10,7 +10,7 @@
 #      la F16 del 14B non sta nei 24 GB della VM. Il file .imatrix contiene solo statistiche, non testo;
 #   3. rifà il Q4_K_M dalla F16 con la matrice (stessa RAM di prima, qualità migliore) e lo mette al
 #      posto della base con lo stesso nome (qwen3:8b ecc.): nessuna variabile del .env da cambiare.
-#      La versione di prima resta come <base>-originale (es. qwen3:8b-originale) finché non la togli;
+#      Per tornare alla versione di prima: ollama pull <base> (riscarica il Q4_K_M di Ollama);
 #   4. ricrea i modelli dei Modelfile di deploy/oracle/ollama NON addestrati (pm-projexa,
 #      recap-projexa...) sulla base nuova; quelli addestrati si riapplicano dal job o da Analisi PM;
 #   5. annota base, F16 e matrice in ~/projexa-modelli/basi/basi.json: da lì Analisi PM › Modello
@@ -22,8 +22,8 @@
 #   bash /opt/projexa/deploy/oracle/setup-modelli-imatrix.sh qwen3:8b
 #   bash /opt/projexa/deploy/oracle/setup-modelli-imatrix.sh qwen3:4b-instruct=qwen3:4b-instruct-2507-fp16
 # Serve llama-imatrix: rieseguire prima deploy/oracle/setup-llama-cpp.sh.
-# Disco: F16 tenute ~16 GB (8B) + ~30 GB (14B) + ~8 GB (4B); durante il lavoro serve circa il doppio
-# della F16 della base in corso. Tempo: 8B circa 40-60 minuti, 14B circa 1,5 ore (3 core).
+# Disco: F16 tenute ~16 GB (8B) + ~30 GB (14B) + ~8 GB (4B); durante il lavoro serve circa 1,9 volte
+# la F16 della base in corso (14B ~56 GB). Tempo: 8B circa 40-60 minuti, 14B circa 1,5 ore (3 core).
 # Durante il lavoro il file /var/tmp/projexa-modelli.lock ferma recap e funzioni con «Projexa»
 # (config/ollamaPrecedenza.js).
 # =============================================================================
@@ -87,10 +87,11 @@ for arg in "$@"; do
   slug=$(echo "$base" | tr ':.' '--')
   echo "=== $base (F16: $f16) ==="
 
-  # Spazio: F16 nei dati di Ollama (se non c'è già) + copia intermedia, Q4 e copia di Ollama.
+  # Spazio (2026-10-28, misurato sul picco): nei dati di Ollama la F16 (se non c'è già) + la copia
+  # del Q4 nuovo (~0,32 della F16); in basi/ un file alla volta (copia Q8/Q6 ~0,53, poi Q4 ~0,32).
   serve_ollama=$(awk -v g="$dimf16" 'BEGIN { printf "%.0f", g * 0.35e9 }')
-  ollama show "$f16" >/dev/null 2>&1 || serve_ollama=$(awk -v g="$dimf16" 'BEGIN { printf "%.0f", g * 1.4e9 }')
-  serve_basi=$(awk -v g="$dimf16" 'BEGIN { printf "%.0f", g * 0.9e9 }')
+  ollama show "$f16" >/dev/null 2>&1 || serve_ollama=$(awk -v g="$dimf16" 'BEGIN { printf "%.0f", g * 1.35e9 }')
+  serve_basi=$(awk -v g="$dimf16" 'BEGIN { printf "%.0f", g * 0.6e9 }')
   if [ "$(disp "$OLLAMA_DATI")" = "$(disp "$BASI")" ]; then
     serve=$((serve_ollama + serve_basi)); ha=$(libero "$BASI")
     [ "$ha" -ge "$serve" ] || { echo "ERRORE: spazio su disco insufficiente: servono circa $(gb $serve) GB, liberi $(gb $ha)"; exit 1; }
@@ -123,10 +124,11 @@ for arg in "$@"; do
   sudo -n nice -n 10 "$BIN/llama-quantize" --imatrix "$BASI/$slug.imatrix" "$blob" "$TMP" Q4_K_M "$THREADS" | grep -E '^\[ *[0-9]+/' | awk 'NR % 50 == 0' || true
   sudo -n chown "$(id -un):" "$TMP"
 
+  # Nessuna copia di riserva (2026-10-28, disco da 173 GB): per tornare al Q4_K_M di prima basta
+  # «ollama pull <base>». Il file vecchio si libera quando nessun modello lo usa più.
   echo "[5/5] Sostituisco $base su Ollama"
-  ollama show "$base-originale" >/dev/null 2>&1 || ollama cp "$base" "$base-originale"
   mf="$BASI/$slug.Modelfile"
-  { echo "FROM $TMP"; ollama show "$base-originale" --modelfile | awk '/^FROM / { dopo = 1; next } dopo || !/^#/'; } > "$mf"
+  { echo "FROM $TMP"; ollama show "$base" --modelfile | awk '/^FROM / { dopo = 1; next } dopo || !/^#/'; } > "$mf"
   ollama create "$base" -f "$mf" | tr '\r' '\n' | grep -E 'success|error' || true
   rm -f "$TMP" "$mf"; TMP=""
 
