@@ -33,6 +33,7 @@ import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { createHash } from 'crypto';
+import { AsyncLocalStorage } from 'async_hooks';
 
 const router = express.Router();
 
@@ -1365,9 +1366,38 @@ export function testoDagliAppunti(notes) {
     + notes.join('\n\n');
 }
 
+// CODA DI PROJEXA (2026-10-28): recap e lavori in background (Email attività, Dossier, RAID,
+// associazioni...) partivano insieme. Il secondo scaricava dalla RAM il modello del primo
+// (liberaRamOllama) e caricava il suo: il recap perdeva il modello e il lavoro nuovo andava in
+// «timed out waiting for llama-server to start». Ora un lavoro alla volta, in ordine di arrivo.
+// Un recap tiene il turno per tutti i suoi pezzi (appunti e testo finale): le chiamate fatte
+// dentro un turno già preso non rientrano in coda (inTurno).
+const inTurno = new AsyncLocalStorage();
+let turnoOccupato = false;
+const turniInAttesa = [];
+async function inCodaProjexa(fn) {
+  if (inTurno.getStore()) return fn();
+  if (turnoOccupato) {
+    console.log(`[OLLAMA] Projexa in coda: un altro lavoro sta usando il modello locale (${turniInAttesa.length + 1} in attesa)`);
+    await new Promise((avanti) => turniInAttesa.push(avanti));
+  } else {
+    turnoOccupato = true;
+  }
+  try {
+    return await inTurno.run(true, fn);
+  } finally {
+    const prossimo = turniInAttesa.shift();
+    if (prossimo) prossimo(); else turnoOccupato = false;
+  }
+}
+
 // Esegue fn(signal) quando la VM è libera (niente Assistente PM, registrazioni o trascrizioni in
 // corso); se una di queste parte mentre fn lavora, la richiesta si interrompe e fn si ripete.
-async function conPrecedenza(fn) {
+// Prima aspetta il suo turno nella coda di Projexa (inCodaProjexa).
+function conPrecedenza(fn) {
+  return inCodaProjexa(() => conPrecedenzaInTurno(fn));
+}
+async function conPrecedenzaInTurno(fn) {
   for (;;) {
     await attendiVmLibera({ avviso: (motivo) => { segnaAttesaProjexa(motivo); console.log(`[OLLAMA] Projexa in attesa: la VM serve prima a ${motivo}`); } });
     segnaAttesaProjexa(''); // per la pagina Monitor (config/lavoriProjexa.js)
@@ -1445,7 +1475,12 @@ async function recapProjexaChat(sistema, compito, numPredict, modello = RECAP_PR
 // passato anche ai pezzi; opts.ai: voce scelta («Projexa» o «Projexa 14B»); opts.cosa: nome del
 // lavoro per la pagina Monitor («Recap cliente», «Recap interno»); opts.chiave / opts.tipo:
 // riunione («tenant|utente|id_calendar») e 'recap' | 'interno', per la barra della finestra Recap.
-export async function askOllamaRecap(buildPrompt, transcript, { meeting = false, contesto = '', ai = '', cosa = 'Recap', chiave = '', tipo = '' } = {}) {
+// Tutto il recap in un solo turno della coda di Projexa: nessun altro lavoro si infila tra un
+// pezzo e l'altro cambiando il modello in RAM.
+export function askOllamaRecap(buildPrompt, transcript, opts = {}) {
+  return inCodaProjexa(() => askOllamaRecapInTurno(buildPrompt, transcript, opts));
+}
+async function askOllamaRecapInTurno(buildPrompt, transcript, { meeting = false, contesto = '', ai = '', cosa = 'Recap', chiave = '', tipo = '' } = {}) {
   if (meeting) {
     const lavoro = iniziaLavoro({ cosa, titolo: contesto, modello: etichettaRecapProjexa(ai), chiave, tipo });
     try { return await askRecapProjexa(buildPrompt, transcript, contesto, ai, lavoro); } finally { lavoro.fine(); }
