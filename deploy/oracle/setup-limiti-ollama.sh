@@ -10,7 +10,9 @@
 #   - MemoryMax=17G   tetto rigido: se Ollama lo supera viene fermato lui, non la VM
 #                     (restano ~7 GB a PostgreSQL, Node, Whisper, Parakeet, Presidio e sistema);
 #   - MemorySwapMax=1G niente swap «infinito» che rallenta tutta la macchina;
-#   - OOMScoreAdjust=500: in caso di memoria finita il kernel sacrifica Ollama, non DB o sito.
+#   - OOMScoreAdjust=500: in caso di memoria finita il kernel sacrifica Ollama, non DB o sito;
+#   - OLLAMA_LOAD_TIMEOUT=15m (2026-10-28): con questi tetti il 14B può metterci più dei 5 minuti
+#     predefiniti a caricarsi («timed out waiting for llama-server to start»).
 # Il backend (routes/ai.js, liberaRamOllama) scarica i modelli non in uso prima di ogni recap e
 # usa 3 core (OLLAMA_RECAP_THREADS), così il 14B sta sotto il tetto.
 # Il file è un drop-in separato: le variabili già in projexa.conf (OLLAMA_MAX_LOADED_MODELS...)
@@ -30,6 +32,7 @@ MemoryHigh=15G
 MemoryMax=17G
 MemorySwapMax=1G
 OOMScoreAdjust=500
+Environment=OLLAMA_LOAD_TIMEOUT=15m
 UNIT
 
 sudo systemctl daemon-reload

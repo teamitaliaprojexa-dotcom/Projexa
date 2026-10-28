@@ -1208,10 +1208,11 @@ function ollamaPostUnaVolta(url, body, timeoutMs, { signal } = {}) {
 const OLLAMA_BASE = () => String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
 const nomeOllama = (m) => String(m || '').replace(/:latest$/, '');
 const ultimoScarico = new Map();
-export async function liberaRamOllama(tenere, base = OLLAMA_BASE()) {
+// forza: scarica anche se l'ha appena fatto (dopo un caricamento non riuscito).
+export async function liberaRamOllama(tenere, base = OLLAMA_BASE(), { forza = false } = {}) {
   const keep = new Set([].concat(tenere || []).filter(Boolean).map(nomeOllama));
   const chiave = `${base}|${[...keep].sort().join('|')}`;
-  if (!keep.size || Date.now() - (ultimoScarico.get(chiave) || 0) < 60000) return;
+  if (!keep.size || (!forza && Date.now() - (ultimoScarico.get(chiave) || 0) < 60000)) return;
   ultimoScarico.set(chiave, Date.now());
   try {
     const r = await fetch(`${base}/api/ps`, { signal: AbortSignal.timeout(5000) });
@@ -1226,6 +1227,12 @@ export async function liberaRamOllama(tenere, base = OLLAMA_BASE()) {
     console.warn(`[OLLAMA] elenco dei modelli caricati non disponibile (${e.message})`);
   }
 }
+
+// Modello che Ollama non è riuscito a caricare (2026-10-28: «timed out waiting for llama-server
+// to start» con il 14B): di solito RAM ancora occupata da altri modelli o rallentata dal tetto
+// MemoryHigh del servizio. Si libera la RAM e si riprova una volta.
+const caricamentoFallito = (r) => !r.ok && r.status !== 404
+  && /timed out waiting for llama-server|llama runner process has terminated|requires more system memory/i.test(String((r.data && r.data.error) || ''));
 
 // Core per recap e funzioni con «Projexa» (2026-10-22): 3 su 4, così sito, database e
 // trascrizione restano reattivi. Il tetto vero (3,5 core e RAM) è sul servizio ollama
@@ -1252,6 +1259,11 @@ export async function ollamaConPrecedenza(modelloScelto, fn) {
       console.warn(`[OLLAMA] modello ${catena[i]} assente sulla VM: uso ${catena[i + 1]}`);
       await liberaRamOllama(catena[i + 1]);
       r = await fn(catena[++i], signal);
+    }
+    if (caricamentoFallito(r)) {
+      console.warn(`[OLLAMA] ${catena[i]} non si è caricato (${r.data.error}): libero la RAM e riprovo`);
+      await liberaRamOllama(catena[i], OLLAMA_BASE(), { forza: true });
+      r = await fn(catena[i], signal);
     }
     return { ...r, model: catena[i] };
   });
@@ -1399,6 +1411,11 @@ async function recapProjexaChat(sistema, compito, numPredict, modello = RECAP_PR
         console.warn(`[RECAP] modello ${model} assente su Ollama: uso ${catena[i + 1]}`);
         model = catena[++i];
         await liberaRamOllama(model, base);
+        response = await ollamaPost(`${base}/api/chat`, corpo(), timeout, { signal });
+      }
+      if (caricamentoFallito(response)) {
+        console.warn(`[RECAP] ${model} non si è caricato (${response.data.error}): libero la RAM e riprovo`);
+        await liberaRamOllama(model, base, { forza: true });
         response = await ollamaPost(`${base}/api/chat`, corpo(), timeout, { signal });
       }
     } catch (error) {
