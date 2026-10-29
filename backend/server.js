@@ -10046,10 +10046,10 @@ const REPORTING_AREAS = {
 };
 // Esclusi i tipi che non sono dati da riportare: griglie/Gantt (11, 13), espressioni (12),
 // Nodo Padre (0, resta solo come intestazione dei suoi campi), collegamenti (20), accesso
-// DB/funzioni (15, 16), password (40), flag+testo (14), routine (50).
-// Il tipo 4 (valore letto da tabella.colonna, es. Fatturato / da Fatturare da proj_fatturato)
-// è un dato: dal 2026-10-29 si riporta, letto come nella scheda (valoreTipo4).
-const REPORTING_EXCLUDED_TYPES = new Set(['11', '13', '12', '0', '20', '15', '16', '40', '14', '50']);
+// DB/funzioni (15, 16), password (40), riferimento a tabella (4), flag+testo (14), routine (50).
+// Fatturato, Fatturato Futuro e da Fatturare dei progetti (tipo 4, da proj_fatturato) si leggono
+// dalla sezione «Fatturato progetto» (scelta dell'utente, 2026-10-29).
+const REPORTING_EXCLUDED_TYPES = new Set(['11', '13', '12', '0', '20', '15', '16', '40', '4', '14', '50']);
 
 // Tabelle "dettaglio" del reporting: tabelle normali (una riga per record) legate al cliente
 // da tenant_id + user_id + client_id e, se hanno project_id, anche al progetto.
@@ -10216,9 +10216,7 @@ app.get('/api/reporting/fields/:source(clients|projects)', requireAuth, async (r
 // Valori dei campi scelti per gli elementi indicati (clienti o progetti): Map
 // "<id elemento>\u0001<nodo padre>\u0001<campo>" -> valore da mostrare. Stessa visibilità per
 // ruolo dell'elenco campi. Valore per tipo: 1 = valore1 (Sì/No); 3/30/31 = valore3 (numero);
-// 8 = valore3 (%); 4 = valore letto da tabella.colonna come nella scheda (valoreTipo4, sulla
-// riga del proprietario, del cliente e del progetto); altri = valore2. I numeri interi senza
-// ".00", i decimali in formato italiano.
+// 8 = valore3 (%); altri = valore2. I numeri interi senza ".00", i decimali in formato italiano.
 const reportingCellKey = (itemId, parent, campo) => `${itemId}\u0001${parent || ''}\u0001${campo}`;
 async function reportingValues(req, source, ids, keys) {
   const values = new Map();
@@ -10226,8 +10224,7 @@ async function reportingValues(req, source, ids, keys) {
   const root = REPORTING_AREAS[source].root;
   const r = await db.query(
     `SELECT f.master_id, f.campo, CASE WHEN p.argument = $6 THEN NULL ELSE p.campo END AS parent,
-            f.tipo_valore, f.valore1, f.valore2, f.valore3,
-            f.user_id::text AS user_id, f.client_id::text AS client_id, f.tabella, f.colonna, f."VariabDB"
+            f.tipo_valore, f.valore1, f.valore2, f.valore3
        FROM "${source}" f
        JOIN "${source}" p ON p.id::text = f.argument
       WHERE f.tenant_id = $1 AND f.user_id::text = ANY($2::text[]) AND f.master_id = ANY($3::uuid[])
@@ -10248,16 +10245,7 @@ async function reportingValues(req, source, ids, keys) {
     if (t === '1') val = (v.valore1 === true || v.valore1 === 't' || v.valore1 === 'true') ? 'Sì' : 'No';
     else if (t === '8') val = v.valore3 == null || v.valore3 === '' ? '' : `${fmtNumber(v.valore3)}%`; // percentuale
     else if (t === '3' || t === '30' || t === '31') val = fmtNumber(v.valore3);
-    else if (t === '4' && v.tabella && v.colonna) {
-      try {
-        const owner = String(v.user_id) === String(req.user.user_id) ? req.user : { ...req.user, user_id: v.user_id };
-        const x = await valoreTipo4(req, v, owner, { clientId: v.client_id, projectId: source === 'projects' ? v.master_id : null });
-        val = x == null || x === '' ? '' : (Number.isFinite(Number(x)) ? fmtNumber(x) : x);
-      } catch (e) {
-        val = '';
-        console.warn(`[REPORTING] tipo 4 «${v.campo}» (${v.tabella}.${v.colonna}): ${e.message}`);
-      }
-    } else val = v.valore2;
+    else val = v.valore2;
     values.set(reportingCellKey(v.master_id, v.parent, v.campo), val == null ? '' : val);
   }
   return values;
