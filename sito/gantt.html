@@ -1316,10 +1316,13 @@
                 const level = nodeLevel(node);
                 if (level > modelCols) continue; // oltre il modello scelto: nascosto
                 // "Mostra gantt": le attività con "Mostra al cliente" disattivo restano fuori
+                // (anche quando è nascosto un argomento che le contiene).
                 if (ganttVisible && node.mostra_cliente === false) continue;
                 // Argomento chiuso con la freccia: le sue sotto attività non si mostrano.
                 let nascosto = false;
-                for (let p = node.parent; p; p = p.parent) if (collapsed.has(p.id)) { nascosto = true; break; }
+                for (let p = node.parent; p; p = p.parent) {
+                    if (collapsed.has(p.id) || (ganttVisible && p.mostra_cliente === false)) { nascosto = true; break; }
+                }
                 if (nascosto) continue;
                 const color = displayColor(node);
                 html += `<div class="wbs-row${level === 1 ? ' lvl1' : ''}" data-node-id="${escapeHtml(node.id)}"${level === 1 ? ` style="--stripe:${rootColor(node)}"` : ''}>`;
@@ -1904,9 +1907,12 @@
 
         // "Mostra al cliente": se disattivo l'attività sparisce dalla vista "Mostra gantt"
         // (resta invece sempre visibile e modificabile nella vista di lavoro).
+        // Il valore scende a tutte le sotto attività, a ogni livello.
         document.getElementById('cfgMostraCliente').addEventListener('change', () => {
             if (!selectedNode) return;
-            selectedNode.mostra_cliente = document.getElementById('cfgMostraCliente').checked;
+            const mostra = document.getElementById('cfgMostraCliente').checked;
+            const giu = (n) => { n.mostra_cliente = mostra; n.children.forEach(giu); };
+            giu(selectedNode);
             scheduleSave();
             if (ganttVisible) { render(); closeFlyout(); } // la riga esce dalla vista gantt
         });
@@ -2045,7 +2051,8 @@
             };
             GANTT_EXTRA_COLS.forEach(col => { node[col] = null; });
             node.avanzamento = 0;
-            node.mostra_cliente = true;
+            // Sotto un argomento nascosto al cliente nasce già nascosta.
+            node.mostra_cliente = !(parent && parent.mostra_cliente === false);
             return node;
         }
 
