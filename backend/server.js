@@ -800,6 +800,23 @@ async function referenceKeys(tabella, user, context = {}) {
   return keys;
 }
 
+// Valore di un campo di tipo 4: riga row (tabella, colonna, VariabDB, campo) letta da
+// tabella.colonna sulla riga di user (+ cliente/progetto del contesto). Usata dalla scheda
+// (dettaglio) e dal Reporting, così mostrano lo stesso numero. Lancia l'errore: lo gestisce
+// chi chiama. VariabDB contiene sempre l'operatore iniziale (AND/OR); senza filtri di
+// contesto l'operatore si toglie per evitare "WHERE AND ...".
+async function valoreTipo4(req, row, user, context = {}) {
+  assertValidIdentifier(row.tabella);
+  assertValidIdentifier(row.colonna);
+  if (!(await tabellaCampoConsentita(req, row.tabella))) throw new Error('tabella non consentita');
+  const keys = await referenceKeys(row.tabella, user, context);
+  let where = keys.length ? 'WHERE ' + keys.map((k, i) => `"${k.col}" = $${i + 1}`).join(' AND ') : '';
+  const variab = (row.VariabDB || '').trim();
+  if (variab) where = where ? `${where} ${variab}` : 'WHERE ' + variab.replace(/^\s*(and|or)\s+/i, '');
+  const ref = await db.query(`SELECT "${row.colonna}" AS v FROM "${row.tabella}" ${where} LIMIT 1`, keys.map((k) => k.val));
+  return ref.rows[0] ? ref.rows[0].v : null;
+}
+
 // Risolve le opzioni di lookup_values (tipi 9/10) con ricerca a cascata:
 // 1) tenant_id = login E user_id = login (custom personale)
 // 2) tenant_id = login E user_id IS NULL (custom di tenant)
@@ -10029,8 +10046,10 @@ const REPORTING_AREAS = {
 };
 // Esclusi i tipi che non sono dati da riportare: griglie/Gantt (11, 13), espressioni (12),
 // Nodo Padre (0, resta solo come intestazione dei suoi campi), collegamenti (20), accesso
-// DB/funzioni (15, 16), password (40), riferimento a tabella (4), flag+testo (14), routine (50).
-const REPORTING_EXCLUDED_TYPES = new Set(['11', '13', '12', '0', '20', '15', '16', '40', '4', '14', '50']);
+// DB/funzioni (15, 16), password (40), flag+testo (14), routine (50).
+// Il tipo 4 (valore letto da tabella.colonna, es. Fatturato / da Fatturare da proj_fatturato)
+// è un dato: dal 2026-10-29 si riporta, letto come nella scheda (valoreTipo4).
+const REPORTING_EXCLUDED_TYPES = new Set(['11', '13', '12', '0', '20', '15', '16', '40', '14', '50']);
 
 // Tabelle "dettaglio" del reporting: tabelle normali (una riga per record) legate al cliente
 // da tenant_id + user_id + client_id e, se hanno project_id, anche al progetto.
@@ -10039,7 +10058,10 @@ const REPORTING_TABLES = {
   contatti: { table: 'contacts', label: 'Contatti' },
   issue: { table: 'issue', label: 'Issue' },
   licenze: { table: 'licenze_app', label: 'Licenze' },
-  fatturazione: { table: 'proj_anno_fatt', label: 'Fatturazione Anno/mese' },
+  // Con i totali del progetto della vista proj_fatturato (2026-10-29): fatturato, fatturato
+  // futuro e da fatturare, uguali su ogni riga (anno) dello stesso progetto.
+  fatturazione: { table: 'proj_anno_fatt', label: 'Fatturazione Anno/mese',
+    unisci: { table: 'proj_fatturato', columns: ['fatturato', 'fatturato_futuro', 'da_fatturare'] } },
   costi: { table: 'proj_worker', label: 'Costi Progetto' },
   tktjira: { table: 'task_app', label: 'Tkt Jira' },
   todo: { table: 'tasks', label: 'To do List' },
@@ -10087,6 +10109,19 @@ async function reportingTableColumns(area) {
       if (display) fkInfo = { table: fk.ft, column: fk.fc, display };
     }
     out.push({ name: c.column_name, type: c.data_type, fk: fkInfo });
+  }
+  // Colonne di una vista collegata riga per riga (stesso tenant, utente, cliente e progetto),
+  // es. i totali di proj_fatturato nella Fatturazione. Nomi già presenti nella tabella: esclusi.
+  const unisci = REPORTING_TABLES[area].unisci;
+  if (unisci) {
+    const ucols = (await db.query(
+      `SELECT column_name, data_type FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1 AND column_name = ANY($2::text[]) ORDER BY ordinal_position`,
+      [unisci.table, unisci.columns]
+    )).rows;
+    for (const c of ucols) {
+      if (!out.some((x) => x.name === c.column_name)) out.push({ name: c.column_name, type: c.data_type, fk: null, unito: true });
+    }
   }
   return { table: t, columns: out, all: new Set(cols.map((c) => c.column_name)) };
 }
@@ -10193,7 +10228,9 @@ app.get('/api/reporting/fields/:source(clients|projects)', requireAuth, async (r
 // Valori dei campi scelti per gli elementi indicati (clienti o progetti): Map
 // "<id elemento>\u0001<nodo padre>\u0001<campo>" -> valore da mostrare. Stessa visibilità per
 // ruolo dell'elenco campi. Valore per tipo: 1 = valore1 (Sì/No); 3/30/31 = valore3 (numero);
-// 8 = valore3 (%); altri = valore2. I numeri interi senza ".00", i decimali in formato italiano.
+// 8 = valore3 (%); 4 = valore letto da tabella.colonna come nella scheda (valoreTipo4, sulla
+// riga del proprietario, del cliente e del progetto); altri = valore2. I numeri interi senza
+// ".00", i decimali in formato italiano.
 const reportingCellKey = (itemId, parent, campo) => `${itemId}\u0001${parent || ''}\u0001${campo}`;
 async function reportingValues(req, source, ids, keys) {
   const values = new Map();
@@ -10201,7 +10238,8 @@ async function reportingValues(req, source, ids, keys) {
   const root = REPORTING_AREAS[source].root;
   const r = await db.query(
     `SELECT f.master_id, f.campo, CASE WHEN p.argument = $6 THEN NULL ELSE p.campo END AS parent,
-            f.tipo_valore, f.valore1, f.valore2, f.valore3
+            f.tipo_valore, f.valore1, f.valore2, f.valore3,
+            f.user_id::text AS user_id, f.client_id::text AS client_id, f.tabella, f.colonna, f."VariabDB"
        FROM "${source}" f
        JOIN "${source}" p ON p.id::text = f.argument
       WHERE f.tenant_id = $1 AND f.user_id::text = ANY($2::text[]) AND f.master_id = ANY($3::uuid[])
@@ -10222,7 +10260,16 @@ async function reportingValues(req, source, ids, keys) {
     if (t === '1') val = (v.valore1 === true || v.valore1 === 't' || v.valore1 === 'true') ? 'Sì' : 'No';
     else if (t === '8') val = v.valore3 == null || v.valore3 === '' ? '' : `${fmtNumber(v.valore3)}%`; // percentuale
     else if (t === '3' || t === '30' || t === '31') val = fmtNumber(v.valore3);
-    else val = v.valore2;
+    else if (t === '4' && v.tabella && v.colonna) {
+      try {
+        const owner = String(v.user_id) === String(req.user.user_id) ? req.user : { ...req.user, user_id: v.user_id };
+        const x = await valoreTipo4(req, v, owner, { clientId: v.client_id, projectId: source === 'projects' ? v.master_id : null });
+        val = x == null || x === '' ? '' : (Number.isFinite(Number(x)) ? fmtNumber(x) : x);
+      } catch (e) {
+        val = '';
+        console.warn(`[REPORTING] tipo 4 «${v.campo}» (${v.tabella}.${v.colonna}): ${e.message}`);
+      }
+    } else val = v.valore2;
     values.set(reportingCellKey(v.master_id, v.parent, v.campo), val == null ? '' : val);
   }
   return values;
@@ -10316,9 +10363,16 @@ app.get('/api/reporting/data', requireAuth, async (req, res) => {
       const wanted = fields.filter((f) => f.area === area).map((f) => info.columns.find((c) => c.name === f.key)).filter(Boolean);
       const selects = [];
       const joins = [];
+      // Vista collegata (REPORTING_TABLES[area].unisci): un solo LEFT JOIN, sulle stesse chiavi.
+      if (wanted.some((c) => c.unito)) {
+        joins.push(`LEFT JOIN "${assertValidIdentifier(REPORTING_TABLES[area].unisci.table)}" u ON u.tenant_id = d.tenant_id
+          AND u.user_id = d.user_id AND u.client_id = d.client_id AND u.project_id = d.project_id`);
+      }
       wanted.forEach((c, i) => {
         assertValidIdentifier(c.name);
-        if (c.fk) {
+        if (c.unito) {
+          selects.push(`u."${c.name}"`);
+        } else if (c.fk) {
           const alias = `fk${i}`;
           joins.push(`LEFT JOIN "${assertValidIdentifier(c.fk.table)}" ${alias} ON ${alias}."${assertValidIdentifier(c.fk.column)}" = d."${c.name}"`);
           selects.push(`${alias}."${assertValidIdentifier(c.fk.display)}" AS "${c.name}"`);
@@ -12030,26 +12084,7 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
       row.__can_write = !readOnlyAccess && canWriteRow(req, row.id_roles_write, table);
       if (Number(row.tipo_valore) === 4 && row.tabella && row.colonna) {
         try {
-          assertValidIdentifier(row.tabella);
-          assertValidIdentifier(row.colonna);
-          if (!(await tabellaCampoConsentita(req, row.tabella))) throw new Error('tabella non consentita');
-          const keys = await referenceKeys(row.tabella, contextUser, { clientId: clientContextId, projectId: projectContextId });
-          let where = keys.length
-            ? 'WHERE ' + keys.map((k, i) => `"${k.col}" = $${i + 1}`).join(' AND ')
-            : '';
-          // VariabDB contiene sempre l'operatore iniziale (AND/OR); se non ci sono filtri
-          // di contesto precedenti, l'operatore iniziale viene rimosso per evitare "WHERE AND ...".
-          const variab = (row.VariabDB || '').trim();
-          if (variab) {
-            where = where
-              ? `${where} ${variab}`
-              : 'WHERE ' + variab.replace(/^\s*(and|or)\s+/i, '');
-          }
-          const ref = await db.query(
-            `SELECT "${row.colonna}" AS v FROM "${row.tabella}" ${where} LIMIT 1`,
-            keys.map(k => k.val)
-          );
-          row.resolved_value = ref.rows[0] ? ref.rows[0].v : null;
+          row.resolved_value = await valoreTipo4(req, row, contextUser, { clientId: clientContextId, projectId: projectContextId });
         } catch (e) {
           row.resolved_value = null;
           // Prima l'errore era scartato in silenzio: il campo restava vuoto senza motivo visibile.
