@@ -168,7 +168,7 @@
         }
         /* Colori delle sigle per area (C clienti, P progetti, tabelle dettaglio) */
         .report-grid th.col-projects .th-area { background: #D1FAE5; color: #065F46; }
-        .report-grid th.col-quotazioni .th-area, .report-grid th.col-fatturazione .th-area, .report-grid th.col-costi .th-area, .report-grid th.col-commesse .th-area { background: #FEF3C7; color: #92400E; }
+        .report-grid th.col-quotazioni .th-area, .report-grid th.col-fatturazione .th-area, .report-grid th.col-fatturatoprogetto .th-area, .report-grid th.col-costi .th-area, .report-grid th.col-commesse .th-area { background: #FEF3C7; color: #92400E; }
         .report-grid th.col-mysupport .th-area { background: #FEE2E2; color: #991B1B; }
         .report-grid th.col-contatti .th-area, .report-grid th.col-licenze .th-area { background: #EDE9FE; color: #5B21B6; }
         .report-grid th.col-issue .th-area, .report-grid th.col-tktjira .th-area, .report-grid th.col-todo .th-area { background: #FCE7F3; color: #9D174D; }
@@ -497,6 +497,8 @@
             issue: { label: 'Issue', icon: 'fa-circle-exclamation', tag: 'I', table: true },
             licenze: { label: 'Licenze', icon: 'fa-key', tag: 'L', table: true },
             fatturazione: { label: 'Fatturazione Anno/mese', icon: 'fa-calendar-days', tag: 'F', table: true },
+            // Totali per progetto (vista proj_fatturato): anche i progetti senza righe di fatturazione.
+            fatturatoprogetto: { label: 'Fatturato progetto', icon: 'fa-euro-sign', tag: 'FP', table: true, noExpiry: true }, // view senza scadenza
             costi: { label: 'Costi Progetto', icon: 'fa-coins', tag: 'CP', table: true },
             tktjira: { label: 'Ticket Jira', icon: 'fa-ticket', tag: 'J', table: true },
             todo: { label: 'To-Do List', icon: 'fa-list-check', tag: 'T', table: true },

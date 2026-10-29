@@ -10058,10 +10058,11 @@ const REPORTING_TABLES = {
   contatti: { table: 'contacts', label: 'Contatti' },
   issue: { table: 'issue', label: 'Issue' },
   licenze: { table: 'licenze_app', label: 'Licenze' },
-  // Con i totali del progetto della vista proj_fatturato (2026-10-29): fatturato, fatturato
-  // futuro e da fatturare, uguali su ogni riga (anno) dello stesso progetto.
-  fatturazione: { table: 'proj_anno_fatt', label: 'Fatturazione Anno/mese',
-    unisci: { table: 'proj_fatturato', columns: ['fatturato', 'fatturato_futuro', 'da_fatturare'] } },
+  fatturazione: { table: 'proj_anno_fatt', label: 'Fatturazione Anno/mese' },
+  // Totali per progetto (vista proj_fatturato, 2026-10-29): una riga per progetto con Importo,
+  // fatturato, fatturato futuro e da fatturare, anche per i progetti senza righe di
+  // fatturazione (stesso calcolo del campo «da Fatturare» della scheda). Vista senza scadenza.
+  fatturatoprogetto: { table: 'proj_fatturato', label: 'Fatturato progetto' },
   costi: { table: 'proj_worker', label: 'Costi Progetto' },
   tktjira: { table: 'task_app', label: 'Tkt Jira' },
   todo: { table: 'tasks', label: 'To do List' },
@@ -10109,19 +10110,6 @@ async function reportingTableColumns(area) {
       if (display) fkInfo = { table: fk.ft, column: fk.fc, display };
     }
     out.push({ name: c.column_name, type: c.data_type, fk: fkInfo });
-  }
-  // Colonne di una vista collegata riga per riga (stesso tenant, utente, cliente e progetto),
-  // es. i totali di proj_fatturato nella Fatturazione. Nomi già presenti nella tabella: esclusi.
-  const unisci = REPORTING_TABLES[area].unisci;
-  if (unisci) {
-    const ucols = (await db.query(
-      `SELECT column_name, data_type FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = $1 AND column_name = ANY($2::text[]) ORDER BY ordinal_position`,
-      [unisci.table, unisci.columns]
-    )).rows;
-    for (const c of ucols) {
-      if (!out.some((x) => x.name === c.column_name)) out.push({ name: c.column_name, type: c.data_type, fk: null, unito: true });
-    }
   }
   return { table: t, columns: out, all: new Set(cols.map((c) => c.column_name)) };
 }
@@ -10363,16 +10351,9 @@ app.get('/api/reporting/data', requireAuth, async (req, res) => {
       const wanted = fields.filter((f) => f.area === area).map((f) => info.columns.find((c) => c.name === f.key)).filter(Boolean);
       const selects = [];
       const joins = [];
-      // Vista collegata (REPORTING_TABLES[area].unisci): un solo LEFT JOIN, sulle stesse chiavi.
-      if (wanted.some((c) => c.unito)) {
-        joins.push(`LEFT JOIN "${assertValidIdentifier(REPORTING_TABLES[area].unisci.table)}" u ON u.tenant_id = d.tenant_id
-          AND u.user_id = d.user_id AND u.client_id = d.client_id AND u.project_id = d.project_id`);
-      }
       wanted.forEach((c, i) => {
         assertValidIdentifier(c.name);
-        if (c.unito) {
-          selects.push(`u."${c.name}"`);
-        } else if (c.fk) {
+        if (c.fk) {
           const alias = `fk${i}`;
           joins.push(`LEFT JOIN "${assertValidIdentifier(c.fk.table)}" ${alias} ON ${alias}."${assertValidIdentifier(c.fk.column)}" = d."${c.name}"`);
           selects.push(`${alias}."${assertValidIdentifier(c.fk.display)}" AS "${c.name}"`);
