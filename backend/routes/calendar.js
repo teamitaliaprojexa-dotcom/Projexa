@@ -28,13 +28,12 @@ import { parseRecapActions, parseDueDate, ownerVariants } from '../jobs/recapTas
 import { proposteDaRecap, salvaDaRecap } from '../config/azioniCliente.js';
 import { encryptRowForWrite } from '../config/crypto.js';
 import { cercaDoppione, aggiornamento, todoAperte, ownerTodo, aggiornaTodo } from '../config/dedupVoci.js';
-import { localRecapMode, aiCollegate, PROVIDERS as AI_PROVIDERS } from './ai.js';
+import { aiCollegate, PROVIDERS as AI_PROVIDERS } from './ai.js';
 import JWT_SECRET from '../config/jwt.js';
 import { requireAuth } from '../middleware/auth.js';
 import { startLinkState, checkLinkState } from '../config/oauthLinkState.js';
 import { isAllowedOrigin } from '../config/origins.js';
 import { arricchisciEventi, completaRiunione } from '../config/riunioniOutlook.js';
-import { avanzamentoRiunione } from '../config/lavoriProjexa.js';
 import {
   getIntegration,
   saveIntegration,
@@ -1297,11 +1296,7 @@ router.post('/meetings/managed/status', requireAuth, async (req, res) => {
     if (recapBatch.size) controllaRecapBatchUtente(req.user);
     const out = {};
     for (const [id, row] of map) {
-      // Avanzamento del recap cliente con Projexa (2026-10-22): dalla memoria del backend
-      // (config/lavoriProjexa.js), null se il recap non gira con il modello locale (es. Batch).
-      const l = avanzamentoRiunione(`${req.user.tenant_id}|${req.user.user_id}|${id}`).find((x) => x.tipo === 'recap');
-      out[id] = { ...row, pending: pending.get(id) || 0, recap_running: recapRunning.has(id), recap_batch: recapBatch.has(id), recap_auto: recapAuto.has(id),
-        recap_percento: l && l.percento != null ? l.percento : null, recap_fase: l ? (l.inAttesa ? `in pausa: la VM serve prima a ${l.inAttesa}` : l.fase || '') : '' };
+      out[id] = { ...row, pending: pending.get(id) || 0, recap_running: recapRunning.has(id), recap_batch: recapBatch.has(id), recap_auto: recapAuto.has(id) };
     }
     res.json({ meetings: out });
   } catch (error) {
@@ -1522,7 +1517,7 @@ router.post('/meetings/managed/finalize', requireAuth, async (req, res) => {
 // genera invece la coda (jobs/meetingTranscription.js). Stessa logica: AI scelta in
 // Impostazioni › AI, prompt backend/prompts/recap_email.txt.
 // Cosa chiedere premendo il pulsante: AI (se «AI generazione e-mail recap» = "Chiedi sempre",
-// elenco delle AI con chiave collegata + Projexa) ed esecuzione (se «Esecuzione Recap» =
+// elenco delle AI con chiave collegata) ed esecuzione (se «Esecuzione Recap» =
 // "Chiedi Sempre").
 router.get('/meetings/managed/recap-opzioni', requireAuth, async (req, res) => {
   try {
@@ -1532,9 +1527,7 @@ router.get('/meetings/managed/recap-opzioni', requireAuth, async (req, res) => {
     res.json({
       ai, chiediAi, esecuzione, chiediEsecuzione: esecuzione === 'chiedi',
       aiDisponibili: chiediAi
-        ? [...(await aiCollegate(req.user.user_id)).map((x) => ({ nome: x.nome, label: x.label, batch: true })),
-          { nome: 'Projexa', label: 'Projexa (gratuito)', batch: false },
-          { nome: 'Projexa 14B', label: 'Projexa 14B (gratuito, più preciso ma più lento)', batch: false }]
+        ? (await aiCollegate(req.user.user_id)).map((x) => ({ nome: x.nome, label: x.label, batch: true }))
         : []
     });
   } catch (error) {
@@ -1556,19 +1549,11 @@ router.post('/meetings/managed/recap', requireAuth, async (req, res) => {
       if (!providerName) return res.status(400).json({ error: 'Scegli l\'AI da usare per il recap' });
     }
     if (!providerName) return res.status(400).json({ error: 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"' });
-    const locale = localRecapMode(providerName) === 'server';
-    if (!locale && !AI_PROVIDERS[providerName.toLowerCase()]) return res.status(400).json({ error: `AI «${providerName}» non utilizzabile per il recap` });
+    if (!AI_PROVIDERS[providerName.toLowerCase()]) return res.status(400).json({ error: `AI «${providerName}» non utilizzabile per il recap` });
     let esecuzione = await recapEsecuzione(req.user);
     if (esecuzione === 'chiedi') {
       esecuzione = String(b.esecuzione || '').trim().toLowerCase();
       if (!['immediato', 'batch'].includes(esecuzione)) return res.status(400).json({ error: 'Scegli se eseguire il recap Immediato o in Batch' });
-    }
-    // Projexa: troppi minuti per una richiesta HTTP, va nella coda in background
-    // (stessa strada del recap automatico); la griglia mostra la clessidra e poi "Recap pronto".
-    // Non ha la modalità Batch (è già gratuito).
-    if (locale) {
-      await enqueueFinalize(req.user, idCalendar, { ai: providerName });
-      return res.status(202).json({ success: true, queued: true, provider: providerName });
     }
     // Batch: costo dimezzato, il recap arriva entro 24 ore (job recap_batch, jobs/recapBatch.js).
     let nota = '';

@@ -24,8 +24,7 @@
         return t ? { Authorization: `Bearer ${t}` } : {};
     };
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    // Voce «Projexa» del campo = agente PM Projexa su Ollama della VM (solo modalità testo).
-    const nomeAi = (ai) => (ai === 'Projexa' ? 'PM Projexa' : (ai || 'Gemini'));
+    const nomeAi = (ai) => ai || 'Gemini';
     const zoom = () => (window.uiZoom ? window.uiZoom() : 1) || 1;
 
     const css = `
@@ -378,7 +377,7 @@
         // Impostazioni › «Esecuzione Assistente PM»: Testo/Audio = parte subito con quella
         // modalità; "Chiedi Sempre" (o vuoto) = scelta nella finestra.
         let modalita = d.modalita === 'testo' || d.modalita === 'audio' ? d.modalita : null;
-        if (modalita) bodyEl.innerHTML = `<div class="apm-msg info">Collegamento a ${s.ai === 'Projexa' ? 'PM Projexa' : 'Gemini Live'}…</div>`;
+        if (modalita) bodyEl.innerHTML = `<div class="apm-msg info">Collegamento a Gemini Live…</div>`;
         else modalita = await new Promise((resolve) => { s.scelta = resolve; disegnaScelta(); });
         if (!modalita || s !== stato) return null; // finestra chiusa o registrazione fermata
         try {
@@ -417,7 +416,7 @@
         bodyEl.querySelectorAll('.apm-modo').forEach((b) => b.addEventListener('click', () => {
             const m = b.dataset.modo;
             try { localStorage.setItem(MODO_KEY, m); } catch (e) { /* solo preferenza */ }
-            bodyEl.innerHTML = `<div class="apm-msg info">Collegamento a ${stato && stato.ai === 'Projexa' ? 'PM Projexa' : 'Gemini Live'}…</div>`;
+            bodyEl.innerHTML = `<div class="apm-msg info">Collegamento a Gemini Live…</div>`;
             const r = stato && stato.scelta;
             if (stato) stato.scelta = null;
             if (r) r(m);
@@ -473,8 +472,7 @@
     }
 
     // «Chiudi definitivamente» (2026-10-20): la X nasconde soltanto la finestra e l'assistente
-    // continua a lavorare; questo pulsante chiude la sessione anche sul server (con PM Projexa
-    // ferma Ollama sulla VM e ne libera la memoria). La registrazione e la trascrizione della
+    // continua a lavorare; questo pulsante chiude la sessione anche sul server. La registrazione e la trascrizione della
     // riunione proseguono; i messaggi restano 2 ore (pulsante «Assistente PM» per rivederli).
     async function chiudiDefinitivamente() {
         const s = stato;
@@ -640,12 +638,5 @@
         return null;
     }
 
-    // Durata dei blocchi brevi (secondi) per la dashboard. PM Projexa: ~25 s, perché Whisper
-    // sulla VM elabora comunque finestre da 30 s (blocchi da 10 s costavano uguale e con Ollama
-    // in parallelo arrivavano uno al minuto, prova 2026-10-20). null = valori della dashboard.
-    function durataBlocchi() {
-        return stato && stato.ai === 'Projexa' ? { min: 20, max: 28 } : null;
-    }
-
-    window.AssistentePm = { avvia, ferma, attivo, inviaBlocco, inviaAudio, riapri, durataBlocchi };
+    window.AssistentePm = { avvia, ferma, attivo, inviaBlocco, inviaAudio, riapri };
 })();

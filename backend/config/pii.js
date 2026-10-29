@@ -6,8 +6,7 @@
 // ([PERSONA_1], [AZIENDA_2], [EMAIL_1], ...) e la risposta dell'AI torna con i segnaposto, che
 // Projexa sostituisce con i valori veri prima di mostrarla o salvarla. L'AI lavora sul contenuto
 // (cosa si è deciso, quali rischi, quali azioni) senza sapere a chi appartiene.
-// Le AI locali della VM («Projexa», Ollama) e i servizi di trascrizione locali NON passano di
-// qui: i dati non escono dal server.
+// I servizi di trascrizione locali della VM NON passano di qui: i dati non escono dal server.
 //
 // Tre livelli di riconoscimento, uniti (in caso di sovrapposizione vince il primo, tranne email e
 // URL che restano interi anche se contengono un nome):
@@ -430,137 +429,6 @@ export class Anonimizzatore {
     } catch { /* mappa illeggibile: la risposta resta con i segnaposto */ }
     return a;
   }
-}
-
-// ----------------------------------------------------------------------------
-// PSEUDONIMIZZAZIONE DEI FILE DI ADDESTRAMENTO (2026-10-23)
-// ----------------------------------------------------------------------------
-// I file JSONL di Analisi PM (domande, recap, associazioni, RAID e CR) vanno su Google Colab:
-// prima di uscire dal server ogni dato personale diventa un dato FINTO ma realistico e coerente
-// in tutto il file («Mario Rossi» -> sempre «Luca Ferri», «Rossi» da solo -> «Ferri», il cliente
-// -> «Azienda Alfa»). Niente segnaposto tra parentesi: il modello deve imparare su testo
-// naturale, come quello che vedrà davvero. La corrispondenza vera/finta resta in memoria per
-// la sola durata del download e non si salva da nessuna parte.
-// Stessi tre livelli dell'anonimizzazione (nomi noti, regole, Presidio) e attiva anche con
-// PII_MASCHERAMENTO spento: un file di addestramento non esce mai con i dati veri.
-const NOMI_FINTI = ['Luca', 'Giulia', 'Marco', 'Sara', 'Andrea', 'Chiara', 'Paolo', 'Elena', 'Davide', 'Marta', 'Stefano',
-  'Laura', 'Simone', 'Francesca', 'Matteo', 'Silvia', 'Roberto', 'Valentina', 'Fabio', 'Federica', 'Alberto', 'Anna',
-  'Riccardo', 'Paola', 'Giorgio', 'Alessia', 'Enrico', 'Monica', 'Daniele', 'Ilaria', 'Massimo', 'Roberta', 'Claudio',
-  'Beatrice', 'Nicola', 'Serena', 'Emanuele', 'Cristina', 'Filippo', 'Barbara', 'Tommaso', 'Elisa', 'Pietro', 'Lucia',
-  'Antonio', 'Martina', 'Alessio', 'Teresa', 'Gabriele', 'Carla'];
-const COGNOMI_FINTI = ['Ferri', 'Galli', 'Conti', 'Moretti', 'Barbieri', 'Fontana', 'Santoro', 'Mariani', 'Rinaldi', 'Caruso',
-  'Ferrara', 'Lombardi', 'Testa', 'Gentile', 'Martinelli', 'Serra', 'Villa', 'Pellegrini', 'Leone', 'Longo', 'Sala',
-  'Vitale', 'Bernardi', 'Monti', 'Fabbri', 'Marchetti', 'Grasso', 'Parisi', 'Silvestri', 'Cattaneo', 'Ferraro', 'Rossetti',
-  'Bianco', 'Benedetti', 'Riva', 'Orlando', 'Neri', 'Donati', 'Sartori', 'Messina', 'Farina', 'Palumbo', 'Guidi', 'Bassi',
-  'Valentini', 'Pagano', 'Basile', 'Morelli', 'Negri', 'Grassi', 'Coppola', 'Mazza', 'Fiore', 'Ruggiero', 'Piras'];
-const LETTERE_GRECHE = ['Alfa', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta', 'Eta', 'Theta', 'Iota', 'Kappa', 'Lambda', 'Mi',
-  'Ni', 'Xi', 'Omicron', 'Pi', 'Rho', 'Sigma', 'Tau', 'Ypsilon', 'Phi', 'Chi', 'Psi', 'Omega'];
-const LUOGHI_FINTI = ['Valverde', 'Montefiore', 'Borgonuovo', 'Castelrosso', 'Pianalto', 'Roccabella', 'Sanfelice', 'Collebianco'];
-const MAIUSCOLO = (s) => s.length > 1 && s === s.toUpperCase() && s !== s.toLowerCase();
-
-export class Pseudonimizzatore extends Anonimizzatore {
-  constructor(userId) {
-    super(userId);
-    this.tipi = new Map();          // valore vero normalizzato -> tipo (per trovaGiaNoti)
-    this.finti = new Map();         // "tipo|valore vero normalizzato" -> valore finto
-    this.parolaPersona = new Map(); // parola vera (minuscola) -> parola finta: nome e cognome restano coerenti
-    this.usati = { nome: 0, cognome: 0 };
-  }
-
-  // Nome o cognome finto per una parola vera; i finti non si ripetono finché ce ne sono.
-  parolaFinta(parola, tipo) {
-    const k = parola.toLowerCase();
-    let f = this.parolaPersona.get(k);
-    if (!f) {
-      const lista = tipo === 'nome' ? NOMI_FINTI : COGNOMI_FINTI;
-      const n = this.usati[tipo]++;
-      f = lista[n % lista.length] + (n >= lista.length ? String(Math.floor(n / lista.length) + 1) : '');
-      this.parolaPersona.set(k, f);
-    }
-    return MAIUSCOLO(parola) ? f.toUpperCase() : f;
-  }
-
-  finto(tipo, valore) {
-    const parole = String(valore).match(RE_PAROLA) || [];
-    const n = (this.contatori[tipo] = (this.contatori[tipo] || 0) + 1);
-    switch (tipo) {
-      case 'PERSON':
-        // Più parole: la prima è il nome (o la si tratta così), le altre i cognomi.
-        return parole.length ? parole.map((p, i) => this.parolaFinta(p, parole.length > 1 && i === 0 ? 'nome' : 'cognome')).join(' ') : 'Persona';
-      case 'ORGANIZATION': return `Azienda ${LETTERE_GRECHE[(n - 1) % 24]}${n > 24 ? ` ${Math.ceil(n / 24)}` : ''}`;
-      case 'LOCATION': return `${LUOGHI_FINTI[(n - 1) % LUOGHI_FINTI.length]}${n > LUOGHI_FINTI.length ? ` ${Math.ceil(n / LUOGHI_FINTI.length)}` : ''}`;
-      case 'EMAIL_ADDRESS': return `utente${n}@esempio.it`;
-      case 'PHONE_NUMBER': return `+39 333 000 ${String(n).padStart(4, '0')}`;
-      case 'URL': return `https://www.esempio${n}.it`;
-      case 'IBAN_CODE': return `IT00X000000000000000000${String(n).padStart(4, '0')}`;
-      case 'CREDIT_CARD': return `4000 0000 0000 ${String(n).padStart(4, '0')}`;
-      case 'IP_ADDRESS': return `10.0.0.${n % 250}`;
-      case 'IT_FISCAL_CODE': return `XXXXXX00X00X${String(n).padStart(3, '0')}X`;
-      case 'IT_VAT_CODE': return `IT${String(n).padStart(11, '0')}`;
-      default: return `DOC${String(n).padStart(6, '0')}`;
-    }
-  }
-
-  segnaposto(tipo, valore) {
-    const chiave = `${tipo}|${norm(valore)}`;
-    let f = this.finti.get(chiave);
-    if (f === undefined) {
-      f = this.finto(tipo, valore);
-      this.finti.set(chiave, f);
-      this.tipi.set(String(valore), tipo);
-      this.perSegnaposto.set(`${tipo}|${this.finti.size}`, valore); // solo per il conteggio (totale)
-    }
-    return f;
-  }
-
-  trovaGiaNoti(testo) {
-    const out = [];
-    for (const [valore, tipo] of this.tipi) {
-      if (valore.length < 3) continue;
-      const re = new RegExp(`${BORDO_PRIMA}${escRe(valore).replace(/\s+/g, '\\s+')}${BORDO_DOPO}`, 'giu');
-      let m;
-      while ((m = re.exec(testo))) out.push({ tipo, inizio: m.index, fine: m.index + m[0].length, priorita: 5 });
-    }
-    return out;
-  }
-
-  // Come maschera(), ma sempre attiva (anche con PII_MASCHERAMENTO spento).
-  async maschera(testo) {
-    const t = String(testo ?? '');
-    if (!t.trim()) return t;
-    if (!this.noti) this.noti = await nomiNoti(this.userId);
-    const presidio = await trovaConPresidio(t);
-    if (presidio.motore === 'presidio') this.motore = 'presidio';
-    return this.applica(t, [...this.trovaGiaNoti(t), ...trovaNomiNoti(t, this.noti), ...trovaConRegole(t), ...presidio.trovati]);
-  }
-}
-
-// File JSONL di addestramento (una riga = { messages: [{ role, content }] }) pseudonimizzato:
-// ogni content passa dal Pseudonimizzatore, con la stessa corrispondenza per tutto il file.
-// Se Presidio è configurato ma non risponde il download si FERMA (503): con le sole regole e i
-// nomi noti i nomi che Projexa non conosce uscirebbero veri.
-export async function pseudonimizzaJsonl(userId, righeJson, etichetta = 'addestramento') {
-  if (piiUrl()) {
-    const stato = await statoAnonimizzazione().catch(() => ({ disponibile: false }));
-    if (stato.motore === 'presidio' && !stato.disponibile) {
-      throw errore(503, 'Pseudonimizzazione non disponibile (servizio Presidio della VM non raggiungibile): per riservatezza il file non viene scaricato. Riprova tra qualche minuto.');
-    }
-  }
-  const p = new Pseudonimizzatore(userId);
-  const giaFatti = new Map(); // stesso testo (es. istruzioni di sistema ripetute) = un solo passaggio
-  const out = [];
-  for (const riga of righeJson) {
-    if (!riga) continue;
-    const r = JSON.parse(riga);
-    for (const m of Array.isArray(r.messages) ? r.messages : []) {
-      if (typeof m.content !== 'string' || !m.content.trim()) continue;
-      if (!giaFatti.has(m.content)) giaFatti.set(m.content, await p.maschera(m.content));
-      m.content = giaFatti.get(m.content);
-    }
-    out.push(JSON.stringify(r));
-  }
-  console.log(`[PII] File di ${etichetta} pseudonimizzato: ${out.length} righe, ${p.totale} dati sostituiti (${p.riepilogo()}) · motore ${p.motore}`);
-  return out;
 }
 
 // Prompt pronto per un'AI esterna: { prompt, anon } (anon null se l'anonimizzazione è spenta).

@@ -1,10 +1,10 @@
 // ============================================================================
 // FILA DEI LAVORI DI UNA RIUNIONE CHE SOPRAVVIVE AI RIAVVII (2026-10-23)
 // ----------------------------------------------------------------------------
-// «AI Automatizza» con Projexa (o con il Batch rifiutato dal fornitore) e il pulsante «Genera»
-// del Recap interno eseguivano i lavori solo nella memoria del server: un riavvio (deploy) li
-// perdeva. Il 2026-10-22 tre deploy in serata hanno lasciato due Recap interni «in corso» per
-// sempre e i RAID / Change Request con Projexa mai partiti.
+// «AI Automatizza» con il Batch rifiutato dal fornitore e il pulsante «Genera» del Recap
+// interno eseguivano i lavori solo nella memoria del server: un riavvio (deploy) li perdeva.
+// Il 2026-10-22 tre deploy in serata hanno lasciato due Recap interni «in corso» per sempre e
+// i RAID / Change Request mai partiti.
 // Ora i passi da fare si scrivono su disco, un file per fila:
 //   AI_TEMP_DIR/fila-riunioni/<id>.json = { user, idCalendar, ai, passi, riprese, creato }
 // (fuori da backend/, che il deploy sincronizza con --delete). Un passo si toglie dal file solo
@@ -79,14 +79,6 @@ async function eseguiPasso(fila, passo) {
   }
 }
 
-// Projexa irraggiungibile per poco (Ollama riavviato o in ricarica: ECONNRESET, ECONNREFUSED):
-// il passo si ripete dopo una breve attesa invece di finire in errore (2026-10-23: il riavvio di
-// Ollama aveva fatto fallire due Recap interni in fila). Non il tempo scaduto: rifarlo subito
-// darebbe lo stesso esito.
-const TENTATIVI_PASSO = 3;
-const ATTESA_RIPROVA_MS = 2 * 60000;
-const temporaneo = (e) => e.status === 503 && e.codice !== 'OLLAMA_TIMEOUT' && /non raggiungibile/i.test(String(e.message || ''));
-
 async function esegui(nome, fila) {
   try {
     while (fila.passi.length) {
@@ -94,13 +86,6 @@ async function esegui(nome, fila) {
       try {
         await eseguiPasso(fila, passo);
       } catch (e) {
-        passo.tentativi = Number(passo.tentativi || 0) + 1;
-        if (temporaneo(e) && passo.tentativi < TENTATIVI_PASSO) {
-          console.warn(`[FILA RIUNIONE] ${fila.idCalendar}: ${passo.nome}, tentativo ${passo.tentativi} non riuscito (${e.message}): riprovo tra ${ATTESA_RIPROVA_MS / 60000} minuti`);
-          await scrivi(nome, fila);
-          await new Promise((r) => setTimeout(r, ATTESA_RIPROVA_MS));
-          continue;
-        }
         console.error(`❌ [FILA RIUNIONE] ${fila.idCalendar}: ${passo.nome} non generato: ${e.message}`);
         if (passo.notifica) {
           await notificaAutomazioneAi({
@@ -119,13 +104,13 @@ async function esegui(nome, fila) {
 }
 
 // Nuova fila: si salva e parte subito (in background). Restituisce subito.
-//   user = { tenant_id, user_id, email, id_roles }, ai = { nome, label, locale }
+//   user = { tenant_id, user_id, email, id_roles }, ai = { nome, label }
 export async function accodaRiunione(user, idCalendar, ai, passi) {
   if (!passi.length) return;
   const nome = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.json`;
   const fila = {
     user: { tenant_id: user.tenant_id, user_id: user.user_id, email: user.email || null, id_roles: user.id_roles ?? null },
-    idCalendar, ai: { nome: ai.nome, label: ai.label || ai.nome, locale: !!ai.locale }, passi: [...passi], riprese: 0, creato: Date.now()
+    idCalendar, ai: { nome: ai.nome, label: ai.label || ai.nome }, passi: [...passi], riprese: 0, creato: Date.now()
   };
   attive.set(nome, fila);
   await scrivi(nome, fila);

@@ -30,12 +30,12 @@ import { SALTA_LOG_ON, SALTA_LOG_OFF, registraTestoRiunione } from '../config/au
 import { contestoAudit } from '../config/auditContext.js';
 import { notificaRiunione } from './notifiche.js';
 import { getIntegration } from '../config/integrations.js';
-import { transcribeAudio, transcribeAudioCpp, transcribeAudioGemini, transcribeAudioParakeet, parakeetUrl, askAiProvider, whisperUrls, whisperCppUrls, localRecapMode, askOllamaRecap, aiCollegate, diarizzazioneUrl, impronteVocali } from '../routes/ai.js';
-import { segnaRegistrazione, segnaTrascrizione, assistenteInCorso } from '../config/ollamaPrecedenza.js';
+import { transcribeAudio, transcribeAudioCpp, transcribeAudioGemini, transcribeAudioParakeet, parakeetUrl, askAiProvider, whisperUrls, whisperCppUrls, aiCollegate, diarizzazioneUrl, impronteVocali } from '../routes/ai.js';
+import { segnaRegistrazione, segnaTrascrizione, assistenteInCorso } from '../config/precedenzaVm.js';
 import { nomiPartecipanti } from '../config/riunioniOutlook.js';
 
 // Registrazione considerata in corso fino a questo tempo dall'ultimo pezzo audio arrivato (se la
-// fine non arriva, es. pagina chiusa): intanto i recap con «Projexa» aspettano (precedenza).
+// fine non arriva, es. pagina chiusa): intanto la VM non si riavvia (jobs/aggiornamentiVm.js).
 const REGISTRAZIONE_TTL_MS = 10 * 60000;
 
 export const NOME_PROGRAMMA = 'meetingTranscription';
@@ -607,13 +607,14 @@ async function transcribeJob(job, baseUrl) {
 // ASSISTENTE_PM_WHISPER_CPP_URL (solo sviluppo in locale): whisper.cpp della VM raggiunto con
 // il tunnel SSH (deploy/oracle/db-tunnel.ps1, porta 18101). Vale SOLO per l'assistente: la coda
 // della trascrizione normale continua a usare WHISPER_URL / WHISPER_CPP_URL.
-// gemini = true (voce «Projexa 4B + 8B (Gemini trascrive)», 2026-10-21): il blocco lo trascrive
-// Gemini (stessa corsia della «Modalità Trascrizione» Gemini), così la CPU della VM resta tutta
-// ai modelli dell'assistente; se Gemini non risponde si usa il Whisper dell'assistente (non
-// quello della coda, che con large-v3-turbo sarebbe troppo lento).
-// parakeet = true (voce «Projexa 4B + 8B (Parakeet trascrive)», 2026-10-21): il blocco lo
-// trascrive Parakeet TDT 0.6B v3 sulla VM (PARAKEET_URL; in locale ASSISTENTE_PM_PARAKEET_URL =
-// tunnel 18103), con lo stesso ripiego sul Whisper dell'assistente se non risponde.
+// Opzioni (2026-10-21, nate per le voci «Projexa» dell'assistente, tolte il 2026-10-29; oggi
+// nessuna voce le usa):
+// gemini = true: il blocco lo trascrive Gemini (stessa corsia della «Modalità Trascrizione»
+// Gemini); se Gemini non risponde si usa il Whisper dell'assistente (non quello della coda, che
+// con large-v3-turbo sarebbe troppo lento).
+// parakeet = true: il blocco lo trascrive Parakeet TDT 0.6B v3 sulla VM (PARAKEET_URL; in
+// locale ASSISTENTE_PM_PARAKEET_URL = tunnel 18103), con lo stesso ripiego sul Whisper
+// dell'assistente se non risponde.
 export async function trascriviBloccoBreve(user, idCalendar, { audioB64, energy, offset, gemini = false, parakeet = false }) {
   const dedicato = String(process.env.ASSISTENTE_PM_WHISPER_CPP_URL || '').trim().replace(/\/+$/, '');
   const base = whisperCppUrls()[0] || whisperUrls()[0] || null;
@@ -830,8 +831,11 @@ async function valoreImpostazione(user, campo) {
 export const isChiediSempre = (v) => /^chiedi/i.test(String(v || '').trim());
 
 // Valore del campo "AI generazione e-mail recap" così com'è (anche "Chiedi sempre"), '' se vuoto.
+// Un valore rimasto dall'AI interna («Projexa», «Projexa 14B», tolta il 2026-10-29) vale come
+// «Chiedi sempre»: si sceglie a mano o si usa la prima AI collegata.
 export async function recapAiImpostata(user) {
-  return valoreImpostazione(user, 'ai generazione e-mail recap');
+  const v = await valoreImpostazione(user, 'ai generazione e-mail recap');
+  return /^projexa\b/i.test(String(v || '').trim()) ? 'Chiedi sempre' : v;
 }
 
 // AI da usare per le funzioni che non chiedono (recap interno, Dossier, email attività...):
@@ -873,8 +877,7 @@ export async function recapSource(user, idCalendar) {
   };
 }
 
-// Recap sul server in corso (Projexa: può durare molti minuti): la dashboard mostra
-// la clessidra invece del pulsante "Recap".
+// Recap sul server in corso: la dashboard mostra la clessidra invece del pulsante "Recap".
 const recapRunning = new Set(); // "tenant|utente|id_calendar"
 const recapKey = (user, idCalendar) => `${user.tenant_id}|${user.user_id}|${idCalendar}`;
 
@@ -940,17 +943,13 @@ export async function recapAutomaticoInCorso(user, ids) {
 export async function generateRecap(user, idCalendar, { origine = null, ai = null } = {}) {
   const providerName = ai || await recapAiImpostata(user);
   if (!providerName || isChiediSempre(providerName)) throw httpError(400, 'Scegli l\'AI in Impostazioni › AI › "AI generazione e-mail recap"');
-  const local = localRecapMode(providerName);
   const { transcript, vars, rules } = await recapSource(user, idCalendar);
 
   let result;
   const key = recapKey(user, idCalendar);
   recapRunning.add(key);
   try {
-    result = local === 'server'
-      ? await askOllamaRecap((text) => buildRecapPrompt(user, { ...vars, TRASCRIZIONE: text }), transcript,
-        { meeting: true, contesto: vars.OGGETTO, ai: providerName, cosa: 'Recap cliente', chiave: `${user.tenant_id}|${user.user_id}|${idCalendar}`, tipo: 'recap' })
-      : await askAiProvider(user.user_id, providerName, await buildRecapPrompt(user, { ...vars, TRASCRIZIONE: transcript }));
+    result = await askAiProvider(user.user_id, providerName, await buildRecapPrompt(user, { ...vars, TRASCRIZIONE: transcript }));
   } finally {
     recapRunning.delete(key);
   }
@@ -1022,7 +1021,7 @@ export async function enqueueChunk(user, idCalendar, { mixB64, energy, micB64, s
       mixB64 ? encRec(mixB64) : null, energy ? JSON.stringify(energy) : null,
       micB64 ? encRec(micB64) : null, sysB64 ? encRec(sysB64) : null]
   );
-  // Registrazione in corso: la trascrizione ha la precedenza sui recap con «Projexa».
+  // Registrazione in corso (config/precedenzaVm.js).
   segnaRegistrazione(recapKey(user, idCalendar), true, REGISTRAZIONE_TTL_MS);
   kickTranscriptionWorker();
   return r.rows[0].id;
@@ -1046,7 +1045,7 @@ export async function enqueueLostNotes(user, idCalendar, notes) {
 }
 
 // Fine registrazione: quando i blocchi precedenti della riunione sono trascritti, recap.
-// ai: AI scelta a mano con il pulsante Recap (es. "Projexa"): il recap parte
+// ai: AI scelta a mano con il pulsante Recap (es. "Gemini"): il recap parte
 // comunque, anche con «Chiedi sempre». Senza: recap automatico secondo le impostazioni.
 export async function enqueueFinalize(user, idCalendar, { ai = null } = {}) {
   const params = [user.tenant_id, user.user_id, user.email ? encRec(user.email) : null, idCalendar];
@@ -1265,7 +1264,7 @@ async function processFinalizeInterno(job) {
         const esecuzione = await recapEsecuzione(user);
         if (isChiediSempre(ai) || esecuzione === 'chiedi') {
           console.log(`[RECAP] ${job.id_calendar}: «Chiedi sempre», nessun recap automatico (resta il pulsante Recap)`);
-        } else if (esecuzione === 'batch' && ai && !localRecapMode(ai)) {
+        } else if (esecuzione === 'batch' && ai) {
           // Import dinamico: jobs/recapBatch.js importa a sua volta questo file.
           const { inviaRecapBatch } = await import('./recapBatch.js');
           try {
@@ -1283,11 +1282,7 @@ async function processFinalizeInterno(job) {
     }
   } catch (error) {
     const attempts = (Number(job.attempts) || 0) + 1;
-    // Projexa oltre il tempo massimo: riprovare dà lo stesso esito e occupa la VM per ore
-    // (2026-10-22: 10 tentativi previsti da ~4 ore l'uno). Con gli appunti salvati su disco un
-    // nuovo tentativo rifà solo il testo finale; dopo 3 ci si ferma (resta il pulsante Recap).
-    const massimo = error.codice === 'OLLAMA_TIMEOUT' ? 3 : 10;
-    if (isTemporary(error) && attempts < massimo) {
+    if (isTemporary(error) && attempts < 10) {
       await db.query(
         `UPDATE rec_meeting_chunks SET attempts = $2, last_error = $3, next_try_at = NOW() + interval '2 minutes' WHERE id = $1`,
         [job.id, attempts, encRec(String(error.message || error).slice(0, 500))]
@@ -1543,7 +1538,7 @@ async function runWorker() {
         const start = (jobs, free) => jobs.forEach((job, i) => {
           const url = free[i];
           busyUrls.add(url);
-          // Whisper sulla CPU della VM: precedenza sui recap con «Projexa» (la corsia Gemini no).
+          // Whisper sulla CPU della VM (config/precedenzaVm.js; la corsia Gemini no).
           segnaTrascrizione(job.id, true);
           const p = processAudioJob(job, url).finally(() => { busyUrls.delete(url); inflight.delete(job.id); segnaTrascrizione(job.id, false); });
           inflight.set(job.id, p);

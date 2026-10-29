@@ -36,7 +36,7 @@ fi
 "$VENV/bin/pip" install -q "sherpa-onnx>=1.12" numpy
 
 # Nice=-5 e CPUWeight=1000 come il Whisper dell'assistente: durante la call la trascrizione
-# passa davanti a Ollama.
+# passa davanti agli altri servizi.
 sudo tee /etc/systemd/system/projexa-parakeet.service >/dev/null <<UNIT
 [Unit]
 Description=Projexa Parakeet TDT 0.6B v3 (porta $PORT, $THREADS core)

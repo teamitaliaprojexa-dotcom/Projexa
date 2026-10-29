@@ -1434,7 +1434,7 @@ async function analizza(req, res) {
       riunioniCorrelate: fontiPerScheda([daRegistri, daRiunioni, daTrascrizioni], 6),
       puntiAttenzione: (Array.isArray(j.punti_attenzione) ? j.punti_attenzione : []).slice(0, 8).map((x) => corto(x, 300)).filter(Boolean),
       rispostaEmail: String(j.risposta_email || '').slice(0, 8000).trim(),
-      ai: { label: r.label || '', model: r.model || '', locale: !!r.locale }
+      ai: { label: r.label || '', model: r.model || '' }
     });
   } catch (e) {
     if (!e.status || e.status >= 500) console.error('❌ [OUTLOOK] analisi:', e.message);

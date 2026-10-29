@@ -14,7 +14,6 @@ import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { whisperUrls, whisperCppUrls, whisperAssistentePorta, parakeetUrl } from './ai.js';
 import { registraAccesso } from '../config/audit.js';
-import { lavoriProjexaInCorso } from '../config/lavoriProjexa.js';
 
 const router = express.Router();
 
@@ -119,9 +118,6 @@ function processLabel(comm, cmdline) {
   if (/uvicorn/.test(cmdline) && /whisper/.test(cmdline)) return 'Whisper (Background)';
   if (comm === 'uvicorn') return 'Whisper (Background)';
   if (/parakeet-service/.test(cmdline)) return 'Parakeet (trascrizione)';
-  if (comm.startsWith('ollama')) return 'Ollama (servizio)';
-  // Processi di Ollama che tengono in RAM i modelli caricati (uno per modello).
-  if (comm === 'llama-server' || /ollama.*runner/.test(cmdline)) return 'Ollama (modelli caricati)';
   if (comm === 'postgres' || comm === 'postmaster') return 'PostgreSQL';
   if (comm === 'caddy') return 'Caddy (HTTPS)';
   if (comm === 'node' || /node/.test(comm)) return /server\.js|projexa/.test(cmdline) ? 'Projexa (Node)' : 'Node';
@@ -242,7 +238,6 @@ export function serviceUnits() {
   if (assistente) units.push({ unit: 'projexa-whisper-assistente', label: `Whisper.cpp (Assistente PM, ${assistente})` });
   if (parakeetUrl()) units.push({ unit: 'projexa-parakeet', label: 'Parakeet TDT 0.6B v3 (trascrizione)' });
   if (process.env.PII_URL) units.push({ unit: 'projexa-pii', label: 'Anonymization Layer (Presidio + spaCy)' });
-  units.push({ unit: 'ollama', label: 'Ollama (Projexa: recap, Assistente PM, funzioni AI, associazioni)' });
   // Backup notturno: dal 2026-10-01 è un job dello schedulatore (pagina Schedulazioni), non più un timer.
   units.push({ unit: 'projexa-monitor.timer', label: 'Controlli di salute' });
   return units;
@@ -283,40 +278,6 @@ async function transcriptionQueue() {
   }
 }
 
-// Modelli di Ollama (2026-10-20): non sono servizi a parte ma file che l'unico servizio Ollama
-// carica in RAM quando servono. Installati (/api/tags) + quelli in RAM adesso (/api/ps).
-const OLLAMA_URL = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
-const USO_MODELLO = [
-  [/^recap-projexa-14b-bk-/, 'backup del recap 14B'],
-  [/^recap-projexa-14b/, 'Recap con «Projexa 14B»'],
-  [/^recap-projexa-bk-/, 'backup del recap'],
-  [/^recap-projexa/, 'Recap con «Projexa» (8B)'],
-  [/^pm-projexa-filtro-bk-/, 'backup del filtro 4B dell\'Assistente PM'],
-  [/^pm-projexa-filtro/, 'filtro 4B addestrato dell\'Assistente PM («Projexa 4B + 8B»)'],
-  [/^pm-projexa-bk-/, 'backup dell\'Assistente PM'],
-  [/^pm-projexa/, 'Assistente PM (Pm projexa, 8B)'],
-  [/^qwen2\.5:3b/, 'filtro veloce dell\'Assistente PM («Projexa 3B + 8B»)'],
-  [/^qwen3:4b-instruct/, 'filtro veloce dell\'Assistente PM («Projexa 4B + 8B»)'],
-  [/^qwen3:14b/, 'base del 14B: «Projexa 14B» di Dossier, funzioni PM, email; associazioni'],
-  [/^qwen3:8b/, 'base dell\'8B: recap, Assistente PM; «Projexa» di Dossier, funzioni PM, email'],
-  [/^qwen2\.5:7b/, 'vecchia base 7B: la usano i backup *-bk-20261020-2300 (eliminarla solo dopo averli tolti)']
-];
-async function ollamaModelli() {
-  try {
-    const get = async (p) => (await fetch(`${OLLAMA_URL}${p}`, { signal: AbortSignal.timeout(3000) })).json();
-    const [tags, ps] = await Promise.all([get('/api/tags'), get('/api/ps')]);
-    const pulito = (n) => String(n || '').replace(/:latest$/, '');
-    const inRam = new Map((ps.models || []).map((m) => [pulito(m.name || m.model), m]));
-    return (tags.models || []).map((m) => {
-      const nome = pulito(m.name);
-      const r = inRam.get(nome);
-      return { nome, uso: (USO_MODELLO.find(([re]) => re.test(nome)) || [null, ''])[1], disco: m.size, ram: r ? Number(r.size) || null : null, scade: r ? r.expires_at : null };
-    }).sort((a, b) => (b.ram || 0) - (a.ram || 0) || a.nome.localeCompare(b.nome));
-  } catch {
-    return null;
-  }
-}
-
 // ----------------------------------------------------------------------------
 // ENDPOINT
 // ----------------------------------------------------------------------------
@@ -342,7 +303,7 @@ router.get('/status', requireAuth, requireMonitorAccess, async (req, res) => {
     const points = history.filter((p) => p.t >= since);
     const last = history[history.length - 1] || null;
     const mem = memInfo();
-    const [services, databases, queue, ollama] = await Promise.all([serviceStates(serviceUnits()), databaseSizes(), transcriptionQueue(), ollamaModelli()]);
+    const [services, databases, queue] = await Promise.all([serviceStates(serviceUnits()), databaseSizes(), transcriptionQueue()]);
     res.json({
       host: os.hostname(),
       cpus: os.cpus().length,
@@ -354,17 +315,10 @@ router.get('/status', requireAuth, requireMonitorAccess, async (req, res) => {
       range,
       sampleSeconds: SAMPLE_MS / 1000,
       historyFrom: history.length ? history[0].t : null,
-      // Recap e lavori AI con il modello locale che stanno girando adesso (config/lavoriProjexa.js).
-      projexa: lavoriProjexaInCorso(),
       series: downsample(points, 240),
-      // I 10 più grandi per RAM, più Ollama sempre (a riposo occupa poco e restava fuori elenco).
-      processes: (() => {
-        const ordinati = lastProcs.slice().sort((a, b) => b.rss - a.rss);
-        const primi = ordinati.slice(0, 10);
-        return [...primi, ...ordinati.slice(10).filter((p) => p.name.startsWith('Ollama'))];
-      })(),
+      // I 10 più grandi per RAM.
+      processes: lastProcs.slice().sort((a, b) => b.rss - a.rss).slice(0, 10),
       services,
-      ollama,
       databases,
       queue
     });

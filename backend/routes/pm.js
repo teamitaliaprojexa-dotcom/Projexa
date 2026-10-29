@@ -40,7 +40,6 @@ import {
 } from '../config/azioniCliente.js';
 import * as Cap from '../config/capacita.js';
 import { cercaDoppione, aggiornamento } from '../config/dedupVoci.js';
-import { registraConfronto, OLLAMA_RAID_ADDESTRATO } from '../jobs/analisiRaid.js';
 
 // Voci RAID ancora aperte del progetto nella forma del controllo doppioni (config/dedupVoci.js).
 const raidAperteDedup = (lista) => lista.filter((x) => x.stato !== 'chiuso')
@@ -143,7 +142,7 @@ router.get('/progetto', async (req, res) => {
     const salute = await saluteProgetto(req.user, pid(req));
     // AI di Impostazioni › AI › «AI Funzioni PM» (vuoto = quella del recap; "Chiedi sempre").
     const info = await infoAi(req.user, 'pm_documento');
-    const ai = info.nome ? { nome: info.nome, locale: info.locale } : null;
+    const ai = info.nome ? { nome: info.nome } : null;
     // Campo Gantt (tipo 13) della scheda: serve al link «Apri il Gantt».
     const campi = await campiProgetto(req.user, salute.progetto.projectId);
     const g = (await db.query(
@@ -270,33 +269,16 @@ router.get('/riunione', async (req, res) => {
 
 // Proposta AI di rischi, decisioni e dipendenze dal recap (o dalla trascrizione) di una riunione.
 // Body: { projectId?, id_calendar }. Se la riunione è collegata a un progetto si usa quello.
-// Testo da cui estrarre RAID e Change Request: il recap, altrimenti la trascrizione. Con
-// Projexa (2026-10-22) solo il recap: la trascrizione intera non sta nel contesto del modello
-// locale e il JSON forzato vuole una sola chiamata.
-function testoEstrazione(m, ai) {
+// Testo da cui estrarre RAID e Change Request: il recap, altrimenti la trascrizione.
+function testoEstrazione(m) {
   const recap = stripMarkdown(String(m.recap || '')).trim();
-  if (ai && ai.locale) {
-    if (!recap) throw errore(400, 'Con Projexa RAID e Change Request si ricavano dal recap: genera prima il recap della riunione');
-    return recap;
-  }
   const base = recap || String(m.trascrizione || '').trim();
   if (!base) throw errore(400, 'La riunione non ha né recap né trascrizione');
   return base;
 }
 
-// Estrazione con l'AI della richiesta. Con «Projexa 14B» prima il modello addestrato
-// raid-projexa-14b (se manca, la base). Con Projexa il confronto con l'AI esterna per
-// l'addestramento (jobs/analisiRaid.js, solo utenti di Analisi PM, mai bloccante).
-async function estrai(req, build, operazione, m, prog) {
-  const ai = req.aiScelta;
-  const quattordici = !!(ai && ai.locale && /14\s*b/i.test(String(ai.nome || '')));
-  const r = await chiediAi(req.user, build, '', { json: true, ai, modelloLocale: quattordici ? OLLAMA_RAID_ADDESTRATO : null });
-  if (r.locale) {
-    registraConfronto(req.user, { operazione, idCalendar: m.id_calendar, projectId: prog.projectId, clientId: prog.clientId,
-      prompt: build(), risposta: r.testo, modello: r.model });
-  }
-  return r;
-}
+// Estrazione con l'AI della richiesta (risposta JSON).
+const estrai = (req, build) => chiediAi(req.user, build, '', { json: true, ai: req.aiScelta });
 
 router.post('/raid/estrai', ...rottaAi('pm_raid', async (req, res) => {
   try {
@@ -310,7 +292,7 @@ router.post('/raid/estrai', ...rottaAi('pm_raid', async (req, res) => {
     const projectId = m.project_id || pid(req);
     if (!projectId) throw errore(400, 'Collega prima la riunione a un progetto (tendina Progetto nella riga della riunione)');
     const prog = await progettoUtente(req.user, projectId);
-    const base = testoEstrazione(m, req.aiScelta);
+    const base = testoEstrazione(m);
     const [esistenti, crEsistenti] = await Promise.all([raidProgetto(req.user, prog.projectId), crProgetto(req.user, prog.projectId)]);
     const righeGia = [...esistenti.map((x) => `- (${x.tipo}) ${x.titolo}`), ...crEsistenti.map((x) => `- (change request ${x.codice || ''}) ${x.titolo}`)];
     const gia = righeGia.length ? righeGia.join('\n') : '(nessuno)';
@@ -322,7 +304,7 @@ router.post('/raid/estrai', ...rottaAi('pm_raid', async (req, res) => {
     // le istruzioni per riconoscerle si aggiungono qui, così funziona senza ritoccare il prompt.
     if (!/change_request/i.test(tpl)) tpl += `\n\n${CR_ISTRUZIONI}`;
     const build = () => tpl.replace(/\{\{(PROGETTO|OGGETTO|DATA_RIUNIONE|TESTO|GIA_PRESENTI)\}\}/g, (x, k) => vars[k]);
-    const r = await estrai(req, build, 'pm_raid', m, prog);
+    const r = await estrai(req, build);
     const j = leggiJson(r.testo);
     if (!j) throw errore(502, `${r.label} non ha restituito un elenco leggibile: riprova`);
     const titoli = new Set([...esistenti, ...crEsistenti].map((x) => normTitolo(x.titolo)));
@@ -383,7 +365,7 @@ router.post('/cr/estrai', ...rottaAi('pm_cr', async (req, res) => {
     const projectId = m.project_id || pid(req);
     if (!projectId) throw errore(400, 'Collega prima la riunione a un progetto (tendina Progetto nella riga della riunione)');
     const prog = await progettoUtente(req.user, projectId);
-    const base = testoEstrazione(m, req.aiScelta);
+    const base = testoEstrazione(m);
     const esistenti = await crProgetto(req.user, prog.projectId);
     const gia = esistenti.length ? esistenti.map((x) => `- ${x.codice || ''} ${x.titolo}`).join('\n') : '(nessuna)';
     const vars = {
@@ -391,7 +373,7 @@ router.post('/cr/estrai', ...rottaAi('pm_cr', async (req, res) => {
     };
     const tpl = (await getPromptFor('CR_ESTRAZIONE', req.user)).testo;
     const build = () => tpl.replace(/\{\{(PROGETTO|OGGETTO|DATA_RIUNIONE|TESTO|GIA_PRESENTI)\}\}/g, (x, k) => vars[k]);
-    const r = await estrai(req, build, 'pm_cr', m, prog);
+    const r = await estrai(req, build);
     const j = leggiJson(r.testo);
     if (!j) throw errore(502, `${r.label} non ha restituito un elenco leggibile: riprova`);
     res.json({
@@ -1033,7 +1015,7 @@ router.post('/chiedi', ...rottaAi('pm_chiedi', async (req, res) => {
     const tpl = (await getPromptFor('CHIEDI_PROGETTO', req.user)).testo;
     const vars = { DOMANDA: domanda, STORIA: storia, DATA: dataIt(oggiIso()), UTENTE: utente };
     const build = (d) => tpl.replace(/\{\{(DATI|DOMANDA|STORIA|DATA|UTENTE)\}\}/g, (x, k) => (k === 'DATI' ? d : vars[k]));
-    const r = await chiediAi(req.user, build, ctx.testo, { soloEsterna: true, ai: req.aiScelta });
+    const r = await chiediAi(req.user, build, ctx.testo, { ai: req.aiScelta });
     res.json({ domanda, progetto: prog.nome, risposta: stripMarkdown(r.testo).trim(), ai: `${r.label}${r.model ? ` (${r.model})` : ''}` });
   } catch (e) { invia(res, e, 'CHIEDI'); }
 }));

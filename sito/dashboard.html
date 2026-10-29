@@ -3676,7 +3676,6 @@
         .meeting-genrecap-btn:hover { background: #BAE6FD; }
         .meeting-genrecap-btn:disabled { opacity: 0.7; cursor: wait; }
         /* Percentuale del recap con Projexa accanto al pulsante (2026-10-22) */
-        .meeting-recap-pct { margin-left: 0.35rem; font-size: 0.75rem; font-weight: 600; color: #9A3412; white-space: nowrap; cursor: help; }
         /* Recap preso in carico da «AI Automatizza»: arancione e non cliccabile (span, non
            button, così il suggerimento al passaggio del mouse compare sempre) */
         .meeting-genrecap-auto {
@@ -4165,9 +4164,6 @@
         .sidebar .sidebar-menu li > a > .dock-ai-icon { width: 86%; height: 86%; }
         .sidebar #navDatabase > a { --tile: linear-gradient(180deg, #94A3B8, #334155); }
         .sidebar #navMonitor > a { --tile: linear-gradient(180deg, #64748B, #0F172A); }
-        .sidebar #navAnalisiPm > a { --tile: linear-gradient(180deg, #818CF8, #3730A3); }
-        /* Pulsante «Analisi PM» della trascrizione: acceso = riunione in coda per l'analisi notturna */
-        #meetingTextAnalisi.on, #meetingTextAnalisiRecap.on { background: #EEF2FF; border-color: #A5B4FC; color: #3730A3; }
         .sidebar #navRecord > a { --tile: linear-gradient(180deg, #FFFFFF, #E5E7EB); }
         .sidebar .sidebar-menu li.nav-settings > a { --tile: linear-gradient(180deg, #D1D5DB, #6B7280); }
 
@@ -4553,9 +4549,6 @@
             <!-- Monitor (schede Monitor VM, Schedulazioni, Log): admin del tenant PROJEXA, oppure in sola
                  lettura gli utenti di MONITOR_LETTURA_EMAILS (il server lo verifica a ogni richiesta) -->
             <li id="navMonitor" style="display: none;"><a href="monitor.html"><i class="fas fa-gauge-high"></i> <span>Monitor</span></a></li>
-            <!-- Analisi PM (domande da PM senior proposte di notte, addestramento di Pm projexa):
-                 solo con «Addestramento Ai Projexa» = true in settings (routes/analisiPm.js) -->
-            <li id="navAnalisiPm" style="display: none;"><a href="analisi-pm.html" title="Analisi PM: domande da valutare e addestramento di PM Projexa"><i class="fas fa-user-tie"></i> <span>Analisi PM</span></a></li>
             <!-- Registrazione libera (non legata al calendario): chiede il nome e avvia la registrazione -->
             <li id="navRecord" data-dash-flag="registra" style="border: none;"><a href="#" id="navRecordLink" title="Nuova registrazione"><svg class="sidebar-icon nav-record-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="none" stroke="#DC2626" stroke-width="1.8"/><rect x="9.6" y="5.6" width="4.8" height="8.2" rx="2.4" fill="#DC2626"/><path d="M7.4 11.4a4.6 4.6 0 0 0 9.2 0" fill="none" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/><path d="M12 16v2.4M9.6 18.4h4.8" stroke="#DC2626" stroke-width="1.6" stroke-linecap="round"/></svg> <span>Registra</span></a></li>
             <li class="nav-settings" style="border: none; position: relative;">
@@ -9702,18 +9695,10 @@
             return `<button type="button" class="meeting-genrecap-btn" data-event-id="${escapeHtml(eventId || '')}" ${running ? 'disabled' : ''} title="${escapeHtml(title)}">${running ? '<i class="fas fa-spinner fa-spin"></i> Recap…' : 'Recap'}</button>`;
         }
 
-        const serverRecapIcon = '<i class="fas fa-hourglass-half meeting-queued" title="Projexa in preparazione sul server: può richiedere diversi minuti, anche a pagina chiusa"></i>';
+        const serverRecapIcon = '<i class="fas fa-hourglass-half meeting-queued" title="Recap in preparazione sul server, anche a pagina chiusa"></i>';
         const batchRecapIcon = '<i class="fas fa-hourglass-half meeting-queued" title="Recap in modalità Batch: arriva entro 24 ore (di solito pochi minuti), anche a pagina chiusa"></i>';
         // «AI Automatizza (solo Batch)» ha preso in carico il recap: pulsante arancione, non cliccabile.
         const autoRecapButton = '<span class="meeting-genrecap-auto" role="button" aria-disabled="true" title="È in carico l\'automatismo con AI per la generazione del recap (AI Automatizza)"><i class="fas fa-robot"></i> Recap</span>';
-        // Percentuale del recap cliente quando gira con Projexa sul server (stato delle riunioni:
-        // recap_percento, recap_fase); con le AI in Batch non c'è e non si mostra nulla.
-        function recapPercento(m) {
-            if (!m || m.recap_percento == null) return '';
-            const fase = m.recap_fase ? ` · ${m.recap_fase}` : '';
-            return `<span class="meeting-recap-pct" title="${escapeHtml(`Recap con Projexa: ${m.recap_percento}%${fase}`)}">${m.recap_percento}%</span>`;
-        }
-
         // «Chiedi sempre» in Impostazioni › AI (AI generazione e-mail recap / Esecuzione Recap):
         // prima di partire si chiede AI e/o esecuzione. Risolve { ai, esecuzione }, oppure null
         // se l'utente annulla. Senza "Chiedi sempre" risolve subito {} (si usano le impostazioni).
@@ -9728,19 +9713,16 @@
                 const aiRow = document.getElementById('recapChoiceAiRow');
                 const aiSel = document.getElementById('recapChoiceAi');
                 const esRow = document.getElementById('recapChoiceEsRow');
-                const esNote = document.getElementById('recapChoiceEsNote');
                 const ok = document.getElementById('recapChoiceConfirm');
                 const cancel = document.getElementById('recapChoiceCancel');
                 const lista = opz.aiDisponibili || [];
                 aiRow.style.display = opz.chiediAi ? '' : 'none';
                 aiSel.innerHTML = lista.map((a) => `<option value="${escapeHtml(a.nome)}">${escapeHtml(a.label)}</option>`).join('');
                 const esRadio = () => modal.querySelector('input[name="recapChoiceEs"]:checked');
-                // Il Batch serve solo alle AI con chiave: con Projexa (gratuito) non si chiede.
                 const aggiorna = () => {
-                    const scelta = opz.chiediAi ? lista.find((a) => a.nome === aiSel.value) : { batch: !/^(projexa( 14b)?|recap projexa \(lento\))$/i.test(opz.ai || '') };
+                    const scelta = opz.chiediAi ? lista.find((a) => a.nome === aiSel.value) : { batch: true };
                     const conBatch = !!(scelta && scelta.batch);
                     esRow.style.display = opz.chiediEsecuzione && conBatch ? '' : 'none';
-                    esNote.style.display = opz.chiediEsecuzione && !conBatch ? '' : 'none';
                 };
                 aiSel.onchange = aggiorna;
                 const immediato = modal.querySelector('input[name="recapChoiceEs"][value="immediato"]');
@@ -10001,31 +9983,6 @@
         }
         setInterval(updateImminentMeetings, 10000);
 
-        // === ASSISTENTE PM PREPARATO PRIMA DELLA CALL (2026-10-21) ===
-        // Da 10 minuti prima dell'inizio di una riunione online (riga con Registra), la VM carica
-        // i modelli di Pm projexa e legge le istruzioni, così a riunione iniziata l'assistente è
-        // subito pronto. Il server non fa nulla se l'assistente è spento o non usa Projexa.
-        const AP_PREPARA_PRIMA_MS = 10 * 60 * 1000;
-        const AP_PREPARA_DOPO_MS = 5 * 60 * 1000;
-        const apPreparate = new Set();
-        function preparaAssistentePm() {
-            const now = Date.now();
-            document.querySelectorAll('#meetingsContainer .meeting-card[data-start]').forEach((row) => {
-                const start = Date.parse(row.dataset.start);
-                const id = row.dataset.eventId;
-                if (!id || apPreparate.has(id) || !row.querySelector('.meeting-rec-btn') || !Number.isFinite(start)) return;
-                const diff = start - now;
-                if (diff > AP_PREPARA_PRIMA_MS || diff < -AP_PREPARA_DOPO_MS) return;
-                apPreparate.add(id);
-                fetch(`${API_URL}/assistente-pm/prepara`, {
-                    method: 'POST',
-                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id_calendar: id, titolo: row.dataset.title || '' })
-                }).catch(() => apPreparate.delete(id));
-            });
-        }
-        setInterval(preparaAssistentePm, 60000);
-
         // === AGGIORNAMENTO DELLA GRIGLIA RIUNIONI (senza rileggere il calendario) ===
         // Rilegge da rec_meeting solo lo stato delle riunioni a video (trascrizione, recap,
         // inviata, gestita) e aggiorna le celle al loro posto: ogni 15 s a pagina visibile,
@@ -10076,8 +10033,8 @@
                     // durante una generazione in corso il pulsante "Recap…" non va sovrascritto
                     if (!manualRecapRunning.has(ev.id)) {
                         const canRecap = m && m.has_trascrizione && !m.has_recap && !m.pending && !recording;
-                        setStatusCell(row, 'meeting-status-genrecap', m && m.recap_auto && !m.has_recap ? autoRecapButton + recapPercento(m)
-                            : (m && m.recap_running && !m.has_recap ? (m.recap_batch ? batchRecapIcon : serverRecapIcon + recapPercento(m)) : (canRecap ? manualRecapButton(ev.id) : '')));
+                        setStatusCell(row, 'meeting-status-genrecap', m && m.recap_auto && !m.has_recap ? autoRecapButton
+                            : (m && m.recap_running && !m.has_recap ? (m.recap_batch ? batchRecapIcon : serverRecapIcon) : (canRecap ? manualRecapButton(ev.id) : '')));
                     }
                     const queued = m && m.pending > 0
                         ? `<i class="fas fa-hourglass-half meeting-queued" title="Trascrizione in corso sul server: ${m.pending} blocc${m.pending === 1 ? 'o' : 'hi'} in coda"></i>`
@@ -10952,9 +10909,9 @@
             const d = mi.dati || {};
             if (d.tabelle === false) { pane.innerHTML = '<div class="mi-avviso"><i class="fas fa-database"></i> Funzione non ancora attiva: va eseguito lo script <b>Supporto/CreaDB/recap_interno.sql</b> sul database.</div>'; return; }
             const dt = (v) => (v ? new Date(v).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }) : '');
-            const lento = d.ai && d.ai.locale;
+
             const STATI = {
-                in_corso: `<i class="fas fa-spinner fa-spin"></i> Recap interno in preparazione${lento ? ' con Projexa: può richiedere molti minuti, puoi chiudere la finestra e ricevi la notifica' : '…'}`,
+                in_corso: `<i class="fas fa-spinner fa-spin"></i> Recap interno in preparazione…`,
                 batch: '<i class="fas fa-hourglass-half"></i> Recap interno inviato in modalità Batch (costo dimezzato): arriva entro 24 ore, di solito in pochi minuti. Puoi chiudere la finestra: ricevi la notifica in campanella.',
                 pronto: `Generato il ${escapeHtml(dt(d.il))}${d.ai && d.ai.nome ? ` · AI: ${escapeHtml(d.ai.nome)}` : ''}`,
                 errore: `<span style="color:#B91C1C"><i class="fas fa-triangle-exclamation"></i> Generazione non riuscita: ${escapeHtml(d.errore || '')}</span>`,
@@ -11361,131 +11318,6 @@
             });
         }
 
-        // --- Analisi PM (routes/analisiPm.js): segno «da analizzare stanotte» sulla trascrizione.
-        // Il job notturno lo toglie a fine analisi. Solo con «Addestramento Ai Projexa» = true in settings.
-        var analisiPmAbilitata = false; // var: impostata anche dal controllo del menu (stesso script)
-        async function mtAnalisiPm(eventId) {
-            const b = document.getElementById('meetingTextAnalisi');
-            if (!b) return;
-            b.style.display = 'none';
-            b.classList.remove('on');
-            b.dataset.eventId = eventId || '';
-            if (!eventId || !analisiPmAbilitata) return;
-            try {
-                const r = await fetch(`${API_URL}/analisi-pm/flag?id_calendar=${encodeURIComponent(eventId)}`, { headers: getAuthHeaders() });
-                const d = await r.json().catch(() => ({}));
-                if (!r.ok || b.dataset.eventId !== eventId) return;
-                mtAnalisiPmMostra(b, d);
-                b.style.display = '';
-            } catch (e) { /* pulsante nascosto */ }
-        }
-        function mtAnalisiPmMostra(b, d) {
-            b.classList.toggle('on', !!d.flag);
-            b.querySelector('span').textContent = d.flag ? 'In coda per stanotte' : d.stato === 'fatta' ? 'Analisi PM (già fatta)' : 'Analisi PM';
-            b.title = d.flag
-                ? `Verrà analizzata stanotte con ${d.ai || 'l\'AI scelta'}: clicca per toglierla dalla coda`
-                : 'Manda questa trascrizione all\'analisi notturna: l\'AI propone le domande da PM senior che avresti potuto fare (pagina Analisi PM)';
-        }
-        // Delega sul documento: lo script viene prima del markup della finestra.
-        document.addEventListener('click', async (e) => {
-            const b = e.target.closest && e.target.closest('#meetingTextAnalisi');
-            if (!b || b.disabled) return;
-            const eventId = b.dataset.eventId;
-            if (!eventId) return;
-            const flag = !b.classList.contains('on');
-            b.disabled = true;
-            try {
-                const r = await fetch(`${API_URL}/analisi-pm/flag`, { method: 'POST', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ id_calendar: eventId, flag }) });
-                const d = await r.json().catch(() => ({}));
-                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
-                mtAnalisiPmMostra(b, { flag });
-                showNotification(flag ? 'Trascrizione in coda per l\'analisi PM di stanotte' : 'Trascrizione tolta dall\'analisi PM', 'success');
-            } catch (err) {
-                showNotification(err.message, 'error');
-            } finally {
-                b.disabled = false;
-            }
-        });
-
-        // --- Analisi Recap (routes/analisiPm.js /recap, jobs/analisiRecap.js): segno «da rifare
-        // stanotte con l'AI insegnante» per addestrare recap-projexa. Stessi utenti di Analisi PM.
-        async function mtAnalisiRecap(eventId) {
-            const b = document.getElementById('meetingTextAnalisiRecap');
-            if (!b) return;
-            b.style.display = 'none';
-            b.classList.remove('on');
-            b.dataset.eventId = eventId || '';
-            if (!eventId || !analisiPmAbilitata) return;
-            try {
-                const r = await fetch(`${API_URL}/analisi-pm/recap/flag?id_calendar=${encodeURIComponent(eventId)}`, { headers: getAuthHeaders() });
-                const d = await r.json().catch(() => ({}));
-                if (!r.ok || b.dataset.eventId !== eventId) return;
-                mtAnalisiRecapMostra(b, d);
-                b.style.display = '';
-            } catch (e) { /* pulsante nascosto (es. analisi_recap.sql non ancora eseguito) */ }
-        }
-        function mtAnalisiRecapMostra(b, d) {
-            b.classList.toggle('on', !!d.flag);
-            b.querySelector('span').textContent = d.flag ? 'Recap in coda per stanotte' : d.stato === 'fatta' ? 'Analisi Recap (già fatta)' : 'Analisi Recap';
-            b.title = d.flag
-                ? `Verrà rifatta stanotte con ${d.ai || 'l\'AI scelta'}: clicca per toglierla dalla coda`
-                : 'Manda questa trascrizione all\'analisi notturna del recap: l\'AI scrive appunti, recap cliente e recap interno da usare come esempi per addestrare Projexa (pagina Analisi PM › Recap)';
-        }
-        document.addEventListener('click', async (e) => {
-            const b = e.target.closest && e.target.closest('#meetingTextAnalisiRecap');
-            if (!b || b.disabled) return;
-            const eventId = b.dataset.eventId;
-            if (!eventId) return;
-            const flag = !b.classList.contains('on');
-            b.disabled = true;
-            try {
-                const r = await fetch(`${API_URL}/analisi-pm/recap/flag`, { method: 'POST', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ id_calendar: eventId, flag }) });
-                const d = await r.json().catch(() => ({}));
-                if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
-                mtAnalisiRecapMostra(b, { flag });
-                showNotification(flag ? 'Trascrizione in coda per l\'analisi del recap di stanotte' : 'Trascrizione tolta dall\'analisi del recap', 'success');
-            } catch (err) {
-                showNotification(err.message, 'error');
-            } finally {
-                b.disabled = false;
-            }
-        });
-
-        // === AVANZAMENTO DEL RECAP CON PROJEXA (2026-10-21) ===
-        // Barra sotto il titolo della finestra Recap: a che punto sono recap cliente e recap
-        // interno con il modello locale (appunti pezzo n di N, testo finale, pausa per la VM).
-        // Il server risponde dalla memoria (nessun carico per la VM); si legge ogni 10 s finché la
-        // finestra è aperta su quella riunione.
-        let mtAvanzTimer = null;
-        async function mtAvanzamento(idCal) {
-            clearTimeout(mtAvanzTimer);
-            const box = document.getElementById('mtAvanz');
-            const modal = document.getElementById('meetingTextModal');
-            if (!box) return;
-            if (!idCal || !modal.classList.contains('open') || modal.dataset.eventId !== idCal || modal.dataset.field !== 'recap') { box.style.display = 'none'; return; }
-            let lavori = [];
-            try {
-                const r = await fetch(`${API_URL}/recap-interno/avanzamento?id_calendar=${encodeURIComponent(idCal)}`, { headers: getAuthHeaders() });
-                if (r.ok) lavori = (await r.json()).lavori || [];
-            } catch (e) { /* si riprova al giro dopo */ }
-            const NOMI = { recap: 'Recap cliente', interno: 'Recap interno' };
-            const minuti = (iso) => Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
-            box.innerHTML = lavori.map((l) => {
-                const p = l.percento == null ? 0 : l.percento;
-                return `<div style="margin-top:0.35rem">
-                    <div style="display:flex; justify-content:space-between; gap:0.5rem; font-size:0.78rem; color:var(--text-muted)">
-                        <span><b style="color:var(--dark)">${escapeHtml(NOMI[l.tipo] || l.cosa || 'Recap')}</b> con ${escapeHtml(l.modello || 'Projexa')}${l.fase ? ` · ${escapeHtml(l.fase)}` : ''}${l.inAttesa ? ` · <span style="color:#B45309">in pausa: la VM serve prima a ${escapeHtml(l.inAttesa)}</span>` : ''}</span>
-                        <span>${l.percento == null ? '' : `${p}% · `}da ${minuti(l.dal)} min</span>
-                    </div>
-                    <div style="height:6px; background:#E5E7EB; border-radius:3px; overflow:hidden; margin-top:0.2rem">
-                        <div style="height:100%; width:${Math.max(3, p)}%; background:${l.inAttesa ? '#F59E0B' : '#10B981'}; transition:width 0.6s"></div>
-                    </div>
-                </div>`;
-            }).join('');
-            box.style.display = lavori.length ? '' : 'none';
-            mtAvanzTimer = setTimeout(() => mtAvanzamento(idCal), 10000);
-        }
-
         async function openMeetingText(btn) {
             const modal = document.getElementById('meetingTextModal');
             const body = document.getElementById('meetingTextBody');
@@ -11503,8 +11335,6 @@
             show('meetingTextRaid', isRecap);      // Rischi e decisioni (Cruscotto PM): solo nel recap
             show('meetingTextAudio', !isRecap);    // file audio: solo trascrizione
             show('meetingTextProponi', !isRecap && !!modal.dataset.eventId); // nomi scritti male: solo trascrizione
-            mtAnalisiPm(!isRecap ? modal.dataset.eventId : '');   // Analisi PM: solo trascrizione, utenti abilitati
-            mtAnalisiRecap(!isRecap ? modal.dataset.eventId : ''); // Analisi Recap: idem (esempi per recap-projexa)
             // Schede Recap cliente / Recap interno: solo sul recap di una riunione gestita.
             mtMostraScheda('cliente', true);
             document.getElementById('mtTabs').style.display = isRecap && modal.dataset.eventId ? '' : 'none';
@@ -11516,7 +11346,6 @@
             body.innerHTML = '<p class="meeting-text-empty"><i class="fas fa-spinner fa-spin"></i> Caricamento…</p>';
             body.dataset.raw = '';
             modal.classList.add('open');
-            mtAvanzamento(isRecap ? modal.dataset.eventId : '');
             try {
                 const res = await fetch(`${API_URL}/calendar/meetings/managed/text?id_calendar=${encodeURIComponent(btn.dataset.eventId)}&field=${field}`, { headers: calendarAuthHeaders() });
                 const data = await res.json().catch(() => ({}));
@@ -11557,7 +11386,7 @@
             modal.dataset.title = title;
             mtMostraScheda('cliente', true);
             document.getElementById('mtTabs').style.display = 'none';
-            ['meetingTextUpload', 'meetingTextAudio', 'meetingTextFix', 'meetingTextProponi', 'meetingTextTasks', 'meetingTextRaid', 'meetingTextClear', 'meetingTextEmail', 'meetingTextAnalisi', 'meetingTextAnalisiRecap'].forEach((id) => {
+            ['meetingTextUpload', 'meetingTextAudio', 'meetingTextFix', 'meetingTextProponi', 'meetingTextTasks', 'meetingTextRaid', 'meetingTextClear', 'meetingTextEmail'].forEach((id) => {
                 const el = document.getElementById(id);
                 if (el) el.style.display = 'none';
             });
@@ -12642,8 +12471,7 @@
             window.AssistentePm.inviaAudio(rec.eventId, out);
         }
         function flushAssistBuffer(rec) {
-            // Pm projexa (Ollama sulla VM): blocchi più lunghi, vedi AssistentePm.durataBlocchi.
-            const dur = (window.AssistentePm && window.AssistentePm.durataBlocchi && window.AssistentePm.durataBlocchi()) || { min: AP_MIN_SECONDS, max: AP_MAX_SECONDS };
+            const dur = { min: AP_MIN_SECONDS, max: AP_MAX_SECONDS };
             const minLen = REC_SAMPLE_RATE * dur.min, maxLen = REC_SAMPLE_RATE * dur.max;
             if (rec.apLen < minLen) return;
             // Soglia di pausa dal livello della voce della registrazione (sola lettura).
@@ -14466,14 +14294,6 @@
                         .then((d) => { if (d.accesso) navMonitor.style.display = ''; })
                         .catch(() => {});
                 }
-            }
-            // Analisi PM: lo dice il server (settings «Addestramento Ai Projexa»); vale anche per i pulsanti nella trascrizione.
-            const navAnalisi = document.getElementById('navAnalisiPm');
-            if (navAnalisi) {
-                fetch(`${API_URL}/analisi-pm/config`, { headers: getAuthHeaders() })
-                    .then((r) => (r.ok ? r.json() : {}))
-                    .then((d) => { analisiPmAbilitata = !!d.abilitato; navAnalisi.style.display = d.abilitato ? '' : 'none'; })
-                    .catch(() => {});
             }
         }
 
@@ -23408,7 +23228,6 @@
                 <button id="meetingTextClose" type="button" aria-label="Chiudi" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;"><i class="fas fa-times"></i></button>
             </div>
             <!-- Avanzamento del recap con Projexa (cliente e interno), sotto il titolo -->
-            <div id="mtAvanz" style="display: none; padding: 0 1.25rem 0.6rem;"></div>
             <div class="mt-layout">
                 <!-- Barra dei comandi, a sinistra -->
                 <div class="mt-side" role="toolbar" aria-label="Comandi">
@@ -23422,8 +23241,6 @@
                     <button id="meetingTextProponi" type="button" class="mt-btn" style="display: none;" title="Projexa cerca nel testo i nomi scritti male (partecipanti, team, rubrica, cliente) e propone le correzioni da salvare"><i class="fas fa-wand-magic-sparkles"></i> Proponi correzioni</button>
                     <button id="meetingTextUpload" type="button" class="mt-btn" title="Carica un file .txt o .vtt: sostituisce il testo di questa riunione"><i class="fas fa-upload"></i> Carica file</button>
                     <button id="meetingTextAudio" type="button" class="mt-btn" style="display: none;" title="Carica un file audio (.mp3, .wav, .m4a…): viene trascritto sul server e il testo si aggiunge alla trascrizione"><i class="fas fa-file-audio"></i> Trascrivi audio</button>
-                    <button id="meetingTextAnalisi" type="button" class="mt-btn" style="display: none;" title="Manda questa trascrizione all'analisi notturna: l'AI propone le domande da PM senior che avresti potuto fare (pagina Analisi PM)"><i class="fas fa-user-tie"></i> <span>Analisi PM</span></button>
-                    <button id="meetingTextAnalisiRecap" type="button" class="mt-btn" style="display: none;" title="Manda questa trascrizione all'analisi notturna del recap: l'AI scrive appunti, recap cliente e recap interno da usare come esempi per addestrare Projexa (pagina Analisi PM › Recap)"><i class="fas fa-envelope-open-text"></i> <span>Analisi Recap</span></button>
                     <button id="meetingTextDownload" type="button" class="mt-btn" title="Scarica il testo in un file .txt"><i class="fas fa-download"></i> Scarica .txt</button>
                     <button id="meetingTextCopy" type="button" class="mt-btn" title="Copia il testo (con la formattazione) negli appunti"><i class="fas fa-copy"></i> Copia testo</button>
                     <button id="meetingTextClear" type="button" class="mt-btn mt-danger" style="display: none;" title="Cancella completamente il recap di questa riunione"><i class="fas fa-eraser"></i> Svuota</button>
@@ -23628,7 +23445,6 @@
                     <label style="font-size: 0.88rem; color: var(--dark); display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;"><input type="radio" name="recapChoiceEs" value="immediato" checked> <span><b>Immediato</b> – il recap è pronto in pochi secondi, al prezzo normale.</span></label>
                     <label style="font-size: 0.88rem; color: var(--dark); display: flex; gap: 0.5rem; align-items: flex-start; cursor: pointer;"><input type="radio" name="recapChoiceEs" value="batch"> <span><b>Batch (−50%)</b> – costa la metà, ma arriva entro 24 ore (di solito pochi minuti), anche a pagina chiusa.</span></label>
                 </div>
-                <p id="recapChoiceEsNote" style="margin: 0; font-size: 0.8rem; color: var(--text-muted); display: none;">Projexa è gratuito: parte subito sul server, senza modalità Batch.</p>
             </div>
             <div class="task-modal-footer">
                 <button id="recapChoiceCancel" type="button" style="padding: 0.6rem 1.2rem; border: 1px solid var(--border); border-radius: 8px; background: white; color: var(--dark); cursor: pointer;">Annulla</button>

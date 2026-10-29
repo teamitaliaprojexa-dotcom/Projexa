@@ -10,22 +10,21 @@
 // Dalla scheda: «Crea task» (tasks assegnati agli owner) ed «Email al team» (nel browser).
 //
 // AI = quella del recap (Impostazioni › AI › «AI generazione e-mail recap»), prompt RECAP_INTERNO
-// (config/prompts.js). La generazione gira in background: con «Projexa» può durare
-// molti minuti; la pagina interroga lo stato e a fine lavoro arriva la notifica in campanella.
+// (config/prompts.js). La generazione gira in background: la pagina interroga lo stato e a fine
+// lavoro arriva la notifica in campanella.
 // Tabelle: Supporto/CreaDB/recap_interno.sql.
 // ============================================================================
 import express from 'express';
 import db from '../config/database.js';
 import { encryptRowForWrite } from '../config/crypto.js';
 import { getPromptFor } from '../config/prompts.js';
-import { askAiProvider, localRecapMode, askOllamaRecap, PROVIDERS as AI_PROVIDERS } from './ai.js';
+import { askAiProvider, PROVIDERS as AI_PROVIDERS } from './ai.js';
 import {
   recapSource, recapAiImpostata, recapEsecuzione, isChiediSempre, applyCorrections, stripMarkdown, encRec
 } from '../jobs/meetingTranscription.js';
 import { inviaPromptBatch, controllaRecapBatchUtente } from '../jobs/recapBatch.js';
 import { parseDueDate } from '../jobs/recapTasks.js';
 import { notificaRiunione } from '../jobs/notifiche.js';
-import { avanzamentoRiunione } from '../config/lavoriProjexa.js';
 import { cercaDoppione, aggiornamento, todoAperte, ownerTodo, aggiornaTodo } from '../config/dedupVoci.js';
 import { accodaRiunione, inFila } from '../jobs/filaRiunione.js';
 
@@ -160,7 +159,6 @@ async function impostaStato(user, idCalendar, stato, erroreTesto = null) {
 }
 
 // Dati per il prompt: riunione, trascrizione corretta, persone del team e build(testo) -> prompt.
-// Usata anche dall'insegnante notturno del recap (jobs/analisiRecap.js).
 export async function prepara(user, idCalendar) {
   const m = await riunione(user, idCalendar);
   const { transcript, vars, rules } = await recapSource(user, idCalendar);
@@ -177,9 +175,7 @@ export async function prepara(user, idCalendar) {
 // restano; le altre si sostituiscono con quelle nuove.
 async function genera(user, idCalendar, providerName) {
   const p = await prepara(user, idCalendar);
-  const r = localRecapMode(providerName) === 'server'
-    ? await askOllamaRecap(async (t) => p.build(t), p.transcript, { meeting: true, contesto: p.vars.OGGETTO, ai: providerName, cosa: 'Recap interno', chiave: `${user.tenant_id}|${user.user_id}|${idCalendar}`, tipo: 'interno' })
-    : await askAiProvider(user.user_id, providerName, p.build(p.transcript));
+  const r = await askAiProvider(user.user_id, providerName, p.build(p.transcript));
   await salvaInterno(user, idCalendar, p, r.text, r.label);
 }
 
@@ -208,7 +204,6 @@ export async function avviaRecapInternoAutomatico(user, idCalendar, providerName
       }
     }
   });
-  if (localRecapMode(providerName) === 'server') return immediato('Projexa non ha la modalità Batch');
   const p = await prepara(user, idCalendar);
   try {
     await inviaPromptBatch(user, idCalendar, providerName, p.build(p.transcript), { tipo: 'recap_interno' });
@@ -300,7 +295,7 @@ router.get('/', async (req, res) => {
     // Con «Chiedi sempre» l'AI la sceglie l'utente a ogni generazione: non se ne mostra una.
     const impostata = await recapAiImpostata(req.user);
     const ai = isChiediSempre(impostata) ? '' : impostata;
-    if (!pronte) return res.json({ tabelle: false, stato: null, attivita: [], riunione: m, ai: { nome: ai, locale: localRecapMode(ai) === 'server' } });
+    if (!pronte) return res.json({ tabelle: false, stato: null, attivita: [], riunione: m, ai: { nome: ai } });
     const r = (await db.query(
       `SELECT recap_interno, recap_interno_stato, recap_interno_il, recap_interno_errore FROM rec_meeting
         WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3`,
@@ -320,17 +315,9 @@ router.get('/', async (req, res) => {
     )).rows;
     res.json({
       tabelle: true, riunione: m, stato, il: r.recap_interno_il, errore: r.recap_interno_errore,
-      sintesi: r.recap_interno || '', attivita: att, ai: { nome: ai, locale: localRecapMode(ai) === 'server' }
+      sintesi: r.recap_interno || '', attivita: att, ai: { nome: ai }
     });
   } catch (e) { invia(res, e, 'LEGGI'); }
-});
-
-// Avanzamento di recap cliente e recap interno con Projexa (barra della finestra Recap,
-// 2026-10-21): solo memoria del backend (config/lavoriProjexa.js), nessuna query né carico per
-// la VM. Query: id_calendar. Risposta: { lavori: [{ tipo, modello, fase, percento, dal, inAttesa }] }.
-router.get('/avanzamento', (req, res) => {
-  const id = String(req.query.id_calendar || '').trim().slice(0, 300);
-  res.json({ lavori: id ? avanzamentoRiunione(`${req.user.tenant_id}|${req.user.user_id}|${id}`) : [] });
 });
 
 router.get('/persone', async (req, res) => {
@@ -355,8 +342,7 @@ router.post('/genera', async (req, res) => {
       if (!providerName) throw errore(400, 'Scegli l\'AI da usare per il recap interno');
     }
     if (!providerName) throw errore(400, 'Scegli l\'AI in Impostazioni › AI › «AI generazione e-mail recap»');
-    const locale = localRecapMode(providerName) === 'server';
-    if (!locale && !AI_PROVIDERS[providerName.toLowerCase()]) throw errore(400, `AI «${providerName}» non utilizzabile per il recap interno`);
+    if (!AI_PROVIDERS[providerName.toLowerCase()]) throw errore(400, `AI «${providerName}» non utilizzabile per il recap interno`);
     let esecuzione = await recapEsecuzione(req.user);
     if (esecuzione === 'chiedi') {
       esecuzione = String(b.esecuzione || '').trim().toLowerCase();
@@ -365,10 +351,10 @@ router.post('/genera', async (req, res) => {
     const k = chiave(req.user, m.id_calendar);
     if (inCorso.has(k) || inFila(req.user, m.id_calendar, 'recap_interno')) throw errore(409, 'Il recap interno di questa riunione è già in preparazione');
     const user = { tenant_id: req.user.tenant_id, user_id: req.user.user_id, email: req.user.email, id_roles: req.user.id_roles };
-    // Batch (non per Projexa, già gratuito): metà prezzo, risposta entro 24 ore; la
+    // Batch: metà prezzo, risposta entro 24 ore; la
     // raccoglie jobs/recapBatch.js (o il controllo all'apertura della scheda).
     let nota = '';
-    if (esecuzione === 'batch' && !locale) {
+    if (esecuzione === 'batch') {
       try {
         const p = await prepara(user, m.id_calendar);
         const r = await inviaPromptBatch(user, m.id_calendar, providerName, p.build(p.transcript), { tipo: 'recap_interno' });
@@ -383,7 +369,7 @@ router.post('/genera', async (req, res) => {
     // Fila su disco (jobs/filaRiunione.js, 2026-10-23): un riavvio del server a metà la
     // riprende invece di lasciarla «in corso» per sempre. Errore = stato «errore» nella scheda.
     await impostaStato(req.user, m.id_calendar, 'in_corso');
-    await accodaRiunione(user, m.id_calendar, { nome: providerName, label: providerName, locale },
+    await accodaRiunione(user, m.id_calendar, { nome: providerName, label: providerName },
       [{ tipo: 'recap_interno', nome: 'Recap Interno' }]);
     res.status(202).json({ avviato: true, nota });
   } catch (e) { invia(res, e, 'GENERA'); }

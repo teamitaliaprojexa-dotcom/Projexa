@@ -21,7 +21,6 @@ import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
 import assistentePmRoutes from './routes/assistentePm.js';
-import analisiPmRoutes from './routes/analisiPm.js';
 import mysupportPushRoutes, { utenteDaTokenPush, registraInvioPush, pushLimitato } from './routes/mysupportPush.js';
 import outlookAddinRoutes from './routes/outlookAddin.js';
 import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
@@ -41,7 +40,7 @@ import { riprendiFileRiunioni } from './jobs/filaRiunione.js';
 import { completaDopoRiavvio } from './jobs/aggiornamentiVm.js';
 import { infoAi } from './config/aiFunzioni.js';
 import aiLavoriRoutes from './routes/aiLavori.js';
-import { askAiProvider, askOllamaRecap } from './routes/ai.js';
+import { askAiProvider } from './routes/ai.js';
 import { getPromptFor } from './config/prompts.js';
 import { leggiTemplate, descriviTemplate, applicaModifiche, leggiRispostaAi, leggiRevisioneAi, testoRisultante, spostamentiRichiesti } from './config/kickoffPptx.js';
 import * as OffertaDocx from './config/offertaDocx.js';
@@ -277,8 +276,6 @@ app.use('/api/audit', auditEventiRoutes);
 app.use('/api/chatbot', chatbotRoutes);
 // Finestra «Assistente PM» durante la registrazione (Gemini Live): routes/assistentePm.js.
 app.use('/api/assistente-pm', assistentePmRoutes);
-// Analisi PM notturna, valutazione delle domande e modello addestrato (solo con «Addestramento Ai Projexa» in settings).
-app.use('/api/analisi-pm', analisiPmRoutes);
 // Token dello script del PC che invia MySupport (interruttore «DataBricks»): routes/mysupportPush.js.
 app.use('/api/mysupport/push', mysupportPushRoutes);
 // Add-in di Outlook «Analizza con Projexa» (pagine in sito/outlook/, token dedicato): routes/outlookAddin.js.
@@ -1493,9 +1490,7 @@ app.post('/api/dashboard/tasks/email-in-carico', requireAuth, ...rottaAi('email_
       if (multi) tpl += PIU_PERSONE;
       return tpl.replace(/\{\{(NOMINATIVO|TASK|DATA|UTENTE)\}\}/g, (m, k) => (k === 'TASK' ? task : vars[k] || ''));
     };
-    const result = req.aiScelta.locale
-      ? await askOllamaRecap(async (text) => build(text), elenco)
-      : await askAiProvider(req.user.user_id, providerName, build(elenco));
+    const result = await askAiProvider(req.user.user_id, providerName, build(elenco));
     const testo = stripMarkdown(String(result.text || '')).trim();
     if (!testo) return res.status(502).json({ error: `${result.label || providerName} non ha restituito alcun testo` });
     res.json({ testo, ai: result.label || providerName, nominativo });
@@ -8930,9 +8925,7 @@ app.get('/api/clients/dossier', requireAuth, ...rottaAi('dossier', async (req, r
         return tpl.replace(/\{\{(DATI|DATA|UTENTE)\}\}/g, (m, k) => (k === 'DATI' ? dati : k === 'DATA' ? oggi : utente));
       };
       try {
-        const r = req.aiScelta.locale
-          ? await askOllamaRecap(async (t) => build(t), datiAi)
-          : await askAiProvider(req.user.user_id, providerName, build(datiAi));
+        const r = await askAiProvider(req.user.user_id, providerName, build(datiAi));
         ai = { testo: stripMarkdown(String(r.text || '')).trim(), label: r.label || providerName, errore: '' };
       } catch (e) {
         ai.errore = `L'AI non ha risposto (${e.status ? e.message : erroreDossier('sintesi AI', e)}): il dossier è senza sintesi.`;

@@ -3,7 +3,7 @@
 # Servizio delle impronte vocali (speaker embedding ONNX, sherpa-onnx, ~25 MB): a fine riunione
 # il backend divide le righe «Partecipanti» in «Partecipante 1, 2…».
 # Servizio systemd projexa-diarizzazione su 127.0.0.1:8105 (senza chiave, come Parakeet).
-# Priorità BASSA (Nice=10, CPUWeight=20): lavora dopo trascrizione, Assistente PM e Ollama,
+# Priorità BASSA (Nice=10, CPUWeight=20): lavora dopo trascrizione e Assistente PM,
 # così non rallenta le funzioni live.
 # Il codice del servizio arriva con il deploy in /opt/projexa/diarizzazione-service/app.py.
 # Prima: eseguire Supporto/CreaDB/rec_meeting_voci.sql sul database.

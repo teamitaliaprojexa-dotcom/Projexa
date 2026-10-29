@@ -97,32 +97,6 @@ export const PROMPT_FUNCTIONS = {
     // INGRESSO = frase su cosa riceve Gemini (trascrizione a pezzi o audio live), dalla modalità.
     segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE', 'INGRESSO']
   },
-  // Stesso Assistente PM con la voce «Projexa» (2026-10-20): agente «Pm projexa» su Ollama
-  // della VM, istruito sul modo di condurre le call dell'utente. Stessi segnaposto.
-  PM_PROJEXA: {
-    titolo: 'Assistente PM durante la riunione (Pm projexa, Ollama)',
-    segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE', 'INGRESSO'],
-    // Agente in fase di test: la riga standard segue il file finché nessuno la modifica
-    // dall'editor (updated_by resta 'file').
-    sincronizzaFile: true
-  },
-  // Filtro veloce di Pm projexa (modello piccolo, 2026-10-20): per ogni pezzo di riunione dice
-  // solo «SI n» (c'è il segnale n) o «NO»; il modello grande scrive il suggerimento solo dopo un SI.
-  PM_PROJEXA_FILTRO: {
-    titolo: 'Filtro veloce dell\'Assistente PM (Pm projexa, modello piccolo)',
-    segnaposto: [],
-    sincronizzaFile: true
-  },
-  // Recap cliente e Recap interno con la voce «Projexa» (2026-10-20, routes/ai.js
-  // askRecapProjexa): istruzioni FISSE di sistema del modello recap-projexa (chi è, glossario
-  // TeamSystem, regole). Il compito (appunti di un pezzo, RECAP_EMAIL, RECAP_INTERNO) arriva nel
-  // messaggio. È anche il «system» degli esempi di addestramento (Analisi PM › Recap): se lo si
-  // cambia molto, conviene riaddestrare. Uguale per tutti: si usa solo la riga standard.
-  RECAP_PROJEXA: {
-    titolo: 'Istruzioni fisse del recap con Projexa (modello recap-projexa, Ollama)',
-    segnaposto: [],
-    sincronizzaFile: true
-  },
   // Add-in di Outlook (routes/outlookAddin.js): analisi dell'email aperta dal PM con i dati di
   // QUEL cliente e progetto. EMAIL = mittente, destinatari, oggetto e testo (dati non fidati);
   // DATI = progetto, issue, ticket MySupport/Jira, quotazioni; TICKET = ticket citati o sullo

@@ -10,9 +10,6 @@
 //     Batch API del fornitore (attendiBatch: metà prezzo, risposta entro 24 ore). Funzioni con
 //     più passaggi (Kick-off: stesura, correzione, revisione) fanno più batch in fila; i
 //     passaggi già pagati restano in ai_lavori_passi, così un riavvio del server non li ripete.
-//   - «Projexa» / «Projexa 14B» (2026-10-20): sempre come lavoro in background, anche con
-//     esecuzione Immediata: Ollama sulla VM richiede minuti e dà la precedenza ad Assistente PM
-//     e trascrizione (config/ollamaPrecedenza.js). Il modello va nel contesto (ollamaModello).
 // Risultato: file (Kick-off, Offerta, Word dei documenti PM) nella cartella temporanea
 // AI_TEMP_DIR/<tenant>/<utente>/, cancellato appena scaricato; oppure dati (JSON cifrato in
 // ai_lavori.risultato) che la finestra «Risultati AI» mostra. Al termine: notifica in campanella.
@@ -28,9 +25,7 @@ import { encryptValue, hasEncryptionKey, isEncrypted } from '../config/crypto.js
 import { contestoAi } from '../config/aiContesto.js';
 import { conContestoAudit } from '../config/auditContext.js';
 import { risolviAi, OPERAZIONI } from '../config/aiFunzioni.js';
-import { inviaBatchAi, statoBatchAi, askAiProvider, isBatchNonDisponibile, modelloFunzioni } from '../routes/ai.js';
-import { vmOccupata } from '../config/ollamaPrecedenza.js';
-import { iniziaLavoro } from '../config/lavoriProjexa.js';
+import { inviaBatchAi, statoBatchAi, askAiProvider, isBatchNonDisponibile } from '../routes/ai.js';
 import { notificaLavoroAi } from './notifiche.js';
 
 const SERVER = os.hostname();
@@ -89,19 +84,13 @@ export function rottaAi(operazione, handler) {
         // Funzioni che vanno anche senza AI (Dossier, anteprima dei documenti PM): si prosegue
         // con i soli dati e il motivo come avviso. La scelta mancante ("Chiedi sempre") no.
         if (!OPERAZIONI[operazione].facoltativa || e.code === 'AI_SCELTA') throw e;
-        req.aiScelta = { nome: '', label: '', locale: false, esecuzione: 'immediato', errore: e.message };
+        req.aiScelta = { nome: '', label: '', esecuzione: 'immediato', errore: e.message };
       }
-      // «Projexa» (Ollama sulla VM, 2026-10-20): sempre in background come un lavoro Batch,
-      // perché su CPU richiede minuti; stessa notifica e stessa finestra «Risultati AI».
-      const locale = !!req.aiScelta.locale;
-      if (req.aiScelta.esecuzione !== 'batch' && !locale && !OPERAZIONI[operazione].sempreInBackground) return next();
+      if (req.aiScelta.esecuzione !== 'batch' && !OPERAZIONI[operazione].sempreInBackground) return next();
       const id = await creaLavoro(req, operazione, scelte);
-      const occupata = locale ? vmOccupata() : false;
       res.status(202).json({
         batch: true, lavoro: id, provider: req.aiScelta.label,
-        messaggio: locale
-          ? `${OPERAZIONI[operazione].etichetta}: in preparazione in background con ${req.aiScelta.label} (gratuito, sul server di Projexa). ${occupata ? 'Adesso il server serve prima all\'Assistente PM o alla trascrizione delle riunioni: parte appena è libero. ' : 'Può richiedere qualche minuto. '}Riceverai la notifica in campanella e lo trovi in «Risultati AI».`
-          : `${OPERAZIONI[operazione].etichetta}: richiesta inviata a ${req.aiScelta.label} in modalità Batch (costo dimezzato). Il risultato arriva entro 24 ore, di solito in pochi minuti: riceverai la notifica in campanella e lo trovi in «Risultati AI».`
+        messaggio: `${OPERAZIONI[operazione].etichetta}: richiesta inviata a ${req.aiScelta.label} in modalità Batch (costo dimezzato). Il risultato arriva entro 24 ore, di solito in pochi minuti: riceverai la notifica in campanella e lo trovi in «Risultati AI».`
       });
     } catch (e) {
       if (!e.status) console.error(`❌ AI_LAVORO ${operazione}:`, e.message);
@@ -146,13 +135,12 @@ async function creaLavoro(req, operazione, scelte) {
 // Lavoro creato dal server senza una richiesta HTTP («AI Automatizza (solo Batch)» a fine
 // trascrizione, jobs/aiAutomatizza.js): stessa strada di un lavoro Batch chiesto dalla pagina.
 //   user = { tenant_id, user_id, email }, path = rotta dell'operazione (solo descrittiva),
-//   body = corpo che l'handler si aspetta, ai = { nome, label, locale? } dell'AI da usare
-//   (locale = Projexa sulla VM: niente Batch, il modello giusto lo sceglie eseguiLavoro).
+//   body = corpo che l'handler si aspetta, ai = { nome, label } dell'AI da usare.
 export async function creaLavoroAutomatico(user, operazione, { path, body, ai, titolo = '' }) {
   if (!OPERAZIONI[operazione] || !REGISTRO.has(operazione)) throw new Error(`Operazione AI non disponibile: ${operazione}`);
   const req = {
     user, method: 'POST', originalUrl: path, url: path, query: {}, body: body || {}, params: {},
-    aiScelta: { nome: ai.nome, label: ai.label, locale: !!ai.locale, esecuzione: ai.locale ? 'immediato' : 'batch', automatico: true }
+    aiScelta: { nome: ai.nome, label: ai.label, esecuzione: 'batch', automatico: true }
   };
   return creaLavoro(req, operazione, { titolo, extra: null });
 }
@@ -283,22 +271,13 @@ export async function eseguiLavoro(id) {
       get: () => undefined, header: () => undefined
     };
     const res = new RispostaFinta();
-    // Con «Projexa» / «Projexa 14B» il modello Ollama da usare (routes/ai.js, ollamaGenerate).
-    const locale = p.ai && p.ai.locale;
-    // Pagina Monitor: «Lavori di Projexa in corso» (config/lavoriProjexa.js).
-    const lavoro = locale ? iniziaLavoro({ cosa: (OPERAZIONI[l.operazione] || {}).etichetta || l.operazione, titolo: '', modello: p.ai.label || 'Projexa' }) : null;
-    try {
-      await conContestoAudit({ userId: l.user_id, tenantId: l.tenant_id, origine: `job:ai_batch ${l.operazione}` },
-        () => contestoAi.run({
-          // Operazioni sempre in background (Add-in Outlook) con esecuzione Immediata: l'AI si
-          // chiama subito, senza Batch API.
-          ...(OPERAZIONI[l.operazione]?.sempreInBackground && p.ai && p.ai.esecuzione !== 'batch'
-            ? {} : { attendiBatch: (prov, prompt, opz) => attendiBatch(l, prov, prompt, opz) }),
-          ...(locale ? { ollamaModello: modelloFunzioni(p.ai.nome), ollamaEtichetta: p.ai.label } : {})
-        }, () => handler(req, res)));
-    } finally {
-      if (lavoro) lavoro.fine();
-    }
+    await conContestoAudit({ userId: l.user_id, tenantId: l.tenant_id, origine: `job:ai_batch ${l.operazione}` },
+      () => contestoAi.run(
+        // Operazioni sempre in background (Add-in Outlook) con esecuzione Immediata: l'AI si
+        // chiama subito, senza Batch API.
+        OPERAZIONI[l.operazione]?.sempreInBackground && p.ai && p.ai.esecuzione !== 'batch'
+          ? {} : { attendiBatch: (prov, prompt, opz) => attendiBatch(l, prov, prompt, opz) },
+        () => handler(req, res)));
 
     if (res.statusCode >= 400) {
       const msg = (res.corpo && res.corpo.error) || `Errore ${res.statusCode}`;

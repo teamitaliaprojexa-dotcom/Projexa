@@ -18,15 +18,13 @@
 //                        stessa estrazione RAID propone anche le Change Request (una sola spesa).
 // RAID e Change Request partono SOLO se la riunione ha un progetto associato (tendine della
 // riga); senza progetto non si fa nulla per loro e partono solo i recap.
-// Con Projexa (2026-10-22) anche RAID e Change Request girano sulla VM: partono DOPO i recap
-// e si ricavano dal recap (non dalla trascrizione), con il JSON forzato da Ollama.
-// Se l'AI non ha il Batch (Projexa) o il fornitore rifiuta la richiesta Batch (es. Gemini
-// gratuito) quella funzione si esegue in Immediato, SOLO in questo caso.
+// Se il fornitore rifiuta la richiesta Batch (es. Gemini gratuito) quella funzione si esegue in
+// Immediato, SOLO in questo caso.
 // Notifiche: un riepilogo del lancio + quelle di sempre a lavoro finito (recap pronto, recap
 // interno pronto, risultato AI pronto); in caso di errore dell'esecuzione immediata, un avviso.
 // ============================================================================
 import db from '../config/database.js';
-import { localRecapMode, aiCollegate, PROVIDERS } from '../routes/ai.js';
+import { aiCollegate, PROVIDERS } from '../routes/ai.js';
 import { recapAiImpostata, isChiediSempre, segnaRecapAutomatico, ORIGINE_AUTOMATIZZA } from './meetingTranscription.js';
 import { notificaAutomazioneAi } from './notifiche.js';
 import { accodaRiunione } from './filaRiunione.js';
@@ -82,13 +80,14 @@ export async function avviaAutomazioneAi(user, idCalendar) {
   const f = conf.funzioni;
   const gestisceRecap = f.has('recap');
   const righe = [];
-  // Passi da eseguire subito (Projexa o Batch rifiutato), in ordine: fila salvata su disco che
-  // riparte dopo un riavvio del server (jobs/filaRiunione.js, 2026-10-23).
+  // Passi da eseguire subito (Batch rifiutato), in ordine: fila salvata su disco che riparte
+  // dopo un riavvio del server (jobs/filaRiunione.js, 2026-10-23).
   const daEseguireSubito = []; // { tipo, nome, notifica, ... }
 
-  // AI: quella di «AI generazione e-mail recap»; con «Chiedi sempre» la prima AI collegata.
+  // AI: quella di «AI generazione e-mail recap»; con «Chiedi sempre» (o un valore rimasto
+  // dall'AI interna «Projexa», tolta il 2026-10-29) la prima AI collegata.
   let ai = await recapAiImpostata(user).catch(() => '');
-  if (isChiediSempre(ai)) ai = ((await aiCollegate(user.user_id).catch(() => []))[0] || {}).nome || '';
+  if (isChiediSempre(ai) || /^projexa\b/i.test(String(ai || '').trim())) ai = ((await aiCollegate(user.user_id).catch(() => []))[0] || {}).nome || '';
   if (!ai) {
     await notificaAutomazioneAi({
       tenantId: user.tenant_id, userId: user.user_id, idCalendar, titolo: 'AI Automatizza non avviata',
@@ -97,8 +96,7 @@ export async function avviaAutomazioneAi(user, idCalendar) {
     // Senza AI nemmeno il recap normale potrebbe partire: lo si lascia comunque alla logica di sempre.
     return false;
   }
-  const locale = localRecapMode(ai) === 'server';
-  const labelAi = locale ? (/14\s*b/i.test(ai) ? 'Projexa 14B' : 'Projexa') : etichettaAi(ai);
+  const labelAi = etichettaAi(ai);
   console.log(`[AI AUTOMATIZZA] ${idCalendar}: ${[...f].map((k) => ETICHETTE[k]).join(', ')} con ${labelAi}`);
 
   // 1) Recap per il cliente
@@ -109,18 +107,15 @@ export async function avviaAutomazioneAi(user, idCalendar) {
       segnaRecapAutomatico(user, idCalendar, true);
       daEseguireSubito.push({ tipo: 'recap', nome: 'Recap', notifica: true, origine: ORIGINE_AUTOMATIZZA });
     };
-    if (locale) immediato('Projexa non ha la modalità Batch');
-    else {
-      try {
-        const { inviaRecapBatch } = await import('./recapBatch.js');
-        await inviaRecapBatch(user, idCalendar, ai, { origine: ORIGINE_AUTOMATIZZA });
-        righe.push(`Recap: Batch con ${labelAi}`);
-      } catch (e) {
-        // La trascrizione c'è (processFinalize lo verifica prima): ogni errore qui viene dal
-        // fornitore o dal Batch. Solo la chiave scollegata non si recupera in Immediato.
-        if (e.status === 428) righe.push(`Recap: non avviato (${e.message})`);
-        else immediato(`Batch non riuscito: ${e.message}`);
-      }
+    try {
+      const { inviaRecapBatch } = await import('./recapBatch.js');
+      await inviaRecapBatch(user, idCalendar, ai, { origine: ORIGINE_AUTOMATIZZA });
+      righe.push(`Recap: Batch con ${labelAi}`);
+    } catch (e) {
+      // La trascrizione c'è (processFinalize lo verifica prima): ogni errore qui viene dal
+      // fornitore o dal Batch. Solo la chiave scollegata non si recupera in Immediato.
+      if (e.status === 428) righe.push(`Recap: non avviato (${e.message})`);
+      else immediato(`Batch non riuscito: ${e.message}`);
     }
   }
 
@@ -156,22 +151,12 @@ export async function avviaAutomazioneAi(user, idCalendar) {
       body: { id_calendar: idCalendar, projectId: m.project_id },
       titolo: m.oggetto || ''
     };
-    const crea = async () => {
+    try {
       const { creaLavoroAutomatico } = await import('./aiLavori.js');
-      return creaLavoroAutomatico(user, operazione, { ...lavoro, ai: { nome: ai, label: labelAi, locale } });
-    };
-    if (locale) {
-      // Projexa (2026-10-22): si ricavano dal recap, quindi partono DOPO i recap in Immediato
-      // (la fila qui sotto è in ordine), con il JSON forzato da Ollama.
-      righe.push(`${nome}: con ${labelAi} dopo il recap, letto dal recap (proposte in «Risultati AI»)`);
-      daEseguireSubito.push({ tipo: 'lavoro', nome, notifica: true, ...lavoro });
-    } else {
-      try {
-        await crea();
-        righe.push(`${nome}: Batch con ${labelAi} (proposte in «Risultati AI»; se il Batch non è disponibile parte in Immediato)`);
-      } catch (e) {
-        righe.push(`${nome}: non avviato (${e.message})`);
-      }
+      await creaLavoroAutomatico(user, operazione, { ...lavoro, ai: { nome: ai, label: labelAi } });
+      righe.push(`${nome}: Batch con ${labelAi} (proposte in «Risultati AI»; se il Batch non è disponibile parte in Immediato)`);
+    } catch (e) {
+      righe.push(`${nome}: non avviato (${e.message})`);
     }
   }
 
@@ -186,7 +171,7 @@ export async function avviaAutomazioneAi(user, idCalendar) {
   // di sempre (recap pronto, recap interno pronto); in caso di errore un avviso. La fila è su
   // disco: un riavvio del server la riprende dal passo interrotto (jobs/filaRiunione.js).
   if (daEseguireSubito.length) {
-    await accodaRiunione(user, idCalendar, { nome: ai, label: labelAi, locale }, daEseguireSubito);
+    await accodaRiunione(user, idCalendar, { nome: ai, label: labelAi }, daEseguireSubito);
   }
   return gestisceRecap;
 }

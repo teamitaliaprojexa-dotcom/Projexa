@@ -46,8 +46,6 @@
         }
         if (!o.chiediAi && !o.chiediEsecuzione) return {};
         if (o.chiediAi && !(o.aiDisponibili || []).length) throw new Error('Nessuna AI disponibile: collega una chiave in Impostazioni › AI');
-        // Solo l'esecuzione da chiedere, ma l'AI impostata non ha il Batch (Projexa): Immediato.
-        if (!o.chiediAi && !o.batchPossibile) return { _esecuzione: 'immediato' };
         stile();
         return new Promise((resolve) => {
             const mask = document.createElement('div');
@@ -60,21 +58,18 @@
                         <select id="pxAiSel">${lista.map((a) => `<option value="${esc(a.nome)}">${esc(a.label)}</option>`).join('')}</select></div>` : ''}
                     ${o.chiediEsecuzione ? `<div id="pxAiEs"><span class="tit" style="font-size:0.9rem;font-weight:600">Esecuzione</span>
                         <label class="px-ai-opz"><input type="radio" name="pxAiEs" value="immediato" checked> <span><b>Immediato</b> – risultato subito, prezzo normale.</span></label>
-                        <label class="px-ai-opz"><input type="radio" name="pxAiEs" value="batch"> <span><b>Batch (−50%)</b> – costa la metà, arriva entro 24 ore (di solito pochi minuti) anche a pagina chiusa: ricevi la notifica e lo trovi in «Risultati AI».</span></label></div>
-                        <p class="px-ai-nota" id="pxAiNoBatch" style="display:none">Projexa è gratuito: lavora in background sul server (senza Batch), ricevi la notifica in campanella.</p>` : ''}
+                        <label class="px-ai-opz"><input type="radio" name="pxAiEs" value="batch"> <span><b>Batch (−50%)</b> – costa la metà, arriva entro 24 ore (di solito pochi minuti) anche a pagina chiusa: ricevi la notifica e lo trovi in «Risultati AI».</span></label></div>` : ''}
                 </div>
                 <div class="px-ai-foot"><button type="button" class="px-ai-annulla">Annulla</button><button type="button" class="px-ai-ok">Continua</button></div>
             </div>`;
             document.body.appendChild(mask);
             const sel = mask.querySelector('#pxAiSel');
             const es = mask.querySelector('#pxAiEs');
-            const noBatch = mask.querySelector('#pxAiNoBatch');
             const aggiorna = () => {
                 if (!es) return;
                 const a = sel ? lista.find((x) => x.nome === sel.value) : null;
-                const conBatch = sel ? !!(a && a.batch) : o.batchPossibile;
+                const conBatch = sel ? !!(a && a.batch) : true;
                 es.style.display = conBatch ? '' : 'none';
-                if (noBatch) noBatch.style.display = conBatch ? 'none' : '';
             };
             if (sel) sel.addEventListener('change', aggiorna);
             aggiorna();

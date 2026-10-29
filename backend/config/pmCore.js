@@ -17,7 +17,7 @@
 // ============================================================================
 import db from './database.js';
 import { getIntegration } from './integrations.js';
-import { askAiProvider, PROVIDERS as AI_PROVIDERS, localRecapMode, askOllamaRecap, askOllamaJson } from '../routes/ai.js';
+import { askAiProvider, PROVIDERS as AI_PROVIDERS } from '../routes/ai.js';
 import { stripMarkdown } from '../jobs/meetingTranscription.js';
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -847,9 +847,8 @@ async function settingValore(user, campo) {
 }
 
 // AI per le funzioni PM: la prima AI esterna collegata tra «AI generazione e-mail recap»,
-// «AI Slide Kick-Off» e «AI Offerta Economica»; se c'è solo «Projexa» si usa
-// quello (solo per i testi, non per le risposte strutturate). null se nessuna.
-export async function aiPerPm(user, { soloEsterna = false } = {}) {
+// «AI Slide Kick-Off» e «AI Offerta Economica». null se nessuna.
+export async function aiPerPm(user) {
   const nomi = [];
   for (const c of ['AI generazione e-mail recap', 'AI Slide Kick-off', 'AI Offerta economica']) {
     const v = await settingValore(user, c);
@@ -859,39 +858,22 @@ export async function aiPerPm(user, { soloEsterna = false } = {}) {
     const cfg = AI_PROVIDERS[nome.toLowerCase()];
     if (!cfg) continue;
     const el = await getIntegration(user.user_id, cfg.provider);
-    if (el[`${cfg.prefix}_api_key`]) return { nome, locale: false, label: cfg.label };
-  }
-  if (!soloEsterna) {
-    const locale = nomi.find((n) => localRecapMode(n) === 'server');
-    if (locale) return { nome: locale, locale: true, label: 'Projexa' };
+    if (el[`${cfg.prefix}_api_key`]) return { nome, label: cfg.label };
   }
   return null;
 }
 
-// build(dati) -> prompt completo. Con l'AI locale i dati vengono riassunti a pezzi.
+// build(dati) -> prompt completo.
 // ai: AI già scelta per la richiesta (req.aiScelta da Impostazioni › AI › «AI Funzioni PM»,
 // vedi config/aiFunzioni.js e jobs/aiLavori.js); senza, la prima AI disponibile (aiPerPm).
-// modelloLocale: modello Ollama addestrato da provare per primo con Projexa (es. raid-projexa-14b).
-export async function chiediAi(user, build, dati, { json = false, soloEsterna = false, ai: scelta = null, modelloLocale = null } = {}) {
+export async function chiediAi(user, build, dati, { json = false, ai: scelta = null } = {}) {
   if (scelta && !scelta.nome && scelta.errore) throw errore(428, scelta.errore);
-  const ai = scelta && scelta.nome ? { nome: scelta.nome, locale: !!scelta.locale, label: scelta.label } : await aiPerPm(user, { soloEsterna: soloEsterna || json });
+  const ai = scelta && scelta.nome ? { nome: scelta.nome, label: scelta.label } : await aiPerPm(user);
   if (!ai) {
-    throw errore(428, json || soloEsterna
-      ? 'Serve un\'AI con chiave API (ChatGPT, Claude, Gemini o Mistral): sceglila in Impostazioni › AI › «AI generazione e-mail recap» (o «AI Slide Kick-off») e collega la sua chiave'
-      : 'Nessuna AI disponibile: sceglila in Impostazioni › AI › «AI generazione e-mail recap» e collega la sua chiave');
+    throw errore(428, 'Serve un\'AI con chiave API (ChatGPT, Claude, Gemini o Mistral): sceglila in Impostazioni › AI › «AI generazione e-mail recap» (o «AI Slide Kick-off») e collega la sua chiave');
   }
-  // Projexa con risposta strutturata (RAID, Change Request, Add-in Outlook): JSON forzato da
-  // Ollama in una chiamata; se il testo non ci sta (413) si riassumono i dati a pezzi come prima.
-  const locale = async () => {
-    if (json) {
-      try { return await askOllamaJson(build(dati), { primo: modelloLocale }); } catch (e) { if (e.status !== 413) throw e; }
-    }
-    return askOllamaRecap(async (t) => build(t), dati);
-  };
-  const r = ai.locale
-    ? await locale()
-    : await askAiProvider(user.user_id, ai.nome, build(dati), json ? { json: true } : {});
-  return { testo: String(r.text || ''), label: r.label || ai.label, model: r.model || '', locale: ai.locale };
+  const r = await askAiProvider(user.user_id, ai.nome, build(dati), json ? { json: true } : {});
+  return { testo: String(r.text || ''), label: r.label || ai.label, model: r.model || '' };
 }
 
 // JSON dalla risposta dell'AI (anche dentro ```json … ``` o con testo attorno).

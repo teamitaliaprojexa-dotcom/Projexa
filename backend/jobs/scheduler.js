@@ -26,9 +26,6 @@ import { eseguiRecapBatch } from './recapBatch.js';
 import { eseguiGiroLavoriAi } from './aiLavori.js';
 import { eseguiConservazioneRiunioni } from './conservazione.js';
 import { eseguiAssociaTodoRaid } from './associaTodoRaid.js';
-import { eseguiAnalisiPm } from './analisiPm.js';
-import { eseguiAnalisiRecap } from './analisiRecap.js';
-import { eseguiQuantizzaModelli } from './quantizzaModelli.js';
 import { conContestoAudit } from '../config/auditContext.js';
 
 // Job schedulabili: la chiave è il valore di job_schedules.job.
@@ -66,15 +63,7 @@ const JOBS = {
   conservazione_riunioni: (riga) => eseguiConservazioneRiunioni({ mesi: riga.parametri && riga.parametri.mesi }),
   // Associazione automatica To-Do e RAID (jobs/associaTodoRaid.js): invio all'AI la mattina
   // (lun-ven 5:00), poi raccolta dei risultati Batch nei giri successivi. Per tutti i tenant.
-  associa_todo_raid: () => eseguiAssociaTodoRaid(),
-  // Analisi PM notturna (jobs/analisiPm.js): riunioni segnate, Gemini un gruppo per giro o ChatGPT Batch.
-  analisi_pm: () => eseguiAnalisiPm(),
-  // Insegnante notturno del recap (jobs/analisiRecap.js): appunti, recap cliente e recap interno
-  // scritti da Gemini/ChatGPT sulle riunioni segnate, esempi per addestrare recap-projexa.
-  analisi_recap: () => eseguiAnalisiRecap(),
-  // Basi dei modelli di Ollama F16 + Q4_K_M con imatrix (jobs/quantizzaModelli.js): un passo per
-  // giro in background (una base o un modello addestrato da riapplicare), solo a VM libera.
-  quantizza_modelli: (riga) => eseguiQuantizzaModelli(riga)
+  associa_todo_raid: () => eseguiAssociaTodoRaid()
 };
 
 // Job eseguiti dal BROWSER dell'utente (utente_config) mentre Projexa è aperta, non dal
@@ -101,10 +90,7 @@ export const INFO_JOB = {
   recap_batch: { etichetta: 'Recap in modalità Batch: raccoglie quelli pronti', jira: false, perUtente: true },
   lavori_ai: { etichetta: 'Lavori AI in Batch: ripresa e pulizia', jira: false, perUtente: true },
   conservazione_riunioni: { etichetta: 'Conservazione: trascrizioni e recap oltre 24 mesi', jira: false },
-  associa_todo_raid: { etichetta: 'Associazione automatica To-Do e RAID (AI)', jira: false, perUtente: true },
-  analisi_pm: { etichetta: 'Analisi PM notturna delle riunioni segnate (AI)', jira: false, perUtente: true },
-  analisi_recap: { etichetta: 'Analisi Recap notturna: esempi per addestrare recap-projexa (AI)', jira: false, perUtente: true },
-  quantizza_modelli: { etichetta: 'Modelli Projexa: basi F16 + Q4_K_M con imatrix (un passo per giro, VM libera)', jira: false }
+  associa_todo_raid: { etichetta: 'Associazione automatica To-Do e RAID (AI)', jira: false, perUtente: true }
 };
 
 export function schedulerAttivo() {

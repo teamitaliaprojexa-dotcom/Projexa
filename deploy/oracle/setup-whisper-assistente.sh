@@ -10,7 +10,7 @@
 # 2026-10-21 (call Miroglio): con 2 core un blocco da 20 s richiedeva ~40 s, la coda si riempiva
 # e l'assistente vedeva meno di metà riunione, 4-6 minuti in ritardo. Ora 4 core e precedenza
 # sulla CPU (Nice -5, CPUWeight 1000): mentre l'assistente è aperto la trascrizione delle
-# riunioni aspetta in coda (backend, config/ollamaPrecedenza.js) e Ollama (Nice 10) usa il resto.
+# riunioni aspetta in coda (backend, config/precedenzaVm.js).
 # Uso (sulla VM):  bash setup-whisper-assistente.sh [modello]   (default: small-q5_1)
 set -euo pipefail
 

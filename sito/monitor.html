@@ -844,27 +844,13 @@
 
                 $('procBody').innerHTML = d.processes.map((p) => `<tr><td>${esc(p.name)}${p.count > 1 ? ` <span style="color:var(--muted)">×${p.count}</span>` : ''}</td><td class="num">${bytes(p.rss)}</td><td class="num">${pct(p.cpu)}</td></tr>`).join('')
                     || '<tr><td colspan="3" style="color:var(--muted)">Dati in raccolta…</td></tr>';
-                // Sotto Ollama i suoi modelli (2026-10-20): non sono servizi a parte, il servizio li
-                // carica in RAM quando servono. «in RAM» = caricato adesso, «pronto» = installato.
-                const oraIt = (iso) => { const x = new Date(iso); return isNaN(x) || x.getFullYear() > 2100 ? '' : x.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }); };
-                const modelliOllama = (d.ollama || []).map((m) => `<tr><td style="padding-left:1.6rem"><span style="color:var(--muted)">↳</span> ${esc(m.nome)}${m.uso ? `<div style="color:var(--muted);font-size:0.8rem">${esc(m.uso)}</div>` : ''}</td>
-                    <td class="num">${m.ram ? `<span title="${oraIt(m.scade) ? `Resta caricato fino alle ${oraIt(m.scade)} se non viene usato` : ''}">in RAM ${bytes(m.ram)}</span>` : `<span style="color:var(--muted)">pronto · ${bytes(m.disco)}</span>`}</td></tr>`).join('');
-                $('svcBody').innerHTML = d.services.map((s) => `<tr><td>${esc(s.label)}</td><td class="num">${stateBadge(s.state)}</td></tr>${s.unit === 'ollama' ? modelliOllama : ''}`).join('');
+                $('svcBody').innerHTML = d.services.map((s) => `<tr><td>${esc(s.label)}</td><td class="num">${stateBadge(s.state)}</td></tr>`).join('');
                 $('dbBody').innerHTML = d.databases.map((x) => `<tr><td>${esc(x.name)}</td><td class="num">${bytes(x.bytes)}</td></tr>`).join('')
                     || '<tr><td colspan="2" style="color:var(--muted)">Non disponibile</td></tr>';
                 const q = d.queue;
                 $('queueBody').innerHTML = q
                     ? `<tr><td>Blocchi in attesa</td><td class="num">${q.pending}</td></tr><tr><td>In trascrizione</td><td class="num">${q.transcribing}</td></tr><tr><td>Recap in coda</td><td class="num">${q.recap}</td></tr>`
                     : '<tr><td style="color:var(--muted)">Non disponibile</td></tr>';
-                // Lavori di Projexa in corso (2026-10-21): recap cliente/interno e lavori AI con il
-                // modello locale non passano dalla coda qui sopra: girano nel backend.
-                const lavori = d.projexa || [];
-                const daQuando = (iso) => { const min = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)); return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`; };
-                $('queueBody').innerHTML += `<tr><td colspan="2" style="padding-top:0.9rem"><b>Lavori di Projexa in corso</b></td></tr>`
-                    + (lavori.length ? lavori.map((l) => `<tr><td>${esc(l.cosa)}${l.titolo ? ` · ${esc(l.titolo)}` : ''}
-                        <div style="color:var(--muted);font-size:0.8rem">${esc(l.modello || 'Projexa')}${l.fase ? ` · ${esc(l.fase)}` : ''}${l.inAttesa ? ` · <span style="color:var(--warn, #B45309)">in pausa: la VM serve prima a ${esc(l.inAttesa)}</span>` : ''}</div></td>
-                        <td class="num">da ${daQuando(l.dal)}</td></tr>`).join('')
-                    : '<tr><td colspan="2" style="color:var(--muted)">Nessuno</td></tr>');
                 $('updated').textContent = `Aggiornato alle ${new Date().toLocaleTimeString('it-IT')} · ogni 15 s`;
             }
 
@@ -1319,17 +1305,11 @@
                         ${vm.swapTotal ? `<div class="small">Swap ${gb(vm.swapUsed)} di ${gb(vm.swapTotal)}</div>` : ''}</div>
                         ${vm.swapUsed ? `<button type="button" class="btn btn-sm" data-write data-svuota-swap title="Svuota lo swap: la memoria spostata su disco torna in RAM"><i class="fas fa-broom"></i></button>` : ''}
                     </div>` : '';
-                // Ollama: modelli caricati adesso (pm-projexa, filtro 3B, recap...) e fino a quando restano in RAM.
-                const ore = (iso) => { const d = new Date(iso); return isNaN(d) || d.getFullYear() > 2100 ? '' : d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }); };
-                const modelli = (s) => !Array.isArray(s.modelli) ? ''
-                    : !s.modelli.length ? `<div class="small">Nessun modello caricato</div>`
-                    : s.modelli.map(m => `<div class="small" title="Resta caricato fino alle ${esc(ore(m.scade) || '–')} se non viene usato"><i class="fas fa-cube"></i> ${esc(m.nome)} · ${gb(m.ram)}${ore(m.scade) ? ` · fino alle ${esc(ore(m.scade))}` : ''}
-                        <button type="button" class="btn btn-sm" data-write data-ollama-scarica="${esc(m.nome)}" title="Scarica il modello dalla RAM (si ricarica da solo al prossimo uso)" style="padding: 0 0.35rem; margin-left: 0.25rem;"><i class="fas fa-eject"></i></button></div>`).join('');
                 $('svcList').innerHTML = svc.map(s => {
                     const on = s.state === 'active';
                     const nd = s.state === 'n.d.';
                     return `<div class="svc"><span class="dot ${nd ? 'nd' : on ? 'on' : 'off'}"></span>
-                        <div><div class="strong">${esc(s.label)}</div><div class="small">${esc(nd ? 'non disponibile qui (solo sulla VM)' : on ? 'attivo' : s.state)}</div>${on ? consumo(s) + modelli(s) : ''}</div>
+                        <div><div class="strong">${esc(s.label)}</div><div class="small">${esc(nd ? 'non disponibile qui (solo sulla VM)' : on ? 'attivo' : s.state)}</div>${on ? consumo(s) : ''}</div>
                         ${nd ? '' : `<button type="button" class="btn btn-sm" data-write data-svc-restart="${esc(s.unit)}" data-svc-label="${esc(s.label)}" title="Riavvia il servizio"><i class="fas fa-rotate-right"></i></button>`}
                     </div>`;
                 }).join('') + vmTile;
@@ -1402,21 +1382,17 @@
                 caricaServizi();
             });
 
-            // Scarica un modello Ollama / svuota lo swap (stessi controlli dei comandi ssh, dal server).
+            // Svuota lo swap (stessi controlli dei comandi ssh, dal server).
             $('svcList').addEventListener('click', async (e) => {
-                const b = e.target.closest('[data-ollama-scarica], [data-svuota-swap]');
+                const b = e.target.closest('[data-svuota-swap]');
                 if (!b) return;
-                const modello = b.dataset.ollamaScarica;
-                const msg = modello != null
-                    ? `Scaricare «${modello}» dalla RAM?\nAl prossimo uso (Assistente PM, recap con Projexa, associazioni) si ricarica da solo, ma la prima risposta sarà lenta.`
-                    : 'Svuotare lo swap?\nLa memoria spostata su disco torna in RAM: può richiedere qualche minuto.';
-                if (!confirm(msg)) return;
+                if (!confirm('Svuotare lo swap?\nLa memoria spostata su disco torna in RAM: può richiedere qualche minuto.')) return;
                 b.disabled = true;
                 try {
-                    const r = await fetch(`${API_URL}/job-schedules/servizi/${modello != null ? 'ollama-scarica' : 'svuota-swap'}`, {
+                    const r = await fetch(`${API_URL}/job-schedules/servizi/svuota-swap`, {
                         method: 'POST',
                         headers: headers({ 'Content-Type': 'application/json' }),
-                        body: JSON.stringify(modello != null ? { modello } : {})
+                        body: JSON.stringify({})
                     });
                     const d = await r.json().catch(() => ({}));
                     if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
@@ -2294,5 +2270,6 @@
             }
         })();
     </script>
+    <script src="js/chatbot.js"></script>
 </body>
 </html>

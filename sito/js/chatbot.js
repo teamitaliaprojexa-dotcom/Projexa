@@ -1,4 +1,4 @@
-// === Assistente "Projexa" (chatbot AI in basso a destra nella dashboard) ===
+// === Assistente "Projexa" (chatbot AI in basso a destra, in tutte le pagine dell'app) ===
 //
 // Pulsante con il logo Projexa e il badge "AI": si trascina tenendo premuto (mouse o dito)
 // e resta dove lo si rilascia (posizione ricordata nel browser). Un clic apre la chat.
@@ -78,7 +78,8 @@
     .pxbot-foot { font-size: 11px; color: #9CA3AF; text-align: center; padding: 0 10px 8px; background: #fff; }
     @media (max-width: 480px) {
         .pxbot-panel { width: calc(100vw - 16px); height: calc(100vh - 90px); }
-    }`;
+    }
+    @media print { .pxbot-btn, .pxbot-panel { display: none !important; } }`;
 
     const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -140,7 +141,7 @@
                 <textarea rows="1" maxlength="2000" placeholder="Scrivi la tua domanda… es. come creo un nuovo progetto?"></textarea>
                 <button type="submit" title="Invia" aria-label="Invia">➤</button>
             </form>
-            <div class="pxbot-foot">Risposte generate dall'Risposte dell’AI basate sul Manuale utente: possono contenere errori.</div>`;
+            <div class="pxbot-foot">Risposte dell’AI basate sul Manuale utente: possono contenere errori.</div>`;
 
         // Fuori dal <body>: la dashboard applica lo zoom dell'interfaccia al body
         // (body.style.zoom) e gli elementi fissi al suo interno verrebbero scalati, con
@@ -319,10 +320,18 @@
         });
     }
 
+    // Pagina aperta DENTRO la dashboard (riquadro «pagina interna», iframe): il chatbot della
+    // dashboard resta visibile sopra, quindi qui non se ne crea un secondo.
+    function dentroDashboard() {
+        if (window.top === window) return false;
+        try { return !!window.top.document.querySelector('script[src*="chatbot.js"]'); } catch { return false; }
+    }
+
     // Il chatbot compare solo se in Impostazioni "Chat-Bot Projexa" è attivo (senza la riga
     // resta visibile). Se il controllo fallisce (rete/server) lo si mostra comunque.
+    // Si carica in tutte le pagine dell'app (dashboard, Gantt, Issue, Portfolio...), 2026-10-29.
     async function start() {
-        if (!localStorage.getItem('authToken')) return;
+        if (!localStorage.getItem('authToken') || dentroDashboard()) return;
         try {
             const res = await fetch(`${API_URL}/settings/chatbot-enabled`, {
                 headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || ''}` }

@@ -48,10 +48,10 @@ export const eseguiCopiaStaging = () => eseguiScript('sync-staging.sh', [], 60 *
 // ----------------------------------------------------------------------------
 // Toglie solo ciò che NON si pulisce da solo e che si può rigenerare senza danni:
 //   - cache dei pacchetti di sistema (sudo dnf clean all);
-//   - log di systemd oltre 500 MB / 30 giorni (Whisper, Caddy, Ollama...);
+//   - log di systemd oltre 500 MB / 30 giorni (Whisper, Caddy...);
 //   - cache di pip e di npm (si riscaricano se servono);
 //   - log di PM2 del backend oltre PM2_LOG_MAX_MB: svuotati (si tengono i nuovi).
-// NON tocca: modelli di Whisper/Ollama (~/.cache/huggingface ecc.), backup (si puliscono da
+// NON tocca: modelli di Whisper (~/.cache/huggingface ecc.), backup (si puliscono da
 // backup-db.sh), database, file del progetto. Scritto in Node (non come script .sh) così
 // arriva sulla VM con il normale deploy. Ogni passo è indipendente: se uno fallisce si
 // annota nel report e si va avanti; il job fallisce solo se falliscono tutti.

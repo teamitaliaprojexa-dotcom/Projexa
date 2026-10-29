@@ -8,8 +8,8 @@
 //     più vecchie del limite (la riga della riunione resta: data, oggetto, cliente, progetto);
 //   - cancella le attività del recap interno di quelle riunioni (sono ricavate dalla
 //     trascrizione). I task già creati dalle attività restano: sono dati di progetto;
-//   - cancella i dati di addestramento ricavati da quelle riunioni (Analisi PM, Recap, RAID e
-//     CR, associazioni, esempi non attivi: conservazioneAnalisi, 2026-10-23).
+//   - cancella le richieste di associazione To-Do e RAID più vecchie del limite (conservazioneAnalisi,
+//     2026-10-23). I dati di addestramento dell'AI interna sono stati eliminati il 2026-10-29.
 // Il limite si cambia con job_schedules.parametri = {"mesi": N} (minimo 6).
 // Gira solo sulla VM (schedulatore). Le variazioni finiscono nel log di audit come le altre.
 // ============================================================================
@@ -54,30 +54,18 @@ export async function eseguiConservazioneRiunioni({ mesi } = {}) {
   report.analisi = await conservazioneAnalisi(limite);
   const totAnalisi = Object.values(report.analisi).reduce((s, x) => s + (Number(x) || 0), 0);
   if (report.riunioniSvuotate || report.attivitaCancellate || totAnalisi) {
-    console.log(`[CONSERVAZIONE] Oltre ${n} mesi: ${report.riunioniSvuotate} riunioni svuotate, ${report.attivitaCancellate} attività cancellate, ${totAnalisi} righe di analisi/addestramento cancellate`);
+    console.log(`[CONSERVAZIONE] Oltre ${n} mesi: ${report.riunioniSvuotate} riunioni svuotate, ${report.attivitaCancellate} attività cancellate, ${totAnalisi} richieste di associazione cancellate`);
   }
   return report;
 }
 
-// Dati di ADDESTRAMENTO ricavati dalle riunioni (2026-10-23, richiesta utente): pezzi di
-// trascrizione, appunti, recap e prompt copiati in Analisi PM (domande), Analisi Recap, RAID e CR,
-// associazioni To-Do/RAID ed esempi salvati. Stesso limite delle trascrizioni: si cancellano le
-// righe di riunioni più vecchie del limite (o, se la riunione non c'è più o la riga non ne ha
-// una, quelle create prima del limite). Le versioni di esempi ATTIVE restano: le usa Projexa.
-// Ogni tabella è facoltativa (SQL non eseguito = si salta).
+// Dati ricavati dalle riunioni e mandati all'AI (2026-10-23, richiesta utente). Stesso limite delle
+// trascrizioni: si cancellano le righe di riunioni più vecchie del limite (o, se la riunione non
+// c'è più o la riga non ne ha una, quelle create prima del limite). Ogni tabella è facoltativa
+// (SQL non eseguito = si salta).
 const ANALISI = [
-  // Domande da PM e riunioni analizzate (analisi_pm.sql).
-  { nome: 'domandePm', tabella: 'pm_analisi', riunione: true },
-  { nome: 'riunioniPm', tabella: 'pm_analisi_riunioni', riunione: true },
-  // Insegnante notturno del recap (analisi_recap.sql).
-  { nome: 'recap', tabella: 'recap_analisi', riunione: true },
-  { nome: 'riunioniRecap', tabella: 'recap_analisi_riunioni', riunione: true },
-  // Confronti RAID e Change Request (analisi_raid.sql): id_calendar può mancare.
-  { nome: 'raid', tabella: 'pm_raid_analisi', riunione: true },
-  // Associazioni To-Do e RAID (elenco delle voci inviato all'AI): non legate a una riunione.
-  { nome: 'associazioni', tabella: 'pm_associazioni', riunione: false },
-  // Esempi salvati con «Usa come esempi»: solo le versioni non attive.
-  { nome: 'esempi', tabella: 'pm_projexa_esempi', riunione: false, extra: 'AND NOT attivo' }
+  // Associazioni To-Do e RAID (voci e risposta dell'AI): non legate a una riunione.
+  { nome: 'associazioni', tabella: 'pm_associazioni', riunione: false }
 ];
 
 async function conservazioneAnalisi(limite) {

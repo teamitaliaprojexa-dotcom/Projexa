@@ -13,21 +13,18 @@
 //   - notifica (campanella) sulla Issue in revisione.
 // Ogni coppia valutata si salva in issue_doppioni (Supporto/CreaDB/issue_doppioni.sql): non torna
 // più all'AI, anche se il PM rimette «Aperto» perché non erano doppioni.
-// AI: chiamata immediata (non Batch: poche Issue, e il doppione va segnalato in giornata);
-// «Projexa» = Ollama della VM.
+// AI: chiamata immediata (non Batch: poche Issue, e il doppione va segnalato in giornata).
 // ============================================================================
 import db from '../config/database.js';
 import notifDb from '../config/notifDatabase.js';
 import { encryptValue, encryptRowForWrite } from '../config/crypto.js';
-import { askAiProvider, ollamaPost, ollamaConPrecedenza, senzaRagionamento } from '../routes/ai.js';
+import { askAiProvider } from '../routes/ai.js';
 import { nomiClientiProgetti } from './notifiche.js';
 
 export const STATO_REVISIONE = 'In revisione';
 const CONFIDENZA_MIN = 80;
 const MAX_ISSUE = 30; // Issue per richiesta (un cliente)
 const CAMPI_DA_COMPLETARE = ['project_id', 'modulo', 'richiedente', 'owner', 'mysupport', 'tkt_jira', 'deadline'];
-const OLLAMA_URL = String(process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
-const OLLAMA_MODELLO = process.env.OLLAMA_ASSOCIAZIONI_MODEL || process.env.OLLAMA_FUNZIONI_14B_MODEL || 'qwen3:14b';
 
 const oggiRoma = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
 const giorno = (d) => (d ? new Date(d).toLocaleDateString('it-IT', { timeZone: 'Europe/Rome' }) : '');
@@ -94,15 +91,6 @@ export function leggiGruppi(testo) {
 }
 
 async function chiediAi(u, aiNome, testo) {
-  if (aiNome === 'Projexa') {
-    const r = await ollamaConPrecedenza([OLLAMA_MODELLO], (model, signal) => ollamaPost(`${OLLAMA_URL}/api/chat`, {
-      model, stream: false, format: 'json', think: false, keep_alive: '10m',
-      messages: [{ role: 'user', content: testo }],
-      options: { num_ctx: 8192, temperature: 0, num_predict: 800 }
-    }, 20 * 60000, { signal }));
-    if (!r.ok) throw new Error((r.data && r.data.error) || `Ollama: errore ${r.status}`);
-    return senzaRagionamento(r.data && r.data.message && r.data.message.content);
-  }
   return (await askAiProvider(u.user_id, aiNome, testo, { json: true })).text;
 }
 

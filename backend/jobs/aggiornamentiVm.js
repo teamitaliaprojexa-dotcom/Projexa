@@ -20,14 +20,13 @@ import fs from 'fs';
 import { execFile } from 'child_process';
 import db from '../config/database.js';
 import { sudoDnf, riavvioNecessario, statoInstallazione, serviceUnits, serviceStates } from '../routes/vm-monitor.js';
-import { vmOccupata } from '../config/ollamaPrecedenza.js';
-import { lavoriProjexaInCorso } from '../config/lavoriProjexa.js';
+import { vmOccupata } from '../config/precedenzaVm.js';
 import { fileRiunioniAttive } from './filaRiunione.js';
 import { notificaSistema } from './notifiche.js';
 
 const ESCLUSI = ['postgresql*', 'caddy*', 'nodejs*'];
 const MARCATORE = '/var/tmp/projexa-aggiornamenti-auto.json';
-const ATTESA_SERVIZI_MS = 3 * 60000; // dopo l'avvio: tempo per far partire Whisper, Ollama...
+const ATTESA_SERVIZI_MS = 3 * 60000; // dopo l'avvio: tempo per far partire Whisper, Parakeet...
 const RIGHE_LOG = 40;
 
 const righe = (r) => `${r.stdout}\n${r.stderr}`.split('\n').map((l) => l.trimEnd()).filter(Boolean);
@@ -54,9 +53,7 @@ async function serviziFermi() {
 // Motivi per cui adesso la VM NON va riavviata (elenco vuoto = libera).
 async function motiviVmOccupata(rigaId) {
   const motivi = [];
-  if (vmOccupata()) motivi.push('registrazione, trascrizione, Assistente PM o aggiornamento dei modelli in corso');
-  const lavori = lavoriProjexaInCorso();
-  if (lavori.length) motivi.push(`${lavori.length} lavor${lavori.length === 1 ? 'o' : 'i'} di Projexa in corso (${lavori.map((l) => l.cosa).join(', ')})`);
+  if (vmOccupata()) motivi.push('registrazione, trascrizione o Assistente PM in corso');
   if (fileRiunioniAttive()) motivi.push('recap o recap interni in fila');
   const q = async (sql, params = []) => { try { return Number((await db.query(sql, params)).rows[0].n) || 0; } catch { return 0; } };
   const coda = await q(`SELECT count(*) AS n FROM rec_meeting_chunks`);

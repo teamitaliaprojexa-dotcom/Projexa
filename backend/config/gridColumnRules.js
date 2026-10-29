@@ -92,7 +92,10 @@ const REGOLE = {
   },
   // Elenco Licenze del cliente (2026-10-06): ogni licenza una sola volta per cliente.
   licenze_app: {
-    licenza_id: { unico: true }
+    licenza_id: { unico: true },
+    // Una licenza appena inserita è attiva (2026-10-29, richiesta utente): l'interruttore
+    // parte acceso e si può spegnere prima di salvare.
+    active: { default: true }
   }
 };
 
