@@ -12,7 +12,7 @@ import os from 'os';
 import { execFile, spawn } from 'child_process';
 import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
-import { whisperUrls, whisperCppUrls, whisperAssistentePorta, parakeetUrl } from './ai.js';
+import { whisperUrls, whisperCppUrls, parakeetUrl } from './ai.js';
 import { registraAccesso } from '../config/audit.js';
 
 const router = express.Router();
@@ -111,10 +111,7 @@ function diskInfo() {
 
 // Nome leggibile del processo (mai la riga di comando completa: potrebbe contenere dati).
 function processLabel(comm, cmdline) {
-  if (comm === 'whisper-server') {
-    const porta = whisperAssistentePorta();
-    return porta && cmdline.includes(`--port ${porta}`) ? 'Whisper.cpp (Assistente PM)' : 'Whisper.cpp (Background-Veloce)';
-  }
+  if (comm === 'whisper-server') return 'Whisper.cpp (Background-Veloce)';
   if (/uvicorn/.test(cmdline) && /whisper/.test(cmdline)) return 'Whisper (Background)';
   if (comm === 'uvicorn') return 'Whisper (Background)';
   if (/parakeet-service/.test(cmdline)) return 'Parakeet (trascrizione)';
@@ -234,8 +231,6 @@ export function serviceUnits() {
     if (port && /127\.0\.0\.1|localhost/.test(u)) units.push({ unit: `projexa-whisper@${port[1]}`, label: `Whisper Background (${port[1]})` });
   }
   if (whisperCppUrls().length) units.push({ unit: 'projexa-whisper-cpp', label: 'Whisper.cpp (Background-Veloce)' });
-  const assistente = whisperAssistentePorta();
-  if (assistente) units.push({ unit: 'projexa-whisper-assistente', label: `Whisper.cpp (Assistente PM, ${assistente})` });
   if (parakeetUrl()) units.push({ unit: 'projexa-parakeet', label: 'Parakeet TDT 0.6B v3 (trascrizione)' });
   if (process.env.PII_URL) units.push({ unit: 'projexa-pii', label: 'Anonymization Layer (Presidio + spaCy)' });
   // Backup notturno: dal 2026-10-01 è un job dello schedulatore (pagina Schedulazioni), non più un timer.

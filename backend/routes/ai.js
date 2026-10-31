@@ -1228,16 +1228,6 @@ export async function impronteVocali(audioBuffer, segmenti) {
   return data.voci.map((v) => (Array.isArray(v) && v.length ? v.map(Number) : null));
 }
 
-// Whisper dedicato all'Assistente PM (deploy/oracle/setup-whisper-assistente.sh): porta, solo se
-// ASSISTENTE_PM_WHISPER_CPP_URL punta a questa macchina (sulla VM: 127.0.0.1:8102; in locale
-// è il tunnel 18101, che non è un servizio di questo PC: lì non vale).
-export function whisperAssistentePorta() {
-  if (process.platform !== 'linux') return null;
-  const u = String(process.env.ASSISTENTE_PM_WHISPER_CPP_URL || '').trim().replace(/\/+$/, '');
-  const m = /^https?:\/\/(127\.0\.0\.1|localhost):(\d+)$/.exec(u);
-  return m ? m[2] : null;
-}
-
 // Trascrizione di un blocco WAV con Gemini («modalità Trascrizione» = Gemini, chiave API
 // dell'utente). Gemini restituisce le frasi con inizio/fine in secondi (JSON con schema), nello
 // stesso formato dei segmenti di Whisper: { segments: [{ start, end, text }], provider }.
@@ -1296,7 +1286,6 @@ export async function transcribeAudioGemini(apiKey, audioBuffer, mime, contesto 
 }
 
 // Blocco WAV su whisper.cpp (endpoint /inference, risposta verbose_json con i segmenti).
-// Esportata per l'Assistente PM (ASSISTENTE_PM_WHISPER_CPP_URL, jobs/meetingTranscription.js).
 export async function transcribeAudioCpp(base, audioBuffer, mime, prompt = '') {
   for (let attempt = 1; ; attempt++) {
     try {

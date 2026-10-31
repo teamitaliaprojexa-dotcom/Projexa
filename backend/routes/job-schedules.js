@@ -15,7 +15,7 @@ import { calcolaProssima, NOMI_JOB, INFO_JOB, schedulerAttivo, schedulerSospeso 
 import { execFile } from 'child_process';
 import fs from 'fs';
 import { statoWorker, kickTranscriptionWorker, enqueueFinalize } from '../jobs/meetingTranscription.js';
-import { whisperUrls, whisperCppUrls, whisperAssistentePorta } from './ai.js';
+import { whisperUrls, whisperCppUrls } from './ai.js';
 
 const router = express.Router();
 router.use(requireAuth, requireMonitorAccess);
@@ -324,8 +324,6 @@ function unitaServizi() {
     if (port && /127\.0\.0\.1|localhost/.test(u)) units.push({ unit: `projexa-whisper@${port[1]}`, label: `Whisper Background (${port[1]})` });
   }
   if (whisperCppUrls().length) units.push({ unit: 'projexa-whisper-cpp', label: 'Whisper.cpp (Background-Veloce)' });
-  const assistente = whisperAssistentePorta();
-  if (assistente) units.push({ unit: 'projexa-whisper-assistente', label: `Whisper.cpp (Assistente PM, ${assistente})` });
   return units;
 }
 

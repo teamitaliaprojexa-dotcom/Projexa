@@ -20,7 +20,7 @@ import cryptoMigrationRoutes from './routes/crypto-migration.js';
 import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
-import assistentePmRoutes from './routes/assistentePm.js';
+import assistentePmRoutes, { attaccaAssistenteLive } from './routes/assistentePm.js';
 import mysupportPushRoutes, { utenteDaTokenPush, registraInvioPush, pushLimitato } from './routes/mysupportPush.js';
 import outlookAddinRoutes from './routes/outlookAddin.js';
 import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
@@ -274,7 +274,8 @@ app.use('/api/notifiche', notificheRoutes);
 app.use('/api/audit', auditEventiRoutes);
 // Assistente "Projexa" della dashboard (Gemini + Manuale Utente): tutti gli utenti.
 app.use('/api/chatbot', chatbotRoutes);
-// Finestra «Assistente PM» durante la registrazione (Gemini Live): routes/assistentePm.js.
+// Finestra «Assistente PM» durante la registrazione (Gemini Live / ChatGPT Realtime):
+// routes/assistentePm.js. L'audio arriva su WebSocket (/api/assistente-pm/live, attaccaAssistenteLive).
 app.use('/api/assistente-pm', assistentePmRoutes);
 // Token dello script del PC che invia MySupport (interruttore «DataBricks»): routes/mysupportPush.js.
 app.use('/api/mysupport/push', mysupportPushRoutes);
@@ -12977,7 +12978,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+const httpServer = app.listen(PORT, () => {
   console.log(`\n🚀 Projexa API running on http://localhost:${PORT}`);
   let dbHost = '?';
   try { dbHost = new URL(resolveDbUrl('DATABASE_URL')).host; } catch { /* URL assente o non valido */ }
@@ -13000,6 +13001,8 @@ app.listen(PORT, () => {
   // e notifica in campanella, solo se il riavvio l'ha fatto quel job.
   completaDopoRiavvio();
 });
+// WebSocket dell'Assistente PM: audio della riunione dal browser, suggerimenti verso il browser.
+attaccaAssistenteLive(httpServer);
 
 // Graceful shutdown
 process.on('SIGINT', () => {

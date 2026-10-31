@@ -64,4 +64,33 @@
 
     window.uiZoom = () => zoom;
     window.ProjexaUiScale = { apply, readSetting, init, BASE };
+
+    // Grafici Chart.js: con lo zoom sul body Chart.js legge la posizione del mouse in una
+    // scala diversa da quella del grafico (offsetX) e il tooltip aggancia il punto sbagliato
+    // (es. mouse su ottobre, tooltip di agosto). Si ricalcola la posizione dal clientX e dal
+    // riquadro del canvas, entrambi in pixel dello schermo, in proporzione alla sua larghezza.
+    const chartZoomFix = {
+        id: 'uiZoomFix',
+        beforeEvent(chart, args) {
+            const e = args.event;
+            const n = e && e.native;
+            if (!n || n.clientX == null) return;
+            const r = chart.canvas.getBoundingClientRect();
+            if (!r.width || !r.height) return;
+            e.x = (n.clientX - r.left) * chart.width / r.width;
+            e.y = (n.clientY - r.top) * chart.height / r.height;
+            const a = chart.chartArea;
+            if (a) args.inChartArea = e.x >= a.left && e.x <= a.right && e.y >= a.top && e.y <= a.bottom;
+        }
+    };
+    let chartFixRegistrato = false;
+    function registraChartFix() {
+        if (chartFixRegistrato || !window.Chart || typeof window.Chart.register !== 'function') return;
+        window.Chart.register(chartZoomFix);
+        chartFixRegistrato = true;
+    }
+    registraChartFix();
+    // Chart.js caricato con defer (dashboard): è pronto al DOMContentLoaded.
+    document.addEventListener('DOMContentLoaded', registraChartFix);
+    window.addEventListener('load', registraChartFix);
 })();

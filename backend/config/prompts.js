@@ -91,10 +91,11 @@ export const PROMPT_FUNCTIONS = {
     segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE']
   },
   // Finestra «Assistente PM» durante la registrazione (routes/assistentePm.js): istruzioni di
-  // sistema della sessione Gemini Live. Il punto «.» come risposta = nessun suggerimento.
+  // sistema della sessione Gemini Live / ChatGPT Realtime, che riceve solo l'audio della riunione
+  // (nessuna trascrizione). «Nessun suggerimento.» come risposta = niente da mostrare.
   ASSISTENTE_PM: {
-    titolo: 'Assistente PM durante la riunione (Gemini Live)',
-    // INGRESSO = frase su cosa riceve Gemini (trascrizione a pezzi o audio live), dalla modalità.
+    titolo: 'Assistente PM durante la riunione (Gemini Live / ChatGPT Realtime)',
+    // INGRESSO = frase su cosa riceve l'AI (l'audio della riunione), scritta dal server.
     segnaposto: ['DATI', 'RIUNIONE', 'DATA', 'UTENTE', 'INGRESSO']
   },
   // Add-in di Outlook (routes/outlookAddin.js): analisi dell'email aperta dal PM con i dati di

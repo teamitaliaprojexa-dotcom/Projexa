@@ -11785,7 +11785,7 @@
         //    la trascrizione di Teams): startMeetingRecording con soloAssistente.
         // Con «Registra» l'assistente parte comunque da solo, come prima.
         const AP_TITOLO_AVVIA = 'Assistente PM senza registrare: ascolta la riunione e ti dà suggerimenti, ma la riunione non viene trascritta da Projexa (per registrarla usa Registra)';
-        const AP_TITOLO_RIAPRI = 'Assistente PM: riapri la finestra (suggerimenti e trascrizione live)';
+        const AP_TITOLO_RIAPRI = 'Assistente PM: riapri la finestra dei suggerimenti';
         function assistenteRigaButton(recording) {
             return `<button type="button" class="meeting-linea-btn meeting-ap-btn${recording ? ' attivo' : ''}" title="${recording ? AP_TITOLO_RIAPRI : AP_TITOLO_AVVIA}" aria-label="Assistente PM"><i class="fas fa-user-tie"></i></button>`;
         }
@@ -12008,12 +12008,10 @@
                 const rec = meetingRec;
                 if (!window.AssistentePm || !rec || !rec.eventId) return;
                 // Senza sessione e con la registrazione in corso l'assistente si avvia ora: da qui
-                // in poi riceve audio o blocchi brevi (come all'avvio della registrazione).
-                window.AssistentePm.riapri({ eventId: rec.eventId, title: rec.title, registrazioneInCorso: !!rec.running }).then((modo) => {
-                    if (!modo || !rec.running || rec.assistente) return;
-                    rec.apMic = []; rec.apSys = []; rec.apLen = 0; rec.apScanFrom = 0; rec.apQuietRun = 0;
-                    rec.apFlushed = rec.flushedSamples + rec.bufferLen;
-                    rec.assistente = modo;
+                // in poi riceve l'audio (come all'avvio della registrazione).
+                window.AssistentePm.riapri({ eventId: rec.eventId, title: rec.title, registrazioneInCorso: !!rec.running }).then((attivo) => {
+                    if (!attivo || !rec.running || rec.assistente) return;
+                    rec.assistente = true;
                 }).catch(() => {});
             });
             document.getElementById('meetingRecorderPanel')?.addEventListener('click', () => {
@@ -12624,7 +12622,7 @@
                 recMonitorLevels(rec, rec.mic ? mic : null, rec.hasSystemAudio ? sys : null);
                 if (rec.soloAssistente) {
                     // Solo assistente: nessun blocco per la trascrizione; si tiene solo lo storico
-                    // dei livelli della voce (serve al volume dei blocchi brevi e dell'audio live).
+                    // dei livelli della voce (serve al volume dell'audio per l'assistente).
                     recStoricoLivelli(rec, 'mic', rec.mic ? mic : null);
                     recStoricoLivelli(rec, 'system', rec.hasSystemAudio ? sys : null);
                 } else {
@@ -12633,16 +12631,8 @@
                     rec.bufferLen += (mic || sys).length;
                     flushRecBuffer(rec, false);
                 }
-                // Assistente PM: in modalità Testo stessi campioni in un buffer a parte, per i
-                // blocchi brevi; in modalità Audio live mixati e inviati subito a Gemini.
-                if (rec.assistente === 'testo') {
-                    if (rec.mic) rec.apMic.push(mic);
-                    if (rec.hasSystemAudio) rec.apSys.push(sys);
-                    rec.apLen += (mic || sys).length;
-                    flushAssistBuffer(rec);
-                } else if (rec.assistente === 'audio') {
-                    sendAssistAudio(rec, rec.mic ? mic : null, rec.hasSystemAudio ? sys : null);
-                }
+                // Assistente PM: stessi campioni mixati e inviati subito all'AI (solo audio).
+                if (rec.assistente) sendAssistAudio(rec, rec.mic ? mic : null, rec.hasSystemAudio ? sys : null);
             };
             merger.connect(rec.node);
             rec.node.connect(rec.ctx.destination); // l'uscita è silenziosa: serve solo a far girare il nodo
@@ -12668,34 +12658,23 @@
                 : 'Audio della riunione non condiviso: verrà trascritto solo il tuo microfono. Ferma e riavvia la registrazione attivando "Condividi anche l\'audio di sistema".'));
             updateRecStatus(rec);
             if (!rec.hasSystemAudio) showNotification(soloAssistente ? 'Audio di sistema non condiviso: l\'assistente sente solo il tuo microfono' : 'Audio di sistema non condiviso: verrà trascritto solo il tuo microfono', 'info');
-            // «AI Assistente PM» acceso: finestra dell'assistente e blocchi brevi per lui.
-            rec.apMic = []; rec.apSys = []; rec.apLen = 0; rec.apFlushed = 0; rec.apScanFrom = 0; rec.apQuietRun = 0;
+            // «AI Assistente PM» acceso: finestra dell'assistente e audio della riunione per lui.
             rec.assistente = false;
             if (window.AssistentePm) {
-                // La finestra chiede la modalità: 'testo' (blocchi brevi trascritti da Projexa)
-                // o 'audio' (audio live a Gemini); null = assistente spento o non avviato.
+                // true = assistente partito: da qui riceve l'audio; false = spento o non avviato.
                 // Solo assistente: se l'assistente non parte la cattura non serve e si ferma.
-                window.AssistentePm.avvia({ eventId: rec.eventId, title: rec.title }).then((modo) => {
-                    if (!modo && rec.soloAssistente && rec.running) { stopMeetingRecording('Assistente PM non avviato: ascolto fermato.'); return; }
-                    if (!modo || !rec.running) return;
-                    // L'audio arrivato prima della scelta non serve all'assistente: si parte da qui.
-                    rec.apFlushed = rec.flushedSamples + rec.bufferLen;
-                    rec.assistente = modo;
+                window.AssistentePm.avvia({ eventId: rec.eventId, title: rec.title }).then((attivo) => {
+                    if (!attivo && rec.soloAssistente && rec.running) { stopMeetingRecording('Assistente PM non avviato: ascolto fermato.'); return; }
+                    if (!attivo || !rec.running) return;
+                    rec.assistente = true;
                 }).catch(() => {});
             }
         }
 
-        // === BLOCCHI BREVI PER L'«ASSISTENTE PM» (sito/js/assistente-pm.js) ===
-        // Oltre ai blocchi da ~2 minuti della trascrizione, con l'assistente attivo il browser
-        // manda ogni ~10 s un blocco breve che il server trascrive SUBITO (Whisper di Projexa)
-        // e passa in testo a Gemini; non entra nella trascrizione della riunione. Taglio alla
-        // prima pausa dopo AP_MIN_SECONDS, comunque entro AP_MAX_SECONDS.
-        const AP_MIN_SECONDS = 7;
-        const AP_MAX_SECONDS = 10;
-
-        // Modalità Audio live: microfono + audio di sistema mixati come per la trascrizione
-        // (stesso guadagno della registrazione, ricalcolato ogni 2 s) e passati alla finestra,
-        // che li invia a Gemini a pezzi da ~0,5 s.
+        // === AUDIO PER L'«ASSISTENTE PM» (sito/js/assistente-pm.js) ===
+        // Microfono + audio di sistema mixati come per la trascrizione (stesso guadagno della
+        // registrazione, ricalcolato ogni 2 s) e passati alla finestra, che li invia all'AI sul
+        // WebSocket a pezzi da ~0,5 s. Nessuna trascrizione per l'assistente (2026-10-31).
         function sendAssistAudio(rec, mic, sys) {
             const now = Date.now();
             if (!rec.apGain || now - rec.apGain.at > 2000) {
@@ -12715,66 +12694,6 @@
             }
             window.AssistentePm.inviaAudio(rec.eventId, out);
         }
-        function flushAssistBuffer(rec) {
-            const dur = { min: AP_MIN_SECONDS, max: AP_MAX_SECONDS };
-            const minLen = REC_SAMPLE_RATE * dur.min, maxLen = REC_SAMPLE_RATE * dur.max;
-            if (rec.apLen < minLen) return;
-            // Soglia di pausa dal livello della voce della registrazione (sola lettura).
-            const lvl = (track) => Math.max(REC_SILENCE_RMS, REC_PAUSE_RATIO * recVoiceLevel(rec, track, null));
-            const L = { mic: rec.mic ? lvl('mic') : 0, sys: rec.hasSystemAudio ? lvl('system') : 0 };
-            if (!rec.apScanFrom) { rec.apScanFrom = minLen; rec.apQuietRun = 0; }
-            let cut = null;
-            while (cut == null && rec.apScanFrom + REC_PAUSE_WINDOW <= Math.min(rec.apLen, maxLen)) {
-                const a = rec.apScanFrom, b = a + REC_PAUSE_WINDOW;
-                const score = Math.max(
-                    L.mic ? recRms(sliceRecParts(rec.apMic, a, b)) / L.mic : 0,
-                    L.sys ? recRms(sliceRecParts(rec.apSys, a, b)) / L.sys : 0
-                );
-                rec.apScanFrom = b;
-                rec.apQuietRun = score < 1 ? rec.apQuietRun + 1 : 0;
-                if (rec.apQuietRun >= 2) cut = a;
-            }
-            if (cut == null && rec.apLen >= maxLen) cut = maxLen;
-            if (cut == null) return;
-
-            const total = rec.apLen;
-            const micRaw = rec.mic ? sliceRecParts(rec.apMic, 0, cut) : null;
-            const sysRaw = rec.hasSystemAudio ? sliceRecParts(rec.apSys, 0, cut) : null;
-            const offsetSec = (rec.baseOffset || 0) + rec.apFlushed / REC_SAMPLE_RATE;
-            rec.apFlushed += cut;
-            rec.apMic = rec.mic && cut < total ? [sliceRecParts(rec.apMic, cut, total)] : [];
-            rec.apSys = rec.hasSystemAudio && cut < total ? [sliceRecParts(rec.apSys, cut, total)] : [];
-            rec.apLen = total - cut;
-            rec.apScanFrom = 0;
-            rec.apQuietRun = 0;
-            // Nessuno parla: niente da trascrivere.
-            const loudest = Math.max(0, ...(micRaw ? recEnergy(micRaw) : []), ...(sysRaw ? recEnergy(sysRaw) : []));
-            if (loudest < REC_SILENCE_RMS) return;
-            // Volume portato a livello udibile con il guadagno della registrazione (senza toccarne
-            // lo storico); all'inizio, senza storico, con il livello del blocco stesso.
-            const norm = (track, raw) => {
-                if (!raw) return null;
-                const level = recVoiceLevel(rec, track, null);
-                return level ? applyRecGain(raw, Math.min(REC_MAX_GAIN, Math.max(1, REC_TARGET_VOICE / level)), level).samples
-                    : normalizeRecTrack(raw).samples;
-            };
-            const micS = norm('mic', micRaw), sysS = norm('system', sysRaw);
-            const len = (micS || sysS).length;
-            const mix = new Int16Array(len);
-            for (let i = 0; i < len; i++) {
-                const v = (micS ? micS[i] : 0) + (sysS ? sysS[i] : 0);
-                mix[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
-            }
-            window.AssistentePm.inviaBlocco({
-                id_calendar: rec.eventId,
-                audio_mix: bytesToBase64(encodeWav(mix, REC_SAMPLE_RATE)),
-                energy_mic: micS ? recEnergy(micS) : null,
-                energy_system: sysS ? recEnergy(sysS) : null,
-                names: Array.isArray(rec.names) ? rec.names : [],
-                offset_sec: offsetSec
-            });
-        }
-
         // --- Controllo dell'audio catturato durante la registrazione ---
         // Barre di livello (microfono / riunione) e avviso se l'audio della riunione resta muto
         // a lungo: è il caso in cui Teams/Meet suonano su un dispositivo che Projexa non cattura
@@ -23708,7 +23627,7 @@
         <div class="meeting-recorder-head">
             <span class="meeting-recorder-dot" id="meetingRecorderDot" aria-hidden="true"></span>
             <strong id="meetingRecorderTitle">Riunione</strong>
-            <button id="meetingRecorderAssistente" type="button" aria-label="Assistente PM" title="Riapri la finestra dell'Assistente PM (suggerimenti e trascrizione live)"><i class="fas fa-user-tie"></i></button>
+            <button id="meetingRecorderAssistente" type="button" aria-label="Assistente PM" title="Riapri la finestra dei suggerimenti dell'Assistente PM"><i class="fas fa-user-tie"></i></button>
             <button id="meetingRecorderPanel" type="button" aria-label="Linea della riunione" title="Linea della riunione: attività, To-Do, Jira, quotazioni, MySupport"><i class="fas fa-route"></i></button>
             <button id="meetingRecorderClose" type="button" aria-label="Chiudi" title="Chiudi"><i class="fas fa-times"></i></button>
         </div>

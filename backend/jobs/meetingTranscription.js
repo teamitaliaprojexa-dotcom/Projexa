@@ -30,8 +30,8 @@ import { SALTA_LOG_ON, SALTA_LOG_OFF, registraTestoRiunione } from '../config/au
 import { contestoAudit } from '../config/auditContext.js';
 import { notificaRiunione } from './notifiche.js';
 import { getIntegration } from '../config/integrations.js';
-import { transcribeAudio, transcribeAudioCpp, transcribeAudioGemini, transcribeAudioParakeet, parakeetUrl, askAiProvider, whisperUrls, whisperCppUrls, aiCollegate, diarizzazioneUrl, impronteVocali } from '../routes/ai.js';
-import { segnaRegistrazione, segnaTrascrizione, assistenteInCorso } from '../config/precedenzaVm.js';
+import { transcribeAudio, transcribeAudioGemini, transcribeAudioParakeet, parakeetUrl, askAiProvider, whisperUrls, whisperCppUrls, aiCollegate, diarizzazioneUrl, impronteVocali } from '../routes/ai.js';
+import { segnaRegistrazione, segnaTrascrizione } from '../config/precedenzaVm.js';
 import { nomiPartecipanti } from '../config/riunioniOutlook.js';
 
 // Registrazione considerata in corso fino a questo tempo dall'ultimo pezzo audio arrivato (se la
@@ -611,60 +611,6 @@ async function transcribeJob(job, baseUrl) {
   const voci = [];
   const text = formatLines(lines, job.offset_sec, job.start_label, voci);
   return { text, voci };
-}
-
-// Blocco breve (8-15 s) dell'«Assistente PM» (routes/assistentePm.js): trascritto SUBITO, fuori
-// dalla coda, e NON salvato nella trascrizione della riunione (quella resta dei blocchi da ~2
-// minuti). Stessi prompt, attribuzione di chi parla e correzioni automatiche dei blocchi normali.
-// Servizio: whisper.cpp se configurato (più veloce), altrimenti il primo servizio standard.
-// ASSISTENTE_PM_WHISPER_CPP_URL (solo sviluppo in locale): whisper.cpp della VM raggiunto con
-// il tunnel SSH (deploy/oracle/db-tunnel.ps1, porta 18101). Vale SOLO per l'assistente: la coda
-// della trascrizione normale continua a usare WHISPER_URL / WHISPER_CPP_URL.
-// Opzioni (2026-10-21, nate per le voci «Projexa» dell'assistente, tolte il 2026-10-29; oggi
-// nessuna voce le usa):
-// gemini = true: il blocco lo trascrive Gemini (stessa corsia della «Modalità Trascrizione»
-// Gemini); se Gemini non risponde si usa il Whisper dell'assistente (non quello della coda, che
-// con large-v3-turbo sarebbe troppo lento).
-// parakeet = true: il blocco lo trascrive Parakeet TDT 0.6B v3 sulla VM (PARAKEET_URL; in
-// locale ASSISTENTE_PM_PARAKEET_URL = tunnel 18103), con lo stesso ripiego sul Whisper
-// dell'assistente se non risponde.
-export async function trascriviBloccoBreve(user, idCalendar, { audioB64, energy, offset, gemini = false, parakeet = false }) {
-  const dedicato = String(process.env.ASSISTENTE_PM_WHISPER_CPP_URL || '').trim().replace(/\/+$/, '');
-  const base = whisperCppUrls()[0] || whisperUrls()[0] || null;
-  const e = energy || {};
-  const me = e.mic ? await speakerName(user) : '';
-  const prompt = await buildWhisperPrompt(user, idCalendar, e.names || []);
-  const audio = Buffer.from(audioB64, 'base64');
-  let r = null;
-  if (gemini) {
-    try {
-      const el = await getIntegration(user.user_id, 'Gemini');
-      if (!el.gemini_api_key) throw new Error('chiave API di Gemini non collegata');
-      r = await transcribeAudioGemini(el.gemini_api_key, audio, 'audio/wav', String(prompt || '').replace(PROMPT_STYLE, '').trim());
-    } catch (err) {
-      console.warn(`[ASSISTENTE PM] ${idCalendar}: Gemini non ha trascritto il blocco (${err.message}): uso Whisper`);
-    }
-  }
-  if (parakeet && !r) {
-    const pk = String(process.env.ASSISTENTE_PM_PARAKEET_URL || '').trim().replace(/\/+$/, '') || parakeetUrl();
-    try {
-      if (!pk) throw new Error('PARAKEET_URL non configurato');
-      r = await transcribeAudioParakeet(pk, audio, 'audio/wav', await buildHotwords(user, idCalendar, e.names || []));
-    } catch (err) {
-      console.warn(`[ASSISTENTE PM] ${idCalendar}: Parakeet non ha trascritto il blocco (${err.message}): uso Whisper`);
-    }
-  }
-  if (!r) r = dedicato
-    ? await transcribeAudioCpp(dedicato, audio, 'audio/wav', prompt)
-    : await transcribeAudio(user.user_id, audio, 'audio/wav', base, prompt);
-  const lines = r.segments.map((seg) => {
-    let who = '';
-    if (e.mic && e.system) who = avgEnergy(e.mic, seg.start, seg.end) >= avgEnergy(e.system, seg.start, seg.end) ? me : OTHERS_LABEL;
-    else if (e.mic) who = me;
-    return { start: seg.start, end: seg.end, who, text: seg.text, cont: seg.cont };
-  });
-  const testo = formatLines(lines, offset, null);
-  return applyCorrections(testo, await loadCorrections(user, idCalendar)).text.trim();
 }
 
 // ----------------------------------------------------------------------------
@@ -1467,7 +1413,6 @@ async function checkUrlHealth(url) {
 // ----------------------------------------------------------------------------
 
 let workerRunning = false;
-let whisperInPausa = false; // Assistente PM aperto: niente blocchi nuovi a Whisper (runWorker)
 const busyUrls = new Set();   // servizi Whisper occupati
 const inflight = new Map();   // id blocco -> promise della trascrizione
 
@@ -1537,17 +1482,7 @@ async function runWorker() {
           inflight.set(job.id, p);
         }
       }
-      // Assistente PM in modalità Testo aperto: la CPU va al suo Whisper (scelta utente
-      // 2026-10-21). I blocchi della riunione restano in coda e ripartono appena l'assistente
-      // si chiude; quelli già in trascrizione finiscono. La corsia Gemini non usa la VM: continua.
-      const cpuAlAssistente = assistenteInCorso();
-      if (cpuAlAssistente !== whisperInPausa) {
-        whisperInPausa = cpuAlAssistente;
-        console.log(cpuAlAssistente
-          ? '[TRASCRIZIONE] Assistente PM aperto: trascrizione con Whisper in pausa, i blocchi restano in coda'
-          : '[TRASCRIZIONE] Assistente PM chiuso: trascrizione con Whisper ripresa');
-      }
-      if ((urls.length || cppUrls.length || pkUrls.length) && !cpuAlAssistente) {
+      if ((urls.length || cppUrls.length || pkUrls.length)) {
         const start = (jobs, free) => jobs.forEach((job, i) => {
           const url = free[i];
           busyUrls.add(url);
