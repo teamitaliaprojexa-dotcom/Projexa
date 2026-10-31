@@ -342,7 +342,6 @@
 </head>
 <body>
     <div class="header">
-        <a href="dashboard.html" class="btn" title="Torna alla dashboard"><i class="fas fa-arrow-left"></i> Dashboard</a>
         <h1><i class="fas fa-chart-column"></i> Reporting <span class="report-name" id="currentReportName"></span></h1>
         <!-- Azioni sul report corrente: salva (chiede il nome) e scarica i dati mostrati -->
         <div class="header-actions" id="headerActions" hidden>
@@ -1617,5 +1616,7 @@
         });
     </script>
     <script src="js/chatbot.js"></script>
+    <!-- Dock di navigazione condivisa (stessa della dashboard): vedi js/dock.js -->
+    <script src="js/dock.js" defer></script>
 </body>
 </html>

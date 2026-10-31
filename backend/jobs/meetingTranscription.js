@@ -230,9 +230,11 @@ function avgEnergy(list, start, end) {
 // quelle di TUTTA la riunione e le righe «Partecipanti» diventano «Partecipante N», con N
 // coerente dall'inizio alla fine. Solo numeri: nessun nome, nessuna impronta tenuta oltre 48 ore.
 // Le funzioni live (Assistente PM) non la usano. Tabella: Supporto/CreaDB/rec_meeting_voci.sql
-// Somiglianza minima (coseno) tra due impronte per dire «stessa voce». Prova del 2026-10-28 con
-// il modello wespeaker resnet34: stessa voce 0,93-0,95, voci diverse 0,59-0,63.
-const DIAR_SOGLIA = Number(process.env.DIARIZZAZIONE_SOGLIA) || 0.65;
+// Somiglianza minima (coseno) tra due impronte per dire «stessa voce». Con l'audio di una
+// riunione Teams vera (2026-10-30, 4 voci) il modello wespeaker resnet34 dà: stessa voce
+// 0,88-0,92 in media, voci diverse 0,72-0,81; con 0,84-0,86 i gruppi tornano con chi parlava.
+// (La prova del 2026-10-28 con voci sintetiche, voci diverse 0,59-0,63, non era rappresentativa.)
+const DIAR_SOGLIA = Number(process.env.DIARIZZAZIONE_SOGLIA) || 0.85;
 const DIAR_MIN_SEC = 4;            // gruppi con meno parlato: uniti al gruppo più simile (se abbastanza simile)
 const DIAR_EREDITA_SEC = 10;       // righe senza impronta (troppo brevi): prendono il numero della riga vicina
 const DIAR_LABEL = (n) => `Partecipante ${n}`;
@@ -277,46 +279,56 @@ async function aggiungiImpronte(audio, lines) {
   }
 }
 
-// Raggruppamento delle impronte (agglomerativo, per centroidi): si uniscono via via i due
-// gruppi più simili finché la somiglianza resta sopra DIAR_SOGLIA. I gruppi con poco parlato
-// (impronte meno affidabili) si uniscono poi al gruppo grande più simile, se lo è abbastanza.
+// Raggruppamento delle impronte (agglomerativo, a legame medio): si uniscono via via i due
+// gruppi più simili finché la somiglianza resta sopra DIAR_SOGLIA. La somiglianza tra due gruppi
+// è la MEDIA di quelle tra le loro frasi (pesate per secondi di parlato, al massimo 30), non
+// quella tra i centroidi: la somma di tante impronte toglie il "rumore" di ogni frase e due voci
+// diverse finivano per sembrare uguali (riunione del 2026-10-30: tutti «Partecipante 1»).
+// I gruppi con poco parlato (impronte meno affidabili) si uniscono poi al gruppo grande più
+// simile, se lo è abbastanza.
 // items: [{ voce, dur }] in ordine di tempo -> numero del partecipante (1, 2, …) per ciascuno,
 // in ordine di prima apparizione.
 export function raggruppaVoci(items, soglia = DIAR_SOGLIA) {
-  // Somma delle impronte (già normalizzate) pesate per secondi di parlato, al massimo 30.
-  const gruppi = items.map((it, i) => ({ somma: it.voce.map((x) => x * Math.min(30, Math.max(0.5, it.dur || 0))), dur: it.dur || 0, membri: [i], primo: i }));
+  const sim = items.map((a) => items.map((b) => coseno(a.voce, b.voce)));
+  const gruppi = items.map((it, i) => ({ peso: Math.min(30, Math.max(0.5, it.dur || 0)), dur: it.dur || 0, membri: [i], primo: i }));
   const attivi = new Set(gruppi.map((_, i) => i));
   for (;;) {
     let best = null;
     const ids = [...attivi];
     for (let x = 0; x < ids.length; x++) {
       for (let y = x + 1; y < ids.length; y++) {
-        const s = coseno(gruppi[ids[x]].somma, gruppi[ids[y]].somma);
+        const s = sim[ids[x]][ids[y]];
         if (s >= soglia && (!best || s > best.s)) best = { a: ids[x], b: ids[y], s };
       }
     }
     if (!best) break;
-    unisci(gruppi, attivi, best.a, best.b);
+    unisci(gruppi, attivi, sim, best.a, best.b);
   }
   const piccoli = [...attivi].filter((g) => gruppi[g].dur < DIAR_MIN_SEC);
   const grandi = [...attivi].filter((g) => gruppi[g].dur >= DIAR_MIN_SEC);
   for (const p of piccoli) {
     let best = null;
     for (const g of grandi) {
-      const s = coseno(gruppi[p].somma, gruppi[g].somma);
-      if (s >= soglia - 0.2 && (!best || s > best.s)) best = { g, s };
+      const s = sim[p][g];
+      if (s >= soglia - 0.1 && (!best || s > best.s)) best = { g, s };
     }
-    if (best) unisci(gruppi, attivi, best.g, p);
+    if (best) unisci(gruppi, attivi, sim, best.g, p);
   }
   const ordine = [...attivi].sort((a, b) => gruppi[a].primo - gruppi[b].primo);
   const numero = new Array(items.length);
   ordine.forEach((g, n) => gruppi[g].membri.forEach((i) => { numero[i] = n + 1; }));
   return numero;
 }
-function unisci(gruppi, attivi, a, b) {
+// Unisce il gruppo b in a; la somiglianza del nuovo gruppo con ogni altro è la media pesata
+// di quelle di a e di b.
+function unisci(gruppi, attivi, sim, a, b) {
   const ga = gruppi[a];
   const gb = gruppi[b];
-  ga.somma = ga.somma.map((x, i) => x + (gb.somma[i] || 0));
+  for (const c of attivi) {
+    if (c === a || c === b) continue;
+    sim[a][c] = sim[c][a] = (ga.peso * sim[a][c] + gb.peso * sim[b][c]) / (ga.peso + gb.peso);
+  }
+  ga.peso += gb.peso;
   ga.dur += gb.dur;
   ga.membri.push(...gb.membri);
   ga.primo = Math.min(ga.primo, gb.primo);
@@ -449,8 +461,9 @@ function mergeLines(lines) {
         last.text += glue + text;
         last.end = Math.max(last.end, end);
         if (l.voce) {
-          last.voce = sommaVoci(last.voce, last.voceSec, l.voce, end - start);
-          last.voceSec += end - start;
+          // La riga può non avere ancora un'impronta (primo pezzo troppo breve): prende questa.
+          last.voce = last.voce ? sommaVoci(last.voce, last.voceSec, l.voce, end - start) : l.voce;
+          last.voceSec = (last.voceSec || 0) + end - start;
         }
         continue;
       }

@@ -972,6 +972,121 @@
             flex: 0 0 30%;
             box-sizing: border-box;
         }
+        /* Campi stile "Contatti" di Apple (classe detail-stacked, in visualizzazione e con
+           "Abilita modifica"): etichetta piccola e grigia sopra, valore sotto, linea sottile tra
+           i campi. In sola lettura (detail-readonly) il valore è senza casella; in modifica la
+           casella è grigio chiaro. Elimina e rinomina restano col layout precedente. */
+        .detail-stacked .settings-detail-row:not(.type11-grid-row) {
+            position: relative;
+            flex-wrap: wrap;
+            align-items: center;
+            row-gap: 3px;
+            column-gap: 0.5rem;
+            padding: 0.55rem 0 0.6rem;
+            border-bottom: 1px solid #ececf0;
+        }
+        .detail-stacked .detail-row .settings-detail-row:not(.type11-grid-row) { border-bottom: 1px solid #ececf0; }
+        .detail-stacked .settings-detail-row:not(.type11-grid-row) > .campo-label {
+            flex: 0 0 100%;
+            max-width: 100%;
+            padding: 0 1.4rem 0 0;
+            border: none;
+            border-radius: 0;
+            font-size: 0.92rem;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+            color: #6e6e73;
+        }
+        /* Sposta campi: l'etichetta resta la maniglia da trascinare, riconoscibile dal bordo tratteggiato */
+        .detail-stacked .settings-detail-row:not(.type11-grid-row) > .campo-label.drag-handle {
+            flex: 0 0 auto;
+            padding: 1px 8px;
+            border: 1px dashed #CBD5E1;
+            border-radius: 6px;
+            cursor: grab;
+        }
+        /* Con "Abilita modifica": casella grigio chiaro arrotondata, bordo blu al fuoco */
+        .detail-stacked:not(.detail-readonly) .settings-detail-row input[type="text"]:not(.field-rename),
+        .detail-stacked:not(.detail-readonly) .settings-detail-row input[type="number"],
+        .detail-stacked:not(.detail-readonly) .settings-detail-row input[type="date"],
+        .detail-stacked:not(.detail-readonly) .settings-detail-row select:not(.span-sel) {
+            padding: 6px 10px;
+            border: 1px solid #e5e5ea !important;
+            border-radius: 8px;
+            background: #f5f5f7;
+            font-size: 0.9rem;
+            color: #1d1d1f;
+            transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+        }
+        .detail-stacked:not(.detail-readonly) .settings-detail-row input:not(.field-rename):focus,
+        .detail-stacked:not(.detail-readonly) .settings-detail-row select:not(.span-sel):focus {
+            outline: none;
+            background: #fff;
+            border-color: #0071e3 !important;
+            box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.18);
+        }
+        .detail-stacked:not(.detail-readonly) .settings-detail-row input:disabled,
+        .detail-stacked:not(.detail-readonly) .settings-detail-row select:disabled { opacity: 0.6; cursor: not-allowed; }
+        .detail-stacked:not(.detail-readonly) .settings-detail-row .field-icon-wrap input { padding-left: 30px; }
+        /* Sola lettura: stessa casella grigio chiaro della modifica, senza freccia/calendario */
+        .detail-readonly .settings-detail-row input[type="text"],
+        .detail-readonly .settings-detail-row input[type="number"],
+        .detail-readonly .settings-detail-row input[type="date"],
+        .detail-readonly .settings-detail-row select,
+        .detail-readonly .settings-detail-row .compl-val {
+            padding: 6px 10px !important;
+            border: 1px solid #e5e5ea !important;
+            border-radius: 8px;
+            background: #f5f5f7 !important;
+            box-shadow: none !important;
+            font-size: 0.9rem;
+            font-weight: 400;
+            color: #1d1d1f;
+            -webkit-text-fill-color: #1d1d1f;
+            opacity: 1;
+            cursor: default;
+            -webkit-appearance: none;
+            appearance: none;
+            text-overflow: ellipsis;
+        }
+        .detail-readonly .settings-detail-row .compl-val { display: inline-block; min-width: 5rem; box-sizing: border-box; }
+        .detail-readonly .settings-detail-row input::placeholder { color: #aeaeb2; -webkit-text-fill-color: #aeaeb2; }
+        .detail-readonly .settings-detail-row select.ro-empty { color: #aeaeb2; -webkit-text-fill-color: #aeaeb2; }
+        .detail-readonly .settings-detail-row input[type="date"]::-webkit-calendar-picker-indicator { display: none; }
+        .detail-readonly .settings-detail-row .field-icon-wrap input { padding-left: 30px !important; }
+        /* Copia del valore: icona che compare passando sopra il campo */
+        .field-copy {
+            position: absolute; top: 0.45rem; right: 0;
+            width: 22px; height: 22px; padding: 0; border: none; border-radius: 6px;
+            background: transparent; color: #86868b; font-size: 0.72rem; cursor: pointer;
+            display: none; align-items: center; justify-content: center;
+        }
+        .field-copy:hover { background: #f0f0f3; color: #1d1d1f; }
+        .field-copy.copiato { color: #16A34A; }
+        .detail-readonly .settings-detail-row:hover > .field-copy { display: inline-flex; }
+
+        /* Collegamento (tipo 12, es. Cartella Progetto): "riga file" stile app File di Apple */
+        .type12-link-button {
+            display: flex; align-items: center; gap: 0.75rem;
+            flex: 1 1 auto; max-width: 420px; min-width: 0; box-sizing: border-box;
+            padding: 0.55rem 0.85rem;
+            border: 1px solid #e5e5ea; border-radius: 12px; background: #fff;
+            color: #1d1d1f; text-decoration: none;
+            transition: background-color 0.15s, border-color 0.15s;
+        }
+        .type12-link-button:hover { background: #f5f5f7; border-color: #d2d2d7; }
+        .type12-link-button:focus-visible { outline: 2px solid #0071e3; outline-offset: 2px; }
+        .t12-ico { flex: none; width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; font-size: 1rem; }
+        .t12-ico.blu { background: #E6F1FB; color: #185FA5; }
+        .t12-ico.verde { background: #E1F5EE; color: #0F6E56; }
+        .t12-ico.viola { background: #EEEDFE; color: #534AB7; }
+        .t12-ico.grigio { background: #F1F1F4; color: #5F5E5A; }
+        .t12-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+        .t12-nome { font-size: 0.9rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .t12-dest { font-size: 0.75rem; color: #86868b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .t12-go { margin-left: auto; flex: none; font-size: 0.75rem; color: #aeaeb2; }
+        .type12-link-button:hover .t12-go { color: #0071e3; }
+
         /* Campo custom: pallino verde al posto di "(*)" in visualizzazione */
         .custom-dot {
             display: inline-block;
@@ -1295,23 +1410,27 @@
         }
         .type11-grid-snapshot { pointer-events: none; }
         /* Tutte le righe visibili (nessun limite di altezza: si scorre con il pannello);
-           scorrimento orizzontale solo se le colonne non stanno nella larghezza. */
+           scorrimento orizzontale solo se le colonne non stanno nella larghezza.
+           Stile "Apple": una card con bordo sottile, righe separate da linee sottili. */
         .type11-grid-scroll {
-            width: 100%;
+            width: fit-content;
+            max-width: 100%;
             overflow-x: auto;
-            padding: 1px;
+            border: 1px solid #e5e5ea;
+            border-radius: 12px;
+            background: #fff;
         }
         .type11-grid-table {
             width: max-content;
             min-width: 0;
             table-layout: fixed;
             border-collapse: separate;
-            border-spacing: 0 7px;
+            border-spacing: 0;
             font-size: 0.82rem;
         }
         .type11-grid-table th,
         .type11-grid-table td {
-            padding: 0.65rem 0.8rem;
+            padding: 0.7rem 1rem;
             border: none;
             text-align: left;
             vertical-align: middle;
@@ -1323,77 +1442,113 @@
             position: sticky;
             top: 0;
             z-index: 2;
-            background: linear-gradient(135deg, #7186a3, #8fa2bb);
-            color: white;
-            font-weight: 600;
-            box-shadow: inset -1px 0 rgba(255, 255, 255, 0.18);
+            background: #f5f5f7;
+            color: #6e6e73;
+            font-size: 0.74rem;
+            font-weight: 500;
+            letter-spacing: 0.01em;
+            border-bottom: 1px solid #e5e5ea;
         }
-        .type11-grid-table th:first-child {
-            border-radius: 10px 0 0 10px;
-        }
-        .type11-grid-table th:last-child { border-radius: 0 10px 10px 0; }
         /* Ordinamento (clic sull'intestazione) e riga dei filtri sotto le intestazioni */
-        .type11-grid-table th.type11-sorted { background: linear-gradient(135deg, #4f6688, #6f86a6); }
+        .type11-grid-table th.type11-sorted { color: #1d1d1f; }
         .type11-sort-btn {
-            margin-left: 0.35rem; padding: 0 0.15rem;
+            margin-left: 0.3rem; padding: 0 0.15rem;
             border: none; background: transparent; color: inherit;
-            font-size: 0.72rem; cursor: pointer; opacity: 0.45; vertical-align: middle;
+            font-size: 0.7rem; cursor: pointer; opacity: 0.35; vertical-align: middle;
         }
-        .type11-sort-btn:hover { opacity: 0.85; }
-        /* Maniglia sul bordo destro dell'intestazione per allargare la colonna */
+        .type11-sort-btn:hover { opacity: 0.8; }
+        /* Maniglia sul bordo destro dell'intestazione per allargare la colonna
+           (la linea sottile fa da separatore tra le intestazioni) */
         .type11-col-resizer {
             position: absolute; top: 0; right: 0; bottom: 0; width: 7px;
             cursor: col-resize; touch-action: none; z-index: 3;
+            background: linear-gradient(#d2d2d7, #d2d2d7) right center / 1px 50% no-repeat;
         }
-        .type11-col-resizer:hover, .type11-col-resizer.active { background: rgba(255, 255, 255, 0.45); }
-        .type11-sorted .type11-sort-btn { opacity: 1; }
+        .type11-grid-table th:last-child .type11-col-resizer { background-image: none; }
+        .type11-col-resizer:hover, .type11-col-resizer.active { background: rgba(0, 113, 227, 0.18); }
+        .type11-sorted .type11-sort-btn { opacity: 1; color: #0071e3; }
+        /* Riga dei filtri: nascosta finché non si preme "Filtri" sopra la griglia */
+        .type11-grid-widget:not(.type11-filters-on) .type11-filter-row { display: none; }
         .type11-grid-table .type11-filter-row th {
-            background: #e9eef5;
-            padding: 0.25rem 0.3rem;
-            box-shadow: inset -1px 0 #ffffff;
-            border-radius: 0;
+            background: #fafafa;
+            padding: 0.35rem 0.4rem;
             z-index: 2;
         }
-        .type11-grid-table .type11-filter-row th:first-child { border-radius: 8px 0 0 8px; }
-        .type11-grid-table .type11-filter-row th:last-child { border-radius: 0 8px 8px 0; }
         .type11-filter-val {
             width: 100%;
             box-sizing: border-box;
-            padding: 0.2rem 0.35rem;
+            height: 28px;
+            padding: 0 0.5rem;
             font-size: 0.75rem;
-            border: 1px solid #cbd5e1;
-            border-radius: 5px;
+            font-weight: 400;
+            border: 1px solid #d2d2d7;
+            border-radius: 7px;
             background: #fff;
-            color: #111827;
+            color: #1d1d1f;
         }
-        .type11-grid-count { font-size: 0.75rem; color: #64748b; padding: 0.2rem 0.4rem 0; }
-        .type11-grid-count a { color: #1d4ed8; }
+        .type11-filter-val:focus { outline: none; border-color: #0071e3; box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.18); }
+        /* Colonna larga quanto la tabella: il pulsante "Filtri" si allinea al suo bordo destro */
+        .settings-detail-row.type11-grid-row:not(.collapsed) > .type11-grid-widget {
+            display: grid; grid-template-columns: fit-content(100%);
+        }
+        .type11-grid-tools { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0 0 0.5rem; }
+        /* Pulsanti di modifica (Nuova riga, Modifica tutte, Elimina…) sulla riga di "Filtri" */
+        .type11-grid-tools > .type11-grid-toolbar { display: contents; }
+        .type11-grid-tools .type11-grid-selection { flex: 1 1 auto; min-width: 8rem; }
+        .type11-grid-tools .type11-grid-toolbar button {
+            height: 30px; padding: 0 0.85rem; border: none; border-radius: 8px;
+            background: #f5f5f7; color: #1d1d1f; font-size: 0.78rem; font-weight: 500;
+        }
+        .type11-grid-tools .type11-grid-toolbar button:hover:not(:disabled) { background: #ebebf0; }
+        .type11-grid-tools .type11-grid-toolbar button.primary { background: var(--secondary-strong, #047857); color: #fff; }
+        .type11-grid-tools .type11-grid-toolbar button.primary:hover:not(:disabled) { background: #065F46; }
+        .type11-grid-tools .type11-grid-toolbar button.type11-grid-edit { background: #FB923C; color: #fff; }
+        .type11-grid-tools .type11-grid-toolbar button.type11-grid-edit:hover:not(:disabled) { background: #F97316; }
+        .type11-grid-tools .type11-grid-toolbar button.danger { background: #E11D27; color: #fff; }
+        .type11-grid-tools .type11-grid-toolbar button.danger:hover:not(:disabled) { background: #C8101A; }
+        /* Disattivato: resta riconoscibile il colore (niente effetto "rosa sbiadito") */
+        .type11-grid-tools .type11-grid-toolbar button:disabled { opacity: 0.7; }
+        /* Interruttore Attive | Tutte accanto a "Filtri": controllo segmentato */
+        .type11-grid-tools .type11-expiry-toggle {
+            display: inline-flex; padding: 2px; border-radius: 8px; background: #f5f5f7;
+        }
+        .type11-grid-tools .type11-expiry-toggle button {
+            border: none; background: transparent; height: 26px; padding: 0 0.75rem; border-radius: 6px;
+            font: inherit; font-size: 0.78rem; color: #6e6e73; cursor: pointer; white-space: nowrap;
+        }
+        .type11-grid-tools .type11-expiry-toggle button:hover { color: #1d1d1f; }
+        .type11-grid-tools .type11-expiry-toggle button.on {
+            background: #fff; color: #1d1d1f; font-weight: 500; box-shadow: 0 0 0 0.5px #d2d2d7, 0 1px 2px rgba(0, 0, 0, 0.06);
+        }
+        .type11-filter-toggle {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            height: 30px; padding: 0 0.8rem;
+            border: none; border-radius: 8px;
+            background: #f5f5f7; color: #6e6e73;
+            font: inherit; font-size: 0.78rem; cursor: pointer;
+        }
+        .type11-filter-toggle:hover { background: #ebebf0; }
+        .type11-filter-toggle.on { background: #e8f1fc; color: #0071e3; }
+        .type11-filter-toggle .type11-filter-badge {
+            min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+            background: #0071e3; color: #fff; font-size: 0.65rem; line-height: 16px; text-align: center;
+        }
+        .type11-grid-count { font-size: 0.75rem; color: #86868b; padding: 0.45rem 0.25rem 0; }
+        .type11-grid-count a { color: #0071e3; }
         .type11-grid-table th:not(:first-child),
         .type11-grid-table td:not(:first-child) { text-align: center; }
         .type11-grid-table tbody td {
-            color: #344054;
-            background: #f4effb;
-            box-shadow: inset -1px 0 rgba(255, 255, 255, 0.55);
-            transition: filter 0.18s ease, transform 0.18s ease;
+            color: #1d1d1f;
+            background: #fff;
+            border-bottom: 1px solid #f0f0f2;
+            transition: background-color 0.15s ease;
         }
+        .type11-grid-table tbody tr:last-child td { border-bottom: none; }
         .type11-grid-table tbody td:first-child {
             min-width: 150px;
-            color: #344054;
-            font-weight: 600;
-            border-radius: 10px 0 0 10px;
+            font-weight: 500;
         }
-        .type11-grid-table tbody td:last-child { border-radius: 0 10px 10px 0; }
-        .type11-grid-table tbody tr.group-color-0 td { background: #f2ecfb; }
-        .type11-grid-table tbody tr.group-color-0 td:first-child { background: #f2ecfb; color: #4f46a5; }
-        .type11-grid-table tbody tr.group-color-1 td { background: #e8f7ee; }
-        .type11-grid-table tbody tr.group-color-1 td:first-child { background: #e8f7ee; color: #15803d; }
-        .type11-grid-table tbody tr.group-color-2 td { background: #fff4df; }
-        .type11-grid-table tbody tr.group-color-2 td:first-child { background: #fff4df; color: #92400e; }
-        .type11-grid-table tbody tr.group-color-3 td { background: #eaf1ff; }
-        .type11-grid-table tbody tr.group-color-3 td:first-child { background: #eaf1ff; color: #1d4ed8; }
-        .type11-grid-table tbody tr.group-color-4 td { background: #e8f7fc; }
-        .type11-grid-table tbody tr.group-color-4 td:first-child { background: #e8f7fc; color: #0f766e; }
-        .type11-grid-table tbody tr:hover td { filter: brightness(0.97); }
+        .type11-grid-table tbody tr:hover td { background: #f5f5f7; }
         /* Griglia a una sola colonna in visualizzazione: righe su 3 colonne affiancate
            (intestazione e filtro restano sopra, larghi quanto le 3 colonne). */
         .type11-grid-table.type11-multicol tbody {
@@ -1401,10 +1556,10 @@
             grid-template-columns: repeat(3, minmax(0, 1fr));
             column-gap: 10px;
             row-gap: 7px;
-            padding-top: 7px;
+            padding: 10px;
         }
         .type11-grid-table.type11-multicol tbody tr { display: block; min-width: 0; }
-        .type11-grid-table.type11-multicol tbody td { display: block; min-width: 0; border-radius: 10px; }
+        .type11-grid-table.type11-multicol tbody td { display: block; min-width: 0; border: 1px solid #e5e5ea; border-radius: 10px; }
         .type11-grid-table.type11-multicol tbody tr.type11-empty-row { grid-column: 1 / -1; }
         /* Colonne che contengono indirizzi web (es. url, link_task): il link per
            esteso occuperebbe mezza griglia, quindi la colonna si stringe al minimo
@@ -1601,7 +1756,31 @@
             .parent-form-overlay.open .parent-form-dialog { animation-duration: 0.01ms; }
         }
 
-        /* Interruttore a levetta (toggle) per i campi booleani e per "Abilita modifica" */
+        /* "Abilita modifica": pulsante a pillola stile Apple sopra una checkbox nascosta.
+           Grigio a riposo; attivo = arancione chiaro, puntino che pulsa e "In modifica · Fine". */
+        .edit-pill { position: relative; display: inline-flex; align-items: center; cursor: pointer; user-select: none; white-space: nowrap; }
+        .edit-pill input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; pointer-events: none; }
+        .edit-pill-ui {
+            display: inline-flex; align-items: center; gap: 0.45rem;
+            height: 30px; padding: 0 0.95rem; border-radius: 999px;
+            background: #E9E9EB; color: #1d1d1f; font-size: 0.8rem; font-weight: 500;
+            transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;
+        }
+        .edit-pill:hover .edit-pill-ui { background: #DEDEE3; }
+        .edit-pill-ui i { font-size: 0.7rem; }
+        .edit-pill-dot { display: none; width: 7px; height: 7px; border-radius: 50%; background: #C2410C; animation: editPillPulse 1.6s ease-in-out infinite; }
+        .edit-pill-on { display: none; }
+        .edit-pill input:checked + .edit-pill-ui { background: #FFF1E6; color: #C2410C; box-shadow: inset 0 0 0 1px #FDBA74; }
+        .edit-pill:hover input:checked + .edit-pill-ui { background: #FFE6D2; }
+        .edit-pill input:checked + .edit-pill-ui .edit-pill-dot { display: inline-block; }
+        .edit-pill input:checked + .edit-pill-ui .edit-pill-off { display: none; }
+        .edit-pill input:checked + .edit-pill-ui .edit-pill-on { display: inline; }
+        .edit-pill input:focus-visible + .edit-pill-ui { outline: 2px solid var(--focus-ring, #2563EB); outline-offset: 2px; }
+        .edit-pill input:disabled + .edit-pill-ui { opacity: 0.5; cursor: not-allowed; }
+        @keyframes editPillPulse { 50% { opacity: 0.3; } }
+        @media (prefers-reduced-motion: reduce) { .edit-pill-dot { animation: none; } }
+
+        /* Interruttore a levetta (toggle) per i campi booleani */
         .toggle-switch {
             position: relative;
             display: inline-block;
@@ -4504,7 +4683,7 @@
                     <div class="flyout-resizer"></div>
                     <div class="settings-flyout-inner">
                         <div class="settings-flyout-title">Clienti</div>
-                        <input type="search" class="flyout-search" data-search-list="clientsList" placeholder="Cerca cliente…" aria-label="Cerca cliente" autocomplete="off">
+                        <input type="search" class="flyout-search" name="px-cerca-clienti" data-search-list="clientsList" placeholder="Cerca cliente…" aria-label="Cerca cliente" autocomplete="off" data-lpignore="true" data-1p-ignore readonly>
                         <ul id="clientsList">
                             <li style="color: var(--text-muted); border: none;">Caricamento…</li>
                         </ul>
@@ -4524,7 +4703,7 @@
                     <div class="flyout-resizer"></div>
                     <div class="settings-flyout-inner">
                         <div class="settings-flyout-title">Progetti clienti</div>
-                        <input type="search" class="flyout-search" data-search-list="projectClientsList" placeholder="Cerca cliente…" aria-label="Cerca cliente" autocomplete="off">
+                        <input type="search" class="flyout-search" name="px-cerca-progetti" data-search-list="projectClientsList" placeholder="Cerca cliente…" aria-label="Cerca cliente" autocomplete="off" data-lpignore="true" data-1p-ignore readonly>
                         <ul id="projectClientsList">
                             <li style="color: var(--text-muted); border: none;">Caricamento…</li>
                         </ul>
@@ -4558,8 +4737,7 @@
                     <div class="settings-flyout-inner">
                         <div class="settings-flyout-title">Impostazioni</div>
                         <div id="settingsListEditWrap" style="display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 0.8rem; margin-bottom: 0.5rem;">
-                            <span id="settingsListEditLabel">Abilita modifica</span>
-                            <label class="toggle-switch"><input type="checkbox" id="settingsListEditToggle" role="switch" aria-labelledby="settingsListEditLabel"><span class="toggle-slider"></span></label>
+                            <label class="edit-pill"><input type="checkbox" id="settingsListEditToggle" role="switch"><span class="edit-pill-ui"><span class="edit-pill-dot"></span><i class="fas fa-pen" aria-hidden="true"></i><span class="edit-pill-off">Abilita modifica</span><span class="edit-pill-on">In modifica · Fine</span></span></label>
                         </div>
                         <div id="settingsArgToolbar" style="display: none; gap: 6px; margin-bottom: 0.9rem;">
                             <button id="settingsAddArgBtn" type="button" title="Aggiungi argomento" style="flex: 0 0 auto; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; padding: 0; background: #1D4ED8; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.8rem;"><i class="fas fa-plus"></i></button>
@@ -4628,9 +4806,8 @@
                         <span class="toggle-switch"><input type="checkbox" id="showAllProjectFieldsToggle"><span class="toggle-slider"></span></span>
                     </label>
                     <button id="closeProjectBtn" type="button" style="display: none; flex: 0 0 auto; padding: 0.35rem 0.75rem; background: var(--warning-strong); color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">Chiudi progetto</button>
-                    <label id="clientEditToggleWrap" style="display: none; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; white-space: nowrap;">
-                        <span>Abilita modifica</span>
-                        <span class="toggle-switch"><input type="checkbox" id="clientEditToggle"><span class="toggle-slider"></span></span>
+                    <label id="clientEditToggleWrap" class="edit-pill" style="display: none;">
+                        <input type="checkbox" id="clientEditToggle" role="switch"><span class="edit-pill-ui"><span class="edit-pill-dot"></span><i class="fas fa-pen" aria-hidden="true"></i><span class="edit-pill-off">Abilita modifica</span><span class="edit-pill-on">In modifica · Fine</span></span>
                     </label>
                     <button id="detailCloseBtn" type="button" title="Chiudi" aria-label="Chiudi" style="display: none; flex: 0 0 auto; width: 26px; height: 26px; background: #e5e7eb; border: none; border-radius: 6px; font-size: 1rem; line-height: 1; cursor: pointer;">✕</button>
                 </div>
@@ -4706,9 +4883,8 @@
                     <div id="parentFormTitle" class="parent-form-title">Dettaglio</div>
                 </div>
                 <div style="display:flex; align-items:center; gap:0.75rem;">
-                    <label id="parentFormEditToggleWrap" style="display:inline-flex; align-items:center; gap:6px; font-size:0.8rem; cursor:pointer; white-space:nowrap;">
-                        <span>Abilita modifica</span>
-                        <span class="toggle-switch"><input type="checkbox" id="parentFormEditToggle"><span class="toggle-slider"></span></span>
+                    <label id="parentFormEditToggleWrap" class="edit-pill">
+                        <input type="checkbox" id="parentFormEditToggle" role="switch"><span class="edit-pill-ui"><span class="edit-pill-dot"></span><i class="fas fa-pen" aria-hidden="true"></i><span class="edit-pill-off">Abilita modifica</span><span class="edit-pill-on">In modifica · Fine</span></span>
                     </label>
                     <button id="parentFormClose" class="parent-form-icon-btn" type="button" title="Chiudi" aria-label="Chiudi">✕</button>
                 </div>
@@ -5215,6 +5391,28 @@
             if (!m) return u;                                   // relativo o percorso
             if (/^[a-z]$/i.test(m[1])) return u;               // percorso Windows (C:...)
             return /^(https?|mailto|tel|file)$/i.test(m[1]) ? u : '#';
+        }
+
+        // Destinazione di un collegamento (campi tipo 12), ricavata dall'indirizzo: dominio
+        // noto (SharePoint, OneDrive, Jira, Google Drive…), percorso di rete o, in mancanza,
+        // il nome del sito. Serve solo per la riga grigia sotto il nome e per l'icona.
+        function type12Destinazione(value) {
+            const u = String(value ?? '').trim();
+            if (/^(\\\\|file:)/i.test(u) || /^[a-z]:[\\/]/i.test(u)) return { nome: 'Cartella di rete', icona: 'fa-folder', colore: 'blu' };
+            let host = '', path = '';
+            try { const x = new URL(u); host = x.hostname.toLowerCase(); path = x.pathname.toLowerCase(); } catch (e) { return { nome: 'Collegamento', icona: 'fa-link', colore: 'grigio' }; }
+            const noti = [
+                [/-my\.sharepoint\.com$|(^|\.)onedrive\.live\.com$|(^|\.)1drv\.ms$/, 'OneDrive', 'fa-cloud', 'blu'],
+                [/\.sharepoint\.com$/, 'SharePoint', 'fa-folder', 'blu'],
+                [/(^|\.)teams\.microsoft\.com$/, 'Teams', 'fa-users', 'viola'],
+                [/\.atlassian\.net$/, path.startsWith('/wiki') ? 'Confluence' : 'Jira', path.startsWith('/wiki') ? 'fa-book' : 'fa-ticket', 'blu'],
+                [/(^|\.)(drive|docs)\.google\.com$/, 'Google Drive', 'fa-folder', 'verde'],
+                [/(^|\.)dropbox\.com$/, 'Dropbox', 'fa-box-open', 'blu'],
+                [/(^|\.)github\.com$/, 'GitHub', 'fa-code-branch', 'grigio']
+            ];
+            const hit = noti.find(([re]) => re.test(host));
+            if (hit) return { nome: hit[1], icona: hit[2], colore: hit[3] };
+            return { nome: host.replace(/^www\./, '') || 'Collegamento', icona: 'fa-link', colore: 'grigio' };
         }
 
         function escapeHtml(value) {
@@ -8293,6 +8491,31 @@
             document.querySelector('.main')?.classList.remove('minimized');
             syncSidebarWidthVar();
             initDock();
+            apriDaParametro();
+        }
+
+        // Dock delle altre pagine (js/dock.js): le voci che qui sono pannelli arrivano come
+        // dashboard.html?apri=<voce>. Si apre il pannello con lo stesso clic del dock e si
+        // toglie il parametro dall'indirizzo (un ricaricamento non lo riapre).
+        function apriDaParametro() {
+            const params = new URLSearchParams(location.search);
+            const voce = params.get('apri');
+            if (!voce) return;
+            const selettori = {
+                clienti: '.sidebar .nav-clients > a',
+                progetti: '.sidebar .nav-projects > a',
+                impostazioni: '.sidebar .nav-settings > a',
+                registra: '#navRecordLink',
+                'risultati-ai': '#navAiRisultatiLink'
+            };
+            params.delete('apri');
+            const resto = params.toString();
+            history.replaceState(null, '', location.pathname + (resto ? `?${resto}` : '') + location.hash);
+            const sel = selettori[voce];
+            if (!sel) return;
+            // Dopo il caricamento della pagina: gli elenchi e i gestori del dock sono pronti.
+            const apri = () => setTimeout(() => document.querySelector(sel)?.click(), 300);
+            if (document.readyState === 'complete') apri(); else window.addEventListener('load', apri, { once: true });
         }
 
         // === DOCK IN BASSO (stile macOS) ===
@@ -8884,7 +9107,29 @@
             }
         }
 
+        // Selettore delle Riunioni: solo i calendari collegati (Impostazioni › Calendar). Se il
+        // calendario scelto non è più collegato si passa al primo collegato e si ricaricano le
+        // riunioni. Nessun calendario collegato: restano tutte le voci, come prima.
+        function syncCalendarProviderOptions() {
+            const sel = document.getElementById('calendarProviderSelector');
+            if (!sel) return false;
+            const opts = [...sel.options];
+            const collegate = opts.filter(o => (calendarStatus[calendarBackendKey(o.value)] || {}).connected);
+            opts.forEach(o => {
+                const visibile = !collegate.length || collegate.includes(o);
+                o.hidden = !visibile;
+                o.disabled = !visibile;
+            });
+            if (!collegate.length || collegate.some(o => o.value === currentCalendarProvider)) return false;
+            currentCalendarProvider = collegate[0].value;
+            sel.value = currentCalendarProvider;
+            return true;
+        }
+
         function renderCalendarConnectionUi() {
+            // Al primo avvio (initMeetings) il caricamento delle riunioni segue; dopo, se il
+            // calendario cambia perché scollegato, le riunioni si ricaricano qui.
+            if (syncCalendarProviderOptions() && meetingsRefreshInterval) loadTodaysMeetings();
             const key = calendarBackendKey(currentCalendarProvider);
             const s = calendarStatus[key] || {};
             const account = document.getElementById('calendarAccount');
@@ -14746,6 +14991,28 @@
             const input = event.target.closest && event.target.closest('.flyout-search');
             if (input) applyFlyoutSearch(input.dataset.searchList);
         });
+        // Il browser (gestore password/riempimento automatico) scambiava la ricerca per il campo
+        // utente e ci scriveva l'email salvata: l'elenco restava filtrato su "Nessun cliente
+        // trovato". La casella resta in sola lettura finché l'utente non ci clicca (il browser
+        // non riempie i campi readonly) e si svuota a ogni apertura di Clienti/Progetti clienti.
+        (function proteggiRicercaFlyout() {
+            const campi = () => document.querySelectorAll('.flyout-search');
+            campi().forEach(input => {
+                input.readOnly = true;
+                const sblocca = () => { input.readOnly = false; };
+                input.addEventListener('pointerdown', sblocca);
+                input.addEventListener('focus', sblocca);
+                input.addEventListener('blur', () => { input.readOnly = true; });
+            });
+            document.addEventListener('click', event => {
+                const voce = event.target.closest && event.target.closest('.sidebar .nav-clients > a, .sidebar .nav-projects > a');
+                if (!voce) return;
+                const input = voce.parentElement.querySelector('.flyout-search');
+                if (!input || !input.value) return;
+                input.value = '';
+                applyFlyoutSearch(input.dataset.searchList);
+            }, true);
+        })();
 
         // Carica nel flyout Clienti le Ragioni Sociali (query su clients, filtrata per tenant+utente del login).
         async function loadClientsNames() {
@@ -15226,7 +15493,7 @@
             if (m) return m;
             document.body.insertAdjacentHTML('beforeend', `<div class="ckp-overlay" id="ckpOverlay" role="dialog" aria-modal="true" aria-labelledby="ckpTitle">
                 <div class="ckp-box">
-                    <div class="ckp-head"><img src="checklist.png" alt=""><h3 id="ckpTitle">Checklist<small id="ckpSub"></small></h3><label class="ckp-mod" title="Aggiungi, rinomina, sposta ed elimina fasi e attività custom del progetto"><input type="checkbox" id="ckpModifica"><span class="ckp-mod-sw"></span>Abilita modifica</label><button type="button" class="ckp-close" id="ckpClose" aria-label="Chiudi">&times;</button></div>
+                    <div class="ckp-head"><img src="checklist.png" alt=""><h3 id="ckpTitle">Checklist<small id="ckpSub"></small></h3><label class="edit-pill" title="Aggiungi, rinomina, sposta ed elimina fasi e attività custom del progetto"><input type="checkbox" id="ckpModifica" role="switch"><span class="edit-pill-ui"><span class="edit-pill-dot"></span><i class="fas fa-pen" aria-hidden="true"></i><span class="edit-pill-off">Abilita modifica</span><span class="edit-pill-on">In modifica · Fine</span></span></label><button type="button" class="ckp-close" id="ckpClose" aria-label="Chiudi">&times;</button></div>
                     <div class="ckp-body" id="ckpBody"></div>
                     <div class="ckp-foot"><span class="ckp-foot-testo" id="ckpFoot"></span><button type="button" class="ckp-agg" id="ckpNuovaFase" style="display:none" title="Aggiunge una nuova voce custom in fondo alla checklist"><i class="fas fa-plus"></i> Aggiungi attività</button><button type="button" class="ckp-del" id="ckpElimina" title="Cancella tutta la checklist di questo progetto"><i class="fas fa-trash"></i> Elimina</button></div>
                 </div></div>`);
@@ -17031,6 +17298,12 @@
             renderLinkedList(desc).then(() => positionParentFormZoom(originRect));
         }
 
+        // Pulsante a pillola "Abilita modifica" (checkbox nascosta): grigio a riposo,
+        // arancione chiaro con "In modifica · Fine" quando è attivo. Stile in .edit-pill.
+        function editPillHtml(id, checked) {
+            return `<label class="edit-pill"><input type="checkbox" id="${id}" role="switch" ${checked ? 'checked' : ''}><span class="edit-pill-ui"><span class="edit-pill-dot"></span><i class="fas fa-pen" aria-hidden="true"></i><span class="edit-pill-off">Abilita modifica</span><span class="edit-pill-on">In modifica · Fine</span></span></label>`;
+        }
+
         // tipo_valore = 15: apre nel form centrale l'elenco derivato dalla query
         // (tabella.colonna + condizione VariabDB), filtrato per tenant/utente.
         function openFieldOptionsList(fieldId, label, triggerElement) {
@@ -17072,7 +17345,7 @@
                 const canUpdate = editEnabled && (mode === 3) && (data.updateEnabled === true);
                 const canShare = editEnabled && (mode === 5);
                 const toggleHtml = desc.central
-                    ? `<div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:.5rem; font-size:.8rem;"><label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><span>Abilita modifica</span><span class="toggle-switch"><input type="checkbox" id="fieldOptionsEditToggle" ${fieldOptionsEditMode ? 'checked' : ''}><span class="toggle-slider"></span></span></label></div>`
+                    ? `<div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:.5rem; font-size:.8rem;">${editPillHtml('fieldOptionsEditToggle', fieldOptionsEditMode)}</div>`
                     : '';
                 if (items.length === 0) {
                     listEl.innerHTML = toggleHtml + '<div style="color: var(--text-muted);">Nessun dato</div>';
@@ -17456,7 +17729,7 @@
                 desc.readOnly = !!data.readOnly;
                 const edit = linkedListEditMode && !desc.readOnly; // "Abilita modifica" attivo anche in organigramma
 
-                const toggleHtml = desc.readOnly ? '' : `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;"><label style="display: flex; align-items: center; gap: 6px; cursor: pointer;"><span>Abilita modifica</span><span class="toggle-switch"><input type="checkbox" id="linkedListEditToggle" ${edit ? 'checked' : ''}><span class="toggle-slider"></span></span></label></div>`;
+                const toggleHtml = desc.readOnly ? '' : `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;">${editPillHtml('linkedListEditToggle', edit)}</div>`;
                 const addHtml = edit ? `<div style="display:flex; gap:0.4rem; margin-bottom:0.75rem;">
                     <button id="linkedAddBtn" type="button" title="Inserisci nuovo record" style="width:30px; height:30px; background:#1D4ED8; color:white; border:none; border-radius:6px; cursor:pointer;"><i class="fas fa-plus"></i></button>
                     <button id="linkedEditHintBtn" type="button" title="Modifica record" style="width:30px; height:30px; background:#6B7280; color:white; border:none; border-radius:6px; cursor:pointer;"><i class="fas fa-pen"></i></button>
@@ -17749,7 +18022,7 @@
                 // Riga di un cliente in sola lettura (condiviso in lettura o del team): solo consultazione.
                 const rowReadOnly = res.headers.get('X-Team-Read') === '1';
                 const edit = linkedRowEditMode && !rowReadOnly;
-                const toggleHtml = rowReadOnly ? '' : `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;"><span>Abilita modifica</span><label class="toggle-switch"><input type="checkbox" id="linkedEditToggle" ${edit ? 'checked' : ''}><span class="toggle-slider"></span></label></div>`;
+                const toggleHtml = rowReadOnly ? '' : `<div style="display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;">${editPillHtml('linkedEditToggle', edit)}</div>`;
                 // Campi: FK -> menu a discesa (valore corrente selezionato); generate/sola lettura -> disabilitati.
                 let fieldsHtml = '';
                 for (const [k, v] of entries) {
@@ -18554,6 +18827,54 @@
             });
         }
 
+        // Campi stile "Contatti" (CSS .detail-stacked) in visualizzazione e in modifica.
+        // In sola lettura (.detail-readonly) i campi vuoti mostrano "Non indicato" e passando
+        // sopra un campo compare l'icona per copiarne il valore; in modifica il segnaposto
+        // originale torna com'era.
+        function applyDetailReadonlyLook(listEl, readonly, stacked) {
+            listEl.classList.toggle('detail-stacked', stacked);
+            listEl.classList.toggle('detail-readonly', readonly);
+            listEl.querySelectorAll('.settings-detail-row input[type="text"][data-setting-id], .settings-detail-row input[type="number"][data-setting-id], .settings-detail-row input[type="date"][data-setting-id]').forEach(inp => {
+                if (readonly) {
+                    if (inp.dataset.phOrig === undefined) inp.dataset.phOrig = inp.getAttribute('placeholder') || '';
+                    inp.placeholder = 'Non indicato';
+                } else if (inp.dataset.phOrig !== undefined) {
+                    if (inp.dataset.phOrig) inp.placeholder = inp.dataset.phOrig; else inp.removeAttribute('placeholder');
+                    delete inp.dataset.phOrig;
+                }
+            });
+            listEl.querySelectorAll('.settings-detail-row select[data-setting-id]').forEach(sel => {
+                sel.classList.toggle('ro-empty', readonly && !sel.value);
+            });
+            if (listEl.dataset.copyReady) return;
+            listEl.dataset.copyReady = '1';
+            const valoreCampo = row => {
+                const el = row && row.querySelector('input[type="text"][data-setting-id], input[type="number"][data-setting-id], input[type="date"][data-setting-id], select[data-setting-id]');
+                if (!el) return '';
+                if (el.tagName === 'SELECT') return el.value ? (el.selectedOptions[0]?.textContent || el.value).trim() : '';
+                return String(el.value || '').trim();
+            };
+            listEl.addEventListener('mouseover', event => {
+                if (!listEl.classList.contains('detail-readonly')) return;
+                const row = event.target.closest('.settings-detail-row');
+                if (!row || row.classList.contains('type11-grid-row') || row.querySelector(':scope > .field-copy')) return;
+                if (!valoreCampo(row)) return;
+                row.insertAdjacentHTML('beforeend', '<button type="button" class="field-copy" title="Copia valore" aria-label="Copia valore"><i class="far fa-copy" aria-hidden="true"></i></button>');
+            });
+            listEl.addEventListener('click', event => {
+                const btn = event.target.closest('.field-copy');
+                if (!btn) return;
+                event.stopPropagation();
+                const testo = valoreCampo(btn.closest('.settings-detail-row'));
+                if (!testo) return;
+                navigator.clipboard?.writeText(testo).then(() => {
+                    btn.classList.add('copiato');
+                    btn.innerHTML = '<i class="fas fa-check" aria-hidden="true"></i>';
+                    setTimeout(() => { btn.classList.remove('copiato'); btn.innerHTML = '<i class="far fa-copy" aria-hidden="true"></i>'; }, 1200);
+                }).catch(() => showNotification('Copia non riuscita', 'info'));
+            });
+        }
+
         function applyDetailMode() {
             let mode = clientDetailMode;
             const listEl = document.getElementById('settingsDetailList');
@@ -18576,6 +18897,7 @@
                 listEl.querySelectorAll('[data-setting-id]').forEach(inp => { inp.disabled = disabled || inp.dataset.readonly === '1'; });
                 // Visualizzazione: i campi sì/no attivi mostrano il flag verde al posto dell'interruttore.
                 listEl.classList.toggle('detail-view', disabled);
+                applyDetailReadonlyLook(listEl, mode === 'view', mode === 'view' || mode === 'edit');
             }
 
             // Toggle "Abilita modifica"
@@ -19748,6 +20070,35 @@
                 filterRow.querySelectorAll('th').forEach(th => { th.style.top = top + 'px'; });
             };
 
+            // Pulsante "Filtri": mostra/nasconde la riga dei filtri. Resta aperta se ci sono
+            // filtri attivi o se l'utente l'aveva aperta prima del ricaricamento della griglia.
+            const filterToggle = widget.querySelector('.type11-filter-toggle');
+            const activeFilterCount = () => Object.entries(state.filters).filter(([col, val]) =>
+                columns.includes(col) && String(val || '').trim()).length;
+            const showFilters = on => {
+                state.showFilters = on;
+                widget.classList.toggle('type11-filters-on', on);
+                if (filterToggle) {
+                    filterToggle.classList.toggle('on', on);
+                    filterToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+                }
+                if (on) requestAnimationFrame(stickFilters);
+            };
+            const updateFilterBadge = () => {
+                if (!filterToggle) return;
+                const n = activeFilterCount();
+                filterToggle.innerHTML = '<i class="fas fa-filter" aria-hidden="true"></i>Filtri'
+                    + (n ? `<span class="type11-filter-badge">${n}</span>` : '');
+            };
+            if (filterToggle) {
+                filterToggle.addEventListener('click', event => {
+                    event.stopPropagation();
+                    showFilters(!state.showFilters);
+                    if (state.showFilters) widget.querySelector('.type11-filter-val')?.focus();
+                });
+            }
+            showFilters(!!state.showFilters || activeFilterCount() > 0);
+
             const apply = () => {
                 const rows = [...tbody.querySelectorAll('tr[data-type11-index]')];
                 const active = Object.entries(state.filters).filter(([col, val]) =>
@@ -19772,6 +20123,7 @@
                 });
                 ordered.forEach(row => tbody.appendChild(row));
                 if (!sort && typeof window.applyType11GridGrouping === 'function') window.applyType11GridGrouping();
+                updateFilterBadge();
 
                 // Freccia giù = crescente, freccia su = decrescente; sbiadita = colonna non ordinata.
                 table.querySelectorAll('.type11-sort-btn').forEach(btn => {
@@ -20399,14 +20751,17 @@
         // di righe (senza tabella): vedi loadType11Grid.
         const TYPE11_VISTA_ELENCO = new Set(['proj_commessa']);
 
-        // Interruttore "Attive | Tutte" a destra nel titolo delle griglie tipo 11 con colonna
-        // scadenza. All'apertura è su "Attive": solo le righe non chiuse (scadenza >= oggi);
+        // Interruttore "Attive | Tutte" delle griglie tipo 11 con colonna scadenza: accanto al
+        // pulsante "Filtri" sopra la tabella (nel titolo della card per la vista elenco). All'apertura è su "Attive": solo le righe non chiuse (scadenza >= oggi);
         // "Tutte" mostra anche le righe chiuse. La scelta vale finché la griglia resta aperta
         // (widget.dataset.showAll).
         function type11SetupExpiryToggle(widget, hasExpiry) {
             const bar = widget.closest('.type11-grid-row')?.querySelector('.type11-bar');
-            if (!bar) return;
-            let seg = bar.querySelector('.type11-expiry-toggle');
+            const tools = widget.querySelector('.type11-grid-tools');
+            const host = tools || bar;
+            if (!host) return;
+            if (tools) bar?.querySelector('.type11-expiry-toggle')?.remove();
+            let seg = host.querySelector('.type11-expiry-toggle');
             if (!hasExpiry) { seg?.remove(); return; }
             if (!seg) {
                 seg = document.createElement('span');
@@ -20423,11 +20778,12 @@
                     if (!b || b.dataset.all === attuale) return;
                     widget.dataset.showAll = b.dataset.all;
                     const row = widget.closest('.type11-grid-row');
-                    if (row?.classList.contains('collapsed')) bar.click(); // riapre la griglia
+                    if (row?.classList.contains('collapsed')) bar?.click(); // riapre la griglia
                     loadType11Grid(widget);
                 });
                 seg.addEventListener('mousedown', event => event.stopPropagation()); // niente trascinamento
-                bar.insertBefore(seg, bar.querySelector('.type11-arrow'));
+                if (tools) tools.insertBefore(seg, tools.querySelector('.type11-filter-toggle'));
+                else bar.insertBefore(seg, bar.querySelector('.type11-arrow'));
             }
             const all = widget.dataset.showAll === '1';
             seg.querySelectorAll('button').forEach(b => {
@@ -20484,7 +20840,6 @@
                     return;
                 }
                 const payload = await res.json();
-                type11SetupExpiryToggle(widget, payload.hasExpiry === true);
                 let visibleColumns = Array.isArray(payload.columns) && payload.columns.length
                     ? payload.columns
                     : columns;
@@ -20536,6 +20891,7 @@
                     widget.innerHTML = righe.length
                         ? `<div class="type11-vista-elenco">${righe.join('')}</div>`
                         : '<div class="t11-el-empty">Nessuna commessa</div>';
+                    type11SetupExpiryToggle(widget, payload.hasExpiry === true);
                     type11GridSnapshots.delete(fieldId);
                     return;
                 }
@@ -20648,7 +21004,10 @@
                 const topFilterHtml = topFilter
                     ? `<div class="type11-top-filter"><label>${escapeHtml(topFilter.label)} <select aria-label="Filtra per ${escapeHtml(topFilter.label)}">${(() => { const v = (widget._type11View && widget._type11View.exact && widget._type11View.exact[topFilter.column]) || type11TopFilterChoice.get(`${fieldId}|${topFilter.column}`) || ''; return v ? `<option value="${escapeHtml(v)}" selected>${escapeHtml(v)}</option>` : '<option value="">Caricamento…</option>'; })()}</select></label></div>`
                     : '';
-                widget.innerHTML = `${topFilterHtml}${toolbar}<div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}${multiColumn ? ' type11-multicol' : ''}" style="width:${tableWidth}px;${multiColumn ? ' max-width:100%;' : ''}">${colgroup}<thead><tr class="type11-head-row">${head}</tr><tr class="type11-filter-row">${filterHead}</tr></thead><tbody>${body}${emptyRow}</tbody></table></div><div class="type11-grid-count"></div>`;
+                // Una sola riga sopra la tabella: pulsanti di modifica, Attive | Tutte e Filtri.
+                const filterToggle = '<button type="button" class="type11-filter-toggle" aria-pressed="false"><i class="fas fa-filter" aria-hidden="true"></i>Filtri</button>';
+                widget.innerHTML = `${topFilterHtml}<div class="type11-grid-tools">${toolbar}${filterToggle}</div><div class="type11-grid-scroll"><table class="type11-grid-table${editing ? ' type11-editable' : ''}${multiColumn ? ' type11-multicol' : ''}" style="width:${tableWidth}px;${multiColumn ? ' max-width:100%;' : ''}">${colgroup}<thead><tr class="type11-head-row">${head}</tr><tr class="type11-filter-row">${filterHead}</tr></thead><tbody>${body}${emptyRow}</tbody></table></div><div class="type11-grid-count"></div>`;
+                type11SetupExpiryToggle(widget, payload.hasExpiry === true);
                 // Scelta del filtro sopra la griglia ripristinata PRIMA di disegnare le righe.
                 if (topFilter) {
                     const view = widget._type11View || (widget._type11View = { filters: {}, sort: null, exact: {} });
@@ -21360,16 +21719,21 @@
                     input = `<span>${escapeHtml(selected.join(', '))}</span>`;
                 }
             } else if (tipo === 12) {
-                // Link costruito dal backend tramite VariabDB. In vista è un pulsante giallo;
-                // in modifica non si modifica il percorso: l'unica modifica ammessa è la
-                // rinomina del campo tramite la funzione Rinomina già presente nel flyout.
+                // Link costruito dal backend tramite VariabDB. Si mostra come una "riga file"
+                // (icona, nome, destinazione ricavata dall'indirizzo, freccia ↗); in modifica non
+                // si modifica il percorso: l'unica modifica ammessa è la rinomina del campo
+                // tramite la funzione Rinomina già presente nel flyout.
                 const url = String(row.resolved_value == null ? '' : row.resolved_value).trim();
                 const label = campoLabelHtml(row.campo);
                 if (!url) {
                     input = `<span style="color: var(--text-muted);" title="VariabDB non risolto">—</span>`;
                 } else {
                     const href = escapeHtml(urlSicuro(url));
-                    input = `<a class="type12-link-button" href="${href}" target="_blank" rel="noopener noreferrer" title="Apri collegamento"><i class="fas fa-folder-open"></i><span>${label}</span></a>`;
+                    const dest = type12Destinazione(url);
+                    input = `<a class="type12-link-button" href="${href}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(url)}">`
+                        + `<span class="t12-ico ${dest.colore}" aria-hidden="true"><i class="fas ${dest.icona}"></i></span>`
+                        + `<span class="t12-txt"><span class="t12-nome">${label}</span><span class="t12-dest">${escapeHtml(dest.nome)} · apri in una nuova scheda</span></span>`
+                        + `<i class="fas fa-arrow-up-right-from-square t12-go" aria-hidden="true"></i></a>`;
                 }
             } else if (tipo === 15) {
                 // Riga cliccabile: apre il form centrale con l'elenco derivato dalla query

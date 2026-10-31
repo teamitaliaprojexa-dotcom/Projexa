@@ -120,7 +120,7 @@
         <span class="stato" id="stato">Preparo il dossier…</span>
         <button class="btn btn-primary" id="stampaBtn" type="button" disabled><i class="fas fa-print"></i> Stampa / Salva PDF</button>
         <!-- Pagina aperta nella stessa scheda (una sola pagina di Projexa): si torna alla precedente; se è aperta dentro la dashboard (registrazione in corso) usa la navigazione dell'area interna. -->
-        <button class="btn btn-secondary" type="button" data-click="tornaIndietro"><i class="fas fa-arrow-left"></i> Indietro</button>
+        <button class="px-back" type="button" data-click="tornaIndietro" title="Torna alla pagina precedente"><i class="fas fa-arrow-left"></i> Indietro</button>
     </div>
     <div class="avvisi" id="avvisi"></div>
     <div class="pagina" id="pagina"><div class="caricamento"><i class="fas fa-spinner fa-spin"></i> Raccolgo i dati del cliente e l'AI scrive la sintesi: può volerci qualche istante…</div></div>
@@ -566,5 +566,7 @@
         carica();
     </script>
     <script src="js/chatbot.js"></script>
+    <!-- Dock di navigazione condivisa (stessa della dashboard): vedi js/dock.js -->
+    <script src="js/dock.js" defer></script>
 </body>
 </html>

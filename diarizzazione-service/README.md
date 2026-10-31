@@ -28,9 +28,11 @@ Per spegnerla basta togliere `DIARIZZAZIONE_URL` dal `.env` e ricaricare il back
 
 ## Taratura
 
-`DIARIZZAZIONE_SOGLIA` (backend, predefinita 0.65) è la somiglianza minima tra due voci per
-considerarle la stessa persona. Se in una riunione la stessa persona viene divisa in più
-partecipanti, abbassarla (es. 0.6); se persone diverse vengono unite, alzarla (es. 0.7).
+`DIARIZZAZIONE_SOGLIA` (backend, predefinita 0.85) è la somiglianza minima tra due voci per
+considerarle la stessa persona. Con l'audio di una riunione Teams la stessa voce sta in media
+a 0,88-0,92 e voci diverse a 0,72-0,81 (riunione del 2026-10-30). Se in una riunione la stessa
+persona viene divisa in più partecipanti, abbassarla (es. 0.82); se persone diverse vengono
+unite, alzarla (es. 0.87).
 
 ## Prova in locale
 

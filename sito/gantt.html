@@ -402,7 +402,7 @@
     <!-- Barra in alto: titolo e stato del salvataggio, viste (Elenco/Timeline, scala), icone,
          menu «⋯» (copia, cancella tutto, salvataggio automatico) e un solo pulsante colorato. -->
     <div class="topbar">
-        <button class="icon-btn" id="backBtn" title="Torna al progetto di partenza"><i class="fas fa-arrow-left"></i></button>
+        <button class="px-back" id="backBtn" title="Torna al progetto di partenza"><i class="fas fa-arrow-left"></i> Progetto</button>
         <div class="tb-title">
             <span class="title" id="pageTitle">Gantt</span>
             <span class="tb-sub"><span id="projSub"></span><span class="save-state" id="saveState"></span></span>
@@ -2328,5 +2328,7 @@
         loadData();
     </script>
     <script src="js/chatbot.js"></script>
+    <!-- Dock di navigazione condivisa (stessa della dashboard): vedi js/dock.js -->
+    <script src="js/dock.js" defer></script>
 </body>
 </html>
