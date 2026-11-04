@@ -1,8 +1,9 @@
-// === INTEGRAZIONE AI (ChatGPT, Claude, Gemini, Mistral) ===
+// === INTEGRAZIONE AI (ChatGPT, Claude, Gemini, Mistral, Groq, OpenRouter, Cloudflare) ===
 //
 // Stesso schema delle integrazioni Calendar/Jira: i dati di autenticazione stanno sul
 // database "Projexa-Auth", tabella integr_tok_auth (vedi config/integrations.js),
-// con tipo_integrazione = 'AI' e provider_integrazione = 'ChatGPT' | 'Claude' | 'Gemini' | 'Mistral'.
+// con tipo_integrazione = 'AI' e provider_integrazione = 'ChatGPT' | 'Claude' | 'Gemini' | 'Mistral'
+// | 'Groq' | 'OpenRouter' | 'Cloudflare'.
 //
 // I fornitori non offrono un login OAuth per usare l'abbonamento personale (ChatGPT Plus,
 // Claude Pro, Gemini Advanced) da app esterne: il collegamento avviene con la chiave API
@@ -42,7 +43,18 @@ export const PROVIDERS = {
   gemini: { provider: 'Gemini', label: 'Gemini', prefix: 'gemini', model: process.env.GEMINI_MODEL || 'gemini-flash-lite-latest' },
   // Mistral AI (Francia): alias "-latest" aggiornato dal fornitore, sovrascrivibile da MISTRAL_MODEL.
   // "small" è incluso anche nel piano gratuito "Experiment" (il "large" no: errore tier_not_allowed).
-  mistral: { provider: 'Mistral', label: 'Mistral', prefix: 'mistral', model: process.env.MISTRAL_MODEL || 'mistral-small-latest' }
+  mistral: { provider: 'Mistral', label: 'Mistral', prefix: 'mistral', model: process.env.MISTRAL_MODEL || 'mistral-small-latest' },
+  // 2026-11-04: Groq, OpenRouter e Cloudflare Workers AI, tutte con API "chat completions"
+  // compatibile OpenAI (vedi chatEndpoint). Nessuna ha la modalità Batch: si esegue Immediato.
+  // Groq (USA): modelli open (Llama, GPT-OSS, Qwen...) molto veloci, piano gratuito con limiti.
+  groq: { provider: 'Groq', label: 'Groq', prefix: 'groq', model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile' },
+  // OpenRouter (USA): un'unica chiave per i modelli di molti fornitori; "openrouter/auto"
+  // sceglie il modello adatto alla richiesta (anche a pagamento). I modelli gratuiti hanno
+  // il suffisso ":free" e si scelgono dal menu «Versione».
+  openrouter: { provider: 'OpenRouter', label: 'OpenRouter', prefix: 'openrouter', model: process.env.OPENROUTER_MODEL || 'openrouter/auto' },
+  // Cloudflare Workers AI: la "chiave" è ACCOUNT_ID:API_TOKEN (il token da solo non basta,
+  // l'indirizzo dell'API contiene l'ID dell'account).
+  cloudflare: { provider: 'Cloudflare', label: 'Cloudflare', prefix: 'cloudflare', model: process.env.CLOUDFLARE_MODEL || '@cf/meta/llama-3.3-70b-instruct-fp8-fast' }
 };
 
 // Versione scelta dall'utente in Impostazioni › AI (elemento "<prefix>_model" della sua
@@ -87,8 +99,10 @@ export async function readJson(response, label) {
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
   if (!response.ok) {
-    // OpenAI/Gemini: { error: { message } }; Mistral: { message, type } al primo livello.
-    const detail = (data.error && (data.error.message || data.error.status)) || data.message || text.slice(0, 300);
+    // OpenAI/Gemini: { error: { message } }; Mistral: { message, type } al primo livello;
+    // Cloudflare: { errors: [{ message }] }.
+    const cfErr = Array.isArray(data.errors) && data.errors[0] && data.errors[0].message;
+    const detail = (data.error && (data.error.message || data.error.status)) || data.message || cfErr || text.slice(0, 300);
     // Modello non incluso nel piano dell'account (es. Mistral gratuito con modello "large").
     if (data.type === 'tier_not_allowed' || (data.error && data.error.type === 'tier_not_allowed')) {
       throw httpError(403, `${label}: il modello richiesto non è incluso nel tuo piano (${detail}). Usa un modello più piccolo o passa a un piano a pagamento.`);
@@ -165,8 +179,35 @@ async function verifyClaudeKey(apiKey) {
   }
 }
 
-// --- ChatGPT (OpenAI) e Mistral: stesso formato "chat completions" ---
-const CHAT_COMPLETIONS_BASE = { chatgpt: 'https://api.openai.com/v1', mistral: 'https://api.mistral.ai/v1' };
+// --- ChatGPT (OpenAI), Mistral, Groq, OpenRouter, Cloudflare: stesso formato "chat completions" ---
+const CHAT_COMPLETIONS_BASE = {
+  chatgpt: 'https://api.openai.com/v1',
+  mistral: 'https://api.mistral.ai/v1',
+  groq: 'https://api.groq.com/openai/v1',
+  openrouter: 'https://openrouter.ai/api/v1'
+};
+// Fornitori che non leggono i PDF nella chat: se ne manda il testo estratto.
+const PDF_COME_TESTO = new Set(['mistral', 'groq', 'cloudflare']);
+
+// Cloudflare: "ACCOUNT_ID:API_TOKEN" (l'ID account è di 32 caratteri esadecimali).
+function cloudflareCredenziali(apiKey) {
+  const m = /^([0-9a-f]{32}):(.+)$/i.exec(String(apiKey || '').trim());
+  if (!m) throw httpError(400, 'Cloudflare: inserisci ACCOUNT_ID:API_TOKEN (l\'ID account è nella dashboard Cloudflare, pagina Workers AI)');
+  return { accountId: m[1], token: m[2] };
+}
+
+// Indirizzo base e intestazioni per il fornitore "chat completions".
+function chatEndpoint(key, apiKey) {
+  if (key === 'cloudflare') {
+    const { accountId, token } = cloudflareCredenziali(apiKey);
+    const account = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai`;
+    return { base: `${account}/v1`, account, headers: { Authorization: `Bearer ${token}` } };
+  }
+  const headers = { Authorization: `Bearer ${apiKey}` };
+  // OpenRouter: intestazioni facoltative con cui l'app compare nelle sue statistiche.
+  if (key === 'openrouter') Object.assign(headers, { 'X-Title': 'Projexa' });
+  return { base: CHAT_COMPLETIONS_BASE[key], headers };
+}
 
 // opzioni.json (es. Kick-off): risposta solo JSON e, dove il modello lo consente, temperatura
 // bassa, così rilanciando la stessa richiesta il risultato cambia poco. Senza opzioni le
@@ -175,10 +216,11 @@ const TEMPERATURA_JSON = 0.2;
 
 async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}, model = PROVIDERS[key].model) {
   const cfg = PROVIDERS[key];
-  // Mistral non legge i PDF nella chat: se ne estrae il testo (i PDF scansionati, senza
-  // testo, restano illeggibili). ChatGPT li riceve come file.
+  const ep = chatEndpoint(key, apiKey);
+  // Mistral, Groq e Cloudflare non leggono i PDF nella chat: se ne estrae il testo (i PDF
+  // scansionati, senza testo, restano illeggibili). ChatGPT e OpenRouter li ricevono come file.
   let list = atts;
-  if (key === 'mistral' && atts.some((a) => a.kind === 'pdf')) {
+  if (PDF_COME_TESTO.has(key) && atts.some((a) => a.kind === 'pdf')) {
     list = [];
     for (const a of atts) {
       if (a.kind !== 'pdf') { list.push(a); continue; }
@@ -198,15 +240,17 @@ async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}, 
         })
       ]
     : text;
-  const send = async () => readJson(await callApi(`${CHAT_COMPLETIONS_BASE[key]}/chat/completions`, {
+  const send = async () => readJson(await callApi(`${ep.base}/chat/completions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: { ...ep.headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
       messages: [{ role: 'user', content }],
       // ChatGPT (gpt-5) accetta solo la temperatura predefinita: lì solo il formato JSON.
-      ...(opzioni.json ? { response_format: { type: 'json_object' } } : {}),
-      ...(opzioni.json && key === 'mistral' ? { temperature: TEMPERATURA_JSON } : {})
+      // OpenRouter e Cloudflare: il formato JSON non è accettato da tutti i modelli, basta
+      // il prompt (che chiede già di rispondere solo in JSON) con la temperatura bassa.
+      ...(opzioni.json && !['openrouter', 'cloudflare'].includes(key) ? { response_format: { type: 'json_object' } } : {}),
+      ...(opzioni.json && key !== 'chatgpt' ? { temperature: TEMPERATURA_JSON } : {})
     })
   }, cfg.label), cfg.label);
   let data;
@@ -225,10 +269,13 @@ async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}, 
 }
 
 async function verifyChatCompletionsKey(key, apiKey) {
-  await readJson(await callApi(`${CHAT_COMPLETIONS_BASE[key]}/models`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-    timeoutMs: 20000
-  }, PROVIDERS[key].label), PROVIDERS[key].label);
+  const ep = chatEndpoint(key, apiKey);
+  // OpenRouter: l'elenco dei modelli è pubblico (risponde anche senza chiave), la chiave si
+  // verifica con /key. Cloudflare: con la ricerca dei modelli dell'account.
+  const url = key === 'openrouter' ? `${ep.base}/key`
+    : key === 'cloudflare' ? `${ep.account}/models/search?per_page=1`
+    : `${ep.base}/models`;
+  await readJson(await callApi(url, { headers: ep.headers, timeoutMs: 20000 }, PROVIDERS[key].label), PROVIDERS[key].label);
 }
 
 // --- Gemini (Google AI Studio, Generative Language API) ---
@@ -291,6 +338,9 @@ async function verifyGeminiKey(apiKey) {
 const ASK = {
   chatgpt: (k, p, a, o, m) => askChatCompletions('chatgpt', k, p, a || [], o || {}, m),
   mistral: (k, p, a, o, m) => askChatCompletions('mistral', k, p, a || [], o || {}, m),
+  groq: (k, p, a, o, m) => askChatCompletions('groq', k, p, a || [], o || {}, m),
+  openrouter: (k, p, a, o, m) => askChatCompletions('openrouter', k, p, a || [], o || {}, m),
+  cloudflare: (k, p, a, o, m) => askChatCompletions('cloudflare', k, p, a || [], o || {}, m),
   claude: (k, p, a, o, m) => askClaude(k, p, a || [], m),
   // Col modello predefinito si passa null: askGemini gestisce così il modello ritirato.
   gemini: (k, p, a, o, m) => askGemini(k, p, m && m !== PROVIDERS.gemini.model ? m : null, a || [], o || {})
@@ -302,11 +352,30 @@ const ASK = {
 // embedding...) o che non funzionano con l'API usata da Projexa. Restituisce [{ id, nome }].
 async function listChatCompletionsModels(key, apiKey) {
   const label = PROVIDERS[key].label;
-  const data = await readJson(await callApi(`${CHAT_COMPLETIONS_BASE[key]}/models`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-    timeoutMs: 20000
-  }, label), label);
+  const ep = chatEndpoint(key, apiKey);
+  if (key === 'cloudflare') {
+    // Solo i modelli di generazione testo (@cf/...).
+    const q = new URLSearchParams({ task: 'Text Generation', per_page: '200' });
+    const data = await readJson(await callApi(`${ep.account}/models/search?${q}`, { headers: ep.headers, timeoutMs: 20000 }, label), label);
+    return (data.result || []).filter((r) => r.name).map((r) => ({ id: r.name, nome: r.name }));
+  }
+  const data = await readJson(await callApi(`${ep.base}/models`, { headers: ep.headers, timeoutMs: 20000 }, label), label);
   const rows = data.data || [];
+  if (key === 'groq') {
+    // Esclusi trascrizione (Whisper), sintesi vocale e modelli di sola moderazione (guard).
+    return rows
+      .filter((r) => r.active !== false && !/(whisper|tts|playai|orpheus|guard)/i.test(r.id))
+      .map((r) => ({ id: r.id, nome: r.id }));
+  }
+  if (key === 'openrouter') {
+    // Solo modelli che rispondono con testo; i gratuiti hanno il suffisso ":free" (o prezzo 0).
+    const gratis = (r) => /:free$/i.test(r.id) || (r.pricing && Number(r.pricing.prompt) === 0 && Number(r.pricing.completion) === 0);
+    const out = rows
+      .filter((r) => !r.architecture || !r.architecture.output_modalities || r.architecture.output_modalities.includes('text'))
+      .map((r) => ({ id: r.id, nome: `${gratis(r) ? '[GRATIS] ' : ''}${r.name && r.name !== r.id ? `${r.name} (${r.id})` : r.id}` }));
+    if (!out.some((m) => m.id === PROVIDERS.openrouter.model)) out.push({ id: PROVIDERS.openrouter.model, nome: 'Auto: OpenRouter sceglie il modello (openrouter/auto)' });
+    return out;
+  }
   if (key === 'chatgpt') {
     // Esclusi anche le versioni datate (gpt-5-2025-08-07: uguali all'alias) e i modelli
     // "-pro" / "deep-research" / "codex", disponibili solo con un'altra API di OpenAI.
@@ -352,6 +421,9 @@ async function listGeminiModels(apiKey) {
 const LIST_MODELS = {
   chatgpt: (k) => listChatCompletionsModels('chatgpt', k),
   mistral: (k) => listChatCompletionsModels('mistral', k),
+  groq: (k) => listChatCompletionsModels('groq', k),
+  openrouter: (k) => listChatCompletionsModels('openrouter', k),
+  cloudflare: (k) => listChatCompletionsModels('cloudflare', k),
   claude: listClaudeModels,
   gemini: listGeminiModels
 };
@@ -526,6 +598,11 @@ export async function inviaBatchAi(userId, providerName, prompt, opzioni = {}) {
   const apiKey = el[`${cfg.prefix}_api_key`];
   if (!apiKey) throw httpError(428, `${cfg.label} non collegato: attivalo da Impostazioni › AI`);
   const model = modelloUtente(cfg, el);
+  // Groq, OpenRouter, Cloudflare: nessuna Batch API, chi chiama esegue in modalità Immediata.
+  if (!BATCH[key]) {
+    throw Object.assign(new Error(`${cfg.label} non ha la modalità Batch: eseguito in modalità Immediata`),
+      { status: 409, code: 'BATCH_NON_DISPONIBILE', dettaglio: 'batch non supportato' });
+  }
   // Anonimizzazione: la tabella dei segnaposto si salva (cifrata) fino alla risposta del batch.
   const { prompt: daInviare, anon } = await anonimizzaPrompt(userId, prompt, { etichetta: `${cfg.label} Batch` });
   try {
@@ -568,6 +645,7 @@ export async function statoBatchAi(userId, providerName, batchId) {
   const el = await getIntegration(userId, cfg.provider);
   const apiKey = el[`${cfg.prefix}_api_key`];
   if (!apiKey) return { stato: 'fallito', errore: `${cfg.label} scollegato: chiave API non più disponibile` };
+  if (!BATCH[key]) return { stato: 'fallito', errore: `${cfg.label} non ha la modalità Batch`, label: cfg.label };
   const esito = await BATCH[key].stato(apiKey, batchId);
   // Risposta con i segnaposto dell'anonimizzazione: si rimettono i valori veri.
   if (esito.stato === 'pronto' && esito.text) esito.text = await ripristinaBatch(key, batchId, userId, esito.text, { json: pareJson(esito.text) });
@@ -594,6 +672,9 @@ async function modelliDisponibili(key, apiKey) {
 const VERIFY = {
   chatgpt: (k) => verifyChatCompletionsKey('chatgpt', k),
   mistral: (k) => verifyChatCompletionsKey('mistral', k),
+  groq: (k) => verifyChatCompletionsKey('groq', k),
+  openrouter: (k) => verifyChatCompletionsKey('openrouter', k),
+  cloudflare: (k) => verifyChatCompletionsKey('cloudflare', k),
   claude: verifyClaudeKey,
   gemini: verifyGeminiKey
 };
@@ -609,8 +690,8 @@ router.get('/status', requireAuth, async (req, res) => {
     const flags = await db.query(
       `SELECT LOWER(BTRIM(campo)) AS campo, valore1 FROM settings
         WHERE tenant_id = $1 AND user_id = $2
-          AND LOWER(BTRIM(campo)) IN ('chatgpt', 'claude', 'gemini', 'mistral', '(*) chatgpt', '(*) claude', '(*) gemini', '(*) mistral')`,
-      [req.user.tenant_id, req.user.user_id]
+          AND LOWER(BTRIM(campo)) = ANY($3::text[])`,
+      [req.user.tenant_id, req.user.user_id, Object.keys(PROVIDERS).flatMap((k) => [k, `(*) ${k}`])]
     );
     const enabled = {};
     for (const r of flags.rows) {
@@ -1033,7 +1114,7 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
     const key = req.params.provider;
     const { result, model } = await withAiRetry(
       (m) => ASK[key](apiKey, prompt, atts, {}, m),
-      { label: cfg.label, model: modelloUtente(cfg, el), fallbacks: key === 'gemini' ? geminiFallbackModels() : [], profile: 'interactive' }
+      { label: cfg.label, model: modelloUtente(cfg, el), fallbacks: await modelliRipiego(key), profile: 'interactive' }
     );
     res.json({
       provider: key, model, text: anon ? anon.ripristina(result.text) : result.text, files: result.files || [], truncated: !!result.truncated,
@@ -1052,7 +1133,7 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
 // TESTO GENERATO DA UN'AI SCELTA (es. recap delle riunioni, vedi routes/calendar.js)
 // ==========================================
 //
-// providerName: valore scritto in settings (es. "Gemini", "ChatGPT", "Claude", "Mistral").
+// providerName: valore scritto in settings (es. "Gemini", "ChatGPT", "Claude", "Mistral", "Groq").
 // Usa la chiave API collegata dall'utente in Impostazioni › AI. Restituisce { text, label, model }.
 // opzioni: { json: true } per le risposte strutturate (vedi TEMPERATURA_JSON).
 export async function askAiProvider(userId, providerName, prompt, opzioni = {}) {
@@ -1071,7 +1152,7 @@ export async function askAiProvider(userId, providerName, prompt, opzioni = {}) 
   const { prompt: daInviare, anon } = await anonimizzaPrompt(userId, prompt, { etichetta: cfg.label });
   const { result, model } = await withAiRetry(
     (m) => ASK[key](apiKey, daInviare, [], opzioni, m),
-    { label: cfg.label, model: modelloUtente(cfg, el), fallbacks: key === 'gemini' ? geminiFallbackModels() : [], profile: 'background' }
+    { label: cfg.label, model: modelloUtente(cfg, el), fallbacks: await modelliRipiego(key), profile: 'background' }
   );
   const text = anon ? anon.ripristina(result.text, { json: !!opzioni.json || pareJson(result.text) }) : result.text;
   return { text, label: cfg.label, model };
@@ -1085,7 +1166,8 @@ export async function askAiProvider(userId, providerName, prompt, opzioni = {}) 
 // Sovraccarico (500/502/503/529, "high demand"): si riprova lo stesso modello con attese
 // crescenti. Se resta sovraccarico, o in caso di limite di richieste (429, es. quota del
 // piano gratuito: inutile riprovare lo stesso modello), si passa ai modelli alternativi
-// (per Gemini GEMINI_FALLBACK_MODEL, separati da virgola), ognuno con qualche tentativo.
+// (per Gemini GEMINI_FALLBACK_MODEL, separati da virgola; per OpenRouter i modelli gratuiti,
+// vedi openrouterFallbackModels), ognuno con qualche tentativo.
 // Profili: 'background' (recap: fino a ~2 minuti sul modello principale, nessuno aspetta a
 // schermo) e 'interactive' (chat e chatbot: l'utente aspetta, attese brevi).
 const RETRY_PROFILES = {
@@ -1093,12 +1175,47 @@ const RETRY_PROFILES = {
   interactive: { waits: [3000, 6000], fallbackAttempts: 2, fallbackWait: 4000 }
 };
 
-export const isQuotaError = (e) => e.status === 429 || e.upstreamStatus === 429;
+// 402: credito esaurito (OpenRouter "insufficient credits"): come la quota, inutile riprovare
+// lo stesso modello, si passa ai modelli di ripiego (per OpenRouter quelli gratuiti).
+export const isQuotaError = (e) => e.status === 429 || e.upstreamStatus === 429 || e.upstreamStatus === 402;
 export const isOverloadError = (e) => [500, 502, 503, 529].includes(e.upstreamStatus) || /overloaded|high demand|sovraccaric/i.test(e.message || '');
 
 export function geminiFallbackModels() {
   return String(process.env.GEMINI_FALLBACK_MODEL || 'gemini-flash-latest,gemini-3.6-flash,gemini-flash-lite-latest')
     .split(',').map((m) => m.trim()).filter(Boolean);
+}
+
+// OpenRouter (2026-11-04): con credito esaurito, limite raggiunto o modello sovraccarico si
+// ripiega sui modelli gratuiti (":free"). OPENROUTER_FALLBACK_MODEL (separati da virgola) li
+// fissa; altrimenti si leggono dall'elenco pubblico di OpenRouter (6 ore di cache): i
+// OPENROUTER_FALLBACK_NUM (predefinito 3) con il contesto più ampio, così i nomi non
+// invecchiano quando OpenRouter cambia i modelli gratuiti.
+let openrouterGratisCache = { at: 0, ids: [] };
+export async function openrouterFallbackModels() {
+  const fissi = String(process.env.OPENROUTER_FALLBACK_MODEL || '').split(',').map((m) => m.trim()).filter(Boolean);
+  if (fissi.length) return fissi;
+  if (openrouterGratisCache.ids.length && Date.now() - openrouterGratisCache.at < 6 * 3600000) return openrouterGratisCache.ids;
+  try {
+    const data = await readJson(await callApi(`${CHAT_COMPLETIONS_BASE.openrouter}/models`, { timeoutMs: 15000 }, 'OpenRouter'), 'OpenRouter');
+    const num = Math.max(1, Number(process.env.OPENROUTER_FALLBACK_NUM) || 3);
+    const ids = (data.data || [])
+      .filter((r) => /:free$/i.test(r.id || ''))
+      .filter((r) => !r.architecture || !r.architecture.output_modalities || r.architecture.output_modalities.includes('text'))
+      .sort((a, b) => (Number(b.context_length) || 0) - (Number(a.context_length) || 0))
+      .slice(0, num)
+      .map((r) => r.id);
+    if (ids.length) openrouterGratisCache = { at: Date.now(), ids };
+  } catch (e) {
+    console.warn('[AI] Elenco modelli gratuiti OpenRouter non disponibile:', e.message);
+  }
+  return openrouterGratisCache.ids;
+}
+
+// Modelli di ripiego per withAiRetry, per fornitore.
+async function modelliRipiego(key) {
+  if (key === 'gemini') return geminiFallbackModels();
+  if (key === 'openrouter') return openrouterFallbackModels();
+  return [];
 }
 
 // run(model): esegue la richiesta con il modello indicato. Restituisce { result, model }.

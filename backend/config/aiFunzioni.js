@@ -103,7 +103,7 @@ export async function risolviAi(user, operazione, scelte = {}) {
   if (!nome) throw errore(400, `Scegli l'AI in Impostazioni › AI › «${f.ai[0]}»`);
   if (exProjexa(nome)) {
     const collegate = await aiCollegate(user.user_id);
-    if (!collegate.length) throw errore(400, `«${op.etichetta}» richiede un'AI con chiave API (ChatGPT, Claude, Gemini o Mistral): collegala in Impostazioni › AI`);
+    if (!collegate.length) throw errore(400, `«${op.etichetta}» richiede un'AI con chiave API (ChatGPT, Claude, Gemini, Mistral, Groq, OpenRouter o Cloudflare): collegala in Impostazioni › AI`);
     nome = collegate[0].nome;
   }
   if (!PROVIDERS[nome.toLowerCase()]) throw errore(400, `L'AI «${nome}» non è utilizzabile per «${op.etichetta}»: scegline un'altra in Impostazioni › AI`);

@@ -27,6 +27,7 @@ const SECRET_ELEMENTS = new Set([
   'outlook_ics_url',
   // Chiavi API delle integrazioni AI (routes/ai.js)
   'chatgpt_api_key', 'claude_api_key', 'gemini_api_key', 'mistral_api_key',
+  'groq_api_key', 'openrouter_api_key', 'cloudflare_api_key',
   // Chiavi admin (sola lettura dei costi) per il saldo stimato in Impostazioni › AI
   'chatgpt_admin_key', 'claude_admin_key'
 ]);

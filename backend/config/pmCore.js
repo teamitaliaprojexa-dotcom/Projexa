@@ -870,7 +870,7 @@ export async function chiediAi(user, build, dati, { json = false, ai: scelta = n
   if (scelta && !scelta.nome && scelta.errore) throw errore(428, scelta.errore);
   const ai = scelta && scelta.nome ? { nome: scelta.nome, label: scelta.label } : await aiPerPm(user);
   if (!ai) {
-    throw errore(428, 'Serve un\'AI con chiave API (ChatGPT, Claude, Gemini o Mistral): sceglila in Impostazioni › AI › «AI generazione e-mail recap» (o «AI Slide Kick-off») e collega la sua chiave');
+    throw errore(428, 'Serve un\'AI con chiave API (ChatGPT, Claude, Gemini, Mistral, Groq, OpenRouter o Cloudflare): sceglila in Impostazioni › AI › «AI generazione e-mail recap» (o «AI Slide Kick-off») e collega la sua chiave');
   }
   const r = await askAiProvider(user.user_id, ai.nome, build(dati), json ? { json: true } : {});
   return { testo: String(r.text || ''), label: r.label || ai.label, model: r.model || '' };

@@ -29,7 +29,7 @@ import { controllaIssueDoppie } from './issueDoppie.js';
 
 // Nome nuovo dal 2026-10-26 (Supporto/CreaDB/uniforma_nomi_e_stati.sql); il vecchio vale ancora.
 const CAMPI = ['associazione automatica to-do e raid', 'associazione autom. todolist e raid'];
-const AI = { chatgpt: 'chatgpt', gpt: 'chatgpt', claude: 'claude', gemini: 'gemini', mistral: 'mistral' };
+const AI = { chatgpt: 'chatgpt', gpt: 'chatgpt', claude: 'claude', gemini: 'gemini', mistral: 'mistral', groq: 'groq', openrouter: 'openrouter', cloudflare: 'cloudflare' };
 const CONFIDENZA_MIN = 80;     // sotto, l'abbinamento non si scrive
 const MAX_VOCI = 60;           // voci per richiesta (un progetto)
 const ORA_ULTIMO_INVIO = 9;    // dopo le 9 si invia solo a chi oggi non ha ancora avuto un invio (vedi invia)
@@ -335,7 +335,7 @@ async function invia(report, esiti) {
     const ai = AI[nome];
     if (!ai) {
       await notifica(u, 'ai', 'Associazione To-Do e RAID non eseguita',
-        `«${u.ai}» non è utilizzabile per l'associazione automatica: scegli ChatGPT, Claude, Gemini (a pagamento), Mistral in Impostazioni › AI › «Associazione automatica To-Do e RAID».`);
+        `«${u.ai}» non è utilizzabile per l'associazione automatica: scegli ChatGPT, Claude, Gemini (a pagamento), Mistral, Groq, OpenRouter o Cloudflare in Impostazioni › AI › «Associazione automatica To-Do e RAID».`);
       report.saltati++;
       continue;
     }
