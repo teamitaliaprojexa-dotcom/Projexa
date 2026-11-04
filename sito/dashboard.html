@@ -3839,6 +3839,7 @@
         .meeting-status-trascrizione { width: 5.8rem; }
         .meeting-status-recap { width: 3.6rem; }
         .meeting-queued { color: #D97706; font-size: 0.8rem; margin-left: 0.2rem; animation: recPulse 1.6s infinite; }
+        .meeting-queued.meeting-queued-attesa { color: #9CA3AF; }
         .meeting-status-genrecap { width: 5rem; }
         .meeting-genrecap-btn {
             width: 4.8rem;
@@ -9948,7 +9949,30 @@
         }
 
         const serverRecapIcon = '<i class="fas fa-hourglass-half meeting-queued" title="Recap in preparazione sul server, anche a pagina chiusa"></i>';
-        const batchRecapIcon = '<i class="fas fa-hourglass-half meeting-queued" title="Recap in modalità Batch: arriva entro 24 ore (di solito pochi minuti), anche a pagina chiusa"></i>';
+        // Clessidra del recap Batch: passandoci sopra si vedono AI, fase presso il fornitore,
+        // invio, ultimo controllo ed eventuale errore temporaneo (info = recap_batch_info dello
+        // stato delle riunioni). Grigia finché il batch è in verifica/in coda, arancione quando
+        // l'AI ci sta lavorando.
+        const BATCH_FASI = { in_verifica: 'in verifica', in_coda: 'in coda', in_elaborazione: 'in elaborazione', in_chiusura: 'in chiusura' };
+        function batchOra(v) {
+            const d = v ? new Date(v) : null;
+            if (!d || isNaN(d)) return '';
+            const ora = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+            return d.toDateString() === new Date().toDateString() ? ora : `${d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })} ${ora}`;
+        }
+        function batchRecapIcon(info) {
+            const righe = ['Recap in modalità Batch: arriva entro 24 ore (di solito pochi minuti), anche a pagina chiusa'];
+            if (info) {
+                const ai = [info.provider, info.model].filter(Boolean).join(' · ');
+                const fase = BATCH_FASI[info.fase] || (info.controllato_il ? 'in attesa' : 'inviato, in attesa del primo controllo');
+                righe.push(`${ai}${ai ? ' · ' : ''}${fase}${info.fornitore ? ` (fornitore: ${info.fornitore})` : ''}`);
+                const tempi = [info.inviato_il ? `inviato alle ${batchOra(info.inviato_il)}` : '', info.controllato_il ? `ultimo controllo ${batchOra(info.controllato_il)}` : ''].filter(Boolean);
+                if (tempi.length) righe.push(tempi.join(' · '));
+                if (info.errore) righe.push(`Ultimo controllo non riuscito, si riprova: ${String(info.errore).slice(0, 200)}`);
+            }
+            const attesa = !info || !info.fase || info.fase === 'in_coda' || info.fase === 'in_verifica';
+            return `<i class="fas fa-hourglass-half meeting-queued${attesa ? ' meeting-queued-attesa' : ''}" title="${escapeHtml(righe.join('\n'))}"></i>`;
+        }
         // «AI Automatizza (solo Batch)» ha preso in carico il recap: pulsante arancione, non cliccabile.
         const autoRecapButton = '<span class="meeting-genrecap-auto" role="button" aria-disabled="true" title="È in carico l\'automatismo con AI per la generazione del recap (AI Automatizza)"><i class="fas fa-robot"></i> Recap</span>';
         // «Chiedi sempre» in Impostazioni › AI (AI generazione e-mail recap / Esecuzione Recap):
@@ -10286,7 +10310,7 @@
                     if (!manualRecapRunning.has(ev.id)) {
                         const canRecap = m && m.has_trascrizione && !m.has_recap && !m.pending && !recording;
                         setStatusCell(row, 'meeting-status-genrecap', m && m.recap_auto && !m.has_recap ? autoRecapButton
-                            : (m && m.recap_running && !m.has_recap ? (m.recap_batch ? batchRecapIcon : serverRecapIcon) : (canRecap ? manualRecapButton(ev.id) : '')));
+                            : (m && m.recap_running && !m.has_recap ? (m.recap_batch ? batchRecapIcon(m.recap_batch_info) : serverRecapIcon) : (canRecap ? manualRecapButton(ev.id) : '')));
                     }
                     const queued = m && m.pending > 0
                         ? `<i class="fas fa-hourglass-half meeting-queued" title="Trascrizione in corso sul server: ${m.pending} blocc${m.pending === 1 ? 'o' : 'hi'} in coda"></i>`

@@ -93,7 +93,41 @@ async function prenota(id) {
   return r.rowCount > 0;
 }
 
-const SELECT_RIGHE = `SELECT id::text AS id, tenant_id, user_id, id_calendar, provider, model, batch_id, origine,
+// Fase comunicata dal fornitore (in coda, in elaborazione...) e chi esegue il batch (OpenRouter),
+// mostrate dalla clessidra della dashboard. Senza le colonne di recap_batch_fase.sql si azzera
+// solo l'errore, come prima.
+async function salvaFase(id, esito) {
+  try {
+    await db.query(`UPDATE rec_meeting_batch SET errore = NULL, fase = $2, fornitore = COALESCE($3, fornitore) WHERE id = $1`,
+      [id, esito.fase || null, esito.fornitore || null]);
+  } catch (e) {
+    if (e.code !== '42703') throw e;
+    await db.query(`UPDATE rec_meeting_batch SET errore = NULL WHERE id = $1`, [id]);
+  }
+}
+
+// Dettagli dei recap Batch in attesa, per la clessidra della dashboard: Map id_calendar ->
+// { provider, model, fornitore, fase, inviato_il, controllato_il, errore } (la richiesta più recente).
+export async function dettagliRecapBatch(user, ids) {
+  if (!ids.length) return new Map();
+  try {
+    const r = await db.query(
+      `SELECT DISTINCT ON (id_calendar) id_calendar, provider, model, inviato_il, controllato_il, errore,
+              to_jsonb(b) ->> 'fase' AS fase, to_jsonb(b) ->> 'fornitore' AS fornitore
+         FROM rec_meeting_batch b
+        WHERE tenant_id = $1 AND user_id = $2 AND stato = 'in_corso' AND id_calendar = ANY($3::text[])
+          AND ${TIPO} = 'recap'
+        ORDER BY id_calendar, inviato_il DESC`,
+      [user.tenant_id, user.user_id, ids]
+    );
+    return new Map(r.rows.map(({ id_calendar, ...d }) => [id_calendar, d]));
+  } catch (e) {
+    if (e.code === '42P01') return new Map();
+    throw e;
+  }
+}
+
+const SELECT_RIGHE =`SELECT id::text AS id, tenant_id, user_id, id_calendar, provider, model, batch_id, origine,
        ${TIPO} AS tipo, inviato_il < now() - ($1 || ' hours')::interval AS scaduto
   FROM rec_meeting_batch b`;
 
@@ -133,7 +167,7 @@ async function controllaRiga(riga, report) {
     const esito = await statoBatchAi(riga.user_id, riga.provider, riga.batch_id);
     if (esito.stato === 'in_corso') {
       if (riga.scaduto) return immediato(`nessuna risposta da ${riga.provider} entro ${SCADENZA_ORE} ore`);
-      await db.query(`UPDATE rec_meeting_batch SET errore = NULL WHERE id = $1`, [riga.id]);
+      await salvaFase(riga.id, esito);
       return 'in_attesa';
     }
     if (esito.stato === 'pronto' && interno) {

@@ -23,7 +23,7 @@ import {
   copiaTrascrizioneCondivisa, recapAiImpostata, recapEsecuzione, isChiediSempre, annullaRecapBatchInAttesa, glossarioRiunione
 } from '../jobs/meetingTranscription.js';
 import { proponiCorrezioni } from '../config/proposteCorrezioni.js';
-import { inviaRecapBatch, controllaRecapBatchUtente } from '../jobs/recapBatch.js';
+import { inviaRecapBatch, controllaRecapBatchUtente, dettagliRecapBatch } from '../jobs/recapBatch.js';
 import { parseRecapActions, parseDueDate, ownerVariants } from '../jobs/recapTasks.js';
 import { proposteDaRecap, salvaDaRecap } from '../config/azioniCliente.js';
 import { encryptRowForWrite } from '../config/crypto.js';
@@ -1289,6 +1289,8 @@ router.post('/meetings/managed/status', requireAuth, async (req, res) => {
     const pending = await pendingChunks(req.user, ids);
     const recapRunning = await recapInProgress(req.user, ids);
     const recapBatch = await recapBatchInCorso(req.user, ids);
+    // Dettagli per la clessidra del Batch: AI, fase presso il fornitore, invio e ultimo controllo.
+    const batchInfo = recapBatch.size ? await dettagliRecapBatch(req.user, [...recapBatch]) : new Map();
     // Recap preso in carico da «AI Automatizza»: pulsante Recap arancione e non cliccabile.
     const recapAuto = await recapAutomaticoInCorso(req.user, ids);
     // Recap Batch in attesa: si controllano subito presso l'AI (in background); il recap
@@ -1296,7 +1298,7 @@ router.post('/meetings/managed/status', requireAuth, async (req, res) => {
     if (recapBatch.size) controllaRecapBatchUtente(req.user);
     const out = {};
     for (const [id, row] of map) {
-      out[id] = { ...row, pending: pending.get(id) || 0, recap_running: recapRunning.has(id), recap_batch: recapBatch.has(id), recap_auto: recapAuto.has(id) };
+      out[id] = { ...row, pending: pending.get(id) || 0, recap_running: recapRunning.has(id), recap_batch: recapBatch.has(id), recap_batch_info: batchInfo.get(id) || null, recap_auto: recapAuto.has(id) };
     }
     res.json({ meetings: out });
   } catch (error) {

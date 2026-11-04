@@ -472,8 +472,11 @@ const LIST_MODELS = {
 // --- Modalità BATCH (recap con «Esecuzione Recap» = Batch, vedi jobs/recapBatch.js) ---
 // Una richiesta sola per batch: il fornitore la elabora entro 24 ore (di solito pochi
 // minuti) a metà prezzo. invia -> id del batch; stato -> { stato: 'in_corso' | 'pronto' |
-// 'fallito', text, errore }.
+// 'fallito', text, errore }. Con 'in_corso' anche fase: 'in_verifica' | 'in_coda' |
+// 'in_elaborazione' | 'in_chiusura' (quelle che il fornitore distingue), mostrata dalla dashboard.
 const BATCH_ID_RICHIESTA = 'recap';
+// Fasi di OpenAI e OpenRouter (stessi nomi).
+const FASE_OPENAI = { validating: 'in_verifica', in_progress: 'in_elaborazione', finalizing: 'in_chiusura', cancelling: 'in_chiusura' };
 
 // Prima riga JSONL di un file di risultati (OpenAI / Mistral).
 async function primaRigaJsonl(base, fileId, apiKey, label) {
@@ -523,7 +526,7 @@ const BATCH = {
       const b = await readJson(await callApi(`${base}/batches/${encodeURIComponent(batchId)}`, {
         headers: { Authorization: `Bearer ${apiKey}` }, timeoutMs: 30000
       }, 'ChatGPT'), 'ChatGPT');
-      if (['validating', 'in_progress', 'finalizing', 'cancelling'].includes(b.status)) return { stato: 'in_corso' };
+      if (['validating', 'in_progress', 'finalizing', 'cancelling'].includes(b.status)) return { stato: 'in_corso', fase: FASE_OPENAI[b.status] };
       if (b.status === 'completed') {
         const fileId = b.output_file_id || b.error_file_id;
         if (fileId) return esitoRigaChat(await primaRigaJsonl(base, fileId, apiKey, 'ChatGPT'), 'ChatGPT');
@@ -551,7 +554,9 @@ const BATCH = {
       const b = await readJson(await callApi(`${base}/batch/jobs/${encodeURIComponent(batchId)}`, {
         headers: { Authorization: `Bearer ${apiKey}` }, timeoutMs: 30000
       }, 'Mistral'), 'Mistral');
-      if (['QUEUED', 'RUNNING', 'CANCELLATION_REQUESTED'].includes(b.status)) return { stato: 'in_corso' };
+      if (['QUEUED', 'RUNNING', 'CANCELLATION_REQUESTED'].includes(b.status)) {
+        return { stato: 'in_corso', fase: b.status === 'QUEUED' ? 'in_coda' : b.status === 'RUNNING' ? 'in_elaborazione' : 'in_chiusura' };
+      }
       if (b.status === 'SUCCESS') {
         const fileId = b.output_file || b.error_file;
         if (fileId) return esitoRigaChat(await primaRigaJsonl(base, fileId, apiKey, 'Mistral'), 'Mistral');
@@ -578,7 +583,8 @@ const BATCH = {
     async stato(apiKey, batchId) {
       const client = new Anthropic({ apiKey, timeout: 60000, maxRetries: 1 });
       const b = await client.messages.batches.retrieve(batchId);
-      if (b.processing_status !== 'ended') return { stato: 'in_corso' };
+      // Claude non separa la coda dall'elaborazione: "in_progress" vale per entrambe.
+      if (b.processing_status !== 'ended') return { stato: 'in_corso', fase: b.processing_status === 'canceling' ? 'in_chiusura' : 'in_elaborazione' };
       for await (const r of await client.messages.batches.results(batchId)) {
         const res = r.result || {};
         if (res.type === 'succeeded') {
@@ -613,7 +619,9 @@ const BATCH = {
         headers: { 'x-goog-api-key': apiKey }, timeoutMs: 30000
       }, 'Gemini'), 'Gemini');
       const stato = String((b.metadata && b.metadata.state) || b.state || '');
-      if (!b.done && !/SUCCEEDED|FAILED|CANCELLED|EXPIRED/.test(stato)) return { stato: 'in_corso' };
+      if (!b.done && !/SUCCEEDED|FAILED|CANCELLED|EXPIRED/.test(stato)) {
+        return { stato: 'in_corso', fase: /PENDING/.test(stato) ? 'in_coda' : /RUNNING/.test(stato) ? 'in_elaborazione' : null };
+      }
       // Le risposte possono stare in response o in metadata.output (a seconda della versione).
       const contenitore = (b.response && b.response.inlinedResponses) || (b.metadata && b.metadata.output && b.metadata.output.inlinedResponses) || {};
       const risposte = Array.isArray(contenitore) ? contenitore : (contenitore.inlinedResponses || []);
@@ -660,7 +668,10 @@ const BATCH = {
         headers: ep.headers, timeoutMs: 30000
       }, 'OpenRouter'), 'OpenRouter');
       // "completed" senza risultati ancora pubblicati: si aspetta il prossimo controllo.
-      if (['validating', 'in_progress', 'finalizing'].includes(b.status) || (b.status === 'completed' && !b.results)) return { stato: 'in_corso' };
+      // b.provider: chi esegue davvero il batch (es. "Anthropic"), mostrato sotto la clessidra.
+      if (['validating', 'in_progress', 'finalizing'].includes(b.status) || (b.status === 'completed' && !b.results)) {
+        return { stato: 'in_corso', fase: FASE_OPENAI[b.status] || 'in_chiusura', fornitore: b.provider || null };
+      }
       if (b.status === 'completed') {
         const r = (b.results || []).find((x) => x.custom_id === BATCH_ID_RICHIESTA) || b.results[0];
         if (r && r.response && !r.error) return esitoRigaChat(r, 'OpenRouter');
