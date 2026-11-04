@@ -2,7 +2,7 @@
 // RECAP IN MODALITÀ BATCH (Impostazioni › AI › «Esecuzione Recap» = "Batch (50% off)")
 // ----------------------------------------------------------------------------
 // Il recap non si chiede all'AI "subito" ma con la sua Batch API (ChatGPT, Claude, Gemini,
-// Mistral): costa la metà e la risposta arriva entro 24 ore (di solito pochi minuti).
+// Mistral, OpenRouter): costa la metà e la risposta arriva entro 24 ore (di solito pochi minuti).
 //   inviaRecapBatch -> prepara il prompt come il recap normale, invia il batch e salva la
 //                      richiesta in rec_meeting_batch (stato 'in_corso');
 //   eseguiRecapBatch -> job "recap_batch" dello schedulatore (ogni 5 minuti, solo sulla VM):

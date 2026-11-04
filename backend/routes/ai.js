@@ -45,7 +45,8 @@ export const PROVIDERS = {
   // "small" è incluso anche nel piano gratuito "Experiment" (il "large" no: errore tier_not_allowed).
   mistral: { provider: 'Mistral', label: 'Mistral', prefix: 'mistral', model: process.env.MISTRAL_MODEL || 'mistral-small-latest' },
   // 2026-11-04: Groq, OpenRouter e Cloudflare Workers AI, tutte con API "chat completions"
-  // compatibile OpenAI (vedi chatEndpoint). Nessuna ha la modalità Batch: si esegue Immediato.
+  // compatibile OpenAI (vedi chatEndpoint). Solo OpenRouter ha la modalità Batch (vedi BATCH):
+  // con Groq e Cloudflare si esegue Immediato.
   // Groq (USA): modelli open (Llama, GPT-OSS, Qwen...) molto veloci, piano gratuito con limiti.
   groq: { provider: 'Groq', label: 'Groq', prefix: 'groq', model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile' },
   // OpenRouter (USA): un'unica chiave per i modelli di molti fornitori; "openrouter/auto"
@@ -60,6 +61,9 @@ export const PROVIDERS = {
 // Versione scelta dall'utente in Impostazioni › AI (elemento "<prefix>_model" della sua
 // integrazione), altrimenti quella predefinita qui sopra.
 const modelloUtente = (cfg, el) => el[`${cfg.prefix}_model`] || cfg.model;
+// OpenRouter elenca anche le varianti "<modello>:batch" (prezzo Batch): la Batch API vuole il
+// modello base e sceglie lei la variante, /chat/completions le rifiuta (404).
+const modelloBaseOpenrouter = (m) => String(m || '').replace(/:batch$/i, '');
 
 function requireProvider(req, res, next) {
   const cfg = PROVIDERS[req.params.provider];
@@ -112,6 +116,14 @@ export async function readJson(response, label) {
       throw httpError(400, `Chiave API ${label} non valida o senza permessi${detail ? ` (${String(detail).slice(0, 200)})` : ''}`);
     }
     if (response.status === 429) throw httpError(429, `${label}: limite di utilizzo o credito esaurito (${detail})`);
+    // Modello ritirato o non disponibile con la chiave (es. Groq 404 "The model ... does not
+    // exist"): con il 502 il messaggio finiva nascosto come «Errore interno del server».
+    if (response.status === 404 && /model/i.test(detail)) {
+      const err = httpError(400, `${label}: il modello richiesto non è disponibile (${detail}). Scegline un altro in Impostazioni › AI › ${label} › Versione.`);
+      err.upstreamStatus = 404;
+      err.code = 'MODELLO_NON_DISPONIBILE';
+      throw err;
+    }
     const err = httpError(502, `${label} ${response.status}: ${detail}`);
     err.upstreamStatus = response.status; // es. 503 = fornitore sovraccarico (temporaneo)
     throw err;
@@ -240,11 +252,12 @@ async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}, 
         })
       ]
     : text;
-  const send = async () => readJson(await callApi(`${ep.base}/chat/completions`, {
+  const send = async (m = model) => readJson(await callApi(`${ep.base}/chat/completions`, {
     method: 'POST',
     headers: { ...ep.headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model,
+      // OpenRouter: la variante ":batch" funziona solo con la Batch API (in Immediato si usa il modello base).
+      model: key === 'openrouter' ? modelloBaseOpenrouter(m) : m,
       messages: [{ role: 'user', content }],
       // ChatGPT (gpt-5) accetta solo la temperatura predefinita: lì solo il formato JSON.
       // OpenRouter e Cloudflare: il formato JSON non è accettato da tutti i modelli, basta
@@ -261,16 +274,39 @@ async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}, 
   try {
     data = await send();
   } catch (error) {
-    // 429 "rate limit": i piani gratuiti (es. Mistral) ammettono pochissime richieste al
-    // secondo; dopo una breve pausa si riprova una volta. Se è finito il credito/quota
-    // mensile anche il secondo tentativo fallisce e l'errore arriva all'utente.
-    if (error.status !== 429) throw error;
-    await new Promise((r) => setTimeout(r, 2000));
-    data = await send();
+    if (error.code === 'MODELLO_NON_DISPONIBILE' && MODELLI_PREFERITI[key]) {
+      // Modello ritirato dal fornitore (es. Groq): come per Gemini si passa a un modello
+      // dell'elenco attuale della chiave; se era il predefinito, anche per le richieste
+      // successive (va aggiornato <FORNITORE>_MODEL).
+      const nuovo = await modelloSostituto(key, apiKey, model);
+      if (!nuovo) throw error;
+      console.warn(`[AI] Modello ${cfg.label} ${model} non disponibile: uso ${nuovo}${model === cfg.model ? ` (aggiornare ${key.toUpperCase()}_MODEL)` : ' (cambiare la Versione in Impostazioni › AI)'}`);
+      if (model === cfg.model) cfg.model = nuovo;
+      data = await send(nuovo);
+    } else {
+      // 429 "rate limit": i piani gratuiti (es. Mistral) ammettono pochissime richieste al
+      // secondo; dopo una breve pausa si riprova una volta. Se è finito il credito/quota
+      // mensile anche il secondo tentativo fallisce e l'errore arriva all'utente.
+      if (error.status !== 429) throw error;
+      await new Promise((r) => setTimeout(r, 2000));
+      data = await send();
+    }
   }
   const choice = (data.choices || [])[0] || {};
   // OpenRouter (Auto o ripiego) risponde con il modello che ha davvero generato il testo.
   return { text: String((choice.message && choice.message.content) || '').trim(), truncated: choice.finish_reason === 'length', model: data.model || null };
+}
+
+// Sostituto di un modello ritirato: il primo dell'elenco della chiave che corrisponde alle
+// preferenze, in ordine (solo i fornitori elencati: per gli altri l'errore arriva all'utente).
+const MODELLI_PREFERITI = { groq: [/gpt-oss-120b/i, /llama.*70b/i, /qwen/i, /llama/i, /gpt-oss/i] };
+async function modelloSostituto(key, apiKey, model) {
+  const ids = (await listChatCompletionsModels(key, apiKey).catch(() => [])).map((m) => m.id).filter((id) => id !== model);
+  for (const re of MODELLI_PREFERITI[key] || []) {
+    const id = ids.find((x) => re.test(x));
+    if (id) return id;
+  }
+  return ids[0] || null;
 }
 
 async function verifyChatCompletionsKey(key, apiKey) {
@@ -590,6 +626,50 @@ const BATCH = {
       const dett = (r && r.error && r.error.message) || (b.error && b.error.message);
       return { stato: 'fallito', errore: `Gemini: batch ${stato || 'concluso'} senza testo${dett ? ` (${dett})` : ''}` };
     }
+  },
+  // OpenRouter (2026-11-04): Batch API con le richieste nel corpo (nessun file JSONL) e i
+  // risultati nella risposta di GET /batches/{id}. Va col modello base (vedi
+  // modelloBaseOpenrouter); un modello senza variante Batch viene rifiutato e si ripiega
+  // sull'Immediato (inviaBatchAi). I campi vanno prima di "requests", altrimenti 400.
+  openrouter: {
+    async invia(apiKey, model, prompt, opzioni = {}) {
+      const ep = chatEndpoint('openrouter', apiKey);
+      const b = await readJson(await callApi(`${ep.base}/batches`, {
+        method: 'POST',
+        headers: { ...ep.headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: '/v1/chat/completions',
+          model: modelloBaseOpenrouter(model),
+          completion_window: '24h',
+          requests: [{
+            custom_id: BATCH_ID_RICHIESTA,
+            body: {
+              messages: [{ role: 'user', content: prompt }],
+              ...(opzioni.json ? { temperature: TEMPERATURA_JSON } : {}),
+              max_tokens: 16000
+            }
+          }]
+        }),
+        timeoutMs: 60000
+      }, 'OpenRouter'), 'OpenRouter');
+      return b.id;
+    },
+    async stato(apiKey, batchId) {
+      const ep = chatEndpoint('openrouter', apiKey);
+      const b = await readJson(await callApi(`${ep.base}/batches/${encodeURIComponent(batchId)}`, {
+        headers: ep.headers, timeoutMs: 30000
+      }, 'OpenRouter'), 'OpenRouter');
+      // "completed" senza risultati ancora pubblicati: si aspetta il prossimo controllo.
+      if (['validating', 'in_progress', 'finalizing'].includes(b.status) || (b.status === 'completed' && !b.results)) return { stato: 'in_corso' };
+      if (b.status === 'completed') {
+        const r = (b.results || []).find((x) => x.custom_id === BATCH_ID_RICHIESTA) || b.results[0];
+        if (r && r.response && !r.error) return esitoRigaChat(r, 'OpenRouter');
+        const dett = r && r.error && r.error.message;
+        return { stato: 'fallito', errore: `OpenRouter: richiesta non riuscita${dett ? ` (${dett})` : ''}` };
+      }
+      const dett = b.error && b.error.message;
+      return { stato: 'fallito', errore: `OpenRouter: batch ${b.status}${dett ? ` (${dett})` : ''}` };
+    }
   }
 };
 
@@ -603,7 +683,7 @@ export async function inviaBatchAi(userId, providerName, prompt, opzioni = {}) {
   const apiKey = el[`${cfg.prefix}_api_key`];
   if (!apiKey) throw httpError(428, `${cfg.label} non collegato: attivalo da Impostazioni › AI`);
   const model = modelloUtente(cfg, el);
-  // Groq, OpenRouter, Cloudflare: nessuna Batch API, chi chiama esegue in modalità Immediata.
+  // Groq, Cloudflare: nessuna Batch API, chi chiama esegue in modalità Immediata.
   if (!BATCH[key]) {
     throw Object.assign(new Error(`${cfg.label} non ha la modalità Batch: eseguito in modalità Immediata`),
       { status: 409, code: 'BATCH_NON_DISPONIBILE', dettaglio: 'batch non supportato' });
