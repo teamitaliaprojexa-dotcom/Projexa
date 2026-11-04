@@ -363,7 +363,9 @@ export async function notificaOutlook({ tenantId, userId, titolo, messaggio, tab
 // stessi punti in cui si registra la riga unica del log). Destinatario: il proprietario
 // della riunione; nel testo l'oggetto, il cliente e il progetto se ci sono.
 // ----------------------------------------------------------------------------
-export async function notificaRiunione({ tenantId, userId, idCalendar, tipo }) {
+// ai: AI e modello che hanno generato (o tentato) il recap, es. "OpenRouter · anthropic/claude-…";
+// errore: motivo del recap non generato.
+export async function notificaRiunione({ tenantId, userId, idCalendar, tipo, ai = null, errore = null, batch = false }) {
   try {
     const r = (await db.query(
       `SELECT id::text AS id, oggetto, client_id, project_id, data_calendar::text AS data
@@ -380,11 +382,13 @@ export async function notificaRiunione({ tenantId, userId, idCalendar, tipo }) {
       titolo: tipo === 'recap' ? `Recap pronto: ${oggetto}`
         : tipo === 'recap_interno' ? `Recap interno pronto: ${oggetto}`
         // Recap in modalità Batch non riuscito (jobs/recapBatch.js): si rigenera col pulsante Recap.
-        : tipo === 'recap_fallito' ? `Recap non generato (Batch): ${oggetto}`
+        : tipo === 'recap_fallito' ? `Recap non generato${batch ? ' (Batch)' : ''}: ${oggetto}`
         : `Trascrizione completata: ${oggetto}`,
       messaggio: [
         r.data ? `Riunione del ${r.data.split('-').reverse().join('/')}` : null,
-        [cliente ? `Cliente: ${cliente}` : null, progetto ? `Progetto: ${progetto}` : null].filter(Boolean).join(' · ')
+        [cliente ? `Cliente: ${cliente}` : null, progetto ? `Progetto: ${progetto}` : null].filter(Boolean).join(' · '),
+        ai ? `${tipo === 'recap_fallito' ? 'AI usata' : 'Generato con'}: ${ai}` : null,
+        errore ? `Motivo: ${String(errore).slice(0, 500)}` : null
       ].filter(Boolean).join('\n') || null,
       tabella: 'rec_meeting', rigaId: r.id
     });

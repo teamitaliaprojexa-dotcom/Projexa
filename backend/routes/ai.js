@@ -250,7 +250,11 @@ async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}, 
       // OpenRouter e Cloudflare: il formato JSON non è accettato da tutti i modelli, basta
       // il prompt (che chiede già di rispondere solo in JSON) con la temperatura bassa.
       ...(opzioni.json && !['openrouter', 'cloudflare'].includes(key) ? { response_format: { type: 'json_object' } } : {}),
-      ...(opzioni.json && key !== 'chatgpt' ? { temperature: TEMPERATURA_JSON } : {})
+      ...(opzioni.json && key !== 'chatgpt' ? { temperature: TEMPERATURA_JSON } : {}),
+      // OpenRouter senza limite riserva il credito per la risposta più lunga del modello (per
+      // Claude decine di migliaia di token): con poco credito rifiuta la richiesta (402). Lo
+      // stesso limite di askClaude basta per recap e documenti.
+      ...(key === 'openrouter' ? { max_tokens: 16000 } : {})
     })
   }, cfg.label), cfg.label);
   let data;
@@ -265,7 +269,8 @@ async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}, 
     data = await send();
   }
   const choice = (data.choices || [])[0] || {};
-  return { text: String((choice.message && choice.message.content) || '').trim(), truncated: choice.finish_reason === 'length' };
+  // OpenRouter (Auto o ripiego) risponde con il modello che ha davvero generato il testo.
+  return { text: String((choice.message && choice.message.content) || '').trim(), truncated: choice.finish_reason === 'length', model: data.model || null };
 }
 
 async function verifyChatCompletionsKey(key, apiKey) {
@@ -1117,7 +1122,7 @@ router.post('/:provider/chat', requireAuth, requireProvider, async (req, res) =>
       { label: cfg.label, model: modelloUtente(cfg, el), fallbacks: await modelliRipiego(key), profile: 'interactive' }
     );
     res.json({
-      provider: key, model, text: anon ? anon.ripristina(result.text) : result.text, files: result.files || [], truncated: !!result.truncated,
+      provider: key, model: result.model || model, text: anon ? anon.ripristina(result.text) : result.text, files: result.files || [], truncated: !!result.truncated,
       // Dati personali sostituiti da segnaposto prima dell'invio (la dashboard lo segnala)
       anonimizzati: anon ? anon.totale : 0,
       // Trascrizioni rimaste fuori per il limite di lunghezza (la dashboard lo segnala)
@@ -1155,7 +1160,7 @@ export async function askAiProvider(userId, providerName, prompt, opzioni = {}) 
     { label: cfg.label, model: modelloUtente(cfg, el), fallbacks: await modelliRipiego(key), profile: 'background' }
   );
   const text = anon ? anon.ripristina(result.text, { json: !!opzioni.json || pareJson(result.text) }) : result.text;
-  return { text, label: cfg.label, model };
+  return { text, label: cfg.label, model: result.model || model };
 }
 
 // ==========================================

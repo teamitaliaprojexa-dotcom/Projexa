@@ -909,10 +909,23 @@ export async function generateRecap(user, idCalendar, { origine = null, ai = nul
   recapRunning.add(key);
   try {
     result = await askAiProvider(user.user_id, providerName, await buildRecapPrompt(user, { ...vars, TRASCRIZIONE: transcript }));
+    return await salvaRecap(user, idCalendar, result, { rules, vars, origine });
+  } catch (error) {
+    // Pulsante Recap (nessuna origine): l'errore arriva anche nella campanella, perché con
+    // un'AI lenta la pagina può aver perso la risposta (o l'avviso a video è sparito).
+    // La coda (origine 'job:...') avvisa da sé quando smette di riprovare.
+    if (!origine) await notificaRecapFallito(user, idCalendar, providerName, error, result);
+    throw error;
   } finally {
     recapRunning.delete(key);
   }
-  return salvaRecap(user, idCalendar, result, { rules, vars, origine });
+}
+
+// «Recap non generato» nella campanella, con l'AI (e il modello, se noto) e il motivo.
+async function notificaRecapFallito(user, idCalendar, providerName, error, result = null) {
+  const ai = [(result && result.label) || providerName, result && result.model].filter(Boolean).join(' · ');
+  await notificaRiunione({ tenantId: user.tenant_id, userId: user.user_id, idCalendar, tipo: 'recap_fallito', ai, errore: error && error.message })
+    .catch(() => {});
 }
 
 // Salva il recap prodotto dall'AI (result: { text, label, model }) sulla riunione: correzioni,
@@ -954,7 +967,10 @@ export async function salvaRecap(user, idCalendar, result, { rules, vars, origin
     origine: origine || (ctx && ctx.origine) || 'job:recap'
   });
   // Campanella del proprietario della riunione: recap pronto.
-  await notificaRiunione({ tenantId: user.tenant_id, userId: user.user_id, idCalendar, tipo: 'recap' });
+  await notificaRiunione({
+    tenantId: user.tenant_id, userId: user.user_id, idCalendar, tipo: 'recap',
+    ai: [result.label, result.model].filter(Boolean).join(' · ')
+  });
   console.log(`[RECAP] ✓ Recap generato con ${result.label} per la riunione ${idCalendar}`);
   return { provider: result.label, model: result.model, length: recap.length };
 }
@@ -1250,6 +1266,7 @@ async function processFinalizeInterno(job) {
       return 'riprogrammata';
     }
     console.error(`❌ [RECAP] ${job.id_calendar} non generato: ${error.message}`);
+    await notificaRecapFallito(user, job.id_calendar, job.recap_ai || await recapAiImpostata(user).catch(() => null), error);
   }
 }
 

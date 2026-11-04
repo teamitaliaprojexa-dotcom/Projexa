@@ -176,7 +176,7 @@ export async function prepara(user, idCalendar) {
 async function genera(user, idCalendar, providerName) {
   const p = await prepara(user, idCalendar);
   const r = await askAiProvider(user.user_id, providerName, p.build(p.transcript));
-  await salvaInterno(user, idCalendar, p, r.text, r.label);
+  await salvaInterno(user, idCalendar, p, r.text, r.label, r.model);
 }
 
 // «AI Automatizza (solo Batch)» a fine trascrizione (jobs/aiAutomatizza.js): recap interno in
@@ -240,7 +240,7 @@ export async function erroreRecapInternoBatch(user, idCalendar, messaggio) {
   await impostaStato(user, idCalendar, 'errore', String(messaggio || 'Batch non riuscito').slice(0, 1000));
 }
 
-async function salvaInterno(user, idCalendar, { m, elenco, rules }, testoAi, label) {
+async function salvaInterno(user, idCalendar, { m, elenco, rules }, testoAi, label, model = null) {
   const testo = applyCorrections(String(testoAi || '').trim(), rules).text;
   const { sintesi, attivita } = leggiRecapInterno(testo, m.data);
   if (!sintesi && !attivita.length) throw errore(502, `${label} non ha restituito un recap interno leggibile: riprova`);
@@ -281,7 +281,7 @@ async function salvaInterno(user, idCalendar, { m, elenco, rules }, testoAi, lab
   } finally {
     client.release();
   }
-  await notificaRiunione({ tenantId: user.tenant_id, userId: user.user_id, idCalendar, tipo: 'recap_interno' });
+  await notificaRiunione({ tenantId: user.tenant_id, userId: user.user_id, idCalendar, tipo: 'recap_interno', ai: [label, model].filter(Boolean).join(' · ') });
   console.log(`[RECAP INTERNO] ✓ ${attivita.length} attività con ${label} per la riunione ${idCalendar}`);
 }
 

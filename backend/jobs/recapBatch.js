@@ -108,7 +108,10 @@ async function controllaRiga(riga, report) {
   const fallito = async (errore) => {
     await concludi(riga, 'fallito', errore);
     if (interno) await (await modInterno()).erroreRecapInternoBatch(user, riga.id_calendar, errore).catch(() => {});
-    await notificaRiunione({ tenantId: riga.tenant_id, userId: riga.user_id, idCalendar: riga.id_calendar, tipo: 'recap_fallito' });
+    await notificaRiunione({
+      tenantId: riga.tenant_id, userId: riga.user_id, idCalendar: riga.id_calendar, tipo: 'recap_fallito', batch: true,
+      ai: [riga.provider, riga.model].filter(Boolean).join(' · '), errore
+    });
     if (report) report.errori.push(`${riga.id_calendar}: ${errore}`);
     return 'fallito';
   };
