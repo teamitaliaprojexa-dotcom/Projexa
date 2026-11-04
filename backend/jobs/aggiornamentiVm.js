@@ -50,8 +50,9 @@ async function serviziFermi() {
     .map((s) => `${s.label} (${s.state})`);
 }
 
-// Motivi per cui adesso la VM NON va riavviata (elenco vuoto = libera).
-async function motiviVmOccupata(rigaId) {
+// Motivi per cui adesso la VM NON va riavviata (elenco vuoto = libera). rigaId = la schedulazione
+// che chiede il riavvio (non conta come «altro job»); null dalla pagina Monitor › Aggiornamenti.
+export async function motiviVmOccupata(rigaId = null) {
   const motivi = [];
   if (vmOccupata()) motivi.push('registrazione, trascrizione o Assistente PM in corso');
   if (fileRiunioniAttive()) motivi.push('recap o recap interni in fila');
@@ -60,16 +61,30 @@ async function motiviVmOccupata(rigaId) {
   if (coda) motivi.push(`${coda} blocchi di riunioni in coda (trascrizione o recap)`);
   const ai = await q(`SELECT count(*) AS n FROM ai_lavori WHERE stato = 'in_corso'`);
   if (ai) motivi.push(`${ai} lavori AI in corso`);
-  const job = await q(`SELECT count(*) AS n FROM job_schedules WHERE in_esecuzione_dal IS NOT NULL AND id <> $1`, [rigaId]);
+  const job = await q(`SELECT count(*) AS n FROM job_schedules WHERE in_esecuzione_dal IS NOT NULL AND id IS DISTINCT FROM $1`, [rigaId]);
   if (job) motivi.push(`${job} altre schedulazioni in esecuzione`);
   return motivi;
 }
 
-function riavvia() {
+function riavvia(messaggio = 'Projexa: riavvio dopo gli aggiornamenti automatici') {
   return new Promise((resolve, reject) => {
-    execFile('sudo', ['-n', 'shutdown', '-r', '+1', 'Projexa: riavvio dopo gli aggiornamenti automatici'], { timeout: 30000 },
+    execFile('sudo', ['-n', 'shutdown', '-r', '+1', messaggio], { timeout: 30000 },
       (err, stdout, stderr) => (err ? reject(new Error(String(stderr || err.message).trim())) : resolve()));
   });
+}
+
+// Riavvio chiesto dalla pagina Monitor › Aggiornamenti (pulsante «Riavvia VM»): stesso
+// «shutdown -r +1» e stesso MARCATORE del job, così all'avvio completaDopoRiavvio() controlla
+// i servizi e manda la notifica a chi l'ha chiesto.
+export async function riavviaVmDaPagina({ tenantId, userId, email }) {
+  if (process.platform !== 'linux') throw new Error('Riavvio possibile solo sulla VM (Oracle Linux)');
+  fs.writeFileSync(MARCATORE, JSON.stringify({ creato: new Date().toISOString(), tenantId, userId, manuale: true }));
+  try {
+    await riavvia(`Projexa: riavvio della VM chiesto da ${email || 'Monitor'}`);
+  } catch (e) {
+    fs.rmSync(MARCATORE, { force: true });
+    throw e;
+  }
 }
 
 const notifica = (riga, titolo, messaggio) =>
@@ -166,7 +181,7 @@ export function completaDopoRiavvio() {
     console.log(`[AGGIORNAMENTI AUTO] VM riavviata (kernel ${kernel}); servizi fermi: ${fermi.length}`);
     await notificaSistema({
       tenantId: m.tenantId, userId: m.userId,
-      titolo: fermi.length ? 'VM riavviata: servizi da controllare' : 'VM riavviata dopo gli aggiornamenti',
+      titolo: fermi.length ? 'VM riavviata: servizi da controllare' : m.manuale ? 'VM riavviata' : 'VM riavviata dopo gli aggiornamenti',
       messaggio: `${fermi.length ? `ATTENZIONE, servizi non attivi: ${fermi.join(', ')}.` : 'Servizi tutti attivi.'} Kernel in uso: ${kernel}.`
     });
   }, ATTESA_SERVIZI_MS);

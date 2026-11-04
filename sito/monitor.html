@@ -549,6 +549,7 @@
                             <span class="updated" id="ag-updated"></span>
                             <button type="button" class="btn" id="ag-verificaBtn" title="Controlla gli aggiornamenti disponibili (non installa niente)"><i class="fas fa-magnifying-glass"></i> Verifica</button>
                             <button type="button" class="btn primary" id="ag-applicaBtn" data-write title="Installa solo gli aggiornamenti di sicurezza"><i class="fas fa-shield-halved"></i> Installa aggiornamenti di sicurezza</button>
+                            <button type="button" class="btn" id="ag-riavviaBtn" data-write title="Riavvia la VM (tra 1 minuto): Projexa resta irraggiungibile per 2-3 minuti"><i class="fas fa-power-off"></i> Riavvia VM</button>
                         </div>
                     </div>
                     <div class="tiles" id="ag-tiles"></div>
@@ -635,6 +636,8 @@
                                 <option value="cambio_password">Cambio password</option>
                                 <option value="eliminazione_log">Eliminazione log</option>
                                 <option value="eliminazione_backup">Eliminazione backup</option>
+                                <option value="aggiornamento_sistema">Aggiornamenti VM</option>
+                                <option value="riavvio_vm">Riavvio VM</option>
                             </select>
                         </label>
                         <label class="t-accessi">Cerca (email, IP, dettaglio)
@@ -1442,7 +1445,7 @@
         const schedaLog = (() => {
             const $ = (id) => document.getElementById('lg-' + id);
 
-            const EVENTI = { login: 'Login con password', google: 'Google', microsoft: 'Microsoft', magic_link: 'Link via email', impersonazione: 'Impersonazione', cambio_password: 'Cambio password', eliminazione_log: 'Eliminazione log', eliminazione_backup: 'Eliminazione backup' };
+            const EVENTI = { login: 'Login con password', google: 'Google', microsoft: 'Microsoft', magic_link: 'Link via email', impersonazione: 'Impersonazione', cambio_password: 'Cambio password', eliminazione_log: 'Eliminazione log', eliminazione_backup: 'Eliminazione backup', aggiornamento_sistema: 'Aggiornamenti VM', riavvio_vm: 'Riavvio VM' };
             const TIPI_EMAIL = { recap: 'Recap riunione', trascrizione: 'Trascrizione riunione', conferma_iscrizione: 'Conferma iscrizione', reset_password: 'Password dimenticata', magic_link: 'Link di accesso', richiesta_cancellazione: 'Richiesta cancellazione account' };
             const SERVIZI = { gmail_smtp: 'Gmail del team Projexa', gmail_web: 'Gmail (web) dell\'utente', programma_posta: 'Programma di posta dell\'utente (Outlook)' };
             const OPERAZIONI = { INSERT: 'Inserimento', UPDATE: 'Modifica', DELETE: 'Cancellazione' };
@@ -2136,9 +2139,9 @@
             const quando = (t) => t ? new Date(t).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '–';
             const tile = (l, v, d, cls) => `<div class="card tile" style="margin-bottom:0"><div class="label">${esc(l)}</div><div class="value ${cls || ''}">${esc(v)}</div><div class="detail">${esc(d || '')}</div></div>`;
             const headers = (extra) => Object.assign({ 'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}` }, extra || {});
-            const SSH = 'ssh -i C:\\Users\\ydacc\\.ssh\\ssh-key-2026-09-25.key opc@129.152.0.49 "sudo reboot"';
             let dati = null;
             let timer = null;
+            let riavvioDal = 0; // ms: riavvio chiesto da questa pagina, in attesa che la VM torni su
 
             function render() {
                 const v = dati.verifica;
@@ -2155,8 +2158,13 @@
                 ].join('');
                 const avvisi = [];
                 if (inCorso) avvisi.push('<div class="avviso"><i class="fas fa-spinner fa-spin"></i> Installazione in corso: la pagina si aggiorna da sola.</div>');
-                if (v?.riavvio?.necessario) avvisi.push(`<div class="avviso"><i class="fas fa-power-off"></i> Serve un riavvio della VM perché gli aggiornamenti installati (kernel o librerie di sistema) diventino attivi. Fallo quando nessuno sta registrando, da PowerShell: <code>${esc(SSH)}</code></div>`);
+                const prog = dati.riavvioProgrammato;
+                if (prog) avvisi.push(`<div class="avviso"><i class="fas fa-power-off"></i> Riavvio della VM programmato alle ${esc(new Date(prog.alle).toLocaleTimeString('it-IT'))}${prog.email ? ` da ${esc(prog.email)}` : ''}: Projexa resta irraggiungibile per 2-3 minuti, la pagina si aggiorna da sola.</div>`);
+                else if (v?.riavvio?.necessario) avvisi.push('<div class="avviso"><i class="fas fa-power-off"></i> Serve un riavvio della VM perché gli aggiornamenti installati (kernel o librerie di sistema) diventino attivi. Fallo quando nessuno sta registrando, con «Riavvia VM».</div>');
                 $('avvisi').innerHTML = avvisi.join('');
+                const rb = $('riavviaBtn');
+                rb.disabled = inCorso || !!prog;
+                rb.classList.toggle('primary', !prog && !!v?.riavvio?.necessario);
                 $('righe').innerHTML = !v ? '<tr><td colspan="4" class="small" style="text-align:center;padding:2rem">Nessuna verifica fatta da quando il server è ripartito: premi «Verifica».</td></tr>'
                     : !pacchetti.length ? `<tr><td colspan="4" class="small" style="text-align:center;padding:2rem">${v.errore ? esc(v.errore) : 'Il sistema è aggiornato.'}</td></tr>`
                     : pacchetti.slice().sort((a, b) => (b.sicurezza - a.sicurezza) || (a.nome < b.nome ? -1 : 1)).map((p) =>
@@ -2190,9 +2198,19 @@
                     $('content').style.display = '';
                     render();
                     clearTimeout(timer);
-                    if (d.installazione?.inCorso) timer = setTimeout(() => carica(false), 5000);
+                    if (d.riavvioProgrammato) { riavvioDal = riavvioDal || Date.now(); timer = setTimeout(() => carica(false), 10000); }
+                    else if (riavvioDal) { riavvioDal = 0; carica(true); } // VM ripartita: si ricontrolla
+                    else if (d.installazione?.inCorso) timer = setTimeout(() => carica(false), 5000);
                     else if (eraInCorso) carica(true); // finita: si ricontrolla subito cosa resta
                 } catch (e) {
+                    // Durante il riavvio il server non risponde: si aspetta (fino a 15 minuti) senza errore.
+                    if (riavvioDal && Date.now() - riavvioDal < 15 * 60000) {
+                        $('avvisi').innerHTML = '<div class="avviso"><i class="fas fa-spinner fa-spin"></i> La VM si sta riavviando: la pagina si aggiorna da sola quando Projexa torna raggiungibile.</div>';
+                        clearTimeout(timer);
+                        timer = setTimeout(() => carica(false), 10000);
+                        return;
+                    }
+                    riavvioDal = 0;
                     $('content').style.display = 'none';
                     $('deniedCard').style.display = '';
                     $('deniedMsg').textContent = e.message;
@@ -2212,6 +2230,30 @@
                     if (r.status === 401) { window.location.href = 'index.html'; return; }
                     const d = await r.json().catch(() => ({}));
                     if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                } catch (e) {
+                    alert(e.message);
+                }
+                carica(false);
+            });
+            $('riavviaBtn').addEventListener('click', async () => {
+                const serve = !!dati?.verifica?.riavvio?.necessario;
+                if (!confirm(`Riavviare la VM?${serve ? '' : '\n\nSecondo l\'ultima verifica il riavvio non è necessario.'}\n\nIl riavvio parte tra 1 minuto: Projexa resta irraggiungibile per 2-3 minuti e chi lo sta usando perde il lavoro non salvato. A riavvio finito ricevi una notifica con lo stato dei servizi.`)) return;
+                const invia = async (forza) => {
+                    const r = await fetch(`${API_URL}/vm-monitor/aggiornamenti/riavvia`, { method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ forza }) });
+                    if (r.status === 401) { window.location.href = 'index.html'; return null; }
+                    const d = await r.json().catch(() => ({}));
+                    if (r.status === 409 && d.occupata) return d;
+                    if (!r.ok) throw new Error(d.error || `Errore ${r.status}`);
+                    return d;
+                };
+                $('riavviaBtn').disabled = true;
+                try {
+                    let d = await invia(false);
+                    if (d?.occupata) {
+                        if (!confirm(`ATTENZIONE, la VM è occupata:\n- ${d.motivi.join('\n- ')}\n\nRiavviando adesso questo lavoro si interrompe. Riavviare comunque?`)) { render(); return; }
+                        d = await invia(true);
+                    }
+                    if (d) riavvioDal = Date.now();
                 } catch (e) {
                     alert(e.message);
                 }

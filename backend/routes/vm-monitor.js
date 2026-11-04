@@ -454,10 +454,11 @@ router.post('/storage/elimina', requireAuth, requireMonitorAccess, express.json(
 // «Applica» = sudo dnf upgrade --security -y, solo admin. L'installazione gira staccata dal
 // backend (detached, output su file) così un riavvio di PM2 o un deploy non la interrompono;
 // lo stato si ricava dal file (riga finale __ESITO__ <codice>) e dal pid ancora vivo.
-// Il riavvio della VM (kernel) non si fa da qui: resta da SSH.
+// «Riavvia VM» = sudo shutdown -r +1, solo admin (vedi POST /aggiornamenti/riavvia).
 const AGG_LOG = '/var/tmp/projexa-aggiornamenti.log';
 const AGG_STATO = '/var/tmp/projexa-aggiornamenti.json'; // { pid, avviato, email }
 let ultimaVerifica = null; // { letto, pacchetti, riavvio, errore }
+let riavvioProgrammato = null; // { alle, email }: si azzera da solo, al riavvio del backend
 
 export function sudoDnf(args, timeout) {
   return new Promise((resolve) => {
@@ -529,7 +530,7 @@ router.get('/aggiornamenti', requireAuth, requireMonitorAccess, async (req, res)
     const verifica = req.query.verifica === '1' && !installazione?.inCorso
       ? await verificaAggiornamenti()
       : ultimaVerifica;
-    res.json({ verifica, installazione });
+    res.json({ verifica, installazione, riavvioProgrammato });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -558,6 +559,33 @@ router.post('/aggiornamenti/applica', requireAuth, requireMonitorAccess, async (
   } catch (error) {
     traccia('ko', String(error.message).slice(0, 1000));
     res.status(500).json({ error: `Avvio non riuscito: ${error.message}` });
+  }
+});
+
+// Riavvia la VM tra 1 minuto (POST: solo admin PROJEXA). Mai durante un'installazione; se la VM
+// è occupata (registrazioni, trascrizioni, recap, lavori AI, job) risponde 409 con i motivi e
+// riavvia solo se la pagina richiama con { forza: true } dopo la conferma dell'utente.
+// Il job si importa al momento: importa a sua volta questo file.
+router.post('/aggiornamenti/riavvia', requireAuth, requireMonitorAccess, express.json(), async (req, res) => {
+  const traccia = (esito, dettaglio) => registraAccesso(req, {
+    evento: 'riavvio_vm', esito, userId: req.user.user_id, email: req.user.email,
+    tenantId: req.user.tenant_id, dettaglio
+  });
+  try {
+    if (!IS_LINUX) return res.status(501).json({ error: 'Disponibile solo sulla VM.' });
+    if (statoInstallazione()?.inCorso) return res.status(409).json({ error: 'Installazione degli aggiornamenti in corso: riavvia quando è finita.' });
+    if (riavvioProgrammato) return res.status(409).json({ error: 'Riavvio già programmato.' });
+    const { motiviVmOccupata, riavviaVmDaPagina } = await import('../jobs/aggiornamentiVm.js');
+    const motivi = await motiviVmOccupata(null);
+    if (motivi.length && req.body?.forza !== true) return res.status(409).json({ occupata: true, motivi });
+    await riavviaVmDaPagina({ tenantId: req.user.tenant_id, userId: req.user.user_id, email: req.user.email });
+    riavvioProgrammato = { alle: new Date(Date.now() + 60000).toISOString(), email: req.user.email };
+    console.log(`[AGGIORNAMENTI] Riavvio della VM programmato da ${req.user.email}${motivi.length ? ` (forzato: ${motivi.join('; ')})` : ''}`);
+    traccia('ok', `shutdown -r +1${motivi.length ? ` forzato: ${motivi.join('; ')}` : ''}`.slice(0, 1000));
+    res.json({ ok: true, ...riavvioProgrammato });
+  } catch (error) {
+    traccia('ko', String(error.message).slice(0, 1000));
+    res.status(500).json({ error: `Riavvio non riuscito: ${error.message}` });
   }
 });
 
