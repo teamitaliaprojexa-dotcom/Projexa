@@ -13,6 +13,15 @@ alla fine. Non riconosce chi è la persona (nessun nome) e non salva l'audio.
 3. Le impronte restano cifrate nella tabella `rec_meeting_voci` (al massimo 48 ore).
 4. A fine registrazione, prima del recap, il backend raggruppa le impronte di tutta la riunione
    e riscrive le etichette (`dividiPartecipanti` in `backend/jobs/meetingTranscription.js`).
+   Dal 2026-11-09 (riunione con 2 voci uscita con 16 «Partecipante»):
+   - si raggruppano prima solo le frasi con almeno 2 secondi di parlato; i frammenti brevi
+     vanno poi alla voce a cui somigliano di più;
+   - i gruppi con poco parlato (sotto 20 secondi o il 3% del totale) si uniscono al gruppo più
+     simile, anche se è un altro gruppo piccolo: i frammenti della stessa voce si ritrovano tra loro;
+   - se dal calendario (nomi mandati dal browser con ogni blocco, salvati cifrati insieme alle
+     impronte) o dall'appuntamento collegato da Outlook si sa chi partecipa, i gruppi non
+     superano quel numero meno l'utente;
+   - se la soglia non forma nessun gruppo con abbastanza parlato, si abbassa da sola (fino a −0,06).
 
 L'Assistente PM (funzione live) non la usa. Se il servizio è spento o va in errore la trascrizione
 prosegue normalmente, con le righe «Partecipanti» come prima.

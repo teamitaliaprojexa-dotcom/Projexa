@@ -235,8 +235,13 @@ function avgEnergy(list, start, end) {
 // 0,88-0,92 in media, voci diverse 0,72-0,81; con 0,84-0,86 i gruppi tornano con chi parlava.
 // (La prova del 2026-10-28 con voci sintetiche, voci diverse 0,59-0,63, non era rappresentativa.)
 const DIAR_SOGLIA = Number(process.env.DIARIZZAZIONE_SOGLIA) || 0.85;
-const DIAR_MIN_SEC = 4;            // gruppi con meno parlato: uniti al gruppo più simile (se abbastanza simile)
-const DIAR_EREDITA_SEC = 10;       // righe senza impronta (troppo brevi): prendono il numero della riga vicina
+// Gruppi con poco parlato (meno di DIAR_MIN_SEC secondi o meno del DIAR_MIN_QUOTA del parlato
+// degli altri): uniti SEMPRE al gruppo grande più simile. Riunione del 2026-11-09 (2 voci oltre
+// all'utente, 54 minuti): con la soglia sola uscivano 16 «Partecipante», quasi tutti frammenti
+// ("Mm.", "Yeah.", frasi mal trascritte) con impronte poco affidabili.
+const DIAR_MIN_SEC = 20;
+const DIAR_MIN_QUOTA = 0.03;
+const DIAR_EREDITA_SEC = 60;       // righe senza impronta (troppo brevi): prendono il numero della riga vicina
 const DIAR_LABEL = (n) => `Partecipante ${n}`;
 const DIAR_LABEL_RE = /^\[(\d{2}):(\d{2}):(\d{2})\] (Partecipanti|Partecipante \d+): /;
 const avvisiDiarizzazione = { fino: 0 };
@@ -284,36 +289,102 @@ async function aggiungiImpronte(audio, lines) {
 // è la MEDIA di quelle tra le loro frasi (pesate per secondi di parlato, al massimo 30), non
 // quella tra i centroidi: la somma di tante impronte toglie il "rumore" di ogni frase e due voci
 // diverse finivano per sembrare uguali (riunione del 2026-10-30: tutti «Partecipante 1»).
-// I gruppi con poco parlato (impronte meno affidabili) si uniscono poi al gruppo grande più
-// simile, se lo è abbastanza.
+// Dal 2026-11-09 (riunione con 2 voci divise in 16 «Partecipante»), in tre passi:
+//  1. si raggruppano solo le frasi con almeno DIAR_AFFIDABILE_SEC di parlato (impronte
+//     affidabili); con maxVoci (quante persone al massimo parlano dall'audio di sistema:
+//     partecipanti noti dal calendario o da Outlook, meno l'utente) si continua a unire la
+//     coppia più simile anche sotto la soglia finché i gruppi non sono maxVoci;
+//  2. ogni frase breve va al gruppo a cui somiglia di più (media pesata), senza soglia;
+//  3. i gruppi con poco parlato (sotto DIAR_MIN_SEC o DIAR_MIN_QUOTA del totale) si uniscono
+//     al gruppo grande più simile. Se non c'è nessun gruppo grande restano come sono (niente
+//     «tutti Partecipante 1»).
 // items: [{ voce, dur }] in ordine di tempo -> numero del partecipante (1, 2, …) per ciascuno,
 // in ordine di prima apparizione.
-export function raggruppaVoci(items, soglia = DIAR_SOGLIA) {
-  const sim = items.map((a) => items.map((b) => coseno(a.voce, b.voce)));
-  const gruppi = items.map((it, i) => ({ peso: Math.min(30, Math.max(0.5, it.dur || 0)), dur: it.dur || 0, membri: [i], primo: i }));
-  const attivi = new Set(gruppi.map((_, i) => i));
-  for (;;) {
+const DIAR_AFFIDABILE_SEC = 2;
+export function raggruppaVoci(items, soglia = DIAR_SOGLIA, maxVoci = 0) {
+  const orig = items.map((a) => items.map((b) => coseno(a.voce, b.voce)));
+  const sim = orig.map((r) => r.slice());
+  const pesoDi = (i) => Math.min(30, Math.max(0.5, items[i].dur || 0));
+  const gruppi = items.map((it, i) => ({ peso: pesoDi(i), dur: it.dur || 0, membri: [i], primo: i }));
+  let affidabili = items.map((_, i) => i).filter((i) => (items[i].dur || 0) >= DIAR_AFFIDABILE_SEC);
+  if (affidabili.length < 2) affidabili = items.map((_, i) => i);
+  const attivi = new Set(affidabili);
+  const minimoOra = () => Math.max(DIAR_MIN_SEC, [...attivi].reduce((t, g) => t + gruppi[g].dur, 0) * DIAR_MIN_QUOTA);
+  const grandiOra = () => { const m = minimoOra(); return [...attivi].filter((g) => gruppi[g].dur >= m); };
+  // Se con la soglia non si forma nessun gruppo con abbastanza parlato (audio diverso da quello
+  // su cui è tarata), la si abbassa un poco alla volta.
+  for (const s0 of [soglia, soglia - 0.03, soglia - 0.06]) {
+    for (;;) {
+      let best = null;
+      const ids = [...attivi];
+      for (let x = 0; x < ids.length; x++) {
+        for (let y = x + 1; y < ids.length; y++) {
+          const s = sim[ids[x]][ids[y]];
+          if (s >= s0 && (!best || s > best.s)) best = { a: ids[x], b: ids[y], s };
+        }
+      }
+      if (!best) break;
+      unisci(gruppi, attivi, sim, best.a, best.b);
+    }
+    if (grandiOra().length) break;
+  }
+  // Gruppi con poco parlato: si unisce via via la coppia più simile in cui almeno uno è piccolo
+  // (anche due piccoli: i frammenti della stessa voce si ritrovano tra loro invece di finire
+  // tutti nel primo gruppo grande); due gruppi grandi non si uniscono qui. Va fatto prima del
+  // limite maxVoci: un frammento isolato somiglia poco a tutti e, lasciato per ultimo, farebbe
+  // unire due voci vere.
+  const uniscPiccoli = () => {
+    while (attivi.size > 1) {
+      const minimo = minimoOra();
+      const ids = [...attivi];
+      let best = null;
+      for (let x = 0; x < ids.length; x++) {
+        for (let y = x + 1; y < ids.length; y++) {
+          if (gruppi[ids[x]].dur >= minimo && gruppi[ids[y]].dur >= minimo) continue;
+          const s = sim[ids[x]][ids[y]];
+          if (!best || s > best.s) best = { a: ids[x], b: ids[y], s };
+        }
+      }
+      if (!best) return;
+      // Resta il gruppo con più parlato (il suo «primo» passa comunque al più antico).
+      if (gruppi[best.b].dur > gruppi[best.a].dur) unisci(gruppi, attivi, sim, best.b, best.a);
+      else unisci(gruppi, attivi, sim, best.a, best.b);
+    }
+  };
+  uniscPiccoli();
+  // Più gruppi delle persone presenti: si uniscono i due più simili, anche sotto la soglia.
+  while (maxVoci > 0 && attivi.size > maxVoci) {
     let best = null;
     const ids = [...attivi];
     for (let x = 0; x < ids.length; x++) {
       for (let y = x + 1; y < ids.length; y++) {
         const s = sim[ids[x]][ids[y]];
-        if (s >= soglia && (!best || s > best.s)) best = { a: ids[x], b: ids[y], s };
+        if (!best || s > best.s) best = { a: ids[x], b: ids[y], s };
       }
     }
-    if (!best) break;
     unisci(gruppi, attivi, sim, best.a, best.b);
   }
-  const piccoli = [...attivi].filter((g) => gruppi[g].dur < DIAR_MIN_SEC);
-  const grandi = [...attivi].filter((g) => gruppi[g].dur >= DIAR_MIN_SEC);
-  for (const p of piccoli) {
+  // 2. Frasi brevi: al gruppo con la somiglianza media (pesata) più alta.
+  const scelti = new Set(affidabili);
+  const membriFissi = new Map([...attivi].map((g) => [g, gruppi[g].membri.slice()]));
+  items.forEach((_, u) => {
+    if (scelti.has(u)) return;
     let best = null;
-    for (const g of grandi) {
-      const s = sim[p][g];
-      if (s >= soglia - 0.1 && (!best || s > best.s)) best = { g, s };
+    for (const [g, membri] of membriFissi) {
+      let s = 0;
+      let w = 0;
+      for (const m of membri) { s += pesoDi(m) * orig[u][m]; w += pesoDi(m); }
+      const media = w ? s / w : 0;
+      if (!best || media > best.s) best = { g, s: media };
     }
-    if (best) unisci(gruppi, attivi, sim, best.g, p);
-  }
+    if (!best) return;
+    const g = gruppi[best.g];
+    g.membri.push(u);
+    g.dur += items[u].dur || 0;
+    g.primo = Math.min(g.primo, u);
+  });
+  // 3. Di nuovo i gruppi con poco parlato (ora contano anche le frasi brevi).
+  uniscPiccoli();
   const ordine = [...attivi].sort((a, b) => gruppi[a].primo - gruppi[b].primo);
   const numero = new Array(items.length);
   ordine.forEach((g, n) => gruppi[g].membri.forEach((i) => { numero[i] = n + 1; }));
@@ -338,18 +409,41 @@ function unisci(gruppi, attivi, sim, a, b) {
 // Impronte di un blocco trascritto, in attesa della fine della riunione (cifrate). Una riga per
 // blocco: un nuovo tentativo dello stesso blocco la sostituisce. Si salvano anche le righe senza
 // impronta (frasi brevi): a fine riunione prendono il numero delle righe vicine.
+// Formato (cifrato): { nomi, voci }, con nomi = partecipanti del calendario mandati dal browser
+// con il blocco (servono a sapere quante voci aspettarsi, vedi contaAltri). Le righe salvate
+// prima del 2026-11-09 sono il solo array delle voci.
 async function salvaVoci(job, voci) {
   if (!diarizzazioneUrl() || !voci.length) return;
+  const nomi = job.audio_mix ? parseEnergy(job.energy).names : [];
   try {
     await db.query(
       `INSERT INTO rec_meeting_voci (tenant_id, user_id, id_calendar, chunk_id, offset_sec, voci)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (chunk_id) DO UPDATE SET voci = EXCLUDED.voci`,
-      [job.tenant_id, job.user_id, job.id_calendar, job.id, Number(job.offset_sec) || 0, encRec(JSON.stringify(voci))]
+      [job.tenant_id, job.user_id, job.id_calendar, job.id, Number(job.offset_sec) || 0, encRec(JSON.stringify({ nomi, voci }))]
     );
   } catch (e) {
     // Tabella assente (SQL non ancora eseguito): niente diarizzazione, la trascrizione va avanti.
     console.warn(`[DIARIZZAZIONE] ${job.id_calendar}: impronte non salvate (${e.message})`);
+  }
+}
+
+// Quante persone, oltre all'utente, possono parlare dall'audio di sistema: partecipanti del
+// calendario (nomi mandati dal browser) e dell'appuntamento collegato da Outlook, senza doppioni
+// (stesso nome scritto in modo diverso: «Yanko Dacco'» = «Yanko Daccò») e senza l'utente.
+// 0 = non si sa (nessun partecipante noto oltre all'utente): nessun limite.
+const chiaveNome = (n) => String(n || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z]/g, '');
+export function contaPersone(me, nomi) {
+  const io = chiaveNome(me);
+  const altri = new Set(nomi.map(chiaveNome).filter((k) => k.length >= 3 && k !== io));
+  return altri.size;
+}
+async function contaAltri(user, idCalendar, nomi) {
+  try {
+    const { persone } = await glossarioRiunione(user, idCalendar, [...new Set(nomi)]);
+    return contaPersone(await speakerName(user), persone);
+  } catch (e) {
+    return 0;
   }
 }
 
@@ -370,10 +464,19 @@ async function dividiPartecipanti(user, idCalendar) {
     if (e.code !== '42P01') console.error(`❌ [DIARIZZAZIONE] ${idCalendar}: ${e.message}`);
     return;
   }
-  const items = righe.flatMap((r) => { try { return JSON.parse(r.voci) || []; } catch { return []; } });
+  const nomi = [];
+  const items = righe.flatMap((r) => {
+    try {
+      const x = JSON.parse(r.voci);
+      if (Array.isArray(x)) return x;
+      if (x && Array.isArray(x.nomi)) nomi.push(...x.nomi);
+      return (x && Array.isArray(x.voci)) ? x.voci : [];
+    } catch { return []; }
+  });
   const conVoce = items.filter((it) => Array.isArray(it.voce) && it.voce.length);
   if (!conVoce.length) return;
-  raggruppaVoci(conVoce).forEach((n, i) => { conVoce[i].n = n; });
+  const maxVoci = await contaAltri(user, idCalendar, nomi);
+  raggruppaVoci(conVoce, DIAR_SOGLIA, maxVoci).forEach((n, i) => { conVoce[i].n = n; });
   const perSecondo = new Map();
   for (const it of items) {
     if (!perSecondo.has(it.sec)) perSecondo.set(it.sec, []);
@@ -397,10 +500,16 @@ async function dividiPartecipanti(user, idCalendar) {
       const it = (perSecondo.get(sec) || []).shift();
       if (it) altri.push({ i, sec, n: it.n || null });
     });
-    // Righe senza impronta: numero della riga vicina (prima la precedente).
+    // Righe senza impronta: numero della riga con impronta più vicina (a parità, la precedente),
+    // entro DIAR_EREDITA_SEC.
     altri.forEach((a, k) => {
       if (a.n) return;
-      const vicine = [altri[k - 1], altri[k + 1]].filter((b) => b && b.n && Math.abs(b.sec - a.sec) <= DIAR_EREDITA_SEC);
+      let prima = null;
+      for (let j = k - 1; j >= 0 && !prima; j--) if (altri[j].n) prima = altri[j];
+      let dopo = null;
+      for (let j = k + 1; j < altri.length && !dopo; j++) if (altri[j].n) dopo = altri[j];
+      const vicine = [prima, dopo].filter((b) => b && Math.abs(b.sec - a.sec) <= DIAR_EREDITA_SEC)
+        .sort((x, y) => Math.abs(x.sec - a.sec) - Math.abs(y.sec - a.sec));
       if (vicine.length) a.eredita = vicine[0].n;
     });
     let cambiate = 0;
@@ -420,7 +529,7 @@ async function dividiPartecipanti(user, idCalendar) {
     await client.query('COMMIT');
     trascrizioniDaRegistrare.add(recapKey(user, idCalendar));
     const totale = new Set(conVoce.map((it) => it.n)).size;
-    console.log(`[DIARIZZAZIONE] ${idCalendar}: ${totale} partecipant${totale === 1 ? 'e' : 'i'} distint${totale === 1 ? 'o' : 'i'}, ${cambiate} righe aggiornate`);
+    console.log(`[DIARIZZAZIONE] ${idCalendar}: ${totale} partecipant${totale === 1 ? 'e' : 'i'} distint${totale === 1 ? 'o' : 'i'}${maxVoci ? ` (attesi al massimo ${maxVoci})` : ''}, ${cambiate} righe aggiornate`);
   } catch (e) {
     await client.query('ROLLBACK').catch(() => {});
     console.error(`❌ [DIARIZZAZIONE] ${idCalendar}: etichette non aggiornate (${e.message})`);
