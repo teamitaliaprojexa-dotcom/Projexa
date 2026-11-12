@@ -135,8 +135,25 @@ function trovaConRegole(testo) {
 // le righe dei tenant dell'utente e si filtrano qui. La ricerca usa un indice per PRIMA PAROLA
 // (non una regex con migliaia di alternative, lenta sulle trascrizioni lunghe): il testo si
 // scorre una volta, parola per parola.
+//
+// SEGNAPOSTO PER PERSONA (2026-11-12): ogni persona (e ogni cliente) nota ha un'IDENTITÀ, e
+// tutte le sue forme danno lo STESSO segnaposto: «Yanko Dacco'», «Dacco' Yanko», «Dacco'» e
+// «Yanko» -> [PERSONA_1]. Prima ogni forma aveva il suo segnaposto e l'AI non poteva capire che
+// «Yanko» nella trascrizione era «Yanko Dacco'» dell'elenco del team: niente owner nei recap.
+// Nome o cognome da soli (con la maiuscola): valgono se appartengono a una sola persona nota,
+// oppure, se sono di più persone, se nello stesso testo (o sessione) compare per intero una
+// sola di loro («Marco» = «Marco Bianchi» del team, anche se in rubrica c'è un altro Marco).
+// Il ripristino usa la forma più lunga vista nel testo («Yanko» -> «Yanko Dacco'» se nel testo
+// c'è anche il nome intero).
 const CACHE_NOMI_MS = 10 * 60 * 1000;
-const cacheNomi = new Map(); // user_id -> { at, indice: Map(prima parola -> [{ parole, tipo, maiuscola }]) }
+const cacheNomi = new Map(); // user_id -> { at, indice: Map(prima parola -> [{ parole, tipo, maiuscola, id }]), ambigui: Map(parola -> [id]) }
+// Nomi propri che sono anche parole comuni: da soli non si mascherano (con il cognome sì).
+const NOMI_PAROLA = new Set(['vera', 'rosa', 'bianca', 'sole', 'stella', 'serena', 'gioia', 'felice', 'celeste', 'speranza',
+  'marina', 'franco', 'chiara', 'luce', 'pia', 'fortunato', 'fortunata', 'benedetta', 'benedetto', 'italia', 'grazia',
+  'gloria', 'viola', 'margherita', 'regina', 'santo', 'santa', 'natale', 'pasqua', 'domenica', 'ventura', 'fiore', 'neve',
+  'alba', 'aurora', 'leone', 'amore', 'giusto', 'giusta', 'primo', 'prima', 'costante', 'onesta', 'nevio', 'nazzareno',
+  'grande', 'piccolo', 'bello', 'bella', 'conte', 'costa', 'riva', 'monti', 'ferro', 'fabbri', 'porta', 'villa', 'rossa']);
+const PARTICELLE = new Set(['de', 'di', 'da', 'del', 'della', 'dei', 'degli', 'dal', 'van', 'von', 'der', 'la', 'lo', 'le', 'mc', 'mac', 'san', 'dos', 'das']);
 const RE_PAROLA = /[\p{L}\p{N}]+/gu;
 const RE_SEPARATORE = /^[\s'’\-.&]{1,3}$/u;
 // Forma societaria in coda al nome del cliente: si cerca anche il nome senza («Acme» per «Acme S.r.l.»).
@@ -158,35 +175,54 @@ async function nomiNoti(userId) {
   const indice = new Map();
   const ok = consentitiSet();
   const visti = new Set();
-  // maiuscola: il nome vale solo se nel testo inizia con la maiuscola (cognomi da soli).
-  const aggiungi = (nome, tipo, maiuscola = false) => {
+  // Identità: stessa persona da più tabelle (rubrica, contatti, utenti...) = stesso id.
+  // Chiave = parole del nome in ordine alfabetico («Rossi Mario» = «Mario Rossi»).
+  const identita = new Map(); // chiave -> id
+  let prossimoId = 0;
+  const idDi = (tipo, nome) => {
+    const k = `${tipo}|${parole(nome).map((x) => x.toLowerCase()).sort().join(' ')}`;
+    if (!identita.has(k)) identita.set(k, ++prossimoId);
+    return identita.get(k);
+  };
+  const alias = new Map(); // parola singola -> Set(id) (nomi e cognomi da soli)
+  // maiuscola: il nome vale solo se nel testo inizia con la maiuscola (nomi/cognomi da soli).
+  const aggiungi = (nome, tipo, id, maiuscola = false) => {
     const p = parole(nome);
     const testo = p.join(' ');
     if (!p.length || testo.length < 3 || ok.has(testo.toLowerCase())) return;
-    const chiave = `${tipo}|${maiuscola ? 1 : 0}|${testo.toLowerCase()}`;
+    const chiave = `${tipo}|${maiuscola ? 1 : 0}|${testo.toLowerCase()}|${id}`;
     if (visti.has(chiave)) return;
     visti.add(chiave);
     const prima = p[0].toLowerCase();
     if (!indice.has(prima)) indice.set(prima, []);
-    indice.get(prima).push({ parole: p.map((x) => x.toLowerCase()), tipo, maiuscola });
+    indice.get(prima).push({ parole: p.map((x) => x.toLowerCase()), tipo, maiuscola, id });
+  };
+  const aggiungiAlias = (parola, id) => {
+    const w = String(parola || '').toLowerCase();
+    if (w.length < 3 || PARTICELLE.has(w) || NOMI_PAROLA.has(w) || ok.has(w)) return;
+    if (!alias.has(w)) alias.set(w, new Set());
+    alias.get(w).add(id);
   };
   const persona = (nome, cognome) => {
     const n = String(nome || '').trim();
     const cg = String(cognome || '').trim();
-    if (n && cg) { aggiungi(`${n} ${cg}`, 'PERSON'); aggiungi(`${cg} ${n}`, 'PERSON'); }
-    else if (parole(n).length > 1) { aggiungi(n, 'PERSON'); aggiungi(parole(n).reverse().join(' '), 'PERSON'); }
-    // Cognome da solo (con la maiuscola, almeno 4 lettere): «ne parlo con Bianchi».
-    const ultimo = cg || (parole(n).length > 1 ? parole(n).pop() : '');
-    if (ultimo && ultimo.length >= 4) aggiungi(ultimo, 'PERSON', true);
+    const tutte = parole(`${n} ${cg}`);
+    if (!tutte.length) return;
+    const id = idDi('PERSON', tutte.join(' '));
+    if (n && cg) { aggiungi(`${n} ${cg}`, 'PERSON', id); aggiungi(`${cg} ${n}`, 'PERSON', id); }
+    else if (parole(n).length > 1) { aggiungi(n, 'PERSON', id); aggiungi(parole(n).reverse().join(' '), 'PERSON', id); }
+    // Nome e cognome da soli (con la maiuscola): «ne parlo con Bianchi», «Yanko aiutami».
+    for (const w of tutte) aggiungiAlias(w, id);
   };
   const tenants = (await righe('SELECT DISTINCT tenant_id FROM user_tenants WHERE user_id = $1', [k])).map((r) => r.tenant_id);
   if (tenants.length) {
     const t = [tenants];
     for (const r of await righe(
       `SELECT valore2 FROM clients WHERE tenant_id = ANY($1::uuid[]) AND argument = 'Cliente' AND campo = 'Cliente' AND valore2 IS NOT NULL`, t)) {
-      aggiungi(r.valore2, 'ORGANIZATION');
       const corto = String(r.valore2).replace(RE_FORMA_SOCIETARIA, '').trim();
-      if (corto && corto !== String(r.valore2).trim()) aggiungi(corto, 'ORGANIZATION');
+      const idOrg = idDi('ORGANIZATION', corto || r.valore2); // «Acme» e «Acme S.r.l.» = stesso cliente
+      aggiungi(r.valore2, 'ORGANIZATION', idOrg);
+      if (corto && corto !== String(r.valore2).trim()) aggiungi(corto, 'ORGANIZATION', idOrg);
     }
     for (const r of await righe('SELECT nome, cognome FROM contacts WHERE tenant_id = ANY($1::uuid[])', t)) persona(r.nome, r.cognome);
     for (const r of await righe('SELECT nominativo FROM rubrica WHERE tenant_id = ANY($1::uuid[])', t)) persona(r.nominativo, '');
@@ -195,20 +231,30 @@ async function nomiNoti(userId) {
     for (const r of await righe(
       'SELECT u.name, u.cognome FROM users u JOIN user_tenants ut ON ut.user_id = u.id WHERE ut.tenant_id = ANY($1::uuid[])', t)) persona(r.name, r.cognome);
   }
+  // Nome o cognome da solo: di una sola persona -> nell'indice; di più persone -> «ambiguo»,
+  // si decide nel testo (trovaNomiNoti) in base a chi vi compare per intero.
+  const ambigui = new Map(); // parola -> [id]
+  for (const [w, ids] of alias) {
+    if (ids.size === 1) aggiungi(w, 'PERSON', [...ids][0], true);
+    else ambigui.set(w, [...ids]);
+  }
   // Nomi più lunghi prima: «Mario Rossi Bianchi» vince su «Mario Rossi».
   for (const lista of indice.values()) lista.sort((a, b) => b.parole.length - a.parole.length);
-  const voce = { at: Date.now(), indice, totale: visti.size };
+  const voce = { at: Date.now(), indice, ambigui, totale: visti.size };
   cacheNomi.set(k, voce);
   return voce;
 }
 
-function trovaNomiNoti(testo, noti) {
+// presenti: id delle persone già viste per intero nella sessione (Anonimizzatore), per
+// decidere i nomi da soli ambigui.
+function trovaNomiNoti(testo, noti, presenti = new Set()) {
   const out = [];
   if (!noti || !noti.indice.size) return out;
   const tok = [];
   RE_PAROLA.lastIndex = 0;
   let m;
   while ((m = RE_PAROLA.exec(testo))) tok.push({ p: m[0], l: m[0].toLowerCase(), i: m.index, f: m.index + m[0].length });
+  const coperto = new Set(); // indici di token già presi
   for (let i = 0; i < tok.length; i++) {
     const candidati = noti.indice.get(tok[i].l);
     if (!candidati) continue;
@@ -221,10 +267,26 @@ function trovaNomiNoti(testo, noti) {
         ok = tok[i + j].l === c.parole[j] && RE_SEPARATORE.test(testo.slice(tok[i + j - 1].f, tok[i + j].i));
       }
       if (!ok) continue;
-      out.push({ tipo: c.tipo, inizio: tok[i].i, fine: tok[i + n - 1].f, priorita: c.maiuscola ? 3 : 4 });
+      // Apostrofo finale del cognome («Dacco'»): fa parte del nome, non resta fuori dal segnaposto.
+      let fine = tok[i + n - 1].f;
+      if (/['’]/.test(testo[fine] || '') && !/[\p{L}\p{N}]/u.test(testo[fine + 1] || '')) fine += 1;
+      out.push({ tipo: c.tipo, inizio: tok[i].i, fine, priorita: c.maiuscola ? 3 : 4, id: c.id });
+      for (let j = 0; j < n; j++) coperto.add(i + j);
       i += n - 1;
       break;
     }
+  }
+  // Nomi da soli di più persone: valgono se nel testo (o nella sessione) c'è per intero una
+  // sola di quelle persone.
+  if (noti.ambigui && noti.ambigui.size) {
+    const qui = new Set([...presenti, ...out.filter((x) => x.tipo === 'PERSON' && x.priorita === 4).map((x) => x.id)]);
+    tok.forEach((t, i) => {
+      if (coperto.has(i) || !/^\p{Lu}/u.test(t.p)) return;
+      const ids = noti.ambigui.get(t.l);
+      if (!ids) return;
+      const scelti = ids.filter((id) => qui.has(id));
+      if (scelti.length === 1) out.push({ tipo: 'PERSON', inizio: t.i, fine: t.f, priorita: 3, id: scelti[0] });
+    });
   }
   return out;
 }
@@ -326,24 +388,36 @@ export class Anonimizzatore {
     this.userId = userId;
     this.noti = noti;
     this.perValore = new Map();   // "ETICHETTA|valore normalizzato" -> segnaposto
-    this.perSegnaposto = new Map(); // "ETICHETTA_n" -> valore originale
+    this.perSegnaposto = new Map(); // "ETICHETTA_n" -> valore originale (la forma più lunga vista)
+    this.perId = new Map();         // "tipo|id" della persona/cliente noti -> "ETICHETTA_n"
     this.contatori = {};
     this.motore = 'regole';
   }
 
   get totale() { return this.perSegnaposto.size; }
 
-  segnaposto(tipo, valore) {
+  // id: identità della persona o del cliente noti (nomiNoti): tutte le sue forme («Yanko»,
+  // «Yanko Dacco'») hanno lo stesso segnaposto.
+  segnaposto(tipo, valore, id = null) {
     const etichetta = ETICHETTE[tipo] || 'DATO';
     const chiave = `${etichetta}|${norm(valore)}`;
-    let s = this.perValore.get(chiave);
+    const chiaveId = id != null ? `${tipo}|${id}` : null;
+    let s = (chiaveId && this.perId.get(chiaveId)) || this.perValore.get(chiave);
     if (!s) {
       this.contatori[etichetta] = (this.contatori[etichetta] || 0) + 1;
       s = `${etichetta}_${this.contatori[etichetta]}`;
-      this.perValore.set(chiave, s);
       this.perSegnaposto.set(s, valore);
+    } else if (parole(valore).length > parole(this.perSegnaposto.get(s)).length) {
+      this.perSegnaposto.set(s, valore); // al ripristino la forma più completa
     }
+    this.perValore.set(chiave, s);
+    if (chiaveId) this.perId.set(chiaveId, s);
     return `[${s}]`;
+  }
+
+  // Persone già viste per intero in questa sessione (per i nomi da soli ambigui).
+  idPresenti() {
+    return new Set([...this.perId.keys()].filter((k) => k.startsWith('PERSON|')).map((k) => Number(k.slice(7))));
   }
 
   // Sostituisce gli intervalli trovati (senza sovrapposizioni: vince priorità, poi lunghezza).
@@ -363,7 +437,7 @@ export class Anonimizzatore {
     let out = '';
     let pos = 0;
     for (const t of scelti) {
-      out += testo.slice(pos, t.inizio) + this.segnaposto(t.tipo, testo.slice(t.inizio, t.fine));
+      out += testo.slice(pos, t.inizio) + this.segnaposto(t.tipo, testo.slice(t.inizio, t.fine), t.id);
       pos = t.fine;
     }
     return out + testo.slice(pos);
@@ -388,7 +462,7 @@ export class Anonimizzatore {
     if (!this.noti) this.noti = await nomiNoti(this.userId);
     const presidio = await trovaConPresidio(t);
     if (presidio.motore === 'presidio') this.motore = 'presidio';
-    return this.applica(t, [...this.trovaGiaNoti(t), ...trovaNomiNoti(t, this.noti), ...trovaConRegole(t), ...presidio.trovati]);
+    return this.applica(t, [...this.trovaGiaNoti(t), ...trovaNomiNoti(t, this.noti, this.idPresenti()), ...trovaConRegole(t), ...presidio.trovati]);
   }
 
   // Versione immediata (senza NER), per i punti che non possono attendere: valori già visti in
@@ -396,7 +470,7 @@ export class Anonimizzatore {
   mascheraSubito(testo) {
     const t = String(testo ?? '');
     if (!piiAttivo() || !t.trim()) return t;
-    return this.applica(t, [...this.trovaGiaNoti(t), ...(this.noti ? trovaNomiNoti(t, this.noti) : []), ...trovaConRegole(t)]);
+    return this.applica(t, [...this.trovaGiaNoti(t), ...(this.noti ? trovaNomiNoti(t, this.noti, this.idPresenti()) : []), ...trovaConRegole(t)]);
   }
 
   // Rimette i valori veri al posto dei segnaposto nella risposta dell'AI. json: la risposta è

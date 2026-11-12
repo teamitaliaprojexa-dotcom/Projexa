@@ -33,6 +33,7 @@ import { getIntegration } from '../config/integrations.js';
 import { transcribeAudio, transcribeAudioGemini, transcribeAudioParakeet, parakeetUrl, askAiProvider, whisperUrls, whisperCppUrls, aiCollegate, diarizzazioneUrl, impronteVocali } from '../routes/ai.js';
 import { segnaRegistrazione, segnaTrascrizione } from '../config/precedenzaVm.js';
 import { nomiPartecipanti } from '../config/riunioniOutlook.js';
+import { applicaParlanti } from '../config/parlanti.js';
 
 // Registrazione considerata in corso fino a questo tempo dall'ultimo pezzo audio arrivato (se la
 // fine non arriva, es. pagina chiusa): intanto la VM non si riavvia (jobs/aggiornamentiVm.js).
@@ -1139,6 +1140,11 @@ export async function enqueueFinalize(user, idCalendar, { ai = null } = {}) {
      VALUES ($1, $2, $3, $4, 'finalize'${ai ? ', $5' : ''})`,
     params
   );
+  // Nuova fine registrazione: diarizzazione e nomi dei clic si rifanno (config/parlanti.js).
+  await db.query(
+    'UPDATE rec_meeting SET parlanti_attesa_fino = NULL WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3',
+    [user.tenant_id, user.user_id, idCalendar]
+  ).catch((e) => { if (e.code !== '42703') console.error(`❌ [PARLANTI] ${idCalendar}: ${e.message}`); });
   // Fine della registrazione: restano solo i pezzi ancora da trascrivere (segnati dal worker).
   segnaRegistrazione(recapKey(user, idCalendar), false);
   kickTranscriptionWorker();
@@ -1269,6 +1275,72 @@ export async function copiaTrascrizioneCondivisa(source, idCalendar, soloUtente 
   return copiate;
 }
 
+// ----------------------------------------------------------------------------
+// NOMI DI CHI PARLA PRIMA DEL RECAP (2026-11-12, config/parlanti.js)
+// ----------------------------------------------------------------------------
+// rec_meeting.parlanti_stato = 'attesa' (messo dalla pagina allo Stop, POST /api/parlanti/attendi):
+// se dopo diarizzazione e clic restano «Partecipante N», il recap aspetta che il PM li assegni
+// nella finestra «Assegna nomi» (POST /api/parlanti/assegna -> sbloccaFinalize), al massimo
+// PARLANTI_ATTESA_MIN minuti (predefinito 10; 0 = mai attendere). parlanti_attesa_fino segna
+// anche che diarizzazione e clic sono già stati applicati (non si rifanno alla ripresa).
+const attesaParlantiMin = () => {
+  const v = Number(process.env.PARLANTI_ATTESA_MIN);
+  return Number.isFinite(v) && v >= 0 ? Math.min(v, 120) : 10;
+};
+async function statoParlanti(user, idCalendar) {
+  try {
+    const r = (await db.query(
+      `SELECT parlanti_stato, parlanti_attesa_fino, trascrizione FROM rec_meeting
+        WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+      [user.tenant_id, user.user_id, idCalendar]
+    )).rows[0] || {};
+    return { stato: r.parlanti_stato || null, attesaFino: r.parlanti_attesa_fino || null };
+  } catch (e) {
+    return { stato: null, attesaFino: null }; // colonne assenti (SQL non ancora eseguito)
+  }
+}
+// true = riga «finalize» riprogrammata alla fine dell'attesa (il recap non parte ora).
+async function attendiParlanti(user, job, st) {
+  if (st.stato !== 'attesa') return false;
+  const minuti = attesaParlantiMin();
+  const cur = (await db.query(
+    `SELECT trascrizione, parlanti_attesa_fino FROM rec_meeting WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 LIMIT 1`,
+    [user.tenant_id, user.user_id, job.id_calendar]
+  )).rows[0];
+  const restano = cur && /^\[\d{2}:\d{2}:\d{2}\] Partecipante \d+: /m.test(String(cur.trascrizione || ''));
+  const fino = cur && cur.parlanti_attesa_fino ? new Date(cur.parlanti_attesa_fino) : null;
+  if (!restano || minuti === 0 || (fino && fino <= new Date())) {
+    await db.query(`UPDATE rec_meeting SET parlanti_stato = 'fatto', parlanti_attesa_fino = COALESCE(parlanti_attesa_fino, NOW())
+                     WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3`, [user.tenant_id, user.user_id, job.id_calendar]);
+    if (restano && fino) console.log(`[PARLANTI] ${job.id_calendar}: nomi non assegnati entro ${minuti} minuti, il recap parte con «Partecipante N»`);
+    return false;
+  }
+  const r = await db.query(
+    `UPDATE rec_meeting SET parlanti_attesa_fino = COALESCE(parlanti_attesa_fino, NOW() + ($4 || ' minutes')::interval)
+      WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 RETURNING parlanti_attesa_fino`,
+    [user.tenant_id, user.user_id, job.id_calendar, String(minuti)]
+  );
+  await db.query('UPDATE rec_meeting_chunks SET next_try_at = $2 WHERE id = $1', [job.id, r.rows[0].parlanti_attesa_fino]);
+  console.log(`[PARLANTI] ${job.id_calendar}: recap in attesa dei nomi dei partecipanti (al massimo ${minuti} minuti)`);
+  return true;
+}
+// Nomi assegnati (o «Salta»): il recap in attesa parte subito.
+export async function sbloccaFinalize(user, idCalendar) {
+  await db.query(
+    `UPDATE rec_meeting SET parlanti_stato = 'fatto', parlanti_attesa_fino = COALESCE(parlanti_attesa_fino, NOW())
+      WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND parlanti_stato = 'attesa'`,
+    [user.tenant_id, user.user_id, idCalendar]
+  );
+  // Una riga «finalize» già in lavorazione (finalizing) non riparte due volte: flushInOrder la salta.
+  const r = await db.query(
+    `UPDATE rec_meeting_chunks SET next_try_at = NOW()
+      WHERE tenant_id = $1 AND user_id = $2 AND id_calendar = $3 AND kind = 'finalize' AND next_try_at > NOW()`,
+    [user.tenant_id, user.user_id, idCalendar]
+  );
+  trascrizioniDaRegistrare.add(recapKey(user, idCalendar));
+  if (r.rowCount) kickTranscriptionWorker();
+}
+
 // Recap a fine registrazione. La riga "finalize" resta in coda, prenotata per 2 ore
 // (next_try_at), e si cancella solo a recap concluso: prima veniva cancellata subito e un
 // riavvio del server durante il recap lo perdeva per sempre. Errore temporaneo = stessa riga
@@ -1286,7 +1358,16 @@ async function processFinalizeInterno(job) {
   const user = jobUser(job);
   // Diarizzazione: «Partecipanti» -> «Partecipante N» prima di log, copia condivisa e recap.
   // Solo al primo tentativo (i nuovi tentativi riguardano solo il recap).
-  if (!(Number(job.attempts) > 0)) await dividiPartecipanti(user, job.id_calendar);
+  // Poi i nomi dai clic «chi parla» e, se la pagina lo ha chiesto, l'attesa dei nomi mancanti
+  // (finestra «Assegna nomi» allo Stop): vedi attendiParlanti.
+  if (!(Number(job.attempts) > 0)) {
+    const st = await statoParlanti(user, job.id_calendar);
+    if (!st.attesaFino) {
+      await dividiPartecipanti(user, job.id_calendar);
+      if (await applicaParlanti(user, job.id_calendar)) trascrizioniDaRegistrare.add(recapKey(user, job.id_calendar));
+    }
+    if (!job.recap_ai && await attendiParlanti(user, job, st)) return 'riprogrammata';
+  }
   // Trascrizione finita: UNA riga nel log con tutto il testo (i blocchi non sono stati
   // registrati uno per uno). Solo se il testo è cambiato dall'ultima riga registrata.
   if (trascrizioniDaRegistrare.delete(recapKey(user, job.id_calendar))) {
@@ -1583,6 +1664,11 @@ async function cleanupStale() {
     `DELETE FROM rec_meeting_voci WHERE created_at < NOW() - ($1 || ' hours')::interval`,
     [String(STALE_HOURS)]
   ).catch((e) => { if (e.code !== '42P01') console.error(`❌ [DIARIZZAZIONE] pulizia impronte: ${e.message}`); });
+  // Clic «chi parla» (config/parlanti.js): stesso limite delle impronte.
+  await db.query(
+    `DELETE FROM rec_meeting_parlanti WHERE created_at < NOW() - ($1 || ' hours')::interval`,
+    [String(STALE_HOURS)]
+  ).catch((e) => { if (e.code !== '42P01') console.error(`❌ [PARLANTI] pulizia clic: ${e.message}`); });
   await reclaimStuck();
 }
 

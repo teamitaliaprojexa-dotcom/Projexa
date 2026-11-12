@@ -30,6 +30,7 @@ import notificheRoutes from './routes/notifiche.js';
 import pmRoutes from './routes/pm.js';
 import { sincronizzaAzioniCliente, elencoAzioniCliente, abbinaReferenti } from './config/azioniCliente.js';
 import recapInternoRoutes from './routes/recapInterno.js';
+import parlantiRoutes from './routes/parlanti.js';
 import { notificheNuoviMySupport } from './jobs/notifiche.js';
 import auditEventiRoutes from './routes/audit-eventi.js';
 import { sendMail, buildRichiestaCancellazioneEmail, EMAIL_PROJEXA } from './config/mailer.js';
@@ -286,6 +287,8 @@ app.use('/api/outlook', outlookAddinRoutes);
 app.use('/api/pm', requireAuth, pmRoutes);
 // Recap interno della riunione (scheda «Recap interno» nella finestra del recap): routes/recapInterno.js.
 app.use('/api/recap-interno', requireAuth, recapInternoRoutes);
+// Chi parla nella riunione (pannello durante la registrazione, «Assegna nomi»): routes/parlanti.js.
+app.use('/api/parlanti', requireAuth, parlantiRoutes);
 // Risultati delle funzioni AI eseguite in Batch e scelta "Chiedi sempre" (jobs/aiLavori.js).
 app.use('/api/ai-lavori', aiLavoriRoutes);
 // Migrazione Crypto (database-viewer): riservata agli amministratori.
