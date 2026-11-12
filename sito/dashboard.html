@@ -13207,10 +13207,11 @@
                         parlantiLista(ris, [{ titolo: 'Rubrica', persone: d.rubrica || [] }, { titolo: d.haCliente ? 'Contatti del cliente' : 'Contatti del cliente (collega la riunione a un cliente)', persone: d.cliente || [] }], (p) => {
                             if (!rec.parlanti) return;
                             if (!rec.parlanti.persone.some((x) => parlantiChiave(x) === parlantiChiave(p))) rec.parlanti.persone.push(p);
-                            renderIconeParlanti(rec);
                             cerca.value = '';
                             ris.classList.remove('open');
-                            parlantiNota(`${p.nominativo} aggiunto: clicca l'icona quando parla`);
+                            // Si cerca una persona perché sta parlando: la scelta vale già come clic
+                            // (prova del 2026-11-12: aggiunta dalla ricerca senza clic = nessun nome).
+                            clicParlante(rec, p);
                         }, 'Nessuna persona trovata');
                     } catch (e) { parlantiNota('Ricerca non riuscita: ' + e.message, true); }
                 }, 250);

@@ -27,6 +27,8 @@ import { parseDueDate } from '../jobs/recapTasks.js';
 import { notificaRiunione } from '../jobs/notifiche.js';
 import { cercaDoppione, aggiornamento, todoAperte, ownerTodo, aggiornaTodo } from '../config/dedupVoci.js';
 import { accodaRiunione, inFila } from '../jobs/filaRiunione.js';
+import { speakerName } from '../jobs/meetingTranscription.js';
+import { righeEtichettate, ALTRI_RE } from '../config/parlanti.js';
 
 const router = express.Router();
 const errore = (status, message) => Object.assign(new Error(message), { status });
@@ -102,6 +104,41 @@ async function persone(user, m) {
   return out.sort((a, b) => a.nominativo.localeCompare(b.nominativo, 'it'));
 }
 
+// Project manager e persone del nostro lato che hanno parlato (etichette della trascrizione),
+// non già nel team: { nominativo, email, rubricaId, team: false, ruoloRiunione }.
+async function altriOwner(user, m, transcript, team) {
+  const chiaveN = (s) => norm(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]+/g, '').split(' ').filter(Boolean).sort().join(' ');
+  const giaTeam = new Set(team.map((p) => chiaveN(p.nominativo)));
+  const rb = (await db.query(
+    `SELECT id::text AS id, nominativo, email FROM rubrica
+      WHERE tenant_id = $1 AND user_id = $2 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE) LIMIT 3000`,
+    [user.tenant_id, user.user_id]
+  )).rows.filter((x) => x.nominativo);
+  let clienti = new Set();
+  if (m.client_id) {
+    try {
+      clienti = new Set((await db.query('SELECT nominativo FROM contacts WHERE tenant_id = $1 AND client_id::text = $2', [user.tenant_id, m.client_id]))
+        .rows.map((x) => chiaveN(x.nominativo)).filter(Boolean));
+    } catch { /* tabella contatti non leggibile: nessuna esclusione */ }
+  }
+  const out = [];
+  const visti = new Set(giaTeam);
+  const aggiungi = (nome, ruolo, email = '') => {
+    const k = chiaveN(nome);
+    if (!k || visti.has(k) || clienti.has(k)) return;
+    visti.add(k);
+    const r = (email && rb.find((x) => norm(x.email) === norm(email))) || rb.find((x) => chiaveN(x.nominativo) === k) || null;
+    out.push({ nominativo: String(nome).trim(), email: email || (r && r.email) || '', rubricaId: r ? r.id : null, team: false, ruoloRiunione: ruolo });
+  };
+  aggiungi(await speakerName(user), 'project manager, sei tu', user.email || '');
+  const linee = String(transcript || '').split('\n');
+  for (const r of righeEtichettate(linee)) {
+    if (ALTRI_RE.test(r.label)) continue; // «Partecipante N»: senza nome
+    aggiungi(r.label, 'ha parlato nella riunione');
+  }
+  return out;
+}
+
 // Owner scritto dall'AI -> persona conosciuta (nome completo, o cognome/nome se univoco).
 function abbinaOwner(nome, elenco) {
   const n = norm(nome);
@@ -162,9 +199,19 @@ async function impostaStato(user, idCalendar, stato, erroreTesto = null) {
 export async function prepara(user, idCalendar) {
   const m = await riunione(user, idCalendar);
   const { transcript, vars, rules } = await recapSource(user, idCalendar);
-  const elenco = await persone(user, m);
-  const team = elenco.filter((p) => p.team);
-  const varsInt = { ...vars, TEAM: team.length ? team.map((p) => `- ${p.nominativo}`).join('\n') : '(nessuna persona indicata nel team del progetto)' };
+  const personeTeam = await persone(user, m);
+  const team = personeTeam.filter((p) => p.team);
+  // Owner possibili oltre al team del progetto (2026-11-12): il project manager (la voce del
+  // microfono) e chi ha parlato nella riunione con un nome («Chi parla», config/parlanti.js),
+  // esclusi i contatti del cliente (le loro azioni non sono attività del team). Senza progetto
+  // (es. registrazione libera) prima l'elenco era vuoto e l'AI non indicava nessun owner.
+  const extra = await altriOwner(user, m, transcript, team);
+  const elenco = [...personeTeam, ...extra];
+  const righeTeam = [
+    ...team.map((p) => `- ${p.nominativo}`),
+    ...extra.map((p) => `- ${p.nominativo} (${p.ruoloRiunione})`)
+  ];
+  const varsInt = { ...vars, TEAM: righeTeam.length ? righeTeam.join('\n') : '(nessuna persona indicata nel team del progetto)' };
   let tpl = (await getPromptFor('RECAP_INTERNO', user)).testo;
   if (!tpl.includes('{{TRASCRIZIONE}}')) tpl += '\n\nTrascrizione:\n{{TRASCRIZIONE}}';
   const build = (t) => tpl.replace(/\{\{(TRASCRIZIONE|OGGETTO|DATA|UTENTE|TEAM)\}\}/g, (x, k) => (k === 'TRASCRIZIONE' ? t : (varsInt[k] || '')));
