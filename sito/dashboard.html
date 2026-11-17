@@ -19351,7 +19351,8 @@
         // Riconosciuti dal nome del campo (senza "(*)" e senza suffisso _gg/_hh). A video
         // "12.500,00 €"; al clic il campo torna un numero semplice da modificare; al salvataggio
         // si invia il numero (currencyInputValue).
-        const DETAIL_CURRENCY_FIELDS = new Set(['importo', 'importo non scontato', 'fatturato', 'fatturato futuro', 'da fatturare']);
+        // Marginalità: Importo - Importo non scontato (vista proj_sconto, Supporto/CreaDB/proj_sconto_marginalita.sql).
+        const DETAIL_CURRENCY_FIELDS = new Set(['importo', 'importo non scontato', 'fatturato', 'fatturato futuro', 'da fatturare', 'marginalità', 'marginalita']);
         function isDetailCurrencyField(row) {
             const name = stripGgHhSuffix(String((row && row.campo) || '').replace(/^\(\*\)\s*/, '')).trim().toLowerCase();
             return DETAIL_CURRENCY_FIELDS.has(name);
@@ -19723,13 +19724,19 @@
         // Larghezza compatta e stabile delle colonne tipo 11. La misura deriva dal
         // contenuto realmente mostrato, ma resta entro limiti che impediscono a valori,
         // URL e select di dilatare la tabella durante la modifica inline.
-        function type11PreferredColumnWidth(column, displayValues, compact = false, first = false) {
+        // 2026-11-17: l'intestazione ha anche la freccia di ordinamento e la maniglia (≈ 20 px),
+        // per cui i nomi venivano troncati («data_inzio…»); in modifica le caselle (date,
+        // menu a discesa) hanno bisogno di più spazio del solo testo.
+        function type11PreferredColumnWidth(column, displayValues, compact = false, first = false, editing = false) {
             if (compact) return 44;
-            const lengths = [String(type11ColumnLabel(column) || '').length]
-                .concat((displayValues || []).map(value => String(value == null ? '' : value).length));
-            const longest = Math.min(30, Math.max(0, ...lengths));
-            const calculated = Math.round(longest * 7.2 + 30);
-            const minimum = first ? 150 : 82;
+            const labelLength = String(type11ColumnLabel(column) || '').length;
+            const valueLengths = (displayValues || []).map(value => String(value == null ? '' : value).length);
+            const longest = Math.min(30, Math.max(0, ...valueLengths));
+            const calculated = Math.max(
+                Math.round(Math.min(30, labelLength) * 7.2 + 54),
+                Math.round(longest * 7.2 + 30)
+            );
+            const minimum = first ? (editing ? 190 : 150) : (editing ? 140 : 82);
             const maximum = first ? 250 : 230;
             return Math.max(minimum, Math.min(maximum, calculated));
         }
@@ -21302,7 +21309,8 @@
                     column,
                     records.map(record => displayedValue(record, column)),
                     linkColumns.has(column),
-                    index === 0
+                    index === 0,
+                    editing
                 )));
                 const colgroup = '<colgroup>'
                     + columnWidths.map(width => `<col style="width:${width}px; min-width:${width}px; max-width:${width}px;">`).join('')
@@ -21733,7 +21741,73 @@
             if (!root) return;
             root.querySelectorAll('.type11-grid-widget').forEach(widget => loadType11Grid(widget));
             root.querySelectorAll('[data-proj-lic-field]').forEach(el => loadProjLicenzeChips(el));
+            applicaCampiCondizionati(root);
         }
+
+        // === CAMPI VISIBILI SOLO A CERTE CONDIZIONI (scheda progetto) ===
+        // 2026-11-17: la griglia «Fornitore» e il campo «Consuntivo Fornitore» si vedono solo se
+        // la «Tipologia» del progetto è «Fornitore Esterno». Nomi confrontati senza il prefisso
+        // "(*) " e senza distinzione di maiuscole. Il campo da cui dipendono può stare in un'altra
+        // sezione della scheda: se non è nel blocco appena disegnato si cerca nella pagina.
+        // In «Riordina campi» tutto resta visibile, così i campi si possono ancora spostare.
+        const CAMPI_CONDIZIONATI = [
+            { campi: ['fornitore', 'consuntivo fornitore'], se: 'tipologia', valore: 'fornitore esterno' }
+        ];
+        const nomeCampoNorm = s => String(s || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
+
+        function valoreCampoDettaglio(root, campoNorm) {
+            const trova = scope => [...scope.querySelectorAll('.settings-detail-row[data-campo]')]
+                .find(r => nomeCampoNorm(r.dataset.campo) === campoNorm);
+            const row = trova(root) || trova(document);
+            if (!row) return null;
+            const el = row.querySelector('[data-field="valore2"]') || row.querySelector('input, select');
+            return el ? String(el.value || '').trim().toLowerCase() : '';
+        }
+
+        // Scheda Cliente: la griglia «Fornitori» si vede solo con il booleano «Gestione Fornitori
+        // Esterni» = true nelle Impostazioni (Gestione Progetti). Il flag si rilegge a ogni
+        // apertura, così un cambio nelle Impostazioni vale subito. Senza riga = spento;
+        // con errore di rete la griglia resta visibile.
+        const CAMPI_CLIENTE_DA_FLAG = [{ campi: ['fornitori'], flag: 'fornitoriEsterni' }];
+        async function applicaCampiClienteDaFlag() {
+            let flags = null;
+            try {
+                const res = await fetch(`${API_URL}/settings/dashboard-flags`, { headers: getAuthHeaders() });
+                if (res.ok) flags = await res.json();
+            } catch (e) { /* rete: non si nasconde nulla */ }
+            if (!flags || currentDetailSource !== 'clients') return;
+            for (const regola of CAMPI_CLIENTE_DA_FLAG) {
+                const visibile = detailReorderMode || flags[regola.flag] === true;
+                document.querySelectorAll('.settings-detail-row[data-campo]').forEach(r => {
+                    if (regola.campi.includes(nomeCampoNorm(r.dataset.campo))) {
+                        r.style.display = visibile ? '' : 'none';
+                    }
+                });
+            }
+        }
+
+        function applicaCampiCondizionati(root) {
+            if (root && currentDetailSource === 'clients') { applicaCampiClienteDaFlag(); return; }
+            if (!root || currentDetailSource !== 'projects') return;
+            for (const regola of CAMPI_CONDIZIONATI) {
+                const valore = valoreCampoDettaglio(root, regola.se);
+                // Campo «Tipologia» non presente nella scheda: nessuna regola, non si nasconde nulla.
+                const visibile = detailReorderMode || valore === null || valore === regola.valore;
+                document.querySelectorAll('.settings-detail-row[data-campo]').forEach(r => {
+                    if (regola.campi.includes(nomeCampoNorm(r.dataset.campo))) {
+                        r.style.display = visibile ? '' : 'none';
+                    }
+                });
+            }
+        }
+
+        // Cambiando la Tipologia in modifica, i campi collegati compaiono/spariscono subito.
+        document.addEventListener('change', e => {
+            const row = e.target && e.target.closest && e.target.closest('.settings-detail-row[data-campo]');
+            if (!row) return;
+            const nome = nomeCampoNorm(row.dataset.campo);
+            if (CAMPI_CONDIZIONATI.some(r => r.se === nome)) applicaCampiCondizionati(document);
+        });
 
         // «Licenze da Attivare» in visualizzazione: etichette delle licenze attive del progetto,
         // lette dalla stessa API della griglia (licenza_id arriva già come nome della licenza).

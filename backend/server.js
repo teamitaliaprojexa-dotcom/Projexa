@@ -10009,10 +10009,12 @@ const DASHBOARD_FLAGS = {
   // Sezioni KPI in fondo alla dashboard (2026-10-16).
   kpiGestioneProgetto: 'mostra kpi gestione progetto',
   kpiOfferte: 'mostra kpi offerte e ordini',
-  kpiRilasci: 'mostra kpi rilasci'
+  kpiRilasci: 'mostra kpi rilasci',
+  // Griglia «Fornitori» nella scheda del cliente (2026-11-17), Impostazioni › Gestione Progetti.
+  fornitoriEsterni: 'gestione fornitori esterni'
 };
 // Flag che senza riga in settings valgono false (moduli nuovi, da attivare esplicitamente).
-const DASHBOARD_FLAGS_DEFAULT_OFF = new Set(['reporting', 'capacita', 'kpiRilasci']);
+const DASHBOARD_FLAGS_DEFAULT_OFF = new Set(['reporting', 'capacita', 'kpiRilasci', 'fornitoriEsterni']);
 async function readDashboardFlags(user) {
   const r = await db.query(
     `SELECT LOWER(REGEXP_REPLACE(BTRIM(campo), '^\\(\\*\\)\\s*', '')) AS campo, valore1
@@ -12050,6 +12052,8 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
         .map((x) => ({ id: x.id, label: [x.name, x.cognome].filter(Boolean).join(' ') || x.id }))
         .sort((a, b) => a.label.localeCompare(b.label, 'it', { sensitivity: 'base' }));
     }
+    // Letto una volta sola, solo se tra i campi c'è la Tipologia (vedi sotto).
+    let fornitoriEsterniAttivo = null;
     for (const row of rows) {
       if (Number(row.tipo_valore) === 19) row.tipo19_options = tenantColleagues || [];
       // Permesso per riga: il campo è modificabile solo se id_roles_write = ruolo del contesto
@@ -12157,6 +12161,18 @@ app.get('/api/:source(settings|clients|projects)/details', requireAuth, async (r
             req.user.tenant_id, effectiveUserId, String(row.tipo_valore), rawCampo, stripped, roleLevel
           );
           row.lookup_options = lookup.rows.map(x => x.valore);
+          // «Fornitore Esterno» nella tendina Tipologia solo con «Gestione Fornitori Esterni»
+          // attivo nelle Impostazioni (2026-11-17). Il valore già scelto in un progetto resta
+          // visibile: il browser lo rimette in testa all'elenco se manca.
+          if (stripped.trim().toLowerCase() === 'tipologia') {
+            if (fornitoriEsterniAttivo === null) {
+              fornitoriEsterniAttivo = (await readDashboardFlags(req.user)).fornitoriEsterni === true;
+            }
+            if (!fornitoriEsterniAttivo) {
+              row.lookup_options = row.lookup_options
+                .filter(v => String(v || '').trim().toLowerCase() !== 'fornitore esterno');
+            }
+          }
           row.lookup_is_custom = lookup.isCustom; // true se la sorgente ha tenant_id/user_id valorizzati
         } catch (e) { row.lookup_options = []; }
       }
