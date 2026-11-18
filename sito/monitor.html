@@ -548,7 +548,7 @@
                         <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
                             <span class="updated" id="ag-updated"></span>
                             <button type="button" class="btn" id="ag-verificaBtn" title="Controlla gli aggiornamenti disponibili (non installa niente)"><i class="fas fa-magnifying-glass"></i> Verifica</button>
-                            <button type="button" class="btn primary" id="ag-applicaBtn" data-write title="Installa solo gli aggiornamenti di sicurezza"><i class="fas fa-shield-halved"></i> Installa aggiornamenti di sicurezza</button>
+                            <button type="button" class="btn primary" id="ag-applicaBtn" data-write title="Installa tutti gli aggiornamenti disponibili (sicurezza e non)"><i class="fas fa-download"></i> Installa aggiornamenti</button>
                             <button type="button" class="btn" id="ag-riavviaBtn" data-write title="Riavvia la VM (tra 1 minuto): Projexa resta irraggiungibile per 2-3 minuti"><i class="fas fa-power-off"></i> Riavvia VM</button>
                         </div>
                     </div>
@@ -2170,7 +2170,7 @@
                     : pacchetti.slice().sort((a, b) => (b.sicurezza - a.sicurezza) || (a.nome < b.nome ? -1 : 1)).map((p) =>
                         `<tr><td>${esc(p.nome)}<span class="small">.${esc(p.arch)}</span></td><td>${esc(p.versione)}</td><td class="small">${esc(p.repo)}</td>` +
                         `<td>${p.sicurezza ? '<span class="badge b-sic">Sicurezza</span>' : ''} ${/^kernel/.test(p.nome) ? '<span class="badge b-ker">Kernel</span>' : ''}</td></tr>`).join('');
-                $('applicaBtn').disabled = inCorso || !v || !!v.errore || !sic.length;
+                $('applicaBtn').disabled = inCorso || !v || !!v.errore || !pacchetti.length;
                 $('verificaBtn').disabled = inCorso;
                 if (inst) {
                     $('instCard').style.display = '';
@@ -2222,8 +2222,9 @@
 
             $('verificaBtn').addEventListener('click', () => carica(true));
             $('applicaBtn').addEventListener('click', async () => {
-                const n = (dati?.verifica?.pacchetti || []).filter((p) => p.sicurezza).length;
-                if (!confirm(`Installare ${n} aggiornamenti di sicurezza sulla VM?\n\nFallo quando nessuno sta registrando: alcuni servizi (es. il database) potrebbero riavviarsi per qualche secondo.\nL'installazione richiede qualche minuto e prosegue anche se chiudi la pagina.`)) return;
+                const tutti = dati?.verifica?.pacchetti || [];
+                const nSic = tutti.filter((p) => p.sicurezza).length;
+                if (!confirm(`Installare tutti i ${tutti.length} aggiornamenti sulla VM (di cui ${nSic} di sicurezza)?\n\nFallo quando nessuno sta registrando: alcuni servizi (es. il database) potrebbero riavviarsi per qualche secondo.\nL'installazione richiede qualche minuto e prosegue anche se chiudi la pagina.`)) return;
                 $('applicaBtn').disabled = true;
                 try {
                     const r = await fetch(`${API_URL}/vm-monitor/aggiornamenti/applica`, { method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: '{}' });

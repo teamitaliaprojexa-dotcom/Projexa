@@ -451,7 +451,7 @@ router.post('/storage/elimina', requireAuth, requireMonitorAccess, express.json(
 // SCHEDA AGGIORNAMENTI: aggiornamenti di sicurezza di Oracle Linux (dnf)
 // ----------------------------------------------------------------------------
 // «Verifica» = sudo dnf check-update --security (anche in sola lettura: non modifica nulla).
-// «Applica» = sudo dnf upgrade --security -y, solo admin. L'installazione gira staccata dal
+// «Applica» = sudo dnf upgrade -y (tutti gli aggiornamenti), solo admin. L'installazione gira staccata dal
 // backend (detached, output su file) così un riavvio di PM2 o un deploy non la interrompono;
 // lo stato si ricava dal file (riga finale __ESITO__ <codice>) e dal pid ancora vivo.
 // «Riavvia VM» = sudo shutdown -r +1, solo admin (vedi POST /aggiornamenti/riavvia).
@@ -536,7 +536,8 @@ router.get('/aggiornamenti', requireAuth, requireMonitorAccess, async (req, res)
   }
 });
 
-// Avvia l'installazione degli aggiornamenti di sicurezza (POST: solo admin PROJEXA).
+// Avvia l'installazione di TUTTI gli aggiornamenti, sicurezza e non (POST: solo admin PROJEXA).
+// Dal 2026-11-18: prima era solo --security; il job automatico resta solo sicurezza + kernel.
 router.post('/aggiornamenti/applica', requireAuth, requireMonitorAccess, async (req, res) => {
   const traccia = (esito, dettaglio) => registraAccesso(req, {
     evento: 'aggiornamento_sistema', esito, userId: req.user.user_id, email: req.user.email,
@@ -546,15 +547,15 @@ router.post('/aggiornamenti/applica', requireAuth, requireMonitorAccess, async (
     if (!IS_LINUX) return res.status(501).json({ error: 'Disponibile solo sulla VM.' });
     if (statoInstallazione()?.inCorso) return res.status(409).json({ error: 'Un\'installazione è già in corso.' });
     const fd = fs.openSync(AGG_LOG, 'w');
-    const figlio = spawn('sh', ['-c', 'sudo -n dnf upgrade --security -y 2>&1; echo "__ESITO__ $?"'],
+    const figlio = spawn('sh', ['-c', 'sudo -n dnf upgrade -y 2>&1; echo "__ESITO__ $?"'],
       { detached: true, stdio: ['ignore', fd, fd] });
     fs.closeSync(fd);
     figlio.unref();
     const avviato = new Date().toISOString();
     fs.writeFileSync(AGG_STATO, JSON.stringify({ pid: figlio.pid, avviato, email: req.user.email }));
     ultimaVerifica = null; // da rifare a fine installazione
-    console.log(`[AGGIORNAMENTI] dnf upgrade --security avviato da ${req.user.email} (pid ${figlio.pid})`);
-    traccia('ok', 'dnf upgrade --security avviato');
+    console.log(`[AGGIORNAMENTI] dnf upgrade (tutti) avviato da ${req.user.email} (pid ${figlio.pid})`);
+    traccia('ok', 'dnf upgrade (tutti gli aggiornamenti) avviato');
     res.json({ ok: true, avviato });
   } catch (error) {
     traccia('ko', String(error.message).slice(0, 1000));
