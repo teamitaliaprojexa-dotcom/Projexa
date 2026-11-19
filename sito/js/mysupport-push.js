@@ -95,7 +95,12 @@
             const r = s.ultimoReport;
             const invio = !s.ultimoUso ? 'nessun invio ricevuto finora'
                 : `ultimo invio ${dataOra(s.ultimoUso)}${r ? `: ${r.inserted || 0} nuovi, ${r.updated || 0} aggiornati${r.ricevuti < r.blocchi ? ` (incompleto: ${r.ricevuti}/${r.blocchi} blocchi)` : ''}` : ''}`;
-            const titolo = r ? `Righe ricevute ${r.totale || 0} · invariate ${r.unchanged || 0} · ${cfg.nonTrovati} ${r.nonTrovati || 0}${r.ambigui ? ` · nomi su più clienti ${r.ambigui}` : ''}` : `Token generato il ${dataOra(s.creatoIl)}`;
+            const titolo = r ? `Righe ricevute ${r.totale || 0} · invariate ${r.unchanged || 0}`
+                + (cfg.nonTrovati ? ` · ${cfg.nonTrovati} ${r.nonTrovati || 0}` : '')
+                + (r.ambigui ? ` · nomi su più clienti ${r.ambigui}` : '')
+                + (r.creati ? ` · ticket creati ${r.creati}` : '')
+                + (r.senzaCliente ? ` · creati senza cliente (email non tra i contatti) ${r.senzaCliente}` : '')
+                : `Token generato il ${dataOra(s.creatoIl)}`;
             el.innerHTML = `<span class="calendar-conn-account" title="${esc(titolo)}"><i class="fas fa-key" style="color:#F59E0B;"></i> Token attivo · ${esc(invio)}</span>`
                 + `<button type="button" class="calendar-conn-btn calendar-conn-on" data-dbx-nuovo="${esc(settingId)}" title="Il token attuale smette di funzionare"><i class="fas fa-rotate"></i> Nuovo token</button>`;
         }
@@ -111,7 +116,7 @@
     window.SollecitiTkt = crea({
         api: '/api/mysupport/solleciti/token', interruttore: 'Gestione Solleciti tkt',
         titolo: "Token per l'invio dei solleciti", script: 'dello script dei solleciti ticket sul tuo PC',
-        uso: 'inviare i solleciti dei ticket MySupport', nonTrovati: 'ticket non trovati'
+        uso: 'inviare i solleciti dei ticket MySupport', nonTrovati: null
     });
     // Oggetto giusto per l'interruttore (attributo data-token-tipo: 'dbx' o 'solleciti').
     window.TokenScriptPc = (tipo) => (tipo === 'solleciti' ? window.SollecitiTkt : window.MySupportPush);

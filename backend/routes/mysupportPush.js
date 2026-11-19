@@ -70,7 +70,8 @@ export async function registraInvioPush(tokenId, blocco, blocchi, esito) {
     blocchi, ricevuti: blocco,
     totale: somma('totale'), inserted: somma('inserted'), updated: somma('updated'),
     unchanged: somma('unchanged'), invalid: somma('invalid'),
-    nonTrovati: somma('nonTrovati'), ambigui: somma('ambigui')
+    nonTrovati: somma('nonTrovati'), ambigui: somma('ambigui'),
+    creati: somma('creati'), senzaCliente: somma('senzaCliente') // solo solleciti
   };
   await db.query('UPDATE api_token SET ultimo_uso = now(), ultimo_report = $2 WHERE id = $1', [tokenId, JSON.stringify(report)]);
 }
@@ -185,19 +186,62 @@ export default router;
 // ---------------------------------------------------------------------------
 // POST /push con «Authorization: Bearer pxst_…». Body: { rows, blocco, blocchi } (max 5000
 // righe per blocco), ogni riga { codice_quesito, data_sollecito, email_sollecito,
-// risposta_interna, risposta_cliente }. Aggiorna solo i ticket già presenti in mysupport
-// (tenant del token, chiave codice_quesito); un campo assente nella riga resta com'è, un campo
-// presente ma vuoto viene svuotato. Esito:
-//   inserted  = ticket senza solleciti/risposte che ora ne hanno (sollecito nuovo)
-//   updated   = ticket con solleciti/risposte già presenti e cambiati
-//   unchanged = nessuna differenza; nonTrovati = codice non presente in mysupport.
+// risposta_interna, risposta_cliente }. Chiave: (tenant del token, codice_quesito). Un campo
+// assente nella riga resta com'è, un campo presente ma vuoto viene svuotato.
+// Ticket non ancora in mysupport (2026-11-19, richiesta dell'utente): la riga viene CREATA con
+//   tenant_id / user_id = utente del token,
+//   client_id = cliente del contatto (tabella contacts) con email = email_sollecito
+//               (email cifrata: abbinamento fatto qui dopo la lettura; nessun contatto o
+//               contatti di clienti diversi -> client_id vuoto),
+//   codice_quesito + le 4 colonne dei solleciti; gli altri dati arrivano dal successivo import
+//   MySupport (importaRigheMySupport, upsert sulla stessa chiave: aggiorna tutte le colonne del
+//   file MySupport, cliente e proprietario compresi, e non tocca le 4 dei solleciti).
+// Esito:
+//   inserted     = sollecito nuovo: ticket creato o ticket che prima non aveva solleciti/risposte
+//   updated      = ticket con solleciti/risposte già presenti e cambiati
+//   unchanged    = nessuna differenza
+//   creati       = di cui ticket creati qui; senzaCliente = creati senza cliente abbinato.
 export const sollecitiRouter = express.Router();
 const SCOPO_SOLLECITI = 'solleciti_tkt';
 rotteToken(sollecitiRouter, SCOPO_SOLLECITI);
 
 const SOLLECITI_COLONNE = ['data_sollecito', 'email_sollecito', 'risposta_interna', 'risposta_cliente'];
 
-async function importaSolleciti(tenantId, rowsIn) {
+// Cliente «radice» (riga clients con argument = 'Cliente') di una riga clients: stessa
+// risalita di resolveClientRoot in server.js. null se non trovato.
+async function clienteRadice(id, tenantId) {
+  let cur = id, guard = 0;
+  while (cur && guard++ < 60) {
+    const r = (await db.query('SELECT id, argument FROM clients WHERE id::text = $1 AND tenant_id = $2', [String(cur), tenantId])).rows[0];
+    if (!r) return null;
+    if (r.argument === 'Cliente') return String(r.id);
+    cur = r.argument;
+  }
+  return null;
+}
+
+// email (minuscola) -> client_id radice, dai contatti del tenant. Le email in contacts sono
+// cifrate: db.query le restituisce in chiaro e il confronto si fa qui. Un'email presente su
+// contatti di clienti diversi non viene abbinata (valore null).
+async function clientiPerEmail(tenantId) {
+  const mappa = new Map();
+  const righe = (await db.query(
+    'SELECT DISTINCT client_id::text AS client_id, email FROM contacts WHERE tenant_id = $1 AND client_id IS NOT NULL AND email IS NOT NULL',
+    [tenantId])).rows;
+  const radici = new Map();
+  for (const r of righe) {
+    const email = String(r.email || '').trim().toLowerCase();
+    if (!email || email.startsWith('enc:')) continue;
+    if (!radici.has(r.client_id)) radici.set(r.client_id, await clienteRadice(r.client_id, tenantId));
+    const cid = radici.get(r.client_id);
+    if (!cid) continue;
+    if (!mappa.has(email)) mappa.set(email, cid);
+    else if (mappa.get(email) !== cid) mappa.set(email, null); // stessa email su clienti diversi
+  }
+  return mappa;
+}
+
+async function importaSolleciti(tenantId, userId, rowsIn) {
   const errore400 = (msg) => Object.assign(new Error(msg), { statusCode: 400 });
   if (!rowsIn.length) throw errore400('Nessuna riga da importare');
   if (rowsIn.length > 5000) throw errore400('Troppe righe in una sola richiesta (massimo 5000)');
@@ -214,7 +258,8 @@ async function importaSolleciti(tenantId, rowsIn) {
   };
   const conv = { data_sollecito: data, email_sollecito: (v) => testo(v, 255), risposta_interna: (v) => testo(v, 255), risposta_cliente: (v) => testo(v, 255) };
 
-  let inserted = 0, updated = 0, unchanged = 0, invalid = 0, nonTrovati = 0;
+  let inserted = 0, updated = 0, unchanged = 0, invalid = 0, creati = 0, senzaCliente = 0;
+  let perEmail = null; // caricata solo se serve creare almeno un ticket
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -243,8 +288,24 @@ async function importaSolleciti(tenantId, rowsIn) {
          )
          SELECT p.vuoto, EXISTS (SELECT 1 FROM agg) AS cambiato FROM prima p`,
         params);
-      if (!out.rows.length) nonTrovati += 1;
-      else if (!out.rows[0].cambiato) unchanged += 1;
+      if (!out.rows.length) {
+        // Ticket non ancora in mysupport: si crea con i dati del sollecito.
+        if (!perEmail) perEmail = await clientiPerEmail(tenantId);
+        const email = String(conv.email_sollecito(r.email_sollecito) || '').toLowerCase();
+        const clientId = (email && perEmail.get(email)) || null;
+        const ins = await client.query(
+          `INSERT INTO mysupport (tenant_id, user_id, client_id, codice_quesito, ${presenti.join(', ')})
+           VALUES ($1, $${params.length + 1}, $${params.length + 2}, $2, ${nuovi.join(', ')})
+           ON CONFLICT (tenant_id, codice_quesito) DO NOTHING
+           RETURNING id`,
+          [...params, userId, clientId]);
+        if (ins.rows.length) {
+          creati += 1; inserted += 1;
+          if (!clientId) senzaCliente += 1;
+        } else unchanged += 1; // creato nel frattempo da un altro invio
+        continue;
+      }
+      if (!out.rows[0].cambiato) unchanged += 1;
       else if (out.rows[0].vuoto) inserted += 1;
       else updated += 1;
     }
@@ -255,7 +316,7 @@ async function importaSolleciti(tenantId, rowsIn) {
   } finally {
     client.release();
   }
-  return { totale: rowsIn.length, inserted, updated, unchanged, invalid, nonTrovati };
+  return { totale: rowsIn.length, inserted, updated, unchanged, invalid, creati, senzaCliente };
 }
 
 sollecitiRouter.post('/push', async (req, res) => {
@@ -265,7 +326,7 @@ sollecitiRouter.post('/push', async (req, res) => {
     if (!tok) return res.status(401).json({ error: 'Token non valido o revocato: generane uno nuovo in Impostazioni › Gestione Solleciti tkt' });
     const blocco = Math.max(1, parseInt(req.body?.blocco, 10) || 1);
     const blocchi = Math.max(blocco, parseInt(req.body?.blocchi, 10) || 1);
-    const esito = await importaSolleciti(tok.tenant_id, Array.isArray(req.body?.rows) ? req.body.rows : []);
+    const esito = await importaSolleciti(tok.tenant_id, tok.user_id, Array.isArray(req.body?.rows) ? req.body.rows : []);
     await registraInvioPush(tok.id, blocco, blocchi, esito);
     if (blocco === blocchi) console.log(`[SOLLECITI TKT] utente ${tok.user_id}: invio completato (${blocchi} blocchi)`);
     res.json(esito);
