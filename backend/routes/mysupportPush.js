@@ -10,6 +10,12 @@
 // mostrato UNA volta sola, da incollare in config.json dello script; spento = token revocato).
 // Nella tabella api_token (Supporto/CreaDB/mysupport_push.sql) c'è solo l'impronta SHA-256.
 // Il token vale per l'utente che l'ha generato: l'import usa il suo tenant.
+//
+// 2026-11-19: stesso meccanismo per l'interruttore «Gestione Solleciti tkt» (scopo
+// 'solleciti_tkt', token «pxst_…»): lo script invia i solleciti dei ticket
+// (POST /api/mysupport/solleciti/push, script Supporto/Script PC/Solleciti-Tkt/Solleciti-Push.ps1
+// che legge solleciti_ticket.xlsx) che aggiornano data_sollecito, email_sollecito,
+// risposta_interna e risposta_cliente della tabella mysupport (Supporto/CreaDB/mysupport_solleciti.sql).
 // ============================================================================
 import express from 'express';
 import crypto from 'crypto';
@@ -17,22 +23,25 @@ import db from '../config/database.js';
 import { requireAuth } from '../middleware/auth.js';
 import { notificaMySupportScript } from '../jobs/notifiche.js';
 
-const router = express.Router();
+// Tipi di token: scopo in api_token, prefisso del token, campo dell'interruttore in settings.
+export const TOKEN_TIPI = {
+  mysupport_push: { prefisso: 'pxms_', interruttore: 'databricks', etichetta: 'Databricks', log: 'MYSUPPORT PUSH' },
+  solleciti_tkt: { prefisso: 'pxst_', interruttore: 'gestione solleciti tkt', etichetta: 'Gestione Solleciti tkt', log: 'SOLLECITI TKT' }
+};
 const SCOPO = 'mysupport_push';
-const PREFISSO = 'pxms_';
 
 const impronta = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 
-// Utente del token (o null). Usato da POST /api/mysupport/push: header «Authorization: Bearer pxms_…».
-export async function utenteDaTokenPush(req) {
+// Utente del token (o null). Header «Authorization: Bearer <prefisso>…» dello scopo indicato.
+export async function utenteDaTokenPush(req, scopo = SCOPO) {
   const m = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization || ''));
-  if (!m || !m[1].startsWith(PREFISSO)) return null;
+  if (!m || !m[1].startsWith(TOKEN_TIPI[scopo].prefisso)) return null;
   // L'utente deve appartenere ancora al tenant del token (uscito dall'azienda = token inutile).
   const r = await db.query(
     `SELECT t.id, t.tenant_id, t.user_id FROM api_token t
       WHERE t.token_hash = $1 AND t.scopo = $2
         AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = t.user_id AND ut.tenant_id = t.tenant_id)`,
-    [impronta(m[1]), SCOPO]);
+    [impronta(m[1]), scopo]);
   return r.rows[0] || null;
 }
 
@@ -66,13 +75,13 @@ export async function registraInvioPush(tokenId, blocco, blocchi, esito) {
   await db.query('UPDATE api_token SET ultimo_uso = now(), ultimo_report = $2 WHERE id = $1', [tokenId, JSON.stringify(report)]);
 }
 
-// Riga «DataBricks» del settings dell'utente (anche «(*) DataBricks»): valore1 = interruttore.
-async function impostaInterruttore(user, acceso) {
+// Riga dell'interruttore nel settings dell'utente (anche «(*) …»): valore1 = acceso/spento.
+async function impostaInterruttore(user, campo, acceso) {
   await db.query(
     `UPDATE settings SET valore1 = $3, valore2 = NULL
       WHERE tenant_id = $1 AND user_id = $2
-        AND lower(btrim(regexp_replace(campo, '^\\(\\*\\)\\s*', ''))) = 'databricks'`,
-    [user.tenant_id, user.user_id, acceso]);
+        AND lower(btrim(regexp_replace(campo, '^\\(\\*\\)\\s*', ''))) = $4`,
+    [user.tenant_id, user.user_id, acceso, campo]);
 }
 
 function tabellaMancante(res, e) {
@@ -81,39 +90,65 @@ function tabellaMancante(res, e) {
   return true;
 }
 
-// Stato per Impostazioni: token presente, quando è stato creato, ultimo invio ricevuto.
-router.get('/token', requireAuth, async (req, res) => {
-  try {
-    const r = (await db.query(
-      'SELECT creato_il, ultimo_uso, ultimo_report FROM api_token WHERE tenant_id = $1 AND user_id = $2 AND scopo = $3',
-      [req.user.tenant_id, req.user.user_id, SCOPO])).rows[0];
-    res.json(r ? { attivo: true, creatoIl: r.creato_il, ultimoUso: r.ultimo_uso, ultimoReport: r.ultimo_report } : { attivo: false });
-  } catch (e) {
-    if (tabellaMancante(res, e)) return;
-    console.error('[MYSUPPORT PUSH] stato:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
+// GET/POST/DELETE /token per uno scopo: stato, genera (o rigenera), revoca.
+function rotteToken(router, scopo) {
+  const t = TOKEN_TIPI[scopo];
 
-// Genera (o rigenera: il precedente smette di funzionare) il token e lo restituisce in chiaro,
-// l'unica volta in cui si vede. Accende anche l'interruttore «DataBricks».
-router.post('/token', requireAuth, async (req, res) => {
-  try {
-    const token = PREFISSO + crypto.randomBytes(32).toString('base64url');
-    await db.query(
-      `INSERT INTO api_token (tenant_id, user_id, scopo, token_hash) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (tenant_id, user_id, scopo) DO UPDATE
-         SET token_hash = EXCLUDED.token_hash, creato_il = now(), ultimo_uso = NULL, ultimo_report = NULL`,
-      [req.user.tenant_id, req.user.user_id, SCOPO, impronta(token)]);
-    await impostaInterruttore(req.user, true);
-    console.log(`[MYSUPPORT PUSH] ${req.user.email || req.user.user_id}: token generato`);
-    res.json({ token });
-  } catch (e) {
-    if (tabellaMancante(res, e)) return;
-    console.error('[MYSUPPORT PUSH] genera token:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
+  // Stato per Impostazioni: token presente, quando è stato creato, ultimo invio ricevuto.
+  router.get('/token', requireAuth, async (req, res) => {
+    try {
+      const r = (await db.query(
+        'SELECT creato_il, ultimo_uso, ultimo_report FROM api_token WHERE tenant_id = $1 AND user_id = $2 AND scopo = $3',
+        [req.user.tenant_id, req.user.user_id, scopo])).rows[0];
+      res.json(r ? { attivo: true, creatoIl: r.creato_il, ultimoUso: r.ultimo_uso, ultimoReport: r.ultimo_report } : { attivo: false });
+    } catch (e) {
+      if (tabellaMancante(res, e)) return;
+      console.error(`[${t.log}] stato:`, e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Genera (o rigenera: il precedente smette di funzionare) il token e lo restituisce in chiaro,
+  // l'unica volta in cui si vede. Accende anche l'interruttore.
+  router.post('/token', requireAuth, async (req, res) => {
+    try {
+      const token = t.prefisso + crypto.randomBytes(32).toString('base64url');
+      await db.query(
+        `INSERT INTO api_token (tenant_id, user_id, scopo, token_hash) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (tenant_id, user_id, scopo) DO UPDATE
+           SET token_hash = EXCLUDED.token_hash, creato_il = now(), ultimo_uso = NULL, ultimo_report = NULL`,
+        [req.user.tenant_id, req.user.user_id, scopo, impronta(token)]);
+      await impostaInterruttore(req.user, t.interruttore, true);
+      console.log(`[${t.log}] ${req.user.email || req.user.user_id}: token generato`);
+      res.json({ token });
+    } catch (e) {
+      if (tabellaMancante(res, e)) return;
+      console.error(`[${t.log}] genera token:`, e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Interruttore spento: token revocato (lo script del PC riceverà 401).
+  router.delete('/token', requireAuth, async (req, res) => {
+    try {
+      await db.query('DELETE FROM api_token WHERE tenant_id = $1 AND user_id = $2 AND scopo = $3',
+        [req.user.tenant_id, req.user.user_id, scopo]);
+      await impostaInterruttore(req.user, t.interruttore, false);
+      console.log(`[${t.log}] ${req.user.email || req.user.user_id}: token revocato`);
+      res.json({ ok: true });
+    } catch (e) {
+      if (tabellaMancante(res, e)) return;
+      console.error(`[${t.log}] revoca token:`, e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Router «DataBricks»: /api/mysupport/push (token + avvisi; il push è in server.js)
+// ---------------------------------------------------------------------------
+const router = express.Router();
+rotteToken(router, SCOPO);
 
 // Avviso dallo script del PC (2026-10-23): oggi solo «login Databricks scaduto», che prima si
 // vedeva soltanto nel log del PC (e ci si accorgeva giorni dopo dal file vecchio). Stesso token
@@ -143,19 +178,102 @@ router.post('/avviso', async (req, res) => {
   }
 });
 
-// Interruttore spento: token revocato (lo script del PC riceverà 401).
-router.delete('/token', requireAuth, async (req, res) => {
+export default router;
+
+// ---------------------------------------------------------------------------
+// Router «Gestione Solleciti tkt»: /api/mysupport/solleciti
+// ---------------------------------------------------------------------------
+// POST /push con «Authorization: Bearer pxst_…». Body: { rows, blocco, blocchi } (max 5000
+// righe per blocco), ogni riga { codice_quesito, data_sollecito, email_sollecito,
+// risposta_interna, risposta_cliente }. Aggiorna solo i ticket già presenti in mysupport
+// (tenant del token, chiave codice_quesito); un campo assente nella riga resta com'è, un campo
+// presente ma vuoto viene svuotato. Esito:
+//   inserted  = ticket senza solleciti/risposte che ora ne hanno (sollecito nuovo)
+//   updated   = ticket con solleciti/risposte già presenti e cambiati
+//   unchanged = nessuna differenza; nonTrovati = codice non presente in mysupport.
+export const sollecitiRouter = express.Router();
+const SCOPO_SOLLECITI = 'solleciti_tkt';
+rotteToken(sollecitiRouter, SCOPO_SOLLECITI);
+
+const SOLLECITI_COLONNE = ['data_sollecito', 'email_sollecito', 'risposta_interna', 'risposta_cliente'];
+
+async function importaSolleciti(tenantId, rowsIn) {
+  const errore400 = (msg) => Object.assign(new Error(msg), { statusCode: 400 });
+  if (!rowsIn.length) throw errore400('Nessuna riga da importare');
+  if (rowsIn.length > 5000) throw errore400('Troppe righe in una sola richiesta (massimo 5000)');
+  const testo = (v, max) => { const s = String(v == null ? '' : v).trim(); return s ? s.slice(0, max) : null; };
+  // Data e ora: 'AAAA-MM-GG[ HH:MM[:SS]]' (anche con la T) o 'GG/MM/AAAA[ HH:MM[:SS]]'
+  // (formato del file solleciti_ticket.xlsx) -> 'AAAA-MM-GG HH:MM:SS'.
+  const data = (v) => {
+    const s = String(v == null ? '' : v).trim();
+    const ora = (h, mi, se) => (h ? ` ${h.padStart(2, '0')}:${mi}:${se || '00'}` : ' 00:00:00');
+    let m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(s);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}${ora(m[4], m[5], m[6])}`;
+    m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(s);
+    return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}${ora(m[4], m[5], m[6])}` : null;
+  };
+  const conv = { data_sollecito: data, email_sollecito: (v) => testo(v, 255), risposta_interna: (v) => testo(v, 255), risposta_cliente: (v) => testo(v, 255) };
+
+  let inserted = 0, updated = 0, unchanged = 0, invalid = 0, nonTrovati = 0;
+  const client = await db.connect();
   try {
-    await db.query('DELETE FROM api_token WHERE tenant_id = $1 AND user_id = $2 AND scopo = $3',
-      [req.user.tenant_id, req.user.user_id, SCOPO]);
-    await impostaInterruttore(req.user, false);
-    console.log(`[MYSUPPORT PUSH] ${req.user.email || req.user.user_id}: token revocato`);
-    res.json({ ok: true });
+    await client.query('BEGIN');
+    for (const r of rowsIn) {
+      const codice = testo(r && r.codice_quesito, 50);
+      if (!codice) { invalid += 1; continue; }
+      const presenti = SOLLECITI_COLONNE.filter((k) => Object.prototype.hasOwnProperty.call(r, k));
+      if (!presenti.length) { invalid += 1; continue; }
+      const params = [tenantId, codice];
+      const set = presenti.map((k) => {
+        params.push(conv[k](r[k]));
+        return `${k} = $${params.length}${k === 'data_sollecito' ? '::timestamp' : ''}`;
+      });
+      const nuovi = presenti.map((k) => `$${presenti.indexOf(k) + 3}${k === 'data_sollecito' ? '::timestamp' : ''}`);
+      // vuoto = prima dell'aggiornamento il ticket non aveva né solleciti né risposte.
+      const out = await client.query(
+        `WITH prima AS (
+           SELECT id, (data_sollecito IS NULL AND email_sollecito IS NULL AND risposta_interna IS NULL AND risposta_cliente IS NULL) AS vuoto
+             FROM mysupport WHERE tenant_id = $1 AND codice_quesito = $2
+         ), agg AS (
+           UPDATE mysupport m SET ${set.join(', ')}
+             FROM prima p
+            WHERE m.id = p.id
+              AND (${presenti.map((k) => `m.${k}`).join(', ')}) IS DISTINCT FROM (${nuovi.join(', ')})
+           RETURNING m.id
+         )
+         SELECT p.vuoto, EXISTS (SELECT 1 FROM agg) AS cambiato FROM prima p`,
+        params);
+      if (!out.rows.length) nonTrovati += 1;
+      else if (!out.rows[0].cambiato) unchanged += 1;
+      else if (out.rows[0].vuoto) inserted += 1;
+      else updated += 1;
+    }
+    await client.query('COMMIT');
   } catch (e) {
-    if (tabellaMancante(res, e)) return;
-    console.error('[MYSUPPORT PUSH] revoca token:', e.message);
-    res.status(500).json({ error: e.message });
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+  return { totale: rowsIn.length, inserted, updated, unchanged, invalid, nonTrovati };
+}
+
+sollecitiRouter.post('/push', async (req, res) => {
+  try {
+    if (pushLimitato('ip:' + (req.ip || ''))) return res.status(429).json({ error: 'Troppe richieste: riprova tra qualche minuto' });
+    const tok = await utenteDaTokenPush(req, SCOPO_SOLLECITI);
+    if (!tok) return res.status(401).json({ error: 'Token non valido o revocato: generane uno nuovo in Impostazioni › Gestione Solleciti tkt' });
+    const blocco = Math.max(1, parseInt(req.body?.blocco, 10) || 1);
+    const blocchi = Math.max(blocco, parseInt(req.body?.blocchi, 10) || 1);
+    const esito = await importaSolleciti(tok.tenant_id, Array.isArray(req.body?.rows) ? req.body.rows : []);
+    await registraInvioPush(tok.id, blocco, blocchi, esito);
+    if (blocco === blocchi) console.log(`[SOLLECITI TKT] utente ${tok.user_id}: invio completato (${blocchi} blocchi)`);
+    res.json(esito);
+  } catch (error) {
+    if (error.code === '42P01') return res.status(503).json({ error: 'Tabella api_token mancante: eseguire Supporto/CreaDB/mysupport_push.sql' });
+    if (error.code === '42703') return res.status(503).json({ error: 'Colonne dei solleciti mancanti: eseguire Supporto/CreaDB/mysupport_solleciti.sql' });
+    if (error.statusCode >= 400 && error.statusCode < 500) console.warn(`[SOLLECITI TKT] ${error.message}`);
+    else console.error('[SOLLECITI TKT]', error);
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
-
-export default router;

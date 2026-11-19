@@ -21,7 +21,7 @@ import integrazioniRoutes from './routes/integrazioni.js';
 import promptsRoutes from './routes/prompts.js';
 import chatbotRoutes from './routes/chatbot.js';
 import assistentePmRoutes, { attaccaAssistenteLive } from './routes/assistentePm.js';
-import mysupportPushRoutes, { utenteDaTokenPush, registraInvioPush, pushLimitato } from './routes/mysupportPush.js';
+import mysupportPushRoutes, { sollecitiRouter as sollecitiTktRoutes, utenteDaTokenPush, registraInvioPush, pushLimitato } from './routes/mysupportPush.js';
 import outlookAddinRoutes from './routes/outlookAddin.js';
 import vmMonitorRoutes, { startVmSampler } from './routes/vm-monitor.js';
 import jobSchedulesRoutes from './routes/job-schedules.js';
@@ -280,6 +280,8 @@ app.use('/api/chatbot', chatbotRoutes);
 app.use('/api/assistente-pm', assistentePmRoutes);
 // Token dello script del PC che invia MySupport (interruttore «DataBricks»): routes/mysupportPush.js.
 app.use('/api/mysupport/push', mysupportPushRoutes);
+// Token dello script del PC che invia i solleciti dei ticket (interruttore «Gestione Solleciti tkt»).
+app.use('/api/mysupport/solleciti', sollecitiTktRoutes);
 // Add-in di Outlook «Analizza con Projexa» (pagine in sito/outlook/, token dedicato): routes/outlookAddin.js.
 app.use('/api/outlook', outlookAddinRoutes);
 // Cruscotto PM e Portfolio (funzioni da PM senior: salute, RAID, Change Request, stakeholder,

@@ -9364,31 +9364,35 @@
             const cella = toggle.closest('.bool-cell') || toggle.closest('.toggle-switch');
             const conn = cella && cella.nextElementSibling && cella.nextElementSibling.classList.contains('calendar-conn') ? cella.nextElementSibling : null;
             if (!conn) return;
-            if (acceso && window.MySupportPush) window.MySupportPush.riempi(conn, toggle.dataset.settingId);
+            const tok = window.TokenScriptPc && window.TokenScriptPc(toggle.dataset.tokenTipo);
+            if (acceso && tok) tok.riempi(conn, toggle.dataset.settingId);
             else conn.innerHTML = '';
         }
+        // Vale anche per «Gestione Solleciti tkt»: data-token-tipo sceglie il token (js/mysupport-push.js).
         document.addEventListener('change', async (e) => {
             const toggle = e.target;
             if (!toggle || !toggle.classList || !toggle.classList.contains('dbx-toggle')) return;
-            if (!window.MySupportPush) { revertCalendarToggle(toggle, !toggle.checked); return; }
+            const tok = window.TokenScriptPc && window.TokenScriptPc(toggle.dataset.tokenTipo);
+            if (!tok) { revertCalendarToggle(toggle, !toggle.checked); return; }
             if (toggle.checked) {
-                if (!(await window.MySupportPush.attiva())) { revertCalendarToggle(toggle, false); return; }
+                if (!(await tok.attiva())) { revertCalendarToggle(toggle, false); return; }
                 dbxDopo(toggle, true);
             } else {
-                const yes = await confirmCalendarDisconnect('Databricks', 'Revoca il token dello script MySupport del PC');
-                if (!yes || !(await window.MySupportPush.disattiva())) { revertCalendarToggle(toggle, true); return; }
+                const yes = await confirmCalendarDisconnect(tok.interruttore, 'Revoca il token dello script del PC');
+                if (!yes || !(await tok.disattiva())) { revertCalendarToggle(toggle, true); return; }
                 dbxDopo(toggle, false);
             }
         });
         document.addEventListener('click', async (e) => {
             const b = e.target.closest && e.target.closest('[data-dbx-nuovo]');
-            if (!b || !window.MySupportPush) return;
+            if (!b || !window.TokenScriptPc) return;
             e.preventDefault();
             e.stopPropagation();
+            const toggle = document.querySelector(`.dbx-toggle[data-setting-id="${b.dataset.dbxNuovo}"]`);
+            const tok = window.TokenScriptPc(toggle && toggle.dataset.tokenTipo);
             // Primo token (data-dbx-primo): nessuna conferma, non c'è un token da invalidare.
             const yes = b.dataset.dbxPrimo === '1' || await confirmCalendarDisconnect('il token attuale (lo script del PC andrà aggiornato con quello nuovo)', 'Genera un nuovo token');
-            if (!yes || !(await window.MySupportPush.attiva())) return;
-            const toggle = document.querySelector(`.dbx-toggle[data-setting-id="${b.dataset.dbxNuovo}"]`);
+            if (!yes || !(await tok.attiva())) return;
             if (toggle) { toggle.checked = true; dbxDopo(toggle, true); }
         });
 
@@ -21915,9 +21919,12 @@
                     && DASHBOARD_FLAG_CAMPI.includes(String(row.campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase());
                 // Impostazioni › «DataBricks»: acceso = token con cui lo script del PC invia
                 // MySupport a Projexa (js/mysupport-push.js); stato e ultimo invio accanto.
-                const isDbx = !calKey && !aiKey && currentDetailSource === 'settings' && !detailReorderMode
-                    && String(row.campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase() === 'databricks';
-                const calAttrs = isDbx ? ' class="dbx-toggle"'
+                // Stesso funzionamento per «Gestione Solleciti tkt» (token dei solleciti ticket).
+                const campoNorm = String(row.campo || '').replace(/^\(\*\)\s*/, '').trim().toLowerCase();
+                const tokenTipo = (!calKey && !aiKey && currentDetailSource === 'settings' && !detailReorderMode)
+                    ? (campoNorm === 'databricks' ? 'dbx' : (campoNorm === 'gestione solleciti tkt' ? 'solleciti' : null)) : null;
+                const isDbx = !!tokenTipo;
+                const calAttrs = isDbx ? ` class="dbx-toggle" data-token-tipo="${tokenTipo}"`
                     : calKey ? ` class="calendar-toggle" data-cal-provider="${calKey}"`
                     : (aiKey === 'copilot' ? ' disabled title="Copilot non disponibile: non ha un\'API pubblica"'
                     : (aiKey ? ` class="ai-toggle" data-ai-provider="${aiKey}"`
@@ -21931,7 +21938,7 @@
                     input += `<span class="calendar-conn" data-dbx-stato="${id}"></span>`;
                     if (checked) setTimeout(() => {
                         const el = document.querySelector(`.calendar-conn[data-dbx-stato="${id}"]`);
-                        if (el && window.MySupportPush) window.MySupportPush.riempi(el, id);
+                        if (el && window.TokenScriptPc) window.TokenScriptPc(tokenTipo).riempi(el, id);
                     }, 0);
                 } else if (calKey) {
                     input += `<span class="calendar-conn" data-cal-provider="${calKey}"></span>`;
@@ -24528,7 +24535,7 @@
     <!-- Versione esplicita per evitare che il browser mantenga in cache una precedente
          risposta 404 del modulo: senza questo script la voce Qlik resta display:none. -->
     <script src="js/Qlik_voucher.js?v=20261015-1"></script>
-    <script src="js/mysupport-push.js?v=20261017-2"></script>
+    <script src="js/mysupport-push.js?v=20261119-1"></script>
     <script src="js/outlook-addin.js?v=20261022-3"></script>
     <!-- Accessibilità: finestre (focus, Esc), annunci, tastiera nei flyout, grafici -->
     <script src="js/a11y.js?v=20261026-1"></script>
