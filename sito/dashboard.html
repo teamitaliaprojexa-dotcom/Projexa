@@ -2486,6 +2486,62 @@
         .kpi-refresh-btn.loading i { animation: kpi-spin 0.8s linear infinite; }
         @keyframes kpi-spin { to { transform: rotate(360deg); } }
 
+        /* Pulsante «Gestione Solleciti» tra i mini KPI e il ricalcolo: ticket MySupport sollecitati
+           senza risposta. Con ticket aperti è rosso pieno, con il numero in evidenza e un alone
+           che pulsa finché ce ne sono; a zero diventa verde e tranquillo. */
+        .solleciti-btn {
+            flex: none; align-self: flex-start;
+            display: inline-flex; align-items: center; gap: 0.55rem;
+            padding: 0.55rem 0.8rem; border-radius: 10px; cursor: pointer;
+            font-weight: 700; font-size: 0.85rem; line-height: 1.1; white-space: nowrap;
+            border: 2px solid #dc2626; background: #dc2626; color: #fff;
+            box-shadow: 0 4px 14px rgba(220, 38, 38, 0.35);
+        }
+        .solleciti-btn[hidden] { display: none; }
+        /* Dentro la griglia: stessa forma di un mini KPI (icona e numero sopra, scritta sotto),
+           largo quanto la colonna, così non invade il pulsante di aggiornamento. */
+        #dashboardKpiGrid .solleciti-btn {
+            display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
+            align-items: center; column-gap: 0.5rem; row-gap: 0.35rem;
+            width: 100%; min-width: 0; align-self: start; text-align: left; white-space: normal;
+            padding: 0.6rem 0.75rem;
+        }
+        #dashboardKpiGrid .solleciti-btn .sl-ico { grid-row: 1; grid-column: 1; }
+        #dashboardKpiGrid .solleciti-btn .sl-num { grid-row: 1; grid-column: 2; justify-self: end; }
+        #dashboardKpiGrid .solleciti-btn .sl-lbl { grid-row: 2; grid-column: 1 / -1; font-size: 0.8rem; }
+        @media (max-width: 768px) { #dashboardKpiGrid .solleciti-btn { grid-row: auto !important; grid-column: 1 / -1 !important; margin-left: 0; } }
+        .solleciti-btn .sl-ico { font-size: 1.05rem; }
+        .solleciti-btn .sl-num {
+            min-width: 1.9rem; padding: 0.15rem 0.45rem; border-radius: 999px; text-align: center;
+            background: #fff; color: #dc2626; font-size: 1.05rem; font-variant-numeric: tabular-nums;
+        }
+        .solleciti-btn.sl-alert { animation: sollecitiPulse 1.6s ease-in-out infinite; }
+        .solleciti-btn.sl-alert .sl-ico { animation: sollecitiShake 1.6s ease-in-out infinite; transform-origin: 50% 0; }
+        .solleciti-btn.sl-ok { background: #ecfdf5; border-color: #10b981; color: #047857; box-shadow: none; }
+        .solleciti-btn.sl-ok .sl-num { background: #10b981; color: #fff; }
+        .solleciti-btn:hover { filter: brightness(1.05); }
+        @keyframes sollecitiPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55), 0 4px 14px rgba(220, 38, 38, 0.35); }
+            50% { box-shadow: 0 0 0 9px rgba(220, 38, 38, 0), 0 4px 14px rgba(220, 38, 38, 0.35); }
+        }
+        @keyframes sollecitiShake {
+            0%, 60%, 100% { transform: rotate(0); }
+            65% { transform: rotate(-14deg); } 75% { transform: rotate(12deg); } 85% { transform: rotate(-8deg); }
+        }
+        @media (prefers-reduced-motion: reduce) { .solleciti-btn.sl-alert, .solleciti-btn.sl-alert .sl-ico { animation: none; } }
+        #sollecitiModal .kpi-modal-card { width: 960px; }
+        .sl-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .sl-table th { position: sticky; top: 0; background: #f8fafc; text-align: left; font-weight: 700; color: var(--dark);
+                       padding: 0.5rem 0.6rem; border-bottom: 2px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap; }
+        .sl-table th .sl-dir { color: var(--text-muted); font-size: 0.7rem; margin-left: 0.25rem; }
+        .sl-table td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+        .sl-table tr:hover td { background: #fef2f2; }
+        .sl-table td.sl-tkt { font-weight: 700; font-variant-numeric: tabular-nums; }
+        .sl-table td.sl-data { white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .sl-table a { color: var(--primary); text-decoration: none; } .sl-table a:hover { text-decoration: underline; }
+        .sl-old { color: #dc2626; font-weight: 700; }
+        .sl-nota { font-size: 0.78rem; color: var(--text-muted); margin: 0 0 0.6rem; }
+
         .stat-card {
             background: white;
             min-width: 0;
@@ -5146,6 +5202,12 @@
             <!-- Mini KPI + pulsante di ricalcolo sulla destra -->
             <div class="kpi-grid-row">
                 <div class="stats-grid" id="dashboardKpiGrid"></div>
+                <!-- Gestione Solleciti: ticket MySupport sollecitati senza risposta (interruttore
+                     «Gestione Solleciti tkt» in Impostazioni; nascosto se spento) -->
+                <button type="button" id="sollecitiBtn" class="solleciti-btn" hidden data-click="openSollecitiModal"
+                        title="Ticket MySupport sollecitati che aspettano una risposta">
+                    <i class="fas fa-bell sl-ico"></i><span class="sl-lbl">Gestione Solleciti</span><span class="sl-num" id="sollecitiNum">0</span>
+                </button>
                 <button type="button" id="kpiRefreshBtn" class="kpi-refresh-btn" title="Ricalcola i KPI" aria-label="Ricalcola i KPI" data-click="refreshDashboardKpis"><i class="fas fa-sync-alt"></i></button>
             </div>
 
@@ -5721,10 +5783,136 @@
             return params.toString();
         }
 
+        // === GESTIONE SOLLECITI (2026-11-19) ===
+        // Pulsante tra i mini KPI e il ricalcolo: numero dei ticket MySupport con email del
+        // sollecito compilata e risposta interna o risposta cliente diversa da «Risposto»
+        // (GET /api/mysupport/solleciti/aperti). Nascosto se l'interruttore «Gestione Solleciti
+        // tkt» delle Impostazioni è spento. Si aggiorna con i KPI (caricamento, ricalcolo, filtro).
+        let sollecitiDati = { items: [] };
+        let sollecitiOrdine = { col: 'data_sollecito', dir: 1 };
+        async function loadSolleciti() {
+            const btn = document.getElementById('sollecitiBtn');
+            if (!btn) return;
+            try {
+                const qs = buildKpiQueryString();
+                const r = await fetch(`${API_URL}/mysupport/solleciti/aperti${qs ? `?${qs}` : ''}`, { headers: getAuthHeaders(), cache: 'no-store' });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.error || `Errore HTTP ${r.status}`);
+                sollecitiDati = d;
+                if (!d.attivo) { btn.hidden = true; return; }
+                const n = Number(d.totale) || 0;
+                document.getElementById('sollecitiNum').textContent = String(n);
+                btn.classList.toggle('sl-alert', n > 0);
+                btn.classList.toggle('sl-ok', n === 0);
+                btn.title = n > 0 ? `${n} ticket sollecitat${n === 1 ? 'o aspetta' : 'i aspettano'} una risposta: clicca per vederli` : 'Nessun sollecito in attesa di risposta';
+                btn.hidden = false;
+                const modal = document.getElementById('sollecitiModal');
+                if (modal && modal.style.display === 'flex') renderSollecitiGrid();
+            } catch (e) {
+                console.warn('[SOLLECITI]', e.message);
+            }
+        }
+
+        // Il pulsante va nella griglia dei mini KPI, in prima riga subito dopo l'ultimo KPI
+        // (colonne libere fino alla fine). Se la prima riga è piena resta fuori, a destra.
+        function posizionaSollecitiBtn(grid) {
+            const btn = document.getElementById('sollecitiBtn');
+            if (!btn || !grid) return;
+            const ultima = dashboardKpis
+                .filter((k) => (Number(k.riga) || 1) === 1)
+                .reduce((m, k) => Math.max(m, Number(k.colonna) || 1), 0);
+            if (ultima >= 10) return;
+            btn.style.gridRow = '1';
+            btn.style.gridColumn = String(ultima + 1);
+            grid.appendChild(btn);
+        }
+
+        function renderSollecitiGrid() {
+            const body = document.getElementById('sollecitiModalBody');
+            if (!body) return;
+            const items = (sollecitiDati.items || []).slice();
+            if (!items.length) { body.innerHTML = '<div class="kpi-modal-empty">Nessun sollecito in attesa di risposta.</div>'; return; }
+            const { col, dir } = sollecitiOrdine;
+            const val = (x) => String(x[col] == null ? '' : x[col]).toLowerCase();
+            items.sort((a, b) => (val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0) * dir);
+            const fmt = (v) => {
+                if (!v) return '';
+                const d = new Date(v);
+                return Number.isNaN(d.getTime()) ? escapeHtml(v) : d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+            };
+            // Sollecito di più di 3 giorni fa: data in rosso.
+            const vecchio = (v) => v && (Date.now() - new Date(v).getTime()) > 3 * 86400000;
+            const colonne = [['codice_quesito', 'Numero tkt'], ['cliente', 'Cliente'], ['email_sollecito', 'Email sollecito'], ['nominativo', 'Nominativo'], ['data_sollecito', 'Data sollecito']];
+            const th = colonne.map(([k, l]) => `<th data-sl-col="${k}">${l}${k === col ? `<span class="sl-dir">${dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`).join('');
+            const tr = items.map((x) => `<tr title="Risposta interna: ${escapeHtml(x.risposta_interna || '—')} · Risposta cliente: ${escapeHtml(x.risposta_cliente || '—')}">
+                    <td class="sl-tkt">${escapeHtml(x.codice_quesito || '')}</td>
+                    <td>${escapeHtml(x.cliente || '')}</td>
+                    <td>${x.email_sollecito ? `<a href="mailto:${escapeHtml(x.email_sollecito)}">${escapeHtml(x.email_sollecito)}</a>` : ''}</td>
+                    <td>${escapeHtml(x.nominativo || '')}</td>
+                    <td class="sl-data${vecchio(x.data_sollecito) ? ' sl-old' : ''}">${fmt(x.data_sollecito)}</td>
+                </tr>`).join('');
+            body.innerHTML = `<p class="sl-nota">${items.length} ticket con sollecito inviato e risposta interna o del cliente non ancora «Risposto». Clic sull'intestazione per ordinare; in rosso i solleciti di più di 3 giorni fa.</p>
+                <table class="sl-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
+            body.querySelectorAll('th[data-sl-col]').forEach((h) => h.addEventListener('click', () => {
+                const c = h.dataset.slCol;
+                sollecitiOrdine = { col: c, dir: sollecitiOrdine.col === c ? -sollecitiOrdine.dir : 1 };
+                renderSollecitiGrid();
+            }));
+        }
+
+        function openSollecitiModal() {
+            const modal = document.getElementById('sollecitiModal');
+            if (!modal) return;
+            modal.style.display = 'flex';
+            renderSollecitiGrid();
+            loadSolleciti(); // dati freschi: la griglia si ridisegna appena arrivano
+        }
+        function closeSollecitiModal() {
+            const modal = document.getElementById('sollecitiModal');
+            if (modal) modal.style.display = 'none';
+        }
+        document.addEventListener('click', (e) => {
+            const modal = document.getElementById('sollecitiModal');
+            if (modal && e.target === modal) closeSollecitiModal();
+        });
+        document.addEventListener('keydown', (e) => {
+            const modal = document.getElementById('sollecitiModal');
+            if (e.key === 'Escape' && modal && modal.style.display === 'flex') closeSollecitiModal();
+        });
+        window.openSollecitiModal = openSollecitiModal;
+        window.closeSollecitiModal = closeSollecitiModal;
+
+        // Aggiornamento automatico: quando lo script del PC invia i solleciti (ultimo invio del
+        // token «Gestione Solleciti tkt» cambiato) pulsante e griglia si ricaricano da soli.
+        // Controllo leggero ogni 60 secondi a pagina visibile (come la campanella) e al ritorno
+        // sulla scheda; si ricarica solo se l'ultimo invio è diverso da quello già visto.
+        let sollecitiUltimoInvio = null;
+        async function controllaInvioSolleciti() {
+            const btn = document.getElementById('sollecitiBtn');
+            if (!btn || btn.hidden || document.hidden) return; // interruttore spento: niente controlli
+            try {
+                const r = await fetch(`${API_URL}/mysupport/solleciti/token`, { headers: getAuthHeaders(), cache: 'no-store' });
+                if (!r.ok) return;
+                const s = await r.json();
+                const ultimo = (s && s.ultimoUso) || '';
+                if (sollecitiUltimoInvio === null) { sollecitiUltimoInvio = ultimo; return; } // primo controllo: riferimento
+                if (ultimo === sollecitiUltimoInvio) return;
+                sollecitiUltimoInvio = ultimo;
+                await loadSolleciti();
+            } catch (e) { /* rete assente: si riprova al giro dopo */ }
+        }
+        setInterval(controllaInvioSolleciti, 60000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) controllaInvioSolleciti(); });
+
         // Il caricamento iniziale esegue esclusivamente i conteggi configurati.
         async function loadDashboardKpis({ anima = true } = {}) {
             const grid = document.getElementById('dashboardKpiGrid');
             if (!grid) return;
+            // Il pulsante «Gestione Solleciti» sta dentro la griglia dei mini KPI (vedi
+            // posizionaSollecitiBtn): prima di riscriverla lo si riporta fuori, sennò si perde.
+            const slBtn = document.getElementById('sollecitiBtn');
+            if (slBtn && slBtn.parentElement === grid) grid.parentElement.insertBefore(slBtn, document.getElementById('kpiRefreshBtn'));
+            loadSolleciti(); // pulsante «Gestione Solleciti»: in parallelo ai KPI
             try {
                 const queryString = buildKpiQueryString();
                 const response = await fetch(`${API_URL}/dashboard/kpis${queryString ? `?${queryString}` : ''}`, {
@@ -5750,6 +5938,7 @@
                     </div>
                 `).join('');
                 bindDynamicKpiCards();
+                posizionaSollecitiBtn(grid);
                 grid.querySelectorAll('.kpi-alert-zoom').forEach(card =>
                     card.addEventListener('animationend', () => card.classList.remove('kpi-alert-zoom'), { once: true }));
             } catch (error) {
@@ -24515,6 +24704,18 @@
         </div>
     </div>
     <!-- Modale di dettaglio KPI (Progetti attivi / completati / Rischi aperti) -->
+    <!-- Finestra «Gestione Solleciti»: griglia dei ticket sollecitati senza risposta -->
+    <div id="sollecitiModal" role="dialog" aria-modal="true" aria-labelledby="sollecitiModalTitle" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
+        <div class="kpi-modal-card">
+            <div class="kpi-modal-header">
+                <h3 id="sollecitiModalTitle" style="margin: 0; color: var(--dark);"><i class="fas fa-bell" style="color:#dc2626;"></i> Gestione Solleciti</h3>
+                <button id="sollecitiModalClose" type="button" aria-label="Chiudi" data-click="closeSollecitiModal" style="border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="kpi-modal-body" id="sollecitiModalBody"></div>
+        </div>
+    </div>
     <div id="kpiModal" role="dialog" aria-modal="true" aria-labelledby="kpiModalTitle" style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 600; display: none; align-items: center; justify-content: center;">
         <div class="kpi-modal-card">
             <div class="kpi-modal-header">

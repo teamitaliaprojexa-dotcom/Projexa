@@ -7327,6 +7327,78 @@ app.post('/api/mysupport/push', async (req, res) => {
   }
 });
 
+// GESTIONE SOLLECITI (pulsante della dashboard accanto ai mini KPI, 2026-11-19)
+// Ticket MySupport dell'utente con email_sollecito compilata e risposta ancora mancante:
+// risposta interna O risposta cliente diversa da «Risposto» (anche vuota). Solo se
+// l'interruttore «Gestione Solleciti tkt» delle Impostazioni è acceso (altrimenti attivo=false
+// e il pulsante non compare). Filtro clienti della dashboard facoltativo (clientId).
+// Nominativo: contatto (contacts) con la stessa email, preferendo quello dello stesso cliente;
+// le email dei contatti sono cifrate, quindi l'abbinamento si fa qui dopo la lettura.
+app.get('/api/mysupport/solleciti/aperti', requireAuth, async (req, res) => {
+  try {
+    const t = req.user.tenant_id, u = req.user.user_id;
+    const acceso = (await db.query(
+      `SELECT 1 FROM settings WHERE tenant_id = $1 AND user_id = $2 AND valore1 IS TRUE
+          AND lower(btrim(regexp_replace(campo, '^\\(\\*\\)\\s*', ''))) = 'gestione solleciti tkt' LIMIT 1`,
+      [t, u])).rows.length > 0;
+    if (!acceso) return res.json({ attivo: false, totale: 0, items: [] });
+
+    const clientIds = [].concat(req.query.clientId || []).map(String).filter(Boolean);
+    const params = [t, u];
+    let filtroClienti = '';
+    if (clientIds.length) { params.push(clientIds); filtroClienti = ` AND client_id::text = ANY($${params.length}::text[])`; }
+    const righe = (await db.query(
+      `SELECT codice_quesito, client_id::text AS client_id, mycliente, email_sollecito,
+              to_char(data_sollecito, 'YYYY-MM-DD"T"HH24:MI:SS') AS data_sollecito,
+              risposta_interna, risposta_cliente
+         FROM mysupport
+        WHERE tenant_id = $1 AND user_id = $2
+          AND NULLIF(btrim(email_sollecito), '') IS NOT NULL
+          AND (lower(btrim(coalesce(risposta_interna, ''))) <> 'risposto'
+               OR lower(btrim(coalesce(risposta_cliente, ''))) <> 'risposto')${filtroClienti}
+        ORDER BY data_sollecito NULLS LAST, codice_quesito`,
+      params)).rows;
+
+    let clienti = new Map();
+    try { clienti = await resolveClientDescriptions(righe.map((r) => r.client_id), t); }
+    catch (e) { console.error('[SOLLECITI APERTI] decodifica clienti:', e.message); }
+    // email -> [{ nominativo, client_id }] dai contatti del tenant.
+    const contatti = new Map();
+    if (righe.length) {
+      try {
+        const cr = (await db.query(
+          'SELECT client_id::text AS client_id, nominativo, email FROM contacts WHERE tenant_id = $1 AND email IS NOT NULL', [t])).rows;
+        for (const c of cr) {
+          const e = String(c.email || '').trim().toLowerCase();
+          if (!e || e.startsWith('enc:')) continue;
+          if (!contatti.has(e)) contatti.set(e, []);
+          contatti.get(e).push(c);
+        }
+      } catch (e) { console.error('[SOLLECITI APERTI] contatti:', e.message); }
+    }
+    const items = righe.map((r) => {
+      const lista = contatti.get(String(r.email_sollecito || '').trim().toLowerCase()) || [];
+      const contatto = lista.find((c) => c.client_id && c.client_id === r.client_id) || lista[0];
+      return {
+        codice_quesito: r.codice_quesito,
+        client_id: r.client_id,
+        cliente: (r.client_id && clienti.get(String(r.client_id))) || r.mycliente || null,
+        email_sollecito: r.email_sollecito,
+        nominativo: (contatto && String(contatto.nominativo || '').trim()) || null,
+        data_sollecito: r.data_sollecito,
+        risposta_interna: r.risposta_interna,
+        risposta_cliente: r.risposta_cliente
+      };
+    });
+    res.json({ attivo: true, totale: items.length, items });
+  } catch (error) {
+    // Colonne dei solleciti non ancora create: pulsante nascosto, nessun errore a video.
+    if (error.code === '42703') return res.json({ attivo: false, totale: 0, items: [], nota: 'Eseguire Supporto/CreaDB/mysupport_solleciti.sql' });
+    console.error('[SOLLECITI APERTI]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ==========================================
 // SETTINGS ENDPOINTS
 // ==========================================
