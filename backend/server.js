@@ -7423,15 +7423,25 @@ app.get('/api/mysupport/solleciti/aperti', requireAuth, async (req, res) => {
     const params = [t, u];
     let filtroClienti = '';
     if (clientIds.length) { params.push(clientIds); filtroClienti = ` AND client_id::text = ANY($${params.length}::text[])`; }
+    // 2026-11-23: anche i ticket con customer_vat compilato e stato diverso da «Chiuso» (anche
+    // senza stato), sollecitati o no. Una riga per ticket (le due condizioni sono in OR).
+    // Se la colonna customer_vat non c'è ancora (SQL mysupport_contatto_cliente.sql) si salta.
+    const colsMs = await getTableColumns('mysupport');
+    const conVat = colsMs.has('customer_vat');
+    const sollecitato = `(NULLIF(btrim(email_sollecito), '') IS NOT NULL
+          AND (lower(btrim(coalesce(risposta_interna, ''))) <> 'risposto'
+               OR lower(btrim(coalesce(risposta_cliente, ''))) <> 'risposto'))`;
+    const vatAperto = `(NULLIF(btrim(customer_vat), '') IS NOT NULL
+          AND lower(btrim(coalesce(stato_finale, ''))) <> 'chiuso')`;
     const righe = (await db.query(
       `SELECT codice_quesito, client_id::text AS client_id, mycliente, email_sollecito,
               to_char(data_sollecito, 'YYYY-MM-DD"T"HH24:MI:SS') AS data_sollecito,
-              risposta_interna, risposta_cliente
+              risposta_interna, risposta_cliente, stato_finale,
+              ${sollecitato} AS sollecitato,
+              ${conVat ? 'customer_vat, contact_person, object_description' : 'NULL AS customer_vat, NULL AS contact_person, NULL AS object_description'}
          FROM mysupport
         WHERE tenant_id = $1 AND user_id = $2
-          AND NULLIF(btrim(email_sollecito), '') IS NOT NULL
-          AND (lower(btrim(coalesce(risposta_interna, ''))) <> 'risposto'
-               OR lower(btrim(coalesce(risposta_cliente, ''))) <> 'risposto')${filtroClienti}
+          AND (${sollecitato}${conVat ? ` OR ${vatAperto}` : ''})${filtroClienti}
         ORDER BY data_sollecito NULLS LAST, codice_quesito`,
       params)).rows;
 
@@ -7460,13 +7470,18 @@ app.get('/api/mysupport/solleciti/aperti', requireAuth, async (req, res) => {
         client_id: r.client_id,
         cliente: (r.client_id && clienti.get(String(r.client_id))) || r.mycliente || null,
         email_sollecito: r.email_sollecito,
-        nominativo: (contatto && String(contatto.nominativo || '').trim()) || null,
+        // Senza contatto con l'email del sollecito: il referente del file (Contact Person).
+        nominativo: (contatto && String(contatto.nominativo || '').trim()) || (r.contact_person ? String(r.contact_person).trim() : null) || null,
         data_sollecito: r.data_sollecito,
         risposta_interna: r.risposta_interna,
-        risposta_cliente: r.risposta_cliente
+        risposta_cliente: r.risposta_cliente,
+        stato: r.stato_finale || null,
+        customer_vat: r.customer_vat || null,
+        descrizione: r.object_description || null,
+        sollecitato: !!r.sollecitato
       };
     });
-    res.json({ attivo: true, totale: items.length, items });
+    res.json({ attivo: true, totale: items.length, sollecitati: items.filter((x) => x.sollecitato).length, items });
   } catch (error) {
     // Colonne dei solleciti non ancora create: pulsante nascosto, nessun errore a video.
     if (error.code === '42703') return res.json({ attivo: false, totale: 0, items: [], nota: 'Eseguire Supporto/CreaDB/mysupport_solleciti.sql' });

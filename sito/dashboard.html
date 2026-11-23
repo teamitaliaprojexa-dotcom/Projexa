@@ -2529,7 +2529,7 @@
             65% { transform: rotate(-14deg); } 75% { transform: rotate(12deg); } 85% { transform: rotate(-8deg); }
         }
         @media (prefers-reduced-motion: reduce) { .solleciti-btn.sl-alert, .solleciti-btn.sl-alert .sl-ico { animation: none; } }
-        #sollecitiModal .kpi-modal-card { width: 960px; }
+        #sollecitiModal .kpi-modal-card { width: 1180px; max-width: 96vw; }
         .sl-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
         .sl-table th { position: sticky; top: 0; background: #f8fafc; text-align: left; font-weight: 700; color: var(--dark);
                        padding: 0.5rem 0.6rem; border-bottom: 2px solid var(--border); cursor: pointer; user-select: none; white-space: nowrap; }
@@ -5804,7 +5804,8 @@
                 document.getElementById('sollecitiNum').textContent = String(n);
                 btn.classList.toggle('sl-alert', n > 0);
                 btn.classList.toggle('sl-ok', n === 0);
-                btn.title = n > 0 ? `${n} ticket sollecitat${n === 1 ? 'o aspetta' : 'i aspettano'} una risposta: clicca per vederli` : 'Nessun sollecito in attesa di risposta';
+                const ns = Number(d.sollecitati) || 0;
+                btn.title = n > 0 ? `${n} ticket: ${ns} sollecitat${ns === 1 ? 'o' : 'i'} in attesa di risposta, ${n - ns} non chius${n - ns === 1 ? 'o' : 'i'} con Customer VAT. Clicca per vederli` : 'Nessun sollecito in attesa di risposta';
                 btn.hidden = false;
                 const modal = document.getElementById('sollecitiModal');
                 if (modal && modal.style.display === 'flex') renderSollecitiGrid();
@@ -5831,7 +5832,7 @@
             const body = document.getElementById('sollecitiModalBody');
             if (!body) return;
             const items = (sollecitiDati.items || []).slice();
-            if (!items.length) { body.innerHTML = '<div class="kpi-modal-empty">Nessun sollecito in attesa di risposta.</div>'; return; }
+            if (!items.length) { body.innerHTML = '<div class="kpi-modal-empty">Nessun sollecito in attesa di risposta e nessun ticket non chiuso con Customer VAT.</div>'; return; }
             const { col, dir } = sollecitiOrdine;
             const val = (x) => String(x[col] == null ? '' : x[col]).toLowerCase();
             items.sort((a, b) => (val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0) * dir);
@@ -5842,16 +5843,19 @@
             };
             // Sollecito di più di 3 giorni fa: data in rosso.
             const vecchio = (v) => v && (Date.now() - new Date(v).getTime()) > 3 * 86400000;
-            const colonne = [['codice_quesito', 'Numero tkt'], ['cliente', 'Cliente'], ['email_sollecito', 'Email sollecito'], ['nominativo', 'Nominativo'], ['data_sollecito', 'Data sollecito']];
+            const colonne = [['codice_quesito', 'Numero tkt'], ['cliente', 'Cliente'], ['stato', 'Stato'], ['customer_vat', 'Customer VAT'], ['email_sollecito', 'Email sollecito'], ['nominativo', 'Nominativo'], ['data_sollecito', 'Data sollecito']];
             const th = colonne.map(([k, l]) => `<th data-sl-col="${k}">${l}${k === col ? `<span class="sl-dir">${dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`).join('');
-            const tr = items.map((x) => `<tr title="Risposta interna: ${escapeHtml(x.risposta_interna || '—')} · Risposta cliente: ${escapeHtml(x.risposta_cliente || '—')}">
+            const tr = items.map((x) => `<tr title="${x.descrizione ? `${escapeHtml(x.descrizione)} · ` : ''}Risposta interna: ${escapeHtml(x.risposta_interna || '—')} · Risposta cliente: ${escapeHtml(x.risposta_cliente || '—')}">
                     <td class="sl-tkt">${escapeHtml(x.codice_quesito || '')}</td>
                     <td>${escapeHtml(x.cliente || '')}</td>
+                    <td>${escapeHtml(x.stato || '')}</td>
+                    <td>${escapeHtml(x.customer_vat || '')}</td>
                     <td>${x.email_sollecito ? `<a href="mailto:${escapeHtml(x.email_sollecito)}">${escapeHtml(x.email_sollecito)}</a>` : ''}</td>
                     <td>${escapeHtml(x.nominativo || '')}</td>
                     <td class="sl-data${vecchio(x.data_sollecito) ? ' sl-old' : ''}">${fmt(x.data_sollecito)}</td>
                 </tr>`).join('');
-            body.innerHTML = `<p class="sl-nota">${items.length} ticket con sollecito inviato e risposta interna o del cliente non ancora «Risposto». Clic sull'intestazione per ordinare; in rosso i solleciti di più di 3 giorni fa.</p>
+            const nSoll = items.filter((x) => x.sollecitato).length;
+            body.innerHTML = `<p class="sl-nota">${items.length} ticket: ${nSoll} con sollecito inviato e risposta interna o del cliente non ancora «Risposto», ${items.length - nSoll} non chiusi con Customer VAT compilato (senza sollecito in attesa). Clic sull'intestazione per ordinare; in rosso i solleciti di più di 3 giorni fa; passa il mouse su una riga per descrizione e risposte.</p>
                 <table class="sl-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
             body.querySelectorAll('th[data-sl-col]').forEach((h) => h.addEventListener('click', () => {
                 const c = h.dataset.slCol;
