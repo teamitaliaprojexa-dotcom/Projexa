@@ -71,6 +71,7 @@ export async function registraInvioPush(tokenId, blocco, blocchi, esito) {
     totale: somma('totale'), inserted: somma('inserted'), updated: somma('updated'),
     unchanged: somma('unchanged'), invalid: somma('invalid'),
     nonTrovati: somma('nonTrovati'), ambigui: somma('ambigui'),
+    perCodiceFiscale: somma('perCodiceFiscale'), // MySupport: abbinati per codice fiscale (2026-11-23)
     creati: somma('creati'), senzaCliente: somma('senzaCliente') // solo solleciti
   };
   await db.query('UPDATE api_token SET ultimo_uso = now(), ultimo_report = $2 WHERE id = $1', [tokenId, JSON.stringify(report)]);

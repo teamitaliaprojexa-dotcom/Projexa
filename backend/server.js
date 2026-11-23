@@ -7179,6 +7179,8 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
 // Qui ogni riga viene abbinata al cliente Projexa il cui campo "My Support" (scheda cliente)
 // è uguale alla colonna Cliente del file (senza distinguere maiuscole/minuscole e spazi):
 // da quel cliente prendono tenant_id, user_id (proprietario del cliente) e client_id.
+// Seconda fase (2026-11-23), solo per le righe non caricate dalla prima: abbinamento per
+// codice fiscale (colonna customer_vat del file = campo "Cod fiscale" del cliente).
 // Le righe senza cliente abbinato NON vengono caricate (riepilogo "clienti non trovati").
 // Chiave: (tenant_id, codice_quesito). Riga nuova -> INSERT; già presente -> UPDATE solo se
 // qualche valore è cambiato (altrimenti non si scrive: niente righe inutili nel log).
@@ -7192,6 +7194,15 @@ const MYSUPPORT_COLONNE = ['stato_finale', 'mycliente', 'procedura', 'data_apert
 // già salvati intatti) e se la tabella le ha già (SQL non ancora eseguito = ignorate).
 const MYSUPPORT_COLONNE_EXTRA = ['contact_person', 'object_description', 'customer_vat', 'customer_name'];
 const mySupportNorm = (v) => String(v == null ? '' : v).normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
+// Codice fiscale / partita IVA per il confronto: solo lettere e cifre, maiuscolo, senza il
+// prefisso «IT»; se è di sole cifre si riportano a 11 con gli zeri iniziali (Excel li toglie:
+// 164430043 = 00164430043).
+const normCodiceFiscale = (v) => {
+  let s = String(v == null ? '' : v).normalize('NFKC').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (/^IT\d{11}$/.test(s)) s = s.slice(2);
+  if (/^\d{1,11}$/.test(s)) s = s.padStart(11, '0');
+  return s;
+};
 
 // Import di un blocco di righe (massimo 5000) nel tenant indicato. Lo usano il browser
 // (Qlik › MySupport, utente del login) e lo script schedulato del PC (/api/mysupport/push, utente
@@ -7240,60 +7251,107 @@ async function importaRigheMySupport(tenantId, rowsIn) {
     const s = testo(v, lunghezzaExtra[k]);
     return s && cifrate.has(k) ? encryptValue(s) : s;
   };
-  let inserted = 0, updated = 0, unchanged = 0, invalid = 0;
+  // 2) Seconda fase (2026-11-23): le righe NON caricate dalla prima (nome cliente non trovato o
+  //    presente su più clienti) si abbinano al cliente il cui campo "Cod fiscale" è uguale alla
+  //    colonna customer_vat (Customer Reference VAT) del file. Cod fiscale è cifrato: confronto
+  //    dopo la lettura. Un codice fiscale presente su più clienti non viene abbinato.
+  const clientiPerCF = new Map(); // codice fiscale normalizzato -> Map(clientId -> ownerUserId)
+  if (extraInTabella.includes('customer_vat') && rowsIn.some((r) => r && normCodiceFiscale(r.customer_vat))) {
+    const cf = await db.query(
+      `SELECT argument, valore2 FROM clients
+        WHERE tenant_id = $1 AND LOWER(BTRIM(regexp_replace(campo, '^\\(\\*\\)\\s*', ''))) IN ('cod fiscale', 'codice fiscale')
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`,
+      [tenantId]
+    );
+    for (const c of cf.rows) {
+      const codiceFiscale = normCodiceFiscale(c.valore2);
+      if (!codiceFiscale) continue;
+      const root = await resolveClientRoot(c.argument, tenantId);
+      if (!root) continue;
+      if (!clientiPerCF.has(codiceFiscale)) clientiPerCF.set(codiceFiscale, new Map());
+      clientiPerCF.get(codiceFiscale).set(String(root.clientId), root.ownerUserId);
+    }
+  }
+
+  let inserted = 0, updated = 0, unchanged = 0, invalid = 0, perCodiceFiscale = 0;
   const nuovi = []; // ticket inseriti (non gli aggiornati): notifiche dopo il COMMIT
   const nonTrovati = new Map(); // nome cliente del file -> numero righe
   const ambigui = new Set();
+  const caricati = new Set(); // codici quesito scritti dalla prima fase (la seconda non li tocca)
   const client = await db.connect();
+
+  // Scrive un ticket (upsert sulla chiave tenant_id + codice_quesito: mai righe doppie).
+  const scrivi = async (r, codice, nomeFile, clientId, ownerUserId) => {
+    const valori = {
+      stato_finale: testo(r.stato_finale, 100),
+      mycliente: nomeFile,
+      procedura: testo(r.procedura, 255),
+      data_apertura: dataOra(r.data_apertura),
+      data_chiusura: dataOra(r.data_chiusura),
+      modulo: testo(r.modulo, 255),
+      urgenza: testo(r.urgenza, 100),
+      year_tkt: anno(r.year_tkt),
+      operatore: cifraOperatore ? (testo(r.operatore, 150) ? encryptValue(testo(r.operatore, 150)) : null) : testo(r.operatore, 255)
+    };
+    // Colonne nuove presenti nella riga inviata (vedi MYSUPPORT_COLONNE_EXTRA).
+    const extra = extraInTabella.filter((k) => Object.prototype.hasOwnProperty.call(r, k));
+    extra.forEach((k) => { valori[k] = valoreExtra(k, r[k]); });
+    const colonne = [...MYSUPPORT_COLONNE, ...extra];
+    const params = [tenantId, ownerUserId, clientId, codice, ...colonne.map((k) => valori[k])];
+    const segn = colonne.map((k, i) => {
+      const p = `$${i + 5}`;
+      return (k === 'data_apertura' || k === 'data_chiusura') ? `${p}::timestamp` : (k === 'year_tkt' ? `${p}::integer` : p);
+    });
+    // UPDATE solo se cambia qualcosa (cliente/proprietario compresi); xmax = 0 -> inserita.
+    // Le colonne cifrate non si confrontano (il cifrato cambia a ogni scrittura).
+    const confronto = ['user_id', 'client_id', ...colonne.filter((k) => !cifrate.has(k))];
+    const out = await client.query(
+      `INSERT INTO mysupport (tenant_id, user_id, client_id, codice_quesito, ${colonne.join(', ')})
+       VALUES ($1, $2, $3, $4, ${segn.join(', ')})
+       ON CONFLICT (tenant_id, codice_quesito) DO UPDATE SET
+         user_id = EXCLUDED.user_id, client_id = EXCLUDED.client_id,
+         ${colonne.map((k) => `${k} = EXCLUDED.${k}`).join(', ')}
+       WHERE (${confronto.map((k) => `mysupport.${k}`).join(', ')})
+             IS DISTINCT FROM (${confronto.map((k) => `EXCLUDED.${k}`).join(', ')})
+       RETURNING id, (xmax = 0) AS inserita`,
+      params
+    );
+    if (!out.rows.length) unchanged += 1;
+    else if (out.rows[0].inserita) {
+      inserted += 1;
+      nuovi.push({ id: out.rows[0].id, tenantId: tenantId, userId: ownerUserId, clientId, codice });
+    } else updated += 1;
+  };
+
   try {
     await client.query('BEGIN');
+    // Prima fase: abbinamento per nome (campo "My Support" del cliente).
+    const seconda = [];
     for (const r of rowsIn) {
       const codice = testo(r && r.codice_quesito, 50);
       if (!codice) { invalid += 1; continue; }
       const nomeFile = testo(r.mycliente, 255);
       const abbinati = clientiPerNome.get(mySupportNorm(nomeFile));
-      if (!abbinati) { const k = nomeFile || '(vuoto)'; nonTrovati.set(k, (nonTrovati.get(k) || 0) + 1); continue; }
-      if (abbinati.size > 1) { ambigui.add(nomeFile); continue; } // stesso valore su più clienti
-      const [[clientId, ownerUserId]] = [...abbinati];
-      const valori = {
-        stato_finale: testo(r.stato_finale, 100),
-        mycliente: nomeFile,
-        procedura: testo(r.procedura, 255),
-        data_apertura: dataOra(r.data_apertura),
-        data_chiusura: dataOra(r.data_chiusura),
-        modulo: testo(r.modulo, 255),
-        urgenza: testo(r.urgenza, 100),
-        year_tkt: anno(r.year_tkt),
-        operatore: cifraOperatore ? (testo(r.operatore, 150) ? encryptValue(testo(r.operatore, 150)) : null) : testo(r.operatore, 255)
-      };
-      // Colonne nuove presenti nella riga inviata (vedi MYSUPPORT_COLONNE_EXTRA).
-      const extra = extraInTabella.filter((k) => Object.prototype.hasOwnProperty.call(r, k));
-      extra.forEach((k) => { valori[k] = valoreExtra(k, r[k]); });
-      const colonne = [...MYSUPPORT_COLONNE, ...extra];
-      const params = [tenantId, ownerUserId, clientId, codice, ...colonne.map((k) => valori[k])];
-      const segn = colonne.map((k, i) => {
-        const p = `$${i + 5}`;
-        return (k === 'data_apertura' || k === 'data_chiusura') ? `${p}::timestamp` : (k === 'year_tkt' ? `${p}::integer` : p);
-      });
-      // UPDATE solo se cambia qualcosa (cliente/proprietario compresi); xmax = 0 -> inserita.
-      // Le colonne cifrate non si confrontano (il cifrato cambia a ogni scrittura).
-      const confronto = ['user_id', 'client_id', ...colonne.filter((k) => !cifrate.has(k))];
-      const out = await client.query(
-        `INSERT INTO mysupport (tenant_id, user_id, client_id, codice_quesito, ${colonne.join(', ')})
-         VALUES ($1, $2, $3, $4, ${segn.join(', ')})
-         ON CONFLICT (tenant_id, codice_quesito) DO UPDATE SET
-           user_id = EXCLUDED.user_id, client_id = EXCLUDED.client_id,
-           ${colonne.map((k) => `${k} = EXCLUDED.${k}`).join(', ')}
-         WHERE (${confronto.map((k) => `mysupport.${k}`).join(', ')})
-               IS DISTINCT FROM (${confronto.map((k) => `EXCLUDED.${k}`).join(', ')})
-         RETURNING id, (xmax = 0) AS inserita`,
-        params
-      );
-      if (!out.rows.length) unchanged += 1;
-      else if (out.rows[0].inserita) {
-        inserted += 1;
-        nuovi.push({ id: out.rows[0].id, tenantId: tenantId, userId: ownerUserId, clientId, codice });
-      } else updated += 1;
+      if (abbinati && abbinati.size === 1) {
+        const [[clientId, ownerUserId]] = [...abbinati];
+        await scrivi(r, codice, nomeFile, clientId, ownerUserId);
+        caricati.add(codice);
+        continue;
+      }
+      seconda.push({ r, codice, nomeFile, ambiguo: !!abbinati }); // abbinati.size > 1 = stesso nome su più clienti
+    }
+    // Seconda fase: solo le righe non caricate, abbinate per codice fiscale (customer_vat).
+    for (const s of seconda) {
+      if (caricati.has(s.codice)) continue; // ticket già caricato dalla prima fase
+      const abbinati = clientiPerCF.get(normCodiceFiscale(s.r.customer_vat));
+      if (abbinati && abbinati.size === 1) {
+        const [[clientId, ownerUserId]] = [...abbinati];
+        await scrivi(s.r, s.codice, s.nomeFile, clientId, ownerUserId);
+        perCodiceFiscale += 1;
+        continue;
+      }
+      if (s.ambiguo) ambigui.add(s.nomeFile);
+      else { const k = s.nomeFile || '(vuoto)'; nonTrovati.set(k, (nonTrovati.get(k) || 0) + 1); }
     }
     await client.query('COMMIT');
   } catch (e) {
@@ -7306,7 +7364,7 @@ async function importaRigheMySupport(tenantId, rowsIn) {
   // Gli errori delle notifiche non fanno fallire l'import (già salvato).
   if (nuovi.length) await notificheNuoviMySupport(nuovi);
   return {
-    totale: rowsIn.length, inserted, updated, unchanged, invalid,
+    totale: rowsIn.length, inserted, updated, unchanged, invalid, perCodiceFiscale,
     nonTrovati: [...nonTrovati].map(([nome, righe]) => ({ nome, righe })).sort((a, b) => b.righe - a.righe),
     ambigui: [...ambigui]
   };

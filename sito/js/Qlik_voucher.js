@@ -316,7 +316,7 @@
     // Invio a blocchi di 2000 righe; restituisce i totali, oppure lancia un errore.
     async function inviaMySupport(righe) {
         const CHUNK = 2000;
-        const tot = { totale: 0, inserted: 0, updated: 0, unchanged: 0, invalid: 0, nonTrovati: new Map(), ambigui: new Set() };
+        const tot = { totale: 0, inserted: 0, updated: 0, unchanged: 0, invalid: 0, perCodiceFiscale: 0, nonTrovati: new Map(), ambigui: new Set() };
         for (let i = 0; i < righe.length; i += CHUNK) {
             try {
                 const res = await fetch(`${API_BASE}/mysupport/import`, {
@@ -326,7 +326,7 @@
                 });
                 const data = await res.json().catch(() => ({}));
                 if (!res.ok) throw new Error('Errore durante l\'importazione MySupport: ' + (data.error || res.status));
-                ['totale', 'inserted', 'updated', 'unchanged', 'invalid'].forEach((k) => { tot[k] += Number(data[k]) || 0; });
+                ['totale', 'inserted', 'updated', 'unchanged', 'invalid', 'perCodiceFiscale'].forEach((k) => { tot[k] += Number(data[k]) || 0; });
                 (data.nonTrovati || []).forEach((x) => tot.nonTrovati.set(x.nome, (tot.nonTrovati.get(x.nome) || 0) + x.righe));
                 (data.ambigui || []).forEach((x) => tot.ambigui.add(x));
             } catch (e) {
@@ -380,7 +380,7 @@
         const nonTrovatiHtml = nonTrovati.length
             ? `<div style="margin-top:0.75rem;"><strong>Clienti del file non abbinati (${nonTrovati.length}, ${scartate} righe non caricate):</strong>
                <div style="max-height:140px; overflow-y:auto; font-size:0.8rem; color:#6B7280; margin-top:0.3rem;">${nonTrovati.map(([nome, n]) => `${esc(nome)} (${n})`).join('<br>')}</div>
-               <div style="font-size:0.78rem; color:#6B7280; margin-top:0.3rem;">Per caricarli, scrivi il nome come nel file nel campo <em>MySupport</em> della scheda del cliente.</div></div>`
+               <div style="font-size:0.78rem; color:#6B7280; margin-top:0.3rem;">Per caricarli, scrivi il nome come nel file nel campo <em>MySupport</em> della scheda del cliente, oppure il codice fiscale (colonna Customer Reference VAT del file) nel campo <em>Cod fiscale</em>.</div></div>`
             : '';
         const ambiguiHtml = r.ambigui.size
             ? `<div style="margin-top:0.75rem; color:#B45309;"><strong>Nome MySupport presente su più clienti (righe non caricate):</strong>
@@ -393,6 +393,7 @@
                 <p style="margin:0; font-size:0.95rem;">Quesiti nuovi inseriti: <strong>${r.inserted}</strong></p>
                 <p style="margin:0.35rem 0 0; font-size:0.95rem;">Quesiti aggiornati: <strong>${r.updated}</strong></p>
                 <p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Già presenti senza variazioni: <strong>${r.unchanged}</strong></p>
+                ${r.perCodiceFiscale ? `<p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Di cui abbinati al cliente per codice fiscale: <strong>${r.perCodiceFiscale}</strong></p>` : ''}
                 ${r.invalid ? `<p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Righe senza Codice Quesito: <strong>${r.invalid}</strong></p>` : ''}
                 ${nonTrovatiHtml}
                 ${ambiguiHtml}

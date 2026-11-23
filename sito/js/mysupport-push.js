@@ -98,6 +98,7 @@
             const titolo = r ? `Righe ricevute ${r.totale || 0} · invariate ${r.unchanged || 0}`
                 + (cfg.nonTrovati ? ` · ${cfg.nonTrovati} ${r.nonTrovati || 0}` : '')
                 + (r.ambigui ? ` · nomi su più clienti ${r.ambigui}` : '')
+                + (r.perCodiceFiscale ? ` · di cui per codice fiscale ${r.perCodiceFiscale}` : '')
                 + (r.creati ? ` · ticket creati ${r.creati}` : '')
                 + (r.senzaCliente ? ` · creati senza cliente (email non tra i contatti) ${r.senzaCliente}` : '')
                 : `Token generato il ${dataOra(s.creatoIl)}`;
