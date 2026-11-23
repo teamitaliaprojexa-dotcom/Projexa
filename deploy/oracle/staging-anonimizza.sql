@@ -26,7 +26,7 @@ DECLARE
   espr text;
   -- Colonne con dati personali, riconosciute dal nome (qualunque tabella).
   persone text[] := ARRAY['nominativo', 'nome', 'cognome', 'telefono', 'cellulare', 'mittente', 'owner',
-                          'owner_nominativo', 'referente', 'richiedente', 'assegnatario', 'operatore',
+                          'owner_nominativo', 'referente', 'richiedente', 'assegnatario', 'operatore', 'contact_person',
                           'accettato_da', 'decisa_da', 'richiesta_da', 'fornitore', 'foto_nome'];
   testi text[] := ARRAY['trascrizione', 'recap', 'recap_html', 'recap_interno', 'oggetto', 'email_a', 'email_cc'];
 BEGIN

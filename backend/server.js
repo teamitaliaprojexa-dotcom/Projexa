@@ -7186,6 +7186,11 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
 // ==========================================================================
 const MYSUPPORT_COLONNE = ['stato_finale', 'mycliente', 'procedura', 'data_apertura', 'data_chiusura',
   'modulo', 'urgenza', 'year_tkt', 'operatore'];
+// Colonne aggiunte il 2026-11-23 (Supporto/CreaDB/mysupport_contatto_cliente.sql): Contact Person,
+// Object Description, Customer Reference VAT, Customer Reference Business Name Description.
+// Si scrivono solo se la riga inviata le contiene (script del PC non ancora aggiornato = valori
+// già salvati intatti) e se la tabella le ha già (SQL non ancora eseguito = ignorate).
+const MYSUPPORT_COLONNE_EXTRA = ['contact_person', 'object_description', 'customer_vat', 'customer_name'];
 const mySupportNorm = (v) => String(v == null ? '' : v).normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
 
 // Import di un blocco di righe (massimo 5000) nel tenant indicato. Lo usano il browser
@@ -7225,8 +7230,16 @@ async function importaRigheMySupport(tenantId, rowsIn) {
   // la colonna crypto e c'è la chiave. Il cifrato cambia a ogni scrittura (IV casuale): per
   // decidere se un ticket è cambiato l'operatore non si confronta, si riscrive solo insieme
   // agli altri campi (un cambio del solo operatore aspetta il primo cambio del ticket).
-  let cifraOperatore = false;
-  try { cifraOperatore = hasEncryptionKey() && (await getCryptoPolicy(db, 'mysupport')).encryptColumns.includes('operatore'); } catch (e) { cifraOperatore = false; }
+  // Stessa regola per contact_person (2026-11-23).
+  let cifrate = new Set();
+  try { if (hasEncryptionKey()) cifrate = new Set((await getCryptoPolicy(db, 'mysupport')).encryptColumns); } catch (e) { cifrate = new Set(); }
+  const cifraOperatore = cifrate.has('operatore');
+  const extraInTabella = MYSUPPORT_COLONNE_EXTRA.filter((k) => cols.has(k));
+  const lunghezzaExtra = { contact_person: 150, object_description: 1000, customer_vat: 50, customer_name: 255 };
+  const valoreExtra = (k, v) => {
+    const s = testo(v, lunghezzaExtra[k]);
+    return s && cifrate.has(k) ? encryptValue(s) : s;
+  };
   let inserted = 0, updated = 0, unchanged = 0, invalid = 0;
   const nuovi = []; // ticket inseriti (non gli aggiornati): notifiche dopo il COMMIT
   const nonTrovati = new Map(); // nome cliente del file -> numero righe
@@ -7253,19 +7266,24 @@ async function importaRigheMySupport(tenantId, rowsIn) {
         year_tkt: anno(r.year_tkt),
         operatore: cifraOperatore ? (testo(r.operatore, 150) ? encryptValue(testo(r.operatore, 150)) : null) : testo(r.operatore, 255)
       };
-      const params = [tenantId, ownerUserId, clientId, codice, ...MYSUPPORT_COLONNE.map((k) => valori[k])];
-      const segn = MYSUPPORT_COLONNE.map((k, i) => {
+      // Colonne nuove presenti nella riga inviata (vedi MYSUPPORT_COLONNE_EXTRA).
+      const extra = extraInTabella.filter((k) => Object.prototype.hasOwnProperty.call(r, k));
+      extra.forEach((k) => { valori[k] = valoreExtra(k, r[k]); });
+      const colonne = [...MYSUPPORT_COLONNE, ...extra];
+      const params = [tenantId, ownerUserId, clientId, codice, ...colonne.map((k) => valori[k])];
+      const segn = colonne.map((k, i) => {
         const p = `$${i + 5}`;
         return (k === 'data_apertura' || k === 'data_chiusura') ? `${p}::timestamp` : (k === 'year_tkt' ? `${p}::integer` : p);
       });
       // UPDATE solo se cambia qualcosa (cliente/proprietario compresi); xmax = 0 -> inserita.
-      const confronto = ['user_id', 'client_id', ...MYSUPPORT_COLONNE.filter((k) => !(cifraOperatore && k === 'operatore'))];
+      // Le colonne cifrate non si confrontano (il cifrato cambia a ogni scrittura).
+      const confronto = ['user_id', 'client_id', ...colonne.filter((k) => !cifrate.has(k))];
       const out = await client.query(
-        `INSERT INTO mysupport (tenant_id, user_id, client_id, codice_quesito, ${MYSUPPORT_COLONNE.join(', ')})
+        `INSERT INTO mysupport (tenant_id, user_id, client_id, codice_quesito, ${colonne.join(', ')})
          VALUES ($1, $2, $3, $4, ${segn.join(', ')})
          ON CONFLICT (tenant_id, codice_quesito) DO UPDATE SET
            user_id = EXCLUDED.user_id, client_id = EXCLUDED.client_id,
-           ${MYSUPPORT_COLONNE.map((k) => `${k} = EXCLUDED.${k}`).join(', ')}
+           ${colonne.map((k) => `${k} = EXCLUDED.${k}`).join(', ')}
          WHERE (${confronto.map((k) => `mysupport.${k}`).join(', ')})
                IS DISTINCT FROM (${confronto.map((k) => `EXCLUDED.${k}`).join(', ')})
          RETURNING id, (xmax = 0) AS inserita`,

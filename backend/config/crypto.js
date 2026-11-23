@@ -278,7 +278,8 @@ const TABLE_COLUMN_ALLOWLIST = {
   // Ticket MySupport (2026-10-17, Supporto/CreaDB/cifratura_completa.sql): solo il nome
   // dell'operatore (dato personale). Stato, procedura, cliente e date restano in chiaro:
   // i KPI li filtrano e raggruppano in SQL e l'import abbina il cliente per nome.
-  mysupport: new Set(['operatore']),
+  // 2026-11-23: anche contact_person (referente del cliente, Supporto/CreaDB/mysupport_contatto_cliente.sql).
+  mysupport: new Set(['operatore', 'contact_person']),
   // Rubrica (2026-10-17): nominativo, email, ruolo e nome del file della foto. foto_mime resta
   // in chiaro (tipo del file, non personale). Abbinamenti per email fatti dopo la lettura.
   rubrica: new Set(['nominativo', 'email', 'ruolo', 'foto_nome']),

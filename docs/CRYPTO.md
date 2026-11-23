@@ -48,7 +48,7 @@ migrazione, non dopo.
    - **clients** → solo `valore2` e `valore3`
    - **projects** → solo `valore2`
    - **rubrica** → `nominativo`, `email`, `ruolo`, `foto_nome`
-   - **mysupport** → solo `operatore` (stato, procedura, cliente e date servono ai KPI in SQL)
+   - **mysupport** → `operatore` e `contact_person` (dal 2026-11-23; stato, procedura, cliente e date servono ai KPI in SQL)
    - altre tabelle con elenco: vedi `TABLE_COLUMN_ALLOWLIST` in `backend/config/crypto.js`
 
    **clients e projects: regola per CAMPO (dal 2026-10-17).** Sono tabelle EAV: il flag

@@ -266,6 +266,14 @@
         ['year_TKT', 'year_tkt'],
         ['Operatore', 'operatore']
     ];
+    // Colonne facoltative (2026-11-23): se il file le ha, si caricano; se mancano, i valori
+    // già salvati restano com'erano (server.js, MYSUPPORT_COLONNE_EXTRA).
+    const MYSUPPORT_MAPPA_FACOLTATIVE = [
+        ['Contact Person', 'contact_person'],
+        ['Object Description', 'object_description'],
+        ['Customer Reference VAT', 'customer_vat'],
+        ['Customer Reference Business Name Description', 'customer_name']
+    ];
 
     // Data/ora del file -> 'AAAA-MM-GG HH:MM:SS' (ora locale). Excel la passa come numero
     // seriale (giorni dal 30/12/1899) oppure come testo "gg/mm/aaaa hh:mm".
@@ -290,10 +298,11 @@
     function righeMySupport(columns, rows) {
         const mancanti = MYSUPPORT_MAPPA.filter(([nome]) => !findColumn(columns, nome)).map(([nome]) => nome);
         if (mancanti.length) return { errore: `Il file MySupport non contiene le colonne: ${mancanti.join(', ')}` };
-        const colonna = Object.fromEntries(MYSUPPORT_MAPPA.map(([nome, db]) => [db, findColumn(columns, nome)]));
+        const mappa = [...MYSUPPORT_MAPPA, ...MYSUPPORT_MAPPA_FACOLTATIVE.filter(([nome]) => findColumn(columns, nome))];
+        const colonna = Object.fromEntries(mappa.map(([nome, db]) => [db, findColumn(columns, nome)]));
         const righe = rows.map((row) => {
             const out = {};
-            MYSUPPORT_MAPPA.forEach(([, db]) => {
+            mappa.forEach(([, db]) => {
                 const v = row[colonna[db]];
                 out[db] = (db === 'data_apertura' || db === 'data_chiusura') ? excelDataOra(v)
                     : (v === null || v === undefined ? null : String(v).trim());
