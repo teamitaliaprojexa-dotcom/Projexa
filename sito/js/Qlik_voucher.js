@@ -271,7 +271,7 @@
     const MYSUPPORT_MAPPA_FACOLTATIVE = [
         ['Contact Person', 'contact_person'],
         ['Object Description', 'object_description'],
-        ['Customer Reference VAT', 'customer_vat'],
+        ['Customer Reference VAT Code', 'customer_vat'],
         ['Customer Reference Business Name Description', 'customer_name']
     ];
 
@@ -380,7 +380,7 @@
         const nonTrovatiHtml = nonTrovati.length
             ? `<div style="margin-top:0.75rem;"><strong>Clienti del file non abbinati (${nonTrovati.length}, ${scartate} righe non caricate):</strong>
                <div style="max-height:140px; overflow-y:auto; font-size:0.8rem; color:#6B7280; margin-top:0.3rem;">${nonTrovati.map(([nome, n]) => `${esc(nome)} (${n})`).join('<br>')}</div>
-               <div style="font-size:0.78rem; color:#6B7280; margin-top:0.3rem;">Per caricarli, scrivi il nome come nel file nel campo <em>MySupport</em> della scheda del cliente, oppure il codice fiscale (colonna Customer Reference VAT del file) nel campo <em>Cod fiscale</em>.</div></div>`
+               <div style="font-size:0.78rem; color:#6B7280; margin-top:0.3rem;">Per caricarli, scrivi il nome come nel file nel campo <em>MySupport</em> della scheda del cliente, oppure il codice fiscale (colonna Customer Reference VAT Code del file) nel campo <em>Cod fiscale</em>.</div></div>`
             : '';
         const ambiguiHtml = r.ambigui.size
             ? `<div style="margin-top:0.75rem; color:#B45309;"><strong>Nome MySupport presente su più clienti (righe non caricate):</strong>

@@ -7193,6 +7193,23 @@ const MYSUPPORT_COLONNE = ['stato_finale', 'mycliente', 'procedura', 'data_apert
 // Si scrivono solo se la riga inviata le contiene (script del PC non ancora aggiornato = valori
 // già salvati intatti) e se la tabella le ha già (SQL non ancora eseguito = ignorate).
 const MYSUPPORT_COLONNE_EXTRA = ['contact_person', 'object_description', 'customer_vat', 'customer_name'];
+// Nomi accettati per le colonne nuove (2026-11-23): oltre al nome della colonna, anche
+// l'intestazione del file (es. «Customer Reference VAT Code», nome reale nel file MySupport,
+// «Customer Reference Business Name Description»), confrontati senza maiuscole, spazi e simboli.
+const MYSUPPORT_ALIAS_EXTRA = {
+  contact_person: (n) => n === 'contactperson',
+  object_description: (n) => n === 'objectdescription',
+  customer_vat: (n) => n === 'customervat' || n.startsWith('customerreferencev'),
+  customer_name: (n) => n === 'customername' || n.startsWith('customerreferencebusinessname')
+};
+const mySupportChiave = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+// Valore della colonna nuova k nella riga r; undefined se la riga non la contiene.
+function mySupportExtra(r, k) {
+  if (!r || typeof r !== 'object') return undefined;
+  if (Object.prototype.hasOwnProperty.call(r, k)) return r[k];
+  const alias = Object.keys(r).find((x) => MYSUPPORT_ALIAS_EXTRA[k](mySupportChiave(x)));
+  return alias === undefined ? undefined : r[alias];
+}
 const mySupportNorm = (v) => String(v == null ? '' : v).normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
 // Codice fiscale / partita IVA per il confronto: solo lettere e cifre, maiuscolo, senza il
 // prefisso «IT»; se è di sole cifre si riportano a 11 con gli zeri iniziali (Excel li toglie:
@@ -7256,7 +7273,7 @@ async function importaRigheMySupport(tenantId, rowsIn) {
   //    colonna customer_vat (Customer Reference VAT) del file. Cod fiscale è cifrato: confronto
   //    dopo la lettura. Un codice fiscale presente su più clienti non viene abbinato.
   const clientiPerCF = new Map(); // codice fiscale normalizzato -> Map(clientId -> ownerUserId)
-  if (extraInTabella.includes('customer_vat') && rowsIn.some((r) => r && normCodiceFiscale(r.customer_vat))) {
+  if (extraInTabella.includes('customer_vat') && rowsIn.some((r) => normCodiceFiscale(mySupportExtra(r, 'customer_vat')))) {
     const cf = await db.query(
       `SELECT argument, valore2 FROM clients
         WHERE tenant_id = $1 AND LOWER(BTRIM(regexp_replace(campo, '^\\(\\*\\)\\s*', ''))) IN ('cod fiscale', 'codice fiscale')
@@ -7294,8 +7311,8 @@ async function importaRigheMySupport(tenantId, rowsIn) {
       operatore: cifraOperatore ? (testo(r.operatore, 150) ? encryptValue(testo(r.operatore, 150)) : null) : testo(r.operatore, 255)
     };
     // Colonne nuove presenti nella riga inviata (vedi MYSUPPORT_COLONNE_EXTRA).
-    const extra = extraInTabella.filter((k) => Object.prototype.hasOwnProperty.call(r, k));
-    extra.forEach((k) => { valori[k] = valoreExtra(k, r[k]); });
+    const extra = extraInTabella.filter((k) => mySupportExtra(r, k) !== undefined);
+    extra.forEach((k) => { valori[k] = valoreExtra(k, mySupportExtra(r, k)); });
     const colonne = [...MYSUPPORT_COLONNE, ...extra];
     const params = [tenantId, ownerUserId, clientId, codice, ...colonne.map((k) => valori[k])];
     const segn = colonne.map((k, i) => {
@@ -7343,7 +7360,7 @@ async function importaRigheMySupport(tenantId, rowsIn) {
     // Seconda fase: solo le righe non caricate, abbinate per codice fiscale (customer_vat).
     for (const s of seconda) {
       if (caricati.has(s.codice)) continue; // ticket già caricato dalla prima fase
-      const abbinati = clientiPerCF.get(normCodiceFiscale(s.r.customer_vat));
+      const abbinati = clientiPerCF.get(normCodiceFiscale(mySupportExtra(s.r, 'customer_vat')));
       if (abbinati && abbinati.size === 1) {
         const [[clientId, ownerUserId]] = [...abbinati];
         await scrivi(s.r, s.codice, s.nomeFile, clientId, ownerUserId);
@@ -7390,7 +7407,14 @@ app.post('/api/mysupport/push', async (req, res) => {
     if (!tok) return res.status(401).json({ error: 'Token non valido o revocato: generane uno nuovo in Impostazioni › Databricks' });
     const blocco = Math.max(1, parseInt(req.body?.blocco, 10) || 1);
     const blocchi = Math.max(blocco, parseInt(req.body?.blocchi, 10) || 1);
-    const esito = await importaRigheMySupport(tok.tenant_id, Array.isArray(req.body?.rows) ? req.body.rows : []);
+    const righePush = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    // Controllo (2026-11-23): nel primo blocco, i nomi dei campi inviati dallo script e quante
+    // righe hanno le colonne nuove compilate (solo nomi e conteggi, nessun dato).
+    if (blocco === 1 && righePush.length) {
+      const piene = MYSUPPORT_COLONNE_EXTRA.map((k) => `${k}=${righePush.filter((r) => String(mySupportExtra(r, k) ?? '').trim()).length}`);
+      console.log(`[MYSUPPORT PUSH] campi ricevuti: ${Object.keys(righePush[0] || {}).join(', ')} | compilati nel blocco 1 su ${righePush.length}: ${piene.join(', ')}`);
+    }
+    const esito = await importaRigheMySupport(tok.tenant_id, righePush);
     await registraInvioPush(tok.id, blocco, blocchi, { ...esito, nonTrovati: esito.nonTrovati.length, ambigui: esito.ambigui.length });
     if (blocco === blocchi) console.log(`[MYSUPPORT PUSH] utente ${tok.user_id}: invio completato (${blocchi} blocchi)`);
     res.json(esito);
