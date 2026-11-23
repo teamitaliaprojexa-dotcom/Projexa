@@ -7462,7 +7462,7 @@ app.get('/api/mysupport/solleciti/aperti', requireAuth, async (req, res) => {
               to_char(data_sollecito, 'YYYY-MM-DD"T"HH24:MI:SS') AS data_sollecito,
               risposta_interna, risposta_cliente, stato_finale,
               ${sollecitato} AS sollecitato,
-              ${conVat ? 'customer_vat, contact_person, object_description' : 'NULL AS customer_vat, NULL AS contact_person, NULL AS object_description'}
+              ${conVat ? 'customer_vat, customer_name, contact_person, object_description' : 'NULL AS customer_vat, NULL AS customer_name, NULL AS contact_person, NULL AS object_description'}
          FROM mysupport
         WHERE tenant_id = $1 AND user_id = $2
           AND (${sollecitato}${conVat ? ` OR ${vatAperto}` : ''})${filtroClienti}
@@ -7494,8 +7494,9 @@ app.get('/api/mysupport/solleciti/aperti', requireAuth, async (req, res) => {
         client_id: r.client_id,
         cliente: (r.client_id && clienti.get(String(r.client_id))) || r.mycliente || null,
         email_sollecito: r.email_sollecito,
-        // Senza contatto con l'email del sollecito: il referente del file (Contact Person).
-        nominativo: (contatto && String(contatto.nominativo || '').trim()) || (r.contact_person ? String(r.contact_person).trim() : null) || null,
+        nominativo: (contatto && String(contatto.nominativo || '').trim()) || null,
+        customer_name: r.customer_name || null,
+        contact_person: r.contact_person ? String(r.contact_person).trim() : null,
         data_sollecito: r.data_sollecito,
         risposta_interna: r.risposta_interna,
         risposta_cliente: r.risposta_cliente,
