@@ -234,6 +234,9 @@
                     <button id="qlikTypeVoucher" type="button" style="padding:0.75rem 1rem; text-align:left; background:#3B82F6; color:white; border:none; border-radius:7px; font-weight:600; cursor:pointer;">
                         Voucher <span style="display:block; font-size:0.78rem; font-weight:400; opacity:0.9; margin-top:0.2rem;">Ore attività sulle commesse dei progetti</span>
                     </button>
+                    <button id="qlikTypeVoucherCrm" type="button" style="padding:0.75rem 1rem; text-align:left; background:#059669; color:white; border:none; border-radius:7px; font-weight:600; cursor:pointer;">
+                        Voucher da CRM <span style="display:block; font-size:0.78rem; font-weight:400; opacity:0.9; margin-top:0.2rem;">Voucher dei progetti presi dal CRM</span>
+                    </button>
                     <!-- MySupport: import manuale disattivato (2026-10-15). I dati li invia (dal 2026-10-17) lo
                          script schedulato del PC (token di Impostazioni › «DataBricks», js/mysupport-push.js). -->
                     <div style="padding:0.75rem 1rem; background:#F9FAFB; color:#9CA3AF; border:1px dashed #D1D5DB; border-radius:7px; font-weight:600; cursor:not-allowed;" title="Import manuale disattivato">
@@ -247,6 +250,7 @@
         modal.style.display = 'flex';
         const close = () => { modal.style.display = 'none'; };
         document.getElementById('qlikTypeVoucher').onclick = () => { close(); QlikVoucher.mode = 'qlik'; showQlikScopeModal(); };
+        document.getElementById('qlikTypeVoucherCrm').onclick = () => { close(); QlikVoucher.mode = 'crm'; showQlikScopeModal(); };
         document.getElementById('qlikTypeCancel').onclick = close;
         modal.onclick = (e) => { if (e.target === modal) close(); };
     }
@@ -407,6 +411,122 @@
         notify(`Import MySupport completato: ${r.inserted} inseriti, ${r.updated} aggiornati`, (r.inserted + r.updated) > 0 ? 'success' : 'info');
     }
 
+    // ==========================================================================
+    // «VOUCHER DA CRM» (2026-11-24) — export dei voucher dal CRM.
+    // Stesso aggiornamento del file Voucher (POST /api/qlik-voucher/import), ma le colonne
+    // del file sono diverse e si trasformano qui:
+    //   Commessa  «00579-23 - HR-2023-ENI-…»  -> Codice Commessa (prima di « - ») e
+    //                                           Titolo Commessa (dopo)
+    //   Tecnico                               -> nominativo, email e codice articolo dalla
+    //                                           rubrica (POST /api/qlik-voucher/crm-tecnici,
+    //                                           nome e cognome anche invertiti)
+    //   Stato                                 -> Stato Voucher (Sospeso / Chiuso)
+    //   Ore Attivita, in sessantesimi («01:30» = 1,5 ore), solo per le righe con:
+    //     Fatturabile = «Fatturabile» e Tipo fatturazione = «A saldo» -> «Totale ore da fatturare»
+    //     Tipo fatturazione = «Fatturata»                             -> «Totale ore Voucher»
+    //   Tutte le altre righe e colonne del file sono ignorate.
+    // Le righe con un Tecnico non trovato in rubrica non si gestiscono e sono elencate alla fine,
+    // insieme alle commesse non trovate.
+    // ==========================================================================
+    const CRM_COLONNE = ['Commessa', 'Tecnico', 'Stato', 'Fatturabile', 'Tipo fatturazione', 'Totale ore da fatturare', 'Totale ore Voucher'];
+
+    function startCrmVoucher(scope) {
+        openQlikFilePicker(scope);
+    }
+
+    // Ore in sessantesimi -> ore decimali: «01:30» = 1,5. Una cella ora di Excel (numero =
+    // frazione di giorno) vale numero × 24. Vuoto = 0.
+    function oreDaSessantesimi(raw) {
+        if (raw === null || raw === undefined || raw === '') return 0;
+        if (typeof raw === 'number') return Number.isFinite(raw) ? raw * 24 : 0;
+        const m = /^(\d+):(\d{1,2})(?::\d{1,2})?$/.exec(String(raw).trim());
+        if (m) return Number(m[1]) + Number(m[2]) / 60;
+        return parseOreAttivita(raw);
+    }
+
+    // Colonna delle ore per la riga, oppure null se la riga non va considerata.
+    function crmColonnaOre(row, col) {
+        const fatturabile = normalizeHeader(row[col['Fatturabile']]);
+        const tipo = normalizeHeader(row[col['Tipo fatturazione']]);
+        if (fatturabile === 'fatturabile' && tipo === 'a saldo') return col['Totale ore da fatturare'];
+        if (tipo === 'fatturata') return col['Totale ore Voucher'];
+        return null;
+    }
+
+    // Righe del file -> { righe: [{ tecnico, cod, titolo, ore, stato }], escluse, commesseNonValide }
+    // oppure { errore }.
+    QlikVoucher.crmRighe = function (columns, rows) {
+        const col = {};
+        const mancanti = [];
+        CRM_COLONNE.forEach((nome) => { col[nome] = findColumn(columns, nome); if (!col[nome]) mancanti.push(nome); });
+        if (mancanti.length) return { errore: `Il file del CRM non contiene le colonne: ${mancanti.join(', ')}` };
+        const righe = [];
+        const commesseNonValide = new Set();
+        let escluse = 0;
+        for (const row of rows) {
+            const colOre = crmColonnaOre(row, col);
+            if (!colOre) { escluse++; continue; }
+            const commessa = String(row[col['Commessa']] == null ? '' : row[col['Commessa']]).trim();
+            const tecnico = String(row[col['Tecnico']] == null ? '' : row[col['Tecnico']]).trim();
+            const sep = commessa.indexOf(' - ');
+            const cod = sep > 0 ? commessa.slice(0, sep).trim() : '';
+            const titolo = sep > 0 ? commessa.slice(sep + 3).trim() : '';
+            if (!cod || !titolo) { if (commessa) commesseNonValide.add(commessa); escluse++; continue; }
+            if (!tecnico) { escluse++; continue; }
+            righe.push({ tecnico, cod, titolo, ore: oreDaSessantesimi(row[colOre]), stato: normalizeHeader(row[col['Stato']]) });
+        }
+        return { righe, escluse, commesseNonValide: [...commesseNonValide] };
+    };
+
+    // Righe + abbinamento rubrica -> gruppi per POST /api/qlik-voucher/import (stesse regole del
+    // file Voucher: «Sospeso» escluso dalle ore, «Chiuso» anche nelle ore fatturate).
+    // Restituisce { groups, tecniciNonTrovati: [{ nome, righe }], ambigui: [...] }.
+    QlikVoucher.crmGruppi = function (righe, abbinamento) {
+        const trovati = (abbinamento && abbinamento.trovati) || {};
+        const ambigui = new Set((abbinamento && abbinamento.ambigui) || []);
+        const nonTrovati = new Map();
+        const gruppi = new Map();
+        for (const r of righe) {
+            const p = trovati[r.tecnico];
+            if (!p || !p.email) { nonTrovati.set(r.tecnico, (nonTrovati.get(r.tecnico) || 0) + 1); continue; }
+            const key = p.email.toLowerCase() + '\u0001' + r.cod + '\u0001' + r.titolo.toLowerCase();
+            const g = gruppi.get(key) || {
+                codiceCommessa: r.cod, titoloCommessa: r.titolo, email: p.email,
+                nominativo: p.nominativo, codiceArticolo: p.codiceArticolo || '', oreTotali: 0, oreFatturate: 0
+            };
+            if (r.stato !== 'sospeso') g.oreTotali += r.ore;
+            if (r.stato === 'chiuso') g.oreFatturate += r.ore;
+            gruppi.set(key, g);
+        }
+        const tecniciNonTrovati = [...nonTrovati].map(([nome, n]) => ({ nome, righe: n, ambiguo: ambigui.has(nome) }))
+            .sort((a, b) => a.nome.localeCompare(b.nome, 'it'));
+        return { groups: [...gruppi.values()], tecniciNonTrovati };
+    };
+
+    async function handleCrmFile(columns, rows) {
+        const x = QlikVoucher.crmRighe(columns, rows);
+        if (x.errore) { notify(x.errore, 'info'); return; }
+        if (!x.righe.length) { notify('Nessuna riga da gestire: servono Fatturabile = «Fatturabile» con Tipo fatturazione = «A saldo», oppure Tipo fatturazione = «Fatturata»', 'info'); return; }
+        let abbinamento;
+        try {
+            const res = await fetch(`${API_BASE}/qlik-voucher/crm-tecnici`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                body: JSON.stringify({ nomi: [...new Set(x.righe.map((r) => r.tecnico))] })
+            });
+            abbinamento = await res.json().catch(() => ({}));
+            if (!res.ok) { notify('Errore nella ricerca dei tecnici in rubrica: ' + (abbinamento.error || res.status), 'info'); return; }
+        } catch (e) { notify('Errore di connessione durante la ricerca dei tecnici', 'info'); return; }
+        const { groups, tecniciNonTrovati } = QlikVoucher.crmGruppi(x.righe, abbinamento);
+        const extra = { tecniciNonTrovati, righeEscluse: x.escluse, commesseNonValide: x.commesseNonValide };
+        if (!groups.length) {
+            showQlikResultModal({ updated: 0, unchanged: 0, inserted: 0, workerUpdated: 0, totalGroups: 0, scope: QlikVoucher.scope, notFoundCommessa: [], notFoundComponente: [], ...extra });
+            return;
+        }
+        notify(`File letto: ${x.righe.length} righe da gestire, ${groups.length} gruppi da importare…`, 'info');
+        await sendQlikImport(groups, extra);
+    }
+
     // Chiede esplicitamente se limitare l'aggiornamento ai progetti attivi
     // (scadenza 31/12/2099) oppure includere anche tutti i progetti storici.
     function showQlikScopeModal() {
@@ -420,7 +540,7 @@
 
         modal.innerHTML = `
             <div style="background:white; border-radius:10px; padding:1.5rem; width:480px; max-width:92vw; box-shadow:0 10px 40px rgba(0,0,0,0.25);">
-                <h3 style="margin:0 0 0.75rem; color:#1F2937;">${QlikVoucher.mode === 'consuntivi' ? 'Aggiornamento Consuntivi' : 'Aggiornamento Qlik'}</h3>
+                <h3 style="margin:0 0 0.75rem; color:#1F2937;">${QlikVoucher.mode === 'consuntivi' ? 'Aggiornamento Consuntivi' : QlikVoucher.mode === 'crm' ? 'Aggiornamento Voucher da CRM' : 'Aggiornamento Qlik'}</h3>
                 <p style="margin:0; color:#4B5563; line-height:1.45;">Quali progetti vuoi aggiornare?</p>
                 <div style="display:flex; flex-direction:column; gap:0.65rem; margin-top:1.15rem;">
                     <button id="qlikScopeActive" type="button" style="padding:0.75rem 1rem; text-align:left; background:#3B82F6; color:white; border:none; border-radius:7px; font-weight:600; cursor:pointer;">
@@ -437,8 +557,10 @@
         modal.style.display = 'flex';
 
         const close = () => { modal.style.display = 'none'; };
-        document.getElementById('qlikScopeActive').onclick = () => { close(); openQlikFilePicker('active'); };
-        document.getElementById('qlikScopeHistory').onclick = () => { close(); openQlikFilePicker('history'); };
+        // «Voucher da CRM» ha un suo passo dopo la scelta dell'ambito (startCrmVoucher).
+        const next = (scope) => (QlikVoucher.mode === 'crm' ? startCrmVoucher(scope) : openQlikFilePicker(scope));
+        document.getElementById('qlikScopeActive').onclick = () => { close(); next('active'); };
+        document.getElementById('qlikScopeHistory').onclick = () => { close(); next('history'); };
         document.getElementById('qlikScopeCancel').onclick = close;
         modal.onclick = (e) => { if (e.target === modal) close(); };
     }
@@ -520,6 +642,11 @@
             await handleMySupportFile(columns, rows, file.name);
             return;
         }
+        // Export del CRM: colonne diverse, tecnici abbinati alla rubrica (handleCrmFile).
+        if (QlikVoucher.mode === 'crm') {
+            await handleCrmFile(columns, rows);
+            return;
+        }
 
         const colCommessa = findColumn(columns, 'Codice Commessa');
         const colTitoloCommessa = findColumn(columns, 'Titolo Commessa');
@@ -581,7 +708,8 @@
 
     // Invia i gruppi al backend, spezzando in blocchi per non superare il
     // limite dell'endpoint (vedi POST /api/qlik-voucher/import in server.js).
-    async function sendQlikImport(groups) {
+    // extra (Voucher da CRM): { tecniciNonTrovati, righeEscluse, commesseNonValide } per il riepilogo.
+    async function sendQlikImport(groups, extra = {}) {
         const CHUNK_SIZE = 2000;
         let totalUpdated = 0;
         let totalUnchanged = 0;
@@ -630,7 +758,8 @@
             totalGroups,
             scope: QlikVoucher.scope,
             notFoundCommessa: [...notFoundCommessa],
-            notFoundComponente
+            notFoundComponente,
+            ...extra
         };
         showQlikResultModal(QlikVoucher.lastResult);
     }
@@ -682,16 +811,32 @@
                    return c.error ? (base + ' <span style="color:#B91C1C;">(' + esc(c.error) + ')</span>') : base;
                }).join('<br>')}</div></div>`
             : '';
+        // Voucher da CRM: tecnici senza corrispondenza in rubrica (righe non gestite).
+        const tecnici = result.tecniciNonTrovati || [];
+        const tecniciHtml = tecnici.length
+            ? `<div style="margin-top:0.75rem;"><strong>Tecnici non trovati in rubrica (${tecnici.length}, ${tecnici.reduce((t, x) => t + x.righe, 0)} righe non gestite):</strong>
+               <div style="max-height:140px; overflow-y:auto; font-size:0.8rem; color:#6B7280; margin-top:0.3rem;">${tecnici.map((t) => `${esc(t.nome)} (${t.righe})${t.ambiguo ? ' <span style="color:#B45309;">— più persone con questo nome</span>' : ''}`).join('<br>')}</div></div>`
+            : '';
+        const commesseNonValide = result.commesseNonValide || [];
+        const commesseNonValideHtml = commesseNonValide.length
+            ? `<div style="margin-top:0.75rem;"><strong>Commesse senza « - » tra codice e titolo (${commesseNonValide.length}):</strong>
+               <div style="max-height:100px; overflow-y:auto; font-size:0.8rem; color:#6B7280; margin-top:0.3rem;">${commesseNonValide.map(esc).join('<br>')}</div></div>`
+            : '';
+        const titolo = QlikVoucher.mode === 'crm' ? 'Importazione Voucher da CRM'
+            : ((TEMPLATE_IMPORTS[QlikVoucher.mode] || {}).title || 'Importazione Qlik voucher');
 
         modal.innerHTML = `
             <div style="background:white; border-radius:10px; padding:1.5rem; width:460px; max-width:92vw; max-height:80vh; overflow-y:auto; box-shadow:0 10px 40px rgba(0,0,0,0.25);">
-                <h3 style="margin:0 0 0.75rem; color:#1F2937;">${esc((TEMPLATE_IMPORTS[QlikVoucher.mode] || {}).title || 'Importazione Qlik voucher')}</h3>
+                <h3 style="margin:0 0 0.75rem; color:#1F2937;">${esc(titolo)}</h3>
                 <p style="margin:0 0 0.45rem; font-size:0.85rem; color:#6B7280;">Ambito: <strong>${result.scope === 'history' ? 'Tutto lo storico' : 'Solo progetti attivi'}</strong></p>
                 <p style="margin:0; font-size:0.95rem;">Righe aggiornate: <strong>${result.updated}</strong> di ${result.totalGroups} gruppi.</p>
                 ${result.unchanged ? `<p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Righe già aggiornate (nessuna modifica): <strong>${result.unchanged}</strong></p>` : ''}
                 <p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Nuovi componenti inseriti: <strong>${result.inserted}</strong></p>
                 <p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Righe proj_worker con ore cambiate: <strong>${result.workerUpdated}</strong></p>
+                ${result.righeEscluse ? `<p style="margin:0.35rem 0 0; font-size:0.85rem; color:#6B7280;">Righe del file non considerate (fatturazione diversa): <strong>${result.righeEscluse}</strong></p>` : ''}
+                ${tecniciHtml}
                 ${notFoundCommessaHtml}
+                ${commesseNonValideHtml}
                 ${notFoundComponenteHtml}
                 <div style="display:flex; justify-content:flex-end; margin-top:1.25rem;">
                     <button id="qlikResultClose" type="button" style="padding:0.5rem 1rem; background:#3B82F6; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Chiudi</button>
@@ -701,7 +846,7 @@
         document.getElementById('qlikResultClose').addEventListener('click', () => { modal.style.display = 'none'; });
         modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; }, { once: true });
 
-        notify(`Import ${QlikVoucher.mode === 'qlik' ? 'Qlik' : 'Consuntivi'} completato: ${result.updated} aggiornate, ${result.inserted} inserite`, (result.updated + result.inserted) > 0 ? 'success' : 'info');
+        notify(`Import ${QlikVoucher.mode === 'qlik' ? 'Qlik' : QlikVoucher.mode === 'crm' ? 'Voucher da CRM' : 'Consuntivi'} completato: ${result.updated} aggiornate, ${result.inserted} inserite`, (result.updated + result.inserted) > 0 ? 'success' : 'info');
     }
 
     // ==========================================================================

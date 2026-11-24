@@ -29,6 +29,7 @@ import auditLogRoutes from './routes/audit-log.js';
 import notificheRoutes from './routes/notifiche.js';
 import pmRoutes from './routes/pm.js';
 import { sincronizzaAzioniCliente, elencoAzioniCliente, abbinaReferenti } from './config/azioniCliente.js';
+import { abbinaTecniciRubrica } from './config/crmVoucher.js';
 import recapInternoRoutes from './routes/recapInterno.js';
 import parlantiRoutes from './routes/parlanti.js';
 import { notificheNuoviMySupport } from './jobs/notifiche.js';
@@ -6742,10 +6743,24 @@ app.post('/api/data/import/rollback', requireAuth, async (req, res) => {
 // nuove sono intestate al PROPRIETARIO del progetto (projects.user_id), perché la
 // griglia del progetto mostra solo le righe del suo proprietario.
 // ==========================================================================
+// Qlik › «Voucher da CRM»: nominativo, email e codice articolo dei «Tecnico» del file,
+// presi dalla rubrica del tenant (config/crmVoucher.js). Sola lettura.
+app.post('/api/qlik-voucher/crm-tecnici', requireAuth, async (req, res) => {
+  try {
+    const nomi = Array.isArray(req.body?.nomi) ? req.body.nomi.slice(0, 5000) : [];
+    res.json(await abbinaTecniciRubrica(db, req.user.tenant_id, nomi));
+  } catch (error) {
+    console.error('[QLIK CRM TECNICI]', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
   try {
     const groupsIn = Array.isArray(req.body?.groups) ? req.body.groups : [];
     const scope = req.body?.scope === 'history' ? 'history' : 'active';
+    // dryRun: fa tutti i calcoli ma annulla la transazione (prova senza salvare nulla).
+    const dryRun = req.body?.dryRun === true;
     if (groupsIn.length === 0) {
       return res.status(400).json({ error: 'Nessun dato da importare' });
     }
@@ -7147,7 +7162,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
         }
       }
 
-      await client.query('COMMIT');
+      await client.query(dryRun ? 'ROLLBACK' : 'COMMIT');
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -7162,6 +7177,7 @@ app.post('/api/qlik-voucher/import', requireAuth, async (req, res) => {
       workerUpdated,
       totalGroups: groups.length,
       scope,
+      dryRun,
       notFoundCommessa: [...new Set(notFoundCommessa)],
       notFoundComponente
     });

@@ -8326,7 +8326,10 @@
         // precedente); false: testo libero, il contatto serve solo a compilare più in fretta.
         // onChoose(option | null) viene chiamato a ogni scelta.
         // freeText = true: con nessun risultato si avvisa che verrà salvato il testo scritto.
-        function attachRubricaAutocomplete(input, data, { strict = false, freeText = false, onChoose = () => {} } = {}) {
+        // multi = true: più nominativi nello stesso campo separati da «; » (es. referente delle
+        // licenze). Si cerca sul nome che si sta scrivendo (dopo l'ultimo «;») e il contatto
+        // scelto sostituisce solo quello, lasciando gli altri.
+        function attachRubricaAutocomplete(input, data, { strict = false, freeText = false, multi = false, onChoose = () => {} } = {}) {
             const list = document.createElement('div');
             list.className = 'task-assignee-list rubrica-ac-list';
             list.setAttribute('role', 'listbox');
@@ -8334,10 +8337,25 @@
             let selectedText = input.value;
             let active = -1;
             let shown = [];
+            // Parte del campo su cui si cerca: tutto, oppure (multi) il nome dopo l'ultimo «;».
+            const lastSep = () => input.value.lastIndexOf(';');
+            const currentTerm = () => (multi ? input.value.slice(lastSep() + 1) : input.value);
+            const otherNames = () => (multi && lastSep() >= 0
+                ? input.value.slice(0, lastSep()).split(';').map(s => s.trim()).filter(Boolean) : []);
 
             const close = () => { list.classList.remove('open'); active = -1; };
             const choose = option => {
-                input.value = selectedText = option ? (option.name || option.label) : '';
+                const name = option ? (option.name || option.label) : '';
+                if (multi) {
+                    // Niente doppioni: un nome già presente non si ripete.
+                    const names = otherNames().filter(n => n.toLocaleLowerCase('it-IT') !== name.toLocaleLowerCase('it-IT'));
+                    if (name) names.push(name);
+                    // «; » in fondo: si può scrivere subito il nome successivo (all'uscita dal
+                    // campo il separatore finale viene tolto).
+                    input.value = selectedText = names.length ? names.join('; ') + '; ' : '';
+                } else {
+                    input.value = selectedText = name;
+                }
                 close();
                 onChoose(option);
             };
@@ -8351,8 +8369,11 @@
             };
             const render = () => {
                 if (!input.isConnected) { list.remove(); return; }
-                const needle = input.value.trim().toLocaleLowerCase('it-IT');
-                shown = data.options.filter(option => !needle || option.label.toLocaleLowerCase('it-IT').includes(needle)).slice(0, 30);
+                const needle = currentTerm().trim().toLocaleLowerCase('it-IT');
+                // multi: le persone già nel campo non si ripropongono.
+                const giaScelti = new Set(otherNames().map(n => n.toLocaleLowerCase('it-IT')));
+                shown = data.options.filter(option => (!needle || option.label.toLocaleLowerCase('it-IT').includes(needle))
+                    && !giaScelti.has(String(option.name || option.label).toLocaleLowerCase('it-IT'))).slice(0, 30);
                 // Nessun risultato: pulsante verde "+ Aggiungi" per creare il contatto in rubrica.
                 list.innerHTML = shown.length
                     ? shown.map((option, index) => `<div class="task-assignee-item${index === active ? ' active' : ''}" role="option" data-index="${index}">${escapeHtml(option.label)}${option.email ? `<small>${escapeHtml(option.email)}</small>` : ''}</div>`).join('')
@@ -8386,7 +8407,7 @@
             list.addEventListener('mousedown', event => {
                 event.preventDefault();
                 if (event.target.closest('.task-assignee-add')) {
-                    const typed = input.value.trim();
+                    const typed = currentTerm().trim();
                     if (strict) input.value = selectedText;
                     close();
                     openRubricaAddDialog(typed, option => {
@@ -8404,6 +8425,17 @@
             // Uscendo dal campo: un testo uguale a un solo nominativo sceglie quel contatto.
             // In modalità strict: testo vuoto = nessuno; testo non trovato = scelta precedente.
             input.addEventListener('blur', () => {
+                if (multi) {
+                    // Più nomi: il nome scritto per ultimo, se è esattamente un contatto, lo sceglie;
+                    // poi il campo viene ripulito (spazi e «;» in più).
+                    const term = currentTerm().trim().toLocaleLowerCase('it-IT');
+                    const exact = term ? data.options.filter(option => String(option.name || option.label).toLocaleLowerCase('it-IT') === term) : [];
+                    if (exact.length === 1) choose(exact[0]);
+                    const tidy = input.value.split(';').map(s => s.trim()).filter(Boolean).join('; ');
+                    if (tidy !== input.value) { input.value = tidy; input.dispatchEvent(new Event('change', { bubbles: true })); }
+                    close();
+                    return;
+                }
                 const text = input.value.trim().toLocaleLowerCase('it-IT');
                 const exact = text ? data.options.filter(option => String(option.name || option.label).toLocaleLowerCase('it-IT') === text) : [];
                 if (exact.length === 1 && input.value !== selectedText) choose(exact[0]);
@@ -8476,12 +8508,17 @@
                 .map(col => rowEl.querySelector(`input.type11-editor-field[data-col="${col}"][type="text"]:not([disabled])`))
                 .filter(input => input && input.dataset.rubrica !== '1');
             if (!inputs.length) return;
-            inputs.forEach(input => { input.dataset.rubrica = '1'; input.placeholder = 'Cerca in rubrica…'; });
+            inputs.forEach(input => {
+                input.dataset.rubrica = '1';
+                input.placeholder = input.dataset.col === 'referente' ? 'Cerca in rubrica… (più nomi separati da ;)' : 'Cerca in rubrica…';
+            });
             const loaded = await loadRubrica();
             const data = { options: loaded.options };
             inputs.forEach(nameInput => attachRubricaAutocomplete(nameInput, data, {
                 strict: false,
                 freeText: true,
+                // "referente": più persone separate da «; » (es. Licenze da Attivare).
+                multi: nameInput.dataset.col === 'referente',
                 onChoose: option => {
                     // Evento "change": la griglia segna la riga come modificata (non "input",
                     // che riaprirebbe l'elenco dei risultati).
