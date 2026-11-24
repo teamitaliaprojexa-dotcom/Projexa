@@ -15706,13 +15706,49 @@
             const titleEl = document.getElementById('settingsDetailTitle');
             if (!listEl) return;
             if (titleEl) titleEl.textContent = 'Nuovo progetto';
-            let models = [];
-            // Modelli: i propri progetti e quelli del team (se ne copia solo la struttura).
-            try { const r = await fetch(`${API_URL}/projects/list?team=1`, { headers: getAuthHeaders() }); if (r.ok) models = await r.json(); } catch (e) {}
-            const opts = ['<option value="">Modello standard</option>'].concat((models || []).map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}${m.team && m.owner_name ? ' (Team: ' + escapeHtml(m.owner_name) + ')' : ''}</option>`)).join('');
             listEl.innerHTML = `<div style="margin-bottom:0.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Nome progetto</label><input id="npName" type="text" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;"></div>
-                <div style="margin-bottom:0.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Copia struttura da</label><select id="npModel" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;">${opts}</select></div>
+                <div style="margin-bottom:0.6rem;"><label style="display:block; font-size:0.8rem; font-weight:600; margin-bottom:0.2rem;">Copia struttura da</label><select id="npModel" style="width:100%; padding:6px 8px; border:1px solid #ccc; border-radius:4px;"><option value="">Modello standard</option></select>
+                <label style="display:flex; align-items:center; gap:0.35rem; margin-top:0.35rem; font-size:0.8rem; cursor:pointer;"><input id="npShowClosed" type="checkbox"> Mostra anche i progetti chiusi</label>
+                <label style="display:flex; align-items:center; gap:0.35rem; margin-top:0.25rem; font-size:0.8rem; cursor:pointer;"><input id="npOtherClients" type="checkbox"> Da altri clienti</label>
+                <select id="npModelClient" style="display:none; width:100%; margin-top:0.35rem; padding:6px 8px; border:1px solid #ccc; border-radius:4px;"></select></div>
                 <div style="display:flex; gap:0.5rem;"><button id="npCreate" type="button" style="flex:1; padding:0.5rem; background:#047857; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">Crea</button><button id="npCancel" type="button" style="flex:0 0 auto; padding:0.5rem 0.8rem; background:#e5e7eb; border:none; border-radius:6px; cursor:pointer;">Annulla</button></div>`;
+            // Modelli: i progetti dello stesso cliente (propri e del team, se ne copia solo la
+            // struttura); con «Mostra anche i progetti chiusi» anche quelli chiusi, marcati
+            // «(chiuso)»; con «Da altri clienti» i progetti del cliente scelto nella tendina.
+            const clientSel = document.getElementById('npModelClient');
+            const otherChk = document.getElementById('npOtherClients');
+            let clientsLoaded = false;
+            const loadModels = async () => {
+                const sel = document.getElementById('npModel');
+                const showClosed = document.getElementById('npShowClosed').checked;
+                const sourceClientId = otherChk.checked ? clientSel.value : clientId;
+                let models = [];
+                try {
+                    if (!sourceClientId) throw new Error('nessun cliente');
+                    const r = await fetch(`${API_URL}/projects/list?clientId=${encodeURIComponent(sourceClientId)}${showClosed ? '&closed=1' : ''}`, { headers: getAuthHeaders() });
+                    if (r.ok) models = await r.json();
+                } catch (e) {}
+                const prev = sel.value;
+                sel.innerHTML = ['<option value="">Modello standard</option>'].concat((models || []).map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.name)}${m.is_closed ? ' (chiuso)' : ''}${m.team && m.owner_name ? ' (Team: ' + escapeHtml(m.owner_name) + ')' : ''}</option>`)).join('');
+                if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+            };
+            document.getElementById('npShowClosed').addEventListener('change', loadModels);
+            clientSel.addEventListener('change', loadModels);
+            otherChk.addEventListener('change', async () => {
+                clientSel.style.display = otherChk.checked ? 'block' : 'none';
+                if (otherChk.checked && !clientsLoaded) {
+                    clientSel.innerHTML = '<option value="">Caricamento…</option>';
+                    let clients = [];
+                    try { const r = await fetch(`${API_URL}/clients/names?team=1`, { headers: getAuthHeaders() }); if (r.ok) clients = await r.json(); } catch (e) {}
+                    const others = (clients || []).filter(c => String(c.id) !== String(clientId));
+                    clientSel.innerHTML = others.length
+                        ? others.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}${c.team && c.owner_name ? ' (Team: ' + escapeHtml(c.owner_name) + ')' : ''}</option>`).join('')
+                        : '<option value="">Nessun altro cliente</option>';
+                    clientsLoaded = true;
+                }
+                loadModels();
+            });
+            await loadModels();
             document.getElementById('npCancel').addEventListener('click', () => renderProjectList(clientId, clientName));
             document.getElementById('npCreate').addEventListener('click', async () => {
                 const name = document.getElementById('npName').value.trim();

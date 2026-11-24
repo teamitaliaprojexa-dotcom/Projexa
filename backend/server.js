@@ -9720,19 +9720,37 @@ app.post('/api/clients', requireAuth, async (req, res) => {
 // ===================== PROGETTI CLIENTI (tabella projects, EAV, scoped per client_id) =====================
 // Copia ricorsivamente la STRUTTURA dei campi di un progetto (valori vuoti), preservando la
 // gerarchia (Nodo Padre + figli). I nuovi campi ereditano tenant/user/client del destinatario.
-async function deepCopyProjectTree(dbClient, tenantId, userId, clientId, srcArg, newArg) {
+// Con copyValues = true (progetto modello scelto dall'utente) si copiano anche i valori
+// (valore1/valore2/valore3, data_inizio, crypto) tranne i campi di PROJECT_COPY_CLEAR_FIELDS,
+// che restano vuoti. Il valore2 cifrato si copia così com'è (stessa chiave, nessun legame
+// con l'id della riga) insieme al suo flag crypto. La scadenza resta il default (2099-12-31).
+async function deepCopyProjectTree(dbClient, tenantId, userId, clientId, srcArg, newArg, copyValues = false) {
   const rows = (await dbClient.query(
-    `SELECT id, campo, tipo_valore, id_roles, ordinamento, tabella, colonna, layout_col, layout_span, "VariabDB" AS variabdb
-     FROM projects WHERE argument = $1 AND campo IS NOT NULL AND campo <> 'Progetto'
+    `SELECT id FROM projects WHERE argument = $1 AND campo IS NOT NULL AND campo <> 'Progetto'
      ORDER BY ordinamento NULLS LAST, campo`,
     [srcArg]
   )).rows;
   for (const r of rows) {
-    const ins = await dbClient.query(
-      `INSERT INTO projects (tenant_id, user_id, client_id, argument, campo, tipo_valore, id_roles, ordinamento, tabella, colonna, layout_col, layout_span, "VariabDB")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
-      [tenantId, userId, clientId, newArg, r.campo, r.tipo_valore, r.id_roles, r.ordinamento, r.tabella, r.colonna, r.layout_col, r.layout_span, r.variabdb]
-    );
+    const ins = copyValues
+      ? await dbClient.query(
+        `INSERT INTO projects (tenant_id, user_id, client_id, argument, campo, tipo_valore, id_roles, ordinamento, tabella, colonna, layout_col, layout_span, "VariabDB",
+                               valore1, valore2, valore3, data_inizio, crypto)
+         SELECT $1, $2, $3, $4, campo, tipo_valore, id_roles, ordinamento, tabella, colonna, layout_col, layout_span, "VariabDB",
+                CASE WHEN svuota THEN NULL ELSE valore1 END,
+                CASE WHEN svuota THEN NULL ELSE valore2 END,
+                CASE WHEN svuota THEN NULL ELSE valore3 END,
+                data_inizio,
+                CASE WHEN svuota THEN 0 ELSE crypto END
+           FROM (SELECT p.*, lower(btrim(regexp_replace(p.campo, '^[(][*][)][[:space:]]*', ''))) = ANY($6::text[]) AS svuota
+                   FROM projects p WHERE p.id = $5) s
+         RETURNING id`,
+        [tenantId, userId, clientId, newArg, r.id, PROJECT_COPY_CLEAR_FIELDS])
+      : await dbClient.query(
+        `INSERT INTO projects (tenant_id, user_id, client_id, argument, campo, tipo_valore, id_roles, ordinamento, tabella, colonna, layout_col, layout_span, "VariabDB")
+         SELECT $1, $2, $3, $4, campo, tipo_valore, id_roles, ordinamento, tabella, colonna, layout_col, layout_span, "VariabDB"
+           FROM projects WHERE id = $5
+         RETURNING id`,
+        [tenantId, userId, clientId, newArg, r.id]);
     // Verifica se esistono figli reali sotto questa riga (argument = id sorgente), a prescindere
     // dal flag tipo_valore: nel template master alcuni contenitori non sono marcati "0" ma hanno
     // comunque righe figlie (argument = id di questa riga) che vanno copiate ricorsivamente.
@@ -9741,7 +9759,104 @@ async function deepCopyProjectTree(dbClient, tenantId, userId, clientId, srcArg,
       [String(r.id)]
     );
     if (hasChildren.rows.length > 0) {
-      await deepCopyProjectTree(dbClient, tenantId, userId, clientId, String(r.id), String(ins.rows[0].id));
+      await deepCopyProjectTree(dbClient, tenantId, userId, clientId, String(r.id), String(ins.rows[0].id), copyValues);
+    }
+  }
+}
+
+// Campi del progetto che, copiando da un progetto modello, restano vuoti (valore1, valore2 e
+// valore3). Confronto senza maiuscole e senza il prefisso «(*) ».
+const PROJECT_COPY_CLEAR_FIELDS = [
+  'Anno', 'Completamento', 'Fatturato', 'Fatturato Futuro', 'da Fatturare', 'Preventivo',
+  'Ordine interno', 'Offerta inviata al Cliente', 'Ordine Ricevuto', 'Ordine Cliente', 'Inviato Billing'
+].map((s) => s.toLowerCase());
+
+// Voce di costo (proj_worker_cost) del cliente di destinazione corrispondente a quella del
+// progetto sorgente: stesso id se il cliente è lo stesso; altrimenti la voce attiva del cliente
+// di destinazione con la stessa descrizione (preferendo quelle di chi crea) e, se non c'è,
+// una copia della voce sorgente sul cliente di destinazione. Cache per id sorgente.
+async function mapWorkerCostId(dbClient, req, srcCostId, srcClientId, newClientId, cache) {
+  if (!srcCostId || String(srcClientId) === String(newClientId)) return srcCostId;
+  if (cache.has(srcCostId)) return cache.get(srcCostId);
+  const src = (await dbClient.query('SELECT desc_worker FROM proj_worker_cost WHERE id = $1', [srcCostId])).rows[0];
+  let id = null;
+  if (src) {
+    const m = await dbClient.query(
+      `SELECT id FROM proj_worker_cost
+        WHERE tenant_id = $1 AND client_id = $2
+          AND lower(btrim(coalesce(desc_worker, ''))) = lower(btrim(coalesce($3, '')))
+          AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)
+        ORDER BY (user_id = $4) DESC LIMIT 1`,
+      [req.user.tenant_id, newClientId, src.desc_worker, req.user.user_id]);
+    if (m.rows.length) id = m.rows[0].id;
+    else {
+      const cols = await getTableColumns('proj_worker_cost');
+      const generated = await getGeneratedColumns('proj_worker_cost');
+      const skip = new Set(['id', 'tenant_id', 'user_id', 'client_id', 'id_roles_write', 'scadenza', 'created_at', 'updated_at']);
+      const copyCols = [...cols].filter((c) => !skip.has(c) && !generated.has(c)).map(assertValidIdentifier);
+      const ins = await dbClient.query(
+        `INSERT INTO proj_worker_cost (tenant_id, user_id, client_id${copyCols.map((c) => `, "${c}"`).join('')})
+         SELECT $1::uuid, $2::uuid, $3::uuid${copyCols.map((c) => `, src."${c}"`).join('')}
+           FROM proj_worker_cost src WHERE src.id = $4 RETURNING id`,
+        [req.user.tenant_id, req.user.user_id, newClientId, srcCostId]);
+      id = ins.rows[0].id;
+      if (cols.has('id_roles_write')) {
+        await dbClient.query('UPDATE proj_worker_cost SET id_roles_write = $1 WHERE id = $2', [roleWriteValue(req), id]);
+      }
+    }
+  }
+  cache.set(srcCostId, id);
+  return id;
+}
+
+// Copia le righe di proj_worker, proj_componenti e proj_licenze del progetto modello sul nuovo
+// progetto (nuovi id, tenant/utente di chi crea, client_id e project_id del nuovo progetto).
+// Commessa e ore lavorate (time_spent_*) restano vuote. Si copiano le righe vive del modello:
+// per un progetto aperto quelle non scadute, per uno chiuso quelle ancora valide alla chiusura,
+// che ripartono con scadenza 2099-12-31. Le voci di costo (worker_cost_id, team_pro) sono
+// rimappate sul cliente di destinazione se il modello è di un altro cliente.
+async function copyProjectCostTables(dbClient, req, srcProjectId, newProjectId, newClientId) {
+  const src = (await dbClient.query(
+    `SELECT client_id, scadenza, (scadenza IS NOT NULL AND scadenza < CURRENT_DATE) AS closed
+       FROM projects WHERE id = $1`, [srcProjectId])).rows[0];
+  if (!src) return;
+  const cutoff = src.closed ? src.scadenza : null; // null = oggi
+  const costCache = new Map();
+  const tables = [
+    { name: 'proj_worker', clear: ['commessa_id'], costRefs: ['worker_cost_id'] },
+    { name: 'proj_componenti', clear: ['commessa_id'], costRefs: ['team_pro'] },
+    { name: 'proj_licenze', clear: [], costRefs: [] }
+  ];
+  for (const t of tables) {
+    const cols = await getTableColumns(t.name);
+    if (!cols.size || !cols.has('project_id')) continue;
+    const generated = await getGeneratedColumns(t.name);
+    const skip = new Set(['id', 'tenant_id', 'user_id', 'client_id', 'project_id', 'id_roles_write', 'created_at', 'updated_at']);
+    const copyCols = [...cols].filter((c) => !skip.has(c) && !generated.has(c)).map(assertValidIdentifier);
+    const srcRows = (await dbClient.query(
+      `SELECT id${t.costRefs.filter((c) => cols.has(c)).map((c) => `, "${c}"`).join('')} FROM ${t.name}
+        WHERE project_id = $1 AND (scadenza IS NULL OR scadenza >= COALESCE($2::date, CURRENT_DATE))`,
+      [srcProjectId, cutoff])).rows;
+    for (const row of srcRows) {
+      const params = [req.user.tenant_id, req.user.user_id, newClientId, newProjectId, row.id];
+      const values = [];
+      for (const c of copyCols) {
+        if (t.clear.includes(c) || /^time_spent_/.test(c)) values.push('NULL');
+        else if (c === 'scadenza' && src.closed) values.push(`'2099-12-31'::date`);
+        else if (t.costRefs.includes(c)) {
+          // Riferimento a una voce di costo: rimappato sul cliente di destinazione.
+          params.push(await mapWorkerCostId(dbClient, req, row[c], src.client_id, newClientId, costCache));
+          values.push(`$${params.length}::uuid`);
+        } else values.push(`src."${c}"`);
+      }
+      const ins = await dbClient.query(
+        `INSERT INTO ${t.name} (tenant_id, user_id, client_id, project_id${copyCols.map((c) => `, "${c}"`).join('')})
+         SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid${values.map((v) => `, ${v}`).join('')}
+           FROM ${t.name} src WHERE src.id = $5 RETURNING id`,
+        params);
+      if (cols.has('id_roles_write')) {
+        await dbClient.query(`UPDATE ${t.name} SET id_roles_write = $1 WHERE id = $2`, [roleWriteValue(req), ins.rows[0].id]);
+      }
     }
   }
 }
@@ -9802,11 +9917,15 @@ app.get('/api/projects/list', requireAuth, async (req, res) => {
     // dei collaboratori del team del Manager (sola lettura, "team" + "owner_name"); altrimenti solo i propri.
     const owners = (clientId || String(req.query.team || '') === '1') ? await selfAndTeamIds(req) : [String(req.user.user_id)];
     const params = [req.user.tenant_id, owners];
-    let where = `argument = 'Progetto' AND campo = 'Progetto' AND tenant_id = $1 AND user_id::text = ANY($2::text[]) AND valore2 IS NOT NULL
-                 AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`;
+    // ?closed=1: include anche i progetti chiusi (scadenza passata), marcati con is_closed.
+    const includeClosed = String(req.query.closed || '') === '1';
+    let where = `argument = 'Progetto' AND campo = 'Progetto' AND tenant_id = $1 AND user_id::text = ANY($2::text[]) AND valore2 IS NOT NULL`;
+    if (!includeClosed) where += ` AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`;
     if (clientId) { params.push(clientId); where += ` AND client_id = $${params.length}`; }
     const r = await db.query(
-      `SELECT id, valore2 AS name, client_id, user_id::text AS owner_id FROM projects WHERE ${where} ORDER BY valore2`,
+      `SELECT id, valore2 AS name, client_id, user_id::text AS owner_id,
+              (scadenza IS NOT NULL AND scadenza < CURRENT_DATE) AS is_closed
+         FROM projects WHERE ${where} ORDER BY valore2`,
       params
     );
     const me = String(req.user.user_id);
@@ -9903,7 +10022,11 @@ app.post('/api/projects', requireAuth, async (req, res) => {
       if (m.rows.length) srcId = m.rows[0].id;
     }
     if (srcId) {
-      await deepCopyProjectTree(client, req.user.tenant_id, req.user.user_id, clientId, srcId, newProject.id);
+      // Modello scelto dall'utente: si copiano anche i valori e le tabelle collegate
+      // (risorse, componenti, licenze); dal Modello standard solo la struttura.
+      const fromUserModel = srcId !== STANDARD_TEMPLATE_PROJECT_ID && String(srcId) === sourceProjectId;
+      await deepCopyProjectTree(client, req.user.tenant_id, req.user.user_id, clientId, srcId, newProject.id, fromUserModel);
+      if (fromUserModel) await copyProjectCostTables(client, req, srcId, newProject.id, clientId);
     }
     // Tutte le righe del nuovo progetto (master_id = id progetto, compilato dal trigger):
     // modificabili dal ruolo di chi crea il progetto.
