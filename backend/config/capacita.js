@@ -885,7 +885,10 @@ async function pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo,
     statoLic.set(k, s);
   }
   const completate = new Map([...statoLic].filter(([, s]) => s.fatta && s.stima > 0).map(([k, s]) => [k, s.stima]));
-  const daRef = await orePerReferenti(user, projectId, persTeam, normNome, completate);
+  // Nome confrontabile anche con spazi diversi («Michele Lo Gallo» = «Michele Logallo», «De Rosa
+  // Sandra» = «Sandra De Rosa»): lettere del nome senza spazi, in ordine.
+  const chiaveNome = (s) => normNome(s).replace(/\s+/g, '').split('').sort().join('');
+  const daRef = await orePerReferenti(user, projectId, persTeam, chiaveNome, completate);
   const referentiLicenze = {};
   const oreReferenti = {}; // nome modulo -> { persone: [{ nome, gg }], licenza: gg date alla licenza }
 
@@ -900,17 +903,17 @@ async function pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo,
       `SELECT nominativo, email FROM rubrica
         WHERE tenant_id = $1 AND email IS NOT NULL AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`, [user.tenant_id]).catch(() => ({ rows: [] }));
     for (const x of rr.rows) {
-      const nn = normNome(x.nominativo), e = String(x.email || '').trim();
+      const nn = chiaveNome(x.nominativo), e = String(x.email || '').trim();
       if (nn && e.includes('@') && !emailRubrica.has(nn)) emailRubrica.set(nn, e);
     }
   }
   const comunica = {
     persone: persTeam.map((p) => {
-      const nn = normNome(p.nominativo);
+      const nn = chiaveNome(p.nominativo);
       return {
         nominativo: String(p.nominativo || '').trim(), email: emailRubrica.get(nn) || (String(p.email || '').includes('@') ? String(p.email).trim() : null),
         daRubrica: emailRubrica.has(nn), consuntivo: Math.round((p.consuntivo || 0) * 10000) / 10000,
-        licenze: [...daRef].filter(([, v]) => v.referenti.some((r) => normNome(r) === nn)).map(([k, v]) => nomeModulo.get(k) || v.nome)
+        licenze: [...daRef].filter(([, v]) => v.referenti.some((r) => chiaveNome(r) === nn)).map(([k, v]) => nomeModulo.get(k) || v.nome)
       };
     }).sort((a, b) => a.nominativo.localeCompare(b.nominativo, 'it')),
     licenze: [...daRef].map(([k, v]) => ({ nome: nomeModulo.get(k) || v.nome, nelGantt: nomeModulo.has(k), referenti: v.referenti }))
@@ -941,10 +944,13 @@ async function pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo,
         // dice il Gantt (stima × avanzamento %, ridotto in proporzione se le ore non bastano),
         // poi il resto alle fasi in ordine di data fino alla stima; l'eccedenza sull'ultima.
         let resto = daRef.get(k).gg;
-        const base = voci.map((v) => v.stima * (v.x.avanzamento / 100));
+        // Le fasi al 100% (finite) prendono per prime tutta la loro stima.
+        voci.forEach((v) => { v.cons = 0; });
+        for (const v of voci) if (v.x.avanzamento >= 100) { const c = Math.min(resto, v.stima); v.cons = c; resto -= c; }
+        const base = voci.map((v) => (v.x.avanzamento >= 100 ? 0 : v.stima * (v.x.avanzamento / 100)));
         const totBase = base.reduce((a, b) => a + b, 0);
         const f = totBase > resto && totBase > 0 ? resto / totBase : 1;
-        voci.forEach((v, i) => { v.cons = base[i] * f; });
+        voci.forEach((v, i) => { v.cons += base[i] * f; });
         resto -= totBase * f;
         for (const v of voci) { const c = Math.max(0, Math.min(resto, v.stima - v.cons)); v.cons += c; resto -= c; }
         if (resto > 1e-9 && voci.length) voci[voci.length - 1].cons += resto;
@@ -967,7 +973,8 @@ async function pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo,
     // scritto, altrimenti stima della fase × avanzamento % dell'attività (figlio) nel Gantt.
     // Da fare = stima − lavorate (mai sotto zero).
     // Con i referenti della licenza (vedi sopra): le loro ore consuntivate.
-    const cons = q.eff != null ? q.eff : q.ref != null ? q.ref : q.fatto;
+    // Fase al 100% nel Gantt: finita, tutta lavorata (anche se l'Effettivo scritto è più basso).
+    const cons = Math.max(q.eff != null ? q.eff : q.ref != null ? q.ref : q.fatto, q.x.avanzamento >= 100 ? q.stimaFase : 0);
     const da = Math.max(0, q.stimaFase - cons);
     q.r.lavorate = (q.r.lavorate || 0) + cons;
     q.r.stimaGantt = (q.r.stimaGantt || 0) + q.stimaFase;

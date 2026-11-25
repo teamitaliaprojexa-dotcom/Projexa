@@ -329,6 +329,7 @@
     const numIt = (v) => (Math.round((Number(v) || 0) * 10) / 10).toLocaleString('it-IT', { maximumFractionDigits: 1 });
     function testoComunica(d, progetto) {
         const u = (v) => (d.aOre ? `${numIt(v * 8)} h` : `${numIt(v)} gg`);
+        const Ore = d.aOre ? 'Ore' : 'Giornate', ore = Ore.toLowerCase();
         // Numeri per licenza dalle fasi del piano (come il riquadro «Licenze e fasi»).
         const lic = new Map();
         for (const f of d.fasi || []) {
@@ -345,14 +346,15 @@
             const x = lic.get(n);
             const ref = refDi.get(n);
             const intest = `• ${nomeLic(n)}${ref && ref.length ? ` (referenti: ${ref.join(', ')})` : ''}`;
-            if (!x || !(x.stima > 0)) return [intest, '-Non presente nel Gantt: completamento e ore non disponibili', ''];
+            if (!x || !(x.stima > 0)) return [intest, `-Non presente nel Gantt: completamento e ${d.aOre ? 'ore' : 'giornate'} non disponibili`, ''];
             const perc = Math.min(100, Math.round((x.lavorate / x.stima) * 100));
             return [intest,
                 `-Completamento: ${perc}%`,
-                `-Ore disponibili: ${u(x.stima)} – Ore lavorate: ${u(x.lavorate)}`,
-                `-Ore che mancano: ${x.daFare > 0.001 ? u(x.daFare) : 'nessuna (completata)'}`, ''];
+                `-${Ore} disponibili: ${u(x.stima)} – ${Ore} lavorate: ${u(x.lavorate)}`,
+                `-${Ore} che mancano: ${x.daFare > 0.001 ? u(x.daFare) : 'nessuna (completata)'}`, ''];
         }).flat();
-        const righePers = c.persone.map((p) => `• ${p.nominativo} – ore consuntivate: ${numIt((p.consuntivo || 0) * 8)} h – referente di: ${p.licenze.length ? p.licenze.map(nomeLic).join(', ') : 'nessun modulo'}`);
+        // Progetto gestito a giornate (Gestione a HH spento): tutto in giornate, anche il consuntivo delle persone.
+        const righePers = c.persone.map((p) => `• ${p.nominativo} – ${ore} consuntivate: ${u(p.consuntivo || 0)} – referente di: ${p.licenze.length ? p.licenze.map(nomeLic).join(', ') : 'nessun modulo'}`);
         const titolo = [progetto && progetto.cliente, progetto && progetto.nome].filter(Boolean).join(' – ');
         const subject = `${titolo ? `${titolo} – ` : ''}Stato del progetto per il team`;
         const body = ['Ciao a tutti,', '', `di seguito lo stato del progetto${titolo ? ` ${titolo}` : ''} al ${dataIt(d.oggi)}.`, '',
