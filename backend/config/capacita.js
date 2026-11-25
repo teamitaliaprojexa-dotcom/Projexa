@@ -868,6 +868,68 @@ async function pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo,
     }
   }
 
+  // Ore lavorate dai referenti delle licenze (2026-11-25): per le licenze (modulo del Gantt) con
+  // referente e senza Effettivo scritto nel Gantt, le ore consuntivate dai referenti riempiono
+  // le fasi in ordine di data (prima la fase che inizia prima), ognuna fino alla sua stima; quel
+  // che avanza va sull'ultima. Poi ogni fase si divide tra i ruoli con la loro quota.
+  // Licenze completate nel Gantt (tutte le fasi al 100%): normLicenza -> stima (giornate).
+  const statoLic = new Map();
+  const vistiLic = new Set();
+  for (const q of quote) {
+    if (!q.modulo || vistiLic.has(`${q.x.id}|${q.fase}`)) continue;
+    vistiLic.add(`${q.x.id}|${q.fase}`);
+    const k = normLicenza(q.modulo);
+    const s = statoLic.get(k) || { stima: 0, fatta: true };
+    s.stima += gg(q.x.fasi[q.fase]);
+    if (q.x.avanzamento < 100) s.fatta = false;
+    statoLic.set(k, s);
+  }
+  const completate = new Map([...statoLic].filter(([, s]) => s.fatta && s.stima > 0).map(([k, s]) => [k, s.stima]));
+  const daRef = await orePerReferenti(user, projectId, persTeam, normNome, completate);
+  const referentiLicenze = {};
+  const oreReferenti = {}; // nome modulo -> { persone: [{ nome, gg }], licenza: gg date alla licenza }
+  if (daRef.size) {
+    const perModulo = new Map(); // normLicenza -> { nome, voci: Map(«id|fase» -> voce), conEff }
+    for (const q of quote) {
+      if (!q.modulo) continue;
+      const k = normLicenza(q.modulo);
+      if (!daRef.has(k)) continue;
+      const M = perModulo.get(k) || { nome: q.modulo, voci: new Map(), conEff: false };
+      if (q.x.effettivo != null) M.conEff = true;
+      const kv = `${q.x.id}|${q.fase}`;
+      if (!M.voci.has(kv)) M.voci.set(kv, { x: q.x, fase: q.fase, stima: gg(q.x.fasi[q.fase]), cons: 0 });
+      perModulo.set(k, M);
+    }
+    for (const [k, M] of perModulo) {
+      if (M.conEff) continue; // l'Effettivo scritto a mano nel Gantt resta il dato da usare
+      referentiLicenze[M.nome] = daRef.get(k).referenti;
+      oreReferenti[M.nome] = { persone: daRef.get(k).persone || [], licenza: Math.round(daRef.get(k).gg * 1000) / 1000 };
+      const voci = [...M.voci.values()].sort((a, b) => (a.x.inizio || '9999').localeCompare(b.x.inizio || '9999')
+        || a.x.chiave.localeCompare(b.x.chiave, undefined, { numeric: true }) || FASI.indexOf(a.fase) - FASI.indexOf(b.fase));
+      if (completate.has(k)) {
+        // Licenza completata nel Gantt: tutte le fasi lavorate per intero (lavorate = stima).
+        for (const v of voci) v.cons = v.stima;
+      } else {
+        // Totale della licenza = ore dei referenti, senza aggiunte. Prima va alle fasi quanto
+        // dice il Gantt (stima × avanzamento %, ridotto in proporzione se le ore non bastano),
+        // poi il resto alle fasi in ordine di data fino alla stima; l'eccedenza sull'ultima.
+        let resto = daRef.get(k).gg;
+        const base = voci.map((v) => v.stima * (v.x.avanzamento / 100));
+        const totBase = base.reduce((a, b) => a + b, 0);
+        const f = totBase > resto && totBase > 0 ? resto / totBase : 1;
+        voci.forEach((v, i) => { v.cons = base[i] * f; });
+        resto -= totBase * f;
+        for (const v of voci) { const c = Math.max(0, Math.min(resto, v.stima - v.cons)); v.cons += c; resto -= c; }
+        if (resto > 1e-9 && voci.length) voci[voci.length - 1].cons += resto;
+      }
+      for (const q of quote) {
+        if (normLicenza(q.modulo) !== k || !q.r) continue;
+        const v = M.voci.get(`${q.x.id}|${q.fase}`);
+        q.ref = v.stima > 0 ? v.cons * (q.stimaFase / v.stima) : 0;
+      }
+    }
+  }
+
   const persone = new Map(); // «ruolo|persona» -> riga del piano
   const fasi = [];
   const avvisi = { senzaDate: [], inRitardo: [], fuoriTeam: new Set(), senzaRuolo: [], senzaPersone: [] };
@@ -877,7 +939,8 @@ async function pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo,
     // Ore lavorate della fase (scelta dell'utente: è il dato giusto): Effettivo del Gantt se
     // scritto, altrimenti stima della fase × avanzamento % dell'attività (figlio) nel Gantt.
     // Da fare = stima − lavorate (mai sotto zero).
-    const cons = q.eff != null ? q.eff : q.fatto;
+    // Con i referenti della licenza (vedi sopra): le loro ore consuntivate.
+    const cons = q.eff != null ? q.eff : q.ref != null ? q.ref : q.fatto;
     const da = Math.max(0, q.stimaFase - cons);
     q.r.lavorate = (q.r.lavorate || 0) + cons;
     q.r.stimaGantt = (q.r.stimaGantt || 0) + q.stimaFase;
@@ -904,7 +967,7 @@ async function pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo,
     fasi.push({
       id: q.x.id, modulo: q.modulo, attivita: q.x.nome, fase: q.fase, ruolo: q.r.ruolo, avanzamento: q.x.avanzamento,
       inizio: q.x.inizio, fine: q.x.fine, dal: al ? dal : null, al, avviso,
-      stima: tondo(q.stimaFase), daFare: tondo(da), consuntivo: tondo(cons), consFonte: q.eff != null ? 'effettivo' : 'avanzamento', persone: chi.map((p) => p.nominativo), fonte
+      stima: tondo(q.stimaFase), daFare: tondo(da), consuntivo: tondo(cons), consFonte: q.eff != null ? 'effettivo' : q.ref != null ? 'referenti' : 'avanzamento', persone: chi.map((p) => p.nominativo), fonte
     });
     if (da <= 0.001) continue;
     if (avviso === 'senzaDate') avvisi.senzaDate.push(nome);
@@ -975,7 +1038,7 @@ async function pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo,
     modo: 'gantt', oggi, consegna: fine, consegnaProgetto: fineProgetto, motivo, aOre: eco.aOre,
     giorni: [...settimane.values()].reduce((a, b) => a + b, 0),
     settimane: [...settimane.entries()].map(([lun, n]) => ({ lun, giorni: n })),
-    ruoli: lista, fasi, esclusi, chiusi, consegneLicenze: consegneLicenze(righe),
+    ruoli: lista, fasi, esclusi, chiusi, consegneLicenze: consegneLicenze(righe), referentiLicenze, oreReferenti,
     avvisi: { ...avvisi, fuoriTeam: [...avvisi.fuoriTeam] }
   };
 }
@@ -990,6 +1053,86 @@ function consegneLicenze(righe) {
     const fini = [top.fine, ...figli.map((x) => x.fine)].filter(Boolean).sort();
     const data = golive ? (golive.fine || golive.inizio) : (fini[fini.length - 1] || null);
     if (data) out[top.nome] = { data, golive: !!golive };
+  }
+  return out;
+}
+
+// Nome di licenza confrontabile con il modulo del Gantt («Modulo Onboarding» = «Onboarding»).
+const normLicenza = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/^\s*modulo\s+/, '').replace(/[^a-z0-9]+/g, ' ').trim();
+const UUID_REF = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Ore lavorate per licenza dai referenti (2026-11-25, scelta dell'utente): il consuntivo Qlik di
+// ogni persona del team (proj_componenti.time_spent_hh) va alle licenze di cui è referente
+// (Licenze da attivare, proj_licenze.referente: nomi o id di Rubrica separati da «;» o «,»).
+// Chi è referente di più licenze: le licenze completate nel Gantt (completate: normLicenza ->
+// stima in giornate) prendono prima dalle ore dei loro referenti solo la loro stima; le ore che
+// restano vanno alle altre licenze in proporzione al loro totale (effort della riga). Se non ci
+// sono altre licenze aperte, l'eccedenza torna sulle completate.
+// -> Map(normLicenza -> { gg, referenti: [nomi] }) solo per le licenze con un referente.
+async function orePerReferenti(user, projectId, persTeam, normNome, completate = new Map()) {
+  if (!(await tabellaPresente('proj_licenze'))) return new Map();
+  const lic = (await db.query(
+    `SELECT cl.description AS licenza, pl.referente::text AS referente, COALESCE(pl.totale, 0)::float8 AS totale
+       FROM proj_licenze pl
+       LEFT JOIN conf_licenze_app cl ON cl.id = pl.licenza_id
+      WHERE pl.tenant_id = $1 AND pl.user_id = $2 AND pl.project_id::text = $3
+        AND (pl.scadenza IS NULL OR pl.scadenza >= CURRENT_DATE)`,
+    [user.tenant_id, user.user_id, projectId]).catch(() => ({ rows: [] }))).rows;
+  const pezzi = (s) => String(s || '').split(/[;,\n]+/).map((x) => x.trim()).filter(Boolean);
+  // Referenti scritti come id di Rubrica: al loro posto il nominativo.
+  const ids = [...new Set(lic.flatMap((l) => pezzi(l.referente)).filter((x) => UUID_REF.test(x)))];
+  const nomeId = new Map();
+  if (ids.length) {
+    const r = await db.query('SELECT id::text AS id, nominativo FROM rubrica WHERE tenant_id = $1 AND id::text = ANY($2::text[])',
+      [user.tenant_id, ids]).catch(() => ({ rows: [] }));
+    r.rows.forEach((x) => nomeId.set(x.id, x.nominativo));
+  }
+  const licenze = new Map(); // normLicenza -> { totale, referenti: Map(normNome -> nome) }
+  for (const l of lic) {
+    const k = normLicenza(l.licenza);
+    const refs = pezzi(l.referente).map((x) => (UUID_REF.test(x) ? nomeId.get(x) : x)).filter(Boolean);
+    if (!k || !refs.length) continue;
+    const L = licenze.get(k) || { totale: 0, referenti: new Map() };
+    L.totale += Number(l.totale) || 0;
+    refs.forEach((n) => { const nn = normNome(n); if (nn) L.referenti.set(nn, n); });
+    licenze.set(k, L);
+  }
+  const out = new Map([...licenze].map(([k, L]) => [k, { gg: 0, referenti: [...L.referenti.values()] }]));
+  // Consuntivo (giornate) di ogni persona del team, sommato per nome.
+  const consPer = new Map();
+  for (const p of persTeam) {
+    const nn = normNome(p.nominativo);
+    if (nn && p.consuntivo > 0) consPer.set(nn, (consPer.get(nn) || 0) + p.consuntivo);
+  }
+  // Per il controllo nella pagina: ore consuntivate in tutto da ogni referente (0 = non nel team o senza ore).
+  for (const [k, L] of licenze) out.get(k).persone = [...L.referenti].map(([nn, nome]) => ({ nome, gg: Math.round((consPer.get(nn) || 0) * 1000) / 1000 }));
+  // 1. Licenze completate: la loro stima, presa dai referenti in proporzione alle ore che hanno.
+  //    Prima dai referenti che non hanno licenze aperte (le loro ore possono andare solo lì),
+  //    poi dagli altri: così le ore di chi ha anche licenze aperte restano a quelle.
+  const haAperte = (nn) => [...licenze].some(([k, L]) => !completate.has(k) && L.referenti.has(nn));
+  for (const [k, L] of licenze) {
+    if (!completate.has(k)) continue;
+    let manca = completate.get(k);
+    for (const gruppo of [false, true]) {
+      const chi = [...L.referenti.keys()].filter((nn) => haAperte(nn) === gruppo && (consPer.get(nn) || 0) > 0);
+      const disp = chi.reduce((s, nn) => s + consPer.get(nn), 0);
+      if (!(disp > 0) || !(manca > 0)) continue;
+      const presa = Math.min(manca, disp);
+      for (const nn of chi) consPer.set(nn, consPer.get(nn) - presa * (consPer.get(nn) / disp));
+      out.get(k).gg += presa;
+      manca -= presa;
+    }
+  }
+  // 2. Le ore che restano: alle licenze ancora aperte della persona (o, se non ne ha, alle sue completate).
+  for (const [nn, cons] of consPer) {
+    if (!(cons > 1e-9)) continue;
+    const tutte = [...licenze].filter(([, L]) => L.referenti.has(nn));
+    const aperte = tutte.filter(([k]) => !completate.has(k));
+    const sue = aperte.length ? aperte : tutte;
+    if (!sue.length) continue;
+    const tot = sue.reduce((s, [, L]) => s + L.totale, 0);
+    for (const [k, L] of sue) out.get(k).gg += cons * (tot > 0 ? L.totale / tot : 1 / sue.length);
   }
   return out;
 }

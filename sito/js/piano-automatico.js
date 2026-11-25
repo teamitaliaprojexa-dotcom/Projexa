@@ -153,6 +153,7 @@
         .lc-avz { height: 4px; border-radius: 999px; background: #EEF0F4; margin-top: 5px; overflow: hidden; }
         .lc-avz i { display: block; height: 100%; background: #10B981; }
         .lc-nome .lc-lav b { color: #0F766E; display: inline; font-size: inherit; }
+        .lc-nome .lc-lav b.lc-manca { color: #B45309; }
         .lc-consegna { margin-top: 6px; font-size: 0.72rem; color: #4B5563; display: flex; align-items: center; gap: 0.3rem; }
         .lc-consegna i { color: #6D28D9; font-size: 0.68rem; } .lc-consegna b { color: #111827; }
         .lc-consegna.ko b, .lc-consegna.ko i { color: #DC2626; }
@@ -490,9 +491,10 @@
                 const nome = `${f.modulo ? `${f.modulo} › ` : ''}${f.attivita}`;
                 const k = `${nome}|${f.fase}`;
                 const L = licenze.get(lic);
-                const x = L.fasi.get(k) || { chiave: k, attivita: f.attivita, fase: f.fase, inizio: f.inizio, fine: f.fine, avanzamento: f.avanzamento, avviso: f.avviso, daFare: 0, stima: 0, consuntivo: 0, daEffettivo: false, ruoli: [], fonte: f.fonte, persone: new Set() };
+                const x = L.fasi.get(k) || { chiave: k, attivita: f.attivita, fase: f.fase, inizio: f.inizio, fine: f.fine, avanzamento: f.avanzamento, avviso: f.avviso, daFare: 0, stima: 0, consuntivo: 0, daEffettivo: false, daReferenti: false, ruoli: [], fonte: f.fonte, persone: new Set() };
                 x.daFare += f.daFare; x.stima += f.stima; x.consuntivo += f.consuntivo || 0;
                 if (f.consFonte === 'effettivo') x.daEffettivo = true;
+                if (f.consFonte === 'referenti') x.daReferenti = true;
                 if (f.daFare > 0.001) x.ruoli.push(f.ruolo);
                 f.persone.forEach((n) => x.persone.add(n));
                 L.fasi.set(k, x);
@@ -526,6 +528,7 @@
                 // Una corsia per fase (in ordine di inizio): barra sottile nelle date della fase e
                 // etichetta esterna collegata da una linea (a destra della barra, o a sinistra se
                 // la barra arriva in fondo, o sopra se la barra occupa quasi tutta la riga).
+                const refLic = (d.referentiLicenze || {})[L.nome] || [];
                 const ordinate = [...datate].sort((p, q) => p.inizio.localeCompare(q.inizio) || p.fine.localeCompare(q.fine));
                 const chi = (f) => {
                     const m = perFase.get(f.chiave);
@@ -539,6 +542,7 @@
                 // Totale della fase (stima), consuntivo (Effettivo del Gantt o stimato «~») e da fare.
                 const numeri = (f) => {
                     const titCons = f.daEffettivo ? 'Ore lavorate = Effettivo scritto nel Gantt'
+                        : f.daReferenti ? `Ore lavorate = ore consuntivate dai referenti della licenza (${refLic.join(', ')}), messe prima sulle fasi secondo l'avanzamento % del Gantt e poi in ordine di data`
                         : "Ore lavorate = stima della fase × avanzamento % dell'attività nel Gantt (scrivi l'Effettivo nel Gantt per usare le ore reali)";
                     return `<span class="lc-num" title="Stima della fase (Licenze da attivare)">Tot <b>${esc(unita(f.stima))}</b></span>`
                         + `<span class="lc-num cons" title="${esc(titCons)}">Lavorate <b>${esc(unita(f.consuntivo))}</b></span>`
@@ -546,7 +550,7 @@
                 };
                 const corsia = (f) => {
                     const fatto = f.daFare <= 0.001;
-                    const tip = `${L.nome} › ${FASE_NOME[f.fase] || f.fase}\n${dataIt(f.inizio)} → ${dataIt(f.fine)} · avanzamento ${f.avanzamento}%\nTotale ${unita(f.stima)} · lavorate ${unita(f.consuntivo)}${f.daEffettivo ? ' (Effettivo del Gantt)' : ' (stima × avanzamento)'} · ${fatto ? 'fatto' : `da fare ${unita(f.daFare)}`}${f.ruoli.length ? ` (${[...new Set(f.ruoli)].join(', ')})` : ''}\nChi: ${[...f.persone].join(', ') || 'nessuno'}${f.fonte === 'team' ? ' (dal team: Nominativo vuoto)' : ''}${f.avviso === 'inRitardo' ? '\nScaduta e non finita' : ''}`;
+                    const tip = `${L.nome} › ${FASE_NOME[f.fase] || f.fase}\n${dataIt(f.inizio)} → ${dataIt(f.fine)} · avanzamento ${f.avanzamento}%\nTotale ${unita(f.stima)} · lavorate ${unita(f.consuntivo)}${f.daEffettivo ? ' (Effettivo del Gantt)' : f.daReferenti ? ' (consuntivo dei referenti)' : ' (stima × avanzamento)'} · ${fatto ? 'fatto' : `da fare ${unita(f.daFare)}`}${f.ruoli.length ? ` (${[...new Set(f.ruoli)].join(', ')})` : ''}\nChi: ${[...f.persone].join(', ') || 'nessuno'}${f.fonte === 'team' ? ' (dal team: Nominativo vuoto)' : ''}${f.avviso === 'inRitardo' ? '\nScaduta e non finita' : ''}`;
                     const x1 = x(f.inizio), x2 = Math.max(x1 + 0.8, xFine(f.fine));
                     const lato = x2 <= 62 ? 'dx' : x1 >= 34 ? 'sx' : 'su';
                     const pos = lato === 'dx' ? `left:calc(${x2}% + 18px)` : lato === 'sx' ? `right:calc(${100 - x1}% + 18px)` : `left:${x1}%`;
@@ -565,7 +569,7 @@
                 return `<div class="lc-riga">
                     <div class="lc-nome"><b>${esc(String(L.nome).replace(/^Modulo\s+/i, ''))}</b>
                         <small>${daFare > 0.001 ? `${esc(unita(daFare))} da fare` : 'completata'} · ${avz}%</small>
-                        <small class="lc-lav" title="Ore lavorate sulla licenza: per ogni fase l'Effettivo del Gantt se scritto, altrimenti stima × avanzamento % dell'attività nel Gantt">lavorate <b>${esc(unita(fs.reduce((t, f) => t + (f.consuntivo || 0), 0)))}</b> su ${esc(unita(stima))}</small>
+                        <small class="lc-lav" title="${esc(refLic.length ? `${(() => { const o = (d.oreReferenti || {})[L.nome]; if (!o) return ''; const tot = o.persone.reduce((t, p) => t + p.gg, 0); return `Ore consuntivate in tutto dai referenti: ${o.persone.map((p) => `${p.nome} ${unita(p.gg)}`).join(' + ')} = ${unita(tot)}\nDi queste a questa licenza: ${unita(o.licenza)}${tot - o.licenza > 0.001 ? ` (le altre ${unita(tot - o.licenza)} alle altre licenze dei referenti)` : ''}\n\n`; })()}Ore lavorate sulla licenza = ore consuntivate dai referenti (${refLic.join(', ')}); chi è referente di più licenze dà prima alle licenze completate nel Gantt solo la loro stima e divide il resto tra le altre in proporzione al totale; una fase al 100% nel Gantt conta tutta lavorata` : "Ore lavorate sulla licenza: per ogni fase l'Effettivo del Gantt se scritto, altrimenti stima × avanzamento % dell'attività nel Gantt")}">lavorate <b>${esc(unita(fs.reduce((t, f) => t + (f.consuntivo || 0), 0)))}</b> su ${esc(unita(stima))}${daFare > 0.001 ? ` · mancano <b class="lc-manca">${esc(unita(daFare))}</b>` : ''}</small>
                         <div class="lc-avz"><i style="width:${avz}%"></i></div>
                         ${(() => { const c = (d.consegneLicenze || {})[L.nome]; return c ? `<div class="lc-consegna${c.data < d.oggi && avz < 100 ? ' ko' : ''}" title="${c.golive ? 'Data del Go-live della licenza nel Gantt' : 'Ultima data di fine delle attività della licenza nel Gantt (nessun Go-live con data)'}"><i class="fas fa-flag-checkered"></i> Consegna <b>${dataIt(c.data)}</b></div>` : '<div class="lc-consegna nd" title="Nel Gantt la licenza non ha date di fine né Go-live"><i class="fas fa-flag-checkered"></i> Consegna da definire</div>'; })()}</div>
                     <div class="lc-dx">${traccia}${senzaHtml}</div>
