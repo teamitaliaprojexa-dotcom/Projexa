@@ -295,7 +295,86 @@
     }
 
     const ultimoAllineo = new Map(); // projectId -> ultimo allineamento automatico (ms)
-    async function monta(box, { projectId, onApplicato }) {
+    // ===== «Comunica al Team» (2026-11-25) =====
+    // Email al team del progetto (indirizzi dalla Rubrica) con, per ogni persona, ore consuntivate
+    // e licenze di cui è referente e, per ogni licenza, completamento, ore disponibili, lavorate e
+    // ore che mancano (gli stessi numeri del riquadro «Licenze e fasi»). Si apre come l'email della
+    // To-Do: Gmail se il calendario predefinito è Google, altrimenti il programma di posta (mailto:).
+    let tipoPosta = null;
+    async function tipoEmail() {
+        if (tipoPosta) return tipoPosta;
+        try {
+            const r = await fetch(`${PM.API_URL}/calendar/status`, { headers: PM.auth() });
+            const x = r.ok ? await r.json() : {};
+            tipoPosta = x.defaultProvider === 'google' ? 'google' : 'mailto';
+        } catch (e) { tipoPosta = 'mailto'; }
+        return tipoPosta;
+    }
+    const EMAIL_URL_MAX = { google: 7000, mailto: 8000 };
+    function apriEmail(kind, tab, subject, body, to) {
+        const build = (b) => kind === 'google'
+            ? `https://mail.google.com/mail/?view=cm&fs=1${to.length ? `&to=${encodeURIComponent(to.join(','))}` : ''}&su=${encodeURIComponent(subject)}${b ? `&body=${encodeURIComponent(b)}` : ''}`
+            : `mailto:${to.map(encodeURIComponent).join(';')}?subject=${encodeURIComponent(subject)}${b ? `&body=${encodeURIComponent(b.replace(/\n/g, '\r\n'))}` : ''}`;
+        let url = build(body);
+        if (url.length > EMAIL_URL_MAX[kind]) {
+            url = build('');
+            if (navigator.clipboard) navigator.clipboard.writeText(body).catch(() => {});
+            toast('Testo lungo: è stato copiato negli appunti, incollalo nell\'email con Ctrl+V');
+        }
+        if (kind === 'mailto') window.location.href = url;
+        else if (tab && !tab.closed) tab.location.href = url;
+        else window.open(url, '_blank', 'noopener');
+    }
+    // Ore (o giornate) con una cifra decimale, all'italiana.
+    const numIt = (v) => (Math.round((Number(v) || 0) * 10) / 10).toLocaleString('it-IT', { maximumFractionDigits: 1 });
+    function testoComunica(d, progetto) {
+        const u = (v) => (d.aOre ? `${numIt(v * 8)} h` : `${numIt(v)} gg`);
+        // Numeri per licenza dalle fasi del piano (come il riquadro «Licenze e fasi»).
+        const lic = new Map();
+        for (const f of d.fasi || []) {
+            const n = f.modulo || f.attivita;
+            const x = lic.get(n) || { stima: 0, lavorate: 0, daFare: 0 };
+            x.stima += f.stima || 0; x.lavorate += f.consuntivo || 0; x.daFare += f.daFare || 0;
+            lic.set(n, x);
+        }
+        const nomeLic = (n) => String(n).replace(/^Modulo\s+/i, '');
+        const c = d.comunica || { persone: [], licenze: [] };
+        const nomi = [...new Set([...lic.keys(), ...(c.licenze || []).map((l) => l.nome)])];
+        const refDi = new Map((c.licenze || []).map((l) => [l.nome, l.referenti]));
+        const righeLic = nomi.map((n) => {
+            const x = lic.get(n);
+            const ref = refDi.get(n);
+            const intest = `• ${nomeLic(n)}${ref && ref.length ? ` (referenti: ${ref.join(', ')})` : ''}`;
+            if (!x || !(x.stima > 0)) return [intest, '-Non presente nel Gantt: completamento e ore non disponibili', ''];
+            const perc = Math.min(100, Math.round((x.lavorate / x.stima) * 100));
+            return [intest,
+                `-Completamento: ${perc}%`,
+                `-Ore disponibili: ${u(x.stima)} – Ore lavorate: ${u(x.lavorate)}`,
+                `-Ore che mancano: ${x.daFare > 0.001 ? u(x.daFare) : 'nessuna (completata)'}`, ''];
+        }).flat();
+        const righePers = c.persone.map((p) => `• ${p.nominativo} – ore consuntivate: ${numIt((p.consuntivo || 0) * 8)} h – referente di: ${p.licenze.length ? p.licenze.map(nomeLic).join(', ') : 'nessun modulo'}`);
+        const titolo = [progetto && progetto.cliente, progetto && progetto.nome].filter(Boolean).join(' – ');
+        const subject = `${titolo ? `${titolo} – ` : ''}Stato del progetto per il team`;
+        const body = ['Ciao a tutti,', '', `di seguito lo stato del progetto${titolo ? ` ${titolo}` : ''} al ${dataIt(d.oggi)}.`, '',
+            'Team di Progetto', ...righePers, '',
+            'Moduli', ...righeLic,
+            'Rimango a disposizione per eventuali dubbi', '',
+            'Buon Lavoro', 'Grazie'].join('\n');
+        return { subject, body };
+    }
+    async function comunicaTeam(d, progetto) {
+        const c = d.comunica || { persone: [] };
+        const to = [...new Set(c.persone.map((p) => p.email).filter(Boolean))];
+        const senza = c.persone.filter((p) => !p.email).map((p) => p.nominativo);
+        if (!c.persone.length) { toast('Nessuna persona nel team del progetto'); return; }
+        const kind = await tipoEmail();
+        const tab = kind === 'google' ? window.open('', '_blank') : null;
+        const { subject, body } = testoComunica(d, progetto);
+        apriEmail(kind, tab, subject, body, to);
+        if (senza.length) toast(`Nessuna email in rubrica per ${senza.join(', ')}: aggiungi il destinatario nell'email`);
+    }
+
+    async function monta(box, { projectId, progetto = null, onApplicato }) {
         let fuori = new Set();
         let dati = null, consegnaScelta = null;
         const manuali = new Map(); // chiave ruolo -> Map(chiave persona -> %)
@@ -720,6 +799,7 @@
                         <span class="sep">·</span> <b>${U(tot)}</b> da fare</span>
                     ${sovra ? `<span class="pa-badge att"><i class="fas fa-triangle-exclamation"></i> ${sovra} person${sovra === 1 ? 'a' : 'e'} oltre le ore</span>` : (tot > 0.05 ? '<span class="pa-badge ok"><i class="fas fa-check"></i> Fattibile</span>' : '')}
                     <span class="spazio"></span>
+                    ${d.comunica ? '<button type="button" class="pa-btn" data-pa-comunica title="Apre un\'email al team del progetto (indirizzi dalla Rubrica) con ore consuntivate, moduli di cui ognuno è referente e stato di ogni modulo"><i class="fas fa-envelope"></i> Comunica al Team</button>' : ''}
                     <span class="pa-stato" data-pa-stato title="Le allocazioni delle persone su questo progetto si aggiornano da sole quando il piano cambia"><i class="fas fa-spinner fa-spin"></i> Controllo le allocazioni…</span>
                 </div>
                 ${avvisi.length ? `<details class="pa-sett pa-segnalazioni"><summary><i class="fas fa-chevron-right"></i> Segnalazioni (${avvisi.length})</summary><div class="pa-avvisi">${avvisi.join('')}</div></details>` : ''}
@@ -729,6 +809,12 @@
             </div>`;
             box.querySelector('[data-pa-consegna]').addEventListener('change', (e) => { consegnaScelta = e.target.value || null; carica(); });
             box.querySelector('[data-pa-ripristina]')?.addEventListener('click', () => { consegnaScelta = null; carica(); });
+            box.querySelector('[data-pa-comunica]')?.addEventListener('click', () => {
+                // Nome e cliente del progetto: dai dati della Panoramica, altrimenti dall'intestazione della pagina.
+                const tit = document.getElementById('titolo'), sot = document.getElementById('sottotitolo');
+                const prj = progetto || { nome: tit ? tit.textContent.trim() : '', cliente: sot ? sot.textContent.split('·')[0].trim() : '' };
+                comunicaTeam(d, prj);
+            });
         }
         // Piano dal Gantt: niente pulsante, le allocazioni del progetto si allineano da sole al
         // piano ogni volta che si apre la scheda Risorse. Si scrive solo per le persone le cui

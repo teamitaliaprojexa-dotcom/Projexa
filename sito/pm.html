@@ -1136,7 +1136,7 @@
                         : '<div class="pm-vuoto">Nessuna persona nel team del progetto: aggiungile nel Team di progetto della scheda progetto (o con il Kick-off), poi torna qui.</div>'}
                 </div>`;
             // Piano automatico (js/piano-automatico.js): consegna, stima e consuntivo -> % per persona.
-            PianoAutomatico.monta(p.querySelector('#paBox'), { projectId, onApplicato: () => caricaRisorse() });
+            PianoAutomatico.monta(p.querySelector('#paBox'), { projectId, progetto: dati && dati.progetto ? dati.progetto : null, onApplicato: () => caricaRisorse() });
             if (!p.dataset.tooltipAttivo) { p.dataset.tooltipAttivo = '1'; attivaTooltip(p); } // una volta: il pannello resta, cambia solo il contenuto
             const ok = () => caricaRisorse();
             const alloca = async (lista, btn) => {

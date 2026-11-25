@@ -888,6 +888,33 @@ async function pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo,
   const daRef = await orePerReferenti(user, projectId, persTeam, normNome, completate);
   const referentiLicenze = {};
   const oreReferenti = {}; // nome modulo -> { persone: [{ nome, gg }], licenza: gg date alla licenza }
+
+  // «Comunica al Team» (2026-11-25): persone del team con email dalla Rubrica (stesso nome;
+  // se manca, l'email del team), ore consuntivate e licenze di cui sono referenti (nome del
+  // modulo del Gantt se c'è, così la pagina ritrova completamento e ore della licenza).
+  const nomeModulo = new Map();
+  for (const q of quote) if (q.modulo && !nomeModulo.has(normLicenza(q.modulo))) nomeModulo.set(normLicenza(q.modulo), q.modulo);
+  const emailRubrica = new Map();
+  if (await tabellaPresente('rubrica')) {
+    const rr = await db.query(
+      `SELECT nominativo, email FROM rubrica
+        WHERE tenant_id = $1 AND email IS NOT NULL AND (scadenza IS NULL OR scadenza >= CURRENT_DATE)`, [user.tenant_id]).catch(() => ({ rows: [] }));
+    for (const x of rr.rows) {
+      const nn = normNome(x.nominativo), e = String(x.email || '').trim();
+      if (nn && e.includes('@') && !emailRubrica.has(nn)) emailRubrica.set(nn, e);
+    }
+  }
+  const comunica = {
+    persone: persTeam.map((p) => {
+      const nn = normNome(p.nominativo);
+      return {
+        nominativo: String(p.nominativo || '').trim(), email: emailRubrica.get(nn) || (String(p.email || '').includes('@') ? String(p.email).trim() : null),
+        daRubrica: emailRubrica.has(nn), consuntivo: Math.round((p.consuntivo || 0) * 10000) / 10000,
+        licenze: [...daRef].filter(([, v]) => v.referenti.some((r) => normNome(r) === nn)).map(([k, v]) => nomeModulo.get(k) || v.nome)
+      };
+    }).sort((a, b) => a.nominativo.localeCompare(b.nominativo, 'it')),
+    licenze: [...daRef].map(([k, v]) => ({ nome: nomeModulo.get(k) || v.nome, nelGantt: nomeModulo.has(k), referenti: v.referenti }))
+  };
   if (daRef.size) {
     const perModulo = new Map(); // normLicenza -> { nome, voci: Map(«id|fase» -> voce), conEff }
     for (const q of quote) {
@@ -1038,7 +1065,7 @@ async function pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo,
     modo: 'gantt', oggi, consegna: fine, consegnaProgetto: fineProgetto, motivo, aOre: eco.aOre,
     giorni: [...settimane.values()].reduce((a, b) => a + b, 0),
     settimane: [...settimane.entries()].map(([lun, n]) => ({ lun, giorni: n })),
-    ruoli: lista, fasi, esclusi, chiusi, consegneLicenze: consegneLicenze(righe), referentiLicenze, oreReferenti,
+    ruoli: lista, fasi, esclusi, chiusi, consegneLicenze: consegneLicenze(righe), referentiLicenze, oreReferenti, comunica,
     avvisi: { ...avvisi, fuoriTeam: [...avvisi.fuoriTeam] }
   };
 }
@@ -1093,12 +1120,12 @@ async function orePerReferenti(user, projectId, persTeam, normNome, completate =
     const k = normLicenza(l.licenza);
     const refs = pezzi(l.referente).map((x) => (UUID_REF.test(x) ? nomeId.get(x) : x)).filter(Boolean);
     if (!k || !refs.length) continue;
-    const L = licenze.get(k) || { totale: 0, referenti: new Map() };
+    const L = licenze.get(k) || { nome: String(l.licenza || '').trim(), totale: 0, referenti: new Map() };
     L.totale += Number(l.totale) || 0;
     refs.forEach((n) => { const nn = normNome(n); if (nn) L.referenti.set(nn, n); });
     licenze.set(k, L);
   }
-  const out = new Map([...licenze].map(([k, L]) => [k, { gg: 0, referenti: [...L.referenti.values()] }]));
+  const out = new Map([...licenze].map(([k, L]) => [k, { nome: L.nome, gg: 0, referenti: [...L.referenti.values()] }]));
   // Consuntivo (giornate) di ogni persona del team, sommato per nome.
   const consPer = new Map();
   for (const p of persTeam) {
