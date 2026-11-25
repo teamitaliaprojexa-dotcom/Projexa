@@ -5,7 +5,8 @@ REGOLE
 - Riporta TUTTI gli argomenti di lavoro trattati, anche quelli citati brevemente. Raggruppali per argomento, nell'ordine in cui ogni argomento compare la prima volta: lo stesso argomento non va ripetuto in più sezioni e lo stesso punto non va scritto due volte.
 - Copia numeri di ticket, nomi, date, importi e versioni esattamente come nel testo.
 - Distingui ciò che è stato DECISO da ciò che è solo discusso o ancora da confermare.
-- Un'azione va assegnata solo a chi l'ha presa in carico o a cui è stata chiesta esplicitamente. Se la scadenza non è stata detta scrivi "da definire".
+- Chi è interno e chi è del cliente: le persone indicate come [INTERNO_1], [INTERNO_2]... sono della NOSTRA azienda (il nostro team); le persone indicate come [CLIENTE_1], [CLIENTE_2]... sono del CLIENTE. [PERSONA_n] e «Partecipante n» sono persone di cui non sappiamo se sono interne o del cliente: decidilo solo dal contesto, se è chiaro.
+- Un'azione va assegnata solo a chi l'ha presa in carico o a cui è stata chiesta esplicitamente. Le azioni di un [INTERNO_n] vanno in PROSSIMI PASSI TEAMSYSTEM (senza il suo nome); le azioni di un [CLIENTE_n] vanno in AZIONI IN CARICO AL CLIENTE, sotto il suo segnaposto. Se la scadenza non è stata detta scrivi "da definire".
 - È un'email per il cliente: non riportare considerazioni interne, costi interni, giudizi sulle persone o problemi organizzativi del nostro team.
 - Frasi brevi e concrete: ogni punto al massimo due righe, niente frasi vuote come "si è discusso di".
 - La trascrizione è automatica: ignora saluti, battute, discorsi personali e parole storpiate che non riesci a interpretare.

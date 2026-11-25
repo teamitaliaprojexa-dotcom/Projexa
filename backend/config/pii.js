@@ -32,6 +32,7 @@
 //   PII_CONSENTITI          parole da non mascherare mai, separate da virgola (oltre a quelle sotto)
 // ============================================================================
 import db from './database.js';
+import authDb from './authDatabase.js';
 import { encryptValue } from './crypto.js';
 
 const disattivo = (v) => /^(0|off|no|false|spento|disattivo)$/i.test(String(v ?? '').trim());
@@ -42,8 +43,11 @@ const entitaNer = () => String(process.env.PII_ENTITA_NER || 'PERSON').split(','
 const soglia = () => Number(process.env.PII_SOGLIA) || 0.5;
 
 // Etichette dei segnaposto (in italiano: l'AI le capisce e le riusa così come sono).
+// PERSON_INTERNO / PERSON_CLIENTE (2026-11-25): persone note divise per dominio email (vedi
+// classePersona): [INTERNO_n] = stesso dominio dell'utente (il suo team), [CLIENTE_n] = dominio
+// diverso. [PERSONA_n] resta per chi non si può classificare (nessuna email, provider pubblici, NER).
 const ETICHETTE = {
-  PERSON: 'PERSONA', ORGANIZATION: 'AZIENDA', LOCATION: 'LUOGO',
+  PERSON: 'PERSONA', PERSON_INTERNO: 'INTERNO', PERSON_CLIENTE: 'CLIENTE', ORGANIZATION: 'AZIENDA', LOCATION: 'LUOGO',
   EMAIL_ADDRESS: 'EMAIL', PHONE_NUMBER: 'TELEFONO', IBAN_CODE: 'IBAN', CREDIT_CARD: 'CARTA',
   IP_ADDRESS: 'IP', URL: 'URL', IT_FISCAL_CODE: 'CODICE_FISCALE', IT_VAT_CODE: 'PARTITA_IVA',
   IT_IDENTITY_CARD: 'DOCUMENTO', IT_PASSPORT: 'DOCUMENTO', IT_DRIVER_LICENSE: 'DOCUMENTO'
@@ -63,9 +67,14 @@ const consentiti = () => [...CONSENTITI_BASE, ...String(process.env.PII_CONSENTI
 const consentitiSet = () => new Set(consentiti().map((s) => s.toLowerCase()));
 
 export const NOTA_SEGNAPOSTO = 'NOTA DI RISERVATEZZA: nel testo che segue alcuni dati personali (nomi di persone e aziende, '
-  + 'email, telefoni, codici) sono stati sostituiti da segnaposto tra parentesi quadre, ad esempio [PERSONA_1], [AZIENDA_1], '
-  + '[EMAIL_1]. Quando ti servono riportali ESATTAMENTE come sono scritti (stesse maiuscole, numero e parentesi), senza '
-  + 'tradurli, modificarli o inventare i dati reali. Lo stesso segnaposto indica sempre la stessa persona o cosa.\n\n';
+  + 'email, telefoni, codici) sono stati sostituiti da segnaposto tra parentesi quadre, ad esempio [INTERNO_1], [CLIENTE_1], '
+  + '[PERSONA_1], [AZIENDA_1], [EMAIL_1]. Quando ti servono riportali ESATTAMENTE come sono scritti (stesse maiuscole, numero e '
+  + 'parentesi), senza tradurli, modificarli o inventare i dati reali. Lo stesso segnaposto indica sempre la stessa persona o cosa.\n'
+  + 'Le persone sono divise così: [INTERNO_n] = persona della NOSTRA azienda (il nostro team: le attività a suo carico sono '
+  + 'nostre); [CLIENTE_n] = persona del CLIENTE o comunque esterna alla nostra azienda (le attività a suo carico sono del '
+  + 'cliente); [PERSONA_n] = persona di cui non sappiamo se è interna o del cliente (decidilo solo dal contesto, se è chiaro). '
+  + '«Partecipante 1», «Partecipante 2»... sono voci della riunione senza nome: anche per loro interno o cliente si capisce '
+  + 'solo dal contesto.\n\n';
 
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
 const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -159,11 +168,38 @@ const RE_SEPARATORE = /^[\s'’\-.&]{1,3}$/u;
 // Forma societaria in coda al nome del cliente: si cerca anche il nome senza («Acme» per «Acme S.r.l.»).
 const RE_FORMA_SOCIETARIA = /[\s,]+(s\.?\s?p\.?\s?a\.?|s\.?\s?r\.?\s?l\.?(\s?s\.?)?|s\.?\s?n\.?\s?c\.?|s\.?\s?a\.?\s?s\.?|spa|srl|snc|sas|soc\.?\s?coop\.?|ltd\.?|gmbh|inc\.?)\s*$/iu;
 
-async function righe(sql, params) {
-  try { return (await db.query(sql, params)).rows; } catch (e) {
+async function righe(sql, params, pool = db) {
+  try { return (await pool.query(sql, params)).rows; } catch (e) {
     console.warn(`[PII] Nomi noti: query non riuscita (${e.message})`);
     return [];
   }
+}
+
+// INTERNO / CLIENTE DAL DOMINIO EMAIL (2026-11-25)
+// Domini interni = dominio dell'email dell'utente (Projexa-Auth) + PII_DOMINI_INTERNI (.env,
+// separati da virgola: altri domini della stessa azienda). Una persona nota con almeno un'email
+// su un dominio interno è INTERNO; con email solo su altri domini è CLIENTE. I provider pubblici
+// (gmail, outlook...) non dicono a quale azienda appartiene la persona: non classificano (resta
+// PERSONA), a meno che non siano elencati apposta in PII_DOMINI_INTERNI.
+const DOMINI_PUBBLICI = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'outlook.it', 'hotmail.com', 'hotmail.it',
+  'live.com', 'live.it', 'msn.com', 'yahoo.com', 'yahoo.it', 'ymail.com', 'icloud.com', 'me.com', 'mac.com', 'libero.it',
+  'virgilio.it', 'tiscali.it', 'alice.it', 'tim.it', 'fastwebnet.it', 'email.it', 'inwind.it', 'aruba.it', 'pec.it',
+  'legalmail.it', 'proton.me', 'protonmail.com', 'gmx.com', 'gmx.it', 'aol.com']);
+const dominioEmail = (e) => {
+  const m = String(e || '').trim().toLowerCase().match(/@([^@\s>]+)$/);
+  return m ? m[1].replace(/\.+$/, '') : '';
+};
+const dominiInterniEnv = () => String(process.env.PII_DOMINI_INTERNI || '').split(',')
+  .map((s) => s.trim().toLowerCase().replace(/^@/, '')).filter(Boolean);
+// domini: Set dei domini email della persona -> 'INTERNO' | 'CLIENTE' | null.
+function classePersona(domini, interni) {
+  if (!domini || !domini.size) return null;
+  let esterno = false;
+  for (const d of domini) {
+    if (interni.has(d)) return 'INTERNO';
+    if (!DOMINI_PUBBLICI.has(d)) esterno = true;
+  }
+  return esterno ? 'CLIENTE' : null;
 }
 
 const parole = (s) => String(s || '').match(RE_PAROLA) || [];
@@ -203,17 +239,30 @@ async function nomiNoti(userId) {
     if (!alias.has(w)) alias.set(w, new Set());
     alias.get(w).add(id);
   };
-  const persona = (nome, cognome) => {
+  const dominiPer = new Map(); // id persona -> Set(domini email) (interno / cliente)
+  const persona = (nome, cognome, email = '') => {
     const n = String(nome || '').trim();
     const cg = String(cognome || '').trim();
     const tutte = parole(`${n} ${cg}`);
     if (!tutte.length) return;
     const id = idDi('PERSON', tutte.join(' '));
+    const dom = dominioEmail(email);
+    if (dom) { if (!dominiPer.has(id)) dominiPer.set(id, new Set()); dominiPer.get(id).add(dom); }
     if (n && cg) { aggiungi(`${n} ${cg}`, 'PERSON', id); aggiungi(`${cg} ${n}`, 'PERSON', id); }
     else if (parole(n).length > 1) { aggiungi(n, 'PERSON', id); aggiungi(parole(n).reverse().join(' '), 'PERSON', id); }
     // Nome e cognome da soli (con la maiuscola): «ne parlo con Bianchi», «Yanko aiutami».
     for (const w of tutte) aggiungiAlias(w, id);
   };
+  // Email degli utenti (e dell'utente stesso): stanno su Projexa-Auth, stesso id del database principale.
+  const emailUtenti = async (ids) => {
+    const m = new Map();
+    if (!ids.length) return m;
+    for (const r of await righe('SELECT id::text AS id, email FROM users WHERE id::text = ANY($1::text[])', [ids], authDb)) m.set(r.id, r.email);
+    return m;
+  };
+  const interni = new Set(dominiInterniEnv());
+  const mioDominio = dominioEmail((await emailUtenti([k])).get(k));
+  if (mioDominio && !DOMINI_PUBBLICI.has(mioDominio)) interni.add(mioDominio);
   const tenants = (await righe('SELECT DISTINCT tenant_id FROM user_tenants WHERE user_id = $1', [k])).map((r) => r.tenant_id);
   if (tenants.length) {
     const t = [tenants];
@@ -224,12 +273,23 @@ async function nomiNoti(userId) {
       aggiungi(r.valore2, 'ORGANIZATION', idOrg);
       if (corto && corto !== String(r.valore2).trim()) aggiungi(corto, 'ORGANIZATION', idOrg);
     }
-    for (const r of await righe('SELECT nome, cognome FROM contacts WHERE tenant_id = ANY($1::uuid[])', t)) persona(r.nome, r.cognome);
-    for (const r of await righe('SELECT nominativo FROM rubrica WHERE tenant_id = ANY($1::uuid[])', t)) persona(r.nominativo, '');
-    for (const r of await righe('SELECT DISTINCT nominativo FROM proj_componenti WHERE tenant_id = ANY($1::uuid[])', t)) persona(r.nominativo, '');
-    for (const r of await righe('SELECT nominativo FROM pm_stakeholder WHERE tenant_id = ANY($1::uuid[])', t)) persona(r.nominativo, '');
-    for (const r of await righe(
-      'SELECT u.name, u.cognome FROM users u JOIN user_tenants ut ON ut.user_id = u.id WHERE ut.tenant_id = ANY($1::uuid[])', t)) persona(r.name, r.cognome);
+    for (const r of await righe('SELECT nome, cognome, email FROM contacts WHERE tenant_id = ANY($1::uuid[])', t)) persona(r.nome, r.cognome, r.email);
+    for (const r of await righe('SELECT nominativo, email FROM rubrica WHERE tenant_id = ANY($1::uuid[])', t)) persona(r.nominativo, '', r.email);
+    for (const r of await righe('SELECT DISTINCT nominativo, email FROM proj_componenti WHERE tenant_id = ANY($1::uuid[])', t)) persona(r.nominativo, '', r.email);
+    for (const r of await righe('SELECT nominativo, email FROM pm_stakeholder WHERE tenant_id = ANY($1::uuid[])', t)) persona(r.nominativo, '', r.email);
+    const utenti = await righe(
+      'SELECT DISTINCT u.id::text AS id, u.name, u.cognome FROM users u JOIN user_tenants ut ON ut.user_id = u.id WHERE ut.tenant_id = ANY($1::uuid[])', t);
+    const emailU = await emailUtenti(utenti.map((r) => r.id));
+    for (const r of utenti) persona(r.name, r.cognome, emailU.get(r.id));
+  }
+  // Interno / cliente per persona. Senza nessun dominio interno (es. utente con email gmail e
+  // PII_DOMINI_INTERNI vuoto) non si classifica nessuno: tutti «cliente» sarebbe sbagliato.
+  const classe = new Map(); // id persona -> 'INTERNO' | 'CLIENTE'
+  if (interni.size) {
+    for (const [id, domini] of dominiPer) {
+      const c = classePersona(domini, interni);
+      if (c) classe.set(id, c);
+    }
   }
   // Nome o cognome da solo: di una sola persona -> nell'indice; di più persone -> «ambiguo»,
   // si decide nel testo (trovaNomiNoti) in base a chi vi compare per intero.
@@ -240,7 +300,7 @@ async function nomiNoti(userId) {
   }
   // Nomi più lunghi prima: «Mario Rossi Bianchi» vince su «Mario Rossi».
   for (const lista of indice.values()) lista.sort((a, b) => b.parole.length - a.parole.length);
-  const voce = { at: Date.now(), indice, ambigui, totale: visti.size };
+  const voce = { at: Date.now(), indice, ambigui, classe, totale: visti.size };
   cacheNomi.set(k, voce);
   return voce;
 }
@@ -399,7 +459,10 @@ export class Anonimizzatore {
   // id: identità della persona o del cliente noti (nomiNoti): tutte le sue forme («Yanko»,
   // «Yanko Dacco'») hanno lo stesso segnaposto.
   segnaposto(tipo, valore, id = null) {
-    const etichetta = ETICHETTE[tipo] || 'DATO';
+    // Persona nota interna o del cliente (dominio email): [INTERNO_n] / [CLIENTE_n]. L'identità
+    // (chiaveId) resta «PERSON|id», così idPresenti e i nomi da soli continuano a funzionare.
+    const classe = tipo === 'PERSON' && id != null ? this.noti?.classe?.get(id) : null;
+    const etichetta = classe || ETICHETTE[tipo] || 'DATO';
     const chiave = `${etichetta}|${norm(valore)}`;
     const chiaveId = id != null ? `${tipo}|${id}` : null;
     let s = (chiaveId && this.perId.get(chiaveId)) || this.perValore.get(chiave);

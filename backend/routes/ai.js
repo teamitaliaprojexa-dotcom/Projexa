@@ -36,7 +36,8 @@ const MAX_PROMPT_CHARS = 20000;
 // Modelli: per ChatGPT e Gemini sovrascrivibili da variabile d'ambiente, così un modello
 // ritirato dal fornitore si cambia nel .env del server senza toccare il codice.
 export const PROVIDERS = {
-  chatgpt: { provider: 'ChatGPT', label: 'ChatGPT', prefix: 'chatgpt', model: process.env.OPENAI_MODEL || 'gpt-5' },
+  chatgpt: { provider: 'ChatGPT', label: 'ChatGPT', prefix: 'chatgpt', model: process.env.OPENAI_MODEL || 'gpt-6.1-sol' },
+  // gpt-6.1-sol dal 2026-11-25: gpt-5 viene ritirato da OpenAI l'11/12/2026 (sostituto ufficiale).
   claude: { provider: 'Claude', label: 'Claude', prefix: 'claude', model: 'claude-opus-5' },
   // Gemini: "Flash Lite" di default perché nel piano gratuito ha limiti molto più ampi
   // (es. 15 richieste/minuto e 500/giorno, contro 5 e 20 dei modelli Flash).
@@ -259,7 +260,7 @@ async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}, 
       // OpenRouter: la variante ":batch" funziona solo con la Batch API (in Immediato si usa il modello base).
       model: key === 'openrouter' ? modelloBaseOpenrouter(m) : m,
       messages: [{ role: 'user', content }],
-      // ChatGPT (gpt-5) accetta solo la temperatura predefinita: lì solo il formato JSON.
+      // ChatGPT (gpt-5 e successivi) accetta solo la temperatura predefinita: lì solo il formato JSON.
       // OpenRouter e Cloudflare: il formato JSON non è accettato da tutti i modelli, basta
       // il prompt (che chiede già di rispondere solo in JSON) con la temperatura bassa.
       ...(opzioni.json && !['openrouter', 'cloudflare'].includes(key) ? { response_format: { type: 'json_object' } } : {}),
@@ -280,7 +281,7 @@ async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}, 
       // successive (va aggiornato <FORNITORE>_MODEL).
       const nuovo = await modelloSostituto(key, apiKey, model);
       if (!nuovo) throw error;
-      console.warn(`[AI] Modello ${cfg.label} ${model} non disponibile: uso ${nuovo}${model === cfg.model ? ` (aggiornare ${key.toUpperCase()}_MODEL)` : ' (cambiare la Versione in Impostazioni › AI)'}`);
+      console.warn(`[AI] Modello ${cfg.label} ${model} non disponibile: uso ${nuovo}${model === cfg.model ? ` (aggiornare ${key === 'chatgpt' ? 'OPENAI' : key.toUpperCase()}_MODEL)` : ' (cambiare la Versione in Impostazioni › AI)'}`);
       if (model === cfg.model) cfg.model = nuovo;
       data = await send(nuovo);
     } else {
@@ -299,9 +300,22 @@ async function askChatCompletions(key, apiKey, prompt, atts = [], opzioni = {}, 
 
 // Sostituto di un modello ritirato: il primo dell'elenco della chiave che corrisponde alle
 // preferenze, in ordine (solo i fornitori elencati: per gli altri l'errore arriva all'utente).
-const MODELLI_PREFERITI = { groq: [/gpt-oss-120b/i, /llama.*70b/i, /qwen/i, /llama/i, /gpt-oss/i] };
+// ChatGPT (2026-11-25): prima il sostituto indicato da OpenAI per il modello ritirato (pagina
+// Deprecations), poi la serie GPT-6 più recente ("sol" = modello principale), poi GPT-5.x.
+const MODELLI_PREFERITI = {
+  groq: [/gpt-oss-120b/i, /llama.*70b/i, /qwen/i, /llama/i, /gpt-oss/i],
+  chatgpt: [/^gpt-6\.1-sol$/i, /^gpt-6(\.\d+)?-sol$/i, /^gpt-6/i, /^gpt-5\.\d+$/i, /^gpt-5\.\d+-mini$/i]
+};
+const SOSTITUTI_UFFICIALI = {
+  chatgpt: {
+    'gpt-5': 'gpt-6.1-sol', 'gpt-5-mini': 'gpt-6.1-terra', 'gpt-5-nano': 'gpt-6-luna',
+    'gpt-5-pro': 'gpt-6.1-sol', o3: 'gpt-6.1-sol', 'o3-pro': 'gpt-6.1-sol'
+  }
+};
 async function modelloSostituto(key, apiKey, model) {
   const ids = (await listChatCompletionsModels(key, apiKey).catch(() => [])).map((m) => m.id).filter((id) => id !== model);
+  const ufficiale = SOSTITUTI_UFFICIALI[key] && SOSTITUTI_UFFICIALI[key][String(model).replace(/-\d{4}-\d{2}-\d{2}$/, '')];
+  if (ufficiale && ids.includes(ufficiale)) return ufficiale;
   for (const re of MODELLI_PREFERITI[key] || []) {
     const id = ids.find((x) => re.test(x));
     if (id) return id;
