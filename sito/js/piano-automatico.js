@@ -348,6 +348,8 @@
             const intest = `• ${nomeLic(n)}${ref && ref.length ? ` (referenti: ${ref.join(', ')})` : ''}`;
             if (!x || !(x.stima > 0)) return [intest, `-Non presente nel Gantt: completamento e ${d.aOre ? 'ore' : 'giornate'} non disponibili`, ''];
             const perc = Math.min(100, Math.round((x.lavorate / x.stima) * 100));
+            // Modulo completato: solo il completamento, senza le ore.
+            if (x.daFare <= 0.001) return [intest, '-Completamento: 100%', ''];
             return [intest,
                 `-Completamento: ${perc}%`,
                 `-${Ore} disponibili: ${u(x.stima)} – ${Ore} lavorate: ${u(x.lavorate)}`,
@@ -355,11 +357,18 @@
         }).flat();
         // Progetto gestito a giornate (Gestione a HH spento): tutto in giornate, anche il consuntivo delle persone.
         const righePers = c.persone.map((p) => `• ${p.nominativo} – ${ore} consuntivate: ${u(p.consuntivo || 0)} – referente di: ${p.licenze.length ? p.licenze.map(nomeLic).join(', ') : 'nessun modulo'}`);
+        // Marginalità: ore (o giornate, progetto a giornate) consuntivate e ancora disponibili.
+        const m = c.marginalita;
+        const righeMarg = m && m.totale > 0.05 ? [
+            `${Ore} ancora disponibili (marginalità)`,
+            `-${Ore} totali consuntivate: ${u(m.consuntivo)}`,
+            `-${Ore} ancora disponibili: ${u(m.totale)}`, ''] : [];
         const titolo = [progetto && progetto.cliente, progetto && progetto.nome].filter(Boolean).join(' – ');
         const subject = `${titolo ? `${titolo} – ` : ''}Stato del progetto per il team`;
         const body = ['Ciao a tutti,', '', `di seguito lo stato del progetto${titolo ? ` ${titolo}` : ''} al ${dataIt(d.oggi)}.`, '',
             'Team di Progetto', ...righePers, '',
             'Moduli', ...righeLic,
+            ...righeMarg,
             'Rimango a disposizione per eventuali dubbi', '',
             'Buon Lavoro', 'Grazie'].join('\n');
         return { subject, body };

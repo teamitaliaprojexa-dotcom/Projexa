@@ -1027,6 +1027,41 @@ async function pianoDaGantt(user, projectId, { oggi, fine, fineProgetto, motivo,
     }
   }
 
+  // Marginalità per «Comunica al Team» (2026-11-25, scelta dell'utente): lavorate secondo il Gantt
+  // (somma delle fasi) − consuntivo Qlik dei ruoli del piano (Costi Progetto, chiusi compresi;
+  // fuori i ruoli senza fasi come il Project Manager). Se positiva, le giornate ancora disponibili
+  // vanno ai referenti delle licenze completate: a ogni licenza in proporzione alla sua stima e,
+  // dentro la licenza, ai referenti in proporzione alle ore che hanno consuntivato (pari se nessuno ne ha).
+  {
+    const lavorate = fasi.reduce((s, f) => s + (f.consuntivo || 0), 0);
+    const consuntivo = [...ruoli.values()].reduce((s, r) => s + (r.consuntivo || 0), 0) + chiusi.reduce((s, r) => s + (r.consuntivo || 0), 0);
+    const totale = lavorate - consuntivo;
+    const consPers = new Map();
+    for (const p of persTeam) { const kk = chiaveNome(p.nominativo); if (kk) consPers.set(kk, (consPers.get(kk) || 0) + (p.consuntivo || 0)); }
+    const comp = [...completate].filter(([k]) => daRef.has(k) && daRef.get(k).referenti.length);
+    const stimaComp = comp.reduce((s, [, st]) => s + st, 0);
+    const perRef = new Map(); // chiave -> { nome, gg, moduli: Set }
+    if (totale > 0.05 && stimaComp > 0) {
+      for (const [k, st] of comp) {
+        const quota = totale * (st / stimaComp);
+        const refs = daRef.get(k).referenti.map((n) => ({ n, kk: chiaveNome(n) }));
+        const pesoTot = refs.reduce((s, r) => s + (consPers.get(r.kk) || 0), 0);
+        for (const r of refs) {
+          const g = pesoTot > 0 ? quota * ((consPers.get(r.kk) || 0) / pesoTot) : quota / refs.length;
+          if (!(g > 0)) continue;
+          const t = persTeam.find((p) => chiaveNome(p.nominativo) === r.kk);
+          const x = perRef.get(r.kk) || { nome: t ? String(t.nominativo).trim() : r.n, gg: 0, moduli: new Set() };
+          x.gg += g; x.moduli.add(nomeModulo.get(k) || daRef.get(k).nome);
+          perRef.set(r.kk, x);
+        }
+      }
+    }
+    comunica.marginalita = {
+      lavorate: tondo(lavorate), consuntivo: tondo(consuntivo), totale: tondo(totale),
+      perReferente: [...perRef.values()].map((x) => ({ nome: x.nome, gg: Math.round(x.gg * 1000) / 1000, moduli: [...x.moduli] })).sort((a, b) => b.gg - a.gg)
+    };
+  }
+
   // Settimane da oggi all'ultima giornata pianificata (almeno fino alla consegna).
   let ultimo = fine && fine >= oggi ? fine : oggi;
   for (const r of persone.values()) for (const d of r.perGiorno.keys()) if (d > ultimo) ultimo = d;
